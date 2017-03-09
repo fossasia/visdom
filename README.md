@@ -1,7 +1,7 @@
 
 # **Visdom**
 
-![visdom_big](https://lh3.googleusercontent.com/-bqH9UXCw-BE/WL2UsdrrbAI/AAAAAAAAnYc/emrxwCmnrW4_CLTyyUttB0SYRJ-i4CCiQCLcB/s0/Screen+Shot+2017-03-06+at+10.51.02+AM.png"visdom_big")
+<p align="center"><img src="https://lh3.googleusercontent.com/-h3HuvbU2V0SfgqgXGiK3LPghE5vqvS0pzpObS0YgG_LABMFk62JCa3KVu_2NV_4LJKaAa5-tg=s0" /></p>
 
 A flexible tool for creating, organizing, and sharing visualizations of live, rich data. Designed for Numpy or Torch.
 
@@ -18,7 +18,7 @@ A flexible tool for creating, organizing, and sharing visualizations of live, ri
 
 Visdom aims to facilitate visualization of (remote) data with an emphasis on supporting scientific experimentation.
 
-<p align="center"><img src="https://lh3.googleusercontent.com/-h3HuvbU2V0SfgqgXGiK3LPghE5vqvS0pzpObS0YgG_LABMFk62JCa3KVu_2NV_4LJKaAa5-tg=s0" width="500"  /></p>
+<p align="center"><img src="https://lh3.googleusercontent.com/-bqH9UXCw-BE/WL2UsdrrbAI/AAAAAAAAnYc/emrxwCmnrW4_CLTyyUttB0SYRJ-i4CCiQCLcB/s0/Screen+Shot+2017-03-06+at+10.51.02+AM.png" width="500"  /></p>
 
 Broadcast visualizations of plots, images, and text for yourself and your collaborators.
 
