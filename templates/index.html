@@ -1,0 +1,65 @@
+<!--
+
+Copyright 2017-present, Facebook, Inc.
+All rights reserved.
+
+This source code is licensed under the license found in the
+LICENSE file in the root directory of this source tree.
+
+-->
+
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <link rel="shortcut icon" href="favicon.png">
+
+    <!-- Bootstrap & jQuery -->
+    <link href="https://unpkg.com/bootstrap@3.3.7/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/jquery@3.1.1/dist/jquery.min.js"></script>
+    <script src="https://unpkg.com/bootstrap@3.3.7/dist/js/bootstrap.min.js"></script>
+
+    <link rel="stylesheet" href="https://unpkg.com/react-resizable@1.4.6/css/styles.css">
+    <link rel="stylesheet" href="https://unpkg.com/react-grid-layout@0.14.0/css/styles.css">
+
+    <!-- Other deps -->
+    <script src="https://unpkg.com/react@15/dist/react.min.js"></script>
+    <script src="https://unpkg.com/react-dom@15/dist/react-dom.min.js"></script>
+    <script src="https://unpkg.com/classnames@2.2.5"></script>
+    <script src="https://unpkg.com/layout-bin-packer@1.2.2"></script>
+    <script src="https://cdn.rawgit.com/STRML/react-grid-layout/0.14.0/dist/react-grid-layout.min.js"></script>
+
+    <!-- Plotly -->
+    <script src="https://cdn.rawgit.com/plotly/plotly.js/master/dist/plotly.min.js"></script>
+
+    <!-- Custom styles for this template -->
+    <script>
+    // TODO: this is not great. Should probably be an endpoint with a JSON
+    // response or the first thing the socket sends back.
+    var ENV_LIST = [
+      {% for item in items %}
+      '{{escape(item)}}',
+      {% end %}
+    ];
+    var ACTIVE_ENV = '{{escape(active_item)}}';
+    var USER = '{{escape(user)}}';
+
+    // Plotly setup
+    window.PLOTLYENV = window.PLOTLYENV || {};
+    window.PLOTLYENV.BASE_URL = 'https://plot.ly';
+
+    </script>
+    <script src={{ static_url("js/main.js") }}></script>
+    <link rel="stylesheet" href={{ static_url("css/style.css") }}>
+
+    <title>visdom</title>
+    <!-- <link rel="icon" href="http://example.com/favicon.png"> -->
+  </head>
+
+  <body>
+    <noscript>JS is required</noscript>
+    <div id="app"></div>
+  </body>
+</html>
