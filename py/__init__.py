@@ -90,6 +90,8 @@ def _markerColorCheck(mc, X, Y, L):
     assert (mc <= 255).all(), 'marker colors have to be <= 255'
     assert (mc == np.floor(mc)).all(), 'marker colors are assumed to be ints'
 
+    mc = np.int8(mc)
+
     if mc.ndim == 1:
         markercolor = mc.tolist()
     else:
