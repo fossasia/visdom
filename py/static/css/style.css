@@ -1,0 +1,150 @@
+/**
+ * Copyright 2017-present, Facebook, Inc.
+ * All rights reserved.
+ *
+ * This source code is licensed under the license found in the
+ * LICENSE file in the root directory of this source tree.
+ *
+ */
+
+* {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-family: "Open Sans", sans-serif;
+  font-weight: lighter;
+  border-radius: 0 !important;
+}
+
+body{
+   background-color: transparent;
+}
+
+html{
+   background-color: #3b5998;
+}
+
+h1 {
+   text-align: center;
+}
+
+.visdom-title {
+   padding: 0px 10px;
+   font-weight: lighter;
+   font-size: 18px;
+}
+
+.navbar-default {
+   background-color: #F0F0F0;
+   border-color: transparent;
+}
+
+.form-inline {
+   padding: 5px;
+}
+
+.form-inline > .btn {
+   margin-right: 10px;
+   margin-left: 5px;
+}
+
+.form-inline > .form-control {
+   margin-left: 5px;
+}
+
+.navbar {min-height:30px !important;}
+
+.window {
+  overflow: hidden;
+  box-sizing: border-box;
+  border: #FFF solid 1px;
+  background: #eff3ff;
+  color: #3b5998;
+  border-radius: 4px;
+  height: 100%;
+  width: 100%;
+  box-shadow: rgba(0, 0, 0, 0.1) 1px 1px 5px;
+}
+
+.maximized .window {
+  border: none;
+  box-shadow: none;
+}
+
+.bar {
+  position: relative;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 14px;
+  color: #333;
+  text-align: right;
+  font-size: 11px;
+}
+
+.bar.focus {
+  /*background: #3b5998;*/
+  font-weight: bold;
+}
+
+.bar button {
+   font-size: 8px;
+}
+
+button {
+   font-size: 14px;
+   line-height: 14px;
+   cursor: pointer;
+   -moz-border-radius: 0px;
+   -webkit-border-radius: 0px;
+   border-radius: 1px;
+   border-color:transparent;
+}
+
+.btn:focus,.btn:active {
+   outline: none !important;
+}
+
+.bar button {
+  background: transparent;
+  margin: 0 4px;
+  float: left;
+}
+
+.content {
+  width: 100%;
+  height: calc( 100% - 14px );
+}
+
+.grip {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 20px;
+  height: 20px;
+  cursor: se-resize;
+  background: transparent;
+  z-index: 10;
+  align: right;
+}
+
+.caption {
+  overflow-y: hidden;
+  word-wrap: break-word;
+}
+
+.content-image {
+  image-rendering: pixelated;
+  background-color: white;
+  margin: auto auto;
+  display: block;
+}
+
+.content-plot {
+  background: white;
+  font-size:10px;
+}
+
+.react-grid-item.react-grid-placeholder {
+  background: white;
+}
