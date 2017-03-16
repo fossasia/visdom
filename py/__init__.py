@@ -90,6 +90,8 @@ def _markerColorCheck(mc, X, Y, L):
     assert (mc <= 255).all(), 'marker colors have to be <= 255'
     assert (mc == np.floor(mc)).all(), 'marker colors are assumed to be ints'
 
+    mc = np.int8(mc)
+
     if mc.ndim == 1:
         markercolor = mc.tolist()
     else:
@@ -279,7 +281,7 @@ class Visdom(object):
         assert win is not None
 
         assert Y.shape == X.shape, 'Y should be same size as X'
-        if X.shape > 2:
+        if X.ndim > 2:
             X = np.squeeze(X)
             Y = np.squeeze(Y)
         assert X.ndim == 1 or X.ndim == 2, 'Updated X should be 1 or 2 dim'
@@ -473,8 +475,8 @@ class Visdom(object):
 
         assert X.ndim == 2, 'data should be two-dimensional'
         opts = {} if opts is None else opts
-        opts['xmin'] = opts.get('xmin', X.min())
-        opts['xmax'] = opts.get('xmax', X.max())
+        opts['xmin'] = opts.get('xmin', np.asscalar(X.min()))
+        opts['xmax'] = opts.get('xmax', np.asscalar(X.max()))
         opts['colormap'] = opts.get('colormap', 'Viridis')
         _assert_opts(opts)
 
