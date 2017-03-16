@@ -17,7 +17,7 @@ from PIL import Image
 import base64 as b64
 import numbers
 from six import string_types
-from six import StringIO
+from six import BytesIO
 
 
 def isstr(s):
@@ -237,12 +237,13 @@ class Visdom(object):
             img = np.uint8(img)
 
         im = Image.fromarray(img)
-        buf = StringIO()
+        buf = BytesIO()
         im.save(buf, format='JPEG', quality=opts['jpgquality'])
+        b64encoded = b64.b64encode(buf.getvalue()).decode('utf-8')
 
         data = [{
             'content': {
-                'src': 'data:image/jpg;base64,' + b64.b64encode(buf.getvalue()),
+                'src': 'data:image/jpg;base64,' + b64encoded,
                 'caption': opts.get('caption'),
                 'size': opts.get('size', list(img.shape)),
             },
