@@ -28,6 +28,7 @@ ioloop.install()  # Needs to happen before any tornado imports!
 import tornado.ioloop
 import tornado.web
 import tornado.websocket
+import tornado.escape
 
 logging.getLogger().setLevel(logging.INFO)
 
@@ -91,7 +92,7 @@ class Application(tornado.web.Application):
 
         for i in l:
             p = os.path.join(FLAGS.env_path, i)
-            f = json.loads(open(p, 'r').read())
+            f = tornado.escape.json_decode(open(p, 'r').read())
             eid = i.replace('.json', '')
             state[eid] = {'jsons': f['jsons'], 'reload': f['reload']}
 
@@ -132,7 +133,7 @@ class SocketHandler(tornado.websocket.WebSocketHandler):
 
     def on_message(self, message):
         print('from web client: ', message)
-        msg = json.loads(message)
+        msg = tornado.escape.json_decode(message)
         cmd = msg.get('cmd')
         if cmd == 'close':
             if 'data' in msg and 'eid' in msg:
@@ -225,7 +226,7 @@ class PostHandler(BaseHandler):
         self.subs = subs
 
     def post(self):
-        args = json.loads(self.request.body)
+        args = tornado.escape.json_decode(self.request.body)
 
         ptype = args['data'][0]['type']
         p = pane(args)
@@ -280,7 +281,7 @@ class UpdateHandler(BaseHandler):
         return p
 
     def post(self):
-        args = json.loads(self.request.body)
+        args = tornado.escape.json_decode(self.request.body)
         eid = 'main' if args.get('eid') is None else args.get('eid')
 
         if args['win'] not in self.state[eid]['jsons']:
@@ -306,7 +307,7 @@ class CloseHandler(BaseHandler):
         self.subs = subs
 
     def post(self):
-        args = json.loads(self.request.body)
+        args = tornado.escape.json_decode(self.request.body)
 
         eid = 'main' if args.get('eid') is None else args.get('eid')
         win = args.get('win')
@@ -328,7 +329,7 @@ def load_env(state, eid, socket):
     else:
         p = os.path.join(FLAGS.env_path, eid.strip(), '.json')
         if os.path.exists(p):
-            env = json.loads(open(p, 'r').read())
+            env = tornado.escape.json_decode(open(p, 'r').read())
             state[eid] = env
 
     if 'reload' in env:
@@ -348,7 +349,7 @@ def load_env(state, eid, socket):
 def gather_envs(state):
     items = [i.replace('.json', '') for i in os.listdir(FLAGS.env_path)
                 if '.json' in i]
-    return sorted(list(set(items + state.keys())))
+    return sorted(list(set(items + list(state.keys()))))
 
 
 class EnvHandler(BaseHandler):
@@ -367,7 +368,7 @@ class EnvHandler(BaseHandler):
         )
 
     def post(self, args):
-        sid = json.loads(self.request.body)['sid']
+        sid = tornado.escape.json_decode(self.request.body)['sid']
         load_env(self.state, args, self.subs[sid])
 
 
@@ -377,7 +378,7 @@ class SaveHandler(BaseHandler):
         self.subs = subs
 
     def post(self):
-        envs = json.loads(self.request.body)['data']
+        envs = tornado.escape.json_decode(self.request.body)['data']
         ret = serialize_env(self.state, envs)  # this ignores invalid env ids
         self.write(json.dumps(ret))
 
