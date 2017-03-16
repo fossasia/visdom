@@ -98,6 +98,7 @@ Visdom now can be accessed by going to `http://localhost:8097` in your browser, 
 #### Python example
 ```python
 import visdom
+import numpy as np
 vis = visdom.Visdom()
 vis.text('Hello, world!')
 vis.image(np.ones((10, 10, 3)))
@@ -105,6 +106,7 @@ vis.image(np.ones((10, 10, 3)))
 
 #### Torch example
 ```lua
+require 'image'
 vis = require 'visdom'()
 vis:text{text = 'Hello, world!'}
 vis:image{img = image.fabio()}
