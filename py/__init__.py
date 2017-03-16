@@ -281,7 +281,7 @@ class Visdom(object):
         assert win is not None
 
         assert Y.shape == X.shape, 'Y should be same size as X'
-        if X.shape > 2:
+        if X.ndim > 2:
             X = np.squeeze(X)
             Y = np.squeeze(Y)
         assert X.ndim == 1 or X.ndim == 2, 'Updated X should be 1 or 2 dim'
