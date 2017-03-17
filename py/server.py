@@ -133,7 +133,8 @@ class SocketHandler(tornado.websocket.WebSocketHandler):
 
     def on_message(self, message):
         print('from web client: ', message)
-        msg = tornado.escape.json_decode(message)
+        msg = tornado.escape.json_decode(tornado.escape.to_basestring(message))
+
         cmd = msg.get('cmd')
         if cmd == 'close':
             if 'data' in msg and 'eid' in msg:
@@ -226,7 +227,7 @@ class PostHandler(BaseHandler):
         self.subs = subs
 
     def post(self):
-        args = tornado.escape.json_decode(self.request.body)
+        args = tornado.escape.json_decode(tornado.escape.to_basestring(self.request.body))
 
         ptype = args['data'][0]['type']
         p = pane(args)
@@ -281,7 +282,7 @@ class UpdateHandler(BaseHandler):
         return p
 
     def post(self):
-        args = tornado.escape.json_decode(self.request.body)
+        args = tornado.escape.json_decode(tornado.escape.to_basestring(self.request.body))
         eid = 'main' if args.get('eid') is None else args.get('eid')
 
         if args['win'] not in self.state[eid]['jsons']:
@@ -307,7 +308,7 @@ class CloseHandler(BaseHandler):
         self.subs = subs
 
     def post(self):
-        args = tornado.escape.json_decode(self.request.body)
+        args = tornado.escape.json_decode(tornado.escape.to_basestring(self.request.body))
 
         eid = 'main' if args.get('eid') is None else args.get('eid')
         win = args.get('win')
@@ -368,7 +369,7 @@ class EnvHandler(BaseHandler):
         )
 
     def post(self, args):
-        sid = tornado.escape.json_decode(self.request.body)['sid']
+        sid = tornado.escape.json_decode(tornado.escape.to_basestring(self.request.body))['sid']
         load_env(self.state, args, self.subs[sid])
 
 
@@ -378,7 +379,7 @@ class SaveHandler(BaseHandler):
         self.subs = subs
 
     def post(self):
-        envs = tornado.escape.json_decode(self.request.body)['data']
+        envs = tornado.escape.json_decode(tornado.escape.to_basestring(self.request.body))['data']
         ret = serialize_env(self.state, envs)  # this ignores invalid env ids
         self.write(json.dumps(ret))
 
