@@ -5,6 +5,7 @@ readme = open('README.md').read()
 requirements = [
     'numpy',
     'pillow',
+    'requests',
     'tornado',
     'pyzmq',
     'six',

@@ -91,7 +91,7 @@ viz.bar(
     X=np.abs(np.random.rand(5, 3)),
     opts=dict(
         stacked=True,
-        legende=['Facebook', 'Google', 'Twitter'],
+        legend=['Facebook', 'Google', 'Twitter'],
         rownames=['2012', '2013', '2014', '2015', '2016']
     )
 )

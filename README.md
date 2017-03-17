@@ -92,7 +92,7 @@ python -m visdom.server
 
 Visdom now can be accessed by going to `http://localhost:8097` in your browser, or your own host address if specified.
 
->If the above does not work, try using a SSH tunnel to your server by adding the following line to your local  `~/.ssh/config`:
+>If the above does not work, try using an SSH tunnel to your server by adding the following line to your local  `~/.ssh/config`:
 ```LocalForward 127.0.0.1:8097 127.0.0.1:8097```.
 
 #### Python example
@@ -141,7 +141,7 @@ The following API is currently supported. Visualizations are powered by [Plotly]
 
 Further details on each of these functions are given below. For a quick introduction into the capabilities of `visdom`, have a look at the `example` directory, or read the details below.
 
-The exact inputs into the plotting functions vary, although most of them take as input a tensor `X` than contains the data and an (optional) tensor `Y` that contains optional data variables (such as labels or timestamps). All plotting functions take as input a optional `win` that can be used to plot into a specific window; each plotting function also returns the `win` of the window it plotted in. One can also specify the `env`  to which the visualization should be added.
+The exact inputs into the plotting functions vary, although most of them take as input a tensor `X` than contains the data and an (optional) tensor `Y` that contains optional data variables (such as labels or timestamps). All plotting functions take as input an optional `win` that can be used to plot into a specific window; each plotting function also returns the `win` of the window it plotted in. One can also specify the `env`  to which the visualization should be added.
 
 ![visdom_big](https://lh3.googleusercontent.com/-bqH9UXCw-BE/WL2UsdrrbAI/AAAAAAAAnYc/emrxwCmnrW4_CLTyyUttB0SYRJ-i4CCiQCLcB/s0/Screen+Shot+2017-03-06+at+10.51.02+AM.png"visdom_big")
 
@@ -210,7 +210,7 @@ The following `options` are supported:
 This function draws a regular, stacked, or grouped bar plot. It takes as
 input an `N` or `NxM` tensor `X` that specifies the height of each of the
 bars. If `X` contains `M` columns, the values corresponding to each row
-are either stacked or grouped (dependending on how `options.stacked` is
+are either stacked or grouped (depending on how `options.stacked` is
 set). In addition to `X`, an (optional) `N` tensor `Y` can be specified
 that contains the corresponding x-axis values.
 
@@ -278,7 +278,7 @@ The following `options` are supported:
 - `options.jpgquality`: JPG quality (`number` 0-100; default = 100)
 
 #### plot.text
-This function prints text in a  box. It takes as input an `text` string.
+This function prints text in a  box. It takes as input a `text` string.
 No specific `options` are currently supported.
 
 
