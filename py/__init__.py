@@ -12,6 +12,7 @@ from __future__ import unicode_literals
 import requests
 import traceback
 import json
+import math
 import numpy as np
 from PIL import Image
 import base64 as b64
@@ -30,6 +31,13 @@ def isnum(n):
 
 def isndarray(n):
     return isinstance(n, (np.ndarray))
+
+
+def nan2none(l):
+    for idx, val in enumerate(l):
+        if math.isnan(val):
+            l[idx] = None
+    return l
 
 
 def _scrub_dict(d):
@@ -367,8 +375,8 @@ class Visdom(object):
             if ind.any():
                 mc = opts.get('markercolor')
                 _data = {
-                    'x': X.take(0, 1)[ind].tolist(),
-                    'y': X.take(1, 1)[ind].tolist(),
+                    'x': nan2none(X.take(0, 1)[ind].tolist()),
+                    'y': nan2none(X.take(1, 1)[ind].tolist()),
                     'name': opts.get('legend') and
                     opts.get('legend')[k - 1] or str(k),
                     'type': 'scatter3d' if is3d else 'scatter',
