@@ -229,5 +229,13 @@ plot:quiver{
    options = {normalize = 0.9},
 }
 
+-- pie chart demo:
+local X = torch.DoubleTensor{19, 26, 55}
+local legend = {'Residential', 'Non-Residential', 'Utility'}
+plot:pie{
+   X = X,
+   options = {legend = legend},
+}
+
 -- close text window:
 plot:close{win = textwindow}

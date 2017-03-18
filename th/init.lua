@@ -1051,6 +1051,45 @@ M.quiver = argcheck{
    end
 }
 
+-- pie chart:
+M.pie = argcheck{
+   doc = [[
+      This function draws a pie chart based on the `N` tensor `X`.
+
+      The following `options` are supported:
+
+       - `options.legend`: `table` containing legend names
+   ]],
+   noordered = true,
+   {name = 'self',    type = 'visdom.client'},
+   {name = 'X',       type = 'torch.*Tensor'},
+   {name = 'options', type = 'table',  opt = true},
+   {name = 'win',     type = 'string', opt = true},
+   {name = 'env',     type = 'string', opt = true},
+   call = function(self, X, options, win, env)
+
+      -- check input:
+      local X = X:squeeze()
+      assert(X:nDimension() == 1,  'X should be one-dimensional')
+      assert(torch.ge(X, 0):all(), 'X cannot contain negative values')
+
+      -- generate table in plotly format:
+      local data = {{
+         values = X:totable(),
+         labels = options.legend,
+         type   = 'pie'
+      }}
+
+      -- send 3d surface plot request to server:
+      return self:sendRequest(json.encode{
+         data   = data,
+         win    = win,
+         eid    = env,
+         layout = options2layout{options = options},
+      })
+   end
+}
+
 -- image:
 M.image = argcheck{
    doc = [[

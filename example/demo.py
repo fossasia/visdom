@@ -196,5 +196,13 @@ viz.stem(
     opts=dict(legend=['Sine', 'Cosine'])
 )
 
+
+# pie chart
+X = np.asarray([19, 26, 55])
+viz.pie(
+    X=X,
+    opts=dict(legend=['Residential', 'Non-Residential', 'Utility'])
+)
+
 # close text window:
 viz.close(win=textwindow)

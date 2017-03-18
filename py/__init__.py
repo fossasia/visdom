@@ -764,3 +764,35 @@ class Visdom(object):
         _assert_opts(opts)
 
         return self.scatter(X=data, Y=labels, opts=opts, win=win, env=env)
+
+    def pie(self, X, win=None, env=None, opts=None):
+        """
+        This function draws a pie chart based on the `N` tensor `X`.
+
+        The following `options` are supported:
+
+        - `options.legend`: `table` containing legend names
+        """
+
+        X = np.squeeze(X)
+        assert X.ndim == 1, 'X should be one-dimensional'
+        assert np.all(np.greater_equal(X, 0)), \
+            'X cannot contain negative values'
+
+        opts = {} if opts is None else opts
+        _assert_opts(opts)
+
+        data = [{
+            'values': X.tolist(),
+            'labels': opts.get('legend'),
+            'type': 'pie',
+        }]
+
+        return self._send(
+            json.dumps({
+                'data': data,
+                'win': win,
+                'eid': env,
+                'layout': _opts2layout(opts)
+            })
+        )
