@@ -116,6 +116,9 @@ def _markerColorCheck(mc, X, Y, L):
 
 
 def _assert_opts(opts):
+    if opts.get('color'):
+        assert isstr(opts.get('color')), 'color should be a string'
+
     if opts.get('colormap'):
         assert isstr(opts.get('colormap')), \
             'colormap should be string'
@@ -145,6 +148,11 @@ def _assert_opts(opts):
             'JPG quality should be a number'
         assert opts.get('jpgquality') > 0 and opts.get('jpgquality') <= 100, \
             'JPG quality should be number between 0 and 100'
+
+    if opts.get('opacity'):
+        assert isnum(opts.get('opacity')), 'opacity should be a number'
+        assert 0 <= opts.get('opacity') <= 1, \
+            'opacity should be a number between 0 and 1'
 
 
 class Visdom(object):
@@ -794,5 +802,37 @@ class Visdom(object):
                 'win': win,
                 'eid': env,
                 'layout': _opts2layout(opts)
+            })
+        )
+
+    def mesh(self, X, Y=None, win=None, env=None, opts=None):
+        opts = {} if opts is None else opts
+        _assert_opts(opts)
+
+        is3d = X.shape[1] == 3
+        assert X.ndim == 2, 'X must have 2 dimensions'
+
+        istri = Y is not None
+        if istri:
+            assert Y.shape[1] == X.shape[1], 'X and Y must have same dimensions'
+            assert Y.ndim == 2, 'Y must have 2 dimensions'
+
+        data = [{
+            'x': X[:, 0].tolist(),
+            'y': X[:, 1].tolist(),
+            'z': X[:, 2].tolist() if is3d else None,
+            'i': Y[:, 0].tolist() if istri else None,
+            'j': Y[:, 1].tolist() if istri else None,
+            'k': Y[:, 2].tolist() if is3d and istri else None,
+            'color': opts.get('color'),
+            'opacity': opts.get('opacity'),
+            'type': 'mesh3d' if is3d else 'mesh',
+        }]
+        return self._send(
+            json.dumps({
+                'data': data,
+                'win': win,
+                'eid': env,
+                'layout': _opts2layout(opts),
             })
         )
