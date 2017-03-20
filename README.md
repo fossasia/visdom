@@ -137,7 +137,7 @@ The following API is currently supported. Visualizations are powered by [Plotly]
 - `vis.quiver`   : quiver plots
 - `vis.image`    : images
 - `vis.text`     : text box
-- `vis.mesh`   : mesh plots
+- `vis.mesh`     : mesh plots
 - `vis.save`     : serialize state
 
 Further details on each of these functions are given below. For a quick introduction into the capabilities of `visdom`, have a look at the `example` directory, or read the details below.
