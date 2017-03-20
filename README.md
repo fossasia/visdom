@@ -125,19 +125,19 @@ th example/demo2.lua
 
 ## Visualization API
 The following API is currently supported. Visualizations are powered by [Plotly](https://plot.ly/).
-- `vis.scatter`: 2D or 3D scatter plots
-- `vis.line`   : line plots
-- `vis.stem`   : stem plots
-- `vis.heatmap`: heatmap plots
-- `vis.bar`    : bar graphs
-- `vis.hist`   : histograms
-- `vis.boxplot`: boxplots
-- `vis.surf`   : surface plots
-- `vis.contour`: contour plots
-- `vis.quiver` : quiver plots
-- `vis.image`  : images
-- `vis.text`   : text box
-- `vis.save`   : serialize state
+- `vis.scatter`  : 2D or 3D scatter plots
+- `vis.line`     : line plots
+- `vis.stem`     : stem plots
+- `vis.heatmap`  : heatmap plots
+- `vis.bar`      : bar graphs
+- `vis.histogram`: histograms
+- `vis.boxplot`  : boxplots
+- `vis.surf`     : surface plots
+- `vis.contour`  : contour plots
+- `vis.quiver`   : quiver plots
+- `vis.image`    : images
+- `vis.text`     : text box
+- `vis.save`     : serialize state
 
 Further details on each of these functions are given below. For a quick introduction into the capabilities of `visdom`, have a look at the `example` directory, or read the details below.
 
