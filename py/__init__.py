@@ -306,7 +306,7 @@ class Visdom(object):
             assert len(name) >= 0, 'name of trace should be nonempty string'
             assert X.ndim == 1, 'updating by name expects 1-dim data'
 
-        data = {'x': X.tolist(), 'y': Y.tolist()}
+        data = {'x': X.transpose().tolist(), 'y': Y.transpose().tolist()}
         if X.ndim == 1:
             data['x'] = [data['x']]
             data['y'] = [data['y']]
