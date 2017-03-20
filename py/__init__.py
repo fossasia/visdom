@@ -821,8 +821,8 @@ class Visdom(object):
         is3d = X.shape[1] == 3
         assert X.ndim == 2, 'X must have 2 dimensions'
 
-        istri = Y is not None
-        if istri:
+        ispoly = Y is not None
+        if ispoly:
             assert Y.shape[1] == X.shape[1], 'X and Y must have same dimensions'
             assert Y.ndim == 2, 'Y must have 2 dimensions'
 
@@ -830,9 +830,9 @@ class Visdom(object):
             'x': X[:, 0].tolist(),
             'y': X[:, 1].tolist(),
             'z': X[:, 2].tolist() if is3d else None,
-            'i': Y[:, 0].tolist() if istri else None,
-            'j': Y[:, 1].tolist() if istri else None,
-            'k': Y[:, 2].tolist() if is3d and istri else None,
+            'i': Y[:, 0].tolist() if ispoly else None,
+            'j': Y[:, 1].tolist() if ispoly else None,
+            'k': Y[:, 2].tolist() if is3d and ispoly else None,
             'color': opts.get('color'),
             'opacity': opts.get('opacity'),
             'type': 'mesh3d' if is3d else 'mesh',
