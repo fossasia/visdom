@@ -818,11 +818,13 @@ class Visdom(object):
         opts = {} if opts is None else opts
         _assert_opts(opts)
 
+        X = np.asarray(X)
         is3d = X.shape[1] == 3
         assert X.ndim == 2, 'X must have 2 dimensions'
 
         ispoly = Y is not None
         if ispoly:
+            Y = np.asarray(Y)
             assert Y.shape[1] == X.shape[1], 'X and Y must have same dimensions'
             assert Y.ndim == 2, 'Y must have 2 dimensions'
 
