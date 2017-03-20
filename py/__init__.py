@@ -806,6 +806,15 @@ class Visdom(object):
         )
 
     def mesh(self, X, Y=None, win=None, env=None, opts=None):
+        """
+        This function draws mesh with set of vertices and polygons.
+        It can also take 2D mesh, and polygons are optional.
+
+        The following `options` are supported:
+
+        - `options.color`: color (`string`)
+        - `options.opacity`: opacity of polygons (`number` 0-1;)
+        """
         opts = {} if opts is None else opts
         _assert_opts(opts)
 

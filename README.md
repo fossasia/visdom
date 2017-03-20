@@ -137,6 +137,7 @@ The following API is currently supported. Visualizations are powered by [Plotly]
 - `vis.quiver` : quiver plots
 - `vis.image`  : images
 - `vis.text`   : text box
+- `vis.mesh`   : mesh plots
 - `vis.save`   : serialize state
 
 Further details on each of these functions are given below. For a quick introduction into the capabilities of `visdom`, have a look at the `example` directory, or read the details below.
@@ -281,6 +282,14 @@ The following `options` are supported:
 This function prints text in a  box. It takes as input a `text` string.
 No specific `options` are currently supported.
 
+### plot.mesh
+This function draws mesh with set of vertices and polygons.
+It can also take 2D mesh, and polygons are optional.
+
+The following `options` are supported:
+
+- `options.color`: color (`string`)
+- `options.opacity`: opacity of polygons (`number` 0-1;)
 
 ### Customizing plots
 
