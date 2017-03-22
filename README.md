@@ -270,7 +270,7 @@ The following `options` are supported:
 - `options.arrowheads`: show arrow heads (`boolean`; default = `true`)
 
 #### plot.image
-This function draws an img. It takes as input an `CxWxH` tensor `img`
+This function draws an img. It takes as input an `HxWxC` tensor `img`
 that contains the image.
 
 The following `options` are supported:
