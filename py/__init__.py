@@ -9,10 +9,12 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import os.path
 import requests
 import traceback
 import json
 import math
+import re
 import numpy as np
 from PIL import Image
 import base64 as b64
@@ -226,6 +228,27 @@ class Visdom(object):
             'eid': env,
             'title': opts.get('title'),
         }))
+
+    def svg(self, svgstr=None, svgfile=None, win=None, env=None, opts=None):
+        """
+        This function draws an SVG object. It takes as input a SVG string or the
+        name of an SVG file. The function does not support any plot-specific
+        `options`.
+        """
+        opts = {} if opts is None else opts
+        _assert_opts(opts)
+
+        if svgfile is not None:
+            assert os.path.isfile(svgfile), 'could not find file %s' % svgfile
+            fileobj = open(svgfile, 'r')
+            assert fileobj, 'could not open file %s' % svgfile
+            svgstr = fileobj.read()
+            fileobj.close()
+
+        assert svgstr is not None, 'should specify SVG string or filename'
+        svg = re.search('<svg .+</svg>', svgstr, re.DOTALL)
+        assert svg is not None, 'could not parse SVG string'
+        return self.text(text=svg.group(0), win=win, env=env, opts=opts)
 
     def image(self, img, win=None, env=None, opts=None):
         """

@@ -196,12 +196,24 @@ viz.stem(
     opts=dict(legend=['Sine', 'Cosine'])
 )
 
-
 # pie chart
 X = np.asarray([19, 26, 55])
 viz.pie(
     X=X,
     opts=dict(legend=['Residential', 'Non-Residential', 'Utility'])
+)
+
+# SVG plotting
+svgstr = """
+<svg height="300" width="300">
+  <ellipse cx="80" cy="80" rx="50" ry="30"
+   style="fill:red;stroke:purple;stroke-width:2" />
+  Sorry, your browser does not support inline SVG.
+</svg>
+"""
+viz.svg(
+    svgstr=svgstr,
+    opts=dict(title='Example of SVG Rendering')
 )
 
 # close text window:

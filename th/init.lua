@@ -1141,6 +1141,50 @@ M.image = argcheck{
    end
 }
 
+-- helper function for loading file as bytestring:
+local function loadFile(filename)
+   local paths = require 'paths'
+   assert(paths.filep(filename),
+      string.format('file not found: %s', filename))
+   local file = io.open(filename, 'r')
+   assert(file, string.format('could not open file: %s', filename))
+   local str = file:read('*all')
+   file:close()
+   return str
+end
+
+-- SVG object:
+M.svg = argcheck{
+   doc = [[
+      This function draws an SVG object. It takes as input a SVG string or the
+      name of an SVG file. The function does not support any plot-specific
+      `options`.
+   ]],
+   noordered = true,
+   {name = 'self',    type = 'visdom.client'},
+   {name = 'svgstr',  type = 'string', opt = true},
+   {name = 'svgfile', type = 'string', opt = true},
+   {name = 'options', type = 'table',  opt = true},
+   {name = 'win',     type = 'string', opt = true},
+   {name = 'env',     type = 'string', opt = true},
+   call = function(self, svgstr, svgfile, options, win, env)
+
+      -- load SVG and strip doctype if it is present:
+      assert(svgstr or svgfile, 'should specify SVG string or filename')
+      local svgstr = svgstr or loadFile(svgfile)
+      local svg = svgstr:match('<svg .+</svg>')
+      assert(svg, 'SVG could not be parsed correctly')
+
+      -- send SVG request:
+      return (self:text{
+         text    = svg,
+         options = options,
+         win     = win,
+         eid     = env,
+      })
+   end
+}
+
 -- text:
 M.text = argcheck{
    doc = [[

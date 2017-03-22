@@ -270,12 +270,17 @@ The following `options` are supported:
 - `options.arrowheads`: show arrow heads (`boolean`; default = `true`)
 
 #### plot.image
-This function draws an img. It takes as input an `CxWxH` tensor `img`
+This function draws an `img`. It takes as input an `CxWxH` tensor `img`
 that contains the image.
 
 The following `options` are supported:
 
 - `options.jpgquality`: JPG quality (`number` 0-100; default = 100)
+
+### plot.svg
+This function draws an SVG object. It takes as input a SVG string `svgstr` or
+the name of an SVG file `svgfile`. The function does not support any specific
+`options`.
 
 #### plot.text
 This function prints text in a  box. It takes as input a `text` string.

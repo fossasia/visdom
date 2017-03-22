@@ -237,5 +237,20 @@ plot:pie{
    options = {legend = legend},
 }
 
+-- svg rendering demo:
+local svgstr = [[
+<svg height="300" width="300">
+  <ellipse cx="80" cy="80" rx="50" ry="30"
+   style="fill:red;stroke:purple;stroke-width:2" />
+  Sorry, your browser does not support inline SVG.
+</svg>
+]]
+plot:svg{
+   svgstr  = svgstr,
+   options = {
+      title  = 'Example of SVG Rendering',
+   },
+}
+
 -- close text window:
 plot:close{win = textwindow}
