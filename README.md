@@ -112,6 +112,13 @@ vis:text{text = 'Hello, world!'}
 vis:image{img = image.fabio()}
 ```
 
+Some users have reported issues when connecting Lua clients to the Visdom server.
+A potential work-around may be to switch off IPv6:
+```
+vis = require 'visdom'()
+vis.ipv6 = false  -- switches off IPv6
+vis:text{text = 'Hello, world!'}
+```
 
 
 ### Demos
