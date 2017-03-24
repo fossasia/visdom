@@ -485,11 +485,9 @@ class Visdom(object):
             assert X is not None, 'must specify x-values for line update'
             return self.updateTrace(X=X, Y=Y, win=win, env=env,
                                     append=update == 'append', opts=opts)
-        Y = np.squeeze(Y)
         assert Y.ndim == 1 or Y.ndim == 2, 'Y should have 1 or 2 dim'
 
         if X is not None:
-            X = np.squeeze(X)
             assert X.ndim == 1 or X.ndim == 2, 'X should have 1 or 2 dim'
         else:
             X = np.linspace(0, 1, Y.shape[0])
