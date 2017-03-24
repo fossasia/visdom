@@ -177,13 +177,15 @@ class Visdom(object):
         endpoint='events',
         port=8097,
         ipv6=True,
-        proxy=None
+        proxy=None,
+        env='main',
     ):
         self.server = server
         self.endpoint = endpoint
         self.port = port
         self.ipv6 = ipv6
         self.proxy = proxy
+        self.env = env              # default env
 
         try:
             import torch
@@ -199,10 +201,13 @@ class Visdom(object):
         build the required JSON yourself. `endpoint` specifies the destination
         Tornado server endpoint for the request.
         """
+        if 'eid' not in msg:
+            msg['eid'] = self.env
+
         try:
             r = requests.post(
                 "{0}:{1}/{2}".format(self.server, self.port, endpoint),
-                data=msg
+                data=json.dumps(msg),
             )
             return r.text
         except BaseException:
@@ -221,9 +226,9 @@ class Visdom(object):
             for env in envs:
                 assert isstr(env), 'env should be a string'
 
-        return self._send(json.dumps({
+        return self._send({
             'data': envs,
-        }), 'save')
+        }, 'save')
 
     def close(self, win=None, env=None):
         """
@@ -232,7 +237,7 @@ class Visdom(object):
         """
 
         return self._send(
-            msg=json.dumps({'win': win, 'eid': env}),
+            msg={'win': win, 'eid': env},
             endpoint='close'
         )
 
@@ -247,12 +252,12 @@ class Visdom(object):
         _assert_opts(opts)
         data = [{'content': text, 'type': 'text'}]
 
-        return self._send(json.dumps({
+        return self._send({
             'data': data,
             'win': win,
             'eid': env,
             'title': opts.get('title'),
-        }))
+        })
 
     def svg(self, svgstr=None, svgfile=None, win=None, env=None, opts=None):
         """
@@ -309,12 +314,12 @@ class Visdom(object):
             'type': 'image',
         }]
 
-        return self._send(json.dumps({
+        return self._send({
             'data': data,
             'win': win,
             'eid': env,
             'title': opts.get('title'),
-        }))
+        })
 
     def updateTrace(self, X, Y, win, env=None, name=None,
                     append=True, opts=None):
@@ -352,16 +357,13 @@ class Visdom(object):
             data['x'] = [data['x']]
             data['y'] = [data['y']]
 
-        return self._send(
-            json.dumps({
-                'data': data,
-                'win': win,
-                'eid': env,
-                'name': name,
-                'append': append,
-            }),
-            endpoint='update'
-        )
+        return self._send({
+            'data': data,
+            'win': win,
+            'eid': env,
+            'name': name,
+            'append': append,
+        }, endpoint='update')
 
     def scatter(self, X, Y=None, win=None, env=None, opts=None, update=None):
         """
@@ -448,12 +450,12 @@ class Visdom(object):
 
                 data.append(_scrub_dict(_data))
 
-        return self._send(json.dumps({
+        return self._send({
             'data': data,
             'win': win,
             'eid': env,
             'layout': _opts2layout(opts, is3d),
-        }))
+        })
 
     def line(self, Y, X=None, win=None, env=None, opts=None, update=None):
         """
@@ -555,14 +557,12 @@ class Visdom(object):
             'colorscale': opts.get('colormap'),
         }]
 
-        return self._send(
-            json.dumps({
-                'data': data,
-                'win': win,
-                'eid': env,
-                'layout': _opts2layout(opts)
-            })
-        )
+        return self._send({
+            'data': data,
+            'win': win,
+            'eid': env,
+            'layout': _opts2layout(opts)
+        })
 
     def bar(self, X, Y=None, win=None, env=None, opts=None):
         """
@@ -614,14 +614,12 @@ class Visdom(object):
                 _data['name'] = opts['legend'][k]
             data.append(_data)
 
-        return self._send(
-            json.dumps({
-                'data': data,
-                'win': win,
-                'eid': env,
-                'layout': _opts2layout(opts)
-            })
-        )
+        return self._send({
+            'data': data,
+            'win': win,
+            'eid': env,
+            'layout': _opts2layout(opts)
+        })
 
     def histogram(self, X, win=None, env=None, opts=None):
         """
@@ -688,14 +686,12 @@ class Visdom(object):
 
             data.append(_data)
 
-        return self._send(
-            json.dumps({
-                'data': data,
-                'win': win,
-                'eid': env,
-                'layout': _opts2layout(opts)
-            })
-        )
+        return self._send({
+            'data': data,
+            'win': win,
+            'eid': env,
+            'layout': _opts2layout(opts)
+        })
 
     def _surface(self, X, stype, win=None, env=None, opts=None):
         """
@@ -728,15 +724,13 @@ class Visdom(object):
             'colorscale': opts['colormap']
         }]
 
-        return self._send(
-            json.dumps({
-                'data': data,
-                'win': win,
-                'eid': env,
-                'layout': _opts2layout(
-                    opts, is3d=True if stype == 'surface' else False)
-            })
-        )
+        return self._send({
+            'data': data,
+            'win': win,
+            'eid': env,
+            'layout': _opts2layout(
+                opts, is3d=True if stype == 'surface' else False)
+        })
 
     def surf(self, X, win=None, env=None, opts=None):
         """
@@ -837,11 +831,9 @@ class Visdom(object):
             'type': 'pie',
         }]
 
-        return self._send(
-            json.dumps({
-                'data': data,
-                'win': win,
-                'eid': env,
-                'layout': _opts2layout(opts)
-            })
-        )
+        return self._send({
+            'data': data,
+            'win': win,
+            'eid': env,
+            'layout': _opts2layout(opts)
+        })

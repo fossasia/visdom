@@ -203,10 +203,9 @@ def pane(args):
 
     return {
         'command': 'pane',
-        'id': uid,
+        'id': str(uid),
         'title': '' if args.get('title') is None else args['title'],
         'contentID': get_rand_id(),   # to detected updated panes
-
     }
 
 
