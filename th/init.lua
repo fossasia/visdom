@@ -257,11 +257,13 @@ M.__init = argcheck{
    {name = 'port',     type = 'number',  default = 8097},
    {name = 'ipv6',     type = 'boolean', default = true},
    {name = 'proxy',    type = 'string',  opt = true},
-   call = function(self, server, endpoint, port, ipv6, proxy)
+   {name = 'env',      type = 'string',  default = 'main'},
+   call = function(self, server, endpoint, port, ipv6, proxy, env)
       self.server   = server
       self.endpoint = endpoint
       self.port     = port
       self.ipv6     = ipv6
+      self.env      = env
       if proxy then socket.http.PROXY = proxy end
    end
 }
@@ -275,10 +277,13 @@ M.sendRequest = argcheck{
       Tornado server endpoint for the request.
    ]],
    {name = 'self',     type = 'visdom.client'},
-   {name = 'request',  type = 'string'},
+   {name = 'request',  type = 'table'},
    {name = 'endpoint', type = 'string',  opt = true},
    call = function(self, request, endpoint)
       local response = {}
+      request['eid'] = request['eid'] or self.env
+      request = json.encode(request)
+
       local status, msg = socket.http.request({
          url     = string.format('%s:%s/%s', self.server, self.port,
                      endpoint or self.endpoint),
@@ -313,7 +318,7 @@ M.save = argcheck{
          for _,v in pairs(envs) do assert(type(v) == 'string') end
 
          -- send save request to server
-         return self:sendRequest(json.encode{
+         return self:sendRequest({
             data   = envs,
          }, 'save')
       end
@@ -372,7 +377,7 @@ M.updateTrace = argcheck{
 
       -- send scatter plot request to server:
       return self:sendRequest{
-         request = (json.encode{
+         request = ({
             data      = nan2null(data),
             win       = win,
             eid       = env,
@@ -486,7 +491,7 @@ M.scatter = argcheck{
       end
 
       -- send scatter plot request to server:
-      return self:sendRequest(json.encode{
+      return self:sendRequest({
          data   = nan2null(data),
          win    = win,
          eid    = env,
@@ -695,7 +700,7 @@ M.heatmap = argcheck{
       }}
 
       -- send heatmap plot request to server:
-      return self:sendRequest(json.encode{
+      return self:sendRequest({
          data   = data,
          win    = win,
          eid    = env,
@@ -767,7 +772,7 @@ M.bar = argcheck{
       end
 
       -- send bar plot request to server:
-      return self:sendRequest(json.encode{
+      return self:sendRequest({
          data   = data,
          win    = win,
          eid    = env,
@@ -864,7 +869,7 @@ M.boxplot = argcheck{
       end
 
       -- send boxplot request to server:
-      return self:sendRequest(json.encode{
+      return self:sendRequest({
          data   = data,
          win    = win,
          eid    = env,
@@ -897,7 +902,7 @@ local function _surface(self, X, type, options, win, env)
    }}
 
    -- send 3d surface plot request to server:
-   return self:sendRequest(json.encode{
+   return self:sendRequest({
       data   = data,
       win    = win,
       eid    = env,
@@ -1081,7 +1086,7 @@ M.pie = argcheck{
       }}
 
       -- send 3d surface plot request to server:
-      return self:sendRequest(json.encode{
+      return self:sendRequest({
          data   = data,
          win    = win,
          eid    = env,
@@ -1132,7 +1137,7 @@ M.image = argcheck{
       }}  -- NOTE: This is not a plotly type
 
       -- send image request:
-      return self:sendRequest(json.encode{
+      return self:sendRequest({
          data   = data,
          win    = win,
          eid    = env,
@@ -1210,7 +1215,7 @@ M.text = argcheck{
       }}  -- NOTE: This is not a plotly type
 
       -- send text request:
-      return self:sendRequest(json.encode{
+      return self:sendRequest({
          data   = data,
          win    = win,
          eid    = env,
@@ -1231,7 +1236,7 @@ M.close = argcheck{
    {name = 'env',  type = 'string', opt = true},
    call = function(self, win, env)
       return self:sendRequest{
-         request  = (json.encode{win = win, eid = env}),
+         request  = ({win = win, eid = env}),
          endpoint = 'close',
       }
    end
