@@ -149,6 +149,26 @@ def _assert_opts(opts):
             'JPG quality should be number between 0 and 100'
 
 
+def pytorch_wrap(fn):
+    def result(*args, **kwargs):
+        args = (a.cpu().numpy() if type(a).__module__ == 'torch' else a
+                for a in args)
+
+        for k in kwargs:
+            if type(kwargs[k]).__module__ == 'torch':
+                kwargs[k] = kwargs[k].cpu().numpy()
+
+        return fn(*args, **kwargs)
+    return result
+
+
+def wrap_tensor_methods(cls, wrapper):
+    fns = ['_surface', 'bar', 'boxplot', 'surf', 'heatmap', 'histogram', 'svg',
+            'image', 'line', 'pie', 'scatter', 'stem', 'contour', 'updateTrace']
+    for key in [k for k in dir(cls) if k in fns]:
+        setattr(cls, key, wrapper(getattr(cls, key)))
+
+
 class Visdom(object):
 
     def __init__(
@@ -165,8 +185,13 @@ class Visdom(object):
         self.ipv6 = ipv6
         self.proxy = proxy
 
-    # Utils
+        try:
+            import torch
+            wrap_tensor_methods(self, pytorch_wrap)
+        except ImportError:
+            pass
 
+    # Utils
     def _send(self, msg, endpoint='events'):
         """
         This function sends specified JSON request to the Tornado server. This
@@ -231,7 +256,7 @@ class Visdom(object):
 
     def svg(self, svgstr=None, svgfile=None, win=None, env=None, opts=None):
         """
-        This function draws an SVG object. It takes as input a SVG string or the
+        This function draws an SVG object. It takes as input an SVG string or the
         name of an SVG file. The function does not support any plot-specific
         `options`.
         """
@@ -252,7 +277,7 @@ class Visdom(object):
 
     def image(self, img, win=None, env=None, opts=None):
         """
-        This function draws an img. It takes as input an `HxWxC` tensor `img`
+        This function draws an img. It takes as input an `CxHxW` tensor `img`
         that contains the image. The array values can be float in [0,1] or uint8
         in [0, 255].
         """
@@ -260,7 +285,7 @@ class Visdom(object):
         opts['jpgquality'] = opts.get('jpgquality', 75)
         _assert_opts(opts)
 
-        nchannels = img.shape[2] if img.ndim == 3 else 1
+        nchannels = img.shape[0] if img.ndim == 3 else 1
         if nchannels == 1:
             img = img[:, :, np.newaxis].repeat(3, axis=2)
 
@@ -269,6 +294,7 @@ class Visdom(object):
                 img = img * 255.
             img = np.uint8(img)
 
+        img = np.transpose(img, (1, 2, 0))
         im = Image.fromarray(img)
         buf = BytesIO()
         im.save(buf, format='JPEG', quality=opts['jpgquality'])

@@ -18,7 +18,7 @@ viz = Visdom()
 textwindow = viz.text('Hello World!')
 
 viz.image(
-    np.random.rand(512, 256, 3),
+    np.random.rand(3, 512, 256),
     opts=dict(title='Random!', caption='How random.'),
 )
 
@@ -218,3 +218,10 @@ viz.svg(
 
 # close text window:
 viz.close(win=textwindow)
+
+# PyTorch tensor
+try:
+    import torch
+    viz.line(Y=torch.Tensor([[0., 0.], [1., 1.]]))
+except ImportError:
+    print('Skipped PyTorch example')

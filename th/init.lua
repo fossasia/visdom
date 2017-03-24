@@ -1093,7 +1093,7 @@ M.pie = argcheck{
 -- image:
 M.image = argcheck{
    doc = [[
-      This function draws an img. It takes as input an `CxWxH` tensor `img`
+      This function draws an img. It takes as input an `CxHxW` tensor `img`
       that contains the image.
 
       The following `options` are supported:
@@ -1156,7 +1156,7 @@ end
 -- SVG object:
 M.svg = argcheck{
    doc = [[
-      This function draws an SVG object. It takes as input a SVG string or the
+      This function draws an SVG object. It takes as input an SVG string or the
       name of an SVG file. The function does not support any plot-specific
       `options`.
    ]],
