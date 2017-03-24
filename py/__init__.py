@@ -201,7 +201,7 @@ class Visdom(object):
         build the required JSON yourself. `endpoint` specifies the destination
         Tornado server endpoint for the request.
         """
-        if 'eid' not in msg:
+        if msg.get('eid', None) is None:
             msg['eid'] = self.env
 
         try:
