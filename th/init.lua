@@ -536,11 +536,10 @@ M.line = argcheck{
             options = options, append = update == 'append',
          }
       end
-            -- assertions on the inputs:
-      Y = Y:squeeze()
+
+      -- assertions on the inputs:
       assert(Y:dim() == 1 or Y:dim() == 2, 'Y should be one or two-dimensional')
       if X then
-         X = X:squeeze()
          assert(X:dim() == 1 or X:dim() == 2,
             'X should be one or two-dimensional')
       else
