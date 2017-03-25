@@ -284,6 +284,16 @@ The following `options` are supported:
 
 - `options.jpgquality`: JPG quality (`number` 0-100; default = 100)
 
+### plot.video
+This function plays a video. It takes as input the filename of the video
+`videofile` or a `LxCxHxW`-sized `tensor` (in Lua) or a or a `LxHxWxC`-sized
+`tensor` (in Python) containing all the frames of the video as input. The
+function does not support any plot-specific `options`.
+
+Note: Using `tensor` input requires that ffmpeg is installed and working.
+Your ability to play video may depend on the browser you use: your browser has
+to support the Theano codec in an OGG container (Chrome supports this).
+
 ### plot.svg
 This function draws an SVG object. It takes as input a SVG string `svgstr` or
 the name of an SVG file `svgfile`. The function does not support any specific
