@@ -15,6 +15,7 @@ import traceback
 import json
 import math
 import re
+import base64
 import numpy as np
 from PIL import Image
 import base64 as b64
@@ -40,6 +41,15 @@ def nan2none(l):
         if math.isnan(val):
             l[idx] = None
     return l
+
+
+def loadfile(filename):
+    assert os.path.isfile(filename), 'could not find file %s' % filename
+    fileobj = open(filename, 'r')
+    assert fileobj, 'could not open file %s' % filename
+    str = fileobj.read()
+    fileobj.close()
+    return str
 
 
 def _scrub_dict(d):
@@ -269,11 +279,7 @@ class Visdom(object):
         _assert_opts(opts)
 
         if svgfile is not None:
-            assert os.path.isfile(svgfile), 'could not find file %s' % svgfile
-            fileobj = open(svgfile, 'r')
-            assert fileobj, 'could not open file %s' % svgfile
-            svgstr = fileobj.read()
-            fileobj.close()
+            svgstr = loadfile(svgfile)
 
         assert svgstr is not None, 'should specify SVG string or filename'
         svg = re.search('<svg .+</svg>', svgstr, re.DOTALL)
@@ -320,6 +326,54 @@ class Visdom(object):
             'eid': env,
             'title': opts.get('title'),
         })
+
+    def video(self, tensor=None, videofile=None, win=None, env=None, opts=None):
+        """
+        This function plays a video. It takes as input the filename of the video
+        or a `LxCxHxW` tensor containing all the frames of the video. The function
+        does not support any plot-specific `options`.
+        """
+        opts = {} if opts is None else opts
+        _assert_opts(opts)
+        assert tensor is not None or videofile is not None, \
+            'should specify video tensor or file'
+
+        if tensor is not None:
+            import cv2
+            import tempfile
+            assert tensor.ndim == 4, 'video should be in 4D tensor'
+            videofile = '/tmp/%s.ogv' % next(tempfile._get_candidate_names())
+            fourcc = cv2.cv.CV_FOURCC(
+                chr(ord('T')),
+                chr(ord('H')),
+                chr(ord('E')),
+                chr(ord('O'))
+            )
+            writer = cv2.VideoWriter(
+                videofile,
+                fourcc,
+                25,
+                (tensor.shape[1], tensor.shape[2])
+            )
+            assert writer.isOpened(), 'video writer could not be opened'
+            for i in range(tensor.shape[0]):
+                writer.write(tensor[i, :, :, :])
+            writer.release()
+            writer = None
+
+        extension = videofile[-3:].lower()
+        mimetypes = dict(mp4='mp4', ogv='ogg', avi='avi', webm='webm')
+        mimetype = mimetypes.get(extension)
+        assert mimetype is not None, 'unknown video type: %s' % extension
+
+        bytestr = loadfile(videofile)
+        videodata = """
+            <video controls>
+                <source type="video/%s" src="data:video/%s;base64,%s">
+                Your browser does not support the video tag.
+            </video>
+        """ % (mimetype, mimetype, base64.b64encode(bytestr))
+        return self.text(text=videodata, win=win, env=env, opts=opts)
 
     def updateTrace(self, X, Y, win, env=None, name=None,
                     append=True, opts=None):
