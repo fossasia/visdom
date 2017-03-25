@@ -89,8 +89,6 @@ def serialize_env(state, eids):
     l = [i for i in eids if i in state]
     for i in l:
         p = '%s/%s.json' % (FLAGS.env_path, i)
-        print('serialize')
-        print(state)
         open(p, 'w').write(json.dumps(state[i]))
     return l
 
@@ -118,8 +116,6 @@ class Application(tornado.web.Application):
             state['main'] = {'jsons': {}, 'reload': {}}
             serialize_env(state, ['main'])
 
-        print('Application')
-        print(state)
         handlers = [
             (r"/events", PostHandler, dict(state=state, subs=subs)),
             (r"/update", UpdateHandler, dict(state=state, subs=subs)),
