@@ -30,6 +30,9 @@ local assertOptions = argcheck{
       if options.colormap then
          assert(type(options.colormap) == 'string', 'colormap should be string')
       end
+      if options.color then
+         assert(type(options.color) == 'string', 'color should be string')
+      end
       if options.mode then
          assert(type(options.mode) == 'string', 'mode should be a string')
       end
@@ -54,6 +57,12 @@ local assertOptions = argcheck{
             'JPG quality should be a number')
          assert(options.jpgquality > 0 and options.jpgquality <= 100,
             'JPG quality should be number between 0 and 100')
+      end
+      if options.opacity then
+         assert(type(options.opacity) == 'number',
+            'opacity should be a number')
+         assert(options.opacity >= 0 and options.opacity <= 1,
+            'opacity should be a number between 0 and 1')
       end
    end
 }
@@ -1085,6 +1094,60 @@ M.pie = argcheck{
       }}
 
       -- send 3d surface plot request to server:
+      return self:sendRequest({
+         data   = data,
+         win    = win,
+         eid    = env,
+         layout = options2layout{options = options},
+      })
+   end
+}
+
+-- mesh plot:
+M.mesh = argcheck{
+   doc = [[
+      This function draws a mesh plot from a set of vertices defined in an
+      `Nx2` or `Nx3` matrix `X`, and polygons defined in an optional `Mx2` or
+      `Mx3` matrix `Y`.
+
+      The following `options` are supported:
+
+      - `options.color`: color (`string`)
+      - `options.opacity`: opacity of polygons (`number` between 0 and 1)
+   ]],
+   {name = 'self',    type = 'visdom.client'},
+   {name = 'X',       type = 'torch.*Tensor'},
+   {name = 'Y',       type = 'torch.*Tensor', opt = true},
+   {name = 'options', type = 'table',  opt = true},
+   {name = 'win',     type = 'string', opt = true},
+   {name = 'env',     type = 'string', opt = true},
+   call = function(self, X, Y, options, win, env)
+
+      -- check inputs:
+      assert(X:nDimension() == 2, 'X must have 2 dimensions')
+      assert(X:size(2) == 2 or X:size(2) == 3, 'X must have 2 or 3 columns')
+      local is3d = (X:size(2) == 3)
+      local ispoly = (Y ~= nil)
+      if ispoly then
+         assert(Y:nDimension() == 2, 'Y must have 2 dimensions')
+         assert(Y:size(2) == X:size(2),
+            'X and Y must have same number of columns')
+      end
+      options = options or {}
+      assertOptions(options)
+
+      -- make data object:
+      local data = {{
+         x = X:narrow(2, 1, 1):squeeze():totable(),
+         y = X:narrow(2, 2, 1):squeeze():totable(),
+         z = is3d and X:narrow(2, 3, 1):squeeze():totable() or nil,
+         i = ispoly and Y:narrow(2, 1, 1):squeeze():totable() or nil,
+         j = ispoly and Y:narrow(2, 2, 1):squeeze():totable() or nil,
+         k = (ispoly and is3d) and Y:narrow(2, 3, 1):squeeze():totable() or nil,
+         color = options.color,
+         opacity = options.opacity,
+         type = is3d and 'mesh3d' or 'mesh',
+      }}
       return self:sendRequest({
          data   = data,
          win    = win,
