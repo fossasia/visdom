@@ -11,6 +11,7 @@ LICENSE file in the root directory of this source tree.
 -- dependencies:
 require 'torch'
 require 'image'
+local paths = require 'paths'
 
 -- intialize visdom Torch client:
 local visdom = require 'visdom'
@@ -251,6 +252,22 @@ plot:svg{
       title  = 'Example of SVG Rendering',
    },
 }
+
+-- video demo:
+local video = torch.ByteTensor(256, 3, 128, 128)
+for n = 1,video:size(1) do
+   video[n]:fill(n - 1)
+end
+local ok = pcall(plot.video, plot.video, {tensor = video})
+if not ok then print('Skipped video example') end
+
+-- video demo:
+local videofile = '/home/' .. os.getenv('USER') .. '/trailer.ogv'
+   -- NOTE: Download video from http://media.w3.org/2010/05/sintel/trailer.ogv
+if paths.filep(videofile) then
+   local ok = pcall(plot.video, plot.video, {videofile = videofile})
+   if not ok then print('Skipped video example') end
+end
 
 -- close text window:
 plot:close{win = textwindow}

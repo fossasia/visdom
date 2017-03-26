@@ -1119,10 +1119,10 @@ M.image = argcheck{
       options.jpgquality = options.jpgquality or 100
       assertOptions{options = options}
 
+      -- convert to JPG bytestring to base64:
       local immem = image.compressJPG(img, options.jpgquality)
       local imgdata = 'data:image/jpg;base64,' ..
          mime.b64(ffi.string(immem:data(), immem:nElement()))
-
       local imsize = (img:dim() == 2 and img or img[1]):size():totable()
 
       -- make data object:
@@ -1182,6 +1182,69 @@ M.svg = argcheck{
       -- send SVG request:
       return (self:text{
          text    = svg,
+         options = options,
+         win     = win,
+         eid     = env,
+      })
+   end
+}
+
+-- video file:
+M.video = argcheck{
+   doc = [[
+      This function plays a video. It takes as input the filename of the video
+      or a `LxCxHxW` tensor containing all the frames of the video. The function
+      does not support any plot-specific `options`.
+   ]],
+   noordered = true,
+   {name = 'self',      type = 'visdom.client'},
+   {name = 'tensor',    type = 'torch.ByteTensor', opt = true},
+   {name = 'videofile', type = 'string', opt = true},
+   {name = 'options',   type = 'table',  opt = true},
+   {name = 'win',       type = 'string', opt = true},
+   {name = 'env',       type = 'string', opt = true},
+   call = function(self, tensor, videofile, options, win, env)
+
+      -- get mime type for video:
+      videofile = videofile or os.tmpname() .. '.ogv'
+      assert(tensor or videofile, 'should specify video tensor or file')
+      local extension = videofile:sub(-3):lower()
+      local mimetypes = {
+         mp4  = 'mp4',
+         ogv  = 'ogg',
+         avi  = 'avi',
+         webm = 'webm',
+      }
+      local mimetype = mimetypes[extension]
+      assert(mimetype, string.format('unknown video type: %s', extension))
+
+      -- construct video if a tensor was specified:
+      if tensor then
+         assert(tensor:nDimension() == 4, 'video should be in 4D tensor')
+         local ffmpeg = require 'ffmpeg'
+         local video = ffmpeg.Video{
+            height = tensor:size(3),
+            width  = tensor:size(4),
+            fps    = 25,
+            length = tensor:size(1),
+            tensor = tensor,
+            zoom   = 2,
+         }
+         video:save{outpath = videofile, keep = false, usetheora = true}
+      end
+
+      -- load video file:
+      local bytestr = loadFile(videofile)
+
+      -- send out video request:
+      local videodata = string.format([[
+         <video controls>
+            <source type="video/%s" src="data:video/%s;base64,%s">
+            Your browser does not support the video tag.
+         </video>
+      ]], mimetype, mimetype, mime.b64(bytestr))
+      return (self:text{
+         text    = videodata,
          options = options,
          win     = win,
          eid     = env,
