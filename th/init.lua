@@ -257,11 +257,13 @@ M.__init = argcheck{
    {name = 'port',     type = 'number',  default = 8097},
    {name = 'ipv6',     type = 'boolean', default = true},
    {name = 'proxy',    type = 'string',  opt = true},
-   call = function(self, server, endpoint, port, ipv6, proxy)
+   {name = 'env',      type = 'string',  default = 'main'},
+   call = function(self, server, endpoint, port, ipv6, proxy, env)
       self.server   = server
       self.endpoint = endpoint
       self.port     = port
       self.ipv6     = ipv6
+      self.env      = env
       if proxy then socket.http.PROXY = proxy end
    end
 }
@@ -275,10 +277,13 @@ M.sendRequest = argcheck{
       Tornado server endpoint for the request.
    ]],
    {name = 'self',     type = 'visdom.client'},
-   {name = 'request',  type = 'string'},
+   {name = 'request',  type = 'table'},
    {name = 'endpoint', type = 'string',  opt = true},
    call = function(self, request, endpoint)
       local response = {}
+      request['eid'] = request['eid'] or self.env
+      request = json.encode(request)
+
       local status, msg = socket.http.request({
          url     = string.format('%s:%s/%s', self.server, self.port,
                      endpoint or self.endpoint),
@@ -313,7 +318,7 @@ M.save = argcheck{
          for _,v in pairs(envs) do assert(type(v) == 'string') end
 
          -- send save request to server
-         return self:sendRequest(json.encode{
+         return self:sendRequest({
             data   = envs,
          }, 'save')
       end
@@ -372,7 +377,7 @@ M.updateTrace = argcheck{
 
       -- send scatter plot request to server:
       return self:sendRequest{
-         request = (json.encode{
+         request = ({
             data      = nan2null(data),
             win       = win,
             eid       = env,
@@ -486,7 +491,7 @@ M.scatter = argcheck{
       end
 
       -- send scatter plot request to server:
-      return self:sendRequest(json.encode{
+      return self:sendRequest({
          data   = nan2null(data),
          win    = win,
          eid    = env,
@@ -531,11 +536,10 @@ M.line = argcheck{
             options = options, append = update == 'append',
          }
       end
-            -- assertions on the inputs:
-      Y = Y:squeeze()
+
+      -- assertions on the inputs:
       assert(Y:dim() == 1 or Y:dim() == 2, 'Y should be one or two-dimensional')
       if X then
-         X = X:squeeze()
          assert(X:dim() == 1 or X:dim() == 2,
             'X should be one or two-dimensional')
       else
@@ -695,7 +699,7 @@ M.heatmap = argcheck{
       }}
 
       -- send heatmap plot request to server:
-      return self:sendRequest(json.encode{
+      return self:sendRequest({
          data   = data,
          win    = win,
          eid    = env,
@@ -767,7 +771,7 @@ M.bar = argcheck{
       end
 
       -- send bar plot request to server:
-      return self:sendRequest(json.encode{
+      return self:sendRequest({
          data   = data,
          win    = win,
          eid    = env,
@@ -864,7 +868,7 @@ M.boxplot = argcheck{
       end
 
       -- send boxplot request to server:
-      return self:sendRequest(json.encode{
+      return self:sendRequest({
          data   = data,
          win    = win,
          eid    = env,
@@ -897,7 +901,7 @@ local function _surface(self, X, type, options, win, env)
    }}
 
    -- send 3d surface plot request to server:
-   return self:sendRequest(json.encode{
+   return self:sendRequest({
       data   = data,
       win    = win,
       eid    = env,
@@ -1081,7 +1085,7 @@ M.pie = argcheck{
       }}
 
       -- send 3d surface plot request to server:
-      return self:sendRequest(json.encode{
+      return self:sendRequest({
          data   = data,
          win    = win,
          eid    = env,
@@ -1093,7 +1097,7 @@ M.pie = argcheck{
 -- image:
 M.image = argcheck{
    doc = [[
-      This function draws an img. It takes as input an `CxWxH` tensor `img`
+      This function draws an img. It takes as input an `CxHxW` tensor `img`
       that contains the image.
 
       The following `options` are supported:
@@ -1115,10 +1119,10 @@ M.image = argcheck{
       options.jpgquality = options.jpgquality or 100
       assertOptions{options = options}
 
+      -- convert to JPG bytestring to base64:
       local immem = image.compressJPG(img, options.jpgquality)
       local imgdata = 'data:image/jpg;base64,' ..
          mime.b64(ffi.string(immem:data(), immem:nElement()))
-
       local imsize = (img:dim() == 2 and img or img[1]):size():totable()
 
       -- make data object:
@@ -1132,11 +1136,118 @@ M.image = argcheck{
       }}  -- NOTE: This is not a plotly type
 
       -- send image request:
-      return self:sendRequest(json.encode{
+      return self:sendRequest({
          data   = data,
          win    = win,
          eid    = env,
          title  = options.title,
+      })
+   end
+}
+
+-- helper function for loading file as bytestring:
+local function loadFile(filename)
+   local paths = require 'paths'
+   assert(paths.filep(filename),
+      string.format('file not found: %s', filename))
+   local file = io.open(filename, 'r')
+   assert(file, string.format('could not open file: %s', filename))
+   local str = file:read('*all')
+   file:close()
+   return str
+end
+
+-- SVG object:
+M.svg = argcheck{
+   doc = [[
+      This function draws an SVG object. It takes as input an SVG string or the
+      name of an SVG file. The function does not support any plot-specific
+      `options`.
+   ]],
+   noordered = true,
+   {name = 'self',    type = 'visdom.client'},
+   {name = 'svgstr',  type = 'string', opt = true},
+   {name = 'svgfile', type = 'string', opt = true},
+   {name = 'options', type = 'table',  opt = true},
+   {name = 'win',     type = 'string', opt = true},
+   {name = 'env',     type = 'string', opt = true},
+   call = function(self, svgstr, svgfile, options, win, env)
+
+      -- load SVG and strip doctype if it is present:
+      assert(svgstr or svgfile, 'should specify SVG string or filename')
+      local svgstr = svgstr or loadFile(svgfile)
+      local svg = svgstr:match('<svg .+</svg>')
+      assert(svg, 'SVG could not be parsed correctly')
+
+      -- send SVG request:
+      return (self:text{
+         text    = svg,
+         options = options,
+         win     = win,
+         eid     = env,
+      })
+   end
+}
+
+-- video file:
+M.video = argcheck{
+   doc = [[
+      This function plays a video. It takes as input the filename of the video
+      or a `LxCxHxW` tensor containing all the frames of the video. The function
+      does not support any plot-specific `options`.
+   ]],
+   noordered = true,
+   {name = 'self',      type = 'visdom.client'},
+   {name = 'tensor',    type = 'torch.ByteTensor', opt = true},
+   {name = 'videofile', type = 'string', opt = true},
+   {name = 'options',   type = 'table',  opt = true},
+   {name = 'win',       type = 'string', opt = true},
+   {name = 'env',       type = 'string', opt = true},
+   call = function(self, tensor, videofile, options, win, env)
+
+      -- get mime type for video:
+      videofile = videofile or os.tmpname() .. '.ogv'
+      assert(tensor or videofile, 'should specify video tensor or file')
+      local extension = videofile:sub(-3):lower()
+      local mimetypes = {
+         mp4  = 'mp4',
+         ogv  = 'ogg',
+         avi  = 'avi',
+         webm = 'webm',
+      }
+      local mimetype = mimetypes[extension]
+      assert(mimetype, string.format('unknown video type: %s', extension))
+
+      -- construct video if a tensor was specified:
+      if tensor then
+         assert(tensor:nDimension() == 4, 'video should be in 4D tensor')
+         local ffmpeg = require 'ffmpeg'
+         local video = ffmpeg.Video{
+            height = tensor:size(3),
+            width  = tensor:size(4),
+            fps    = 25,
+            length = tensor:size(1),
+            tensor = tensor,
+            zoom   = 2,
+         }
+         video:save{outpath = videofile, keep = false, usetheora = true}
+      end
+
+      -- load video file:
+      local bytestr = loadFile(videofile)
+
+      -- send out video request:
+      local videodata = string.format([[
+         <video controls>
+            <source type="video/%s" src="data:video/%s;base64,%s">
+            Your browser does not support the video tag.
+         </video>
+      ]], mimetype, mimetype, mime.b64(bytestr))
+      return (self:text{
+         text    = videodata,
+         options = options,
+         win     = win,
+         eid     = env,
       })
    end
 }
@@ -1166,7 +1277,7 @@ M.text = argcheck{
       }}  -- NOTE: This is not a plotly type
 
       -- send text request:
-      return self:sendRequest(json.encode{
+      return self:sendRequest({
          data   = data,
          win    = win,
          eid    = env,
@@ -1187,7 +1298,7 @@ M.close = argcheck{
    {name = 'env',  type = 'string', opt = true},
    call = function(self, win, env)
       return self:sendRequest{
-         request  = (json.encode{win = win, eid = env}),
+         request  = ({win = win, eid = env}),
          endpoint = 'close',
       }
    end

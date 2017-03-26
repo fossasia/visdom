@@ -112,6 +112,13 @@ vis:text{text = 'Hello, world!'}
 vis:image{img = image.fabio()}
 ```
 
+Some users have reported issues when connecting Lua clients to the Visdom server.
+A potential work-around may be to switch off IPv6:
+```
+vis = require 'visdom'()
+vis.ipv6 = false  -- switches off IPv6
+vis:text{text = 'Hello, world!'}
+```
 
 
 ### Demos
@@ -271,12 +278,27 @@ The following `options` are supported:
 - `options.arrowheads`: show arrow heads (`boolean`; default = `true`)
 
 #### plot.image
-This function draws an img. It takes as input an `CxWxH` tensor `img`
+This function draws an `img`. It takes as input an `CxHxW` tensor `img`
 that contains the image.
 
 The following `options` are supported:
 
 - `options.jpgquality`: JPG quality (`number` 0-100; default = 100)
+
+### plot.video
+This function plays a video. It takes as input the filename of the video
+`videofile` or a `LxCxHxW`-sized `tensor` (in Lua) or a or a `LxHxWxC`-sized
+`tensor` (in Python) containing all the frames of the video as input. The
+function does not support any plot-specific `options`.
+
+Note: Using `tensor` input requires that ffmpeg is installed and working.
+Your ability to play video may depend on the browser you use: your browser has
+to support the Theano codec in an OGG container (Chrome supports this).
+
+### plot.svg
+This function draws an SVG object. It takes as input a SVG string `svgstr` or
+the name of an SVG file `svgfile`. The function does not support any specific
+`options`.
 
 #### plot.text
 This function prints text in a  box. It takes as input a `text` string.

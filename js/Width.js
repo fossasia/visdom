@@ -48,7 +48,6 @@ const Width: ProviderT = (ComposedComponent) => class extends React.Component {
   }
 
   onWindowResize = (_event: ?Event) => {
-    let mounted = this.mounted;
     if (this.resizeTimer) clearTimeout(this.resizeTimer);
     this.resizeTimer = setTimeout(this.onWindowResizeStop, 200);
   }

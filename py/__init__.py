@@ -9,10 +9,13 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import os.path
 import requests
 import traceback
 import json
 import math
+import re
+import base64
 import numpy as np
 from PIL import Image
 import base64 as b64
@@ -38,6 +41,15 @@ def nan2none(l):
         if math.isnan(val):
             l[idx] = None
     return l
+
+
+def loadfile(filename):
+    assert os.path.isfile(filename), 'could not find file %s' % filename
+    fileobj = open(filename, 'r')
+    assert fileobj, 'could not open file %s' % filename
+    str = fileobj.read()
+    fileobj.close()
+    return str
 
 
 def _scrub_dict(d):
@@ -155,6 +167,26 @@ def _assert_opts(opts):
             'opacity should be a number between 0 and 1'
 
 
+def pytorch_wrap(fn):
+    def result(*args, **kwargs):
+        args = (a.cpu().numpy() if type(a).__module__ == 'torch' else a
+                for a in args)
+
+        for k in kwargs:
+            if type(kwargs[k]).__module__ == 'torch':
+                kwargs[k] = kwargs[k].cpu().numpy()
+
+        return fn(*args, **kwargs)
+    return result
+
+
+def wrap_tensor_methods(cls, wrapper):
+    fns = ['_surface', 'bar', 'boxplot', 'surf', 'heatmap', 'histogram', 'svg',
+            'image', 'line', 'pie', 'scatter', 'stem', 'contour', 'updateTrace']
+    for key in [k for k in dir(cls) if k in fns]:
+        setattr(cls, key, wrapper(getattr(cls, key)))
+
+
 class Visdom(object):
 
     def __init__(
@@ -163,16 +195,23 @@ class Visdom(object):
         endpoint='events',
         port=8097,
         ipv6=True,
-        proxy=None
+        proxy=None,
+        env='main',
     ):
         self.server = server
         self.endpoint = endpoint
         self.port = port
         self.ipv6 = ipv6
         self.proxy = proxy
+        self.env = env              # default env
+
+        try:
+            import torch
+            wrap_tensor_methods(self, pytorch_wrap)
+        except ImportError:
+            pass
 
     # Utils
-
     def _send(self, msg, endpoint='events'):
         """
         This function sends specified JSON request to the Tornado server. This
@@ -180,10 +219,13 @@ class Visdom(object):
         build the required JSON yourself. `endpoint` specifies the destination
         Tornado server endpoint for the request.
         """
+        if msg.get('eid', None) is None:
+            msg['eid'] = self.env
+
         try:
             r = requests.post(
                 "{0}:{1}/{2}".format(self.server, self.port, endpoint),
-                data=msg
+                data=json.dumps(msg),
             )
             return r.text
         except BaseException:
@@ -202,9 +244,9 @@ class Visdom(object):
             for env in envs:
                 assert isstr(env), 'env should be a string'
 
-        return self._send(json.dumps({
+        return self._send({
             'data': envs,
-        }), 'save')
+        }, 'save')
 
     def close(self, win=None, env=None):
         """
@@ -213,7 +255,7 @@ class Visdom(object):
         """
 
         return self._send(
-            msg=json.dumps({'win': win, 'eid': env}),
+            msg={'win': win, 'eid': env},
             endpoint='close'
         )
 
@@ -228,16 +270,33 @@ class Visdom(object):
         _assert_opts(opts)
         data = [{'content': text, 'type': 'text'}]
 
-        return self._send(json.dumps({
+        return self._send({
             'data': data,
             'win': win,
             'eid': env,
             'title': opts.get('title'),
-        }))
+        })
+
+    def svg(self, svgstr=None, svgfile=None, win=None, env=None, opts=None):
+        """
+        This function draws an SVG object. It takes as input an SVG string or the
+        name of an SVG file. The function does not support any plot-specific
+        `options`.
+        """
+        opts = {} if opts is None else opts
+        _assert_opts(opts)
+
+        if svgfile is not None:
+            svgstr = loadfile(svgfile)
+
+        assert svgstr is not None, 'should specify SVG string or filename'
+        svg = re.search('<svg .+</svg>', svgstr, re.DOTALL)
+        assert svg is not None, 'could not parse SVG string'
+        return self.text(text=svg.group(0), win=win, env=env, opts=opts)
 
     def image(self, img, win=None, env=None, opts=None):
         """
-        This function draws an img. It takes as input an `HxWxC` tensor `img`
+        This function draws an img. It takes as input an `CxHxW` tensor `img`
         that contains the image. The array values can be float in [0,1] or uint8
         in [0, 255].
         """
@@ -245,7 +304,7 @@ class Visdom(object):
         opts['jpgquality'] = opts.get('jpgquality', 75)
         _assert_opts(opts)
 
-        nchannels = img.shape[2] if img.ndim == 3 else 1
+        nchannels = img.shape[0] if img.ndim == 3 else 1
         if nchannels == 1:
             img = img[:, :, np.newaxis].repeat(3, axis=2)
 
@@ -254,6 +313,7 @@ class Visdom(object):
                 img = img * 255.
             img = np.uint8(img)
 
+        img = np.transpose(img, (1, 2, 0))
         im = Image.fromarray(img)
         buf = BytesIO()
         im.save(buf, format='JPEG', quality=opts['jpgquality'])
@@ -268,12 +328,60 @@ class Visdom(object):
             'type': 'image',
         }]
 
-        return self._send(json.dumps({
+        return self._send({
             'data': data,
             'win': win,
             'eid': env,
             'title': opts.get('title'),
-        }))
+        })
+
+    def video(self, tensor=None, videofile=None, win=None, env=None, opts=None):
+        """
+        This function plays a video. It takes as input the filename of the video
+        or a `LxCxHxW` tensor containing all the frames of the video. The function
+        does not support any plot-specific `options`.
+        """
+        opts = {} if opts is None else opts
+        _assert_opts(opts)
+        assert tensor is not None or videofile is not None, \
+            'should specify video tensor or file'
+
+        if tensor is not None:
+            import cv2
+            import tempfile
+            assert tensor.ndim == 4, 'video should be in 4D tensor'
+            videofile = '/tmp/%s.ogv' % next(tempfile._get_candidate_names())
+            fourcc = cv2.cv.CV_FOURCC(
+                chr(ord('T')),
+                chr(ord('H')),
+                chr(ord('E')),
+                chr(ord('O'))
+            )
+            writer = cv2.VideoWriter(
+                videofile,
+                fourcc,
+                25,
+                (tensor.shape[1], tensor.shape[2])
+            )
+            assert writer.isOpened(), 'video writer could not be opened'
+            for i in range(tensor.shape[0]):
+                writer.write(tensor[i, :, :, :])
+            writer.release()
+            writer = None
+
+        extension = videofile[-3:].lower()
+        mimetypes = dict(mp4='mp4', ogv='ogg', avi='avi', webm='webm')
+        mimetype = mimetypes.get(extension)
+        assert mimetype is not None, 'unknown video type: %s' % extension
+
+        bytestr = loadfile(videofile)
+        videodata = """
+            <video controls>
+                <source type="video/%s" src="data:video/%s;base64,%s">
+                Your browser does not support the video tag.
+            </video>
+        """ % (mimetype, mimetype, base64.b64encode(bytestr))
+        return self.text(text=videodata, win=win, env=env, opts=opts)
 
     def updateTrace(self, X, Y, win, env=None, name=None,
                     append=True, opts=None):
@@ -311,16 +419,13 @@ class Visdom(object):
             data['x'] = [data['x']]
             data['y'] = [data['y']]
 
-        return self._send(
-            json.dumps({
-                'data': data,
-                'win': win,
-                'eid': env,
-                'name': name,
-                'append': append,
-            }),
-            endpoint='update'
-        )
+        return self._send({
+            'data': data,
+            'win': win,
+            'eid': env,
+            'name': name,
+            'append': append,
+        }, endpoint='update')
 
     def scatter(self, X, Y=None, win=None, env=None, opts=None, update=None):
         """
@@ -407,12 +512,12 @@ class Visdom(object):
 
                 data.append(_scrub_dict(_data))
 
-        return self._send(json.dumps({
+        return self._send({
             'data': data,
             'win': win,
             'eid': env,
             'layout': _opts2layout(opts, is3d),
-        }))
+        })
 
     def line(self, Y, X=None, win=None, env=None, opts=None, update=None):
         """
@@ -442,11 +547,9 @@ class Visdom(object):
             assert X is not None, 'must specify x-values for line update'
             return self.updateTrace(X=X, Y=Y, win=win, env=env,
                                     append=update == 'append', opts=opts)
-        Y = np.squeeze(Y)
         assert Y.ndim == 1 or Y.ndim == 2, 'Y should have 1 or 2 dim'
 
         if X is not None:
-            X = np.squeeze(X)
             assert X.ndim == 1 or X.ndim == 2, 'X should have 1 or 2 dim'
         else:
             X = np.linspace(0, 1, Y.shape[0])
@@ -514,14 +617,12 @@ class Visdom(object):
             'colorscale': opts.get('colormap'),
         }]
 
-        return self._send(
-            json.dumps({
-                'data': data,
-                'win': win,
-                'eid': env,
-                'layout': _opts2layout(opts)
-            })
-        )
+        return self._send({
+            'data': data,
+            'win': win,
+            'eid': env,
+            'layout': _opts2layout(opts)
+        })
 
     def bar(self, X, Y=None, win=None, env=None, opts=None):
         """
@@ -573,14 +674,12 @@ class Visdom(object):
                 _data['name'] = opts['legend'][k]
             data.append(_data)
 
-        return self._send(
-            json.dumps({
-                'data': data,
-                'win': win,
-                'eid': env,
-                'layout': _opts2layout(opts)
-            })
-        )
+        return self._send({
+            'data': data,
+            'win': win,
+            'eid': env,
+            'layout': _opts2layout(opts)
+        })
 
     def histogram(self, X, win=None, env=None, opts=None):
         """
@@ -647,14 +746,12 @@ class Visdom(object):
 
             data.append(_data)
 
-        return self._send(
-            json.dumps({
-                'data': data,
-                'win': win,
-                'eid': env,
-                'layout': _opts2layout(opts)
-            })
-        )
+        return self._send({
+            'data': data,
+            'win': win,
+            'eid': env,
+            'layout': _opts2layout(opts)
+        })
 
     def _surface(self, X, stype, win=None, env=None, opts=None):
         """
@@ -687,15 +784,13 @@ class Visdom(object):
             'colorscale': opts['colormap']
         }]
 
-        return self._send(
-            json.dumps({
-                'data': data,
-                'win': win,
-                'eid': env,
-                'layout': _opts2layout(
-                    opts, is3d=True if stype == 'surface' else False)
-            })
-        )
+        return self._send({
+            'data': data,
+            'win': win,
+            'eid': env,
+            'layout': _opts2layout(
+                opts, is3d=True if stype == 'surface' else False)
+        })
 
     def surf(self, X, win=None, env=None, opts=None):
         """
@@ -795,15 +890,12 @@ class Visdom(object):
             'labels': opts.get('legend'),
             'type': 'pie',
         }]
-
-        return self._send(
-            json.dumps({
-                'data': data,
-                'win': win,
-                'eid': env,
-                'layout': _opts2layout(opts)
-            })
-        )
+        return self._send({
+            'data': data,
+            'win': win,
+            'eid': env,
+            'layout': _opts2layout(opts)
+        })
 
     def mesh(self, X, Y=None, win=None, env=None, opts=None):
         """
@@ -839,11 +931,9 @@ class Visdom(object):
             'opacity': opts.get('opacity'),
             'type': 'mesh3d' if is3d else 'mesh',
         }]
-        return self._send(
-            json.dumps({
-                'data': data,
-                'win': win,
-                'eid': env,
-                'layout': _opts2layout(opts),
-            })
-        )
+        return self._send({
+            'data': data,
+            'win': win,
+            'eid': env,
+            'layout': _opts2layout(opts)
+        })

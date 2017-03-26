@@ -60,6 +60,17 @@ def get_path(filename):
     return os.path.join(cwd, filename)
 
 
+def extract_eid(args):
+    """Extract eid from args. If eid does not exist in args,
+    it returns 'main'."""
+
+    eid = 'main' if args.get('eid') is None else args.get('eid')
+    # Replace slashes with underscores, to avoid recognizing them
+    # as directories.
+    eid = eid.replace('/', '_')
+    return eid
+
+
 tornado_settings = {
     "autoescape": None,
     "debug": "/dbg/" in __file__,
@@ -192,10 +203,9 @@ def pane(args):
 
     return {
         'command': 'pane',
-        'id': uid,
+        'id': str(uid),
         'title': '' if args.get('title') is None else args['title'],
         'contentID': get_rand_id(),   # to detected updated panes
-
     }
 
 
@@ -231,7 +241,7 @@ class PostHandler(BaseHandler):
 
         ptype = args['data'][0]['type']
         p = pane(args)
-        eid = 'main' if args.get('eid') is None else args.get('eid')
+        eid = extract_eid(args)
 
         if ptype in ['image', 'text']:
             p.update(dict(content=args['data'][0]['content'], type=ptype))
@@ -283,7 +293,7 @@ class UpdateHandler(BaseHandler):
 
     def post(self):
         args = tornado.escape.json_decode(tornado.escape.to_basestring(self.request.body))
-        eid = 'main' if args.get('eid') is None else args.get('eid')
+        eid = extract_eid(args)
 
         if args['win'] not in self.state[eid]['jsons']:
             self.write('win does not exist')
@@ -310,7 +320,7 @@ class CloseHandler(BaseHandler):
     def post(self):
         args = tornado.escape.json_decode(tornado.escape.to_basestring(self.request.body))
 
-        eid = 'main' if args.get('eid') is None else args.get('eid')
+        eid = extract_eid(args)
         win = args.get('win')
 
         keys = list(self.state[eid]['jsons'].keys()) if win is None else [win]

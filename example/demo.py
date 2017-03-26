@@ -12,13 +12,30 @@ from __future__ import unicode_literals
 from visdom import Visdom
 import numpy as np
 import math
+import os.path
+import getpass
 
 viz = Visdom()
 
 textwindow = viz.text('Hello World!')
 
+# video demo:
+try:
+    video = np.empty([256, 250, 250, 3], dtype=np.uint8)
+    for n in range(256):
+        video[n, :, :, :].fill(n)
+    viz.video(tensor=video)
+
+    # video demo: download video from http://media.w3.org/2010/05/sintel/trailer.ogv
+    videofile = '/home/%s/trailer.ogv' % getpass.getuser()
+    if os.path.isfile(videofile):
+        viz.video(videofile=videofile)
+except ImportError:
+    print('Skipped video example')
+
+# image demo
 viz.image(
-    np.random.rand(512, 256, 3),
+    np.random.rand(3, 512, 256),
     opts=dict(title='Random!', caption='How random.'),
 )
 
@@ -196,7 +213,6 @@ viz.stem(
     opts=dict(legend=['Sine', 'Cosine'])
 )
 
-
 # pie chart
 X = np.asarray([19, 26, 55])
 viz.pie(
@@ -204,8 +220,7 @@ viz.pie(
     opts=dict(legend=['Residential', 'Non-Residential', 'Utility'])
 )
 
-
-# mesh
+# mesh plot
 x = [0, 0, 1, 1, 0, 0, 1, 1]
 y = [0, 1, 1, 0, 0, 1, 1, 0]
 z = [0, 0, 0, 0, 1, 1, 1, 1]
@@ -216,6 +231,25 @@ k = [0, 7, 2, 3, 6, 7, 1, 1, 5, 5, 7, 6]
 Y = np.c_[i, j, k]
 viz.mesh(X=X, Y=Y, opts=dict(opacity=0.5))
 
+# SVG plotting
+svgstr = """
+<svg height="300" width="300">
+  <ellipse cx="80" cy="80" rx="50" ry="30"
+   style="fill:red;stroke:purple;stroke-width:2" />
+  Sorry, your browser does not support inline SVG.
+</svg>
+"""
+viz.svg(
+    svgstr=svgstr,
+    opts=dict(title='Example of SVG Rendering')
+)
 
 # close text window:
 viz.close(win=textwindow)
+
+# PyTorch tensor
+try:
+    import torch
+    viz.line(Y=torch.Tensor([[0., 0.], [1., 1.]]))
+except ImportError:
+    print('Skipped PyTorch example')
