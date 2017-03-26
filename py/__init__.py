@@ -128,6 +128,9 @@ def _markerColorCheck(mc, X, Y, L):
 
 
 def _assert_opts(opts):
+    if opts.get('color'):
+        assert isstr(opts.get('color')), 'color should be a string'
+
     if opts.get('colormap'):
         assert isstr(opts.get('colormap')), \
             'colormap should be string'
@@ -157,6 +160,11 @@ def _assert_opts(opts):
             'JPG quality should be a number'
         assert opts.get('jpgquality') > 0 and opts.get('jpgquality') <= 100, \
             'JPG quality should be number between 0 and 100'
+
+    if opts.get('opacity'):
+        assert isnum(opts.get('opacity')), 'opacity should be a number'
+        assert 0 <= opts.get('opacity') <= 1, \
+            'opacity should be a number between 0 and 1'
 
 
 def pytorch_wrap(fn):
@@ -882,7 +890,50 @@ class Visdom(object):
             'labels': opts.get('legend'),
             'type': 'pie',
         }]
+        return self._send({
+            'data': data,
+            'win': win,
+            'eid': env,
+            'layout': _opts2layout(opts)
+        })
 
+    def mesh(self, X, Y=None, win=None, env=None, opts=None):
+        """
+        This function draws a mesh plot from a set of vertices defined in an
+        `Nx2` or `Nx3` matrix `X`, and polygons defined in an optional `Mx2` or
+        `Mx3` matrix `Y`.
+
+        The following `options` are supported:
+
+        - `options.color`: color (`string`)
+        - `options.opacity`: opacity of polygons (`number` between 0 and 1)
+        """
+        opts = {} if opts is None else opts
+        _assert_opts(opts)
+
+        X = np.asarray(X)
+        assert X.ndim == 2, 'X must have 2 dimensions'
+        assert X.shape[1] == 2 or X.shape[1] == 3, 'X must have 2 or 3 columns'
+        is3d = X.shape[1] == 3
+
+        ispoly = Y is not None
+        if ispoly:
+            Y = np.asarray(Y)
+            assert Y.ndim == 2, 'Y must have 2 dimensions'
+            assert Y.shape[1] == X.shape[1], \
+                'X and Y must have same number of columns'
+
+        data = [{
+            'x': X[:, 0].tolist(),
+            'y': X[:, 1].tolist(),
+            'z': X[:, 2].tolist() if is3d else None,
+            'i': Y[:, 0].tolist() if ispoly else None,
+            'j': Y[:, 1].tolist() if ispoly else None,
+            'k': Y[:, 2].tolist() if is3d and ispoly else None,
+            'color': opts.get('color'),
+            'opacity': opts.get('opacity'),
+            'type': 'mesh3d' if is3d else 'mesh',
+        }]
         return self._send({
             'data': data,
             'win': win,

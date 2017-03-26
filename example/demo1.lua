@@ -253,6 +253,19 @@ plot:svg{
    },
 }
 
+-- mesh plot demo:
+local X = torch.DoubleTensor{
+   {0, 0, 1, 1, 0, 0, 1, 1},
+   {0, 1, 1, 0, 0, 1, 1, 0},
+   {0, 0, 0, 0, 1, 1, 1, 1},
+}:t()
+local Y = torch.DoubleTensor{
+   {7, 0, 0, 0, 4, 4, 6, 6, 4, 0, 3, 2},
+   {3, 4, 1, 2, 5, 6, 5, 2, 0, 1, 6, 3},
+   {0, 7, 2, 3, 6, 7, 1, 1, 5, 5, 7, 6},
+}:t()
+plot:mesh{X = X, Y = Y, options = {opacity = 0.5}}
+
 -- video demo:
 local video = torch.ByteTensor(256, 3, 128, 128)
 for n = 1,video:size(1) do
