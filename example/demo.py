@@ -12,26 +12,11 @@ from __future__ import unicode_literals
 from visdom import Visdom
 import numpy as np
 import math
-import os.path
-import getpass
 
 viz = Visdom()
 
 textwindow = viz.text('Hello World!')
 
-# video demo:
-video = np.empty([256, 250, 250, 3], dtype=np.uint8)
-print(video.shape)
-for n in range(256):
-    video[n, :, :, :].fill(n)
-viz.video(tensor=video)
-
-# video demo: download video from http://media.w3.org/2010/05/sintel/trailer.ogv
-videofile = '/home/%s/trailer.ogv' % getpass.getuser()
-if os.path.isfile(videofile):
-    viz.video(videofile=videofile)
-
-# image demo
 viz.image(
     np.random.rand(3, 512, 256),
     opts=dict(title='Random!', caption='How random.'),

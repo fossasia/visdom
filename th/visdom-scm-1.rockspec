@@ -24,7 +24,6 @@ dependencies = {
    "luasocket >= 1.0",
    "json >= 1.0",
    "luaffi >= 1.0",
-   "paths >= 1.0",
 }
 
 build = {

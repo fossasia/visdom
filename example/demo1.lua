@@ -11,7 +11,6 @@ LICENSE file in the root directory of this source tree.
 -- dependencies:
 require 'torch'
 require 'image'
-local paths = require 'paths'
 
 -- intialize visdom Torch client:
 local visdom = require 'visdom'
@@ -19,20 +18,6 @@ local plot = visdom{server = 'http://localhost', port = 8097}
 
 -- text box demo:
 local textwindow = plot:text{text = 'Hello, world!'}
-
--- video demo:
-local video = torch.ByteTensor(256, 3, 128, 128)
-for n = 1,video:size(1) do
-   video[n]:fill(n - 1)
-end
-plot:video{tensor = video}
-
--- video demo:
-local videofile = '/home/' .. os.getenv('USER') .. '/trailer.ogv'
-   -- NOTE: Download video from http://media.w3.org/2010/05/sintel/trailer.ogv
-if paths.filep(videofile) then
-   plot:video{videofile = videofile}
-end
 
 -- image demo:
 plot:image{
