@@ -60,15 +60,20 @@ def get_path(filename):
     return os.path.join(cwd, filename)
 
 
+def escape_eid(eid):
+    """Replace slashes with underscores, to avoid recognizing them
+    as directories.
+    """
+
+    return eid.replace('/', '_')
+
+
 def extract_eid(args):
     """Extract eid from args. If eid does not exist in args,
     it returns 'main'."""
 
     eid = 'main' if args.get('eid') is None else args.get('eid')
-    # Replace slashes with underscores, to avoid recognizing them
-    # as directories.
-    eid = eid.replace('/', '_')
-    return eid
+    return escape_eid(eid)
 
 
 tornado_settings = {
@@ -155,6 +160,7 @@ class SocketHandler(tornado.websocket.WebSocketHandler):
         elif cmd == 'save':
             # save localStorage pane metadata
             if 'data' in msg and 'eid' in msg:
+                msg['eid'] = escape_eid(msg['eid'])
                 self.state[msg['eid']] = copy.deepcopy(self.state[msg['prev_eid']])
                 self.state[msg['eid']]['reload'] = msg['data']
                 self.eid = msg['eid']
@@ -390,6 +396,7 @@ class SaveHandler(BaseHandler):
 
     def post(self):
         envs = tornado.escape.json_decode(tornado.escape.to_basestring(self.request.body))['data']
+        envs = [escape_eid(eid) for eid in envs]
         ret = serialize_env(self.state, envs)  # this ignores invalid env ids
         self.write(json.dumps(ret))
 
