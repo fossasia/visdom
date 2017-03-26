@@ -351,12 +351,10 @@ class Visdom(object):
             import tempfile
             assert tensor.ndim == 4, 'video should be in 4D tensor'
             videofile = '/tmp/%s.ogv' % next(tempfile._get_candidate_names())
-            fourcc = cv2.cv.CV_FOURCC(
-                chr(ord('T')),
-                chr(ord('H')),
-                chr(ord('E')),
-                chr(ord('O'))
-            )
+            if cv2.__version__.startswith('2'):
+                fourcc = cv2.cv.CV_FOURCC(*'THEO')
+            elif cv2.__version__.startswith('3'):
+                fourcc = cv2.VideoWriter_fourcc(*'THEO')
             writer = cv2.VideoWriter(
                 videofile,
                 fourcc,
