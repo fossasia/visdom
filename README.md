@@ -101,7 +101,7 @@ import visdom
 import numpy as np
 vis = visdom.Visdom()
 vis.text('Hello, world!')
-vis.image(np.ones((10, 10, 3)))
+vis.image(np.ones((3, 10, 10)))
 ```
 
 #### Torch example
