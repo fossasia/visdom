@@ -306,7 +306,7 @@ class Visdom(object):
 
         nchannels = img.shape[0] if img.ndim == 3 else 1
         if nchannels == 1:
-            img = img[:, :, np.newaxis].repeat(3, axis=2)
+            img = img[np.newaxis, :, :].repeat(3, axis=0)
 
         if 'float' in str(img.dtype):
             if img.max() <= 1:
