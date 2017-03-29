@@ -143,6 +143,8 @@ The following API is currently supported. Visualizations are powered by [Plotly]
 - `vis.contour`  : contour plots
 - `vis.quiver`   : quiver plots
 - `vis.image`    : images
+-  vis.images    : grid of images
+-  vis.video     : video
 - `vis.text`     : text box
 - `vis.mesh`     : mesh plots
 - `vis.save`     : serialize state
@@ -284,6 +286,10 @@ that contains the image.
 The following `options` are supported:
 
 - `options.jpgquality`: JPG quality (`number` 0-100; default = 100)
+
+#### plot.images
+This function makes a grid of images. It takes as input an `NxCxHxW` tensor
+or a list of `CxHxW` images. 
 
 ### plot.video
 This function plays a video. It takes as input the filename of the video
