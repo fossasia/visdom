@@ -39,6 +39,12 @@ viz.image(
     opts=dict(title='Random!', caption='How random.'),
 )
 
+# grid of images
+viz.images(
+    np.random.randn(20, 3, 64, 64), 
+    opts=dict(title='Random images', caption='How random.')
+)
+
 # scatter plots
 Y = np.random.rand(100)
 viz.scatter(
