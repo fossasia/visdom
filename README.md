@@ -291,6 +291,10 @@ The following `options` are supported:
 This function makes a grid of images. It takes as input an `NxCxHxW` tensor
 or a list of `CxHxW` images. 
 
+The following `options` are supported:
+
+- `options.jpgquality`: JPG quality (`number` 0-100; default = 100)
+
 ### plot.video
 This function plays a video. It takes as input the filename of the video
 `videofile` or a `LxCxHxW`-sized `tensor` (in Lua) or a or a `LxHxWxC`-sized
