@@ -285,6 +285,7 @@ M.sendRequest = argcheck{
       build the required JSON yourself. `endpoint` specifies the destination
       Tornado server endpoint for the request.
    ]],
+   noordered = true,
    {name = 'self',     type = 'visdom.client'},
    {name = 'request',  type = 'table'},
    {name = 'endpoint', type = 'string',  opt = true},
@@ -327,9 +328,12 @@ M.save = argcheck{
          for _,v in pairs(envs) do assert(type(v) == 'string') end
 
          -- send save request to server
-         return self:sendRequest({
-            data   = envs,
-         }, 'save')
+         return self:sendRequest{
+            request = {
+               data = envs,
+            },
+            endpoint = 'save',
+         }
       end
    end
 }
@@ -386,13 +390,13 @@ M.updateTrace = argcheck{
 
       -- send scatter plot request to server:
       return self:sendRequest{
-         request = ({
+         request = {
             data      = nan2null(data),
             win       = win,
             eid       = env,
             name      = name,
             append    = append,
-         }),
+         },
          endpoint = 'update',
       }
    end
@@ -500,12 +504,12 @@ M.scatter = argcheck{
       end
 
       -- send scatter plot request to server:
-      return self:sendRequest({
+      return self:sendRequest{request = {
          data   = nan2null(data),
          win    = win,
          eid    = env,
          layout = options2layout{options = options, is3d = is3d},
-      })
+      }}
    end
 }
 
@@ -708,12 +712,12 @@ M.heatmap = argcheck{
       }}
 
       -- send heatmap plot request to server:
-      return self:sendRequest({
+      return self:sendRequest{request = {
          data   = data,
          win    = win,
          eid    = env,
          layout = options2layout{options = options},
-      })
+      }}
    end
 }
 
@@ -780,12 +784,12 @@ M.bar = argcheck{
       end
 
       -- send bar plot request to server:
-      return self:sendRequest({
+      return self:sendRequest{request = {
          data   = data,
          win    = win,
          eid    = env,
          layout = options2layout{options = options},
-      })
+      }}
    end
 }
 
@@ -877,12 +881,12 @@ M.boxplot = argcheck{
       end
 
       -- send boxplot request to server:
-      return self:sendRequest({
+      return self:sendRequest{request = {
          data   = data,
          win    = win,
          eid    = env,
          layout = options2layout{options = options},
-      })
+      }}
    end
 }
 
@@ -910,7 +914,7 @@ local function _surface(self, X, type, options, win, env)
    }}
 
    -- send 3d surface plot request to server:
-   return self:sendRequest({
+   return self:sendRequest{request = {
       data   = data,
       win    = win,
       eid    = env,
@@ -918,7 +922,7 @@ local function _surface(self, X, type, options, win, env)
          options = options,
          is3d = type == 'surface' and true or nil
       },
-   })
+   }}
 end
 
 -- 3d surface plot:
@@ -1094,12 +1098,12 @@ M.pie = argcheck{
       }}
 
       -- send 3d surface plot request to server:
-      return self:sendRequest({
+      return self:sendRequest{request = {
          data   = data,
          win    = win,
          eid    = env,
          layout = options2layout{options = options},
-      })
+      }}
    end
 }
 
@@ -1148,12 +1152,12 @@ M.mesh = argcheck{
          opacity = options.opacity,
          type = is3d and 'mesh3d' or 'mesh',
       }}
-      return self:sendRequest({
+      return self:sendRequest{request = {
          data   = data,
          win    = win,
          eid    = env,
          layout = options2layout{options = options},
-      })
+      }}
    end
 }
 
@@ -1199,12 +1203,12 @@ M.image = argcheck{
       }}  -- NOTE: This is not a plotly type
 
       -- send image request:
-      return self:sendRequest({
+      return self:sendRequest{request = {
          data   = data,
          win    = win,
          eid    = env,
          title  = options.title,
-      })
+      }}
    end
 }
 
@@ -1340,12 +1344,12 @@ M.text = argcheck{
       }}  -- NOTE: This is not a plotly type
 
       -- send text request:
-      return self:sendRequest({
+      return self:sendRequest{request = {
          data   = data,
          win    = win,
          eid    = env,
          title  = options.title,
-      })
+      }}
    end
 }
 
