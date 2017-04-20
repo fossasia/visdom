@@ -1212,6 +1212,31 @@ M.image = argcheck{
    end
 }
 
+--images:
+M.images = argcheck{
+   doc = [[
+      This function makes a grid of images. It takes either be a table of 
+      image Tensors of size height x width (greyscale) or nChannel x height x width (color), 
+      or a single Tensor of size batchSize x nChannel x height x width 
+      or nChannel x height x width where nChannel=[3,1], 
+      batchSize x height x width or height x width.
+   ]],
+   noordered = true,
+   {name = 'self',    type = 'visdom.client'},
+   {name = 'tensor',  type = 'torch.*Tensor'},
+   {name = 'nrow',    type = 'number', opt = true},
+   {name = 'padding', type = 'number'}, opt = true},
+   {name = 'options', type = 'table',  opt = true},
+   {name = 'win',     type = 'string', opt = true},
+   {name = 'env',     type = 'string', opt = true},
+   call = function(self, tensor, nrow, padding, options, win, env)
+      grid = images.toDisplayTensor{input=tensor, padding=padding, nrow=nrow}
+   
+      return self:image(grid, options, win, env)
+      
+   end
+}
+
 -- helper function for loading file as bytestring:
 local function loadFile(filename)
    local paths = require 'paths'
