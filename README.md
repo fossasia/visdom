@@ -9,7 +9,7 @@ A flexible tool for creating, organizing, and sharing visualizations of live, ri
 * [Concepts](#concepts)
 * [Setup](#setup)
 * [Usage](#launch)
-* [Visualization API](#visualization-api)
+* [API](#api)
 * [To Do](#to-do)
 * [Contributing](#contributing)
 
@@ -130,10 +130,24 @@ th example/demo2.lua
 ```
 
 
-## Visualization API
-The following API is currently supported. Visualizations are powered by [Plotly](https://plot.ly/).
+## API
+For a quick introduction into the capabilities of `visdom`, have a look at the `example` directory, or read the details below.
+
+### Basics
+Visdom offers the following basic visualization functions:
+- `vis.image`    : images
+- `vis.text`     : arbitrary HTML
+- `vis.video`    : videos
+- `vis.svg`      : SVG object
+- `vis.save`     : serialize state server-side
+
+### Plotting
+We have wrapped several common plot types to make creating basic visualizations easily. These visualizations are powered by [Plotly](https://plot.ly/). 
+
+The following API is currently supported:
 - `vis.scatter`  : 2D or 3D scatter plots
 - `vis.line`     : line plots
+- `vis.updateTrace`     : update existing line/scatter plots
 - `vis.stem`     : stem plots
 - `vis.heatmap`  : heatmap plots
 - `vis.bar`      : bar graphs
@@ -142,20 +156,61 @@ The following API is currently supported. Visualizations are powered by [Plotly]
 - `vis.surf`     : surface plots
 - `vis.contour`  : contour plots
 - `vis.quiver`   : quiver plots
-- `vis.image`    : images
--  vis.images    : grid of images
--  vis.video     : video
-- `vis.text`     : text box
 - `vis.mesh`     : mesh plots
-- `vis.save`     : serialize state
 
-Further details on each of these functions are given below. For a quick introduction into the capabilities of `visdom`, have a look at the `example` directory, or read the details below.
+#### Generic Plots
+Note that the server API adheres to the Plotly convention of `data` and `layout` objects, such that you can produce your own arbitrary `Plotly` visualizations:
 
-The exact inputs into the plotting functions vary, although most of them take as input a tensor `X` than contains the data and an (optional) tensor `Y` that contains optional data variables (such as labels or timestamps). All plotting functions take as input an optional `win` that can be used to plot into a specific window; each plotting function also returns the `win` of the window it plotted in. One can also specify the `env`  to which the visualization should be added.
+```python
+import visdom
+vis = visdom.Visdom()
+
+trace = dict(x=[1,2,3], y=[4,5,6], marker={'color': 'red', 'symbol': 104, 'size': "10"}, 
+                    mode="markers+lines",  text=["one","two","three"], name='1st Trace')
+layout=dict(title="First Plot", xaxis={'title':'x1'}, yaxis={'title':'x2'})
+
+vis._send(data=[trace], layout=layout, win='mywin')
+```
 
 ![visdom_big](https://lh3.googleusercontent.com/-bqH9UXCw-BE/WL2UsdrrbAI/AAAAAAAAnYc/emrxwCmnrW4_CLTyyUttB0SYRJ-i4CCiQCLcB/s0/Screen+Shot+2017-03-06+at+10.51.02+AM.png"visdom_big")
 
-#### plot.scatter
+
+## Details
+
+#### vis.image
+This function draws an `img`. It takes as input an `CxHxW` tensor `img`
+that contains the image.
+
+The following `options` are supported:
+
+- `options.jpgquality`: JPG quality (`number` 0-100; default = 100)
+
+#### vis.text
+This function prints text in a  box. You can use this to embed arbitrary HTML.
+It takes as input a `text` string.
+No specific `options` are currently supported.
+
+#### vis.video
+This function plays a video. It takes as input the filename of the video
+`videofile` or a `LxCxHxW`-sized `tensor` (in Lua) or a or a `LxHxWxC`-sized
+`tensor` (in Python) containing all the frames of the video as input. The
+function does not support any plot-specific `options`.
+
+Note: Using `tensor` input requires that ffmpeg is installed and working.
+Your ability to play video may depend on the browser you use: your browser has
+to support the Theano codec in an OGG container (Chrome supports this).
+
+#### vis.svg
+This function draws an SVG object. It takes as input a SVG string `svgstr` or
+the name of an SVG file `svgfile`. The function does not support any specific
+`options`.
+
+### Simple Plots
+Further details on the wrapped plotting functions are given below.
+
+The exact inputs into the plotting functions vary, although most of them take as input a tensor `X` than contains the data and an (optional) tensor `Y` that contains optional data variables (such as labels or timestamps). All plotting functions take as input an optional `win` that can be used to plot into a specific window; each plotting function also returns the `win` of the window it plotted in. One can also specify the `env`  to which the visualization should be added.
+
+#### vis.scatter
 This function draws a 2D or 3D scatter plot. It takes as input an `Nx2` or
 `Nx3` tensor `X` that specifies the locations of the `N` points in the
 scatter plot. An optional `N` tensor `Y` containing discrete labels that
@@ -176,7 +231,7 @@ The following `options` are supported:
 - Tensor of size `K` and `K x 3`: Instead of having a unique color per data point, the same color is shared for all points of a particular label.
 
 
-#### plot.line
+#### vis.line
 This function draws a line plot. It takes as input an `N` or `NxM` tensor
 `Y` that specifies the values of the `M` lines (that connect `N` points)
 to plot. It also takes an optional `X` tensor that specifies the
@@ -192,7 +247,26 @@ The following `options` are supported:
 - `options.markersize`  : marker size (`number`; default = `'10'`)
 - `options.legend`      : `table` containing legend names
 
-#### plot.stem
+
+#### vis.updateTrace
+This function allows updating of data for extant line or scatter plots.
+
+It is up to the user to specify `name` of an existing trace if they want
+to add to it, and a new `name` if they want to add a trace to the plot.
+By default, if no legend is specified at time of first creation,
+the `name` is the index of the line in the legend.
+
+If no `name` is specified, all traces should be updated.
+Trace update data that is all `NaN` is ignored;
+this can be used for masking update.
+
+The `append` parameter determines if the update data should be appended
+to or replaces existing data.
+
+There are no options because they are assumed to be inherited from the
+specified plot.
+
+#### vis.stem
 This function draws a stem plot. It takes as input an `N` or `NxM` tensor
 `X` that specifies the values of the `N` points in the `M` time series.
 An optional `N` or `NxM` tensor `Y` containing timestamps can be specified
@@ -204,7 +278,7 @@ The following `options` are supported:
 - `options.colormap`: colormap (`string`; default = `'Viridis'`)
 - `options.legend`  : `table` containing legend names
 
-#### plot.heatmap
+#### vis.heatmap
 This function draws a heatmap. It takes as input an `NxM` tensor `X` that
 specifies the value at each location in the heatmap.
 
@@ -216,7 +290,7 @@ The following `options` are supported:
 - `options.columnnames`: `table` containing x-axis labels
 - `options.rownames`   : `table` containing y-axis labels
 
-#### plot.bar
+#### vis.bar
 This function draws a regular, stacked, or grouped bar plot. It takes as
 input an `N` or `NxM` tensor `X` that specifies the height of each of the
 bars. If `X` contains `M` columns, the values corresponding to each row
@@ -230,7 +304,7 @@ The following plot-specific `options` are currently supported:
 - `options.stacked`    : stack multiple columns in `X`
 - `options.legend`     : `table` containing legend labels
 
-#### plot.histogram
+#### vis.histogram
 This function draws a histogram of the specified data. It takes as input
 an `N` tensor `X` that specifies the data of which to construct the
 histogram.
@@ -239,7 +313,7 @@ The following plot-specific `options` are currently supported:
 
 - `options.numbins`: number of bins (`number`; default = 30)
 
-#### plot.boxplot
+#### vis.boxplot
 This function draws boxplots of the specified data. It takes as input
 an `N` or an `NxM` tensor `X` that specifies the `N` data values of which
 to construct the `M` boxplots.
@@ -248,7 +322,7 @@ The following plot-specific `options` are currently supported:
 
 - `options.legend`: labels for each of the columns in `X`
 
-#### plot.surf
+#### vis.surf
 This function draws a surface plot. It takes as input an `NxM` tensor `X`
 that specifies the value at each location in the surface plot.
 
@@ -258,7 +332,7 @@ The following `options` are supported:
 - `options.xmin`    : clip minimum value (`number`; default = `X:min()`)
 - `options.xmax`    : clip maximum value (`number`; default = `X:max()`)
 
-#### plot.contour
+#### vis.contour
 This function draws a contour plot. It takes as input an `NxM` tensor `X`
 that specifies the value at each location in the contour plot.
 
@@ -268,7 +342,7 @@ The following `options` are supported:
 - `options.xmin`    : clip minimum value (`number`; default = `X:min()`)
 - `options.xmax`    : clip maximum value (`number`; default = `X:max()`)
 
-#### plot.quiver
+#### vis.quiver
 This function draws a quiver plot in which the direction and length of the
 arrows is determined by the `NxM` tensors `X` and `Y`. Two optional `NxM`
 tensors `gridX` and `gridY` can be provided that specify the offsets of
@@ -279,42 +353,7 @@ The following `options` are supported:
 - `options.normalize`:  length of longest arrows (`number`)
 - `options.arrowheads`: show arrow heads (`boolean`; default = `true`)
 
-#### plot.image
-This function draws an `img`. It takes as input an `CxHxW` tensor `img`
-that contains the image.
-
-The following `options` are supported:
-
-- `options.jpgquality`: JPG quality (`number` 0-100; default = 100)
-
-#### plot.images
-This function makes a grid of images. It takes as input an `NxCxHxW` tensor
-or a list of `CxHxW` images. 
-
-The following `options` are supported:
-
-- `options.jpgquality`: JPG quality (`number` 0-100; default = 100)
-
-### plot.video
-This function plays a video. It takes as input the filename of the video
-`videofile` or a `LxCxHxW`-sized `tensor` (in Lua) or a or a `LxHxWxC`-sized
-`tensor` (in Python) containing all the frames of the video as input. The
-function does not support any plot-specific `options`.
-
-Note: Using `tensor` input requires that ffmpeg is installed and working.
-Your ability to play video may depend on the browser you use: your browser has
-to support the Theano codec in an OGG container (Chrome supports this).
-
-### plot.svg
-This function draws an SVG object. It takes as input a SVG string `svgstr` or
-the name of an SVG file `svgfile`. The function does not support any specific
-`options`.
-
-#### plot.text
-This function prints text in a  box. It takes as input a `text` string.
-No specific `options` are currently supported.
-
-### plot.mesh
+#### vis.mesh
 This function draws a mesh plot from a set of vertices defined in an
 `Nx2` or `Nx3` matrix `X`, and polygons defined in an optional `Mx2` or
 `Mx3` matrix `Y`.

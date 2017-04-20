@@ -45,7 +45,7 @@ def nan2none(l):
 
 def loadfile(filename):
     assert os.path.isfile(filename), 'could not find file %s' % filename
-    fileobj = open(filename, 'r')
+    fileobj = open(filename, 'rb')
     assert fileobj, 'could not open file %s' % filename
     str = fileobj.read()
     fileobj.close()
@@ -433,7 +433,7 @@ class Visdom(object):
                 <source type="video/%s" src="data:video/%s;base64,%s">
                 Your browser does not support the video tag.
             </video>
-        """ % (mimetype, mimetype, base64.b64encode(bytestr))
+        """ % (mimetype, mimetype, base64.b64encode(bytestr).decode('utf-8'))
         return self.text(text=videodata, win=win, env=env, opts=opts)
 
     def updateTrace(self, X, Y, win, env=None, name=None,

@@ -53,7 +53,7 @@ plot:scatter{
    },
 }
 
---2D scatterplot with custom intensities (red channel):
+-- 2D scatterplot with custom intensities (red channel):
 local id = plot:scatter{
     X = torch.randn(255, 2),
     options = {
