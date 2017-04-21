@@ -142,7 +142,7 @@ Visdom offers the following basic visualization functions:
 - `vis.save`     : serialize state server-side
 
 ### Plotting
-We have wrapped several common plot types to make creating basic visualizations easily. These visualizations are powered by [Plotly](https://plot.ly/). 
+We have wrapped several common plot types to make creating basic visualizations easily. These visualizations are powered by [Plotly](https://plot.ly/).
 
 The following API is currently supported:
 - `vis.scatter`  : 2D or 3D scatter plots
@@ -165,7 +165,7 @@ Note that the server API adheres to the Plotly convention of `data` and `layout`
 import visdom
 vis = visdom.Visdom()
 
-trace = dict(x=[1,2,3], y=[4,5,6], marker={'color': 'red', 'symbol': 104, 'size': "10"}, 
+trace = dict(x=[1,2,3], y=[4,5,6], marker={'color': 'red', 'symbol': 104, 'size': "10"},
                     mode="markers+lines",  text=["one","two","three"], name='1st Trace')
 layout=dict(title="First Plot", xaxis={'title':'x1'}, yaxis={'title':'x2'})
 
