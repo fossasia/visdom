@@ -184,6 +184,7 @@ that contains the image.
 The following `options` are supported:
 
 - `options.jpgquality`: JPG quality (`number` 0-100; default = 100)
+- `options.caption`: Caption for the image
 
 #### vis.text
 This function prints text in a  box. You can use this to embed arbitrary HTML.
