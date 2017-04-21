@@ -335,6 +335,53 @@ class Visdom(object):
             'title': opts.get('title'),
         })
 
+    def images(self, tensor, nrow=8, padding=2,
+               win=None, env=None, opts=None):
+        """
+        Given a 4D tensor of shape (B x C x H x W),
+        or a list of images all of the same size,
+        makes a grid of images of size (B / nrow, nrow).
+
+
+        This is a modified from `make_grid()`
+        https://github.com/pytorch/vision/blob/master/torchvision/utils.py
+        """
+
+        # If list of images, convert to a 4D tensor
+        if isinstance(tensor, list):
+            tensor = np.stack(tensor, 0)
+
+        if tensor.ndim == 2:  # single image H x W
+            tensor = np.expand_dims(tensor, 0)
+        if tensor.ndim == 3:  # single image
+            if tensor.shape[0] == 1:  # if single-channel, convert to 3-channel
+                tensor = np.repeat(tensor, 3, 0)
+            return self.image(tensor, win, env, opts)
+        if tensor.ndim == 4 and tensor.shape[1] == 1:  # single-channel images
+            tensor = np.repeat(tensor, 3, 1)
+
+        # make 4D tensor of images into a grid
+        nmaps = tensor.shape[0]
+        xmaps = min(nrow, nmaps)
+        ymaps = int(math.ceil(float(nmaps) / xmaps))
+        height, width = int(tensor.shape[2] + 2 * padding),
+        int(tensor.shape[3] + 2 * padding)
+
+        grid = np.ones([3, height * ymaps, width * xmaps])
+        k = 0
+        for y in range(ymaps):
+            for x in range(xmaps):
+                if k >= nmaps:
+                    break
+                h_start = y * height + 1 + padding
+                h_end = h_start + tensor.shape[2]
+                w_start = x * width + 1 + padding
+                w_end = w_start + tensor.shape[3]
+                grid[:, h_start:h_end, w_start:w_end] = tensor[k]
+                k += 1
+
+        return self.image(grid, win, env, opts)
+
     def video(self, tensor=None, videofile=None, win=None, env=None, opts=None):
         """
         This function plays a video. It takes as input the filename of the video
@@ -351,14 +398,14 @@ class Visdom(object):
             import tempfile
             assert tensor.ndim == 4, 'video should be in 4D tensor'
             videofile = '/tmp/%s.ogv' % next(tempfile._get_candidate_names())
-            if cv2.__version__.startswith('2'): # OpenCV 2
+            if cv2.__version__.startswith('2'):  # OpenCV 2
                 fourcc = cv2.cv.CV_FOURCC(
                     chr(ord('T')),
                     chr(ord('H')),
                     chr(ord('E')),
                     chr(ord('O'))
                 )
-            elif cv2.__version__.startswith('3'): # OpenCV 3
+            elif cv2.__version__.startswith('3'):  # OpenCV 3
                 fourcc = cv2.VideoWriter_fourcc(
                     chr(ord('T')),
                     chr(ord('H')),

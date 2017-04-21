@@ -29,6 +29,22 @@ plot:image{
    }
 }
 
+-- images demo:
+plot:images{
+   table = {torch.zeros(3, 200, 200) + 0.1, torch.zeros(3, 200, 200) + 0.2},
+   options = {
+      caption = 'I was a table of tensors...',
+   }
+}
+
+-- images demo:
+plot:images{
+   tensor = torch.randn(6, 3, 200, 200),
+   options = {
+     caption = 'I was a 4D tensor...',
+   }
+}
+
 -- scatter plot demos:
 plot:scatter{
    X = torch.randn(100, 2),
