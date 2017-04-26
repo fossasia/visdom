@@ -166,8 +166,9 @@ def _assert_options(options):
         assert 0 <= options.get('opacity') <= 1, \
             'opacity should be a number between 0 and 1'
 
-
 def pytorch_wrap(fn):
+    """Convert PyTorch tensor arguments to Numpy arrays"""
+
     def result(*args, **kwargs):
         args = (a.cpu().numpy() if type(a).__module__ == 'torch' else a
                 for a in args)
@@ -179,11 +180,29 @@ def pytorch_wrap(fn):
         return fn(*args, **kwargs)
     return result
 
+def opts_wrap(fn):
+    """Deprecate `opts` for `options` without breaking backwards compatibility"""
 
-def wrap_tensor_methods(cls, wrapper):
-    fns = ['_surface', 'bar', 'boxplot', 'surf', 'heatmap', 'histogram', 'svg',
-            'image', 'line', 'pie', 'scatter', 'stem', 'contour', 'updateTrace']
-    for key in [k for k in dir(cls) if k in fns]:
+    def result(*args, **kwargs):
+        if 'opts' in kwargs:
+            # print("Warning: opts is deprecated, use options")
+            kwargs['options'] = kwargs['opts']
+            del kwargs['opts']
+
+        return fn(*args, **kwargs)
+    return result
+
+tensor_methods = ['_surface', 'bar', 'boxplot', 'surf', 'heatmap', 'histogram', 'svg',
+    'image', 'line', 'pie', 'scatter', 'stem', 'contour', 'updateTrace']
+
+opts_methods = ['text', 'svg', 'image', 'images', 'video', 'updateTrace', 'scatter',
+    'line', 'heatmap', 'bar', 'histogram', 'boxplot', '_surface', 'surf',
+    'contour', 'stem', 'pie', 'mesh']
+
+def wrap_methods(cls, method_names, wrapper):
+    """Replace given class methods with a wrapped version"""
+
+    for key in [k for k in dir(cls) if k in method_names]:
         setattr(cls, key, wrapper(getattr(cls, key)))
 
 
@@ -205,9 +224,11 @@ class Visdom(object):
         self.proxy = proxy
         self.env = env              # default env
 
+        wrap_methods(self, opts_methods, opts_wrap)
+
         try:
             import torch
-            wrap_tensor_methods(self, pytorch_wrap)
+            wrap_methods(self, tensor_methods, pytorch_wrap)
         except ImportError:
             pass
 
