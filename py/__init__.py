@@ -61,13 +61,15 @@ def _scrub_dict(d):
 
 
 def _axisformat(x, opts):
-    fields = ['type', 'tick', 'label', 'tickmin', 'tickmax']
-    if any([x + i for i in fields]):
+    fields = ['type', 'tick', 'label', 'tickvals', 'ticklabels', 'tickmin', 'tickmax']
+    if any([opts.get(x + i) for i in fields]):
         return {
             'type': opts.get(x + 'type'),
             'title': opts.get(x + 'label'),
             'range': [opts.get(x + 'tickmin'), opts.get(x + 'tickmax')]
             if (opts.get(x + 'tickmin') and opts.get(x + 'tickmax')) else None,
+            'tickvals': opts.get(x + 'tickvals'),
+            'ticktext': opts.get(x + 'ticklabels'),
             'tickwidth': opts.get(x + 'tickstep'),
             'showticklabels': opts.get(x + 'ytick'),
         }

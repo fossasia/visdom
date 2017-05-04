@@ -97,19 +97,25 @@ local options2layout = argcheck{
          showlegend = (options.legend == nil) and false or options.legend,
          title      = options.title,
          xaxis = (options.xtype or options.xtype or options.xtick or
-            options.xlabel or options.xtickmin or options.xtickmax) and {
-            type  = options.xtype,
-            title = options.xlabel,
-            range = (options.xtickmin and options.xtickmax) and
+            options.xtickvals or options.xticklabels or options.xlabel or
+            options.xtickmin or options.xtickmax) and {
+            type     = options.xtype,
+            title    = options.xlabel,
+            tickvals = options.xtickvals,
+            ticktext = options.xticklabels,
+            range    = (options.xtickmin and options.xtickmax) and
                {options.xtickmin, options.xtickmax} or nil,
             tickwidth      = options.xtickstep,
             showticklabels = options.xtick,
          },
          yaxis = (options.ytype or options.ytype or options.ytick or
-            options.ylabel or options.ytickmin or options.ytickmax) and {
-            type  = options.ytype,
-            title = options.ylabel,
-            range = (options.ytickmin and options.ytickmax) and
+            options.ytickvals or options.yticklabels or options.ylabel or
+            options.ytickmin or options.ytickmax) and {
+            type     = options.ytype,
+            title    = options.ylabel,
+            tickvals = options.ytickvals,
+            ticktext = options.yticklabels,
+            range    = (options.ytickmin and options.ytickmax) and
                {options.ytickmin, options.ytickmax} or nil,
             tickwidth      = options.ytickstep,
             showticklabels = options.ytick,
@@ -123,9 +129,12 @@ local options2layout = argcheck{
       }
       if is3d then
          layout.zaxis = (options.ztype or options.ztype or options.ztick or
-            options.zlabel or options.ztickmin or options.ztickmax) and {
-            type  = options.ztype,
-            title = options.zlabel,
+            options.ztickvals or options.zticklabels or options.zlabel or
+            options.ztickmin or options.ztickmax) and {
+            type     = options.ztype,
+            title    = options.zlabel,
+            tickvals = options.ztickvals,
+            ticktext = options.zticklabels,
             range = (options.ztickmin and options.ztickmax) and
                {options.ztickmin, options.ztickmax} or nil,
             tickwidth      = options.ztickstep,
