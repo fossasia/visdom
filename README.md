@@ -197,6 +197,10 @@ This function plays a video. It takes as input the filename of the video
 `tensor` (in Python) containing all the frames of the video as input. The
 function does not support any plot-specific `options`.
 
+The following `options` are supported:
+
+- `options.fps`: FPS for the video (`integer` > 0; default = 25)
+
 Note: Using `tensor` input requires that ffmpeg is installed and working.
 Your ability to play video may depend on the browser you use: your browser has
 to support the Theano codec in an OGG container (Chrome supports this).

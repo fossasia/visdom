@@ -168,6 +168,10 @@ def _assert_opts(opts):
         assert 0 <= opts.get('opacity') <= 1, \
             'opacity should be a number between 0 and 1'
 
+    if opts.get('fps'):
+        assert isnum(opts.get('fps')), 'fps should be a number'
+        assert opts.get('fps') > 0, 'fps must be greater than 0'
+
 
 def pytorch_wrap(fn):
     def result(*args, **kwargs):
@@ -390,6 +394,7 @@ class Visdom(object):
         does not support any plot-specific `options`.
         """
         opts = {} if opts is None else opts
+        opts['fps'] = opts.get('fps', 25)
         _assert_opts(opts)
         assert tensor is not None or videofile is not None, \
             'should specify video tensor or file'
@@ -416,7 +421,7 @@ class Visdom(object):
             writer = cv2.VideoWriter(
                 videofile,
                 fourcc,
-                25,
+                opts.get('fps'),
                 (tensor.shape[1], tensor.shape[2])
             )
             assert writer.isOpened(), 'video writer could not be opened'
