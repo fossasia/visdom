@@ -58,6 +58,10 @@ local assertOptions = argcheck{
          assert(options.jpgquality > 0 and options.jpgquality <= 100,
             'JPG quality should be number between 0 and 100')
       end
+      if options.fps then
+         assert(type(options.fps) == 'number', 'fps should be a number')
+         assert(options.fps > 0 , 'fps should be greater than zero')
+      end
       if options.opacity then
          assert(type(options.opacity) == 'number',
             'opacity should be a number')
@@ -1312,6 +1316,8 @@ M.video = argcheck{
    call = function(self, tensor, videofile, options, win, env)
 
       -- get mime type for video:
+      options = options or {}
+      options.fps = options.fps or 25
       videofile = videofile or os.tmpname() .. '.ogv'
       assert(tensor or videofile, 'should specify video tensor or file')
       local extension = videofile:sub(-3):lower()
@@ -1331,7 +1337,7 @@ M.video = argcheck{
          local video = ffmpeg.Video{
             height = tensor:size(3),
             width  = tensor:size(4),
-            fps    = 25,
+            fps    = options.fps,
             length = tensor:size(1),
             tensor = tensor,
             zoom   = 2,
