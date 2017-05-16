@@ -22,6 +22,11 @@ import base64 as b64
 import numbers
 from six import string_types
 from six import BytesIO
+import logging
+
+
+logging.getLogger('requests').setLevel(logging.CRITICAL)
+logging.getLogger('urllib3').setLevel(logging.CRITICAL)
 
 
 def isstr(s):
