@@ -169,7 +169,7 @@ trace = dict(x=[1,2,3], y=[4,5,6], marker={'color': 'red', 'symbol': 104, 'size'
                     mode="markers+lines",  text=["one","two","three"], name='1st Trace')
 layout=dict(title="First Plot", xaxis={'title':'x1'}, yaxis={'title':'x2'})
 
-vis._send(data=[trace], layout=layout, win='mywin')
+vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 ```
 
 ![visdom_big](https://lh3.googleusercontent.com/-bqH9UXCw-BE/WL2UsdrrbAI/AAAAAAAAnYc/emrxwCmnrW4_CLTyyUttB0SYRJ-i4CCiQCLcB/s0/Screen+Shot+2017-03-06+at+10.51.02+AM.png"visdom_big")
