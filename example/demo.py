@@ -219,6 +219,19 @@ viz.stem(
     opts=dict(legend=['Sine', 'Cosine'])
 )
 
+# quiver plot
+X = np.arange(0, 2.1, .2)
+Y = np.arange(0, 2.1, .2)
+X = np.broadcast_to(np.expand_dims(X, axis=1), (len(X), len(X)))
+Y = np.broadcast_to(np.expand_dims(Y, axis=0), (len(Y), len(Y)))
+U = np.multiply(np.cos(X), Y)
+V = np.multiply(np.sin(X), Y)
+viz.quiver(
+    X=U,
+    Y=V,
+    opts=dict(normalize=0.9),
+)
+
 # pie chart
 X = np.asarray([19, 26, 55])
 viz.pie(

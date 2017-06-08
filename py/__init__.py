@@ -193,7 +193,8 @@ def pytorch_wrap(fn):
 
 def wrap_tensor_methods(cls, wrapper):
     fns = ['_surface', 'bar', 'boxplot', 'surf', 'heatmap', 'histogram', 'svg',
-            'image', 'line', 'pie', 'scatter', 'stem', 'contour', 'updateTrace']
+            'image', 'line', 'pie', 'scatter', 'stem', 'quiver', 'contour',
+            'updateTrace']
     for key in [k for k in dir(cls) if k in fns]:
         setattr(cls, key, wrapper(getattr(cls, key)))
 
@@ -887,6 +888,88 @@ class Visdom(object):
         """
 
         self._surface(X=X, stype='contour', opts=opts, win=win, env=env)
+
+    def quiver(self, X, Y, gridX=None, gridY=None,
+                            win=None, env=None, opts=None):
+        """
+        This function draws a quiver plot in which the direction and length of the
+        arrows is determined by the `NxM` tensors `X` and `Y`. Two optional `NxM`
+        tensors `gridX` and `gridY` can be provided that specify the offsets of
+        the arrows; by default, the arrows will be done on a regular grid.
+
+        The following `options` are supported:
+
+        - `options.normalize`:  length of longest arrows (`number`)
+        - `options.arrowheads`: show arrow heads (`boolean`; default = `true`)
+        """
+
+        # assertions:
+        assert X.ndim == 2, 'X should be two-dimensional'
+        assert Y.ndim == 2, 'Y should be two-dimensional'
+        assert Y.shape == X.shape, 'X and Y should have the same size'
+
+        # make sure we have a grid:
+        N, M = X.shape[0], X.shape[1]
+        if gridX is None:
+            gridX = np.broadcast_to(np.expand_dims(np.arange(0, N), axis=1), (N, M))
+        if gridY is None:
+            gridY = np.broadcast_to(np.expand_dims(np.arange(0, M), axis=0), (N, M))
+        assert gridX.shape == X.shape, 'X and gridX should have the same size'
+        assert gridY.shape == Y.shape, 'Y and gridY should have the same size'
+
+        # default options:
+        opts = {} if opts is None else opts
+        opts['mode'] = 'lines'
+        opts['arrowheads'] = opts.get('arrowheads', True)
+        _assert_opts(opts)
+
+        # normalize vectors to unit length:
+        if opts.get('normalize', False):
+            assert isinstance(opts['normalize'], numbers.Number) and \
+                opts['normalize'] > 0, \
+                'opts.normalize should be positive number'
+            magnitude = np.sqrt(np.add(np.multiply(X, X),
+                                       np.multiply(Y, Y))).max()
+            X = X / (magnitude / opts['normalize'])
+            Y = Y / (magnitude / opts['normalize'])
+
+        # interleave X and Y with copies / NaNs to get lines:
+        nans = np.full((X.shape[0], X.shape[1]), np.nan).flatten()
+        tipX = gridX + X
+        tipY = gridY + Y
+        dX = np.column_stack((gridX.flatten(), tipX.flatten(), nans))
+        dY = np.column_stack((gridY.flatten(), tipY.flatten(), nans))
+
+        # convert data to scatter plot format:
+        dX = np.resize(dX, (dX.shape[0] * 3, 1))
+        dY = np.resize(dY, (dY.shape[0] * 3, 1))
+        data = np.column_stack((dX.flatten(), dY.flatten()))
+
+        # add arrow heads:
+        if opts['arrowheads']:
+
+            # compute tip points:
+            alpha = 0.33  # size of arrow head relative to vector length
+            beta = 0.33   # width of the base of the arrow head
+            Xbeta = (X + 1e-5) * beta
+            Ybeta = (Y + 1e-5) * beta
+            lX = np.add(-alpha * np.add(X, Ybeta), tipX)
+            rX = np.add(-alpha * np.add(X, -Ybeta), tipX)
+            lY = np.add(-alpha * np.add(Y, -Xbeta), tipY)
+            rY = np.add(-alpha * np.add(Y, Xbeta), tipY)
+
+            # add to data:
+            hX = np.column_stack((lX.flatten(), tipX.flatten(),
+                                  rX.flatten(), nans))
+            hY = np.column_stack((lY.flatten(), tipY.flatten(),
+                                  rY.flatten(), nans))
+            hX = np.resize(hX, (hX.shape[0] * 4, 1))
+            hY = np.resize(hY, (hY.shape[0] * 4, 1))
+            data = np.concatenate((data, np.column_stack(
+                (hX.flatten(), hY.flatten()))), axis=0)
+
+        # generate scatter plot:
+        return self.scatter(X=data, opts=opts, win=win, env=env)
 
     def stem(self, X, Y=None, win=None, env=None, opts=None):
         """
