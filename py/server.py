@@ -207,10 +207,15 @@ def pane(args):
     else:
         uid = args['win']
 
+    opts = args['opts']
+
     return {
         'command': 'pane',
         'id': str(uid),
-        'title': '' if args.get('title') is None else args['title'],
+        'title': opts.get('title', ''),
+        'inflate': opts.get('inflate', True),
+        'width': opts.get('width'),
+        'height': opts.get('height'),
         'contentID': get_rand_id(),   # to detected updated panes
     }
 

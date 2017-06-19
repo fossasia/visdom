@@ -409,6 +409,7 @@ M.updateTrace = argcheck{
             eid       = env,
             name      = name,
             append    = append,
+            opts      = options,
          },
          endpoint = 'update',
       }
@@ -522,6 +523,7 @@ M.scatter = argcheck{
          win    = win,
          eid    = env,
          layout = options2layout{options = options, is3d = is3d},
+         opts   = options,
       }}
    end
 }
@@ -730,6 +732,7 @@ M.heatmap = argcheck{
          win    = win,
          eid    = env,
          layout = options2layout{options = options},
+         opts   = options,
       }}
    end
 }
@@ -802,6 +805,7 @@ M.bar = argcheck{
          win    = win,
          eid    = env,
          layout = options2layout{options = options},
+         opts   = options,
       }}
    end
 }
@@ -899,6 +903,7 @@ M.boxplot = argcheck{
          win    = win,
          eid    = env,
          layout = options2layout{options = options},
+         opts   = options,
       }}
    end
 }
@@ -935,6 +940,7 @@ local function _surface(self, X, type, options, win, env)
          options = options,
          is3d = type == 'surface' and true or nil
       },
+      opts   = options,
    }}
 end
 
@@ -1116,6 +1122,7 @@ M.pie = argcheck{
          win    = win,
          eid    = env,
          layout = options2layout{options = options},
+         opts   = options,
       }}
    end
 }
@@ -1170,6 +1177,7 @@ M.mesh = argcheck{
          win    = win,
          eid    = env,
          layout = options2layout{options = options},
+         opts   = options,
       }}
    end
 }
@@ -1204,13 +1212,14 @@ M.image = argcheck{
       local imgdata = 'data:image/jpg;base64,' ..
          mime.b64(ffi.string(immem:data(), immem:nElement()))
       local imsize = (img:dim() == 2 and img or img[1]):size():totable()
+      options.width = (options.width or imsize[2])
+      options.height = (options.height or imsize[3])
 
       -- make data object:
       local data = {{
          content = {
             src     = imgdata,
             caption = options.caption,
-            size    = options.size or imsize,
          },
          type = 'image',
       }}  -- NOTE: This is not a plotly type
@@ -1220,7 +1229,7 @@ M.image = argcheck{
          data   = data,
          win    = win,
          eid    = env,
-         title  = options.title,
+         opts   = options,
       }}
    end
 }
@@ -1393,7 +1402,7 @@ M.text = argcheck{
          data   = data,
          win    = win,
          eid    = env,
-         title  = options.title,
+         opts   = options,
       }}
    end
 }
