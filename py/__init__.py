@@ -286,7 +286,7 @@ class Visdom(object):
             'data': data,
             'win': win,
             'eid': env,
-            'title': opts.get('title'),
+            'opts': opts
         })
 
     def svg(self, svgstr=None, svgfile=None, win=None, env=None, opts=None):
@@ -315,6 +315,8 @@ class Visdom(object):
         opts = {} if opts is None else opts
         opts['jpgquality'] = opts.get('jpgquality', 75)
         _assert_opts(opts)
+        opts['width'] = opts.get('width', img.shape[2])
+        opts['height'] = opts.get('height', img.shape[1])
 
         nchannels = img.shape[0] if img.ndim == 3 else 1
         if nchannels == 1:
@@ -335,7 +337,6 @@ class Visdom(object):
             'content': {
                 'src': 'data:image/jpg;base64,' + b64encoded,
                 'caption': opts.get('caption'),
-                'size': opts.get('size', list(img.shape)),
             },
             'type': 'image',
         }]
@@ -344,7 +345,7 @@ class Visdom(object):
             'data': data,
             'win': win,
             'eid': env,
-            'title': opts.get('title'),
+            'opts': opts,
         })
 
     def images(self, tensor, nrow=8, padding=2,
@@ -492,6 +493,7 @@ class Visdom(object):
             'eid': env,
             'name': name,
             'append': append,
+            'opts': opts,
         }, endpoint='update')
 
     def scatter(self, X, Y=None, win=None, env=None, opts=None, update=None):
@@ -584,6 +586,7 @@ class Visdom(object):
             'win': win,
             'eid': env,
             'layout': _opts2layout(opts, is3d),
+            'opts': opts,
         })
 
     def line(self, Y, X=None, win=None, env=None, opts=None, update=None):
@@ -688,7 +691,8 @@ class Visdom(object):
             'data': data,
             'win': win,
             'eid': env,
-            'layout': _opts2layout(opts)
+            'layout': _opts2layout(opts),
+            'opts': opts,
         })
 
     def bar(self, X, Y=None, win=None, env=None, opts=None):
@@ -745,7 +749,8 @@ class Visdom(object):
             'data': data,
             'win': win,
             'eid': env,
-            'layout': _opts2layout(opts)
+            'layout': _opts2layout(opts),
+            'opts': opts,
         })
 
     def histogram(self, X, win=None, env=None, opts=None):
@@ -817,7 +822,8 @@ class Visdom(object):
             'data': data,
             'win': win,
             'eid': env,
-            'layout': _opts2layout(opts)
+            'layout': _opts2layout(opts),
+            'opts': opts,
         })
 
     def _surface(self, X, stype, win=None, env=None, opts=None):
@@ -856,7 +862,8 @@ class Visdom(object):
             'win': win,
             'eid': env,
             'layout': _opts2layout(
-                opts, is3d=True if stype == 'surface' else False)
+                opts, is3d=True if stype == 'surface' else False),
+            'opts': opts,
         })
 
     def surf(self, X, win=None, env=None, opts=None):
@@ -1043,7 +1050,8 @@ class Visdom(object):
             'data': data,
             'win': win,
             'eid': env,
-            'layout': _opts2layout(opts)
+            'layout': _opts2layout(opts),
+            'opts': opts,
         })
 
     def mesh(self, X, Y=None, win=None, env=None, opts=None):
@@ -1087,5 +1095,6 @@ class Visdom(object):
             'data': data,
             'win': win,
             'eid': env,
-            'layout': _opts2layout(opts)
+            'layout': _opts2layout(opts),
+            'opts': opts,
         })

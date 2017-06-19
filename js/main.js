@@ -57,14 +57,19 @@ class App extends React.Component {
   _timeoutID = null;
   _pendingPanes = [];
 
-  pix2grid = (w, h) => {  // translate pixels -> RGL grid coordinates
-    let colWidth = (this.state.width - (MARGIN * (this.state.cols - 1))
+  colWidth = () => {
+    return (this.state.width - (MARGIN * (this.state.cols - 1))
       - (MARGIN * 2)) / this.state.cols;
+  }
 
-    w = (w + MARGIN) / (colWidth + MARGIN);
-    h = (h + MARGIN) / (ROW_HEIGHT + MARGIN);
+  p2w = (w) => {  // translate pixels -> RGL grid coordinates
+    let colWidth = this.colWidth();
+    return (w + MARGIN) / (colWidth + MARGIN);
+  }
 
-    return {w: w, h: h};
+  p2h = (h) => {
+    let colWidth = this.colWidth();
+    return (h + MARGIN) / (ROW_HEIGHT + MARGIN);
   }
 
   keyLS = (key) => {      // append env to pane id for localStorage key
@@ -108,17 +113,9 @@ class App extends React.Component {
       } else {
         let w = PANE_SIZE[newPane.type][0], h = PANE_SIZE[newPane.type][1];
 
-        if (newPane.content && newPane.content.size) {
-          // we set the size once we know rendered size
-          let newSize = this.pix2grid(
-            newPane.content.size[1],
-            newPane.content.size[0] + 14  // bar size is 14px
-          );
-
-          w = newSize.w;  // w = Math.ceil(newSize.w);
-          h = Math.ceil(newSize.h);
-          if (newPane.content.caption) h += 1;
-        }
+        if (newPane.width) w = this.p2w(newPane.width);
+        if (newPane.height) h = Math.ceil(this.p2h(newPane.height + 14));
+        if (newPane.content.caption) h += 1;
 
         this._bin.content.push({width: w, height: h});
 
