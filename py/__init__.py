@@ -308,18 +308,19 @@ class Visdom(object):
 
     def image(self, img, win=None, env=None, opts=None):
         """
-        This function draws an img. It takes as input an `CxHxW` tensor `img`
-        that contains the image. The array values can be float in [0,1] or uint8
-        in [0, 255].
+        This function draws an img. It takes as input an `CxHxW` or `HxW` tensor
+        `img` that contains the image. The array values can be float in [0,1] or
+        uint8 in [0, 255].
         """
         opts = {} if opts is None else opts
         opts['jpgquality'] = opts.get('jpgquality', 75)
         _assert_opts(opts)
-        opts['width'] = opts.get('width', img.shape[2])
-        opts['height'] = opts.get('height', img.shape[1])
+        opts['width'] = opts.get('width', img.shape[img.ndim - 1])
+        opts['height'] = opts.get('height', img.shape[img.ndim - 2])
 
         nchannels = img.shape[0] if img.ndim == 3 else 1
         if nchannels == 1:
+            img = np.squeeze(img)
             img = img[np.newaxis, :, :].repeat(3, axis=0)
 
         if 'float' in str(img.dtype):
