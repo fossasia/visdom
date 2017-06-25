@@ -60,6 +60,22 @@ def get_path(filename):
     return os.path.join(cwd, filename)
 
 
+def escape_eid(eid):
+    """Replace slashes with underscores, to avoid recognizing them
+    as directories.
+    """
+
+    return eid.replace('/', '_')
+
+
+def extract_eid(args):
+    """Extract eid from args. If eid does not exist in args,
+    it returns 'main'."""
+
+    eid = 'main' if args.get('eid') is None else args.get('eid')
+    return escape_eid(eid)
+
+
 tornado_settings = {
     "autoescape": None,
     "debug": "/dbg/" in __file__,
@@ -133,7 +149,8 @@ class SocketHandler(tornado.websocket.WebSocketHandler):
 
     def on_message(self, message):
         print('from web client: ', message)
-        msg = tornado.escape.json_decode(message)
+        msg = tornado.escape.json_decode(tornado.escape.to_basestring(message))
+
         cmd = msg.get('cmd')
         if cmd == 'close':
             if 'data' in msg and 'eid' in msg:
@@ -143,6 +160,7 @@ class SocketHandler(tornado.websocket.WebSocketHandler):
         elif cmd == 'save':
             # save localStorage pane metadata
             if 'data' in msg and 'eid' in msg:
+                msg['eid'] = escape_eid(msg['eid'])
                 self.state[msg['eid']] = copy.deepcopy(self.state[msg['prev_eid']])
                 self.state[msg['eid']]['reload'] = msg['data']
                 self.eid = msg['eid']
@@ -189,12 +207,16 @@ def pane(args):
     else:
         uid = args['win']
 
+    opts = args['opts']
+
     return {
         'command': 'pane',
-        'id': uid,
-        'title': '' if args.get('title') is None else args['title'],
+        'id': str(uid),
+        'title': opts.get('title', ''),
+        'inflate': opts.get('inflate', True),
+        'width': opts.get('width'),
+        'height': opts.get('height'),
         'contentID': get_rand_id(),   # to detected updated panes
-
     }
 
 
@@ -226,11 +248,11 @@ class PostHandler(BaseHandler):
         self.subs = subs
 
     def post(self):
-        args = tornado.escape.json_decode(self.request.body)
+        args = tornado.escape.json_decode(tornado.escape.to_basestring(self.request.body))
 
         ptype = args['data'][0]['type']
         p = pane(args)
-        eid = 'main' if args.get('eid') is None else args.get('eid')
+        eid = extract_eid(args)
 
         if ptype in ['image', 'text']:
             p.update(dict(content=args['data'][0]['content'], type=ptype))
@@ -281,8 +303,8 @@ class UpdateHandler(BaseHandler):
         return p
 
     def post(self):
-        args = tornado.escape.json_decode(self.request.body)
-        eid = 'main' if args.get('eid') is None else args.get('eid')
+        args = tornado.escape.json_decode(tornado.escape.to_basestring(self.request.body))
+        eid = extract_eid(args)
 
         if args['win'] not in self.state[eid]['jsons']:
             self.write('win does not exist')
@@ -307,9 +329,9 @@ class CloseHandler(BaseHandler):
         self.subs = subs
 
     def post(self):
-        args = tornado.escape.json_decode(self.request.body)
+        args = tornado.escape.json_decode(tornado.escape.to_basestring(self.request.body))
 
-        eid = 'main' if args.get('eid') is None else args.get('eid')
+        eid = extract_eid(args)
         win = args.get('win')
 
         keys = list(self.state[eid]['jsons'].keys()) if win is None else [win]
@@ -368,7 +390,7 @@ class EnvHandler(BaseHandler):
         )
 
     def post(self, args):
-        sid = tornado.escape.json_decode(self.request.body)['sid']
+        sid = tornado.escape.json_decode(tornado.escape.to_basestring(self.request.body))['sid']
         load_env(self.state, args, self.subs[sid])
 
 
@@ -378,7 +400,8 @@ class SaveHandler(BaseHandler):
         self.subs = subs
 
     def post(self):
-        envs = tornado.escape.json_decode(self.request.body)['data']
+        envs = tornado.escape.json_decode(tornado.escape.to_basestring(self.request.body))['data']
+        envs = [escape_eid(eid) for eid in envs]
         ret = serialize_env(self.state, envs)  # this ignores invalid env ids
         self.write(json.dumps(ret))
 

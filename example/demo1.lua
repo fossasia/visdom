@@ -11,6 +11,7 @@ LICENSE file in the root directory of this source tree.
 -- dependencies:
 require 'torch'
 require 'image'
+local paths = require 'paths'
 
 -- intialize visdom Torch client:
 local visdom = require 'visdom'
@@ -25,6 +26,22 @@ plot:image{
    options = {
       title = 'Fabio',
       caption = 'Hello, I am Fabio ;)',
+   }
+}
+
+-- images demo:
+plot:images{
+   table = {torch.zeros(3, 200, 200) + 0.1, torch.zeros(3, 200, 200) + 0.2},
+   options = {
+      caption = 'I was a table of tensors...',
+   }
+}
+
+-- images demo:
+plot:images{
+   tensor = torch.randn(6, 3, 200, 200),
+   options = {
+     caption = 'I was a 4D tensor...',
    }
 }
 
@@ -52,7 +69,7 @@ plot:scatter{
    },
 }
 
---2D scatterplot with custom intensities (red channel):
+-- 2D scatterplot with custom intensities (red channel):
 local id = plot:scatter{
     X = torch.randn(255, 2),
     options = {
@@ -228,6 +245,58 @@ plot:quiver{
    Y = V,
    options = {normalize = 0.9},
 }
+
+-- pie chart demo:
+local X = torch.DoubleTensor{19, 26, 55}
+local legend = {'Residential', 'Non-Residential', 'Utility'}
+plot:pie{
+   X = X,
+   options = {legend = legend},
+}
+
+-- svg rendering demo:
+local svgstr = [[
+<svg height="300" width="300">
+  <ellipse cx="80" cy="80" rx="50" ry="30"
+   style="fill:red;stroke:purple;stroke-width:2" />
+  Sorry, your browser does not support inline SVG.
+</svg>
+]]
+plot:svg{
+   svgstr  = svgstr,
+   options = {
+      title  = 'Example of SVG Rendering',
+   },
+}
+
+-- mesh plot demo:
+local X = torch.DoubleTensor{
+   {0, 0, 1, 1, 0, 0, 1, 1},
+   {0, 1, 1, 0, 0, 1, 1, 0},
+   {0, 0, 0, 0, 1, 1, 1, 1},
+}:t()
+local Y = torch.DoubleTensor{
+   {7, 0, 0, 0, 4, 4, 6, 6, 4, 0, 3, 2},
+   {3, 4, 1, 2, 5, 6, 5, 2, 0, 1, 6, 3},
+   {0, 7, 2, 3, 6, 7, 1, 1, 5, 5, 7, 6},
+}:t()
+plot:mesh{X = X, Y = Y, options = {opacity = 0.5}}
+
+-- video demo:
+local video = torch.ByteTensor(256, 3, 128, 128)
+for n = 1,video:size(1) do
+   video[n]:fill(n - 1)
+end
+local ok = pcall(plot.video, plot.video, {tensor = video})
+if not ok then print('Skipped video example') end
+
+-- video demo:
+local videofile = '/home/' .. os.getenv('USER') .. '/trailer.ogv'
+   -- NOTE: Download video from http://media.w3.org/2010/05/sintel/trailer.ogv
+if paths.filep(videofile) then
+   local ok = pcall(plot.video, plot.video, {videofile = videofile})
+   if not ok then print('Skipped video example') end
+end
 
 -- close text window:
 plot:close{win = textwindow}

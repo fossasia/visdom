@@ -30,6 +30,9 @@ local assertOptions = argcheck{
       if options.colormap then
          assert(type(options.colormap) == 'string', 'colormap should be string')
       end
+      if options.color then
+         assert(type(options.color) == 'string', 'color should be string')
+      end
       if options.mode then
          assert(type(options.mode) == 'string', 'mode should be a string')
       end
@@ -54,6 +57,16 @@ local assertOptions = argcheck{
             'JPG quality should be a number')
          assert(options.jpgquality > 0 and options.jpgquality <= 100,
             'JPG quality should be number between 0 and 100')
+      end
+      if options.fps then
+         assert(type(options.fps) == 'number', 'fps should be a number')
+         assert(options.fps > 0 , 'fps should be greater than zero')
+      end
+      if options.opacity then
+         assert(type(options.opacity) == 'number',
+            'opacity should be a number')
+         assert(options.opacity >= 0 and options.opacity <= 1,
+            'opacity should be a number between 0 and 1')
       end
    end
 }
@@ -88,19 +101,25 @@ local options2layout = argcheck{
          showlegend = (options.legend == nil) and false or options.legend,
          title      = options.title,
          xaxis = (options.xtype or options.xtype or options.xtick or
-            options.xlabel or options.xtickmin or options.xtickmax) and {
-            type  = options.xtype,
-            title = options.xlabel,
-            range = (options.xtickmin and options.xtickmax) and
+            options.xtickvals or options.xticklabels or options.xlabel or
+            options.xtickmin or options.xtickmax) and {
+            type     = options.xtype,
+            title    = options.xlabel,
+            tickvals = options.xtickvals,
+            ticktext = options.xticklabels,
+            range    = (options.xtickmin and options.xtickmax) and
                {options.xtickmin, options.xtickmax} or nil,
             tickwidth      = options.xtickstep,
             showticklabels = options.xtick,
          },
          yaxis = (options.ytype or options.ytype or options.ytick or
-            options.ylabel or options.ytickmin or options.ytickmax) and {
-            type  = options.ytype,
-            title = options.ylabel,
-            range = (options.ytickmin and options.ytickmax) and
+            options.ytickvals or options.yticklabels or options.ylabel or
+            options.ytickmin or options.ytickmax) and {
+            type     = options.ytype,
+            title    = options.ylabel,
+            tickvals = options.ytickvals,
+            ticktext = options.yticklabels,
+            range    = (options.ytickmin and options.ytickmax) and
                {options.ytickmin, options.ytickmax} or nil,
             tickwidth      = options.ytickstep,
             showticklabels = options.ytick,
@@ -114,9 +133,12 @@ local options2layout = argcheck{
       }
       if is3d then
          layout.zaxis = (options.ztype or options.ztype or options.ztick or
-            options.zlabel or options.ztickmin or options.ztickmax) and {
-            type  = options.ztype,
-            title = options.zlabel,
+            options.ztickvals or options.zticklabels or options.zlabel or
+            options.ztickmin or options.ztickmax) and {
+            type     = options.ztype,
+            title    = options.zlabel,
+            tickvals = options.ztickvals,
+            ticktext = options.zticklabels,
             range = (options.ztickmin and options.ztickmax) and
                {options.ztickmin, options.ztickmax} or nil,
             tickwidth      = options.ztickstep,
@@ -257,11 +279,13 @@ M.__init = argcheck{
    {name = 'port',     type = 'number',  default = 8097},
    {name = 'ipv6',     type = 'boolean', default = true},
    {name = 'proxy',    type = 'string',  opt = true},
-   call = function(self, server, endpoint, port, ipv6, proxy)
+   {name = 'env',      type = 'string',  default = 'main'},
+   call = function(self, server, endpoint, port, ipv6, proxy, env)
       self.server   = server
       self.endpoint = endpoint
       self.port     = port
       self.ipv6     = ipv6
+      self.env      = env
       if proxy then socket.http.PROXY = proxy end
    end
 }
@@ -274,11 +298,15 @@ M.sendRequest = argcheck{
       build the required JSON yourself. `endpoint` specifies the destination
       Tornado server endpoint for the request.
    ]],
+   noordered = true,
    {name = 'self',     type = 'visdom.client'},
-   {name = 'request',  type = 'string'},
+   {name = 'request',  type = 'table'},
    {name = 'endpoint', type = 'string',  opt = true},
    call = function(self, request, endpoint)
       local response = {}
+      request['eid'] = request['eid'] or self.env
+      request = json.encode(request)
+
       local status, msg = socket.http.request({
          url     = string.format('%s:%s/%s', self.server, self.port,
                      endpoint or self.endpoint),
@@ -313,9 +341,12 @@ M.save = argcheck{
          for _,v in pairs(envs) do assert(type(v) == 'string') end
 
          -- send save request to server
-         return self:sendRequest(json.encode{
-            data   = envs,
-         }, 'save')
+         return self:sendRequest{
+            request = {
+               data = envs,
+            },
+            endpoint = 'save',
+         }
       end
    end
 }
@@ -372,13 +403,14 @@ M.updateTrace = argcheck{
 
       -- send scatter plot request to server:
       return self:sendRequest{
-         request = (json.encode{
+         request = {
             data      = nan2null(data),
             win       = win,
             eid       = env,
             name      = name,
             append    = append,
-         }),
+            opts      = options,
+         },
          endpoint = 'update',
       }
    end
@@ -486,12 +518,13 @@ M.scatter = argcheck{
       end
 
       -- send scatter plot request to server:
-      return self:sendRequest(json.encode{
+      return self:sendRequest{request = {
          data   = nan2null(data),
          win    = win,
          eid    = env,
          layout = options2layout{options = options, is3d = is3d},
-      })
+         opts   = options,
+      }}
    end
 }
 
@@ -531,11 +564,10 @@ M.line = argcheck{
             options = options, append = update == 'append',
          }
       end
-            -- assertions on the inputs:
-      Y = Y:squeeze()
+
+      -- assertions on the inputs:
       assert(Y:dim() == 1 or Y:dim() == 2, 'Y should be one or two-dimensional')
       if X then
-         X = X:squeeze()
          assert(X:dim() == 1 or X:dim() == 2,
             'X should be one or two-dimensional')
       else
@@ -695,12 +727,13 @@ M.heatmap = argcheck{
       }}
 
       -- send heatmap plot request to server:
-      return self:sendRequest(json.encode{
+      return self:sendRequest{request = {
          data   = data,
          win    = win,
          eid    = env,
          layout = options2layout{options = options},
-      })
+         opts   = options,
+      }}
    end
 }
 
@@ -767,12 +800,13 @@ M.bar = argcheck{
       end
 
       -- send bar plot request to server:
-      return self:sendRequest(json.encode{
+      return self:sendRequest{request = {
          data   = data,
          win    = win,
          eid    = env,
          layout = options2layout{options = options},
-      })
+         opts   = options,
+      }}
    end
 }
 
@@ -864,12 +898,13 @@ M.boxplot = argcheck{
       end
 
       -- send boxplot request to server:
-      return self:sendRequest(json.encode{
+      return self:sendRequest{request = {
          data   = data,
          win    = win,
          eid    = env,
          layout = options2layout{options = options},
-      })
+         opts   = options,
+      }}
    end
 }
 
@@ -897,7 +932,7 @@ local function _surface(self, X, type, options, win, env)
    }}
 
    -- send 3d surface plot request to server:
-   return self:sendRequest(json.encode{
+   return self:sendRequest{request = {
       data   = data,
       win    = win,
       eid    = env,
@@ -905,7 +940,8 @@ local function _surface(self, X, type, options, win, env)
          options = options,
          is3d = type == 'surface' and true or nil
       },
-   })
+      opts   = options,
+   }}
 end
 
 -- 3d surface plot:
@@ -1051,10 +1087,105 @@ M.quiver = argcheck{
    end
 }
 
+-- pie chart:
+M.pie = argcheck{
+   doc = [[
+      This function draws a pie chart based on the `N` tensor `X`.
+
+      The following `options` are supported:
+
+       - `options.legend`: `table` containing legend names
+   ]],
+   noordered = true,
+   {name = 'self',    type = 'visdom.client'},
+   {name = 'X',       type = 'torch.*Tensor'},
+   {name = 'options', type = 'table',  opt = true},
+   {name = 'win',     type = 'string', opt = true},
+   {name = 'env',     type = 'string', opt = true},
+   call = function(self, X, options, win, env)
+
+      -- check input:
+      local X = X:squeeze()
+      assert(X:nDimension() == 1,  'X should be one-dimensional')
+      assert(torch.ge(X, 0):all(), 'X cannot contain negative values')
+
+      -- generate table in plotly format:
+      local data = {{
+         values = X:totable(),
+         labels = options.legend,
+         type   = 'pie'
+      }}
+
+      -- send 3d surface plot request to server:
+      return self:sendRequest{request = {
+         data   = data,
+         win    = win,
+         eid    = env,
+         layout = options2layout{options = options},
+         opts   = options,
+      }}
+   end
+}
+
+-- mesh plot:
+M.mesh = argcheck{
+   doc = [[
+      This function draws a mesh plot from a set of vertices defined in an
+      `Nx2` or `Nx3` matrix `X`, and polygons defined in an optional `Mx2` or
+      `Mx3` matrix `Y`.
+
+      The following `options` are supported:
+
+      - `options.color`: color (`string`)
+      - `options.opacity`: opacity of polygons (`number` between 0 and 1)
+   ]],
+   {name = 'self',    type = 'visdom.client'},
+   {name = 'X',       type = 'torch.*Tensor'},
+   {name = 'Y',       type = 'torch.*Tensor', opt = true},
+   {name = 'options', type = 'table',  opt = true},
+   {name = 'win',     type = 'string', opt = true},
+   {name = 'env',     type = 'string', opt = true},
+   call = function(self, X, Y, options, win, env)
+
+      -- check inputs:
+      assert(X:nDimension() == 2, 'X must have 2 dimensions')
+      assert(X:size(2) == 2 or X:size(2) == 3, 'X must have 2 or 3 columns')
+      local is3d = (X:size(2) == 3)
+      local ispoly = (Y ~= nil)
+      if ispoly then
+         assert(Y:nDimension() == 2, 'Y must have 2 dimensions')
+         assert(Y:size(2) == X:size(2),
+            'X and Y must have same number of columns')
+      end
+      options = options or {}
+      assertOptions(options)
+
+      -- make data object:
+      local data = {{
+         x = X:narrow(2, 1, 1):squeeze():totable(),
+         y = X:narrow(2, 2, 1):squeeze():totable(),
+         z = is3d and X:narrow(2, 3, 1):squeeze():totable() or nil,
+         i = ispoly and Y:narrow(2, 1, 1):squeeze():totable() or nil,
+         j = ispoly and Y:narrow(2, 2, 1):squeeze():totable() or nil,
+         k = (ispoly and is3d) and Y:narrow(2, 3, 1):squeeze():totable() or nil,
+         color = options.color,
+         opacity = options.opacity,
+         type = is3d and 'mesh3d' or 'mesh',
+      }}
+      return self:sendRequest{request = {
+         data   = data,
+         win    = win,
+         eid    = env,
+         layout = options2layout{options = options},
+         opts   = options,
+      }}
+   end
+}
+
 -- image:
 M.image = argcheck{
    doc = [[
-      This function draws an img. It takes as input an `CxWxH` tensor `img`
+      This function draws an img. It takes as input an `CxHxW` tensor `img`
       that contains the image.
 
       The following `options` are supported:
@@ -1076,28 +1207,168 @@ M.image = argcheck{
       options.jpgquality = options.jpgquality or 100
       assertOptions{options = options}
 
+      -- convert to JPG bytestring to base64:
       local immem = image.compressJPG(img, options.jpgquality)
       local imgdata = 'data:image/jpg;base64,' ..
          mime.b64(ffi.string(immem:data(), immem:nElement()))
-
       local imsize = (img:dim() == 2 and img or img[1]):size():totable()
+      options.width = (options.width or imsize[2])
+      options.height = (options.height or imsize[3])
 
       -- make data object:
       local data = {{
          content = {
             src     = imgdata,
             caption = options.caption,
-            size    = options.size or imsize,
          },
          type = 'image',
       }}  -- NOTE: This is not a plotly type
 
       -- send image request:
-      return self:sendRequest(json.encode{
+      return self:sendRequest{request = {
          data   = data,
          win    = win,
          eid    = env,
-         title  = options.title,
+         opts   = options,
+      }}
+   end
+}
+
+--images:
+M.images = argcheck{
+   doc = [[
+      This function makes a grid of images. It takes either a table of image
+      Tensors H x W (greyscale) or nChannel x H x W (color), or a single Tensor
+      of size batchSize x nChannel x H x W or nChannel x H x W where
+      nChannel=[3,1], batchSize x H x W or H x W.
+   ]],
+   noordered = true,
+   force = true,
+   {name = 'self',    type = 'visdom.client'},
+   {name = 'table',   type = 'table',  opt = true},
+   {name = 'tensor',  type = 'torch.*Tensor', opt = true},
+   {name = 'nrow',    type = 'number', opt = true},
+   {name = 'padding', type = 'number', opt = true},
+   {name = 'options', type = 'table',  opt = true},
+   {name = 'win',     type = 'string', opt = true},
+   {name = 'env',     type = 'string', opt = true},
+   call = function(self, table, tensor, nrow, padding, options, win, env)
+      assert(table or tensor)
+      return self:image{
+        img = image.toDisplayTensor{
+          input = table or tensor, padding = padding, nrow = nrow},
+        options = options,
+        win = win,
+        env = env
+      }
+   end
+}
+
+-- helper function for loading file as bytestring:
+local function loadFile(filename)
+   local paths = require 'paths'
+   assert(paths.filep(filename),
+      string.format('file not found: %s', filename))
+   local file = io.open(filename, 'r')
+   assert(file, string.format('could not open file: %s', filename))
+   local str = file:read('*all')
+   file:close()
+   return str
+end
+
+-- SVG object:
+M.svg = argcheck{
+   doc = [[
+      This function draws an SVG object. It takes as input an SVG string or the
+      name of an SVG file. The function does not support any plot-specific
+      `options`.
+   ]],
+   noordered = true,
+   {name = 'self',    type = 'visdom.client'},
+   {name = 'svgstr',  type = 'string', opt = true},
+   {name = 'svgfile', type = 'string', opt = true},
+   {name = 'options', type = 'table',  opt = true},
+   {name = 'win',     type = 'string', opt = true},
+   {name = 'env',     type = 'string', opt = true},
+   call = function(self, svgstr, svgfile, options, win, env)
+
+      -- load SVG and strip doctype if it is present:
+      assert(svgstr or svgfile, 'should specify SVG string or filename')
+      local svgstr = svgstr or loadFile(svgfile)
+      local svg = svgstr:match('<svg .+</svg>')
+      assert(svg, 'SVG could not be parsed correctly')
+
+      -- send SVG request:
+      return (self:text{
+         text    = svg,
+         options = options,
+         win     = win,
+         eid     = env,
+      })
+   end
+}
+
+-- video file:
+M.video = argcheck{
+   doc = [[
+      This function plays a video. It takes as input the filename of the video
+      or a `LxCxHxW` tensor containing all the frames of the video. The function
+      does not support any plot-specific `options`.
+   ]],
+   noordered = true,
+   {name = 'self',      type = 'visdom.client'},
+   {name = 'tensor',    type = 'torch.ByteTensor', opt = true},
+   {name = 'videofile', type = 'string', opt = true},
+   {name = 'options',   type = 'table',  opt = true},
+   {name = 'win',       type = 'string', opt = true},
+   {name = 'env',       type = 'string', opt = true},
+   call = function(self, tensor, videofile, options, win, env)
+
+      -- get mime type for video:
+      options = options or {}
+      options.fps = options.fps or 25
+      videofile = videofile or os.tmpname() .. '.ogv'
+      assert(tensor or videofile, 'should specify video tensor or file')
+      local extension = videofile:sub(-3):lower()
+      local mimetypes = {
+         mp4  = 'mp4',
+         ogv  = 'ogg',
+         avi  = 'avi',
+         webm = 'webm',
+      }
+      local mimetype = mimetypes[extension]
+      assert(mimetype, string.format('unknown video type: %s', extension))
+
+      -- construct video if a tensor was specified:
+      if tensor then
+         assert(tensor:nDimension() == 4, 'video should be in 4D tensor')
+         local ffmpeg = require 'ffmpeg'
+         local video = ffmpeg.Video{
+            height = tensor:size(3),
+            width  = tensor:size(4),
+            fps    = options.fps,
+            length = tensor:size(1),
+            tensor = tensor,
+            zoom   = 2,
+         }
+         video:save{outpath = videofile, keep = false, usetheora = true}
+      end
+
+      -- load video file:
+      local bytestr = loadFile(videofile)
+
+      -- send out video request:
+      local videodata = string.format([[
+         <video controls>
+            <source type="video/%s" src="data:video/%s;base64,%s">
+            Your browser does not support the video tag.
+         </video>
+      ]], mimetype, mimetype, mime.b64(bytestr))
+      return (self:text{
+         text    = videodata,
+         options = options,
+         win     = win,
+         eid     = env,
       })
    end
 }
@@ -1127,12 +1398,12 @@ M.text = argcheck{
       }}  -- NOTE: This is not a plotly type
 
       -- send text request:
-      return self:sendRequest(json.encode{
+      return self:sendRequest{request = {
          data   = data,
          win    = win,
          eid    = env,
-         title  = options.title,
-      })
+         opts   = options,
+      }}
    end
 }
 
@@ -1148,7 +1419,7 @@ M.close = argcheck{
    {name = 'env',  type = 'string', opt = true},
    call = function(self, win, env)
       return self:sendRequest{
-         request  = (json.encode{win = win, eid = env}),
+         request  = ({win = win, eid = env}),
          endpoint = 'close',
       }
    end

@@ -9,15 +9,24 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import os.path
 import requests
 import traceback
 import json
+import math
+import re
+import base64
 import numpy as np
 from PIL import Image
 import base64 as b64
 import numbers
 from six import string_types
 from six import BytesIO
+import logging
+
+
+logging.getLogger('requests').setLevel(logging.CRITICAL)
+logging.getLogger('urllib3').setLevel(logging.CRITICAL)
 
 
 def isstr(s):
@@ -32,6 +41,22 @@ def isndarray(n):
     return isinstance(n, (np.ndarray))
 
 
+def nan2none(l):
+    for idx, val in enumerate(l):
+        if math.isnan(val):
+            l[idx] = None
+    return l
+
+
+def loadfile(filename):
+    assert os.path.isfile(filename), 'could not find file %s' % filename
+    fileobj = open(filename, 'rb')
+    assert fileobj, 'could not open file %s' % filename
+    str = fileobj.read()
+    fileobj.close()
+    return str
+
+
 def _scrub_dict(d):
     if type(d) is dict:
         return dict((k, _scrub_dict(v)) for k, v in list(d.items())
@@ -41,13 +66,15 @@ def _scrub_dict(d):
 
 
 def _axisformat(x, opts):
-    fields = ['type', 'tick', 'label', 'tickmin', 'tickmax']
-    if any([x + i for i in fields]):
+    fields = ['type', 'tick', 'label', 'tickvals', 'ticklabels', 'tickmin', 'tickmax']
+    if any([opts.get(x + i) for i in fields]):
         return {
             'type': opts.get(x + 'type'),
             'title': opts.get(x + 'label'),
             'range': [opts.get(x + 'tickmin'), opts.get(x + 'tickmax')]
             if (opts.get(x + 'tickmin') and opts.get(x + 'tickmax')) else None,
+            'tickvals': opts.get(x + 'tickvals'),
+            'ticktext': opts.get(x + 'ticklabels'),
             'tickwidth': opts.get(x + 'tickstep'),
             'showticklabels': opts.get(x + 'ytick'),
         }
@@ -90,7 +117,7 @@ def _markerColorCheck(mc, X, Y, L):
     assert (mc <= 255).all(), 'marker colors have to be <= 255'
     assert (mc == np.floor(mc)).all(), 'marker colors are assumed to be ints'
 
-    mc = np.int8(mc)
+    mc = np.uint8(mc)
 
     if mc.ndim == 1:
         markercolor = mc.tolist()
@@ -108,6 +135,9 @@ def _markerColorCheck(mc, X, Y, L):
 
 
 def _assert_opts(opts):
+    if opts.get('color'):
+        assert isstr(opts.get('color')), 'color should be a string'
+
     if opts.get('colormap'):
         assert isstr(opts.get('colormap')), \
             'colormap should be string'
@@ -138,6 +168,36 @@ def _assert_opts(opts):
         assert opts.get('jpgquality') > 0 and opts.get('jpgquality') <= 100, \
             'JPG quality should be number between 0 and 100'
 
+    if opts.get('opacity'):
+        assert isnum(opts.get('opacity')), 'opacity should be a number'
+        assert 0 <= opts.get('opacity') <= 1, \
+            'opacity should be a number between 0 and 1'
+
+    if opts.get('fps'):
+        assert isnum(opts.get('fps')), 'fps should be a number'
+        assert opts.get('fps') > 0, 'fps must be greater than 0'
+
+
+def pytorch_wrap(fn):
+    def result(*args, **kwargs):
+        args = (a.cpu().numpy() if type(a).__module__ == 'torch' else a
+                for a in args)
+
+        for k in kwargs:
+            if type(kwargs[k]).__module__ == 'torch':
+                kwargs[k] = kwargs[k].cpu().numpy()
+
+        return fn(*args, **kwargs)
+    return result
+
+
+def wrap_tensor_methods(cls, wrapper):
+    fns = ['_surface', 'bar', 'boxplot', 'surf', 'heatmap', 'histogram', 'svg',
+            'image', 'line', 'pie', 'scatter', 'stem', 'quiver', 'contour',
+            'updateTrace']
+    for key in [k for k in dir(cls) if k in fns]:
+        setattr(cls, key, wrapper(getattr(cls, key)))
+
 
 class Visdom(object):
 
@@ -147,16 +207,23 @@ class Visdom(object):
         endpoint='events',
         port=8097,
         ipv6=True,
-        proxy=None
+        proxy=None,
+        env='main',
     ):
         self.server = server
         self.endpoint = endpoint
         self.port = port
         self.ipv6 = ipv6
         self.proxy = proxy
+        self.env = env              # default env
+
+        try:
+            import torch
+            wrap_tensor_methods(self, pytorch_wrap)
+        except ImportError:
+            pass
 
     # Utils
-
     def _send(self, msg, endpoint='events'):
         """
         This function sends specified JSON request to the Tornado server. This
@@ -164,10 +231,13 @@ class Visdom(object):
         build the required JSON yourself. `endpoint` specifies the destination
         Tornado server endpoint for the request.
         """
+        if msg.get('eid', None) is None:
+            msg['eid'] = self.env
+
         try:
             r = requests.post(
                 "{0}:{1}/{2}".format(self.server, self.port, endpoint),
-                data=msg
+                data=json.dumps(msg),
             )
             return r.text
         except BaseException:
@@ -186,9 +256,9 @@ class Visdom(object):
             for env in envs:
                 assert isstr(env), 'env should be a string'
 
-        return self._send(json.dumps({
+        return self._send({
             'data': envs,
-        }), 'save')
+        }, 'save')
 
     def close(self, win=None, env=None):
         """
@@ -197,7 +267,7 @@ class Visdom(object):
         """
 
         return self._send(
-            msg=json.dumps({'win': win, 'eid': env}),
+            msg={'win': win, 'eid': env},
             endpoint='close'
         )
 
@@ -212,32 +282,53 @@ class Visdom(object):
         _assert_opts(opts)
         data = [{'content': text, 'type': 'text'}]
 
-        return self._send(json.dumps({
+        return self._send({
             'data': data,
             'win': win,
             'eid': env,
-            'title': opts.get('title'),
-        }))
+            'opts': opts
+        })
+
+    def svg(self, svgstr=None, svgfile=None, win=None, env=None, opts=None):
+        """
+        This function draws an SVG object. It takes as input an SVG string or the
+        name of an SVG file. The function does not support any plot-specific
+        `options`.
+        """
+        opts = {} if opts is None else opts
+        _assert_opts(opts)
+
+        if svgfile is not None:
+            svgstr = loadfile(svgfile)
+
+        assert svgstr is not None, 'should specify SVG string or filename'
+        svg = re.search('<svg .+</svg>', svgstr, re.DOTALL)
+        assert svg is not None, 'could not parse SVG string'
+        return self.text(text=svg.group(0), win=win, env=env, opts=opts)
 
     def image(self, img, win=None, env=None, opts=None):
         """
-        This function draws an img. It takes as input an `HxWxC` tensor `img`
-        that contains the image. The array values can be float in [0,1] or uint8
-        in [0, 255].
+        This function draws an img. It takes as input an `CxHxW` or `HxW` tensor
+        `img` that contains the image. The array values can be float in [0,1] or
+        uint8 in [0, 255].
         """
         opts = {} if opts is None else opts
         opts['jpgquality'] = opts.get('jpgquality', 75)
         _assert_opts(opts)
+        opts['width'] = opts.get('width', img.shape[img.ndim - 1])
+        opts['height'] = opts.get('height', img.shape[img.ndim - 2])
 
-        nchannels = img.shape[2] if img.ndim == 3 else 1
+        nchannels = img.shape[0] if img.ndim == 3 else 1
         if nchannels == 1:
-            img = img[:, :, np.newaxis].repeat(3, axis=2)
+            img = np.squeeze(img)
+            img = img[np.newaxis, :, :].repeat(3, axis=0)
 
         if 'float' in str(img.dtype):
             if img.max() <= 1:
                 img = img * 255.
             img = np.uint8(img)
 
+        img = np.transpose(img, (1, 2, 0))
         im = Image.fromarray(img)
         buf = BytesIO()
         im.save(buf, format='JPEG', quality=opts['jpgquality'])
@@ -247,17 +338,119 @@ class Visdom(object):
             'content': {
                 'src': 'data:image/jpg;base64,' + b64encoded,
                 'caption': opts.get('caption'),
-                'size': opts.get('size', list(img.shape)),
             },
             'type': 'image',
         }]
 
-        return self._send(json.dumps({
+        return self._send({
             'data': data,
             'win': win,
             'eid': env,
-            'title': opts.get('title'),
-        }))
+            'opts': opts,
+        })
+
+    def images(self, tensor, nrow=8, padding=2,
+               win=None, env=None, opts=None):
+        """
+        Given a 4D tensor of shape (B x C x H x W),
+        or a list of images all of the same size,
+        makes a grid of images of size (B / nrow, nrow).
+
+
+        This is a modified from `make_grid()`
+        https://github.com/pytorch/vision/blob/master/torchvision/utils.py
+        """
+
+        # If list of images, convert to a 4D tensor
+        if isinstance(tensor, list):
+            tensor = np.stack(tensor, 0)
+
+        if tensor.ndim == 2:  # single image H x W
+            tensor = np.expand_dims(tensor, 0)
+        if tensor.ndim == 3:  # single image
+            if tensor.shape[0] == 1:  # if single-channel, convert to 3-channel
+                tensor = np.repeat(tensor, 3, 0)
+            return self.image(tensor, win, env, opts)
+        if tensor.ndim == 4 and tensor.shape[1] == 1:  # single-channel images
+            tensor = np.repeat(tensor, 3, 1)
+
+        # make 4D tensor of images into a grid
+        nmaps = tensor.shape[0]
+        xmaps = min(nrow, nmaps)
+        ymaps = int(math.ceil(float(nmaps) / xmaps))
+        height, width = int(tensor.shape[2] + 2 * padding), int(tensor.shape[3] + 2 * padding)
+
+        grid = np.ones([3, height * ymaps, width * xmaps])
+        k = 0
+        for y in range(ymaps):
+            for x in range(xmaps):
+                if k >= nmaps:
+                    break
+                h_start = y * height + 1 + padding
+                h_end = h_start + tensor.shape[2]
+                w_start = x * width + 1 + padding
+                w_end = w_start + tensor.shape[3]
+                grid[:, h_start:h_end, w_start:w_end] = tensor[k]
+                k += 1
+
+        return self.image(grid, win, env, opts)
+
+    def video(self, tensor=None, videofile=None, win=None, env=None, opts=None):
+        """
+        This function plays a video. It takes as input the filename of the video
+        or a `LxCxHxW` tensor containing all the frames of the video. The function
+        does not support any plot-specific `options`.
+        """
+        opts = {} if opts is None else opts
+        opts['fps'] = opts.get('fps', 25)
+        _assert_opts(opts)
+        assert tensor is not None or videofile is not None, \
+            'should specify video tensor or file'
+
+        if tensor is not None:
+            import cv2
+            import tempfile
+            assert tensor.ndim == 4, 'video should be in 4D tensor'
+            videofile = '/tmp/%s.ogv' % next(tempfile._get_candidate_names())
+            if cv2.__version__.startswith('2'):  # OpenCV 2
+                fourcc = cv2.cv.CV_FOURCC(
+                    chr(ord('T')),
+                    chr(ord('H')),
+                    chr(ord('E')),
+                    chr(ord('O'))
+                )
+            elif cv2.__version__.startswith('3'):  # OpenCV 3
+                fourcc = cv2.VideoWriter_fourcc(
+                    chr(ord('T')),
+                    chr(ord('H')),
+                    chr(ord('E')),
+                    chr(ord('O'))
+                )
+            writer = cv2.VideoWriter(
+                videofile,
+                fourcc,
+                opts.get('fps'),
+                (tensor.shape[1], tensor.shape[2])
+            )
+            assert writer.isOpened(), 'video writer could not be opened'
+            for i in range(tensor.shape[0]):
+                writer.write(tensor[i, :, :, :])
+            writer.release()
+            writer = None
+
+        extension = videofile[-3:].lower()
+        mimetypes = dict(mp4='mp4', ogv='ogg', avi='avi', webm='webm')
+        mimetype = mimetypes.get(extension)
+        assert mimetype is not None, 'unknown video type: %s' % extension
+
+        bytestr = loadfile(videofile)
+        videodata = """
+            <video controls>
+                <source type="video/%s" src="data:video/%s;base64,%s">
+                Your browser does not support the video tag.
+            </video>
+        """ % (mimetype, mimetype, base64.b64encode(bytestr).decode('utf-8'))
+        return self.text(text=videodata, win=win, env=env, opts=opts)
 
     def updateTrace(self, X, Y, win, env=None, name=None,
                     append=True, opts=None):
@@ -290,21 +483,19 @@ class Visdom(object):
             assert len(name) >= 0, 'name of trace should be nonempty string'
             assert X.ndim == 1, 'updating by name expects 1-dim data'
 
-        data = {'x': X.tolist(), 'y': Y.tolist()}
+        data = {'x': X.transpose().tolist(), 'y': Y.transpose().tolist()}
         if X.ndim == 1:
             data['x'] = [data['x']]
             data['y'] = [data['y']]
 
-        return self._send(
-            json.dumps({
-                'data': data,
-                'win': win,
-                'eid': env,
-                'name': name,
-                'append': append,
-            }),
-            endpoint='update'
-        )
+        return self._send({
+            'data': data,
+            'win': win,
+            'eid': env,
+            'name': name,
+            'append': append,
+            'opts': opts,
+        }, endpoint='update')
 
     def scatter(self, X, Y=None, win=None, env=None, opts=None, update=None):
         """
@@ -367,8 +558,8 @@ class Visdom(object):
             if ind.any():
                 mc = opts.get('markercolor')
                 _data = {
-                    'x': X.take(0, 1)[ind].tolist(),
-                    'y': X.take(1, 1)[ind].tolist(),
+                    'x': nan2none(X.take(0, 1)[ind].tolist()),
+                    'y': nan2none(X.take(1, 1)[ind].tolist()),
                     'name': opts.get('legend') and
                     opts.get('legend')[k - 1] or str(k),
                     'type': 'scatter3d' if is3d else 'scatter',
@@ -391,12 +582,13 @@ class Visdom(object):
 
                 data.append(_scrub_dict(_data))
 
-        return self._send(json.dumps({
+        return self._send({
             'data': data,
             'win': win,
             'eid': env,
             'layout': _opts2layout(opts, is3d),
-        }))
+            'opts': opts,
+        })
 
     def line(self, Y, X=None, win=None, env=None, opts=None, update=None):
         """
@@ -426,11 +618,9 @@ class Visdom(object):
             assert X is not None, 'must specify x-values for line update'
             return self.updateTrace(X=X, Y=Y, win=win, env=env,
                                     append=update == 'append', opts=opts)
-        Y = np.squeeze(Y)
         assert Y.ndim == 1 or Y.ndim == 2, 'Y should have 1 or 2 dim'
 
         if X is not None:
-            X = np.squeeze(X)
             assert X.ndim == 1 or X.ndim == 2, 'X should have 1 or 2 dim'
         else:
             X = np.linspace(0, 1, Y.shape[0])
@@ -498,14 +688,13 @@ class Visdom(object):
             'colorscale': opts.get('colormap'),
         }]
 
-        return self._send(
-            json.dumps({
-                'data': data,
-                'win': win,
-                'eid': env,
-                'layout': _opts2layout(opts)
-            })
-        )
+        return self._send({
+            'data': data,
+            'win': win,
+            'eid': env,
+            'layout': _opts2layout(opts),
+            'opts': opts,
+        })
 
     def bar(self, X, Y=None, win=None, env=None, opts=None):
         """
@@ -557,14 +746,13 @@ class Visdom(object):
                 _data['name'] = opts['legend'][k]
             data.append(_data)
 
-        return self._send(
-            json.dumps({
-                'data': data,
-                'win': win,
-                'eid': env,
-                'layout': _opts2layout(opts)
-            })
-        )
+        return self._send({
+            'data': data,
+            'win': win,
+            'eid': env,
+            'layout': _opts2layout(opts),
+            'opts': opts,
+        })
 
     def histogram(self, X, win=None, env=None, opts=None):
         """
@@ -631,14 +819,13 @@ class Visdom(object):
 
             data.append(_data)
 
-        return self._send(
-            json.dumps({
-                'data': data,
-                'win': win,
-                'eid': env,
-                'layout': _opts2layout(opts)
-            })
-        )
+        return self._send({
+            'data': data,
+            'win': win,
+            'eid': env,
+            'layout': _opts2layout(opts),
+            'opts': opts,
+        })
 
     def _surface(self, X, stype, win=None, env=None, opts=None):
         """
@@ -671,15 +858,14 @@ class Visdom(object):
             'colorscale': opts['colormap']
         }]
 
-        return self._send(
-            json.dumps({
-                'data': data,
-                'win': win,
-                'eid': env,
-                'layout': _opts2layout(
-                    opts, is3d=True if stype == 'surface' else False)
-            })
-        )
+        return self._send({
+            'data': data,
+            'win': win,
+            'eid': env,
+            'layout': _opts2layout(
+                opts, is3d=True if stype == 'surface' else False),
+            'opts': opts,
+        })
 
     def surf(self, X, win=None, env=None, opts=None):
         """
@@ -710,6 +896,88 @@ class Visdom(object):
         """
 
         self._surface(X=X, stype='contour', opts=opts, win=win, env=env)
+
+    def quiver(self, X, Y, gridX=None, gridY=None,
+                            win=None, env=None, opts=None):
+        """
+        This function draws a quiver plot in which the direction and length of the
+        arrows is determined by the `NxM` tensors `X` and `Y`. Two optional `NxM`
+        tensors `gridX` and `gridY` can be provided that specify the offsets of
+        the arrows; by default, the arrows will be done on a regular grid.
+
+        The following `options` are supported:
+
+        - `options.normalize`:  length of longest arrows (`number`)
+        - `options.arrowheads`: show arrow heads (`boolean`; default = `true`)
+        """
+
+        # assertions:
+        assert X.ndim == 2, 'X should be two-dimensional'
+        assert Y.ndim == 2, 'Y should be two-dimensional'
+        assert Y.shape == X.shape, 'X and Y should have the same size'
+
+        # make sure we have a grid:
+        N, M = X.shape[0], X.shape[1]
+        if gridX is None:
+            gridX = np.broadcast_to(np.expand_dims(np.arange(0, N), axis=1), (N, M))
+        if gridY is None:
+            gridY = np.broadcast_to(np.expand_dims(np.arange(0, M), axis=0), (N, M))
+        assert gridX.shape == X.shape, 'X and gridX should have the same size'
+        assert gridY.shape == Y.shape, 'Y and gridY should have the same size'
+
+        # default options:
+        opts = {} if opts is None else opts
+        opts['mode'] = 'lines'
+        opts['arrowheads'] = opts.get('arrowheads', True)
+        _assert_opts(opts)
+
+        # normalize vectors to unit length:
+        if opts.get('normalize', False):
+            assert isinstance(opts['normalize'], numbers.Number) and \
+                opts['normalize'] > 0, \
+                'opts.normalize should be positive number'
+            magnitude = np.sqrt(np.add(np.multiply(X, X),
+                                       np.multiply(Y, Y))).max()
+            X = X / (magnitude / opts['normalize'])
+            Y = Y / (magnitude / opts['normalize'])
+
+        # interleave X and Y with copies / NaNs to get lines:
+        nans = np.full((X.shape[0], X.shape[1]), np.nan).flatten()
+        tipX = gridX + X
+        tipY = gridY + Y
+        dX = np.column_stack((gridX.flatten(), tipX.flatten(), nans))
+        dY = np.column_stack((gridY.flatten(), tipY.flatten(), nans))
+
+        # convert data to scatter plot format:
+        dX = np.resize(dX, (dX.shape[0] * 3, 1))
+        dY = np.resize(dY, (dY.shape[0] * 3, 1))
+        data = np.column_stack((dX.flatten(), dY.flatten()))
+
+        # add arrow heads:
+        if opts['arrowheads']:
+
+            # compute tip points:
+            alpha = 0.33  # size of arrow head relative to vector length
+            beta = 0.33   # width of the base of the arrow head
+            Xbeta = (X + 1e-5) * beta
+            Ybeta = (Y + 1e-5) * beta
+            lX = np.add(-alpha * np.add(X, Ybeta), tipX)
+            rX = np.add(-alpha * np.add(X, -Ybeta), tipX)
+            lY = np.add(-alpha * np.add(Y, -Xbeta), tipY)
+            rY = np.add(-alpha * np.add(Y, Xbeta), tipY)
+
+            # add to data:
+            hX = np.column_stack((lX.flatten(), tipX.flatten(),
+                                  rX.flatten(), nans))
+            hY = np.column_stack((lY.flatten(), tipY.flatten(),
+                                  rY.flatten(), nans))
+            hX = np.resize(hX, (hX.shape[0] * 4, 1))
+            hY = np.resize(hY, (hY.shape[0] * 4, 1))
+            data = np.concatenate((data, np.column_stack(
+                (hX.flatten(), hY.flatten()))), axis=0)
+
+        # generate scatter plot:
+        return self.scatter(X=data, opts=opts, win=win, env=env)
 
     def stem(self, X, Y=None, win=None, env=None, opts=None):
         """
@@ -756,3 +1024,78 @@ class Visdom(object):
         _assert_opts(opts)
 
         return self.scatter(X=data, Y=labels, opts=opts, win=win, env=env)
+
+    def pie(self, X, win=None, env=None, opts=None):
+        """
+        This function draws a pie chart based on the `N` tensor `X`.
+
+        The following `options` are supported:
+
+        - `options.legend`: `table` containing legend names
+        """
+
+        X = np.squeeze(X)
+        assert X.ndim == 1, 'X should be one-dimensional'
+        assert np.all(np.greater_equal(X, 0)), \
+            'X cannot contain negative values'
+
+        opts = {} if opts is None else opts
+        _assert_opts(opts)
+
+        data = [{
+            'values': X.tolist(),
+            'labels': opts.get('legend'),
+            'type': 'pie',
+        }]
+        return self._send({
+            'data': data,
+            'win': win,
+            'eid': env,
+            'layout': _opts2layout(opts),
+            'opts': opts,
+        })
+
+    def mesh(self, X, Y=None, win=None, env=None, opts=None):
+        """
+        This function draws a mesh plot from a set of vertices defined in an
+        `Nx2` or `Nx3` matrix `X`, and polygons defined in an optional `Mx2` or
+        `Mx3` matrix `Y`.
+
+        The following `options` are supported:
+
+        - `options.color`: color (`string`)
+        - `options.opacity`: opacity of polygons (`number` between 0 and 1)
+        """
+        opts = {} if opts is None else opts
+        _assert_opts(opts)
+
+        X = np.asarray(X)
+        assert X.ndim == 2, 'X must have 2 dimensions'
+        assert X.shape[1] == 2 or X.shape[1] == 3, 'X must have 2 or 3 columns'
+        is3d = X.shape[1] == 3
+
+        ispoly = Y is not None
+        if ispoly:
+            Y = np.asarray(Y)
+            assert Y.ndim == 2, 'Y must have 2 dimensions'
+            assert Y.shape[1] == X.shape[1], \
+                'X and Y must have same number of columns'
+
+        data = [{
+            'x': X[:, 0].tolist(),
+            'y': X[:, 1].tolist(),
+            'z': X[:, 2].tolist() if is3d else None,
+            'i': Y[:, 0].tolist() if ispoly else None,
+            'j': Y[:, 1].tolist() if ispoly else None,
+            'k': Y[:, 2].tolist() if is3d and ispoly else None,
+            'color': opts.get('color'),
+            'opacity': opts.get('opacity'),
+            'type': 'mesh3d' if is3d else 'mesh',
+        }]
+        return self._send({
+            'data': data,
+            'win': win,
+            'eid': env,
+            'layout': _opts2layout(opts),
+            'opts': opts,
+        })

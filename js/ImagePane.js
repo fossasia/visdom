@@ -21,7 +21,6 @@ class ImagePane extends React.Component {
 
   render() {
     let content = this.props.content;
-    let labels = content.labels || [];
     return (
       <Pane
         {...this.props}

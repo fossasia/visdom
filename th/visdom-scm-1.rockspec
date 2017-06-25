@@ -22,8 +22,9 @@ dependencies = {
    "torchnet >= 1.0",
    "image >= 1.0",
    "luasocket >= 1.0",
-   "json >= 1.0",
+   "lua-cjson >= 1.0",
    "luaffi >= 1.0",
+   "paths >= 1.0",
 }
 
 build = {

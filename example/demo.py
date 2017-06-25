@@ -12,14 +12,37 @@ from __future__ import unicode_literals
 from visdom import Visdom
 import numpy as np
 import math
+import os.path
+import getpass
 
 viz = Visdom()
 
 textwindow = viz.text('Hello World!')
 
+# video demo:
+try:
+    video = np.empty([256, 250, 250, 3], dtype=np.uint8)
+    for n in range(256):
+        video[n, :, :, :].fill(n)
+    viz.video(tensor=video)
+
+    # video demo: download video from http://media.w3.org/2010/05/sintel/trailer.ogv
+    videofile = '/home/%s/trailer.ogv' % getpass.getuser()
+    if os.path.isfile(videofile):
+        viz.video(videofile=videofile)
+except ImportError:
+    print('Skipped video example')
+
+# image demo
 viz.image(
-    np.random.rand(512, 256, 3),
+    np.random.rand(3, 512, 256),
     opts=dict(title='Random!', caption='How random.'),
+)
+
+# grid of images
+viz.images(
+    np.random.randn(20, 3, 64, 64),
+    opts=dict(title='Random images', caption='How random.')
 )
 
 # scatter plots
@@ -91,7 +114,7 @@ viz.bar(
     X=np.abs(np.random.rand(5, 3)),
     opts=dict(
         stacked=True,
-        legende=['Facebook', 'Google', 'Twitter'],
+        legend=['Facebook', 'Google', 'Twitter'],
         rownames=['2012', '2013', '2014', '2015', '2016']
     )
 )
@@ -142,12 +165,12 @@ win = viz.line(
 )
 viz.line(
     X=np.column_stack((np.arange(10, 20), np.arange(10, 20))),
-    Y=np.column_stack((np.linspace(5, 10, 10), np.linspace(5, 10, 10))),
+    Y=np.column_stack((np.linspace(5, 10, 10), np.linspace(5, 10, 10) + 5)),
     win=win,
     update='append'
 )
 viz.updateTrace(
-    X=np.arange(11, 20),
+    X=np.arange(21, 30),
     Y=np.arange(1, 10),
     win=win,
     name='2'
@@ -196,5 +219,56 @@ viz.stem(
     opts=dict(legend=['Sine', 'Cosine'])
 )
 
+# quiver plot
+X = np.arange(0, 2.1, .2)
+Y = np.arange(0, 2.1, .2)
+X = np.broadcast_to(np.expand_dims(X, axis=1), (len(X), len(X)))
+Y = np.broadcast_to(np.expand_dims(Y, axis=0), (len(Y), len(Y)))
+U = np.multiply(np.cos(X), Y)
+V = np.multiply(np.sin(X), Y)
+viz.quiver(
+    X=U,
+    Y=V,
+    opts=dict(normalize=0.9),
+)
+
+# pie chart
+X = np.asarray([19, 26, 55])
+viz.pie(
+    X=X,
+    opts=dict(legend=['Residential', 'Non-Residential', 'Utility'])
+)
+
+# mesh plot
+x = [0, 0, 1, 1, 0, 0, 1, 1]
+y = [0, 1, 1, 0, 0, 1, 1, 0]
+z = [0, 0, 0, 0, 1, 1, 1, 1]
+X = np.c_[x, y, z]
+i = [7, 0, 0, 0, 4, 4, 6, 6, 4, 0, 3, 2]
+j = [3, 4, 1, 2, 5, 6, 5, 2, 0, 1, 6, 3]
+k = [0, 7, 2, 3, 6, 7, 1, 1, 5, 5, 7, 6]
+Y = np.c_[i, j, k]
+viz.mesh(X=X, Y=Y, opts=dict(opacity=0.5))
+
+# SVG plotting
+svgstr = """
+<svg height="300" width="300">
+  <ellipse cx="80" cy="80" rx="50" ry="30"
+   style="fill:red;stroke:purple;stroke-width:2" />
+  Sorry, your browser does not support inline SVG.
+</svg>
+"""
+viz.svg(
+    svgstr=svgstr,
+    opts=dict(title='Example of SVG Rendering')
+)
+
 # close text window:
 viz.close(win=textwindow)
+
+# PyTorch tensor
+try:
+    import torch
+    viz.line(Y=torch.Tensor([[0., 0.], [1., 1.]]))
+except ImportError:
+    print('Skipped PyTorch example')

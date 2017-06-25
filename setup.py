@@ -5,6 +5,7 @@ readme = open('README.md').read()
 requirements = [
     'numpy',
     'pillow',
+    'requests',
     'tornado',
     'pyzmq',
     'six',
@@ -13,7 +14,7 @@ requirements = [
 setup(
     # Metadata
     name='visdom',
-    version='0.1',
+    version='0.1.04',
     author='Allan Jabri',
     author_email='ajabri@fb.com',
     url='https://github.com/facebookresearch/visdom',
