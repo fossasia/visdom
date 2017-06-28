@@ -46,6 +46,8 @@ class App extends React.Component {
     saveText: ACTIVE_ENV,
     // Bad form... make a copy of the global var we generated in python.
     envList: ENV_LIST.slice(),
+    filter: '',
+    filterField: '',
     layout: [],
     cols: 1280,
     width: 100,
@@ -54,6 +56,7 @@ class App extends React.Component {
   _bin = null;
   _socket = null;
   _envFieldRef = null;
+  _filterFieldRef = null;
   _timeoutID = null;
   _pendingPanes = [];
 
@@ -68,7 +71,6 @@ class App extends React.Component {
   }
 
   p2h = (h) => {
-    let colWidth = this.colWidth();
     return (h + MARGIN) / (ROW_HEIGHT + MARGIN);
   }
 
@@ -316,6 +318,16 @@ class App extends React.Component {
 
     let sorted = sortLayout(this.state.layout);
     let newPanes = Object.assign({}, this.state.panes);
+    let filter = this.state.filter;
+
+    sorted = sorted.sort(function(a, b) {
+      let diff = (newPanes[a.i].title.match(filter) != null) -
+              (newPanes[b.i].title.match(filter) != null);
+      if (diff != 0) {
+        return -diff;
+      }
+      else return sorted.indexOf(a) - sorted.indexOf(b);  // stable sort
+    });
 
     let newLayout = sorted.map((paneLayout, idx) => {
       let pos = this._bin.position(idx, this.state.cols);
@@ -365,7 +377,8 @@ class App extends React.Component {
       let panelayout = getLayoutItem(this.state.layout, id);
 
       return (
-        <div key={pane.id}>
+        <div key={pane.id}
+          style={pane.title.match(this.state.filter) ? {} : {display:'none'}}>
           <Comp
             {...pane}
             key={pane.id}
@@ -420,6 +433,28 @@ class App extends React.Component {
               onClick={this.saveEnv}>
               {this.state.envList.indexOf(
                 this.state.saveText) >= 0 ? 'save' : 'fork'}
+            </button>
+            <input
+              className="form-control"
+              type="text"
+              onChange={(ev) => {this.setState(
+                {filterField: ev.target.value}
+              )}}
+              value={this.state.filterField}
+              ref={(ref) => this._filterFieldRef = ref}
+            />
+            <button
+              className="btn btn-default"
+              disabled={!this.state.connected}
+              onClick={(ev) => {this.setState(
+                {filter: this.state.filterField}, () => {
+                  Object.keys(this.state.panes).map((paneID) => {
+                    this.focusPane(paneID);
+                  });
+                  this.relayout();
+                }
+              )}}>
+              filter
             </button>
             <button
               style={{float: 'right'}}
