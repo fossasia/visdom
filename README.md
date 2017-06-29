@@ -68,6 +68,11 @@ Once you've created a few visualizations, state is maintained. The server automa
 
 * **Fork:** If you enter a new env name, saving will create a new env -- effectively **forking** the previous env.
 
+#### Filter
+You can use the `filter` to dynamically sift through panes present in an env -- just provide a regular expression with which to match titles of pane you want to show. This can be helpful in use cases involving an env with many panes e.g. when systematically checking experimental results.
+
+<p align="center"><img align="center" src="https://lh3.googleusercontent.com/SJEoacYeHkVer5PEpYlJGOSdFX2gt2_GAVsTpg4k2Wea-RxoJ9e3zW_6xqq2g4WWV-JaIaMOLopAvssYgV2XqshhttRacNgRZQKfrreKOJls1RmwtLsA-SauhPPCKosUveab8dJmv7jQZ40sBLJZUXUXa5daCF16DQn7MtxpctP5Wx2MoOJI56DokT6KUj_Pl3I5M5N_y_kDt6f1pOl1FYjHCzV5no58OXHlyqVapLriX8MbfuZ2CWw6ZFY-XNlv5Cja8R9fKOt1956JVGcqo1u7OVM80eevhT69wUS97fw98UGklPhKwrxCgiGvwu_td__8YALleplfgILOR-_9aNMkNM1pnbZ9isHYGLGpBCOV2PnLdxqDcbjM0ojVzh5DLVBJbV3v2WAlbbCztktd5Kk6O5tWRN3tO4uH-Lm80mWJ-6dWip1Lj4qHWOvlCa0Tg6T_s9GY9zEule32knQdYmY7EmoJKpFFOhZuvX9GXWwz3Pu2nnYIzyaXGAax3qQhbEcPY_4zx20nHY2r5clKPAtyDt3unf7yg0Bk8kJb7bZj8BqdL-eof891vJttbiHXz37Dmpr3Qh1r2-AFr72mtafp-kNmPDjkEaxxRkHpQP03MSN2iGlfDC7OY7bsxmGwE-oJKfi59o6MfJcR3HMiNfsx7ARe0u6mujHj6EIl9n8=w373-h185-no" width="300" /></p>
+
 
 ## Setup
 
@@ -158,7 +163,7 @@ The following API is currently supported:
 - `vis.quiver`   : quiver plots
 - `vis.mesh`     : mesh plots
 
-#### Generic Plots
+### Generic Plots
 Note that the server API adheres to the Plotly convention of `data` and `layout` objects, such that you can produce your own arbitrary `Plotly` visualizations:
 
 ```python
@@ -172,10 +177,8 @@ layout=dict(title="First Plot", xaxis={'title':'x1'}, yaxis={'title':'x2'})
 vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 ```
 
-![visdom_big](https://lh3.googleusercontent.com/-bqH9UXCw-BE/WL2UsdrrbAI/AAAAAAAAnYc/emrxwCmnrW4_CLTyyUttB0SYRJ-i4CCiQCLcB/s0/Screen+Shot+2017-03-06+at+10.51.02+AM.png"visdom_big")
-
-
 ## Details
+![visdom_big](https://lh3.googleusercontent.com/-bqH9UXCw-BE/WL2UsdrrbAI/AAAAAAAAnYc/emrxwCmnrW4_CLTyyUttB0SYRJ-i4CCiQCLcB/s0/Screen+Shot+2017-03-06+at+10.51.02+AM.png"visdom_big")
 
 #### vis.image
 This function draws an `img`. It takes as input an `CxHxW` tensor `img`
