@@ -138,6 +138,7 @@ button {
   background-color: white;
   margin: auto auto;
   display: block;
+  width: 100%;
 }
 
 .content-plot {
