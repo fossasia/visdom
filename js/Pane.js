@@ -52,6 +52,9 @@
     else if (this.props.h !== nextProps.h || this.props.w !== nextProps.w) {
       return true;
     }
+    else if (this.props.children !== nextProps.children) {
+      return true;
+    }
 
     return false;
   }
