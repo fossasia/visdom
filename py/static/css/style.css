@@ -114,6 +114,7 @@ button {
 .content {
   width: 100%;
   height: calc( 100% - 14px );
+  display: flex;
 }
 
 .grip {
@@ -138,6 +139,11 @@ button {
   background-color: white;
   margin: auto auto;
   display: block;
+}
+
+div.content:hover .content-image {
+  width: calc(100% - 14px);
+  height: calc(100% - 14px);
 }
 
 .content-plot {
