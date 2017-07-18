@@ -71,11 +71,11 @@ plot:scatter{
 
 -- 2D scatterplot with custom intensities (red channel):
 local id = plot:scatter{
-    X = torch.randn(255, 2),
-    options = {
-        markersize = 10,
-        markercolor = torch.zeros(255):random(0, 255),
-    },
+   X = torch.randn(255, 2),
+   options = {
+      markersize = 10,
+      markercolor = torch.zeros(255):random(0, 255),
+   },
 }
 
 plot:updateTrace{                             -- add new trace to scatter plot
@@ -188,7 +188,6 @@ plot:updateTrace{
    Y = torch.range(11, 20),
    win = id,
    name = '4',
-   options = {markercolors = torch.zeros(1):random(0, 255)},
 }
 
 -- stacked line plot demo:

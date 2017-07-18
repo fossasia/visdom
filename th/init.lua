@@ -173,9 +173,9 @@ local markerColorCheck = argcheck{
              'marker colors are assumed to be integer')
 
       local markercolor
-      if mc:dim() == 1 then -- mc = N
+      if mc:dim() == 1 then  -- mc = N
           markercolor = mc:totable()
-      else -- mc = N x 3
+      else  -- mc = N x 3
           markercolor = {}
           for i = 1, mc:size(1) do
               markercolor[i] = string.format('#%x%x%x', mc[i][1],
@@ -381,25 +381,29 @@ M.updateTrace = argcheck{
 
       -- assertions on the inputs:
       assert(Y:isSameSizeAs(X), 'Y should be same size as X')
-      if X:dim() > 1 then X, Y = X:squeeze(), Y:squeeze() end
       assert(X:dim() == 1 or X:dim() == 2, 'Updated X should be 1 or 2 dim')
       if name then
          assert(#name >= 0,   'name of trace should be nonempty string')
          assert(X:dim() == 1, 'updating by name expects 1-dim data')
       end
-      local markercolors = options and options.markercolors or nil
+      options = options or {}
+      if options.markercolor then
+         options.markercolor = markerColorCheck{
+            mc        = options.markercolor,
+            X         = X,
+            Y         = X.new(X:size()):fill(1),
+            numlabels = 1,
+         }
+      end
 
       -- generate table in plotly format:
       local data = {
          x = X:view(X:size(1), -1):t():totable(),
          y = Y:view(Y:size(1), -1):t():totable(),
-         marker = markercolors and markerColorCheck{
-            mc        = markercolors,
-            X         = X,
-            Y         = X.new(X:size()):fill(1),
-            numlabels = 1,
-         } or nil,
       }
+      if options.markercolor then  -- for scatter plot
+         data.marker = {color = options.markercolor}
+      end
 
       -- send scatter plot request to server:
       return self:sendRequest{
@@ -477,12 +481,12 @@ M.scatter = argcheck{
       options.markersymbol = options.markersymbol or 'dot'
       options.markersize   = options.markersize   or 10
       if options.markercolor ~= nil then
-          options.markercolor = markerColorCheck{
-             mc          = options.markercolor,
-             X           = X,
-             Y           = Y,
-             numlabels   = numlabels,
-          }
+         options.markercolor = markerColorCheck{
+            mc          = options.markercolor,
+            X           = X,
+            Y           = Y,
+            numlabels   = numlabels,
+         }
       end
       assertOptions{options = options}
       if options.legend then
