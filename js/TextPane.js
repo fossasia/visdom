@@ -23,7 +23,7 @@ class TextPane extends React.Component {
   render() {
     return (
       <Pane {...this.props} handleDownload={this.handleDownload}>
-        <div dangerouslySetInnerHTML={{__html: this.props.content}}></div>
+        <div dangerouslySetInnerHTML={{__html: this.props.content}} className="text-pane"></div>
       </Pane>
     )
   }
