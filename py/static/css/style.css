@@ -138,6 +138,7 @@ button {
   background-color: white;
   margin: auto auto;
   display: block;
+  width: 100%;
 }
 
 .content-plot {
@@ -147,4 +148,11 @@ button {
 
 .react-grid-item.react-grid-placeholder {
   background: white;
+}
+
+.text-pane {
+  overflow-y: scroll;
+  overflow-x: scroll;
+  max-height: 100%;
+  max-width: 100%;
 }
