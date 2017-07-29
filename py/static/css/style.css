@@ -149,7 +149,7 @@ button {
   background: white;
 }
 
-.text-pane {
+.content-text {
   overflow-y: scroll;
   overflow-x: scroll;
   max-height: 100%;
