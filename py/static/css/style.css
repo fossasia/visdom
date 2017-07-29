@@ -148,3 +148,10 @@ button {
 .react-grid-item.react-grid-placeholder {
   background: white;
 }
+
+.content-text {
+  overflow-y: scroll;
+  overflow-x: scroll;
+  max-height: 100%;
+  max-width: 100%;
+}
