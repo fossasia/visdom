@@ -140,7 +140,8 @@ For a quick introduction into the capabilities of `visdom`, have a look at the `
 
 ### Basics
 Visdom offers the following basic visualization functions:
-- `vis.image`    : images
+- `vis.image`    : image
+- `vis.images`   : list of images
 - `vis.text`     : arbitrary HTML
 - `vis.video`    : videos
 - `vis.svg`      : SVG object
@@ -186,6 +187,17 @@ that contains the image.
 
 The following `options` are supported:
 
+- `options.jpgquality`: JPG quality (`number` 0-100; default = 100)
+- `options.caption`: Caption for the image
+
+#### vis.images
+
+This function draws a list of `images`. It takes an input `B x C x H x W` tensor or a `list of images` all of the same size. It makes a grid of images of size (B / nrow, nrow).
+
+The following arguments and `options` are supported:
+
+- `nrow`: Number of images in a row
+- `padding`: Padding around the image, equal padding around all 4 sides
 - `options.jpgquality`: JPG quality (`number` 0-100; default = 100)
 - `options.caption`: Caption for the image
 
