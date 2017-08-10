@@ -430,9 +430,9 @@ def main():
     print("It's Alive!")
     app = Application()
     app.listen(FLAGS.port, max_buffer_size=1024 ** 3)
+    logging.info("Application Started")
     print("(You can navigate to http://localhost:%s)" % FLAGS.port)
     ioloop.IOLoop.instance().start()
-    logging.info("Application Started")
 
 
 if __name__ == "__main__":
