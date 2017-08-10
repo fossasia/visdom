@@ -431,7 +431,11 @@ def main():
     app = Application()
     app.listen(FLAGS.port, max_buffer_size=1024 ** 3)
     logging.info("Application Started")
-    print("(You can navigate to http://localhost:%s)" % FLAGS.port)
+    if "HOSTNAME" in os.environ:
+        hostname = os.environ["HOSTNAME"]
+    else:
+        hostname = "localhost"
+    print("(You can navigate to http://%s:%s)" % (hostname, FLAGS.port))
     ioloop.IOLoop.instance().start()
 
 
