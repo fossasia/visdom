@@ -193,8 +193,8 @@ def pytorch_wrap(fn):
 
 def wrap_tensor_methods(cls, wrapper):
     fns = ['_surface', 'bar', 'boxplot', 'surf', 'heatmap', 'histogram', 'svg',
-            'image', 'line', 'pie', 'scatter', 'stem', 'quiver', 'contour',
-            'updateTrace']
+           'image', 'images', 'line', 'pie', 'scatter', 'stem', 'quiver', 'contour',
+           'updateTrace']
     for key in [k for k in dir(cls) if k in fns]:
         setattr(cls, key, wrapper(getattr(cls, key)))
 
