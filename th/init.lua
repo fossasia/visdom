@@ -1216,8 +1216,8 @@ M.image = argcheck{
       local imgdata = 'data:image/jpg;base64,' ..
          mime.b64(ffi.string(immem:data(), immem:nElement()))
       local imsize = (img:dim() == 2 and img or img[1]):size():totable()
-      options.width = (options.width or imsize[1])
-      options.height = (options.height or imsize[2])
+      options.width = (options.width or imsize[2])
+      options.height = (options.height or imsize[1])
 
       -- make data object:
       local data = {{
