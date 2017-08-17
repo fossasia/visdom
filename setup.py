@@ -19,18 +19,18 @@ requirements = [
 def download_scripts(path):
     path = Path(path)
 
-    js_files = { 'https://unpkg.com/bootstrap@3.3.7/dist/css/bootstrap.min.css' : 'bootstrap_3_3_7_bootstrap.min.css',
-                'https://unpkg.com/jquery@3.1.1/dist/jquery.min.js' : 'jquery_3_1_1_jquery.min.js',
-                'https://unpkg.com/bootstrap@3.3.7/dist/js/bootstrap.min.js' : 'bootstrap_3_3_7_bootstrap.min.js',
-                'https://unpkg.com/react-resizable@1.4.6/css/styles.css' : 'react-resizable_1_4_6_styles.css',
-                'https://unpkg.com/react-grid-layout@0.14.0/css/styles.css': 'react-grid-layout_0_14_0_styles.css',
-                'https://unpkg.com/react@15/dist/react.min.js' : 'react_15_react.min.js',
-                'https://unpkg.com/react-dom@15/dist/react-dom.min.js' : 'react-dom-15_react-dom.min.js',
-                'https://unpkg.com/classnames@2.2.5' : 'classnames_2_2_5',
-                'https://unpkg.com/layout-bin-packer@1.2.2' : 'layout_bin_packer_1_2_2',
-                'https://cdn.rawgit.com/STRML/react-grid-layout/0.14.0/dist/react-grid-layout.min.js' : 'react-grid-layout_0_14_0_react-grid-layout.min.js',
-                'https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_SVG': 'mathjax_MathJax.js',
-                'https://cdn.rawgit.com/plotly/plotly.js/master/dist/plotly.min.js': 'plotly_plotly.min.js'}
+    js_files = { 'https://unpkg.com/bootstrap@3.3.7/dist/css/bootstrap.min.css' : 'bootstrap.min.css',
+                'https://unpkg.com/jquery@3.1.1/dist/jquery.min.js' : 'jquery.min.js',
+                'https://unpkg.com/bootstrap@3.3.7/dist/js/bootstrap.min.js' : 'bootstrap.min.js',
+                'https://unpkg.com/react-resizable@1.4.6/css/styles.css' : 'react-resizable-styles.css',
+                'https://unpkg.com/react-grid-layout@0.14.0/css/styles.css': 'react-grid-layout-styles.css',
+                'https://unpkg.com/react@15/dist/react.min.js' : 'react-react.min.js',
+                'https://unpkg.com/react-dom@15/dist/react-dom.min.js' : 'react-dom.min.js',
+                'https://unpkg.com/classnames@2.2.5' : 'classnames',
+                'https://unpkg.com/layout-bin-packer@1.2.2' : 'layout_bin_packer',
+                'https://cdn.rawgit.com/STRML/react-grid-layout/0.14.0/dist/react-grid-layout.min.js' : 'react-grid-layout.min.js',
+                'https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_SVG': 'mathjax-MathJax.js',
+                'https://cdn.rawgit.com/plotly/plotly.js/master/dist/plotly.min.js': 'plotly-plotly.min.js'}
 
     for k,v in js_files.items():
         req = urllib.request.Request( k, headers={'User-Agent': 'Mozilla/5.0'})
