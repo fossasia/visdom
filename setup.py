@@ -36,7 +36,7 @@ def download_scripts(path):
         req = urllib.request.Request( k, headers={'User-Agent': 'Mozilla/5.0'})
         data = urllib.request.urlopen(req).read()
         sub_dir = 'js' if 'js' in k else 'css'
-        data_file = open( str(path / 'visdom' /  'py' / 'static' / sub_dir / v), 'w')
+        data_file = open( str(path / 'visdom' / 'static' / sub_dir / v), 'w')
         print(data, file=data_file)
         data_file.close()
 
