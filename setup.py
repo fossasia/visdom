@@ -35,13 +35,11 @@ def download_scripts(path):
 
     for k,v in js_files.items():
         req = urllib.request.Request( k, headers={'User-Agent': 'Mozilla/5.0'})
-        #data = urllib.request.urlopen(req).read()
+        data = urllib.request.urlopen(req).read()
         sub_dir = 'js' if 'js' in k else 'css'
-        #data_file = open( str(path / 'visdom' / 'static' / sub_dir / v), 'wb')
-        #data_file.write(data)
-        #data_file.close()
-        with urllib.request.urlopen(req) as response, open( str(path / 'visdom' / 'static' / sub_dir / v), 'wb') as out_file:
-            shutil.copyfileobj(response, out_file)
+        with open( str(path / 'visdom' / 'static' / sub_dir / v), 'wb') as data_file:
+            data_file.write(data)
+
 
 class pose_develop(develop):
     def run(self):
@@ -73,6 +71,6 @@ setup(
     zip_safe=True,
     install_requires=requirements,
 
-    #post install hooks
+    # post install hooks
     cmdclass={'install': post_install, 'develop':pose_develop}
 )
