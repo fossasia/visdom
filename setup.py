@@ -37,7 +37,7 @@ def download_scripts(path):
         data = urllib.request.urlopen(req).read()
         sub_dir = 'js' if 'js' in k else 'css'
         data_file = open( str(path / 'visdom' / 'static' / sub_dir / v), 'w')
-        print(data, file=data_file)
+        data_file.write(data)
         data_file.close()
 
 class pose_develop(develop):
