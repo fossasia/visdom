@@ -2,7 +2,9 @@ from setuptools import setup
 from setuptools.command.install import install
 from setuptools.command.develop import develop
 
-import urllib.request
+import six.moves.urllib.request as request
+from six import iteritems
+
 from pathlib import Path
 import shutil
 
@@ -15,12 +17,13 @@ requirements = [
     'tornado',
     'pyzmq',
     'six',
+    'pathlib'
 ]
 
 def download_scripts(path):
     path = Path(path)
 
-    js_files = { 'https://unpkg.com/bootstrap@3.3.7/dist/css/bootstrap.min.css' : 'bootstrap.min.css',
+    ext_files = { 'https://unpkg.com/bootstrap@3.3.7/dist/css/bootstrap.min.css' : 'bootstrap.min.css',
                 'https://unpkg.com/jquery@3.1.1/dist/jquery.min.js' : 'jquery.min.js',
                 'https://unpkg.com/bootstrap@3.3.7/dist/js/bootstrap.min.js' : 'bootstrap.min.js',
                 'https://unpkg.com/react-resizable@1.4.6/css/styles.css' : 'react-resizable-styles.css',
@@ -33,9 +36,9 @@ def download_scripts(path):
                 'https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_SVG': 'mathjax-MathJax.js',
                 'https://cdn.rawgit.com/plotly/plotly.js/master/dist/plotly.min.js': 'plotly-plotly.min.js'}
 
-    for k,v in js_files.items():
-        req = urllib.request.Request( k, headers={'User-Agent': 'Mozilla/5.0'})
-        data = urllib.request.urlopen(req).read()
+    for k,v in iteritems(ext_files):
+        req = request.Request( k, headers={'User-Agent': 'Chrome/30.0.0.0'})
+        data = request.urlopen(req).read()
         sub_dir = 'js' if 'js' in k else 'css'
         with open( str(path / 'visdom' / 'static' / sub_dir / v), 'wb') as data_file:
             data_file.write(data)
@@ -71,6 +74,6 @@ setup(
     zip_safe=True,
     install_requires=requirements,
 
-    # post install hooks
+    # Post install hooks
     cmdclass={'install': post_install, 'develop':pose_develop}
 )
