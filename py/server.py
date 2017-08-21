@@ -479,10 +479,11 @@ def download_scripts():
         if 'css' in k:
             sub_dir = 'css'
 
-        full_path = path / 'visdom' / 'static' / sub_dir / v
+        full_path = path / 'static' / sub_dir / v
         if not full_path.exists():
             req = request.Request(k, headers={'User-Agent': 'Chrome/30.0.0.0'})
             try:
+                full_path.parents[0].mkdir(exist_ok=True)
                 data = request.urlopen(req).read()
                 with open(str(full_path), 'wb') as data_file:
                     data_file.write(data)
