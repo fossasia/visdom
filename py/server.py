@@ -22,6 +22,7 @@ import argparse
 import copy
 
 
+
 import six.moves.urllib.request as request
 from six.moves.urllib.error import URLError, HTTPError
 from six import iteritems
@@ -32,6 +33,8 @@ import shutil
 from os.path import expanduser
 from zmq.eventloop import ioloop
 ioloop.install()  # Needs to happen before any tornado imports!
+
+import ui_methods
 
 import tornado.ioloop
 import tornado.web
@@ -132,9 +135,10 @@ class Application(tornado.web.Application):
             (r"/env/(.*)", EnvHandler, dict(state=state, subs=subs)),
             (r"/save", SaveHandler, dict(state=state, subs=subs)),
             (r"/error/(.*)", ErrorHandler),
+            (r"/scripts/(.*)", tornado.web.StaticFileHandler, {"path":str( Path(FLAGS.env_path) / 'static')}),
             (r"/(.*)", IndexHandler, dict(state=state)),
         ]
-        super(Application, self).__init__(handlers, **tornado_settings)
+        super(Application, self).__init__(handlers, ui_methods=ui_methods, **tornado_settings)
 
 
 class SocketHandler(tornado.websocket.WebSocketHandler):
@@ -394,7 +398,8 @@ class EnvHandler(BaseHandler):
             'index.html',
             user=getpass.getuser(),
             items=[active],
-            active_item=active
+            active_item=active,
+            script_path = str(Path(FLAGS.env_path) / 'static')
         )
 
     def post(self, args):
@@ -424,7 +429,8 @@ class IndexHandler(BaseHandler):
             'index.html',
             user=getpass.getuser(),
             items=items,
-            active_item='main'
+            active_item='main',
+            script_path = str(Path(FLAGS.env_path) / 'static')
         )
 
 
@@ -450,8 +456,8 @@ def main():
 def download_scripts():
     """download js, css scripts before server launch if needed"""
 
-    import visdom
-    path = Path(os.path.dirname(visdom.__file__))
+    path = Path(FLAGS.env_path) / 'static'
+    path.mkdir(exist_ok=True)
 
     ext_files = { 'https://unpkg.com/bootstrap@3.3.7/dist/css/bootstrap.min.css' : 'bootstrap.min.css',
                 'https://unpkg.com/jquery@3.1.1/dist/jquery.min.js' : 'jquery.min.js',
@@ -479,7 +485,7 @@ def download_scripts():
         if 'css' in k:
             sub_dir = 'css'
 
-        full_path = path / 'static' / sub_dir / v
+        full_path = path / sub_dir / v
         if not full_path.exists():
             req = request.Request(k, headers={'User-Agent': 'Chrome/30.0.0.0'})
             try:
