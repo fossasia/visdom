@@ -457,7 +457,6 @@ def download_scripts():
     """download js, css scripts before server launch if needed"""
 
     path = Path(FLAGS.env_path) / 'static'
-    path.mkdir(exist_ok=True)
 
     ext_files = { 'https://unpkg.com/bootstrap@3.3.7/dist/css/bootstrap.min.css' : 'bootstrap.min.css',
                 'https://unpkg.com/jquery@3.1.1/dist/jquery.min.js' : 'jquery.min.js',
@@ -489,7 +488,8 @@ def download_scripts():
         if not full_path.exists():
             req = request.Request(k, headers={'User-Agent': 'Chrome/30.0.0.0'})
             try:
-                full_path.parents[0].mkdir(exist_ok=True)
+                if not full_path.parents[0].exists():
+                    full_path.parents[0].mkdir(parents=True)
                 data = request.urlopen(req).read()
                 with open(str(full_path), 'wb') as data_file:
                     data_file.write(data)
