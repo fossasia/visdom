@@ -33,7 +33,7 @@ def download_scripts(path):
                 'https://unpkg.com/classnames@2.2.5' : 'classnames',
                 'https://unpkg.com/layout-bin-packer@1.2.2' : 'layout_bin_packer',
                 'https://cdn.rawgit.com/STRML/react-grid-layout/0.14.0/dist/react-grid-layout.min.js' : 'react-grid-layout.min.js',
-                'https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_SVG': 'mathjax-MathJax.js',
+                'https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_SVG': 'mathjax-MathJax.js',
                 'https://cdn.rawgit.com/plotly/plotly.js/master/dist/plotly.min.js': 'plotly-plotly.min.js'}
 
     for k,v in iteritems(ext_files):
