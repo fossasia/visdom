@@ -15,27 +15,29 @@ LICENSE file in the root directory of this source tree.
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
     <link rel="shortcut icon" href="favicon.png">
-
+    
     <!-- Bootstrap & jQuery -->
-    <link href="https://unpkg.com/bootstrap@3.3.7/dist/css/bootstrap.min.css" rel="stylesheet">
-    <script src="https://unpkg.com/jquery@3.1.1/dist/jquery.min.js"></script>
-    <script src="https://unpkg.com/bootstrap@3.3.7/dist/js/bootstrap.min.js"></script>
+    <link rel="stylesheet" href={{ scripts_url("css/bootstrap.min.css") }}>
+    <script src={{ scripts_url("js/jquery.min.js") }}></script>
+    <script src={{ scripts_url("js/bootstrap.min.js") }}></script>
 
-    <link rel="stylesheet" href="https://unpkg.com/react-resizable@1.4.6/css/styles.css">
-    <link rel="stylesheet" href="https://unpkg.com/react-grid-layout@0.14.0/css/styles.css">
+    <link rel="stylesheet" href={{ scripts_url("css/react-resizable-styles.css") }}>
+    <link rel="stylesheet" href={{ scripts_url("css/react-grid-layout-styles.css") }}>
 
     <!-- Other deps -->
-    <script src="https://unpkg.com/react@15/dist/react.min.js"></script>
-    <script src="https://unpkg.com/react-dom@15/dist/react-dom.min.js"></script>
-    <script src="https://unpkg.com/classnames@2.2.5"></script>
-    <script src="https://unpkg.com/layout-bin-packer@1.2.2"></script>
-    <script src="https://cdn.rawgit.com/STRML/react-grid-layout/0.14.0/dist/react-grid-layout.min.js"></script>
+    <script src={{ scripts_url("js/react-react.min.js") }}></script>
+    <script src={{ scripts_url("js/react-dom.min.js") }}></script>
+    <script src={{ scripts_url("fonts/classnames") }}></script>
+    <script src={{ scripts_url("fonts/layout_bin_packer") }}></script>
+    <script src={{ scripts_url("js/react-grid-layout.min.js") }}></script>
 
     <!-- Mathjax -->
-    <script type="text/javascript" async src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_SVG"></script>
+    <script type="text/javascript" async src={{ scripts_url("js/mathjax-MathJax.js") }}></script>
 
     <!-- Plotly -->
-    <script src="https://cdn.rawgit.com/plotly/plotly.js/master/dist/plotly.min.js"></script>
+    <script src={{ scripts_url("js/plotly-plotly.min.js") }}></script>
+    
+
 
     <!-- Custom styles for this template -->
     <script>

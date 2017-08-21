@@ -1,4 +1,6 @@
-from distutils.core import setup
+from setuptools import setup
+from setuptools.command.install import install
+from setuptools.command.develop import develop
 
 readme = open('README.md').read()
 
@@ -9,6 +11,7 @@ requirements = [
     'tornado',
     'pyzmq',
     'six',
+    'pathlib'
 ]
 
 setup(
