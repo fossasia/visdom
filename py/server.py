@@ -484,7 +484,7 @@ def download_scripts():
             req = request.Request(k, headers={'User-Agent': 'Chrome/30.0.0.0'})
             try:
                 data = request.urlopen(req).read()
-                with open(str(), 'wb') as data_file:
+                with open(str(full_path), 'wb') as data_file:
                     data_file.write(data)
             except (HTTPError,URLError) as e:
                 print('Error {} while downloading {}'.format(k , e.code))
