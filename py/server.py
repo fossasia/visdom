@@ -464,13 +464,13 @@ def download_scripts():
                 'https://unpkg.com/layout-bin-packer@1.2.2' : 'layout_bin_packer',
                 'https://cdn.rawgit.com/STRML/react-grid-layout/0.14.0/dist/react-grid-layout.min.js' : 'react-grid-layout.min.js',
                 'https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_SVG': 'mathjax-MathJax.js',
-                'https://cdn.rawgit.com/plotly/plotly.js/master/dist/plotly.min.js': 'plotly-plotly.min.js'
-                'https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.eot', 'glyphicons-halflings-regular.eot',
-                'https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.eot?#iefix','glyphicons-halflings-regular.eot?#iefix',
-                'https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.woff2','glyphicons-halflings-regular.woff2'
-                'https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.woff','glyphicons-halflings-regular.woff',
-                'https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.ttf','glyphicons-halflings-regular.ttf',
-                'https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.svg#glyphicons_halflingsregular','glyphicons-halflings-regular.svg#glyphicons_halflingsregular'}
+                'https://cdn.rawgit.com/plotly/plotly.js/master/dist/plotly.min.js': 'plotly-plotly.min.js',
+                'https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.eot': 'glyphicons-halflings-regular.eot',
+                'https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.eot?#iefix':'glyphicons-halflings-regular.eot?#iefix',
+                'https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.woff2':'glyphicons-halflings-regular.woff2',
+                'https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.woff':'glyphicons-halflings-regular.woff',
+                'https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.ttf':'glyphicons-halflings-regular.ttf',
+                'https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.svg#glyphicons_halflingsregular':'glyphicons-halflings-regular.svg#glyphicons_halflingsregular'}
 
     for k,v in iteritems(ext_files):
         sub_dir = 'fonts'
