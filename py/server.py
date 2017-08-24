@@ -426,89 +426,6 @@ class ErrorHandler(BaseHandler):
         raise Exception(error_text)
 
 
-# function that downloads and installs javascript, css, and font dependencies:
-def download_scripts(proxies=None, install_dir=None):
-
-    # location in which to download stuff:
-    if install_dir is None:
-        import visdom
-        install_dir = os.path.dirname(visdom.__file__)
-
-    # all files that need to be downloaded:
-    b = 'https://unpkg.com/'
-    bb = '%sbootstrap@3.3.7/dist/' % b
-    ext_files = {
-        '%sjquery@3.1.1/dist/jquery.min.js' % b: 'jquery.min.js',
-        '%sbootstrap@3.3.7/dist/js/bootstrap.min.js' % b: 'bootstrap.min.js',
-        '%sreact-resizable@1.4.6/css/styles.css' % b: 'react-resizable-styles.css',
-        '%sreact-grid-layout@0.14.0/css/styles.css' % b: 'react-grid-layout-styles.css',
-        '%sreact@15.6.1/dist/react.min.js' % b: 'react-react.min.js',
-        '%sreact-dom@15.6.1/dist/react-dom.min.js' % b: 'react-dom.min.js',
-        '%sclassnames@2.2.5' % b: 'classnames',
-        '%slayout-bin-packer@1.2.2' % b: 'layout_bin_packer',
-        'https://cdn.rawgit.com/STRML/react-grid-layout/0.14.0/dist/' +
-        'react-grid-layout.min.js': 'react-grid-layout.min.js',
-        'https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_SVG':
-            'mathjax-MathJax.js',
-        'https://cdn.rawgit.com/plotly/plotly.js/master/dist/plotly.min.js':
-            'plotly-plotly.min.js',
-        '%scss/bootstrap.min.css' % bb: 'bootstrap.min.css',
-        '%sfonts/glyphicons-halflings-regular.eot' % bb:
-            'glyphicons-halflings-regular.eot',
-        '%sfonts/glyphicons-halflings-regular.eot?#iefix' % bb:
-            'glyphicons-halflings-regular.eot?#iefix',
-        '%sfonts/glyphicons-halflings-regular.woff2' % bb:
-            'glyphicons-halflings-regular.woff2',
-        '%sfonts/glyphicons-halflings-regular.woff' % bb:
-            'glyphicons-halflings-regular.woff',
-        '%sfonts/glyphicons-halflings-regular.ttf' % bb:
-            'glyphicons-halflings-regular.ttf',
-        '%sfonts/glyphicons-halflings-regular.svg#glyphicons_halflingsregular' % bb:
-            'glyphicons-halflings-regular.svg#glyphicons_halflingsregular',
-    }
-
-    # make sure all relevant folders exist:
-    dir_list = [
-        '%s' % install_dir,
-        '%s/static' % install_dir,
-        '%s/static/js' % install_dir,
-        '%s/static/css' % install_dir,
-        '%s/static/fonts' % install_dir,
-    ]
-    for directory in dir_list:
-        if not os.path.exists(directory):
-            os.makedirs(directory)
-
-    # set up proxy handler:
-    from six.moves.urllib import request
-    from six.moves.urllib.error import HTTPError, URLError
-    handler = request.ProxyHandler(proxies) if proxies is not None \
-         else request.BaseHandler()
-    opener = request.build_opener(handler)
-    request.install_opener(opener)
-
-    # download files one-by-one:
-    for (key, val) in ext_files.items():
-
-        # set subdirectory:
-        sub_dir = 'fonts'
-        if '.js' in key:
-            sub_dir = 'js'
-        if '.css' in key:
-            sub_dir = 'css'
-
-        # download file:
-        filename = '%s/static/%s/%s' % (install_dir, sub_dir, val)
-        if not os.path.exists(filename):
-            req = request.Request(key, headers={'User-Agent': 'Chrome/30.0.0.0'})
-            try:
-                data = opener.open(req).read()
-                with open(filename, 'wb') as fwrite:
-                    fwrite.write(data)
-            except (HTTPError, URLError) as exc:
-                print('Error {} while downloading {}'.format(exc.code, key))
-
-
 def main():
     print("It's Alive!")
     app = Application()
@@ -518,10 +435,9 @@ def main():
         hostname = os.environ["HOSTNAME"]
     else:
         hostname = "localhost"
-    print("You can navigate to http://%s:%s" % (hostname, FLAGS.port))
+    print("(You can navigate to http://%s:%s)" % (hostname, FLAGS.port))
     ioloop.IOLoop.instance().start()
 
 
 if __name__ == "__main__":
-    download_scripts()
     main()
