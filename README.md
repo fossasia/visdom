@@ -320,7 +320,7 @@ that contains the corresponding x-axis values.
 
 The following plot-specific `options` are currently supported:
 
-- `options.columnnames`: `table` containing x-axis labels
+- `options.rownames`: `table` containing x-axis labels
 - `options.stacked`    : stack multiple columns in `X`
 - `options.legend`     : `table` containing legend labels
 
