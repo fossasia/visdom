@@ -30,6 +30,8 @@ class ImagePane extends React.Component {
      this.setState(
         {scale: this.state.scale * scalefactor}
      );
+     ev.stopPropagation();
+     ev.preventDefault();
   }
 
   resetZoom = (ev) => {
