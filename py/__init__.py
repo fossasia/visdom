@@ -616,6 +616,10 @@ class Visdom(object):
         """
         if update is not None:
             assert X is not None, 'must specify x-values for line update'
+
+            if Y.ndim == 2 and X.ndim == 1:
+                X = np.tile(X, (Y.shape[1], 1)).transpose()
+
             return self.updateTrace(X=X, Y=Y, win=win, env=env,
                                     append=update == 'append', opts=opts)
         assert Y.ndim == 1 or Y.ndim == 2, 'Y should have 1 or 2 dim'
