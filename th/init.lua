@@ -564,6 +564,9 @@ M.line = argcheck{
    call = function(self, Y, X, options, win, env, update)
 
       if update then
+         if Y:dim() == 2 and X:dim() == 1 then
+            X = X:reshape(X:nElement(), 1):expandAs(Y)
+         end
          return self:updateTrace{Y = Y, X = X, win = win, env = env,
             options = options, append = update == 'append',
          }
