@@ -30,15 +30,17 @@ import tornado.web
 import tornado.websocket
 import tornado.escape
 
-logging.getLogger().setLevel(logging.INFO)
-
 parser = argparse.ArgumentParser(description='Start the visdom server.')
 parser.add_argument('-port', metavar='port', type=int, default=8097,
                     help='port to run the server on.')
 parser.add_argument('-env_path', metavar='env_path', type=str,
                     default='%s/.visdom/' % expanduser("~"),
                     help='path to serialized session to reload (end with /).')
+parser.add_argument('-logging_level', metavar='logger_level', type=int,
+                    default=logging.INFO, help='logging level (default = 20).')
 FLAGS = parser.parse_args()
+
+logging.getLogger().setLevel(FLAGS.logging_level)
 
 
 def get_rand_id():
@@ -142,19 +144,19 @@ class SocketHandler(tornado.websocket.WebSocketHandler):
         if self not in list(self.subs.values()):
             self.eid = 'main'
             self.subs[self.sid] = self
-        print('Opened new socket from ip:', self.request.remote_ip)
+        logging.info('Opened new socket from ip:', self.request.remote_ip)
 
         self.write_message(
             json.dumps({'command': 'register', 'data': self.sid}))
 
     def on_message(self, message):
-        print('from web client: ', message)
+        logging.info('from web client: ', message)
         msg = tornado.escape.json_decode(tornado.escape.to_basestring(message))
 
         cmd = msg.get('cmd')
         if cmd == 'close':
             if 'data' in msg and 'eid' in msg:
-                print('closing pane ', msg['data'])
+                logging.info('closing pane ', msg['data'])
                 self.state[msg['eid']]['jsons'].pop(msg['data'], None)
 
         elif cmd == 'save':
@@ -506,7 +508,7 @@ def download_scripts(proxies=None, install_dir=None):
                 with open(filename, 'wb') as fwrite:
                     fwrite.write(data)
             except (HTTPError, URLError) as exc:
-                print('Error {} while downloading {}'.format(exc.code, key))
+                logging.error('Error {} while downloading {}'.format(exc.code, key))
 
 
 def main():
