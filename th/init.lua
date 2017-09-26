@@ -178,7 +178,7 @@ local markerColorCheck = argcheck{
       else  -- mc = N x 3
           markercolor = {}
           for i = 1, mc:size(1) do
-              markercolor[i] = string.format('#%x%x%x', mc[i][1],
+              markercolor[i] = string.format('#%02x%02x%02x', mc[i][1],
                                                      mc[i][2], mc[i][3])
           end
       end
