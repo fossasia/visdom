@@ -120,9 +120,9 @@ def _markerColorCheck(mc, X, Y, L):
     mc = np.uint8(mc)
 
     if mc.ndim == 1:
-        markercolor = mc.tolist()
+        markercolor = ['rgba(0, 0, 255, %s)' % (mc[i] / 255.) for i in mc]
     else:
-        markercolor = ['#%x%x%x' % (i[0], i[1], i[2]) for i in mc]
+        markercolor = ['#%02x%02x%02x' % (i[0], i[1], i[2]) for i in mc]
 
     if mc.shape[0] != X.shape[0]:
         markercolor = [markercolor[Y[i] - 1] for i in range(Y.shape[0])]

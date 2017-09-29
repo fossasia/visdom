@@ -174,7 +174,10 @@ local markerColorCheck = argcheck{
 
       local markercolor
       if mc:dim() == 1 then  -- mc = N
-          markercolor = mc:totable()
+          markercolor = {}
+          for i = 1, mc:size(1) do
+              markercolor[i] = string.format('rgba(0, 0, 255, %s)', mc[i]/255.)
+          end
       else  -- mc = N x 3
           markercolor = {}
           for i = 1, mc:size(1) do
