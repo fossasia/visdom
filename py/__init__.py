@@ -72,7 +72,7 @@ def _axisformat(x, opts):
             'type': opts.get(x + 'type'),
             'title': opts.get(x + 'label'),
             'range': [opts.get(x + 'tickmin'), opts.get(x + 'tickmax')]
-            if (opts.get(x + 'tickmin') and opts.get(x + 'tickmax')) else None,
+            if (opts.get(x + 'tickmin') and opts.get(x + 'tickmax')) is not None else None,
             'tickvals': opts.get(x + 'tickvals'),
             'ticktext': opts.get(x + 'ticklabels'),
             'tickwidth': opts.get(x + 'tickstep'),
