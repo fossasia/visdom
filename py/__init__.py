@@ -24,6 +24,10 @@ from six import string_types
 from six import BytesIO
 import logging
 
+try:
+    import torchfile
+except BaseException:
+    from . import torchfile
 
 logging.getLogger('requests').setLevel(logging.CRITICAL)
 logging.getLogger('urllib3').setLevel(logging.CRITICAL)
@@ -46,6 +50,19 @@ def nan2none(l):
         if math.isnan(val):
             l[idx] = None
     return l
+
+
+def from_t7(t, b64=False):
+    if b64:
+        t = base64.b64decode(t)
+
+    with open('/dev/shm/t7', 'w') as ff:
+        ff.write(t)
+        ff.close()
+
+    sf = open('/dev/shm/t7')
+
+    return torchfile.T7Reader(sf).read_obj()
 
 
 def loadfile(filename):
@@ -180,8 +197,7 @@ def _assert_opts(opts):
 
 def pytorch_wrap(fn):
     def result(*args, **kwargs):
-        args = (a.cpu().numpy() if type(a).__module__ == 'torch' else a
-                for a in args)
+        args = (a.cpu().numpy() if type(a).__module__ == 'torch' else a for a in args)
 
         for k in kwargs:
             if type(kwargs[k]).__module__ == 'torch':
@@ -209,6 +225,7 @@ class Visdom(object):
         ipv6=True,
         proxy=None,
         env='main',
+        send=True,
     ):
         self.server = server
         self.endpoint = endpoint
@@ -216,6 +233,7 @@ class Visdom(object):
         self.ipv6 = ipv6
         self.proxy = proxy
         self.env = env              # default env
+        self.send = send
 
         try:
             import torch
@@ -233,6 +251,9 @@ class Visdom(object):
         """
         if msg.get('eid', None) is None:
             msg['eid'] = self.env
+
+        if not self.send:
+            return msg, endpoint
 
         try:
             r = requests.post(
@@ -482,6 +503,10 @@ class Visdom(object):
         if name:
             assert len(name) >= 0, 'name of trace should be nonempty string'
             assert X.ndim == 1, 'updating by name expects 1-dim data'
+
+        if opts.get('markercolor') is not None:
+            opts['markercolor'] = _markerColorCheck(
+                opts['markercolor'], X, Y, K)
 
         data = {'x': X.transpose().tolist(), 'y': Y.transpose().tolist()}
         if X.ndim == 1:
@@ -844,7 +869,6 @@ class Visdom(object):
         - `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
         - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
         """
-
         X = np.squeeze(X)
         assert X.ndim == 2, 'X should be two-dimensional'
 
@@ -885,7 +909,7 @@ class Visdom(object):
         - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
         """
 
-        self._surface(X=X, stype='surface', opts=opts, win=win, env=env)
+        return self._surface(X=X, stype='surface', opts=opts, win=win, env=env)
 
     def contour(self, X, win=None, env=None, opts=None):
         """
@@ -899,7 +923,7 @@ class Visdom(object):
         - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
         """
 
-        self._surface(X=X, stype='contour', opts=opts, win=win, env=env)
+        return self._surface(X=X, stype='contour', opts=opts, win=win, env=env)
 
     def quiver(self, X, Y, gridX=None, gridY=None,
                             win=None, env=None, opts=None):

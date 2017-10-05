@@ -18,7 +18,10 @@ local visdom = require 'visdom'
 local plot = visdom{server = 'http://localhost', port = 8097}
 
 -- text box demo:
-local textwindow = plot:text{text = 'Hello, world!'}
+local textwindow = plot:text{
+    text = 'Hello, world! If I\'m still open, close failed'
+}
+plot:py_func{func='text', args={'Hello, world!'}}
 
 -- image demo:
 plot:image{
@@ -83,7 +86,6 @@ plot:updateTrace{                             -- add new trace to scatter plot
    Y = torch.randn(255),
    win = id,
    name = 'new trace',
-   options = {markercolor = torch.zeros(255):random(0, 255)}
 }
 
 -- 2D scatter plot with custom colors:
@@ -166,6 +168,12 @@ local id = plot:line{
    Y = torch.cat(torch.range(0, 10), torch.range(0, 10) + 5, 2),
    X = torch.cat(torch.range(0, 10), torch.range(0, 10), 2),
    options = {markers = false}
+}
+
+plot:py_func{
+  func='line',
+  args = {torch.randn(10)},
+  kwargs = {options = {title = 'This is lua through python'}}
 }
 
 -- update trace demos:

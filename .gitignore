@@ -1,1 +1,4 @@
 node_modules
+build
+th/CMakeLists.txt
+th/build.luarocks

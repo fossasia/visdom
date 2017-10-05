@@ -1,4 +1,4 @@
-from distutils.core import setup
+from setuptools import setup
 
 readme = open('README.md').read()
 
@@ -9,6 +9,7 @@ requirements = [
     'tornado',
     'pyzmq',
     'six',
+    'torchfile',
 ]
 
 setup(

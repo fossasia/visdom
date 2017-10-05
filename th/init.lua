@@ -13,7 +13,6 @@ require 'torch'
 require 'image'
 local json     = require 'cjson'
 local mime     = require 'mime'
-local ffi      = require 'ffi'
 local ltn12    = require 'ltn12'
 local socket   = require 'socket'
 socket.http    = require 'socket.http'
@@ -71,142 +70,12 @@ local assertOptions = argcheck{
    end
 }
 
--- function that replaces all NaNs in a table by json.null:
-local function _nan2null(t)
-   for key, val in pairs(t) do
-      if type(val) == 'table' then
-         t[key] = _nan2null(val)
-      elseif val ~= val then
-         t[key] = json.null
-      end
-   end
-   return t
-end
-local nan2null = argcheck{
-   {name = 't', type = 'table'},
-   call = function(t)
-      return _nan2null(t)
-   end
-}
-
--- function that parses the layout from options:
-local options2layout = argcheck{
-   noordered = true,
-   {name = 'options', type = 'table'},
-   {name = 'is3d',    type = 'boolean', default = false},
-   call = function(options, is3d)
-      local layout = {
-         width      = options.width,
-         height     = options.height,
-         showlegend = (options.legend == nil) and false or options.legend,
-         title      = options.title,
-         xaxis = (options.xtype or options.xtype or options.xtick or
-            options.xtickvals or options.xticklabels or options.xlabel or
-            options.xtickmin or options.xtickmax) and {
-            type     = options.xtype,
-            title    = options.xlabel,
-            tickvals = options.xtickvals,
-            ticktext = options.xticklabels,
-            range    = (options.xtickmin and options.xtickmax) and
-               {options.xtickmin, options.xtickmax} or nil,
-            tickwidth      = options.xtickstep,
-            showticklabels = options.xtick,
-         },
-         yaxis = (options.ytype or options.ytype or options.ytick or
-            options.ytickvals or options.yticklabels or options.ylabel or
-            options.ytickmin or options.ytickmax) and {
-            type     = options.ytype,
-            title    = options.ylabel,
-            tickvals = options.ytickvals,
-            ticktext = options.yticklabels,
-            range    = (options.ytickmin and options.ytickmax) and
-               {options.ytickmin, options.ytickmax} or nil,
-            tickwidth      = options.ytickstep,
-            showticklabels = options.ytick,
-         },
-         margin = {
-            l = options.marginleft or 60,
-            r = options.marginright or 60,
-            t = options.margintop or 60,
-            b = options.marginbottom or 60,
-         },
-      }
-      if is3d then
-         layout.zaxis = (options.ztype or options.ztype or options.ztick or
-            options.ztickvals or options.zticklabels or options.zlabel or
-            options.ztickmin or options.ztickmax) and {
-            type     = options.ztype,
-            title    = options.zlabel,
-            tickvals = options.ztickvals,
-            ticktext = options.zticklabels,
-            range = (options.ztickmin and options.ztickmax) and
-               {options.ztickmin, options.ztickmax} or nil,
-            tickwidth      = options.ztickstep,
-            showticklabels = options.ztick,
-         }
-      end
-      if options.stacked ~= nil then
-         layout.barmode = options.stacked and 'stack' or 'group'
-      end
-      return layout
-   end
-}
-
-local markerColorCheck = argcheck{
-   noordered = true,
-   {name = 'mc',        type = 'torch.*Tensor'},
-   {name = 'X',         type = 'torch.*Tensor'},
-   {name = 'Y',         type = 'torch.*Tensor'},
-   {name = 'numlabels', type = 'number'},
-   call = function(mc, X, Y, numlabels)
-      assert(torch.isTensor(mc), "markercolor need to be a torch.*Tensor")
-      assert(mc:size(1) == numlabels or (mc:size(1) == X:size(1) and
-              (mc:dim() == 1 or mc:dim() == 2 and mc:size(2) == 3)),
-             string.format("marker colors have to be of size `%d` " ..
-                              "or `%d x 3` or `%d` or `%d x 3`, " ..
-                              "but got: %s", X:size(1), X:size(1),
-                           numlabels, numlabels,
-                           table.concat(mc:size():totable(), 'x')))
-      assert(mc:ge(0):all(), "marker colors have to be >= 0")
-      assert(mc:le(255):all(), "marker colors have to be <= 255")
-      assert(mc:eq(torch.floor(mc)):all(),
-             'marker colors are assumed to be integer')
-
-      local markercolor
-      if mc:dim() == 1 then  -- mc = N
-          markercolor = {}
-          for i = 1, mc:size(1) do
-              markercolor[i] = string.format('rgba(0, 0, 255, %s)', mc[i]/255.)
-          end
-      else  -- mc = N x 3
-          markercolor = {}
-          for i = 1, mc:size(1) do
-              markercolor[i] = string.format('#%02x%02x%02x', mc[i][1],
-                                                     mc[i][2], mc[i][3])
-          end
-      end
-      if mc:size(1) ~= X:size(1) then
-        local ret = {}
-        for i = 1, Y:size(1) do
-            ret[i] = markercolor[Y[i]]
-        end
-        markercolor = ret
-      end
-      local ret = {}
-      for k,v in pairs(markercolor) do
-        ret[Y[k]] = ret[Y[k]] or {}
-        table.insert(ret[Y[k]], v)
-      end
-      return ret
-   end
-}
-
 -- initialize plotting object:
 M.__init = argcheck{
    doc = [[
-      The `visdom` package implements a Torch client for `visdom`, a visualization
-      server that wraps plot.ly to show scalable, high-quality visualizations in
-      the browser.
+      The `visdom` package implements a Torch client for `visdom`, a
+      visualization server that wraps plot.ly to show scalable, high-quality
+      visualizations in the browser.
 
       The server can be started with the `server.py` script. The server defaults
       to port 8097. When the server is running on `domain.com:8097`, then visit
@@ -340,17 +209,9 @@ M.save = argcheck{
    {name = 'self',     type = 'visdom.client'},
    {name = 'envs',     type = 'table'},
    call = function(self, envs)
-      if #envs > 0 then
-         for _,v in pairs(envs) do assert(type(v) == 'string') end
-
-         -- send save request to server
-         return self:sendRequest{
-            request = {
-               data = envs,
-            },
-            endpoint = 'save',
-         }
-      end
+      local args = {envs}
+      local kwargs = {}
+      return self:py_func{func = 'save', args = args, kwargs = kwargs}
    end
 }
 
@@ -381,45 +242,9 @@ M.updateTrace = argcheck{
    {name = 'append',       type = 'boolean',       opt = true},
    {name = 'options',      type = 'table',         opt = true},
    call = function(self, Y, X, win, env, name, append, options)
-
-      -- assertions on the inputs:
-      assert(Y:isSameSizeAs(X), 'Y should be same size as X')
-      assert(X:dim() == 1 or X:dim() == 2, 'Updated X should be 1 or 2 dim')
-      if name then
-         assert(#name >= 0,   'name of trace should be nonempty string')
-         assert(X:dim() == 1, 'updating by name expects 1-dim data')
-      end
-      options = options or {}
-      if options.markercolor then
-         options.markercolor = markerColorCheck{
-            mc        = options.markercolor,
-            X         = X,
-            Y         = X.new(X:size()):fill(1),
-            numlabels = 1,
-         }
-      end
-
-      -- generate table in plotly format:
-      local data = {
-         x = X:view(X:size(1), -1):t():totable(),
-         y = Y:view(Y:size(1), -1):t():totable(),
-      }
-      if options.markercolor then  -- for scatter plot
-         data.marker = {color = options.markercolor}
-      end
-
-      -- send scatter plot request to server:
-      return self:sendRequest{
-         request = {
-            data      = nan2null(data),
-            win       = win,
-            eid       = env,
-            name      = name,
-            append    = append,
-            opts      = options,
-         },
-         endpoint = 'update',
-      }
+      local args = {X, Y, win}
+      local kwargs = {name = name, append = append, env = env, opts = options}
+      return self:py_func{func = 'updateTrace', args = args, kwargs = kwargs}
    end
 }
 
@@ -453,85 +278,15 @@ M.scatter = argcheck{
    {name = 'env',     type = 'string',        opt = true},
    {name = 'update',  type = 'string',        opt = true},
    call = function(self, X, Y, options, win, env, update)
-
-      if update then
-         return self:updateTrace{Y = Y, X = X, win = win, env = env,
-            options = options, append = update == 'append',
-         }
-      end
-
-      -- assertions on inputs:
-      assert(X:dim() == 2, 'X should be two-dimensional')
-      assert(X:size(2) == 2 or X:size(2) == 3,
-         'X should have two or three columns')
-      if Y then
-         Y = Y:squeeze()
-         assert(Y:dim() == 1, 'Y should be one-dimensional')
-         assert(X:size(1) == Y:size(1), 'sizes of X and Y should match')
-      else
-         Y = torch.ones(X:size(1))
-      end
-      assert(not(torch.typename(Y) == 'torch.FloatTensor' or
-                 torch.typename(Y) == 'torch.DoubleTensor') or
-         Y:eq(torch.floor(Y)):all(), 'labels are assumed to be integer')
-      assert(Y:min() == 1, 'labels are assumed to be between 1 and K')
-      local numlabels, is3d = Y:max(), (X:size(2) == 3)
-
-      -- set default options:
-      options = options or {}
-      options.colormap     = options.colormap     or 'Viridis'
-      options.mode         = options.mode         or 'markers'
-      options.markersymbol = options.markersymbol or 'dot'
-      options.markersize   = options.markersize   or 10
-      if options.markercolor ~= nil then
-         options.markercolor = markerColorCheck{
-            mc          = options.markercolor,
-            X           = X,
-            Y           = Y,
-            numlabels   = numlabels,
-         }
-      end
-      assertOptions{options = options}
-      if options.legend then
-         assert(#options.legend == numlabels,
-            'number of legend labels must match number of labels in Y')
-      end
-
-      -- generate table in plotly format:
-      local data = {}
-      for k = 1,numlabels do
-         local ind = Y:eq(k)
-         if ind:sum() > 0 then  -- ignore classes without data
-            table.insert(data, {
-               x      = X:select(2, 1)[ind]:totable(),
-               y      = X:select(2, 2)[ind]:totable(),
-               z      = is3d and X:select(2, 3)[ind]:totable() or nil,
-               name   = options.legend and
-                        options.legend[k] or string.format('%d', k),
-               type   = is3d and 'scatter3d' or 'scatter',
-               mode   = options.mode,
-               fill   = options.fillarea and 'tonexty' or nil,
-               marker = {
-                  size   = options.markersize,
-                  symbol = options.markersymbol,
-                  color  = options.markercolor and options.markercolor[k] or nil,
-                  line   = {
-                     color = '#000000',
-                     width = 0.5,
-                  },
-               },
-            })
-         end
-      end
-
-      -- send scatter plot request to server:
-      return self:sendRequest{request = {
-         data   = nan2null(data),
-         win    = win,
-         eid    = env,
-         layout = options2layout{options = options, is3d = is3d},
-         opts   = options,
-      }}
+      local args = {X}
+      local kwargs = {
+         Y = Y,
+         win = win,
+         env = env,
+         opts = options,
+         update = update
+      }
+      return self:py_func{func = 'scatter', args = args, kwargs = kwargs}
    end
 }
 
@@ -565,61 +320,9 @@ M.line = argcheck{
    {name = 'env',     type = 'string',        opt = true},
    {name = 'update',  type = 'string',        opt = true},
    call = function(self, Y, X, options, win, env, update)
-
-      if update then
-         if Y:dim() == 2 and X:dim() == 1 then
-            X = X:reshape(X:nElement(), 1):expandAs(Y)
-         end
-         return self:updateTrace{Y = Y, X = X, win = win, env = env,
-            options = options, append = update == 'append',
-         }
-      end
-
-      -- assertions on the inputs:
-      assert(Y:dim() == 1 or Y:dim() == 2, 'Y should be one or two-dimensional')
-      if X then
-         assert(X:dim() == 1 or X:dim() == 2,
-            'X should be one or two-dimensional')
-      else
-         X = torch.linspace(0, 1, Y:size(1))
-      end
-      if Y:dim() == 2 and X:dim() == 1 then
-         X = X:reshape(X:nElement(), 1):expandAs(Y)
-      end
-      assert(Y:isSameSizeAs(X), 'data should have the same size')
-
-      -- set default options:
-      options = options or {}
-      options.markers  = (options.markers == nil) and false or options.markers
-      options.fillarea = (options.fillarea == nil) and false or options.fillarea
-      options.mode = options.markers and 'lines+markers' or 'lines'
-      assertOptions{options = options}
-
-      -- set up line data:
-      local linedata
-      if Y:dim() == 1 then
-         linedata = torch.cat(X, Y, 2)
-      else
-         linedata = torch.cat(X:t():reshape(X:nElement(), 1),
-                              Y:t():reshape(Y:nElement(), 1), 2)
-      end
-
-      -- set up labels indicating which line each element corresponds to:
-      local labels
-      if Y:dim() == 2 then
-         labels = torch.range(1, Y:size(2))
-         labels = labels:reshape(1, labels:nElement()):expandAs(Y)
-         labels = labels:t():reshape(labels:nElement())
-      end
-
-      -- send line plot request to server (line plot is a special scatter plot):
-      return (self:scatter{
-         X       = linedata,
-         Y       = labels,
-         options = options,
-         win     = win,
-         env     = env
-      })
+      local args = {Y}
+      local kwargs = {X = X, win = win, env = env, opts = options}
+      return self:py_func{func = 'line', args = args, kwargs = kwargs}
    end
 }
 
@@ -645,43 +348,9 @@ M.stem = argcheck{
    {name = 'win',     type = 'string',        opt = true},
    {name = 'env',     type = 'string',        opt = true},
    call = function(self, X, Y, options, win, env)
-
-      -- assertions on inputs:
-      local X = X:squeeze()
-      assert(X:dim() == 1 or X:dim() == 2, 'X should be one or two-dimensional')
-      if X:dim() == 1 then X = X:reshape(X:nElement(), 1) end
-      local Y = Y or torch.range(1, X:size(1))
-      if Y:dim() == 1 then Y = Y:reshape(Y:nElement(), 1) end
-      assert(Y:size(1) == X:size(1), 'number of rows in X and Y should match')
-      assert(Y:size(2) == 1 or Y:size(2) == X:size(2),
-         'Y should be a single column or the same number of columns as X')
-      if Y:size(2) < X:size(2) then Y = Y:expandAs(X) end
-
-      -- interleave X and Y with copies / zeros to get lines:
-      local Z = torch.zeros(Y:size(1), Y:size(2))         -- all zeros
-      local N = torch.zeros(Y:size(1), Y:size(2)):cdiv(Z) -- all NaNs
-      X = torch.cat({Z, X, N}, 2):reshape(X:size(1) * 3, X:size(2))
-      Y = torch.cat({Y, Y, N}, 2):reshape(Y:size(1) * 3, Y:size(2))
-
-      -- convert data to scatter plot format:
-      local data = torch.cat(Y:reshape(Y:nElement()),
-                             X:reshape(X:nElement()), 2)
-      local labels = torch.range(1, X:size(2)):reshape(1, X:size(2))
-      labels = labels:expandAs(X):reshape(X:nElement())
-
-      -- set default options:
-      options = options or {}
-      options.mode = 'lines'
-      assertOptions{options = options}
-
-      -- generate data in plotly format (stem plot is a special scatter plot):
-      return (self:scatter{
-         X       = data,
-         Y       = labels,
-         options = options,
-         win     = win,
-         env     = env,
-      })
+      local args = {X}
+      local kwargs = {Y = Y, win = win, env = env, opts = options}
+      return self:py_func{func = 'stem', args = args, kwargs = kwargs}
    end
 }
 
@@ -706,44 +375,9 @@ M.heatmap = argcheck{
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
    call = function(self, X, options, win, env)
-      assert(X:dim() == 2, 'data should be two-dimensional')
-
-      -- set default options:
-      options = options or {}
-      options.xmin     = options.xmin     or X:min()
-      options.xmax     = options.xmax     or X:max()
-      options.colormap = options.colormap or 'Viridis'
-      options.columnnames = options.columnnames or nil
-      options.rownames = options.rownames or nil
-      assertOptions{options = options}
-      if options.columnnames then
-         assert(#options.columnnames == X:size(2),
-            'number of column names should match number of columns in X')
-      end
-      if options.rownames then
-         assert(#options.rownames == X:size(1),
-            'number of row names should match number of rows in X')
-      end
-
-      -- generate data in plotly format:
-      local data = {{
-         z    = X:totable(),
-         x    = options.columnnames,
-         y    = options.rownames,
-         zmin = options.xmin,
-         zmax = options.xmax,
-         type = 'heatmap',
-         colorscale = options.colormap,
-      }}
-
-      -- send heatmap plot request to server:
-      return self:sendRequest{request = {
-         data   = data,
-         win    = win,
-         eid    = env,
-         layout = options2layout{options = options},
-         opts   = options,
-      }}
+      local args = {X}
+      local kwargs = {win = win, env = env, opts = options}
+      return self:py_func{func = 'heatmap', args = args, kwargs = kwargs}
    end
 }
 
@@ -771,52 +405,9 @@ M.bar = argcheck{
    {name = 'win',     type = 'string',        opt = true},
    {name = 'env',     type = 'string',        opt = true},
    call = function(self, X, Y, options, win, env)
-
-      -- assertions on inputs:
-      local X = X:squeeze()
-      assert(X:dim() == 1 or X:dim() == 2, 'X should be one or two-dimensional')
-      if X:dim() == 1 then X = X:reshape(X:nElement(), 1) end
-      if Y then
-         Y = Y:squeeze()
-         assert(Y:dim() == 1, 'Y should be one-dimensional')
-         assert(X:nElement() == Y:nElement(), 'sizes of X and Y should match')
-      else
-         Y = torch.range(1, X:nElement())
-      end
-
-      -- set default options:
-      options = options or {}
-      options.stacked = (options.stacked == nil) and false or options.stacked
-      options.rownames = options.rownames or nil
-      assertOptions{options = options}
-      if options.rownames then
-         assert(#options.rownames == X:size(1),
-            'number of row names should match number of rows in X')
-      end
-      if options.legend then
-         assert(#options.legend == X:size(2),
-            'number of legend labels must match number of columns in X')
-      end
-
-      -- generate data in plotly format:
-      local data = {}
-      for k = 1,X:size(2) do
-         table.insert(data,{
-            y    = X:select(2, k):totable(),
-            x    = options.rownames or Y:totable(),
-            type = 'bar',
-            name = options.legend and options.legend[k] or nil,
-         })
-      end
-
-      -- send bar plot request to server:
-      return self:sendRequest{request = {
-         data   = data,
-         win    = win,
-         eid    = env,
-         layout = options2layout{options = options},
-         opts   = options,
-      }}
+      local args = {X}
+      local kwargs = {Y = Y, win = win, env = env, opts = options}
+      return self:py_func{func = 'bar', args = args, kwargs = kwargs}
    end
 }
 
@@ -838,29 +429,9 @@ M.histogram = argcheck{
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
    call = function(self, X, options, win, env)
-
-      -- assertions in inputs:
-      local X = X:squeeze()
-      assert(X:dim() == 1, 'X should be one-dimensional')
-
-      -- set default options:
-      options = options or {}
-      options.numbins = options.numbins or math.min(30, X:nElement())
-      assertOptions{options = options}
-
-      -- compute histogram:
-      local minX, maxX = X:min(), X:max()
-      local bins  = torch.histc(X, options.numbins, minX, maxX)
-      local range = torch.linspace(minX, maxX, options.numbins)
-
-      -- make plot:
-      return (self:bar{
-         X = bins,
-         Y = range,
-         options = options,
-         win     = win,
-         env     = env,
-      })
+      local args = {X}
+      local kwargs = {win = win, env = env, opts = options}
+      return self:py_func{func = 'histogram', args = args, kwargs = kwargs}
    end
 }
 
@@ -882,77 +453,11 @@ M.boxplot = argcheck{
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
    call = function(self, X, options, win, env)
-
-      -- assertions on input:
-      local X = X:squeeze()
-      assert(X:dim() == 1 or X:dim() == 2, 'X should be one or two-dimensional')
-      X = X:reshape(X:size(1), X:dim() == 1 and 1 or X:size(2))
-
-      -- process options:
-      options = options or {}
-      assertOptions{options = options}
-      if options.legend then
-         assert(#options.legend == X:size(2),
-            'number of legend labels should match number of columns')
-      end
-
-      -- construct data:
-      local data = {}
-      for k = 1,X:size(2) do
-         table.insert(data, {
-            type = 'box',
-            y    = X:select(2, k):totable(),
-            name = options.legend and options.legend[k]
-                                   or string.format('column %d', k)
-         })
-      end
-
-      -- send boxplot request to server:
-      return self:sendRequest{request = {
-         data   = data,
-         win    = win,
-         eid    = env,
-         layout = options2layout{options = options},
-         opts   = options,
-      }}
+      local args = {X}
+      local kwargs = {win = win, env = env, opts = options}
+      return self:py_func{func = 'boxplot', args = args, kwargs = kwargs}
    end
 }
-
--- helper function for surface 2D/3D plots
--- `type` is 'contour' (2D) or 'surface' (3D).
-local function _surface(self, X, type, options, win, env)
-   -- assertions on input:
-   X = X:squeeze()
-   assert(X:dim() == 2, 'X should be two-dimensional')
-
-   -- process options:
-   options = options or {}
-   options.xmin     = options.xmin     or X:min()
-   options.xmax     = options.xmax     or X:max()
-   options.colormap = options.colormap or 'Viridis'
-   assertOptions{options = options}
-
-   -- generate data table:
-   local data = {{
-      z    = X:totable(),
-      [type == 'surface' and 'cmin' or 'zmin'] = options.xmin,
-      [type == 'surface' and 'cmax' or 'zmax'] = options.xmax,
-      type = type,
-      colorscale = options.colormap,
-   }}
-
-   -- send 3d surface plot request to server:
-   return self:sendRequest{request = {
-      data   = data,
-      win    = win,
-      eid    = env,
-      layout = options2layout{
-         options = options,
-         is3d = type == 'surface' and true or nil
-      },
-      opts   = options,
-   }}
-end
 
 -- 3d surface plot:
 M.surf = argcheck{
@@ -973,7 +478,9 @@ M.surf = argcheck{
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
    call = function(self, X, options, win, env)
-      return _surface(self, X, 'surface', options, win, env)
+      local args = {X}
+      local kwargs = {win = win, env = env, opts = options}
+      return self:py_func{func = 'surf', args = args, kwargs = kwargs}
    end
 }
 
@@ -996,7 +503,9 @@ M.contour = argcheck{
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
    call = function(self, X, options, win, env)
-      return _surface(self, X, 'contour', options, win, env)
+      local args = {X}
+      local kwargs = {win = win, env = env, opts = options}
+      return self:py_func{func = 'contour', args = args, kwargs = kwargs}
    end
 }
 
@@ -1023,77 +532,15 @@ M.quiver = argcheck{
    {name = 'win',     type = 'string',        opt = true},
    {name = 'env',     type = 'string',        opt = true},
    call = function(self, X, Y, gridX, gridY, options, win, env)
-
-      -- defaults and assertions:
-      assert(X:nDimension() == 2, 'X should be two-dimensional')
-      assert(Y:nDimension() == 2, 'Y should be two-dimensional')
-      assert(X:isSameSizeAs(Y), 'X and Y should have the same size')
-      local N, M = X:size(1), X:size(2)
-      local gridY = gridY or torch.range(1, N):resize(N, 1):expand(N, M)
-      local gridX = gridX or torch.range(1, M):resize(1, M):expand(N, M)
-      assert(X:isSameSizeAs(gridX), 'X and gridX should have the same size')
-      assert(Y:isSameSizeAs(gridY), 'Y and gridY should have the same size')
-
-      -- set default options:
-      options = options or {}
-      options.mode = 'lines'
-      options.arrowheads = (options.arrowheads == nil) or options.arrowheads
-      assertOptions{options = options}
-
-      -- normalize vectors to unit length:
-      if options.normalize then
-         assert(type(options.normalize) == 'number' and options.normalize > 0,
-            'options.normalize should be a positive number')
-         local magnitude = torch.cmul(X, X):add(torch.cmul(Y, Y)):sqrt():max()
-         X:div(magnitude / options.normalize)
-         Y:div(magnitude / options.normalize)
-      end
-
-      -- function that makes a vector:
-      local function vec(tensor) return tensor:reshape(tensor:nElement()) end
-
-      -- interleave X and Y with copies / NaNs to get lines:
-      local N = vec(torch.zeros(X:size(1), X:size(2)):div(0)) -- all NaNs
-      local tipX = torch.add(gridX, X)
-      local tipY = torch.add(gridY, Y)
-      local dX = torch.cat({vec(gridX), vec(tipX), N}, 2)
-      local dY = torch.cat({vec(gridY), vec(tipY), N}, 2)
-
-      -- convert data to scatter plot format:
-      dX = dX:reshape(dX:size(1) * 3, 1)
-      dY = dY:reshape(dY:size(1) * 3, 1)
-      local data = torch.cat(dX:reshape(dX:nElement()),
-                             dY:reshape(dY:nElement()), 2)
-
-      -- add arrow heads:
-      if options.arrowheads then
-
-         -- compute tip points:
-         local alpha = 0.33  -- size of arrow head relative to vector length
-         local beta  = 0.33  -- width of the base of the arrow head
-         local Xbeta = torch.add(X, 1e-5):mul(beta)
-         local Ybeta = torch.add(Y, 1e-5):mul(beta)
-         local lX = torch.add(X,  Ybeta):mul(-alpha):add(tipX)
-         local rX = torch.add(X, -Ybeta):mul(-alpha):add(tipX)
-         local lY = torch.add(Y, -Xbeta):mul(-alpha):add(tipY)
-         local rY = torch.add(Y,  Xbeta):mul(-alpha):add(tipY)
-
-         -- add to data:
-         local hX = torch.cat({vec(lX), vec(tipX), vec(rX), vec(N)}, 2)
-         local hY = torch.cat({vec(lY), vec(tipY), vec(rY), vec(N)}, 2)
-         hX = hX:reshape(hX:size(1) * 4, 1)
-         hY = hY:reshape(hY:size(1) * 4, 1)
-         data = torch.cat(data, torch.cat(hX:reshape(hX:nElement()),
-                                          hY:reshape(hY:nElement()), 2), 1)
-      end
-
-      -- generate data in plotly format (quiver plot is a special scatter plot):
-      return (self:scatter{
-         X       = data,
-         options = options,
-         win     = win,
-         env     = env,
-      })
+      local args = {X, Y}
+      local kwargs = {
+         gridX = gridX,
+         gridY = gridY,
+         win = win,
+         env = env,
+         opts = options,
+      }
+      return self:py_func{func = 'quiver', args = args, kwargs = kwargs}
    end
 }
 
@@ -1113,27 +560,9 @@ M.pie = argcheck{
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
    call = function(self, X, options, win, env)
-
-      -- check input:
-      local X = X:squeeze()
-      assert(X:nDimension() == 1,  'X should be one-dimensional')
-      assert(torch.ge(X, 0):all(), 'X cannot contain negative values')
-
-      -- generate table in plotly format:
-      local data = {{
-         values = X:totable(),
-         labels = options.legend,
-         type   = 'pie'
-      }}
-
-      -- send 3d surface plot request to server:
-      return self:sendRequest{request = {
-         data   = data,
-         win    = win,
-         eid    = env,
-         layout = options2layout{options = options},
-         opts   = options,
-      }}
+      local args = {X}
+      local kwargs = {win = win, env = env, opts = options}
+      return self:py_func{func = 'pie', args = args, kwargs = kwargs}
    end
 }
 
@@ -1156,39 +585,9 @@ M.mesh = argcheck{
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
    call = function(self, X, Y, options, win, env)
-
-      -- check inputs:
-      assert(X:nDimension() == 2, 'X must have 2 dimensions')
-      assert(X:size(2) == 2 or X:size(2) == 3, 'X must have 2 or 3 columns')
-      local is3d = (X:size(2) == 3)
-      local ispoly = (Y ~= nil)
-      if ispoly then
-         assert(Y:nDimension() == 2, 'Y must have 2 dimensions')
-         assert(Y:size(2) == X:size(2),
-            'X and Y must have same number of columns')
-      end
-      options = options or {}
-      assertOptions(options)
-
-      -- make data object:
-      local data = {{
-         x = X:narrow(2, 1, 1):squeeze():totable(),
-         y = X:narrow(2, 2, 1):squeeze():totable(),
-         z = is3d and X:narrow(2, 3, 1):squeeze():totable() or nil,
-         i = ispoly and Y:narrow(2, 1, 1):squeeze():totable() or nil,
-         j = ispoly and Y:narrow(2, 2, 1):squeeze():totable() or nil,
-         k = (ispoly and is3d) and Y:narrow(2, 3, 1):squeeze():totable() or nil,
-         color = options.color,
-         opacity = options.opacity,
-         type = is3d and 'mesh3d' or 'mesh',
-      }}
-      return self:sendRequest{request = {
-         data   = data,
-         win    = win,
-         eid    = env,
-         layout = options2layout{options = options},
-         opts   = options,
-      }}
+      local args = {X}
+      local kwargs = {Y = Y, win = win, env = env, opts = options}
+      return self:py_func{func = 'mesh', args = args, kwargs = kwargs}
    end
 }
 
@@ -1209,38 +608,9 @@ M.image = argcheck{
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
    call = function(self, img, options, win, env)
-      assert(img:dim() == 2 or img:dim() == 3,
-         'image should be two or three-dimensional')
-
-      -- default options:
-      options = options or {}
-      options.jpgquality = options.jpgquality or 100
-      assertOptions{options = options}
-
-      -- convert to JPG bytestring to base64:
-      local immem = image.compressJPG(img, options.jpgquality)
-      local imgdata = 'data:image/jpg;base64,' ..
-         mime.b64(ffi.string(immem:data(), immem:nElement()))
-      local imsize = (img:dim() == 2 and img or img[1]):size():totable()
-      options.width = (options.width or imsize[2])
-      options.height = (options.height or imsize[1])
-
-      -- make data object:
-      local data = {{
-         content = {
-            src     = imgdata,
-            caption = options.caption,
-         },
-         type = 'image',
-      }}  -- NOTE: This is not a plotly type
-
-      -- send image request:
-      return self:sendRequest{request = {
-         data   = data,
-         win    = win,
-         eid    = env,
-         opts   = options,
-      }}
+      local args = {img}
+      local kwargs = {win = win, env = env, opts = options}
+      return self:py_func{func = 'image', args = args, kwargs = kwargs}
    end
 }
 
@@ -1264,27 +634,18 @@ M.images = argcheck{
    {name = 'env',     type = 'string', opt = true},
    call = function(self, table, tensor, nrow, padding, options, win, env)
       assert(table or tensor)
-      return self:image{
-        img = image.toDisplayTensor{
-          input = table or tensor, padding = padding, nrow = nrow},
-        options = options,
-        win = win,
-        env = env
+      local input = table or tensor
+      local args = {input}
+      local kwargs = {
+         nrow = nrow,
+         padding = padding,
+         win = win,
+         env = env,
+         opts = options
       }
+      return self:py_func{func = 'images', args = args, kwargs = kwargs}
    end
 }
-
--- helper function for loading file as bytestring:
-local function loadFile(filename)
-   local paths = require 'paths'
-   assert(paths.filep(filename),
-      string.format('file not found: %s', filename))
-   local file = io.open(filename, 'r')
-   assert(file, string.format('could not open file: %s', filename))
-   local str = file:read('*all')
-   file:close()
-   return str
-end
 
 -- SVG object:
 M.svg = argcheck{
@@ -1301,20 +662,15 @@ M.svg = argcheck{
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
    call = function(self, svgstr, svgfile, options, win, env)
-
-      -- load SVG and strip doctype if it is present:
-      assert(svgstr or svgfile, 'should specify SVG string or filename')
-      local svgstr = svgstr or loadFile(svgfile)
-      local svg = svgstr:match('<svg .+</svg>')
-      assert(svg, 'SVG could not be parsed correctly')
-
-      -- send SVG request:
-      return (self:text{
-         text    = svg,
-         options = options,
-         win     = win,
-         eid     = env,
-      })
+      local args = {}
+      local kwargs = {
+         svgstr = svgstr,
+         svgfile = svgfile,
+         win = win,
+         env = env,
+         opts = options,
+      }
+      self:py_func{func = 'svg', args = args, kwargs = kwargs}
    end
 }
 
@@ -1333,53 +689,15 @@ M.video = argcheck{
    {name = 'win',       type = 'string', opt = true},
    {name = 'env',       type = 'string', opt = true},
    call = function(self, tensor, videofile, options, win, env)
-
-      -- get mime type for video:
-      options = options or {}
-      options.fps = options.fps or 25
-      videofile = videofile or os.tmpname() .. '.ogv'
-      assert(tensor or videofile, 'should specify video tensor or file')
-      local extension = videofile:sub(-3):lower()
-      local mimetypes = {
-         mp4  = 'mp4',
-         ogv  = 'ogg',
-         avi  = 'avi',
-         webm = 'webm',
+      local args = {}
+      local kwargs = {
+         tensor = tensor,
+         videofile = videofile,
+         win = win,
+         env = env,
+         opts = options,
       }
-      local mimetype = mimetypes[extension]
-      assert(mimetype, string.format('unknown video type: %s', extension))
-
-      -- construct video if a tensor was specified:
-      if tensor then
-         assert(tensor:nDimension() == 4, 'video should be in 4D tensor')
-         local ffmpeg = require 'ffmpeg'
-         local video = ffmpeg.Video{
-            height = tensor:size(3),
-            width  = tensor:size(4),
-            fps    = options.fps,
-            length = tensor:size(1),
-            tensor = tensor,
-            zoom   = 2,
-         }
-         video:save{outpath = videofile, keep = false, usetheora = true}
-      end
-
-      -- load video file:
-      local bytestr = loadFile(videofile)
-
-      -- send out video request:
-      local videodata = string.format([[
-         <video controls>
-            <source type="video/%s" src="data:video/%s;base64,%s">
-            Your browser does not support the video tag.
-         </video>
-      ]], mimetype, mimetype, mime.b64(bytestr))
-      return (self:text{
-         text    = videodata,
-         options = options,
-         win     = win,
-         eid     = env,
-      })
+      return self:py_func{func = 'video', args = args, kwargs = kwargs}
    end
 }
 
@@ -1396,24 +714,9 @@ M.text = argcheck{
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
    call = function(self, text, options, win, env)
-
-      -- default options:
-      options = options or {}
-      assertOptions{options = options}
-
-      -- make data object:
-      local data = {{
-         content = text,
-         type  = 'text',
-      }}  -- NOTE: This is not a plotly type
-
-      -- send text request:
-      return self:sendRequest{request = {
-         data   = data,
-         win    = win,
-         eid    = env,
-         opts   = options,
-      }}
+      local args = {text}
+      local kwargs = {win = win, env = env, opts = options}
+      return self:py_func{func = 'text', args = args, kwargs = kwargs}
    end
 }
 
@@ -1428,11 +731,59 @@ M.close = argcheck{
    {name = 'win',  type = 'string', opt = true},
    {name = 'env',  type = 'string', opt = true},
    call = function(self, win, env)
-      return self:sendRequest{
-         request  = ({win = win, eid = env}),
-         endpoint = 'close',
-      }
+      local args = {}
+      local kwargs = {win = win, env = env}
+      return self:py_func{func = 'close', args = args, kwargs = kwargs}
    end
 }
+
+local prep
+prep = function(v)
+  local a = {val = v, is_tensor = false, is_table = false}
+  if torch.isTensor(v) then
+     a.val = mime.b64(torch.serialize(v, 'binary'))
+     a.is_tensor = true
+  end
+
+  if type(v) == "table" then
+     local vprep = {}
+     for k,v_old in pairs(v) do vprep[k] = prep(v_old) end
+     a.val = vprep
+     a.is_table = true
+  end
+  return a
+end
+
+M.py_func = argcheck {
+  doc = [[
+  ]],
+  noordered = true,
+  {name = 'self', type = 'visdom.client'},
+  {name = 'func', type = 'string'},
+  {name = 'args', type = 'table'},
+  {name = 'kwargs', type = 'table', opt=true},
+  call = function(self, func, args, kwargs)
+     for k,v in pairs(args) do args[k] = prep(v) end
+
+     for k,v in pairs(kwargs or {}) do
+       kwargs[k] = prep(v)
+       if k == 'options' then
+         kwargs.opts = kwargs.options
+         kwargs.options = nil
+       end
+     end
+
+     local ret = self:sendRequest{
+        request = {func = func, args = args, kwargs = kwargs},
+     }
+
+     if ret:match('Traceback') then
+       error(ret)
+     end
+
+     return ret
+  end
+}
+
 
 return visdom.client
