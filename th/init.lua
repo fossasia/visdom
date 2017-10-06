@@ -240,10 +240,18 @@ M.updateTrace = argcheck{
    {name = 'env',          type = 'string',        opt = true},
    {name = 'name',         type = 'string',        opt = true},
    {name = 'append',       type = 'boolean',       opt = true},
+   {name = 'opts',         type = 'table',         opt = true},
    {name = 'options',      type = 'table',         opt = true},
-   call = function(self, Y, X, win, env, name, append, options)
+   call = function(self, Y, X, win, env, name, append, opts, options)
+      if options then
+         print(
+            [[WARNING: Argument `options` is deprecated and will soon be
+            removed. Use argument `opts` instead.]]
+         )
+      end
+      opts = opts or options or {}
       local args = {X, Y, win}
-      local kwargs = {name = name, append = append, env = env, opts = options}
+      local kwargs = {name = name, append = append, env = env, opts = opts}
       return self:py_func{func = 'updateTrace', args = args, kwargs = kwargs}
    end
 }
@@ -273,17 +281,25 @@ M.scatter = argcheck{
    {name = 'self',    type = 'visdom.client'},
    {name = 'X',       type = 'torch.*Tensor'},
    {name = 'Y',       type = 'torch.*Tensor', opt = true},
+   {name = 'opts',    type = 'table',         opt = true},
    {name = 'options', type = 'table',         opt = true},
    {name = 'win',     type = 'string',        opt = true},
    {name = 'env',     type = 'string',        opt = true},
    {name = 'update',  type = 'string',        opt = true},
-   call = function(self, X, Y, options, win, env, update)
+   call = function(self, X, Y, opts, options, win, env, update)
+      if options then
+         print(
+            [[WARNING: Argument `options` is deprecated and will soon be
+            removed. Use argument `opts` instead.]]
+         )
+      end
+      opts = opts or options or {}
       local args = {X}
       local kwargs = {
          Y = Y,
          win = win,
          env = env,
-         opts = options,
+         opts = opts,
          update = update
       }
       return self:py_func{func = 'scatter', args = args, kwargs = kwargs}
@@ -315,13 +331,21 @@ M.line = argcheck{
    {name = 'self',    type = 'visdom.client'},
    {name = 'Y',       type = 'torch.*Tensor'},
    {name = 'X',       type = 'torch.*Tensor', opt = true},
+   {name = 'opts',    type = 'table',         opt = true},
    {name = 'options', type = 'table',         opt = true},
    {name = 'win',     type = 'string',        opt = true},
    {name = 'env',     type = 'string',        opt = true},
    {name = 'update',  type = 'string',        opt = true},
-   call = function(self, Y, X, options, win, env, update)
+   call = function(self, Y, X, opts, options, win, env, update)
+      if options then
+         print(
+            [[WARNING: Argument `options` is deprecated and will soon be
+            removed. Use argument `opts` instead.]]
+         )
+      end
+      opts = opts or options or {}
       local args = {Y}
-      local kwargs = {X = X, win = win, env = env, opts = options}
+      local kwargs = {X = X, win = win, env = env, opts = opts}
       return self:py_func{func = 'line', args = args, kwargs = kwargs}
    end
 }
@@ -344,12 +368,20 @@ M.stem = argcheck{
    {name = 'self',    type = 'visdom.client'},
    {name = 'X',       type = 'torch.*Tensor'},
    {name = 'Y',       type = 'torch.*Tensor', opt = true},
+   {name = 'opts',    type = 'table',         opt = true},
    {name = 'options', type = 'table',         opt = true},
    {name = 'win',     type = 'string',        opt = true},
    {name = 'env',     type = 'string',        opt = true},
-   call = function(self, X, Y, options, win, env)
+   call = function(self, X, Y, opts, options, win, env)
+      if options then
+         print(
+            [[WARNING: Argument `options` is deprecated and will soon be
+            removed. Use argument `opts` instead.]]
+         )
+      end
+      opts = opts or options or {}
       local args = {X}
-      local kwargs = {Y = Y, win = win, env = env, opts = options}
+      local kwargs = {Y = Y, win = win, env = env, opts = opts}
       return self:py_func{func = 'stem', args = args, kwargs = kwargs}
    end
 }
@@ -371,12 +403,20 @@ M.heatmap = argcheck{
    noordered = true,
    {name = 'self',    type = 'visdom.client'},
    {name = 'X',       type = 'torch.*Tensor'},
+   {name = 'opts',    type = 'table',  opt = true},
    {name = 'options', type = 'table',  opt = true},
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
-   call = function(self, X, options, win, env)
+   call = function(self, X, opts, options, win, env)
+      if options then
+         print(
+            [[WARNING: Argument `options` is deprecated and will soon be
+            removed. Use argument `opts` instead.]]
+         )
+      end
+      opts = opts or options or {}
       local args = {X}
-      local kwargs = {win = win, env = env, opts = options}
+      local kwargs = {win = win, env = env, opts = opts}
       return self:py_func{func = 'heatmap', args = args, kwargs = kwargs}
    end
 }
@@ -401,12 +441,20 @@ M.bar = argcheck{
    {name = 'self',    type = 'visdom.client'},
    {name = 'X',       type = 'torch.*Tensor'},
    {name = 'Y',       type = 'torch.*Tensor', opt = true},
+   {name = 'opts',    type = 'table',         opt = true},
    {name = 'options', type = 'table',         opt = true},
    {name = 'win',     type = 'string',        opt = true},
    {name = 'env',     type = 'string',        opt = true},
-   call = function(self, X, Y, options, win, env)
+   call = function(self, X, Y, opts, options, win, env)
+      if options then
+         print(
+            [[WARNING: Argument `options` is deprecated and will soon be
+            removed. Use argument `opts` instead.]]
+         )
+      end
+      opts = opts or options or {}
       local args = {X}
-      local kwargs = {Y = Y, win = win, env = env, opts = options}
+      local kwargs = {Y = Y, win = win, env = env, opts = opts}
       return self:py_func{func = 'bar', args = args, kwargs = kwargs}
    end
 }
@@ -425,12 +473,20 @@ M.histogram = argcheck{
    noordered = true,
    {name = 'self',    type = 'visdom.client'},
    {name = 'X',       type = 'torch.*Tensor'},
+   {name = 'opts',    type = 'table',  opt = true},
    {name = 'options', type = 'table',  opt = true},
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
-   call = function(self, X, options, win, env)
+   call = function(self, X, opts, options, win, env)
+      if options then
+         print(
+            [[WARNING: Argument `options` is deprecated and will soon be
+            removed. Use argument `opts` instead.]]
+         )
+      end
+      opts = opts or options or {}
       local args = {X}
-      local kwargs = {win = win, env = env, opts = options}
+      local kwargs = {win = win, env = env, opts = opts}
       return self:py_func{func = 'histogram', args = args, kwargs = kwargs}
    end
 }
@@ -449,12 +505,20 @@ M.boxplot = argcheck{
    noordered = true,
    {name = 'self',    type = 'visdom.client'},
    {name = 'X',       type = 'torch.*Tensor'},
+   {name = 'opts',    type = 'table',  opt = true},
    {name = 'options', type = 'table',  opt = true},
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
-   call = function(self, X, options, win, env)
+   call = function(self, X, opts, options, win, env)
+      if options then
+         print(
+            [[WARNING: Argument `options` is deprecated and will soon be
+            removed. Use argument `opts` instead.]]
+         )
+      end
+      opts = opts or options or {}
       local args = {X}
-      local kwargs = {win = win, env = env, opts = options}
+      local kwargs = {win = win, env = env, opts = opts}
       return self:py_func{func = 'boxplot', args = args, kwargs = kwargs}
    end
 }
@@ -474,12 +538,20 @@ M.surf = argcheck{
    noordered = true,
    {name = 'self',    type = 'visdom.client'},
    {name = 'X',       type = 'torch.*Tensor'},
+   {name = 'opts',    type = 'table',  opt = true},
    {name = 'options', type = 'table',  opt = true},
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
-   call = function(self, X, options, win, env)
+   call = function(self, X, opts, options, win, env)
+      if options then
+         print(
+            [[WARNING: Argument `options` is deprecated and will soon be
+            removed. Use argument `opts` instead.]]
+         )
+      end
+      opts = opts or options or {}
       local args = {X}
-      local kwargs = {win = win, env = env, opts = options}
+      local kwargs = {win = win, env = env, opts = opts}
       return self:py_func{func = 'surf', args = args, kwargs = kwargs}
    end
 }
@@ -499,12 +571,20 @@ M.contour = argcheck{
    noordered = true,
    {name = 'self',    type = 'visdom.client'},
    {name = 'X',       type = 'torch.*Tensor'},
+   {name = 'opts',    type = 'table',  opt = true},
    {name = 'options', type = 'table',  opt = true},
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
-   call = function(self, X, options, win, env)
+   call = function(self, X, opts, options, win, env)
+      if options then
+         print(
+            [[WARNING: Argument `options` is deprecated and will soon be
+            removed. Use argument `opts` instead.]]
+         )
+      end
+      opts = opts or options or {}
       local args = {X}
-      local kwargs = {win = win, env = env, opts = options}
+      local kwargs = {win = win, env = env, opts = opts}
       return self:py_func{func = 'contour', args = args, kwargs = kwargs}
    end
 }
@@ -528,17 +608,25 @@ M.quiver = argcheck{
    {name = 'Y',       type = 'torch.*Tensor'},
    {name = 'gridX',   type = 'torch.*Tensor', opt = true},
    {name = 'gridY',   type = 'torch.*Tensor', opt = true},
+   {name = 'opts',    type = 'table',         opt = true},
    {name = 'options', type = 'table',         opt = true},
    {name = 'win',     type = 'string',        opt = true},
    {name = 'env',     type = 'string',        opt = true},
-   call = function(self, X, Y, gridX, gridY, options, win, env)
+   call = function(self, X, Y, gridX, gridY, opts, options, win, env)
+      if options then
+         print(
+            [[WARNING: Argument `options` is deprecated and will soon be
+            removed. Use argument `opts` instead.]]
+         )
+      end
+      opts = opts or options or {}
       local args = {X, Y}
       local kwargs = {
          gridX = gridX,
          gridY = gridY,
          win = win,
          env = env,
-         opts = options,
+         opts = opts,
       }
       return self:py_func{func = 'quiver', args = args, kwargs = kwargs}
    end
@@ -556,12 +644,20 @@ M.pie = argcheck{
    noordered = true,
    {name = 'self',    type = 'visdom.client'},
    {name = 'X',       type = 'torch.*Tensor'},
+   {name = 'opts',    type = 'table',  opt = true},
    {name = 'options', type = 'table',  opt = true},
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
-   call = function(self, X, options, win, env)
+   call = function(self, X, opts, options, win, env)
+      if options then
+         print(
+            [[WARNING: Argument `options` is deprecated and will soon be
+            removed. Use argument `opts` instead.]]
+         )
+      end
+      opts = opts or options or {}
       local args = {X}
-      local kwargs = {win = win, env = env, opts = options}
+      local kwargs = {win = win, env = env, opts = opts}
       return self:py_func{func = 'pie', args = args, kwargs = kwargs}
    end
 }
@@ -581,12 +677,20 @@ M.mesh = argcheck{
    {name = 'self',    type = 'visdom.client'},
    {name = 'X',       type = 'torch.*Tensor'},
    {name = 'Y',       type = 'torch.*Tensor', opt = true},
+   {name = 'opts',    type = 'table',  opt = true},
    {name = 'options', type = 'table',  opt = true},
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
-   call = function(self, X, Y, options, win, env)
+   call = function(self, X, Y, opts, options, win, env)
+      if options then
+         print(
+            [[WARNING: Argument `options` is deprecated and will soon be
+            removed. Use argument `opts` instead.]]
+         )
+      end
+      opts = opts or options or {}
       local args = {X}
-      local kwargs = {Y = Y, win = win, env = env, opts = options}
+      local kwargs = {Y = Y, win = win, env = env, opts = opts}
       return self:py_func{func = 'mesh', args = args, kwargs = kwargs}
    end
 }
@@ -604,12 +708,20 @@ M.image = argcheck{
    noordered = true,
    {name = 'self',    type = 'visdom.client'},
    {name = 'img',     type = 'torch.*Tensor'},
+   {name = 'opts',    type = 'table',  opt = true},
    {name = 'options', type = 'table',  opt = true},
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
-   call = function(self, img, options, win, env)
+   call = function(self, img, opts, options, win, env)
+      if options then
+         print(
+            [[WARNING: Argument `options` is deprecated and will soon be
+            removed. Use argument `opts` instead.]]
+         )
+      end
+      opts = opts or options or {}
       local args = {img}
-      local kwargs = {win = win, env = env, opts = options}
+      local kwargs = {win = win, env = env, opts = opts}
       return self:py_func{func = 'image', args = args, kwargs = kwargs}
    end
 }
@@ -629,10 +741,18 @@ M.images = argcheck{
    {name = 'tensor',  type = 'torch.*Tensor', opt = true},
    {name = 'nrow',    type = 'number', opt = true},
    {name = 'padding', type = 'number', opt = true},
+   {name = 'opts',    type = 'table',  opt = true},
    {name = 'options', type = 'table',  opt = true},
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
-   call = function(self, table, tensor, nrow, padding, options, win, env)
+   call = function(self, table, tensor, nrow, padding, opts, options, win, env)
+      if options then
+         print(
+            [[WARNING: Argument `options` is deprecated and will soon be
+            removed. Use argument `opts` instead.]]
+         )
+      end
+      opts = opts or options or {}
       assert(table or tensor)
       local input = table or tensor
       local args = {input}
@@ -641,7 +761,7 @@ M.images = argcheck{
          padding = padding,
          win = win,
          env = env,
-         opts = options
+         opts = opts
       }
       return self:py_func{func = 'images', args = args, kwargs = kwargs}
    end
@@ -658,17 +778,25 @@ M.svg = argcheck{
    {name = 'self',    type = 'visdom.client'},
    {name = 'svgstr',  type = 'string', opt = true},
    {name = 'svgfile', type = 'string', opt = true},
+   {name = 'opts',    type = 'table',  opt = true},
    {name = 'options', type = 'table',  opt = true},
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
-   call = function(self, svgstr, svgfile, options, win, env)
+   call = function(self, svgstr, svgfile, opts, options, win, env)
+      if options then
+         print(
+            [[WARNING: Argument `options` is deprecated and will soon be
+            removed. Use argument `opts` instead.]]
+         )
+      end
+      opts = opts or options or {}
       local args = {}
       local kwargs = {
          svgstr = svgstr,
          svgfile = svgfile,
          win = win,
          env = env,
-         opts = options,
+         opts = opts,
       }
       self:py_func{func = 'svg', args = args, kwargs = kwargs}
    end
@@ -685,17 +813,25 @@ M.video = argcheck{
    {name = 'self',      type = 'visdom.client'},
    {name = 'tensor',    type = 'torch.ByteTensor', opt = true},
    {name = 'videofile', type = 'string', opt = true},
+   {name = 'opts',    type = 'table',  opt = true},
    {name = 'options',   type = 'table',  opt = true},
    {name = 'win',       type = 'string', opt = true},
    {name = 'env',       type = 'string', opt = true},
-   call = function(self, tensor, videofile, options, win, env)
+   call = function(self, tensor, videofile, opts, options, win, env)
+      if options then
+         print(
+            [[WARNING: Argument `options` is deprecated and will soon be
+            removed. Use argument `opts` instead.]]
+         )
+      end
+      opts = opts or options or {}
       local args = {}
       local kwargs = {
          tensor = tensor,
          videofile = videofile,
          win = win,
          env = env,
-         opts = options,
+         opts = opts,
       }
       return self:py_func{func = 'video', args = args, kwargs = kwargs}
    end
@@ -710,12 +846,20 @@ M.text = argcheck{
    noordered = true,
    {name = 'self',    type = 'visdom.client'},
    {name = 'text',    type = 'string'},
+   {name = 'opts',    type = 'table',  opt = true},
    {name = 'options', type = 'table',  opt = true},
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
-   call = function(self, text, options, win, env)
+   call = function(self, text, opts, options, win, env)
+      if options then
+         print(
+            [[WARNING: Argument `options` is deprecated and will soon be
+            removed. Use argument `opts` instead.]]
+         )
+      end
+      opts = opts or options or {}
       local args = {text}
-      local kwargs = {win = win, env = env, opts = options}
+      local kwargs = {win = win, env = env, opts = opts}
       return self:py_func{func = 'text', args = args, kwargs = kwargs}
    end
 }

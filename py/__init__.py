@@ -504,7 +504,8 @@ class Visdom(object):
             assert len(name) >= 0, 'name of trace should be nonempty string'
             assert X.ndim == 1, 'updating by name expects 1-dim data'
 
-        if opts.get('markercolor') is not None:
+        if opts is not None and opts.get('markercolor') is not None:
+            K = int(Y.max())
             opts['markercolor'] = _markerColorCheck(
                 opts['markercolor'], X, Y, K)
 

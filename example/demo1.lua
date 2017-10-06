@@ -26,7 +26,7 @@ plot:py_func{func='text', args={'Hello, world!'}}
 -- image demo:
 plot:image{
    img = image.fabio(),
-   options = {
+   opts = {
       title = 'Fabio',
       caption = 'Hello, I am Fabio ;)',
    }
@@ -35,7 +35,7 @@ plot:image{
 -- images demo:
 plot:images{
    table = {torch.zeros(3, 200, 200) + 0.1, torch.zeros(3, 200, 200) + 0.2},
-   options = {
+   opts = {
       caption = 'I was a table of tensors...',
    }
 }
@@ -43,7 +43,7 @@ plot:images{
 -- images demo:
 plot:images{
    tensor = torch.randn(6, 3, 200, 200),
-   options = {
+   opts = {
      caption = 'I was a 4D tensor...',
    }
 }
@@ -52,7 +52,7 @@ plot:images{
 plot:scatter{
    X = torch.randn(100, 2),
    Y = torch.randn(100):gt(0):add(1):long(),
-   options = {
+   opts = {
       legend = {'Apples', 'Pears'},
       xtickmin  = -5,
       xtickmax  = 5,
@@ -66,7 +66,7 @@ plot:scatter{
 plot:scatter{
    X = torch.randn(100, 3),
    Y = torch.randn(100):gt(0):add(1):long(),
-   options = {
+   opts = {
       markersize = 5,
       legend = {'Men', 'Women'},
    },
@@ -75,7 +75,7 @@ plot:scatter{
 -- 2D scatterplot with custom intensities (red channel):
 local id = plot:scatter{
    X = torch.randn(255, 2),
-   options = {
+   opts = {
       markersize = 10,
       markercolor = torch.zeros(255):random(0, 255),
    },
@@ -91,7 +91,7 @@ plot:updateTrace{                             -- add new trace to scatter plot
 -- 2D scatter plot with custom colors:
 plot:scatter{
     X = torch.randn(255, 2),
-    options = {
+    opts = {
         markersize = 10,
         markercolor = torch.zeros(255, 3):random(0, 255),
     },
@@ -101,7 +101,7 @@ plot:scatter{
 plot:scatter{
     X = torch.randn(255, 2),
     Y = torch.randn(255):gt(0):add(1):long(), -- two labels
-    options = {
+    opts = {
         markersize = 10,
         markercolor = torch.zeros(2, 3):random(0, 255),
     },
@@ -113,7 +113,7 @@ plot:bar{
 }
 plot:bar{
    X = torch.randn(5, 3):abs(),
-   options = {
+   opts = {
       stacked = true,
       legend = {'Facebook', 'Google', 'Twitter'},
       rownames = {'2012', '2013', '2014', '2015', '2016'},
@@ -121,7 +121,7 @@ plot:bar{
 }
 plot:bar{
    X = torch.randn(20, 3),
-   options = {
+   opts = {
       stacked = false,
       legend  = {'The Netherlands', 'France', 'United States'},
    },
@@ -130,7 +130,7 @@ plot:bar{
 -- histogram demo:
 plot:histogram{
    X = torch.randn(10000),
-   options = {numbins = 20},
+   opts = {numbins = 20},
 }
 
 -- heatmap demo:
@@ -138,7 +138,7 @@ local X = torch.cmul(torch.range(1, 10):reshape(1, 10):expand(5, 10),
                      torch.range(1, 5):reshape(5, 1):expand(5, 10))
 plot:heatmap{
    X = X,
-   options = {
+   opts = {
        columnnames = {'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'},
        rownames = {'y1', 'y2', 'y3', 'y4', 'y5'},
        colormap = 'Electric',
@@ -151,29 +151,29 @@ local y = torch.range(1, 100):reshape(100, 1):expand(100, 100)
 local X = torch.add(x, -50):pow(2):add(
    torch.add(y, -50):pow(2)
 ):div(-math.pow(20, 2)):exp()
-plot:contour{X = X, options = {colormap = 'Viridis'}}
+plot:contour{X = X, opts = {colormap = 'Viridis'}}
 
 -- surface plot demo:
-plot:surf{X = X, options = {colormap = 'Hot'}}
+plot:surf{X = X, opts = {colormap = 'Hot'}}
 
 -- line plot demos:
 local Y = torch.range(-4, 4, 0.05)
 plot:line{
    Y = torch.cat(torch.cmul(Y, Y), torch.sqrt(Y + 5), 2),
    X = torch.cat(Y, Y, 2),
-   options = {markers = false}
+   opts = {markers = false}
 }
 
 local id = plot:line{
    Y = torch.cat(torch.range(0, 10), torch.range(0, 10) + 5, 2),
    X = torch.cat(torch.range(0, 10), torch.range(0, 10), 2),
-   options = {markers = false}
+   opts = {markers = false}
 }
 
 plot:py_func{
   func='line',
   args = {torch.randn(10)},
-  kwargs = {options = {title = 'This is lua through python'}}
+  kwargs = {opts = {title = 'This is lua through python'}}
 }
 
 -- update trace demos:
@@ -203,7 +203,7 @@ local Y = torch.range(0, 4, 0.02)
 plot:line{
    Y = torch.cat(torch.sqrt(Y), torch.sqrt(Y):add(2), 2),
    X = torch.cat(Y, Y, 2),
-   options = {
+   opts = {
       fillarea = true,
       legend   = false,
       width    = 400,
@@ -224,7 +224,7 @@ local X = torch.randn(100, 2)
 X:narrow(2, 2, 1):add(2)
 plot:boxplot{
    X = X,
-   options = {
+   opts = {
       legend = {'Men', 'Women'},
    },
 }
@@ -235,7 +235,7 @@ local X = torch.cat(torch.sin(Y), torch.cos(Y), 2)
 plot:stem{
    X = X,
    Y = Y,
-   options = {
+   opts = {
       legend = {'Sine', 'Cosine'},
    },
 }
@@ -250,7 +250,7 @@ local V = torch.sin(X):cmul(Y)
 plot:quiver{
    X = U,
    Y = V,
-   options = {normalize = 0.9},
+   opts = {normalize = 0.9},
 }
 
 -- pie chart demo:
@@ -258,7 +258,7 @@ local X = torch.DoubleTensor{19, 26, 55}
 local legend = {'Residential', 'Non-Residential', 'Utility'}
 plot:pie{
    X = X,
-   options = {legend = legend},
+   opts = {legend = legend},
 }
 
 -- svg rendering demo:
@@ -271,7 +271,7 @@ local svgstr = [[
 ]]
 plot:svg{
    svgstr  = svgstr,
-   options = {
+   opts = {
       title  = 'Example of SVG Rendering',
    },
 }
@@ -287,7 +287,7 @@ local Y = torch.DoubleTensor{
    {3, 4, 1, 2, 5, 6, 5, 2, 0, 1, 6, 3},
    {0, 7, 2, 3, 6, 7, 1, 1, 5, 5, 7, 6},
 }:t()
-plot:mesh{X = X, Y = Y, options = {opacity = 0.5}}
+plot:mesh{X = X, Y = Y, opts = {opacity = 0.5}}
 
 -- video demo:
 local video = torch.ByteTensor(256, 3, 128, 128)

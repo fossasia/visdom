@@ -185,36 +185,36 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 This function draws an `img`. It takes as input an `CxHxW` tensor `img`
 that contains the image.
 
-The following `options` are supported:
+The following `opts` are supported:
 
-- `options.jpgquality`: JPG quality (`number` 0-100; default = 100)
-- `options.caption`: Caption for the image
+- `opts.jpgquality`: JPG quality (`number` 0-100; default = 100)
+- `opts.caption`: Caption for the image
 
 #### vis.images
 
 This function draws a list of `images`. It takes an input `B x C x H x W` tensor or a `list of images` all of the same size. It makes a grid of images of size (B / nrow, nrow).
 
-The following arguments and `options` are supported:
+The following arguments and `opts` are supported:
 
 - `nrow`: Number of images in a row
 - `padding`: Padding around the image, equal padding around all 4 sides
-- `options.jpgquality`: JPG quality (`number` 0-100; default = 100)
-- `options.caption`: Caption for the image
+- `opts.jpgquality`: JPG quality (`number` 0-100; default = 100)
+- `opts.caption`: Caption for the image
 
 #### vis.text
 This function prints text in a  box. You can use this to embed arbitrary HTML.
 It takes as input a `text` string.
-No specific `options` are currently supported.
+No specific `opts` are currently supported.
 
 #### vis.video
 This function plays a video. It takes as input the filename of the video
 `videofile` or a `LxCxHxW`-sized `tensor` (in Lua) or a or a `LxHxWxC`-sized
 `tensor` (in Python) containing all the frames of the video as input. The
-function does not support any plot-specific `options`.
+function does not support any plot-specific `opts`.
 
-The following `options` are supported:
+The following `opts` are supported:
 
-- `options.fps`: FPS for the video (`integer` > 0; default = 25)
+- `opts.fps`: FPS for the video (`integer` > 0; default = 25)
 
 Note: Using `tensor` input requires that ffmpeg is installed and working.
 Your ability to play video may depend on the browser you use: your browser has
@@ -223,7 +223,7 @@ to support the Theano codec in an OGG container (Chrome supports this).
 #### vis.svg
 This function draws an SVG object. It takes as input a SVG string `svgstr` or
 the name of an SVG file `svgfile`. The function does not support any specific
-`options`.
+`opts`.
 
 ### Simple Plots
 Further details on the wrapped plotting functions are given below.
@@ -236,15 +236,15 @@ This function draws a 2D or 3D scatter plot. It takes as input an `Nx2` or
 scatter plot. An optional `N` tensor `Y` containing discrete labels that
 range between `1` and `K` can be specified as well -- the labels will be
 reflected in the colors of the markers.
-The following `options` are supported:
+The following `opts` are supported:
 
-- `options.colormap`    : colormap (`string`; default = `'Viridis'`)
-- `options.markersymbol`: marker symbol (`string`; default = `'dot'`)
-- `options.markersize`  : marker size (`number`; default = `'10'`)
-- `options.markercolor` : color per marker. (`torch.*Tensor`; default = `nil`)
-- `options.legend`      : `table` containing legend names
+- `opts.colormap`    : colormap (`string`; default = `'Viridis'`)
+- `opts.markersymbol`: marker symbol (`string`; default = `'dot'`)
+- `opts.markersize`  : marker size (`number`; default = `'10'`)
+- `opts.markercolor` : color per marker. (`torch.*Tensor`; default = `nil`)
+- `opts.legend`      : `table` containing legend names
 
-`options.markercolor` is a Tensor with Integer values. The tensor can be of size `N` or `N x 3` or `K` or `K x 3`.
+`opts.markercolor` is a Tensor with Integer values. The tensor can be of size `N` or `N x 3` or `K` or `K x 3`.
 
 - Tensor of size `N`: Single intensity value per data point. 0 = black, 255 = red
 - Tensor of size `N x 3`: Red, Green and Blue intensities per data point. 0,0,0 = black, 255,255,255 = white
@@ -258,14 +258,14 @@ to plot. It also takes an optional `X` tensor that specifies the
 corresponding x-axis values; `X` can be an `N` tensor (in which case all
 lines will share the same x-axis values) or have the same size as `Y`.
 
-The following `options` are supported:
+The following `opts` are supported:
 
-- `options.fillarea`    : fill area below line (`boolean`)
-- `options.colormap`    : colormap (`string`; default = `'Viridis'`)
-- `options.markers`     : show markers (`boolean`; default = `false`)
-- `options.markersymbol`: marker symbol (`string`; default = `'dot'`)
-- `options.markersize`  : marker size (`number`; default = `'10'`)
-- `options.legend`      : `table` containing legend names
+- `opts.fillarea`    : fill area below line (`boolean`)
+- `opts.colormap`    : colormap (`string`; default = `'Viridis'`)
+- `opts.markers`     : show markers (`boolean`; default = `false`)
+- `opts.markersymbol`: marker symbol (`string`; default = `'dot'`)
+- `opts.markersize`  : marker size (`number`; default = `'10'`)
+- `opts.legend`      : `table` containing legend names
 
 
 #### vis.updateTrace
@@ -283,7 +283,7 @@ this can be used for masking update.
 The `append` parameter determines if the update data should be appended
 to or replaces existing data.
 
-There are no options because they are assumed to be inherited from the
+There are no `opts` because they are assumed to be inherited from the
 specified plot.
 
 #### vis.stem
@@ -293,74 +293,74 @@ An optional `N` or `NxM` tensor `Y` containing timestamps can be specified
 as well; if `Y` is an `N` tensor then all `M` time series are assumed to
 have the same timestamps.
 
-The following `options` are supported:
+The following `opts` are supported:
 
-- `options.colormap`: colormap (`string`; default = `'Viridis'`)
-- `options.legend`  : `table` containing legend names
+- `opts.colormap`: colormap (`string`; default = `'Viridis'`)
+- `opts.legend`  : `table` containing legend names
 
 #### vis.heatmap
 This function draws a heatmap. It takes as input an `NxM` tensor `X` that
 specifies the value at each location in the heatmap.
 
-The following `options` are supported:
+The following `opts` are supported:
 
-- `options.colormap`   : colormap (`string`; default = `'Viridis'`)
-- `options.xmin`       : clip minimum value (`number`; default = `X:min()`)
-- `options.xmax`       : clip maximum value (`number`; default = `X:max()`)
-- `options.columnnames`: `table` containing x-axis labels
-- `options.rownames`   : `table` containing y-axis labels
+- `opts.colormap`   : colormap (`string`; default = `'Viridis'`)
+- `opts.xmin`       : clip minimum value (`number`; default = `X:min()`)
+- `opts.xmax`       : clip maximum value (`number`; default = `X:max()`)
+- `opts.columnnames`: `table` containing x-axis labels
+- `opts.rownames`   : `table` containing y-axis labels
 
 #### vis.bar
 This function draws a regular, stacked, or grouped bar plot. It takes as
 input an `N` or `NxM` tensor `X` that specifies the height of each of the
 bars. If `X` contains `M` columns, the values corresponding to each row
-are either stacked or grouped (depending on how `options.stacked` is
+are either stacked or grouped (depending on how `opts.stacked` is
 set). In addition to `X`, an (optional) `N` tensor `Y` can be specified
 that contains the corresponding x-axis values.
 
-The following plot-specific `options` are currently supported:
+The following plot-specific `opts` are currently supported:
 
-- `options.rownames`: `table` containing x-axis labels
-- `options.stacked`    : stack multiple columns in `X`
-- `options.legend`     : `table` containing legend labels
+- `opts.rownames`: `table` containing x-axis labels
+- `opts.stacked`    : stack multiple columns in `X`
+- `opts.legend`     : `table` containing legend labels
 
 #### vis.histogram
 This function draws a histogram of the specified data. It takes as input
 an `N` tensor `X` that specifies the data of which to construct the
 histogram.
 
-The following plot-specific `options` are currently supported:
+The following plot-specific `opts` are currently supported:
 
-- `options.numbins`: number of bins (`number`; default = 30)
+- `opts.numbins`: number of bins (`number`; default = 30)
 
 #### vis.boxplot
 This function draws boxplots of the specified data. It takes as input
 an `N` or an `NxM` tensor `X` that specifies the `N` data values of which
 to construct the `M` boxplots.
 
-The following plot-specific `options` are currently supported:
+The following plot-specific `opts` are currently supported:
 
-- `options.legend`: labels for each of the columns in `X`
+- `opts.legend`: labels for each of the columns in `X`
 
 #### vis.surf
 This function draws a surface plot. It takes as input an `NxM` tensor `X`
 that specifies the value at each location in the surface plot.
 
-The following `options` are supported:
+The following `opts` are supported:
 
-- `options.colormap`: colormap (`string`; default = `'Viridis'`)
-- `options.xmin`    : clip minimum value (`number`; default = `X:min()`)
-- `options.xmax`    : clip maximum value (`number`; default = `X:max()`)
+- `opts.colormap`: colormap (`string`; default = `'Viridis'`)
+- `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
+- `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
 
 #### vis.contour
 This function draws a contour plot. It takes as input an `NxM` tensor `X`
 that specifies the value at each location in the contour plot.
 
-The following `options` are supported:
+The following `opts` are supported:
 
-- `options.colormap`: colormap (`string`; default = `'Viridis'`)
-- `options.xmin`    : clip minimum value (`number`; default = `X:min()`)
-- `options.xmax`    : clip maximum value (`number`; default = `X:max()`)
+- `opts.colormap`: colormap (`string`; default = `'Viridis'`)
+- `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
+- `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
 
 #### vis.quiver
 This function draws a quiver plot in which the direction and length of the
@@ -368,51 +368,51 @@ arrows is determined by the `NxM` tensors `X` and `Y`. Two optional `NxM`
 tensors `gridX` and `gridY` can be provided that specify the offsets of
 the arrows; by default, the arrows will be done on a regular grid.
 
-The following `options` are supported:
+The following `opts` are supported:
 
-- `options.normalize`:  length of longest arrows (`number`)
-- `options.arrowheads`: show arrow heads (`boolean`; default = `true`)
+- `opts.normalize`:  length of longest arrows (`number`)
+- `opts.arrowheads`: show arrow heads (`boolean`; default = `true`)
 
 #### vis.mesh
 This function draws a mesh plot from a set of vertices defined in an
 `Nx2` or `Nx3` matrix `X`, and polygons defined in an optional `Mx2` or
 `Mx3` matrix `Y`.
 
-The following `options` are supported:
+The following `opts` are supported:
 
-- `options.color`: color (`string`)
-- `options.opacity`: opacity of polygons (`number` between 0 and 1)
+- `opts.color`: color (`string`)
+- `opts.opacity`: opacity of polygons (`number` between 0 and 1)
 
 ### Customizing plots
 
-The plotting functions take an optional `options` table as input that can be used to change (generic or plot-specific) properties of the plots. All input arguments are specified in a single table; the input arguments are matches based on the keys they have in the input table.
+The plotting functions take an optional `opts` table as input that can be used to change (generic or plot-specific) properties of the plots. All input arguments are specified in a single table; the input arguments are matches based on the keys they have in the input table.
 
-The following `options` are generic in the sense that they are the same for all visualizations (except `plot.image` and `plot.text`):
+The following `opts` are generic in the sense that they are the same for all visualizations (except `plot.image` and `plot.text`):
 
-- `options.title`       : figure title
-- `options.width`       : figure width
-- `options.height`      : figure height
-- `options.showlegend`  : show legend (`true` or `false`)
-- `options.xtype`       : type of x-axis (`'linear'` or `'log'`)
-- `options.xlabel`      : label of x-axis
-- `options.xtick`       : show ticks on x-axis (`boolean`)
-- `options.xtickmin`    : first tick on x-axis (`number`)
-- `options.xtickmax`    : last tick on x-axis (`number`)
-- `options.xtickvals`   : locations of ticks on x-axis (`table` of `number`s)
-- `options.xticklabels` : ticks labels on x-axis (`table` of `string`s)
-- `options.xtickstep`   : distances between ticks on x-axis (`number`)
-- `options.ytype`       : type of y-axis (`'linear'` or `'log'`)
-- `options.ylabel`      : label of y-axis
-- `options.ytick`       : show ticks on y-axis (`boolean`)
-- `options.ytickmin`    : first tick on y-axis (`number`)
-- `options.ytickmax`    : last tick on y-axis (`number`)
-- `options.ytickvals`   : locations of ticks on y-axis (`table` of `number`s)
-- `options.yticklabels` : ticks labels on y-axis (`table` of `string`s)
-- `options.ytickstep`   : distances between ticks on y-axis (`number`)
-- `options.marginleft`  : left margin (in pixels)
-- `options.marginright` : right margin (in pixels)
-- `options.margintop`   : top margin (in pixels)
-- `options.marginbottom`: bottom margin (in pixels)
+- `opts.title`       : figure title
+- `opts.width`       : figure width
+- `opts.height`      : figure height
+- `opts.showlegend`  : show legend (`true` or `false`)
+- `opts.xtype`       : type of x-axis (`'linear'` or `'log'`)
+- `opts.xlabel`      : label of x-axis
+- `opts.xtick`       : show ticks on x-axis (`boolean`)
+- `opts.xtickmin`    : first tick on x-axis (`number`)
+- `opts.xtickmax`    : last tick on x-axis (`number`)
+- `opts.xtickvals`   : locations of ticks on x-axis (`table` of `number`s)
+- `opts.xticklabels` : ticks labels on x-axis (`table` of `string`s)
+- `opts.xtickstep`   : distances between ticks on x-axis (`number`)
+- `opts.ytype`       : type of y-axis (`'linear'` or `'log'`)
+- `opts.ylabel`      : label of y-axis
+- `opts.ytick`       : show ticks on y-axis (`boolean`)
+- `opts.ytickmin`    : first tick on y-axis (`number`)
+- `opts.ytickmax`    : last tick on y-axis (`number`)
+- `opts.ytickvals`   : locations of ticks on y-axis (`table` of `number`s)
+- `opts.yticklabels` : ticks labels on y-axis (`table` of `string`s)
+- `opts.ytickstep`   : distances between ticks on y-axis (`number`)
+- `opts.marginleft`  : left margin (in pixels)
+- `opts.marginright` : right margin (in pixels)
+- `opts.margintop`   : top margin (in pixels)
+- `opts.marginbottom`: bottom margin (in pixels)
 
 
 The other options are visualization-specific, and are described in the
