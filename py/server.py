@@ -146,23 +146,23 @@ class SocketHandler(tornado.websocket.WebSocketHandler):
         if self not in list(self.subs.values()):
             self.eid = 'main'
             self.subs[self.sid] = self
-        logging.info('Opened new socket from ip:', self.request.remote_ip)
+        logging.info('Opened new socket from ip: {}'.format(self.request.remote_ip))
 
         self.write_message(
             json.dumps({'command': 'register', 'data': self.sid}))
 
     def on_message(self, message):
-        logging.info('from web client: ', message)
+        logging.info('from web client: {}'.format(message))
         msg = tornado.escape.json_decode(tornado.escape.to_basestring(message))
 
         cmd = msg.get('cmd')
         if cmd == 'close':
             if 'data' in msg and 'eid' in msg:
-                logging.info('closing pane ', msg['data'])
+                logging.info('closing window {}'.format(msg['data']))
                 self.state[msg['eid']]['jsons'].pop(msg['data'], None)
 
         elif cmd == 'save':
-            # save localStorage pane metadata
+            # save localStorage window metadata
             if 'data' in msg and 'eid' in msg:
                 msg['eid'] = escape_eid(msg['eid'])
                 self.state[msg['eid']] = copy.deepcopy(self.state[msg['prev_eid']])
@@ -203,11 +203,11 @@ class BaseHandler(tornado.web.RequestHandler):
                 logging.error(e)
 
 
-def pane(args):
-    """ Build a pane dict structure for sending to client """
+def window(args):
+    """ Build a window dict structure for sending to client """
 
     if args.get('win') is None:
-        uid = 'pane_' + get_rand_id()
+        uid = 'window_' + get_rand_id()
     else:
         uid = args['win']
 
@@ -216,13 +216,13 @@ def pane(args):
     ptype = args['data'][0]['type']
 
     p = {
-        'command': 'pane',
+        'command': 'window',
         'id': str(uid),
         'title': opts.get('title', ''),
         'inflate': opts.get('inflate', True),
         'width': opts.get('width'),
         'height': opts.get('height'),
-        'contentID': get_rand_id(),   # to detected updated panes
+        'contentID': get_rand_id(),   # to detected updated windows
     }
 
     if ptype in ['image', 'text']:
@@ -240,7 +240,7 @@ def broadcast(self, msg, eid):
             self.subs[s].write_message(msg)
 
 
-def register_pane(self, p, eid):
+def register_window(self, p, eid):
     # in case env doesn't exist
     self.state[eid] = self.state.get(eid, {'jsons': {}, 'reload': {}})
     env = self.state[eid]['jsons']
@@ -310,9 +310,9 @@ class PostHandler(BaseHandler):
                 return self.write(traceback.format_exc())
 
         eid = extract_eid(req)
-        p = pane(req)
+        p = window(req)
 
-        register_pane(self, p, eid)
+        register_window(self, p, eid)
 
 
 class UpdateHandler(BaseHandler):
@@ -424,8 +424,8 @@ def load_env(state, eid, socket):
         )
 
     jsons = list(env.get('jsons', {}).values())
-    panes = sorted(jsons, key=lambda k: ('i' not in k, k.get('i', None)))
-    for v in panes:
+    windows = sorted(jsons, key=lambda k: ('i' not in k, k.get('i', None)))
+    for v in windows:
         socket.write_message(v)
 
     socket.write_message(json.dumps({'command': 'layout'}))

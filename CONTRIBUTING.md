@@ -16,6 +16,8 @@ We actively welcome your pull requests.
 
 ## Contributing to the UI
 The UI is built with [React](https://facebook.github.io/react/). This means that `js/` needs to be compiled. This can be done with `yarn` or `npm`.
+To clarify an inconsistency, Panes in the UI are the containers for the
+'windows' referred to by the Python and Lua APIs.
 
 #### yarn
 You can find instructions for install `yarn` [here](https://yarnpkg.com/lang/en/docs/install/).
