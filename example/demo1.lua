@@ -81,6 +81,13 @@ local id = plot:scatter{
    },
 }
 
+-- check if win_exists works
+local exists = plot:win_exists{
+  win = id,
+}
+if not exists then error("created window doesn't exist") end
+
+
 plot:updateTrace{                             -- add new trace to scatter plot
    X = torch.randn(255),
    Y = torch.randn(255),
@@ -307,3 +314,9 @@ end
 
 -- close text window:
 plot:close{win = textwindow}
+
+-- assert the window is closed
+local exists = plot:win_exists{
+  win = textwindow,
+}
+if exists then error("closed window still exists") end

@@ -215,6 +215,33 @@ M.save = argcheck{
    end
 }
 
+-- check to see if a window exists
+M.win_exists = argcheck{
+   doc = [[
+      This function returns a bool representing whether or not a window exists
+      on the server already.
+   ]],
+   {name = 'self', type = 'visdom.client'},
+   {name = 'win',  type = 'string'},
+   {name = 'env',  type = 'string', opt = true},
+   call = function(self, win, env)
+      local args = {win}
+      local kwargs = {env = env}
+      local val = self:py_func{
+         func = '_win_exists_wrap',
+         args = args,
+         kwargs = kwargs,
+      }
+      if val == 'true' then
+         return true
+      end
+      if val == 'false' then
+         return false
+      end
+      error('Value returned from win_exists was not boolean')
+   end
+}
+
 M.updateTrace = argcheck{
    doc = [[
       This function allows updating of the data of a line or scatter plot.

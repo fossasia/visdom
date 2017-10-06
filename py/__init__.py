@@ -137,7 +137,8 @@ def _markerColorCheck(mc, X, Y, L):
     mc = np.uint8(mc)
 
     if mc.ndim == 1:
-        markercolor = ['rgba(0, 0, 255, %s)' % (mc[i] / 255.) for i in mc]
+        markercolor = ['rgba(0, 0, 255, %s)' % (mc[i] / 255.)
+                       for i in range(len(mc))]
     else:
         markercolor = ['#%02x%02x%02x' % (i[0], i[1], i[2]) for i in mc]
 
@@ -291,6 +292,33 @@ class Visdom(object):
             msg={'win': win, 'eid': env},
             endpoint='close'
         )
+
+    def _win_exists_wrap(self, win, env=None):
+        """
+        This function returns a string indicating whether
+        or not a window exists on the server already. ['true' or 'false']
+        Returns False if something went wrong
+        """
+        assert win is not None
+
+        return self._send({
+            'win': win,
+            'eid': env,
+        }, endpoint='win_exists')
+
+    def win_exists(self, win, env=None):
+        """
+        This function returns a bool indicating whether
+        or not a window exists on the server already.
+        Returns None if something went wrong
+        """
+        e = self._win_exists_wrap(win, env)
+        if e == 'true':
+            return True
+        elif e == 'false':
+            return False
+        else:
+            return None
 
     # Content
 

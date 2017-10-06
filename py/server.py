@@ -128,6 +128,7 @@ class Application(tornado.web.Application):
             (r"/env/(.*)", EnvHandler, dict(state=state, subs=subs)),
             (r"/save", SaveHandler, dict(state=state, subs=subs)),
             (r"/error/(.*)", ErrorHandler, dict(state=state, subs=subs)),
+            (r"/win_exists", ExistsHandler, dict(state=state, subs=subs)),
             (r"/(.*)", IndexHandler, dict(state=state, subs=subs)),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)
@@ -277,6 +278,7 @@ class PostHandler(BaseHandler):
             'update': UpdateHandler,
             'save': SaveHandler,
             'close': CloseHandler,
+            'win_exists': ExistsHandler,
         }
 
     def func(self, req):
@@ -313,6 +315,27 @@ class PostHandler(BaseHandler):
         p = window(req)
 
         register_window(self, p, eid)
+
+
+class ExistsHandler(BaseHandler):
+    def initialize(self, state, subs):
+        self.state = state
+        self.subs = subs
+
+    @staticmethod
+    def wrap_func(handler, args):
+        eid = extract_eid(args)
+
+        if args['win'] in handler.state[eid]['jsons']:
+            handler.write('true')
+        else:
+            handler.write('false')
+
+    def post(self):
+        args = tornado.escape.json_decode(
+            tornado.escape.to_basestring(self.request.body)
+        )
+        self.wrap_func(self, args)
 
 
 class UpdateHandler(BaseHandler):

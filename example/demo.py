@@ -111,6 +111,9 @@ win = viz.scatter(
     ),
 )
 
+# assert that the window exists
+assert viz.win_exists(win)
+
 # add new trace to scatter plot
 viz.updateTrace(
     X=np.random.rand(255),
@@ -277,6 +280,9 @@ viz.svg(
 
 # close text window:
 viz.close(win=textwindow)
+
+# assert that the closed window doesn't exist
+assert not viz.win_exists(textwindow)
 
 # PyTorch tensor
 try:
