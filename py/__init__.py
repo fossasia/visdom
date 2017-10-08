@@ -23,6 +23,7 @@ import numbers
 from six import string_types
 from six import BytesIO
 import logging
+from time import sleep
 
 try:
     import torchfile
@@ -319,6 +320,18 @@ class Visdom(object):
             return False
         else:
             return None
+
+    def check_connection(self):
+        """
+        This function returns a bool indicating whether or
+        not the server is connected.
+        """
+        data = np.zeros(1)  # can not pass an empty array to self.line()
+        win = self.line(data, opts={'title': 'Testing server connection'})
+        if win:
+            sleep(1)  # wait for the window to load
+            self.close(win)
+        return bool(win)
 
     # Content
 
