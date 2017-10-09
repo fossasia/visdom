@@ -181,6 +181,7 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 ### Others
 - `vis.close`    : close a window by id
 - `vis.win_exists`: check if a window already exists by id
+- `vis.check_connection`: check if the server is connected
 
 ## Details
 ![visdom_big](https://lh3.googleusercontent.com/-bqH9UXCw-BE/WL2UsdrrbAI/AAAAAAAAnYc/emrxwCmnrW4_CLTyyUttB0SYRJ-i4CCiQCLcB/s0/Screen+Shot+2017-03-06+at+10.51.02+AM.png"visdom_big")

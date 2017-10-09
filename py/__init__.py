@@ -320,6 +320,13 @@ class Visdom(object):
         else:
             return None
 
+    def check_connection(self):
+        """
+        This function returns a bool indicating whether or
+        not the server is connected.
+        """
+        return self.win_exists('') is not None
+
     # Content
 
     def text(self, text, win=None, env=None, opts=None):
