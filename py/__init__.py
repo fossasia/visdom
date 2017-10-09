@@ -23,7 +23,6 @@ import numbers
 from six import string_types
 from six import BytesIO
 import logging
-from time import sleep
 
 try:
     import torchfile
