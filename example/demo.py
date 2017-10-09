@@ -19,6 +19,8 @@ from six.moves import urllib
 
 viz = Visdom()
 
+assert viz.check_connection()
+
 textwindow = viz.text('Hello World!')
 
 # video demo:

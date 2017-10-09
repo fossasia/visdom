@@ -16,6 +16,9 @@ local paths = require 'paths'
 -- intialize visdom Torch client:
 local visdom = require 'visdom'
 local plot = visdom{server = 'http://localhost', port = 8097}
+if not plot:check_connection() then
+   error('Could not connect, please ensure the visdom server is running')
+end
 
 -- text box demo:
 local textwindow = plot:text{

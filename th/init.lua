@@ -242,6 +242,22 @@ M.win_exists = argcheck{
    end
 }
 
+-- check_connection
+M.check_connection = argcheck{
+   doc = [[
+      This function returns a bool representing whether or not the visdom
+      client is connected to the server
+   ]],
+   {name = 'self', type = 'visdom.client'},
+   call = function(self)
+      if pcall(self.win_exists, self, '') then
+         return true
+      else
+         return false
+      end
+   end
+}
+
 M.updateTrace = argcheck{
    doc = [[
       This function allows updating of the data of a line or scatter plot.
