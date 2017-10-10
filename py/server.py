@@ -345,6 +345,11 @@ class UpdateHandler(BaseHandler):
 
     @staticmethod
     def update(p, args):
+        # Update text in window, separated by newline `\n`
+        if args['data'][0]['type'] == 'text':
+            p['content'] += "\n" + args['data'][0]['content']
+            return p
+
         pdata = p['content']['data']
 
         new_data = args['data']
