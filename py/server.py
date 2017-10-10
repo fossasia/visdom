@@ -39,11 +39,17 @@ parser.add_argument('-env_path', metavar='env_path', type=str,
                     default='%s/.visdom/' % expanduser("~"),
                     help='path to serialized session to reload (end with /).')
 parser.add_argument('-logging_level', metavar='logger_level', default='INFO',
-                    choices=['CRITICAL', 'ERROR', 'WARN', 'WARNING', 'INFO', 'DEBUG', 'NOTSET'],
-                    help='logging level (default = INFO).')
+                    help='logging level (default = INFO). Can take logging level name or int (example: 20)')
 FLAGS = parser.parse_args()
 
-logging.getLogger().setLevel(logging._nameToLevel[FLAGS.logging_level])
+try:
+    logging_level = int(FLAGS.logging_level)
+except (ValueError,):
+    if FLAGS.logging_level not in logging._nameToLevel.keys():
+        raise KeyError("Invalid logging level : {0}".format(FLAGS.logging_level))
+    logging_level = logging._nameToLevel[FLAGS.logging_level]
+
+logging.getLogger().setLevel(logging_level)
 
 
 def get_rand_id():
