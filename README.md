@@ -8,7 +8,7 @@ A flexible tool for creating, organizing, and sharing visualizations of live, ri
 * [Overview](#overview)
 * [Concepts](#concepts)
 * [Setup](#setup)
-* [Usage](#launch)
+* [Usage](#usage)
 * [API](#api)
 * [To Do](#to-do)
 * [Contributing](#contributing)
@@ -87,7 +87,7 @@ luarocks install visdom
 
 ```
 
-## Launch
+## Usage
 
 Start the server (probably in a  `screen` or `tmux`) :
 
@@ -140,29 +140,29 @@ For a quick introduction into the capabilities of `visdom`, have a look at the `
 
 ### Basics
 Visdom offers the following basic visualization functions:
-- `vis.image`    : image
-- `vis.images`   : list of images
-- `vis.text`     : arbitrary HTML
-- `vis.video`    : videos
-- `vis.svg`      : SVG object
-- `vis.save`     : serialize state server-side
+- [`vis.image`](#visimage)    : image
+- [`vis.images`](#visimages)   : list of images
+- [`vis.text`](#vistext)     : arbitrary HTML
+- [`vis.video`](#visvideo)    : videos
+- [`vis.svg`](#vissvg)      : SVG object
+- [`vis.save`](#vissave)     : serialize state server-side
 
 ### Plotting
 We have wrapped several common plot types to make creating basic visualizations easily. These visualizations are powered by [Plotly](https://plot.ly/).
 
 The following API is currently supported:
-- `vis.scatter`  : 2D or 3D scatter plots
-- `vis.line`     : line plots
-- `vis.updateTrace`     : update existing line/scatter plots
-- `vis.stem`     : stem plots
-- `vis.heatmap`  : heatmap plots
-- `vis.bar`      : bar graphs
-- `vis.histogram`: histograms
-- `vis.boxplot`  : boxplots
-- `vis.surf`     : surface plots
-- `vis.contour`  : contour plots
-- `vis.quiver`   : quiver plots
-- `vis.mesh`     : mesh plots
+- [`vis.scatter`](#visscatter)  : 2D or 3D scatter plots
+- [`vis.line`](#visline)     : line plots
+- [`vis.updateTrace`](#visupdatetrace)     : update existing line/scatter plots
+- [`vis.stem`](#visstem)     : stem plots
+- [`vis.heatmap`](#visheatmap)  : heatmap plots
+- [`vis.bar`](#visbar)  : bar graphs
+- [`vis.histogram`](#vishistogram) : histograms
+- [`vis.boxplot`](#visboxplot)  : boxplots
+- [`vis.surf`](#vissurf)     : surface plots
+- [`vis.contour`](#viscontour)  : contour plots
+- [`vis.quiver`](#visquiver)   : quiver plots
+- [`vis.mesh`](#vismesh)     : mesh plots
 
 ### Generic Plots
 Note that the server API adheres to the Plotly convention of `data` and `layout` objects, such that you can produce your own arbitrary `Plotly` visualizations:
@@ -179,12 +179,14 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 ```
 
 ### Others
-- `vis.close`    : close a window by id
-- `vis.win_exists`: check if a window already exists by id
-- `vis.check_connection`: check if the server is connected
+- [`vis.close`](#visclose)    : close a window by id
+- [`vis.win_exists`](#viswinexists) : check if a window already exists by id
+- [`vis.check_connection`](#vischeckconnection): check if the server is connected
 
 ## Details
 ![visdom_big](https://lh3.googleusercontent.com/-bqH9UXCw-BE/WL2UsdrrbAI/AAAAAAAAnYc/emrxwCmnrW4_CLTyyUttB0SYRJ-i4CCiQCLcB/s0/Screen+Shot+2017-03-06+at+10.51.02+AM.png"visdom_big")
+
+### Basics
 
 #### vis.image
 This function draws an `img`. It takes as input an `CxHxW` tensor `img`
@@ -230,7 +232,10 @@ This function draws an SVG object. It takes as input a SVG string `svgstr` or
 the name of an SVG file `svgfile`. The function does not support any specific
 `opts`.
 
-### Simple Plots
+#### vis.save
+This function saves the `envs` that are alive on the visdom server. It takes input a list (in python) or table (in lua) of env ids to be saved.
+
+### Plotting
 Further details on the wrapped plotting functions are given below.
 
 The exact inputs into the plotting functions vary, although most of them take as input a tensor `X` than contains the data and an (optional) tensor `Y` that contains optional data variables (such as labels or timestamps). All plotting functions take as input an optional `win` that can be used to plot into a specific window; each plotting function also returns the `win` of the window it plotted in. One can also specify the `env`  to which the visualization should be added.
@@ -419,9 +424,25 @@ The following `opts` are generic in the sense that they are the same for all vis
 - `opts.margintop`   : top margin (in pixels)
 - `opts.marginbottom`: bottom margin (in pixels)
 
-
 The other options are visualization-specific, and are described in the
 documentation of the functions.
+
+### Others
+
+#### vis.close
+
+This function closes a specific window. It takes input window id `win` and environment id `eid`. Use `win` as `None` to close all windows in an environment.
+
+#### vis.win_exists
+
+This function returns a bool indicating whether or not a window `win` exists on the server already. Returns None if something went wrong. 
+
+Optional arguments:
+- `env`: Environment in which window is to be searched. Default is `None`.
+
+#### vis.check_connection
+
+This function returns a bool indicating whether or not the server is connected.
 
 ## To Do
 
