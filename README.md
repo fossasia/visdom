@@ -180,8 +180,8 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 
 ### Others
 - [`vis.close`](#visclose)    : close a window by id
-- [`vis.win_exists`](#viswinexists) : check if a window already exists by id
-- [`vis.check_connection`](#vischeckconnection): check if the server is connected
+- [`vis.win_exists`](#viswin_exists) : check if a window already exists by id
+- [`vis.check_connection`](#vischeck_connection): check if the server is connected
 
 ## Details
 ![visdom_big](https://lh3.googleusercontent.com/-bqH9UXCw-BE/WL2UsdrrbAI/AAAAAAAAnYc/emrxwCmnrW4_CLTyyUttB0SYRJ-i4CCiQCLcB/s0/Screen+Shot+2017-03-06+at+10.51.02+AM.png"visdom_big")
@@ -438,7 +438,7 @@ This function closes a specific window. It takes input window id `win` and envir
 This function returns a bool indicating whether or not a window `win` exists on the server already. Returns None if something went wrong. 
 
 Optional arguments:
-- `env`: Environment in which window is to be searched. Default is `None`.
+- `env`: Environment to search for the window in. Default is `None`.
 
 #### vis.check_connection
 
