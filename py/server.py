@@ -38,11 +38,22 @@ parser.add_argument('-port', metavar='port', type=int, default=8097,
 parser.add_argument('-env_path', metavar='env_path', type=str,
                     default='%s/.visdom/' % expanduser("~"),
                     help='path to serialized session to reload.')
-parser.add_argument('-logging_level', metavar='logger_level', type=int,
-                    default=logging.INFO, help='logging level (default = 20).')
+parser.add_argument('-logging_level', metavar='logger_level', default='INFO',
+                    help='logging level (default = INFO). Can take logging '
+                         'level name or int (example: 20)')
 FLAGS = parser.parse_args()
 
-logging.getLogger().setLevel(FLAGS.logging_level)
+try:
+    logging_level = int(FLAGS.logging_level)
+except (ValueError,):
+    try:
+        logging_level = logging._checkLevel(FLAGS.logging_level)
+    except ValueError:
+        raise KeyError(
+            "Invalid logging level : {0}".format(FLAGS.logging_level)
+        )
+
+logging.getLogger().setLevel(logging_level)
 
 
 def get_rand_id():
