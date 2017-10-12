@@ -37,7 +37,7 @@ parser.add_argument('-port', metavar='port', type=int, default=8097,
                     help='port to run the server on.')
 parser.add_argument('-env_path', metavar='env_path', type=str,
                     default='%s/.visdom/' % expanduser("~"),
-                    help='path to serialized session to reload (end with /).')
+                    help='path to serialized session to reload.')
 parser.add_argument('-logging_level', metavar='logger_level', type=int,
                     default=logging.INFO, help='logging level (default = 20).')
 FLAGS = parser.parse_args()
@@ -92,7 +92,7 @@ tornado_settings = {
 def serialize_env(state, eids):
     l = [i for i in eids if i in state]
     for i in l:
-        p = '%s/%s.json' % (FLAGS.env_path, i)
+        p = os.path.join(FLAGS.env_path, "{0}.json".format(i))
         open(p, 'w').write(json.dumps(state[i]))
     return l
 
