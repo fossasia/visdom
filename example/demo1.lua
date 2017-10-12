@@ -24,6 +24,11 @@ end
 local textwindow = plot:text{
     text = 'Hello, world! If I\'m still open, close failed'
 }
+local updatetextwindow = plot:text{
+    text = 'Hello, world! If I don\'t have another line, update text failed.'
+}
+plot:text{text = 'Here\'s another line', win = updatetextwindow, append = true}
+
 plot:py_func{func='text', args={'Hello, world!'}}
 
 -- image demo:

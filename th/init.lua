@@ -388,7 +388,7 @@ M.line = argcheck{
       end
       opts = opts or options or {}
       local args = {Y}
-      local kwargs = {X = X, win = win, env = env, opts = opts}
+      local kwargs = {X = X, win = win, env = env, opts = opts, update = update}
       return self:py_func{func = 'line', args = args, kwargs = kwargs}
    end
 }
@@ -893,7 +893,8 @@ M.text = argcheck{
    {name = 'options', type = 'table',  opt = true},
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
-   call = function(self, text, opts, options, win, env)
+   {name = 'append',  type = 'boolean', opt = true},
+   call = function(self, text, opts, options, win, env, append)
       if options then
          print(
             [[WARNING: Argument `options` is deprecated and will soon be
@@ -902,7 +903,7 @@ M.text = argcheck{
       end
       opts = opts or options or {}
       local args = {text}
-      local kwargs = {win = win, env = env, opts = opts}
+      local kwargs = {win = win, env = env, opts = opts, append = append}
       return self:py_func{func = 'text', args = args, kwargs = kwargs}
    end
 }

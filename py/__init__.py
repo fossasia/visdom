@@ -329,7 +329,7 @@ class Visdom(object):
 
     # Content
 
-    def text(self, text, win=None, env=None, opts=None):
+    def text(self, text, win=None, env=None, opts=None, append=False):
         """
         This function prints text in a box. It takes as input an `text` string.
         No specific `opts` are currently supported.
@@ -338,12 +338,17 @@ class Visdom(object):
         _assert_opts(opts)
         data = [{'content': text, 'type': 'text'}]
 
+        if append:
+            endpoint = 'update'
+        else:
+            endpoint = 'events'
+
         return self._send({
             'data': data,
             'win': win,
             'eid': env,
-            'opts': opts
-        })
+            'opts': opts,
+        }, endpoint=endpoint)
 
     def svg(self, svgstr=None, svgfile=None, win=None, env=None, opts=None):
         """

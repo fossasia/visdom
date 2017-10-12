@@ -23,6 +23,9 @@ assert viz.check_connection()
 
 textwindow = viz.text('Hello World!')
 
+updatetextwindow = viz.text('Hello World! More text should be here')
+viz.text('And here it is', win=updatetextwindow, append=True)
+
 # video demo:
 try:
     video = np.empty([256, 250, 250, 3], dtype=np.uint8)

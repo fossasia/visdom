@@ -345,6 +345,11 @@ class UpdateHandler(BaseHandler):
 
     @staticmethod
     def update(p, args):
+        # Update text in window, separated by a line break
+        if p['type'] == 'text':
+            p['content'] += "<br>" + args['data'][0]['content']
+            return p
+
         pdata = p['content']['data']
 
         new_data = args['data']
@@ -388,8 +393,9 @@ class UpdateHandler(BaseHandler):
 
         p = handler.state[eid]['jsons'][args['win']]
 
-        if not p['content']['data'][0]['type'] == 'scatter':
-            handler.write('win is not scatter')
+        if not (p['type'] == 'text' or
+                p['content']['data'][0]['type'] == 'scatter'):
+            handler.write('win is not scatter or text')
             return
 
         p = UpdateHandler.update(p, args)
