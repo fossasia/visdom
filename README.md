@@ -87,6 +87,17 @@ luarocks install visdom
 
 ```
 
+```bash
+# Install python from source
+pip install -e .
+# If the above runs into issues, you can try the below
+easy_install .
+
+# Install Torch client from source (from th directory)
+luarocks make
+
+```
+
 ## Usage
 
 Start the server (probably in a  `screen` or `tmux`) :
@@ -435,7 +446,7 @@ This function closes a specific window. It takes input window id `win` and envir
 
 #### vis.win_exists
 
-This function returns a bool indicating whether or not a window `win` exists on the server already. Returns None if something went wrong. 
+This function returns a bool indicating whether or not a window `win` exists on the server already. Returns None if something went wrong.
 
 Optional arguments:
 - `env`: Environment to search for the window in. Default is `None`.

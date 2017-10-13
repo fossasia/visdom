@@ -15,7 +15,7 @@ requirements = [
 setup(
     # Metadata
     name='visdom',
-    version='0.1.05',
+    version='0.1.06',
     author='Allan Jabri',
     author_email='ajabri@fb.com',
     url='https://github.com/facebookresearch/visdom',
@@ -28,6 +28,6 @@ setup(
     package_dir={'visdom': 'py'},
     package_data={'visdom': ['static/*.*', 'static/**/*']},
     include_package_data=True,
-    zip_safe=True,
+    zip_safe=False,
     install_requires=requirements,
 )
