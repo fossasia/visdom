@@ -168,6 +168,7 @@ class App extends React.Component {
           sessionID: cmd.data,
         }, () => {this.selectEnv(this.state.envID)});
         break;
+      case 'pane':
       case 'window':
         this.addPaneBatched(cmd);
         break;
