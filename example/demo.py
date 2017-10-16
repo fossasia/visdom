@@ -289,6 +289,14 @@ viz.close(win=textwindow)
 # assert that the closed window doesn't exist
 assert not viz.win_exists(textwindow)
 
+# Arbitrary visdom content
+trace = dict(x=[1, 2, 3], y=[4, 5, 6], mode="markers+lines", type='custom',
+             marker={'color': 'red', 'symbol': 104, 'size': "10"},
+             text=["one", "two", "three"], name='1st Trace')
+layout = dict(title="First Plot", xaxis={'title': 'x1'}, yaxis={'title': 'x2'})
+
+viz._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
+
 # PyTorch tensor
 try:
     import torch

@@ -217,13 +217,8 @@ class BaseHandler(tornado.web.RequestHandler):
 
 def window(args):
     """ Build a window dict structure for sending to client """
-
-    if args.get('win') is None:
-        uid = 'window_' + get_rand_id()
-    else:
-        uid = args['win']
-
-    opts = args['opts']
+    uid = args.get('win', 'window_' + get_rand_id())
+    opts = args.get('opts', {})
 
     ptype = args['data'][0]['type']
 
