@@ -941,8 +941,6 @@ class Visdom(object):
         This function draws a surface plot. It takes as input an `NxM` tensor
         `X` that specifies the value at each location in the surface plot.
 
-        `stype` is 'contour' (2D) or 'surface' (3D).
-
         The following `opts` are supported:
 
         - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
