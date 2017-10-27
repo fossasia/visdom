@@ -24,6 +24,7 @@ assert viz.check_connection()
 textwindow = viz.text('Hello World!')
 
 updatetextwindow = viz.text('Hello World! More text should be here')
+assert updatetextwindow is not None, 'Window was none'
 viz.text('And here it is', win=updatetextwindow, append=True)
 
 # video demo:
