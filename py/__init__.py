@@ -101,7 +101,7 @@ def _opts2layout(opts, is3d=False):
     layout = {
         'width': opts.get('width'),
         'height': opts.get('height'),
-        'showlegend': 'legend' in opts,
+        'showlegend': opts.get('showlegend', 'legend' in opts),
         'title': opts.get('title'),
         'xaxis': _axisformat('x', opts),
         'yaxis': _axisformat('y', opts),
