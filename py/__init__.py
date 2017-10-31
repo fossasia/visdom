@@ -77,7 +77,7 @@ def loadfile(filename):
 def _scrub_dict(d):
     if type(d) is dict:
         return dict((k, _scrub_dict(v)) for k, v in list(d.items())
-                                        if v and _scrub_dict(v))
+                    if v is not None and _scrub_dict(v) is not None)
     else:
         return d
 
@@ -101,7 +101,7 @@ def _opts2layout(opts, is3d=False):
     layout = {
         'width': opts.get('width'),
         'height': opts.get('height'),
-        'showlegend': opts.get('legend', False),
+        'showlegend': opts.get('showlegend', 'legend' in opts),
         'title': opts.get('title'),
         'xaxis': _axisformat('x', opts),
         'yaxis': _axisformat('y', opts),
@@ -626,8 +626,8 @@ class Visdom(object):
                 _data = {
                     'x': nan2none(X.take(0, 1)[ind].tolist()),
                     'y': nan2none(X.take(1, 1)[ind].tolist()),
-                    'name': opts.get('legend') and
-                    opts.get('legend')[k - 1] or str(k),
+                    'name': opts.get('legend')[k - 1] if 'legend' in opts
+                    else str(k),
                     'type': 'scatter3d' if is3d else 'scatter',
                     'mode': opts.get('mode'),
                     'marker': {
