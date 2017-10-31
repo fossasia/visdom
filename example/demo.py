@@ -170,7 +170,7 @@ viz.contour(X=X, opts=dict(colormap='Viridis'))
 viz.surf(X=X, opts=dict(colormap='Hot'))
 
 # line plots
-viz.line(Y=np.random.rand(10))
+viz.line(Y=np.random.rand(10), opts=dict(showlegend=True))
 
 Y = np.linspace(-5, 5, 100)
 viz.line(
@@ -209,7 +209,7 @@ win = viz.line(
     X=np.column_stack((Y, Y)),
     opts=dict(
         fillarea=True,
-        legend=False,
+        showlegend=False,
         width=400,
         height=400,
         xlabel='Time',
