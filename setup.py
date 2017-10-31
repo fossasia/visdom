@@ -15,7 +15,7 @@ requirements = [
 setup(
     # Metadata
     name='visdom',
-    version='0.1.6.1',
+    version='0.1.6.2',
     author='Allan Jabri',
     author_email='ajabri@fb.com',
     url='https://github.com/facebookresearch/visdom',
