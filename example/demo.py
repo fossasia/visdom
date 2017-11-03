@@ -263,6 +263,41 @@ viz.pie(
     opts=dict(legend=['Residential', 'Non-Residential', 'Utility'])
 )
 
+# scatter plot example with various type of updates
+colors = np.random.randint(0, 255, (2, 3,))
+win = viz.scatter(
+    X=np.random.rand(255, 2),
+    Y=(np.random.rand(255) + 1.5).astype(int),
+    opts=dict(
+        markersize=10,
+        markercolor=colors,
+        legend=['1', '2']
+    ),
+)
+
+viz.scatter(
+    X=np.random.rand(255),
+    Y=np.random.rand(255),
+    opts=dict(
+        markersize=10,
+        markercolor=colors[0].reshape(-1, 3),
+
+    ),
+    name='1',
+    update='append',
+    win=win)
+
+viz.scatter(
+    X=np.random.rand(255, 2),
+    Y=(np.random.rand(255) + 1.5).astype(int),
+    opts=dict(
+        markersize=10,
+        markercolor=colors,
+    ),
+    update='append',
+    win=win)
+
+
 # mesh plot
 x = [0, 0, 1, 1, 0, 0, 1, 1]
 y = [0, 1, 1, 0, 0, 1, 1, 0]
