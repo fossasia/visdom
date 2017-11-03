@@ -23,6 +23,7 @@ import numbers
 from six import string_types
 from six import BytesIO
 import logging
+import warnings
 
 try:
     import torchfile
@@ -532,6 +533,11 @@ class Visdom(object):
         There are less options because they are assumed to inherited from the
         specified plot.
         """
+        warnings.warn("updateTrace is going to be deprecated in the next "
+                      "version of `visdom`. Please to use `scatter(.., "
+                      "update='append',name=<traceName>)` or `line(.., "
+                      "update='append',name=<traceName>)` as required.",
+                      PendingDeprecationWarning)
         assert win is not None
 
         assert Y.shape == X.shape, 'Y should be same size as X'
@@ -572,7 +578,7 @@ class Visdom(object):
         range between `1` and `K` can be specified as well -- the labels will be
         reflected in the colors of the markers.
 
-        `update` can be used to efficiently update the data of an existing line.
+        `update` can be used to efficiently update the data of an existing plot.
         Use 'append' to append data, 'replace' to use new data. If updating a
         single trace, use `name` to specify the name of the trace to be updated.
         Update data that is all NaN is ignored (can be used for masking update).

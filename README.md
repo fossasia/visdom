@@ -253,11 +253,15 @@ Further details on the wrapped plotting functions are given below.
 The exact inputs into the plotting functions vary, although most of them take as input a tensor `X` than contains the data and an (optional) tensor `Y` that contains optional data variables (such as labels or timestamps). All plotting functions take as input an optional `win` that can be used to plot into a specific window; each plotting function also returns the `win` of the window it plotted in. One can also specify the `env`  to which the visualization should be added.
 
 #### vis.scatter
+
 This function draws a 2D or 3D scatter plot. It takes as input an `Nx2` or
 `Nx3` tensor `X` that specifies the locations of the `N` points in the
 scatter plot. An optional `N` tensor `Y` containing discrete labels that
 range between `1` and `K` can be specified as well -- the labels will be
 reflected in the colors of the markers.
+
+`update` can be used to efficiently update the data of an existing plot. Use 'append' to append data, 'replace' to use new data. If updating a single trace, use `name` to specify the name of the trace to be updated. Update data that is all NaN is ignored (can be used for masking update).
+
 The following `opts` are supported:
 
 - `opts.colormap`    : colormap (`string`; default = `'Viridis'`)
@@ -279,6 +283,8 @@ This function draws a line plot. It takes as input an `N` or `NxM` tensor
 to plot. It also takes an optional `X` tensor that specifies the
 corresponding x-axis values; `X` can be an `N` tensor (in which case all
 lines will share the same x-axis values) or have the same size as `Y`.
+
+`update` can be used to efficiently update the data of an existing plot. Use 'append' to append data, 'replace' to use new data. If updating a single trace, use `name` to specify the name of the trace to be updated. Update data that is all NaN is ignored (can be used for masking update).
 
 The following `opts` are supported:
 
@@ -307,6 +313,8 @@ to or replaces existing data.
 
 There are no `opts` because they are assumed to be inherited from the
 specified plot.
+
+*Note: This function will be deprecated in upcoming versions.*
 
 #### vis.stem
 This function draws a stem plot. It takes as input an `N` or `NxM` tensor
