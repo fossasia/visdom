@@ -120,11 +120,12 @@ win = viz.scatter(
 assert viz.win_exists(win)
 
 # add new trace to scatter plot
-viz.updateTrace(
+viz.scatter(
     X=np.random.rand(255),
     Y=np.random.rand(255),
     win=win,
     name='new_trace',
+    update='new'
 )
 
 
@@ -189,17 +190,19 @@ viz.line(
     win=win,
     update='append'
 )
-viz.updateTrace(
+viz.line(
     X=np.arange(21, 30),
     Y=np.arange(1, 10),
     win=win,
-    name='2'
+    name='2',
+    update='append'
 )
-viz.updateTrace(
+viz.line(
     X=np.arange(1, 10),
     Y=np.arange(11, 20),
     win=win,
-    name='4'
+    name='4',
+    update='append'
 )
 
 Y = np.linspace(0, 4, 200)

@@ -365,7 +365,7 @@ class UpdateHandler(BaseHandler):
         idxs = list(range(len(pdata)))
 
         if name is not None:
-            assert len(new_data['x']) == 1
+            assert len(new_data) == 1
             idxs = [i for i in idxs if pdata[i]['name'] == name]
 
         # inject new trace
@@ -375,17 +375,34 @@ class UpdateHandler(BaseHandler):
             pdata[idx]['name'] = name
             idxs = [idx]
             append = False
-            if 'marker' in new_data:
-                pdata[idx]['marker']['color'] = new_data['marker']
+            pdata[idx] = new_data[0]
+            for k, v in new_data[0].items():
+                pdata[idx][k] = v
+            return p
 
         for n, idx in enumerate(idxs):    # update traces
-            if all([math.isnan(i) or i is None for i in new_data['x'][n]]):
+            if all([math.isnan(i) or i is None for i in new_data[n]['x']]):
                 continue
+            # handle data for plotting
+            for axis in ['x', 'y']:
+                pdata[idx][axis] = (pdata[idx][axis] + new_data[n][axis]) \
+                    if append else new_data[n][axis]
 
-            pdata[idx]['x'] = (pdata[idx]['x'] + new_data['x'][n]) if append \
-                else new_data['x'][n]
-            pdata[idx]['y'] = (pdata[idx]['y'] + new_data['y'][n]) if append \
-                else new_data['y'][n]
+            # handle marker properties
+            if 'marker' not in new_data[n]:
+                continue
+            if 'marker' not in pdata[idx]:
+                pdata[idx]['marker'] = {}
+            pdata_marker = pdata[idx]['marker']
+            for marker_prop in ['color']:
+                if marker_prop not in new_data[n]['marker']:
+                    continue
+                if marker_prop not in pdata[idx]['marker']:
+                    pdata[idx]['marker'][marker_prop] = []
+                pdata_marker[marker_prop] = (
+                    pdata_marker[marker_prop] +
+                    new_data[n]['marker'][marker_prop]) if append else \
+                    new_data[n]['marker'][marker_prop]
 
         return p
 
