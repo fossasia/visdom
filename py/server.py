@@ -565,8 +565,6 @@ def download_scripts(proxies=None, install_dir=None):
         '%scss/bootstrap.min.css' % bb: 'bootstrap.min.css',
         '%sfonts/glyphicons-halflings-regular.eot' % bb:
             'glyphicons-halflings-regular.eot',
-        '%sfonts/glyphicons-halflings-regular.eot?#iefix' % bb:
-            'glyphicons-halflings-regular.eot?#iefix',
         '%sfonts/glyphicons-halflings-regular.woff2' % bb:
             'glyphicons-halflings-regular.woff2',
         '%sfonts/glyphicons-halflings-regular.woff' % bb:
