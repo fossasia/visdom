@@ -121,11 +121,12 @@ win = viz.scatter(
 assert viz.win_exists(win)
 
 # add new trace to scatter plot
-viz.updateTrace(
+viz.scatter(
     X=np.random.rand(255),
     Y=np.random.rand(255),
     win=win,
     name='new_trace',
+    update='new'
 )
 
 
@@ -190,17 +191,19 @@ viz.line(
     win=win,
     update='append'
 )
-viz.updateTrace(
+viz.line(
     X=np.arange(21, 30),
     Y=np.arange(1, 10),
     win=win,
-    name='2'
+    name='2',
+    update='append'
 )
-viz.updateTrace(
+viz.line(
     X=np.arange(1, 10),
     Y=np.arange(11, 20),
     win=win,
-    name='4'
+    name='4',
+    update='append'
 )
 
 Y = np.linspace(0, 4, 200)
@@ -259,6 +262,41 @@ viz.pie(
     X=X,
     opts=dict(legend=['Residential', 'Non-Residential', 'Utility'])
 )
+
+# scatter plot example with various type of updates
+colors = np.random.randint(0, 255, (2, 3,))
+win = viz.scatter(
+    X=np.random.rand(255, 2),
+    Y=(np.random.rand(255) + 1.5).astype(int),
+    opts=dict(
+        markersize=10,
+        markercolor=colors,
+        legend=['1', '2']
+    ),
+)
+
+viz.scatter(
+    X=np.random.rand(255),
+    Y=np.random.rand(255),
+    opts=dict(
+        markersize=10,
+        markercolor=colors[0].reshape(-1, 3),
+
+    ),
+    name='1',
+    update='append',
+    win=win)
+
+viz.scatter(
+    X=np.random.rand(255, 2),
+    Y=(np.random.rand(255) + 1.5).astype(int),
+    opts=dict(
+        markersize=10,
+        markercolor=colors,
+    ),
+    update='append',
+    win=win)
+
 
 # mesh plot
 x = [0, 0, 1, 1, 0, 0, 1, 1]
