@@ -351,13 +351,9 @@ class UpdateHandler(BaseHandler):
         self.state = state
         self.subs = subs
 
+    # TODO remove when updateTrace is to be deprecated
     @staticmethod
-    def update(p, args):
-        # Update text in window, separated by a line break
-        if p['type'] == 'text':
-            p['content'] += "<br>" + args['data'][0]['content']
-            return p
-
+    def update_updateTrace(p, args):
         pdata = p['content']['data']
 
         new_data = args['data']
@@ -388,6 +384,66 @@ class UpdateHandler(BaseHandler):
                 else new_data['x'][n]
             pdata[idx]['y'] = (pdata[idx]['y'] + new_data['y'][n]) if append \
                 else new_data['y'][n]
+
+        return p
+
+    @staticmethod
+    def update(p, args):
+        # Update text in window, separated by a line break
+        if p['type'] == 'text':
+            p['content'] += "<br>" + args['data'][0]['content']
+            return p
+
+        pdata = p['content']['data']
+
+        new_data = args['data']
+        # TODO remove when updateTrace is deprecated
+        if isinstance(new_data, dict):
+            return UpdateHandler.update_updateTrace(p, args)
+        name = args.get('name')
+        append = args.get('append')
+
+        idxs = list(range(len(pdata)))
+
+        if name is not None:
+            assert len(new_data) == 1
+            idxs = [i for i in idxs if pdata[i]['name'] == name]
+
+        # inject new trace
+        if len(idxs) == 0:
+            idx = len(pdata)
+            pdata.append(dict(pdata[0]))   # plot is not empty, clone an entry
+            pdata[idx]['name'] = name
+            idxs = [idx]
+            append = False
+            pdata[idx] = new_data[0]
+            for k, v in new_data[0].items():
+                pdata[idx][k] = v
+            return p
+
+        for n, idx in enumerate(idxs):    # update traces
+            if all([math.isnan(i) or i is None for i in new_data[n]['x']]):
+                continue
+            # handle data for plotting
+            for axis in ['x', 'y']:
+                pdata[idx][axis] = (pdata[idx][axis] + new_data[n][axis]) \
+                    if append else new_data[n][axis]
+
+            # handle marker properties
+            if 'marker' not in new_data[n]:
+                continue
+            if 'marker' not in pdata[idx]:
+                pdata[idx]['marker'] = {}
+            pdata_marker = pdata[idx]['marker']
+            for marker_prop in ['color']:
+                if marker_prop not in new_data[n]['marker']:
+                    continue
+                if marker_prop not in pdata[idx]['marker']:
+                    pdata[idx]['marker'][marker_prop] = []
+                pdata_marker[marker_prop] = (
+                    pdata_marker[marker_prop] +
+                    new_data[n]['marker'][marker_prop]) if append else \
+                    new_data[n]['marker'][marker_prop]
 
         return p
 

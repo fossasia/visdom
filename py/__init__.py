@@ -23,6 +23,7 @@ import numbers
 from six import string_types
 from six import BytesIO
 import logging
+import warnings
 
 try:
     import torchfile
@@ -532,6 +533,11 @@ class Visdom(object):
         There are less options because they are assumed to inherited from the
         specified plot.
         """
+        warnings.warn("updateTrace is going to be deprecated in the next "
+                      "version of `visdom`. Please to use `scatter(.., "
+                      "update='append',name=<traceName>)` or `line(.., "
+                      "update='append',name=<traceName>)` as required.",
+                      PendingDeprecationWarning)
         assert win is not None
 
         assert Y.shape == X.shape, 'Y should be same size as X'
@@ -563,7 +569,8 @@ class Visdom(object):
             'opts': opts,
         }, endpoint='update')
 
-    def scatter(self, X, Y=None, win=None, env=None, opts=None, update=None):
+    def scatter(self, X, Y=None, win=None, env=None, opts=None, update=None,
+                name=None):
         """
         This function draws a 2D or 3D scatter plot. It takes in an `Nx2` or
         `Nx3` tensor `X` that specifies the locations of the `N` points in the
@@ -571,8 +578,9 @@ class Visdom(object):
         range between `1` and `K` can be specified as well -- the labels will be
         reflected in the colors of the markers.
 
-        `update` can be used to efficiently update the data of an existing line.
-        Use 'append' to append data, 'replace' to use new data.
+        `update` can be used to efficiently update the data of an existing plot.
+        Use 'append' to append data, 'replace' to use new data. If updating a
+        single trace, use `name` to specify the name of the trace to be updated.
         Update data that is all NaN is ignored (can be used for masking update).
 
         The following `opts` are supported:
@@ -584,8 +592,22 @@ class Visdom(object):
         - `opts.legend`      : `table` containing legend names
         """
         if update is not None:
-            return self.updateTrace(X=X, Y=Y, win=win, env=env,
-                                    append=update == 'append', opts=opts)
+            assert win is not None
+
+            # case when X is 1 dimensional and corresponding values on y-axis
+            # are passed in parameter Y
+            if name:
+                assert len(name) >= 0, \
+                    'name of trace should be non-empty string'
+                assert X.ndim == 1 or X.ndim == 2, 'updating by name should' \
+                    'have 1-dim or 2-dim X.'
+                if X.ndim == 1:
+                    assert Y.ndim == 1, \
+                        'update by name should have 1-dim Y when X is 1-dim'
+                    assert X.shape[0] == Y.shape[0], \
+                        'X and Y should have same shape'
+                    X = np.column_stack((X, Y))
+                    Y = None
 
         assert X.ndim == 2, 'X should have two dims'
         assert X.shape[1] == 2 or X.shape[1] == 3, 'X should have 2 or 3 cols'
@@ -595,7 +617,7 @@ class Visdom(object):
             assert Y.ndim == 1, 'Y should be one-dimensional'
             assert X.shape[0] == Y.shape[0], 'sizes of X and Y should match'
         else:
-            Y = np.ones(X.shape[0])
+            Y = np.ones(X.shape[0], dtype=int)
 
         assert np.equal(np.mod(Y, 1), 0).all(), 'labels should be integers'
         assert Y.min() == 1, 'labels are assumed to be between 1 and K'
@@ -648,15 +670,28 @@ class Visdom(object):
 
                 data.append(_scrub_dict(_data))
 
-        return self._send({
+        if opts:
+            for marker_prop in ['markercolor']:
+                if marker_prop in opts:
+                    del opts[marker_prop]
+
+        data_to_send = {
             'data': data,
             'win': win,
             'eid': env,
             'layout': _opts2layout(opts, is3d),
             'opts': opts,
-        })
+        }
+        endpoint = 'events'
+        if update:
+            data_to_send['name'] = name
+            data_to_send['append'] = update == 'append'
+            endpoint = 'update'
 
-    def line(self, Y, X=None, win=None, env=None, opts=None, update=None):
+        return self._send(data_to_send, endpoint=endpoint)
+
+    def line(self, Y, X=None, win=None, env=None, opts=None, update=None,
+             name=None):
         """
         This function draws a line plot. It takes in an `N` or `NxM` tensor
         `Y` that specifies the values of the `M` lines (that connect `N` points)
@@ -665,7 +700,8 @@ class Visdom(object):
         lines will share the same x-axis values) or have the same size as `Y`.
 
         `update` can be used to efficiently update the data of an existing line.
-        Use 'append' to append data, 'replace' to use new data.
+        Use 'append' to append data, 'replace' to use new data. If updating a
+        single trace, use `name` to specify the name of the trace to be updated.
         Update data that is all NaN is ignored (can be used for masking update).
 
         The following `opts` are supported:
@@ -682,12 +718,6 @@ class Visdom(object):
         """
         if update is not None:
             assert X is not None, 'must specify x-values for line update'
-
-            if Y.ndim == 2 and X.ndim == 1:
-                X = np.tile(X, (Y.shape[1], 1)).transpose()
-
-            return self.updateTrace(X=X, Y=Y, win=win, env=env,
-                                    append=update == 'append', opts=opts)
         assert Y.ndim == 1 or Y.ndim == 2, 'Y should have 1 or 2 dim'
 
         if X is not None:
@@ -717,7 +747,8 @@ class Visdom(object):
             labels = np.arange(1, Y.shape[1] + 1)
             labels = np.tile(labels, (Y.shape[0], 1)).ravel(order='F')
 
-        return self.scatter(X=linedata, Y=labels, opts=opts, win=win, env=env)
+        return self.scatter(X=linedata, Y=labels, opts=opts, win=win, env=env,
+                            update=update, name=name)
 
     def heatmap(self, X, win=None, env=None, opts=None):
         """
