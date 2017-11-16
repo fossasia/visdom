@@ -500,7 +500,7 @@ class Visdom(object):
             writer.release()
             writer = None
 
-        extension = videofile[-3:].lower()
+        extension = videofile.split(".")[-1].lower()
         mimetypes = dict(mp4='mp4', ogv='ogg', avi='avi', webm='webm')
         mimetype = mimetypes.get(extension)
         assert mimetype is not None, 'unknown video type: %s' % extension
