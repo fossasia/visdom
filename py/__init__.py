@@ -815,7 +815,13 @@ class Visdom(object):
         X = np.squeeze(X)
         assert X.ndim == 1 or X.ndim == 2, 'X should be one or two-dimensional'
         if X.ndim == 1:
-            X = X[:, None]
+            if opts.get('legend') is not None:
+                X = X[None, :]
+                assert opts.get('rownames') is None, \
+                    'both rownames and legend cannot be specified \
+                    for one-dimensional X values'
+            else:
+                X = X[:, None]
         if Y is not None:
             Y = np.squeeze(Y)
             assert Y.ndim == 1, 'Y should be one-dimensional'
@@ -834,7 +840,7 @@ class Visdom(object):
 
         if opts.get('legend') is not None:
             assert len(opts['legend']) == X.shape[1], \
-                'number of legened labels must match number of columns in X'
+                'number of legend labels must match number of columns in X'
 
         data = []
         for k in range(X.shape[1]):
