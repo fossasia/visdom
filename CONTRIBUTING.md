@@ -38,25 +38,26 @@ if you are installing from source or using another method of installing
 dependancies, the folder to use may be different.
 
 * Download the following files and copy them into the following subfolders of the
-visdom package directory, creating them if necessary (format: URL: `subfolder`):    
-
-    https://unpkg.com/jquery@3.1.1/dist/jquery.min.js: `static/js/jquery.min.js`
-    https://unpkg.com/bootstrap@3.3.7/dist/js/bootstrap.min.js: `static/js/bootstrap.min.js`
-    https://unpkg.com/react-resizable@1.4.6/css/styles.css: `static/css/react-resizable-styles.css`
-    https://unpkg.com/react-grid-layout@0.14.0/css/styles.css: `static/css/react-grid-layout-styles.css`
-    https://unpkg.com/react@15.6.1/dist/react.min.js: `static/js/react-react.min.js`
-    https://unpkg.com/react-dom@15.6.1/dist/react-dom.min.js: `static/js/react-dom.min.js`
-    https://unpkg.com/classnames@2.2.5: `static/fonts/classnames`
-    https://unpkg.com/layout-bin-packer@1.2.2: `static/fonts/layout_bin_packer`
-    https://cdn.rawgit.com/STRML/react-grid-layout/0.14.0/dist/react-grid-layout.min.js: `static/js/react-grid-layout.min.js`
-    https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_SVG: `static/js/mathjax-MathJax.js`
-    https://cdn.rawgit.com/plotly/plotly.js/master/dist/plotly.min.js: `static/js/plotly-plotly.min.js`
-    https://unpkg.com/bootstrap@3.3.7/dist/css/bootstrap.min.css: `static/css/bootstrap.min.css`
-    https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.eot: `static/fonts/glyphicons-halflings-regular.eot`
-    https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.woff2: `static/fonts/glyphicons-halflings-regular.woff2`
-    https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.woff: `static/fonts/glyphicons-halflings-regular.woff`
-    https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.ttf: `static/fonts/glyphicons-halflings-regular.ttf`
-    https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.svg#glyphicons_halflingsregular: `static/fonts/glyphicons-halflings-regular.svg#glyphicons_halflingsregular`
+visdom package directory, creating them if necessary. Can be done manually or potentially by just copying and pasting the following (format: `wget URL -O subfolder`):    
+```
+wget https://unpkg.com/jquery@3.1.1/dist/jquery.min.js -O visdom/static/js/jquery.min.js
+wget https://unpkg.com/bootstrap@3.3.7/dist/js/bootstrap.min.js -O visdom/static/js/bootstrap.min.js
+wget https://unpkg.com/react-resizable@1.4.6/css/styles.css -O visdom/static/css/react-resizable-styles.css
+wget https://unpkg.com/react-grid-layout@0.14.0/css/styles.css -O visdom/static/css/react-grid-layout-styles.css
+wget https://unpkg.com/react@15.6.1/dist/react.min.js -O visdom/static/js/react-react.min.js
+wget https://unpkg.com/react-dom@15.6.1/dist/react-dom.min.js -O visdom/static/js/react-dom.min.js
+wget https://unpkg.com/classnames@2.2.5 -O visdom/static/fonts/classnames
+wget https://unpkg.com/layout-bin-packer@1.2.2 -O visdom/static/fonts/layout_bin_packer
+wget https://cdn.rawgit.com/STRML/react-grid-layout/0.14.0/dist/react-grid-layout.min.js -O visdom/static/js/react-grid-layout.min.js
+wget https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_SVG -O visdom/static/js/mathjax-MathJax.js
+wget https://cdn.rawgit.com/plotly/plotly.js/master/dist/plotly.min.js -O visdom/static/js/plotly-plotly.min.js
+wget https://unpkg.com/bootstrap@3.3.7/dist/css/bootstrap.min.css -O visdom/static/css/bootstrap.min.css
+wget https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.eot -O visdom/static/fonts/glyphicons-halflings-regular.eot
+wget https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.woff2 -O visdom/static/fonts/glyphicons-halflings-regular.woff2
+wget https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.woff -O visdom/static/fonts/glyphicons-halflings-regular.woff
+wget https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.ttf -O visdom/static/fonts/glyphicons-halflings-regular.ttf
+wget https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.svg#glyphicons_halflingsregular -O visdom/static/fonts/glyphicons-halflings-regular.svg#glyphicons_halflingsregular
+```
 
 * Restart the visdom server, try again, and check the JavaScript Console to
 confirm all dependencies are found.
