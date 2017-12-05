@@ -57,11 +57,11 @@ def from_t7(t, b64=False):
     if b64:
         t = base64.b64decode(t)
 
-    with open('/dev/shm/t7', 'w') as ff:
+    with open('/dev/shm/t7', 'wb') as ff:
         ff.write(t)
         ff.close()
 
-    sf = open('/dev/shm/t7')
+    sf = open('/dev/shm/t7', 'rb')
 
     return torchfile.T7Reader(sf).read_obj()
 
