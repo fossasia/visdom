@@ -460,7 +460,7 @@ class Visdom(object):
     def video(self, tensor=None, videofile=None, win=None, env=None, opts=None):
         """
         This function plays a video. It takes as input the filename of the video
-        or a `LxCxHxW` tensor containing all the frames of the video. The function
+        or a `LxHxWxC` tensor containing all the frames of the video. The function
         does not support any plot-specific `options`.
         """
         opts = {} if opts is None else opts
