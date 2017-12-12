@@ -815,7 +815,7 @@ class Visdom(object):
         X = np.squeeze(X)
         assert X.ndim == 1 or X.ndim == 2, 'X should be one or two-dimensional'
         if X.ndim == 1:
-            if opts.get('legend') is not None:
+            if opts is not None and opts.get('legend') is not None:
                 X = X[None, :]
                 assert opts.get('rownames') is None, \
                     'both rownames and legend cannot be specified \
