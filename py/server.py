@@ -595,6 +595,8 @@ class ErrorHandler(BaseHandler):
 # function that downloads and installs javascript, css, and font dependencies:
 def download_scripts(proxies=None, install_dir=None):
 
+    print("Downloading scripts. It might take a while.")
+
     # location in which to download stuff:
     if install_dir is None:
         import visdom
@@ -616,6 +618,8 @@ def download_scripts(proxies=None, install_dir=None):
         'react-grid-layout.min.js': 'react-grid-layout.min.js',
         'https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_SVG':
             'mathjax-MathJax.js',
+        # here is another url in case the cdn breaks down again.
+        # https://raw.githubusercontent.com/plotly/plotly.js/master/dist/plotly.min.js
         'https://cdn.plot.ly/plotly-latest.min.js':
             'plotly-plotly.min.js',
         '%scss/bootstrap.min.css' % bb: 'bootstrap.min.css',
