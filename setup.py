@@ -3,7 +3,7 @@ from setuptools import setup
 readme = open('README.md').read()
 
 requirements = [
-    'numpy',
+    'numpy>=1.8',
     'pillow',
     'requests',
     'tornado',
@@ -15,7 +15,7 @@ requirements = [
 setup(
     # Metadata
     name='visdom',
-    version='0.1.6.3',
+    version='0.1.6.4',
     author='Allan Jabri',
     author_email='ajabri@fb.com',
     url='https://github.com/facebookresearch/visdom',
