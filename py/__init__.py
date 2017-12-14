@@ -57,11 +57,11 @@ def from_t7(t, b64=False):
     if b64:
         t = base64.b64decode(t)
 
-    with open('/dev/shm/t7', 'w') as ff:
+    with open('/dev/shm/t7', 'wb') as ff:
         ff.write(t)
         ff.close()
 
-    sf = open('/dev/shm/t7')
+    sf = open('/dev/shm/t7', 'rb')
 
     return torchfile.T7Reader(sf).read_obj()
 
@@ -461,7 +461,7 @@ class Visdom(object):
     def video(self, tensor=None, videofile=None, win=None, env=None, opts=None):
         """
         This function plays a video. It takes as input the filename of the video
-        or a `LxCxHxW` tensor containing all the frames of the video. The function
+        or a `LxHxWxC` tensor containing all the frames of the video. The function
         does not support any plot-specific `options`.
         """
         opts = {} if opts is None else opts
@@ -816,7 +816,13 @@ class Visdom(object):
         X = np.squeeze(X)
         assert X.ndim == 1 or X.ndim == 2, 'X should be one or two-dimensional'
         if X.ndim == 1:
-            X = X[:, None]
+            if opts is not None and opts.get('legend') is not None:
+                X = X[None, :]
+                assert opts.get('rownames') is None, \
+                    'both rownames and legend cannot be specified \
+                    for one-dimensional X values'
+            else:
+                X = X[:, None]
         if Y is not None:
             Y = np.squeeze(Y)
             assert Y.ndim == 1, 'Y should be one-dimensional'
@@ -835,7 +841,7 @@ class Visdom(object):
 
         if opts.get('legend') is not None:
             assert len(opts['legend']) == X.shape[1], \
-                'number of legened labels must match number of columns in X'
+                'number of legend labels must match number of columns in X'
 
         data = []
         for k in range(X.shape[1]):

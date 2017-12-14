@@ -227,8 +227,8 @@ No specific `opts` are currently supported.
 
 #### vis.video
 This function plays a video. It takes as input the filename of the video
-`videofile` or a `LxCxHxW`-sized `tensor` (in Lua) or a or a `LxHxWxC`-sized
-`tensor` (in Python) containing all the frames of the video as input. The
+`videofile` or a `LxHxWxC`-sized
+`tensor` containing all the frames of the video as input. The
 function does not support any plot-specific `opts`.
 
 The following `opts` are supported:

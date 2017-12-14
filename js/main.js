@@ -78,6 +78,14 @@ class App extends React.Component {
     return this.state.envID + '_' + key;
   }
 
+  correctPathname = () => {
+    var pathname = window.location.pathname;
+    if (pathname.slice(-1) != '/') {
+      pathname = pathname + '/'
+    }
+    return pathname
+  }
+
   addPaneBatched = (pane) => {
     if (!this._timeoutID) {
       this._timeoutID = setTimeout(this.processBatchedPanes, 100);
@@ -142,7 +150,7 @@ class App extends React.Component {
     }
 
     var url = window.location;
-    var socket = new WebSocket('ws://' + url.host + '/socket');
+    var socket = new WebSocket('ws://' + url.host + this.correctPathname() + 'socket');
 
     socket.onmessage = this._handleMessage;
 
@@ -252,7 +260,7 @@ class App extends React.Component {
     });
     // This kicks off a new stream of events from the socket so there's nothing
     // to handle here. We might want to surface the error state.
-    $.post('/env/' + envID,
+    $.post(this.correctPathname() + 'env/' + envID,
       JSON.stringify({'sid' : this.state.sessionID}));
   }
 
