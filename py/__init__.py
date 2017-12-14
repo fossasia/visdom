@@ -244,7 +244,7 @@ class Visdom(object):
             pass
 
     # Utils
-    def _send(self, msg, endpoint='events'):
+    def _send(self, msg, endpoint='events', quiet=False):
         """
         This function sends specified JSON request to the Tornado server. This
         function should generally not be called by the user, unless you want to
@@ -264,9 +264,10 @@ class Visdom(object):
             )
             return r.text
         except BaseException:
-            print("Exception in user code:")
-            print('-' * 60)
-            traceback.print_exc()
+            if not quiet:
+                print("Exception in user code:")
+                print('-' * 60)
+                traceback.print_exc()
             return False
 
     def save(self, envs):
@@ -305,7 +306,7 @@ class Visdom(object):
         return self._send({
             'win': win,
             'eid': env,
-        }, endpoint='win_exists')
+        }, endpoint='win_exists', quiet=True)
 
     def win_exists(self, win, env=None):
         """
