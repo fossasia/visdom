@@ -241,7 +241,11 @@ win = viz.line(
 )
 
 # Assure that the stacked area plot isn't giant
+<<<<<<< HEAD
 viz.update_window_opts(
+=======
+viz.update_layout(
+>>>>>>> Fixes fullwidth bug, programmatic window sizing
     win=win,
     opts=dict(
         width=300,
