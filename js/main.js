@@ -52,8 +52,7 @@ class App extends React.Component {
     layout: [],
     cols: 100,
     width: 1280,
-    layoutList: []
-
+    layoutList: [],
   };
 
   _bin = null;
@@ -378,7 +377,7 @@ class App extends React.Component {
 
   updateToLayout = (layoutID) => {
     this.setState({layoutID: layoutID});
-    if layoutID !== '' {
+    if (layoutID !== '') {
       this.updateLayout(this.state.layoutList[layoutID]);
     }
   }
