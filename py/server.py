@@ -677,7 +677,7 @@ def download_scripts(proxies=None, install_dir=None):
                 logging.error('Error {} while downloading {}'.format(exc.code, key))
 
 
-def main():
+def main(print_func=None):
     print("It's Alive!")
     app = Application()
     app.listen(FLAGS.port, max_buffer_size=1024 ** 3)
@@ -686,7 +686,10 @@ def main():
         hostname = os.environ["HOSTNAME"]
     else:
         hostname = "localhost"
-    print("You can navigate to http://%s:%s" % (hostname, FLAGS.port))
+    if print_func is None:
+        print("You can navigate to http://%s:%s" % (hostname, FLAGS.port))
+    else:
+        print_func(FLAGS.port)
     ioloop.IOLoop.instance().start()
 
 
