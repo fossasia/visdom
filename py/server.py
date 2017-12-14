@@ -215,6 +215,23 @@ class BaseHandler(tornado.web.RequestHandler):
                 logging.error(e)
 
 
+def update_window(p, args):
+    """Adds new args to a window if they exist"""
+    content = p['content']
+    layout = content['layout']
+    layout.update(args.get('layout', {}))
+    opts = args.get('opts', {})
+    for opt_name, opt_val in opts.items():
+        if opt_name in p:
+            p[opt_name] = opt_val
+
+    if 'legend' in opts:
+        pdata = p['content']['data']
+        for i, d in enumerate(pdata):
+            d['name'] = opts['legend'][i]
+    return p
+
+
 def window(args):
     """ Build a window dict structure for sending to client """
     uid = args.get('win', 'window_' + get_rand_id())
@@ -396,11 +413,14 @@ class UpdateHandler(BaseHandler):
 
         pdata = p['content']['data']
 
-        new_data = args['data']
+        new_data = args.get('data')
         # TODO remove when updateTrace is deprecated
         if isinstance(new_data, dict):
             return UpdateHandler.update_updateTrace(p, args)
+        p = update_window(p, args)
         name = args.get('name')
+        if name is None:
+            return p  # we only updated the opts or layout
         append = args.get('append')
 
         idxs = list(range(len(pdata)))

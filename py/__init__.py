@@ -570,6 +570,19 @@ class Visdom(object):
             'opts': opts,
         }, endpoint='update')
 
+    def update_layout(self, win, opts, env=None):
+        """
+        This function allows pushing new options to an existing plot window
+        without updating the content
+        """
+        data_to_send = {
+            'win': win,
+            'eid': env,
+            'layout': _opts2layout(opts),
+            'opts': opts,
+        }
+        return self._send(data_to_send, endpoint='update')
+
     def scatter(self, X, Y=None, win=None, env=None, opts=None, update=None,
                 name=None):
         """
