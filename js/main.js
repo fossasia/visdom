@@ -49,8 +49,8 @@ class App extends React.Component {
     filter: '',
     filterField: '',
     layout: [],
-    cols: 1280,
-    width: 100,
+    cols: 100,
+    width: 1280,
   };
 
   _bin = null;

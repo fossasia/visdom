@@ -227,8 +227,8 @@ win = viz.line(
     opts=dict(
         fillarea=True,
         showlegend=False,
-        width=400,
-        height=400,
+        width=800,
+        height=800,
         xlabel='Time',
         ylabel='Volume',
         ytype='log',
@@ -237,6 +237,15 @@ win = viz.line(
         marginright=30,
         marginbottom=80,
         margintop=30,
+    ),
+)
+
+# Assure that the stacked area plot isn't giant
+viz.update_layout(
+    win=win,
+    opts=dict(
+        width=300,
+        height=300,
     ),
 )
 
