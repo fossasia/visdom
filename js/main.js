@@ -495,7 +495,7 @@ class App extends React.Component {
 
   updateToLayout = (layoutID) => {
     this.setState({layoutID: layoutID});
-    if layoutID !== '' {
+    if (layoutID !== '') {
       this.updateLayout(this.state.layoutList[layoutID]);
     }
   }
