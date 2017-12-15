@@ -568,7 +568,7 @@ class Visdom(object):
             'opts': opts,
         }, endpoint='update')
 
-    def update_layout(self, win, opts, env=None):
+    def update_window_opts(self, win, opts, env=None):
         """
         This function allows pushing new options to an existing plot window
         without updating the content
