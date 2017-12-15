@@ -65,16 +65,30 @@ viz.images(
 
 # scatter plots
 Y = np.random.rand(100)
-viz.scatter(
+old_scatter = viz.scatter(
     X=np.random.rand(100, 2),
     Y=(Y[Y > 0] + 1.5).astype(int),
     opts=dict(
-        legend=['Apples', 'Pears'],
-        xtickmin=-5,
-        xtickmax=5,
+        legend=['Didnt', 'Update'],
+        xtickmin=-50,
+        xtickmax=50,
         xtickstep=0.5,
-        ytickmin=-5,
-        ytickmax=5,
+        ytickmin=-50,
+        ytickmax=50,
+        ytickstep=0.5,
+        markersymbol='cross-thin-open',
+    ),
+)
+
+viz.update_window_opts(
+    win=old_scatter,
+    opts=dict(
+        legend=['Apples', 'Pears'],
+        xtickmin=0,
+        xtickmax=1,
+        xtickstep=0.5,
+        ytickmin=0,
+        ytickmax=1,
         ytickstep=0.5,
         markersymbol='cross-thin-open',
     ),
@@ -213,8 +227,8 @@ win = viz.line(
     opts=dict(
         fillarea=True,
         showlegend=False,
-        width=400,
-        height=400,
+        width=800,
+        height=800,
         xlabel='Time',
         ylabel='Volume',
         ytype='log',
@@ -223,6 +237,15 @@ win = viz.line(
         marginright=30,
         marginbottom=80,
         margintop=30,
+    ),
+)
+
+# Assure that the stacked area plot isn't giant
+viz.update_window_opts(
+    win=win,
+    opts=dict(
+        width=300,
+        height=300,
     ),
 )
 

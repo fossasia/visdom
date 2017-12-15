@@ -258,6 +258,21 @@ M.check_connection = argcheck{
    end
 }
 
+M.update_window_opts = argcheck{
+   doc = [[
+      This function allows pushing new options to an existing plot window
+      without updating the content
+   ]],
+   {name = 'self',  type = 'visdom.client'},
+   {name = 'win',   type = 'string'},
+   {name = 'opts',  type = 'table'},
+   {name = 'env',   type = 'string',        opt = true},
+   call = function(self, win, opts, env)
+   local args = {win, opts}
+   local kwargs = {env = env}
+   return self:py_func{func = 'update_window_opts', args = args, kwargs = kwargs}
+}
+
 M.updateTrace = argcheck{
    doc = [[
       This function allows updating of the data of a line or scatter plot.
