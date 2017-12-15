@@ -80,7 +80,7 @@ old_scatter = viz.scatter(
     ),
 )
 
-viz.update_layout(
+viz.update_window_opts(
     win=old_scatter,
     opts=dict(
         legend=['Apples', 'Pears'],
@@ -241,7 +241,7 @@ win = viz.line(
 )
 
 # Assure that the stacked area plot isn't giant
-viz.update_layout(
+viz.update_window_opts(
     win=win,
     opts=dict(
         width=300,
