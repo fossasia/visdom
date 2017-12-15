@@ -100,8 +100,6 @@ def _axisformat(x, opts):
 
 def _opts2layout(opts, is3d=False):
     layout = {
-        'width': opts.get('width'),
-        'height': opts.get('height'),
         'showlegend': opts.get('showlegend', 'legend' in opts),
         'title': opts.get('title'),
         'xaxis': _axisformat('x', opts),
@@ -569,6 +567,19 @@ class Visdom(object):
             'append': append,
             'opts': opts,
         }, endpoint='update')
+
+    def update_window_opts(self, win, opts, env=None):
+        """
+        This function allows pushing new options to an existing plot window
+        without updating the content
+        """
+        data_to_send = {
+            'win': win,
+            'eid': env,
+            'layout': _opts2layout(opts),
+            'opts': opts,
+        }
+        return self._send(data_to_send, endpoint='update')
 
     def scatter(self, X, Y=None, win=None, env=None, opts=None, update=None,
                 name=None):
