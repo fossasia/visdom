@@ -268,9 +268,10 @@ M.update_window_opts = argcheck{
    {name = 'opts',  type = 'table'},
    {name = 'env',   type = 'string',        opt = true},
    call = function(self, win, opts, env)
-   local args = {win, opts}
-   local kwargs = {env = env}
-   return self:py_func{func = 'update_window_opts', args = args, kwargs = kwargs}
+      local args = {win, opts}
+      local kwargs = {env = env}
+      return self:py_func{func = 'update_window_opts', args = args, kwargs = kwargs}
+   end
 }
 
 M.updateTrace = argcheck{
