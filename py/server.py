@@ -419,7 +419,7 @@ class UpdateHandler(BaseHandler):
             return UpdateHandler.update_updateTrace(p, args)
         p = update_window(p, args)
         name = args.get('name')
-        if name is None:
+        if name is None and new_data is None:
             return p  # we only updated the opts or layout
         append = args.get('append')
 
