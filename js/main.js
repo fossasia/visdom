@@ -34,6 +34,17 @@ const PANE_SIZE = {
   text:  [20, 20],
 };
 
+const MODAL_STYLE = {
+  content : {
+    top                   : '50%',
+    left                  : '50%',
+    right                 : 'auto',
+    bottom                : 'auto',
+    marginRight           : '-50%',
+    transform             : 'translate(-50%, -50%)'
+  }
+};
+
 // TODO: Move some of this to smaller components and/or use something like redux
 // to move state out of the app to a standalone store.
 class App extends React.Component {
@@ -53,6 +64,9 @@ class App extends React.Component {
     cols: 100,
     width: 1280,
     layoutList: [],
+    showEnvModal: false,
+    showViewModal: false,
+    modifyEnv: null,
   };
 
   _bin = null;
@@ -198,6 +212,9 @@ class App extends React.Component {
       case 'layout':
         this.relayout();
         break;
+      case 'env_update':
+        this.setState({envList: cmd.data})
+        break;
       default:
         console.error('unrecognized command', cmd);
     }
@@ -269,6 +286,14 @@ class App extends React.Component {
     // to handle here. We might want to surface the error state.
     $.post(this.correctPathname() + 'env/' + envID,
       JSON.stringify({'sid' : this.state.sessionID}));
+  }
+
+  deleteEnv = () => {
+    this.sendSocketMessage({
+      cmd: 'delete_env',
+      prev_eid: this.state.envID,
+      eid: this.state.modifyEnv,
+    });
   }
 
   saveEnv = () => {
@@ -390,6 +415,90 @@ class App extends React.Component {
     this.setState({cols: cols, width: width}, () => {this.relayout()});
   }
 
+  openEnvModal() {
+    this.setState({showEnvModal: true});
+  }
+
+  afterOpenEnvModal() {
+    // do something here?
+  }
+
+  closeEnvModal() {
+    this.setState({showEnvModal: false});
+  }
+
+  openViewModal() {
+    this.setState({showViewModal: true});
+  }
+
+  afterOpenViewModal() {
+    // do something here?
+  }
+
+  closeViewModal() {
+    this.setState({showViewModal: false});
+  }
+
+  renderEnvModal() {
+    return (
+      <ReactModal
+        isOpen={this.state.showEnvModal}
+        onAfterOpen={this.afterOpenEnvModal.bind(this)}
+        onRequestClose={this.closeEnvModal.bind(this)}
+        contentLabel="Environment Management Modal"
+        ariaHideApp={false}
+        style={MODAL_STYLE}
+      >
+        <span className="visdom-title">Manage Environments</span>
+        <br/>
+        Save or fork current environment:
+        <br/>
+        <div className="form-inline">
+          <input
+            className="form-control"
+            type="text"
+            onChange={(ev) => {this.setState({saveText: ev.target.value})}}
+            value={this.state.saveText}
+            ref={(ref) => this._envFieldRef = ref}
+          />
+          <button
+            className="btn btn-default"
+            disabled={!this.state.connected}
+            onClick={this.saveEnv}>
+            {this.state.envList.indexOf(
+              this.state.saveText) >= 0 ? 'save' : 'fork'}
+          </button>
+        </div>
+        <br/>
+        Delete selected environment:
+        <br/>
+        <div className="form-inline">
+          <select
+            className="form-control"
+            disabled={!this.state.connected}
+            onChange={(ev) => {this.setState({modifyEnv: ev.target.value})}}
+            value={this.state.modifyEnv}>{
+              this.state.envList.map((env) => {
+                return <option key={env} value={env}>{env}</option>;
+              })
+            }
+          </select>
+          <button
+            className="btn btn-default"
+            disabled={!this.state.connected || !this.state.modifyEnv
+                       || this.state.modifyEnv == 'main'}
+            onClick={this.deleteEnv.bind(this)}>
+            Delete
+          </button>
+        </div>
+      </ReactModal>
+    );
+  }
+
+  renderViewModal() {
+    return null;
+  }
+
   render() {
     let panes = Object.keys(this.state.panes).map((id) => {
       let pane = this.state.panes[id];
@@ -416,21 +525,14 @@ class App extends React.Component {
         </div>
       );
     });
+    let envModal = this.renderEnvModal();
 
     return (
       <div>
+        {envModal}
         <div className="navbar navbar-default">
           <div className="form-inline">
             <span className="visdom-title">visdom</span>
-            <select
-              className="form-control"
-              disabled={!this.state.connected}
-              onChange={(ev) => {this.selectEnv(ev.target.value)}}
-              value={this.state.envID}>{
-              this.state.envList.map((env) => {
-                return <option key={env} value={env}>{env}</option>;
-              })
-            }</select>
             <button
               className="btn btn-default"
               onClick={this.relayout}>
@@ -438,25 +540,43 @@ class App extends React.Component {
                 className="glyphicon glyphicon-th">
               </span>
             </button>
+            <select
+              className="form-control"
+              disabled={!this.state.connected}
+              onChange={(ev) => {this.selectEnv(ev.target.value)}}
+              value={this.state.envID}>{
+                this.state.envList.map((env) => {
+                  return <option key={env} value={env}>{env}</option>;
+                })
+              }
+            </select>
+            <button
+              className="btn btn-default"
+              disabled={!this.state.connected}
+              onClick={this.openEnvModal.bind(this)}>
+              manage envs
+            </button>
             <button
               className="btn btn-default"
               disabled={!this.state.connected}
               onClick={this.closeAllPanes}>
-              clear
+              clear env
             </button>
-            <input
+            <select
               className="form-control"
-              type="text"
-              onChange={(ev) => {this.setState({saveText: ev.target.value})}}
-              value={this.state.saveText}
-              ref={(ref) => this._envFieldRef = ref}
-            />
+              disabled={!this.state.connected}
+              onChange={(ev) => {this.updateToLayout(ev.target.value)}}
+              value={this.state.layoutID}>{
+                this.state.layoutList.map((env) => {
+                  return <option key={env} value={env}>{env}</option>;
+                })
+              }
+            </select>
             <button
               className="btn btn-default"
               disabled={!this.state.connected}
-              onClick={this.saveEnv}>
-              {this.state.envList.indexOf(
-                this.state.saveText) >= 0 ? 'save' : 'fork'}
+              onClick={(ev) => {this.renderLayoutDialog()}}>
+              manage layouts
             </button>
             <input
               className="form-control"
@@ -479,21 +599,6 @@ class App extends React.Component {
                 }
               )}}>
               filter
-            </button>
-            <select
-              className="form-control"
-              disabled={!this.state.connected}
-              onChange={(ev) => {this.updateToLayout(ev.target.value)}}
-              value={this.state.layoutID}>{
-              this.state.layoutList.map((env) => {
-                return <option key={env} value={env}>{env}</option>;
-              })
-            }</select>
-            <button
-              className="btn btn-default"
-              disabled={!this.state.connected}
-              onClick={(ev) => {this.renderLayoutDialog()}>
-              layouts
             </button>
             <button
               style={{float: 'right'}}
