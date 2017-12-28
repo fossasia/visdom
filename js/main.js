@@ -45,6 +45,8 @@ const MODAL_STYLE = {
   }
 };
 
+const DEFAULT_LAYOUT = 'default';
+
 // TODO: Move some of this to smaller components and/or use something like redux
 // to move state out of the app to a standalone store.
 class App extends React.Component {
@@ -55,7 +57,7 @@ class App extends React.Component {
     focusedPaneID: null,
     envID: ACTIVE_ENV,
     saveText: ACTIVE_ENV,
-    layoutID: '',
+    layoutID: DEFAULT_LAYOUT,
     // Bad form... make a copy of the global var we generated in python.
     envList: ENV_LIST.slice(),
     filter: '',
@@ -63,7 +65,7 @@ class App extends React.Component {
     layout: [],
     cols: 100,
     width: 1280,
-    layoutList: [],
+    layoutLists: {[DEFAULT_LAYOUT]: []},
     showEnvModal: false,
     showViewModal: false,
     modifyEnv: null,
@@ -339,7 +341,7 @@ class App extends React.Component {
   }
 
   movePane = (layout, oldLayoutItem, layoutItem) => {
-     this.updateLayout(layout);
+    this.updateLayout(layout);
   }
 
   rebin = (layout) => {
@@ -393,11 +395,14 @@ class App extends React.Component {
   }
 
   updateLayout = (layout) => {
-    this.setState({layout: layout}, (newState) => {
-      this.state.layout.map((playout, idx) => {
-        localStorage.setItem(this.keyLS(playout.i), JSON.stringify(playout));
-      });
-    });
+    this.setState(
+      {layoutID: DEFAULT_LAYOUT, layout: layout},
+      (newState) => {
+        this.state.layout.map((playout, idx) => {
+          localStorage.setItem(this.keyLS(playout.i), JSON.stringify(playout));
+        });
+      }
+    );
   }
 
   updateToLayout = (layoutID) => {
@@ -470,7 +475,18 @@ class App extends React.Component {
           </button>
         </div>
         <br/>
-        Delete selected environment:
+        Clear contents of current environment:
+        <br/>
+        <div className="form-inline">
+          <button
+            className="btn btn-default"
+            disabled={!this.state.connected}
+            onClick={this.closeAllPanes}>
+            clear
+          </button>
+        </div>
+        <br/>
+        Delete environment selected in dropdown:
         <br/>
         <div className="form-inline">
           <select
@@ -496,7 +512,70 @@ class App extends React.Component {
   }
 
   renderViewModal() {
-    return null;
+    return (
+      <ReactModal
+        isOpen={this.state.showEnvModal}
+        onAfterOpen={this.afterOpenEnvModal.bind(this)}
+        onRequestClose={this.closeEnvModal.bind(this)}
+        contentLabel="Environment Management Modal"
+        ariaHideApp={false}
+        style={MODAL_STYLE}
+      >
+        <span className="visdom-title">Manage Environments</span>
+        <br/>
+        Save or fork current environment:
+        <br/>
+        <div className="form-inline">
+          <input
+            className="form-control"
+            type="text"
+            onChange={(ev) => {this.setState({saveText: ev.target.value})}}
+            value={this.state.saveText}
+            ref={(ref) => this._envFieldRef = ref}
+          />
+          <button
+            className="btn btn-default"
+            disabled={!this.state.connected}
+            onClick={this.saveEnv}>
+            {this.state.envList.indexOf(
+              this.state.saveText) >= 0 ? 'save' : 'fork'}
+          </button>
+        </div>
+        <br/>
+        Clear contents of current environment:
+        <br/>
+        <div className="form-inline">
+          <button
+            className="btn btn-default"
+            disabled={!this.state.connected}
+            onClick={this.closeAllPanes}>
+            clear
+          </button>
+        </div>
+        <br/>
+        Delete environment selected in dropdown:
+        <br/>
+        <div className="form-inline">
+          <select
+            className="form-control"
+            disabled={!this.state.connected}
+            onChange={(ev) => {this.setState({modifyEnv: ev.target.value})}}
+            value={this.state.modifyEnv}>{
+              this.state.envList.map((env) => {
+                return <option key={env} value={env}>{env}</option>;
+              })
+            }
+          </select>
+          <button
+            className="btn btn-default"
+            disabled={!this.state.connected || !this.state.modifyEnv
+                       || this.state.modifyEnv == 'main'}
+            onClick={this.deleteEnv.bind(this)}>
+            Delete
+          </button>
+        </div>
+      </ReactModal>
+    );
   }
 
   render() {
@@ -555,12 +634,6 @@ class App extends React.Component {
               disabled={!this.state.connected}
               onClick={this.openEnvModal.bind(this)}>
               manage envs
-            </button>
-            <button
-              className="btn btn-default"
-              disabled={!this.state.connected}
-              onClick={this.closeAllPanes}>
-              clear env
             </button>
             <select
               className="form-control"
