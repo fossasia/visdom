@@ -44,7 +44,6 @@ class App extends React.Component {
     focusedPaneID: null,
     envID: ACTIVE_ENV,
     saveText: ACTIVE_ENV,
-    layoutID: '',
     // Bad form... make a copy of the global var we generated in python.
     envList: ENV_LIST.slice(),
     filter: '',
@@ -52,8 +51,6 @@ class App extends React.Component {
     layout: [],
     cols: 100,
     width: 1280,
-    layoutList: []
-
   };
 
   _bin = null;
@@ -376,13 +373,6 @@ class App extends React.Component {
     });
   }
 
-  updateToLayout = (layoutID) => {
-    this.setState({layoutID: layoutID});
-    if layoutID !== '' {
-      this.updateLayout(this.state.layoutList[layoutID]);
-    }
-  }
-
   componentDidMount() {
     this.connect();
   }
@@ -480,21 +470,6 @@ class App extends React.Component {
                 }
               )}}>
               filter
-            </button>
-            <select
-              className="form-control"
-              disabled={!this.state.connected}
-              onChange={(ev) => {this.updateToLayout(ev.target.value)}}
-              value={this.state.layoutID}>{
-              this.state.layoutList.map((env) => {
-                return <option key={env} value={env}>{env}</option>;
-              })
-            }</select>
-            <button
-              className="btn btn-default"
-              disabled={!this.state.connected}
-              onClick={(ev) => {this.renderLayoutDialog()}>
-              layouts
             </button>
             <button
               style={{float: 'right'}}
