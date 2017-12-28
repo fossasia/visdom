@@ -816,6 +816,7 @@ class App extends React.Component {
         </div>
       );
     });
+    let envModal = this.renderEnvModal();
 
     let envModal = this.renderEnvModal();
     let viewModal = this.renderViewModal();
