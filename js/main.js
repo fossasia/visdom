@@ -406,9 +406,12 @@ class App extends React.Component {
     let newPanes = Object.assign({}, this.state.panes);
     let filter = this.state.filter;
     let old_sorted = sorted.slice()
+<<<<<<< HEAD
     let layoutID = this.state.layoutID
     let envLayoutList = this.getCurrLayoutList();
     let layoutMap = envLayoutList.get(this.state.layoutID);
+=======
+>>>>>>> Stabilizes the packing function, fixes pane sizing
     // Sort out things that were filtered away
     sorted = sorted.sort(function(a, b) {
       let diff = (newPanes[a.i].title.match(filter) != null) -
@@ -424,7 +427,11 @@ class App extends React.Component {
           return diff;
         }
       }
+<<<<<<< HEAD
       return old_sorted.indexOf(a) - old_sorted.indexOf(b);  // stable sort
+=======
+      else return old_sorted.indexOf(a) - old_sorted.indexOf(b);  // stable sort
+>>>>>>> Stabilizes the packing function, fixes pane sizing
     });
 
     let newLayout = sorted.map((paneLayout, idx) => {
