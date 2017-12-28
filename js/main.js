@@ -45,7 +45,7 @@ const MODAL_STYLE = {
   }
 };
 
-const DEFAULT_LAYOUT = 'current';
+const DEFAULT_LAYOUT = 'default';
 
 // TODO: Move some of this to smaller components and/or use something like redux
 // to move state out of the app to a standalone store.
@@ -65,7 +65,7 @@ class App extends React.Component {
     layout: [],
     cols: 100,
     width: 1280,
-    layoutLists: new Map([['main', new Map([[DEFAULT_LAYOUT, new Map()]])]]),
+    layoutLists: {[DEFAULT_LAYOUT]: []},
     showEnvModal: false,
     showViewModal: false,
     modifyID: null,
@@ -359,7 +359,6 @@ class App extends React.Component {
   }
 
   movePane = (layout, oldLayoutItem, layoutItem) => {
-    this.setState({'layoutID': DEFAULT_LAYOUT})
     this.updateLayout(layout);
   }
 
@@ -452,45 +451,14 @@ class App extends React.Component {
   }
 
   updateLayout = (layout) => {
-    this.setState({layout: layout}, (newState) => {
-      this.state.layout.map((playout, idx) => {
-        localStorage.setItem(this.keyLS(playout.i), JSON.stringify(playout));
-      });
-    });
-    // TODO this is very non-conventional react, someday it shall be fixed but
-    // for now it's important to fix relayout grossness
-    this.state.layout = layout;
-  }
-
-  updateToLayout = (layoutID) => {
-    this.setState({layoutID: layoutID});
-    // TODO this is very non-conventional react, someday it shall be fixed but
-    // for now it's important to fix relayout grossness
-    this.state.layoutID = layoutID;
-    if (layoutID !== DEFAULT_LAYOUT) {
-      this.relayout();
-      this.relayout();
-      this.relayout();
-    }
-  }
-
-  saveLayout() {
-    let sorted = sortLayout(this.state.layout);
-    let layoutMap = new Map();
-    for (var idx = 0; idx < sorted.length; idx++) {
-      let pane = this.state.panes[sorted[idx].i];
-      let currLayout = getLayoutItem(this.state.layout, pane.id);
-      layoutMap.set(sorted[idx].i, [idx, currLayout.h, currLayout.w]);
-    }
-    let layoutLists = this.state.layoutLists;
-    layoutLists.get(this.state.envID).set(this.state.saveText, layoutMap);
-    this.setState({layoutLists: layoutLists, layoutID: this.state.saveText});
-  }
-
-  deleteLayout() {
-    let layoutLists = this.state.layoutLists;
-    layoutLists.get(this.state.envID).delete(this.state.modifyID);
-    this.setState({layoutLists: layoutLists});
+    this.setState(
+      {layoutID: DEFAULT_LAYOUT, layout: layout},
+      (newState) => {
+        this.state.layout.map((playout, idx) => {
+          localStorage.setItem(this.keyLS(playout.i), JSON.stringify(playout));
+        });
+      }
+    );
   }
 
   updateToLayout = (layoutID) => {
@@ -554,6 +522,17 @@ class App extends React.Component {
           </button>
         </div>
         <br/>
+        Clear contents of current environment:
+        <br/>
+        <div className="form-inline">
+          <button
+            className="btn btn-default"
+            disabled={!this.state.connected}
+            onClick={this.closeAllPanes}>
+            clear
+          </button>
+        </div>
+        <br/>
         Delete environment selected in dropdown:
         <br/>
         <div className="form-inline">
@@ -582,25 +561,16 @@ class App extends React.Component {
   renderViewModal() {
     return (
       <ReactModal
-        isOpen={this.state.showViewModal}
-        onRequestClose={this.closeViewModal.bind(this)}
-        contentLabel="Layout Views Management Modal"
+        isOpen={this.state.showEnvModal}
+        onAfterOpen={this.afterOpenEnvModal.bind(this)}
+        onRequestClose={this.closeEnvModal.bind(this)}
+        contentLabel="Environment Management Modal"
         ariaHideApp={false}
         style={MODAL_STYLE}
       >
-        <span className="visdom-title">Manage Views</span>
+        <span className="visdom-title">Manage Environments</span>
         <br/>
-        <strong>
-          Currently these are only saved locally, and are lost on refresh
-        </strong>
-        <br/>
-        <em>
-          This feature is in beta, it's usually necessary to
-          <br/>
-          repack after selecting to restore your view
-        </em>
-        <br/>
-        Save or fork current layout:
+        Save or fork current environment:
         <br/>
         <div className="form-inline">
           <input
@@ -608,186 +578,51 @@ class App extends React.Component {
             type="text"
             onChange={(ev) => {this.setState({saveText: ev.target.value})}}
             value={this.state.saveText}
+            ref={(ref) => this._envFieldRef = ref}
           />
           <button
             className="btn btn-default"
-            disabled={!this.state.connected ||
-                      this.state.saveText == DEFAULT_LAYOUT}
-            onClick={this.saveLayout.bind(this)}>
-            {this.getCurrLayoutList().has(
-              this.state.saveText) ? 'save' : 'fork'}
+            disabled={!this.state.connected}
+            onClick={this.saveEnv}>
+            {this.state.envList.indexOf(
+              this.state.saveText) >= 0 ? 'save' : 'fork'}
           </button>
         </div>
         <br/>
-        Delete layout view selected in dropdown:
+        Clear contents of current environment:
+        <br/>
+        <div className="form-inline">
+          <button
+            className="btn btn-default"
+            disabled={!this.state.connected}
+            onClick={this.closeAllPanes}>
+            clear
+          </button>
+        </div>
+        <br/>
+        Delete environment selected in dropdown:
         <br/>
         <div className="form-inline">
           <select
             className="form-control"
             disabled={!this.state.connected}
-            onChange={(ev) => {this.setState({modifyID: ev.target.value})}}
-            value={this.state.modifyID}>{
-              Array.from(this.getCurrLayoutList().keys()).map((view) => {
-                return <option key={view} value={view}>{view}</option>;
+            onChange={(ev) => {this.setState({modifyEnv: ev.target.value})}}
+            value={this.state.modifyEnv}>{
+              this.state.envList.map((env) => {
+                return <option key={env} value={env}>{env}</option>;
               })
             }
           </select>
           <button
             className="btn btn-default"
-            disabled={!this.state.connected || !this.state.modifyID
-                       || this.state.modifyID == DEFAULT_LAYOUT}
-            onClick={this.deleteLayout.bind(this)}>
+            disabled={!this.state.connected || !this.state.modifyEnv
+                       || this.state.modifyEnv == 'main'}
+            onClick={this.deleteEnv.bind(this)}>
             Delete
           </button>
         </div>
       </ReactModal>
     );
-  }
-
-  renderEnvControls() {
-    let env_options = this.state.envList.map((env) => {
-      let check_space = ''
-      if (env == this.state.envID) {
-        check_space = <span>&nbsp;&#10003;</span>;
-      }
-      return <li>
-        <a href="#" onClick={this.selectEnv.bind(this, env)}>
-          {env}
-          {check_space}
-        </a>
-      </li>;
-    })
-    return (
-      <span>
-        <span>Environment&nbsp;</span>
-        <div className="btn-group navbar-btn" role="group" aria-label="Environment:">
-          <div className="btn-group" role="group">
-            <button className="btn btn-default dropdown-toggle"
-                    type="button" id="envDropdown" data-toggle="dropdown"
-                    aria-haspopup="true" aria-expanded="true">
-              {this.state.envID}
-              &nbsp;
-              <span className="caret"></span>
-            </button>
-            <ul className="dropdown-menu" aria-labelledby="envDropdown">
-              {env_options}
-            </ul>
-          </div>
-          <button
-            data-toggle="tooltip"
-            title="Clear Current Environment"
-            data-placement="bottom"
-            className="btn btn-default"
-            disabled={!this.state.connected}
-            onClick={this.closeAllPanes}>
-            <span
-              className="glyphicon glyphicon-erase">
-            </span>
-          </button>
-          <button
-            data-toggle="tooltip"
-            title="Manage Environments"
-            data-placement="bottom"
-            className="btn btn-default"
-            disabled={!this.state.connected}
-            onClick={this.openEnvModal.bind(this)}>
-            <span
-              className="glyphicon glyphicon-folder-open">
-            </span>
-          </button>
-        </div>
-      </span>
-    )
-  }
-
-  renderViewControls() {
-    let view_options = Array.from(
-      this.getCurrLayoutList().keys()).map((view) => {
-        let check_space = ''
-        if (view == this.state.layoutID) {
-          check_space = <span>&nbsp;&#10003;</span>;
-        }
-        return <li>
-          <a href="#" onClick={this.updateToLayout.bind(this, view)}>
-            {view}
-            {check_space}
-          </a>
-        </li>;
-      }
-    )
-    return (
-      <span>
-        <span>View&nbsp;</span>
-        <div className="btn-group navbar-btn" role="group" aria-label="View:">
-          <div className="btn-group" role="group">
-            <button className="btn btn-default dropdown-toggle"
-                    type="button" id="viewDropdown" data-toggle="dropdown"
-                    aria-haspopup="true" aria-expanded="true">
-              {this.state.layoutID}
-              &nbsp;
-              <span className="caret"></span>
-            </button>
-            <ul className="dropdown-menu" aria-labelledby="viewDropdown">
-              {view_options}
-            </ul>
-          </div>
-          <button
-            data-toggle="tooltip"
-            title="Repack"
-            data-placement="bottom"
-            className="btn btn-default"
-            onClick={(ev) => {this.relayout(); this.relayout();}}>
-            <span
-              className="glyphicon glyphicon-th">
-            </span>
-          </button>
-          <button
-            data-toggle="tooltip"
-            title="Manage Views"
-            data-placement="bottom"
-            className="btn btn-default"
-            disabled={!this.state.connected}
-            onClick={(ev) => {this.openViewModal()}}>
-            <span
-              className="glyphicon glyphicon-folder-open">
-            </span>
-          </button>
-        </div>
-      </span>
-    )
-  }
-
-  renderFilterControl() {
-    return (
-      <div className="input-group navbar-btn">
-        <input type="text" className="form-control" placeholder="Filter text"
-          onChange={(ev) => {this.setState(
-            {filterField: ev.target.value}
-          )}}
-          value={this.state.filterField}
-          ref={(ref) => this._filterFieldRef = ref}/>
-        <span className="input-group-btn">
-          <button
-            type="button"
-            className="btn btn-default"
-            disabled={!this.state.connected}
-            onClick={(ev) => {this.setState(
-              {filter: this.state.filterField}, () => {
-                Object.keys(this.state.panes).map((paneID) => {
-                  this.focusPane(paneID);
-                });
-                // TODO remove this once relayout is moved to a post-state
-                // update kind of thing
-                this.state.filter = this.state.filterField
-                this.relayout();
-                this.relayout();
-              }
-            )}}>
-            filter
-          </button>
-        </span>
-      </div>
-    )
   }
 
   render() {
@@ -827,19 +662,70 @@ class App extends React.Component {
     return (
       <div>
         {envModal}
-        {viewModal}
-        <div className="navbar-form navbar-default">
-          <span className="navbar-brand visdom-title">visdom</span>
-          <span className="vertical-line"></span>
-          &nbsp;&nbsp;
-          {envControls}
-          &nbsp;&nbsp;
-          <span className="vertical-line"></span>
-          &nbsp;&nbsp;
-          {viewControls}
-          <span style={{float: 'right'}}>
-            {filterControl}
-            &nbsp;&nbsp;
+        <div className="navbar navbar-default">
+          <div className="form-inline">
+            <span className="visdom-title">visdom</span>
+            <button
+              className="btn btn-default"
+              onClick={this.relayout}>
+              <span
+                className="glyphicon glyphicon-th">
+              </span>
+            </button>
+            <select
+              className="form-control"
+              disabled={!this.state.connected}
+              onChange={(ev) => {this.selectEnv(ev.target.value)}}
+              value={this.state.envID}>{
+                this.state.envList.map((env) => {
+                  return <option key={env} value={env}>{env}</option>;
+                })
+              }
+            </select>
+            <button
+              className="btn btn-default"
+              disabled={!this.state.connected}
+              onClick={this.openEnvModal.bind(this)}>
+              manage envs
+            </button>
+            <select
+              className="form-control"
+              disabled={!this.state.connected}
+              onChange={(ev) => {this.updateToLayout(ev.target.value)}}
+              value={this.state.layoutID}>{
+                this.state.layoutList.map((env) => {
+                  return <option key={env} value={env}>{env}</option>;
+                })
+              }
+            </select>
+            <button
+              className="btn btn-default"
+              disabled={!this.state.connected}
+              onClick={(ev) => {this.renderLayoutDialog()}}>
+              manage layouts
+            </button>
+            <input
+              className="form-control"
+              type="text"
+              onChange={(ev) => {this.setState(
+                {filterField: ev.target.value}
+              )}}
+              value={this.state.filterField}
+              ref={(ref) => this._filterFieldRef = ref}
+            />
+            <button
+              className="btn btn-default"
+              disabled={!this.state.connected}
+              onClick={(ev) => {this.setState(
+                {filter: this.state.filterField}, () => {
+                  Object.keys(this.state.panes).map((paneID) => {
+                    this.focusPane(paneID);
+                  });
+                  this.relayout();
+                }
+              )}}>
+              filter
+            </button>
             <button
               className={classNames({
                 'btn': true,
