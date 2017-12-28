@@ -145,6 +145,13 @@ class Application(tornado.web.Application):
         super(Application, self).__init__(handlers, **tornado_settings)
 
 
+def broadcast_envs(handler):
+    for s in handler.subs:
+        handler.subs[s].write_message(json.dumps(
+            {'command': 'env_update', 'data': list(handler.state.keys())}
+        ))
+
+
 class SocketHandler(tornado.websocket.WebSocketHandler):
     def initialize(self, state, subs):
         self.state = state
@@ -181,6 +188,15 @@ class SocketHandler(tornado.websocket.WebSocketHandler):
                 self.state[msg['eid']]['reload'] = msg['data']
                 self.eid = msg['eid']
                 serialize_env(self.state, [self.eid])
+
+        if cmd == 'delete_env':
+            if 'eid' in msg:
+                logging.info('closing environment {}'.format(msg['eid']))
+                del self.state[msg['eid']]
+                p = os.path.join(FLAGS.env_path, "{0}.json".format(msg['eid']))
+                os.remove(p)
+                broadcast_envs(self)
+
 
     def on_close(self):
         if self in list(self.subs.values()):
@@ -279,6 +295,7 @@ def register_window(self, p, eid):
     env[p['id']] = p
 
     broadcast(self, p, eid)
+    broadcast_envs(self)
     self.write(p['id'])
 
 
@@ -304,6 +321,7 @@ class PostHandler(BaseHandler):
             'save': SaveHandler,
             'close': CloseHandler,
             'win_exists': ExistsHandler,
+            'delete_env': DeleteEnvHandler,
         }
 
     def func(self, req):
@@ -511,6 +529,27 @@ class CloseHandler(BaseHandler):
             broadcast(
                 handler, json.dumps({'command': 'close', 'data': win}), eid
             )
+
+    def post(self):
+        args = tornado.escape.json_decode(
+            tornado.escape.to_basestring(self.request.body)
+        )
+        self.wrap_func(self, args)
+
+
+class DeleteEnvHandler(BaseHandler):
+    def initialize(self, state, subs):
+        self.state = state
+        self.subs = subs
+
+    @staticmethod
+    def wrap_func(handler, args):
+        eid = extract_eid(args)
+        if eid is not None:
+            del handler.state[eid]
+            p = os.path.join(FLAGS.env_path, "{0}.json".format(eid))
+            os.remove(p)
+            broadcast_envs(handler)
 
     def post(self):
         args = tornado.escape.json_decode(

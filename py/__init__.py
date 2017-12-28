@@ -236,7 +236,7 @@ class Visdom(object):
         self.send = send
 
         try:
-            import torch
+            import torch  # noqa F401: we do use torch, just weirdly
             wrap_tensor_methods(self, pytorch_wrap)
         except ImportError:
             pass
@@ -291,6 +291,13 @@ class Visdom(object):
         return self._send(
             msg={'win': win, 'eid': env},
             endpoint='close'
+        )
+
+    def delete_env(self, env):
+        """This function deletes a specific environment."""
+        return self._send(
+            msg={'eid': env},
+            endpoint='delete_env'
         )
 
     def _win_exists_wrap(self, win, env=None):

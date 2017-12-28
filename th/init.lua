@@ -941,6 +941,21 @@ M.close = argcheck{
    end
 }
 
+-- delete an environment:
+M.delete_env = argcheck{
+   doc = [[
+      This function deletes a specific environment.
+   ]],
+   noordered = true,
+   {name = 'self', type = 'visdom.client'},
+   {name = 'env',  type = 'string'},
+   call = function(self, win, env)
+      local args = {env}
+      local kwargs = {}
+      return self:py_func{func = 'delete_env', args = args, kwargs = kwargs}
+   end
+}
+
 local prep
 prep = function(v)
   local a = {val = v, is_tensor = false, is_table = false}
