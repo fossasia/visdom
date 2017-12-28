@@ -141,6 +141,11 @@ class App extends React.Component {
       }
 
       newLayout.push(paneLayout);
+    } else {
+      let currLayout = getLayoutItem(newLayout, newPane.id);
+      if (newPane.width) currLayout.w = this.p2w(newPane.width);
+      if (newPane.height) currLayout.h = Math.ceil(this.p2h(newPane.height + 14));
+      if (newPane.content.caption) currLayout.h += 1;
     }
   }
 
@@ -328,14 +333,15 @@ class App extends React.Component {
     let sorted = sortLayout(this.state.layout);
     let newPanes = Object.assign({}, this.state.panes);
     let filter = this.state.filter;
-
+    let old_sorted = sorted.slice()
+    // Sort out things that were filtered away
     sorted = sorted.sort(function(a, b) {
       let diff = (newPanes[a.i].title.match(filter) != null) -
               (newPanes[b.i].title.match(filter) != null);
       if (diff != 0) {
         return -diff;
       }
-      else return sorted.indexOf(a) - sorted.indexOf(b);  // stable sort
+      else return old_sorted.indexOf(a) - old_sorted.indexOf(b);  // stable sort
     });
 
     let newLayout = sorted.map((paneLayout, idx) => {
