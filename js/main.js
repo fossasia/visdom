@@ -65,10 +65,10 @@ class App extends React.Component {
     layout: [],
     cols: 100,
     width: 1280,
-    layoutLists: {[DEFAULT_LAYOUT]: []},
+    layoutLists: new Map([['main', new Map([[DEFAULT_LAYOUT, new Map()]])]]),
     showEnvModal: false,
     showViewModal: false,
-    modifyEnv: null,
+    modifyID: null,
   };
 
   _bin = null;
@@ -215,7 +215,14 @@ class App extends React.Component {
         this.relayout();
         break;
       case 'env_update':
-        this.setState({envList: cmd.data})
+        let layoutLists = this.state.layoutLists;
+        for (var envIdx in cmd.data) {
+          if (!layoutLists.has(cmd.data[envIdx])) {
+            layoutLists.set(cmd.data[envIdx],
+              new Map([[DEFAULT_LAYOUT, new Map()]]));
+          }
+        }
+        this.setState({envList: cmd.data, layoutLists: layoutLists})
         break;
       default:
         console.error('unrecognized command', cmd);
@@ -294,7 +301,7 @@ class App extends React.Component {
     this.sendSocketMessage({
       cmd: 'delete_env',
       prev_eid: this.state.envID,
-      eid: this.state.modifyEnv,
+      eid: this.state.modifyID,
     });
   }
 
@@ -323,8 +330,18 @@ class App extends React.Component {
     if (newEnvList.indexOf(env) === -1) {
       newEnvList.push(env);
     }
+    let layoutLists = this.state.layoutLists;
+
+    for (var envIdx in newEnvList) {
+      if (!layoutLists.has(newEnvList[envIdx])) {
+        layoutLists.set(newEnvList[envIdx],
+          new Map([[DEFAULT_LAYOUT, new Map()]]));
+      }
+    }
+
     this.setState({
       envList: newEnvList,
+      layoutLists: layoutLists,
       envID: env,
     });
   }
@@ -336,11 +353,13 @@ class App extends React.Component {
   }
 
   resizePane = (layout, oldLayoutItem, layoutItem) => {
+    this.setState({'layoutID': DEFAULT_LAYOUT})
     this.focusPane(layoutItem.i);
     this.updateLayout(layout);
   }
 
   movePane = (layout, oldLayoutItem, layoutItem) => {
+    this.setState({'layoutID': DEFAULT_LAYOUT})
     this.updateLayout(layout);
   }
 
@@ -356,6 +375,14 @@ class App extends React.Component {
     this._bin = new Bin.ShelfFirst(contents, this.state.cols);
   }
 
+  getCurrLayoutList() {
+    if (this.state.layoutLists.has(this.state.envID)) {
+      return this.state.layoutLists.get(this.state.envID);
+    } else {
+      return new Map();
+    }
+  }
+
   relayout = (pack) => {
     this.rebin();
 
@@ -363,14 +390,25 @@ class App extends React.Component {
     let newPanes = Object.assign({}, this.state.panes);
     let filter = this.state.filter;
     let old_sorted = sorted.slice()
+    let layoutID = this.state.layoutID
+    let envLayoutList = this.getCurrLayoutList();
+    let layoutMap = envLayoutList.get(this.state.layoutID);
     // Sort out things that were filtered away
     sorted = sorted.sort(function(a, b) {
       let diff = (newPanes[a.i].title.match(filter) != null) -
               (newPanes[b.i].title.match(filter) != null);
       if (diff != 0) {
         return -diff;
+      } else if (layoutID !== DEFAULT_LAYOUT) {
+        let aVal = layoutMap.has(a.i) ? -layoutMap.get(a.i) : 1;
+        let bVal = layoutMap.has(b.i) ? -layoutMap.get(b.i) : 1;
+        let diff = bVal - aVal;
+        if (diff != 0) {
+          // At least one of the two was in the layout map.
+          return diff;
+        }
       }
-      else return old_sorted.indexOf(a) - old_sorted.indexOf(b);  // stable sort
+      return old_sorted.indexOf(a) - old_sorted.indexOf(b);  // stable sort
     });
 
     let newLayout = sorted.map((paneLayout, idx) => {
@@ -395,21 +433,35 @@ class App extends React.Component {
   }
 
   updateLayout = (layout) => {
-    this.setState(
-      {layoutID: DEFAULT_LAYOUT, layout: layout},
-      (newState) => {
-        this.state.layout.map((playout, idx) => {
-          localStorage.setItem(this.keyLS(playout.i), JSON.stringify(playout));
-        });
-      }
-    );
+    this.setState({layout: layout}, (newState) => {
+      this.state.layout.map((playout, idx) => {
+        localStorage.setItem(this.keyLS(playout.i), JSON.stringify(playout));
+      });
+    });
   }
 
   updateToLayout = (layoutID) => {
     this.setState({layoutID: layoutID});
-    if (layoutID !== '') {
-      this.updateLayout(this.state.layoutList[layoutID]);
+    if (layoutID !== DEFAULT_LAYOUT) {
+      this.relayout()
     }
+  }
+
+  saveLayout() {
+    let sorted = sortLayout(this.state.layout);
+    let layoutMap = new Map();
+    for (var idx = 0; idx < sorted.length; idx++) {
+      layoutMap.set(sorted[idx].i, idx);
+    }
+    let layoutLists = this.state.layoutLists;
+    layoutLists.get(this.state.envID).set(this.state.saveText, layoutMap);
+    this.setState({layoutLists: layoutLists, layoutID: this.state.saveText});
+  }
+
+  deleteLayout() {
+    let layoutLists = this.state.layoutLists;
+    layoutLists.get(this.state.envID).delete(this.state.modifyID);
+    this.setState({layoutLists: layoutLists});
   }
 
   componentDidMount() {
@@ -421,11 +473,7 @@ class App extends React.Component {
   }
 
   openEnvModal() {
-    this.setState({showEnvModal: true});
-  }
-
-  afterOpenEnvModal() {
-    // do something here?
+    this.setState({showEnvModal: true, saveText: this.state.envID});
   }
 
   closeEnvModal() {
@@ -433,11 +481,7 @@ class App extends React.Component {
   }
 
   openViewModal() {
-    this.setState({showViewModal: true});
-  }
-
-  afterOpenViewModal() {
-    // do something here?
+    this.setState({showViewModal: true, saveText: this.state.layoutID});
   }
 
   closeViewModal() {
@@ -448,7 +492,6 @@ class App extends React.Component {
     return (
       <ReactModal
         isOpen={this.state.showEnvModal}
-        onAfterOpen={this.afterOpenEnvModal.bind(this)}
         onRequestClose={this.closeEnvModal.bind(this)}
         contentLabel="Environment Management Modal"
         ariaHideApp={false}
@@ -492,8 +535,8 @@ class App extends React.Component {
           <select
             className="form-control"
             disabled={!this.state.connected}
-            onChange={(ev) => {this.setState({modifyEnv: ev.target.value})}}
-            value={this.state.modifyEnv}>{
+            onChange={(ev) => {this.setState({modifyID: ev.target.value})}}
+            value={this.state.modifyID}>{
               this.state.envList.map((env) => {
                 return <option key={env} value={env}>{env}</option>;
               })
@@ -501,8 +544,8 @@ class App extends React.Component {
           </select>
           <button
             className="btn btn-default"
-            disabled={!this.state.connected || !this.state.modifyEnv
-                       || this.state.modifyEnv == 'main'}
+            disabled={!this.state.connected || !this.state.modifyID
+                       || this.state.modifyID == 'main'}
             onClick={this.deleteEnv.bind(this)}>
             Delete
           </button>
@@ -514,16 +557,25 @@ class App extends React.Component {
   renderViewModal() {
     return (
       <ReactModal
-        isOpen={this.state.showEnvModal}
-        onAfterOpen={this.afterOpenEnvModal.bind(this)}
-        onRequestClose={this.closeEnvModal.bind(this)}
-        contentLabel="Environment Management Modal"
+        isOpen={this.state.showViewModal}
+        onRequestClose={this.closeViewModal.bind(this)}
+        contentLabel="Layout Views Management Modal"
         ariaHideApp={false}
         style={MODAL_STYLE}
       >
-        <span className="visdom-title">Manage Environments</span>
+        <span className="visdom-title">Manage Views</span>
         <br/>
-        Save or fork current environment:
+        <strong>
+          Currently these are only saved locally, and are lost on refresh
+        </strong>
+        <br/>
+        <strong>
+          This feature is in beta, it's sometimes necessary to
+          <br/>
+          repack after loading to restore your view
+        </strong>
+        <br/>
+        Save or fork current layout:
         <br/>
         <div className="form-inline">
           <input
@@ -531,46 +583,35 @@ class App extends React.Component {
             type="text"
             onChange={(ev) => {this.setState({saveText: ev.target.value})}}
             value={this.state.saveText}
-            ref={(ref) => this._envFieldRef = ref}
           />
           <button
             className="btn btn-default"
-            disabled={!this.state.connected}
-            onClick={this.saveEnv}>
-            {this.state.envList.indexOf(
-              this.state.saveText) >= 0 ? 'save' : 'fork'}
+            disabled={!this.state.connected ||
+                      this.state.saveText == DEFAULT_LAYOUT}
+            onClick={this.saveLayout.bind(this)}>
+            {this.getCurrLayoutList().has(
+              this.state.saveText) ? 'save' : 'fork'}
           </button>
         </div>
         <br/>
-        Clear contents of current environment:
-        <br/>
-        <div className="form-inline">
-          <button
-            className="btn btn-default"
-            disabled={!this.state.connected}
-            onClick={this.closeAllPanes}>
-            clear
-          </button>
-        </div>
-        <br/>
-        Delete environment selected in dropdown:
+        Delete layout view selected in dropdown:
         <br/>
         <div className="form-inline">
           <select
             className="form-control"
             disabled={!this.state.connected}
-            onChange={(ev) => {this.setState({modifyEnv: ev.target.value})}}
-            value={this.state.modifyEnv}>{
-              this.state.envList.map((env) => {
-                return <option key={env} value={env}>{env}</option>;
+            onChange={(ev) => {this.setState({modifyID: ev.target.value})}}
+            value={this.state.modifyID}>{
+              Array.from(this.getCurrLayoutList().keys()).map((view) => {
+                return <option key={view} value={view}>{view}</option>;
               })
             }
           </select>
           <button
             className="btn btn-default"
-            disabled={!this.state.connected || !this.state.modifyEnv
-                       || this.state.modifyEnv == 'main'}
-            onClick={this.deleteEnv.bind(this)}>
+            disabled={!this.state.connected || !this.state.modifyID
+                       || this.state.modifyID == DEFAULT_LAYOUT}
+            onClick={this.deleteLayout.bind(this)}>
             Delete
           </button>
         </div>
@@ -604,11 +645,14 @@ class App extends React.Component {
         </div>
       );
     });
+
     let envModal = this.renderEnvModal();
+    let viewModal = this.renderViewModal();
 
     return (
       <div>
         {envModal}
+        {viewModal}
         <div className="navbar navbar-default">
           <div className="form-inline">
             <span className="visdom-title">visdom</span>
@@ -640,15 +684,15 @@ class App extends React.Component {
               disabled={!this.state.connected}
               onChange={(ev) => {this.updateToLayout(ev.target.value)}}
               value={this.state.layoutID}>{
-                this.state.layoutList.map((env) => {
-                  return <option key={env} value={env}>{env}</option>;
+                Array.from(this.getCurrLayoutList().keys()).map((view) => {
+                  return <option key={view} value={view}>{view}</option>;
                 })
               }
             </select>
             <button
               className="btn btn-default"
               disabled={!this.state.connected}
-              onClick={(ev) => {this.renderLayoutDialog()}}>
+              onClick={(ev) => {this.openViewModal()}}>
               manage layouts
             </button>
             <input
