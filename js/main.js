@@ -639,8 +639,15 @@ class App extends React.Component {
 
   renderEnvControls() {
     let env_options = this.state.envList.map((env) => {
+      let check_space = ''
+      if (env == this.state.envID) {
+        check_space = <span>&nbsp;&#10003;</span>;
+      }
       return <li>
-        <a href="#" onClick={this.selectEnv.bind(this, env)}>{env}</a>
+        <a href="#" onClick={this.selectEnv.bind(this, env)}>
+          {env}
+          {check_space}
+        </a>
       </li>;
     })
     return (
@@ -689,8 +696,15 @@ class App extends React.Component {
   renderViewControls() {
     let view_options = Array.from(
       this.getCurrLayoutList().keys()).map((view) => {
+        let check_space = ''
+        if (view == this.state.layoutID) {
+          check_space = <span>&nbsp;&#10003;</span>;
+        }
         return <li>
-          <a href="#" onClick={this.updateToLayout.bind(this, view)}>{view}</a>
+          <a href="#" onClick={this.updateToLayout.bind(this, view)}>
+            {view}
+            {check_space}
+          </a>
         </li>;
       }
     )
@@ -755,6 +769,10 @@ class App extends React.Component {
                 Object.keys(this.state.panes).map((paneID) => {
                   this.focusPane(paneID);
                 });
+                // TODO remove this once relayout is moved to a post-state
+                // update kind of thing
+                this.state.filter = this.state.filterField
+                this.relayout();
                 this.relayout();
               }
             )}}>
