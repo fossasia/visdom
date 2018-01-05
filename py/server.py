@@ -732,8 +732,12 @@ def download_scripts(proxies=None, install_dir=None):
                 data = opener.open(req).read()
                 with open(filename, 'wb') as fwrite:
                     fwrite.write(data)
-            except (HTTPError, URLError) as exc:
-                logging.error('Error {} while downloading {}'.format(exc.code, key))
+            except HTTPError as exc:
+                logging.error('Error {} while downloading {}'.format(
+                    exc.code, key))
+            except URLError as exc:
+                logging.error('Error {} while downloading {}'.format(
+                    exc.reason, key))
 
 
 def main(print_func=None):
