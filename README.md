@@ -106,7 +106,7 @@ Using the repack icon (9 boxes), visdom will attempt to pack your windows in a w
 > **Note**: Due to the reliance on row/column ordering and `ReactGridLayout` the final layout might be slightly different than what might be expected. We're working on improving that experience or providing alternatives that give more fine-tuned control.
 
 #### Reloading Views
-<p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34621042-9c6c05f6-f215-11e7-92c7-60afe2bf7e1e.gif" width="300" /></p>
+<p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34621042-9c6c05f6-f215-11e7-92c7-60afe2bf7e1e.gif" width="600" /></p>
 
 Using the view dropdown it is possible to select previously saved views, restoring the locations and sizes of all of the windows within the current environment to the places they were when that view was saved last.
 
