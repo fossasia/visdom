@@ -125,9 +125,9 @@ def _markerColorCheck(mc, X, Y, L):
     assert isndarray(mc), 'mc should be a numpy ndarray'
     assert mc.shape[0] == L or (mc.shape[0] == X.shape[0] and
             (mc.ndim == 1 or mc.ndim == 2 and mc.shape[1] == 3)), \
-            'marker colors have to be of size `%d` or `%d x 3` ' + \
-            ' or `%d` or `%d x 3`, but got: %s' % \
-            (X.shape[0], X.shape[1], L, L, 'x'.join(mc.shape))
+            ('marker colors have to be of size `%d` or `%d x 3` ' + \
+            ' or `%d` or `%d x 3`, but got: %s') % \
+            (X.shape[0], X.shape[1], L, L, 'x'.join(map(str,mc.shape)))
 
     assert (mc >= 0).all(), 'marker colors have to be >= 0'
     assert (mc <= 255).all(), 'marker colors have to be <= 255'
