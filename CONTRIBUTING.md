@@ -85,7 +85,7 @@ accept them!
 You can always install visdom from source. Clone the Github repo (and make your
 own code changes, if any). In the visdom source folder, run:
 ```
-pip uninstall visdom && pip install -e ..
+pip uninstall visdom && pip install -e .
 ```
 For some pip installs, this approach does not always properly link the visdom
 module. In that case, try running `python setup.py install` instead.
