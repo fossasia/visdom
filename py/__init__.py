@@ -403,7 +403,7 @@ class Visdom(object):
 
         data = [{
             'content': {
-                'src': 'data:image/jpg;base64,' + b64encoded,
+                'src': 'data:image/png;base64,' + b64encoded,
                 'caption': opts.get('caption'),
             },
             'type': 'image',
