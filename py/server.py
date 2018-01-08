@@ -669,6 +669,7 @@ def download_scripts(proxies=None, install_dir=None):
         '%sbootstrap@3.3.7/dist/js/bootstrap.min.js' % b: 'bootstrap.min.js',
         '%sreact-resizable@1.4.6/css/styles.css' % b: 'react-resizable-styles.css',
         '%sreact-grid-layout@0.14.0/css/styles.css' % b: 'react-grid-layout-styles.css',
+        '%sreact-modal@3.1.10/dist/react-modal.min.js' % b: 'react-modal.min.js',
         '%sreact@15.6.1/dist/react.min.js' % b: 'react-react.min.js',
         '%sreact-dom@15.6.1/dist/react-dom.min.js' % b: 'react-dom.min.js',
         '%sclassnames@2.2.5' % b: 'classnames',

@@ -35,7 +35,7 @@ Organize your visualization space programmatically or through the UI to create d
 ## Concepts
 Visdom has a simple set of features that can be composed for various use-cases.
 
-#### Panes
+### Panes
 <p align="center"><img align="center" src="https://lh3.googleusercontent.com/-kLnogsg9RCs/WLx34PEsGWI/AAAAAAAAnSs/7t_62pbfmfoEBnkcbKTXIqz0WM8pQJHVQCLcB/s0/Screen+Shot+2017-03-05+at+3.34.43+PM.png" width="500" /></p>
 
 
@@ -47,17 +47,30 @@ The UI begins as a blank slate -- you can populate it with plots, images, and te
 
 
 
-#### Environments
-<p align="center"><img align="center" src="https://lh3.googleusercontent.com/-1wRSpNIoFeo/WLXacodRTMI/AAAAAAAAnEo/sTr5jSnQviA0uLqFIvwPGledmxcpupdkgCLcB/s0/Screen+Shot+2017-02-28+at+2.54.13+PM.png" width="300" /></p>
+### Environments
+<p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34618198-fc63976c-f20b-11e7-9c0d-060132fdb37e.png" width="300" /></p>
 
-You can partition your visualization space with `envs`. By default, every user will have an env called `main`. New envs can be created in the UI or programmatically. The state of envs is chronically saved.
+You can partition your visualization space with `envs`. By default, every user will have an env called `main`. New envs can be created in the UI or programmatically. The state of envs is chronically saved. Environments are able to keep entirely different pools of plots.
 
 You can access a specific env via url: `http://localhost.com:8097/env/main`. If your server is hosted, you can share this url so others can see your visualizations too.
 
->**Managing Envs:**
->Your envs are loaded at initialization of the server, by default from `$HOME/.visdom/`. Custom paths can be passed as a cmd-line argument. Envs are removed by deleting the corresponding `.json` file from the env dir.
+#### Selecting Environments
+<p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34618242-261d55d4-f20c-11e7-820d-c16731248b26.png" width="300" /></p>
 
-#### State
+From the main page it is possible to toggle between different environments using the environment selector. Selecting a new environment will query the server for the plots that exist in that environment.
+
+#### Clearing Environments
+You can use the eraser button to remove all of the current contents of an environment. This closes the plot panes for that environment but keeps the empty environment for new plots.
+
+#### Managing Environments
+<p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34618262-3bb635c8-f20c-11e7-9370-9facfde0cfb7.png" width="400" /></p>
+
+Pressing the folder icon opens a dialog that allows you to fork or force save the current environment, or delete any of your existing environments. Use of this feature is fully described in the **State** section.
+
+>**Env Files:**
+>Your envs are loaded at initialization of the server, by default from `$HOME/.visdom/`. Custom paths can be passed as a cmd-line argument. Envs are removed by using the delete button or by deleting the corresponding `.json` file from the env dir.
+
+### State
 Once you've created a few visualizations, state is maintained. The server automatically caches your visualizations -- if you reload the page, your visualizations reappear.
 
 <p align="center"><img align="center" src="https://lh3.googleusercontent.com/-ZKeFJfMe5S4/WLXebiNgFwI/AAAAAAAAnFI/AH2cGsf40hEWbH6UeclYQcZPS0YZbcayQCLcB/s0/env_fork_2.gif" width="400" /></p>
@@ -68,21 +81,46 @@ Once you've created a few visualizations, state is maintained. The server automa
 
 * **Fork:** If you enter a new env name, saving will create a new env -- effectively **forking** the previous env.
 
-#### Filter
+> **Tip**: Fork an environment before you begin to make edits to ensure that your changes are saved seperately.
+
+### Filter
 You can use the `filter` to dynamically sift through windows present in an env -- just provide a regular expression with which to match titles of window you want to show. This can be helpful in use cases involving an env with many windows e.g. when systematically checking experimental results.
 
-<p align="center"><img align="center" src="https://lh3.googleusercontent.com/SJEoacYeHkVer5PEpYlJGOSdFX2gt2_GAVsTpg4k2Wea-RxoJ9e3zW_6xqq2g4WWV-JaIaMOLopAvssYgV2XqshhttRacNgRZQKfrreKOJls1RmwtLsA-SauhPPCKosUveab8dJmv7jQZ40sBLJZUXUXa5daCF16DQn7MtxpctP5Wx2MoOJI56DokT6KUj_Pl3I5M5N_y_kDt6f1pOl1FYjHCzV5no58OXHlyqVapLriX8MbfuZ2CWw6ZFY-XNlv5Cja8R9fKOt1956JVGcqo1u7OVM80eevhT69wUS97fw98UGklPhKwrxCgiGvwu_td__8YALleplfgILOR-_9aNMkNM1pnbZ9isHYGLGpBCOV2PnLdxqDcbjM0ojVzh5DLVBJbV3v2WAlbbCztktd5Kk6O5tWRN3tO4uH-Lm80mWJ-6dWip1Lj4qHWOvlCa0Tg6T_s9GY9zEule32knQdYmY7EmoJKpFFOhZuvX9GXWwz3Pu2nnYIzyaXGAax3qQhbEcPY_4zx20nHY2r5clKPAtyDt3unf7yg0Bk8kJb7bZj8BqdL-eof891vJttbiHXz37Dmpr3Qh1r2-AFr72mtafp-kNmPDjkEaxxRkHpQP03MSN2iGlfDC7OY7bsxmGwE-oJKfi59o6MfJcR3HMiNfsx7ARe0u6mujHj6EIl9n8=w373-h185-no" width="300" /></p>
+<p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34618118-b86cb138-f20b-11e7-834d-b7d7039313f0.png" width="300" /></p>
 
+### [BETA] Views
+<p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34618173-e2546f40-f20b-11e7-9969-16267891fb53.png" width="300" /></p>
+
+It is possible to manage the views simply by dragging the tops of windows around, however additional features exist to keep views organized and save common views. View management can be useful for saving and switching between multiple common organizations of your windows.
+
+#### Saving/Deleting Views
+Using the folder icon, a dialog window opens where views can be forked in the same way that envs can be. Saving a view will retain the position and sizes of all of the panes in a given environment.
+
+> **Note**: Saved views are static, and editing a saved view copies that view over to the `current` view where editing can occur.
+
+> **Warning**: Saved views are currently only saved locally, and are lost on page refresh. Saving to server is coming soon.
+
+#### Re-Packing
+Using the repack icon (9 boxes), visdom will attempt to pack your windows in a way that they best fit while retaining row/column ordering.
+
+> **Note**: Due to the reliance on row/column ordering and `ReactGridLayout` the final layout might be slightly different than what might be expected. We're working on improving that experience or providing alternatives that give more fine-tuned control.
+
+#### Reloading Views
+<p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34621042-9c6c05f6-f215-11e7-92c7-60afe2bf7e1e.gif" width="600" /></p>
+
+Using the view dropdown it is possible to select previously saved views, restoring the locations and sizes of all of the windows within the current environment to the places they were when that view was saved last.
 
 ## Setup
 
 Requires Python 2.7/3 (and optionally Torch7)
 
 ```bash
-# Install Python server and client
+# Install Python server and client from pip
+# (STABLE VERSION, NOT ALL CURRENT FEATURES ARE SUPPORTED)
 pip install visdom
 
 # Install Torch client
+# (STABLE VERSION, NOT ALL CURRENT FEATURES ARE SUPPORTED)
 luarocks install visdom
 
 ```
