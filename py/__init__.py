@@ -381,7 +381,6 @@ class Visdom(object):
         uint8 in [0, 255].
         """
         opts = {} if opts is None else opts
-        opts['jpgquality'] = opts.get('jpgquality', 75)
         _assert_opts(opts)
         opts['width'] = opts.get('width', img.shape[img.ndim - 1])
         opts['height'] = opts.get('height', img.shape[img.ndim - 2])
@@ -399,12 +398,12 @@ class Visdom(object):
         img = np.transpose(img, (1, 2, 0))
         im = Image.fromarray(img)
         buf = BytesIO()
-        im.save(buf, format='JPEG', quality=opts['jpgquality'])
+        im.save(buf, format='PNG')
         b64encoded = b64.b64encode(buf.getvalue()).decode('utf-8')
 
         data = [{
             'content': {
-                'src': 'data:image/jpg;base64,' + b64encoded,
+                'src': 'data:image/png;base64,' + b64encoded,
                 'caption': opts.get('caption'),
             },
             'type': 'image',
