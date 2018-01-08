@@ -153,3 +153,7 @@ button {
   max-height: 100%;
   max-width: 100%;
 }
+
+.vertical-line {
+  border-left: thin solid #ccc;
+}
