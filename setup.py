@@ -15,9 +15,9 @@ requirements = [
 setup(
     # Metadata
     name='visdom',
-    version='0.1.6.4',
-    author='Allan Jabri',
-    author_email='ajabri@fb.com',
+    version='0.1.7',
+    author='Allan Jabri, Jack Urbanek',
+    author_email='jju@fb.com',
     url='https://github.com/facebookresearch/visdom',
     description='A tool for visualizing live, rich data for Torch and Numpy',
     long_description=readme,

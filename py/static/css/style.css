@@ -13,7 +13,6 @@
   border: 0;
   font-family: "Open Sans", sans-serif;
   font-weight: lighter;
-  border-radius: 0 !important;
 }
 
 body{
@@ -29,9 +28,9 @@ h1 {
 }
 
 .visdom-title {
-   padding: 0px 10px;
    font-weight: lighter;
    font-size: 18px;
+   padding: 13px;
 }
 
 .navbar-default {
@@ -54,13 +53,14 @@ h1 {
 
 .navbar {min-height:30px !important;}
 
+.navbar-form {margin-top:0px !important;}
+
 .window {
   overflow: hidden;
   box-sizing: border-box;
   border: #FFF solid 1px;
   background: white;
   color: #3b5998;
-  border-radius: 4px;
   height: 100%;
   width: 100%;
   box-shadow: rgba(0, 0, 0, 0.1) 1px 1px 5px;
@@ -95,8 +95,6 @@ button {
    font-size: 14px;
    line-height: 14px;
    cursor: pointer;
-   -moz-border-radius: 0px;
-   -webkit-border-radius: 0px;
    border-radius: 1px;
    border-color:transparent;
 }
@@ -154,4 +152,8 @@ button {
   overflow-x: scroll;
   max-height: 100%;
   max-width: 100%;
+}
+
+.vertical-line {
+  border-left: thin solid #ccc;
 }
