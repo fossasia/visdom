@@ -828,8 +828,12 @@ class App extends React.Component {
         {viewModal}
         <div className="navbar-form navbar-default">
           <span className="navbar-brand visdom-title">visdom</span>
+          <span className="vertical-line"></span>
+          &nbsp;&nbsp;
           {envControls}
-          &nbsp;&nbsp;&nbsp;&nbsp;
+          &nbsp;&nbsp;
+          <span className="vertical-line"></span>
+          &nbsp;&nbsp;
           {viewControls}
           <span style={{float: 'right'}}>
             {filterControl}
