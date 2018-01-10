@@ -816,12 +816,6 @@ class App extends React.Component {
     let viewControls = this.renderViewControls();
     let filterControl = this.renderFilterControl();
 
-    let envModal = this.renderEnvModal();
-    let viewModal = this.renderViewModal();
-    let envControls = this.renderEnvControls();
-    let viewControls = this.renderViewControls();
-    let filterControl = this.renderFilterControl();
-
     return (
       <div>
         {envModal}
