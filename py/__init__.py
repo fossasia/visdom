@@ -733,7 +733,8 @@ class Visdom(object):
         lines will share the same x-axis values) or have the same size as `Y`.
 
         `update` can be used to efficiently update the data of an existing line.
-        Use 'append' to append data, 'replace' to use new data. If updating a
+        Use 'append' to append data, 'replace' to use new data, and 'remove' to
+        delete the trace that is specified in `name`. If updating a
         single trace, use `name` to specify the name of the trace to be updated.
         Update data that is all NaN is ignored (can be used for masking update).
 
