@@ -444,22 +444,29 @@ class UpdateHandler(BaseHandler):
         idxs = list(range(len(pdata)))
 
         if name is not None:
-            assert len(new_data) == 1
+            assert len(new_data) == 1 or args.get('delete')
             idxs = [i for i in idxs if pdata[i]['name'] == name]
+
+        # Delete a trace
+        if args.get('delete'):
+            for idx in idxs:
+                del pdata[idx]
+            return p
 
         # inject new trace
         if len(idxs) == 0:
             idx = len(pdata)
-            pdata.append(dict(pdata[0]))   # plot is not empty, clone an entry
-            pdata[idx]['name'] = name
+            pdata.append(dict(pdata[0]))  # plot is not empty, clone an entry
             idxs = [idx]
             append = False
             pdata[idx] = new_data[0]
             for k, v in new_data[0].items():
                 pdata[idx][k] = v
+            pdata[idx]['name'] = name
             return p
 
-        for n, idx in enumerate(idxs):    # update traces
+        # Update traces
+        for n, idx in enumerate(idxs):
             if all([math.isnan(i) or i is None for i in new_data[n]['x']]):
                 continue
             # handle data for plotting

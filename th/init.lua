@@ -325,7 +325,9 @@ M.scatter = argcheck{
       reflected in the colors of the markers.
 
       `update` can be used to efficiently update the data of an existing line.
-      Use 'append' to append data, 'replace' to use new data, or nil otherwise.
+      Use 'append' to append data, 'replace' to use new data, 'remove' to delete
+      the trace specified in `name` or nil otherwise.
+      Use `name` if you want to update a specific trace.
       Update data that is all NaN is ignored (can be used for masking updates).
 
       The following `options` are supported:
@@ -345,6 +347,7 @@ M.scatter = argcheck{
    {name = 'win',     type = 'string',        opt = true},
    {name = 'env',     type = 'string',        opt = true},
    {name = 'update',  type = 'string',        opt = true},
+   {name = 'name',    type = 'string',        opt = true},
    call = function(self, X, Y, opts, options, win, env, update)
       if options then
          print(
@@ -359,7 +362,8 @@ M.scatter = argcheck{
          win = win,
          env = env,
          opts = opts,
-         update = update
+         update = update,
+         name = name
       }
       return self:py_func{func = 'scatter', args = args, kwargs = kwargs}
    end
@@ -375,7 +379,9 @@ M.line = argcheck{
       lines will share the same x-axis values) or have the same size as `Y`.
 
       `update` can be used to efficiently update the data of an existing line.
-      Use 'append' to append data, 'replace' to use new data, or nil otherwise.
+      Use 'append' to append data, 'replace' to use new data, 'remove' to delete
+      the trace specified in `name` or nil otherwise.
+      Use `name` if you want to update a specific trace.
       Update data that is all NaN is ignored (can be used for masking updates).
 
       The following `options` are supported:
@@ -395,6 +401,7 @@ M.line = argcheck{
    {name = 'win',     type = 'string',        opt = true},
    {name = 'env',     type = 'string',        opt = true},
    {name = 'update',  type = 'string',        opt = true},
+   {name = 'name',    type = 'string',        opt = true},
    call = function(self, Y, X, opts, options, win, env, update)
       if options then
          print(
@@ -404,7 +411,14 @@ M.line = argcheck{
       end
       opts = opts or options or {}
       local args = {Y}
-      local kwargs = {X = X, win = win, env = env, opts = opts, update = update}
+      local kwargs = {
+         X = X,
+         win = win,
+         env = env,
+         opts = opts,
+         update = update,
+         name = name
+      }
       return self:py_func{func = 'line', args = args, kwargs = kwargs}
    end
 }

@@ -597,8 +597,9 @@ class Visdom(object):
         reflected in the colors of the markers.
 
         `update` can be used to efficiently update the data of an existing plot.
-        Use 'append' to append data, 'replace' to use new data. If updating a
-        single trace, use `name` to specify the name of the trace to be updated.
+        Use 'append' to append data, 'replace' to use new data, and 'remove' to
+        delete the trace that is specified in `name`. If updating a single
+        trace, use `name` to specify the name of the trace to be updated.
         Update data that is all NaN is ignored (can be used for masking update).
 
         The following `opts` are supported:
@@ -609,7 +610,21 @@ class Visdom(object):
         - `opts.markercolor` : marker color (`np.array`; default = `None`)
         - `opts.legend`      : `table` containing legend names
         """
-        if update is not None:
+        if update == 'remove':
+            assert win is not None
+            assert name is not None, 'A trace must be specified for deletion'
+            assert opts is None, 'Opts cannot be updated on trace deletion'
+            data_to_send = {
+                'data': [],
+                'name': name,
+                'delete': True,
+                'win': win,
+                'eid': env,
+            }
+
+            return self._send(data_to_send, endpoint='update')
+
+        elif update is not None:
             assert win is not None
 
             # case when X is 1 dimensional and corresponding values on y-axis
@@ -718,7 +733,8 @@ class Visdom(object):
         lines will share the same x-axis values) or have the same size as `Y`.
 
         `update` can be used to efficiently update the data of an existing line.
-        Use 'append' to append data, 'replace' to use new data. If updating a
+        Use 'append' to append data, 'replace' to use new data, and 'remove' to
+        delete the trace that is specified in `name`. If updating a
         single trace, use `name` to specify the name of the trace to be updated.
         Update data that is all NaN is ignored (can be used for masking update).
 
@@ -735,7 +751,11 @@ class Visdom(object):
         creating a new plot -- this can be used for efficient updating.
         """
         if update is not None:
-            assert X is not None, 'must specify x-values for line update'
+            if update is 'remove':
+                return self.scatter(X=None, Y=None, opts=opts, win=win,
+                                    env=env, update=update, name=name)
+            else:
+                assert X is not None, 'must specify x-values for line update'
         assert Y.ndim == 1 or Y.ndim == 2, 'Y should have 1 or 2 dim'
 
         if X is not None:
