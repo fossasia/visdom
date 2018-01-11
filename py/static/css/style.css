@@ -143,6 +143,18 @@ button {
   font-size:10px;
 }
 
+.hidden-window {
+  visibility: hidden;
+}
+
+/* This exists to make sure that when we filter out windows, plotly
+doesn't override our desire to make them non-interactable */
+.hidden-window * {
+  pointer-events: none !important;
+}
+
+
+
 .react-grid-item.react-grid-placeholder {
   background: white;
 }
