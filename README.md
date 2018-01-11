@@ -298,7 +298,7 @@ scatter plot. An optional `N` tensor `Y` containing discrete labels that
 range between `1` and `K` can be specified as well -- the labels will be
 reflected in the colors of the markers.
 
-`update` can be used to efficiently update the data of an existing plot. Use 'append' to append data, 'replace' to use new data. If updating a single trace, use `name` to specify the name of the trace to be updated. Update data that is all NaN is ignored (can be used for masking update).
+`update` can be used to efficiently update the data of an existing plot. Use 'append' to append data, 'replace' to use new data, or 'remove' to remove the trace specified by `name`. If updating a single trace, use `name` to specify the name of the trace to be updated. Update data that is all NaN is ignored (can be used for masking update).
 
 The following `opts` are supported:
 
@@ -322,7 +322,7 @@ to plot. It also takes an optional `X` tensor that specifies the
 corresponding x-axis values; `X` can be an `N` tensor (in which case all
 lines will share the same x-axis values) or have the same size as `Y`.
 
-`update` can be used to efficiently update the data of an existing plot. Use 'append' to append data, 'replace' to use new data. If updating a single trace, use `name` to specify the name of the trace to be updated. Update data that is all NaN is ignored (can be used for masking update).
+`update` can be used to efficiently update the data of an existing plot. Use 'append' to append data, 'replace' to use new data, or 'remove' to remove the trace specified by `name`. If updating a single trace, use `name` to specify the name of the trace to be updated. Update data that is all NaN is ignored (can be used for masking update).
 
 The following `opts` are supported:
 

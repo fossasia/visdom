@@ -216,9 +216,17 @@ viz.line(
     X=np.arange(1, 10),
     Y=np.arange(11, 20),
     win=win,
-    name='4',
+    name='delete this',
     update='append'
 )
+viz.line(
+    X=np.arange(1, 10),
+    Y=np.arange(11, 20),
+    win=win,
+    name='4',
+    update='insert'
+)
+viz.line(X=None, Y=None, win=win, name='delete this', update='remove')
 
 Y = np.linspace(0, 4, 200)
 win = viz.line(
