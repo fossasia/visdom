@@ -773,7 +773,6 @@ class App extends React.Component {
             data-placement="bottom"
             type="button"
             className="btn btn-default"
-            disabled={!this.state.connected}
             onClick={(ev) => {this.setState(
               {filter: ''}, () => {
                 Object.keys(this.state.panes).map((paneID) => {
