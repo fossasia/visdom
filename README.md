@@ -89,7 +89,7 @@ You can use the `filter` to dynamically sift through windows present in an env -
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34618118-b86cb138-f20b-11e7-834d-b7d7039313f0.png" width="300" /></p>
 
 > **Note**: If you have saved your current view, the view will be restored after clearing the filter.
-> <img align="center" src="https://user-images.githubusercontent.com/1276867/34849912-f0693f30-f6f1-11e7-90b6-2a39f83280e8.gif" width="500" />
+> <p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34849912-f0693f30-f6f1-11e7-90b6-2a39f83280e8.gif" width="500" /></p>
 
 ### [BETA] Views
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34618173-e2546f40-f20b-11e7-9969-16267891fb53.png" width="300" /></p>
