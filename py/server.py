@@ -43,6 +43,8 @@ parser.add_argument('-logging_level', metavar='logger_level', default='INFO',
                          'level name or int (example: 20)')
 FLAGS = parser.parse_args()
 
+LAYOUT_FILE = 'layouts.json'
+
 try:
     logging_level = int(FLAGS.logging_level)
 except (ValueError,):
@@ -145,20 +147,49 @@ class Application(tornado.web.Application):
         super(Application, self).__init__(handlers, **tornado_settings)
 
 
-def broadcast_envs(handler):
-    for s in handler.subs:
-        handler.subs[s].write_message(json.dumps(
+def broadcast_envs(handler, target_subs=None):
+    if target_subs is None:
+        target_subs = handler.subs.values()
+    for sub in target_subs:
+        sub.write_message(json.dumps(
             {'command': 'env_update', 'data': list(handler.state.keys())}
         ))
 
 
 class SocketHandler(tornado.websocket.WebSocketHandler):
     def initialize(self, state, subs):
+        self.layouts = self.load_layouts()
         self.state = state
         self.subs = subs
+        self.broadcast_layouts()
 
     def check_origin(self, origin):
         return True
+
+    def broadcast_layouts(self, target_subs=None):
+        if target_subs is None:
+            target_subs = self.subs.values()
+        for sub in target_subs:
+            sub.write_message(json.dumps(
+                {'command': 'layout_update', 'data': self.layouts}
+            ))
+
+    def save_layouts(self):
+        layout_filepath = os.path.join(FLAGS.env_path, 'view', LAYOUT_FILE)
+        fn = open(layout_filepath, 'w')
+        fn.write(self.layouts)
+        fn.close()
+
+    def load_layouts(self):
+        layout_filepath = os.path.join(FLAGS.env_path, 'view', LAYOUT_FILE)
+        ensure_dir_exists(layout_filepath)
+        if os.path.isfile(layout_filepath):
+            fn = open(layout_filepath, 'r')
+            layouts = fn.read()
+            fn.close()
+            return layouts
+        else:
+            return ""
 
     def open(self):
         self.sid = str(hex(int(time.time() * 10000000))[2:])
@@ -169,6 +200,8 @@ class SocketHandler(tornado.websocket.WebSocketHandler):
 
         self.write_message(
             json.dumps({'command': 'register', 'data': self.sid}))
+        self.broadcast_layouts([self])
+        broadcast_envs(self, [self])
 
     def on_message(self, message):
         logging.info('from web client: {}'.format(message))
@@ -197,6 +230,12 @@ class SocketHandler(tornado.websocket.WebSocketHandler):
                 os.remove(p)
                 broadcast_envs(self)
 
+        if cmd == 'save_layouts':
+            if 'data' in msg:
+                self.layouts = msg.get('data')
+                print(self.layouts)
+                self.save_layouts()
+                self.broadcast_layouts()
 
     def on_close(self):
         if self in list(self.subs.values()):
