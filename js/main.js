@@ -61,7 +61,6 @@ class App extends React.Component {
     // Bad form... make a copy of the global var we generated in python.
     envList: ENV_LIST.slice(),
     filter: '',
-    filterField: '',
     layout: [],
     cols: 100,
     width: 1280,
@@ -74,7 +73,6 @@ class App extends React.Component {
   _bin = null;
   _socket = null;
   _envFieldRef = null;
-  _filterFieldRef = null;
   _timeoutID = null;
   _pendingPanes = [];
 
@@ -405,8 +403,8 @@ class App extends React.Component {
     let sorted = sortLayout(layout);
     let newPanes = Object.assign({}, this.state.panes);
     let filter = this.state.filter;
-    let old_sorted = sorted.slice()
-    let layoutID = this.state.layoutID
+    let old_sorted = sorted.slice();
+    let layoutID = this.state.layoutID;
     let envLayoutList = this.getCurrLayoutList();
     let layoutMap = envLayoutList.get(this.state.layoutID);
     // Sort out things that were filtered away
@@ -754,29 +752,42 @@ class App extends React.Component {
     return (
       <div className="input-group navbar-btn">
         <input type="text" className="form-control" placeholder="Filter text"
-          onChange={(ev) => {this.setState(
-            {filterField: ev.target.value}
-          )}}
-          value={this.state.filterField}
-          ref={(ref) => this._filterFieldRef = ref}/>
+          onChange={(ev) => {
+            this.setState(
+              {filter: ev.target.value}, () => {
+                Object.keys(this.state.panes).map((paneID) => {
+                  this.focusPane(paneID);
+              });
+            });
+            // TODO remove this once relayout is moved to a post-state
+            // update kind of thing
+            this.state.filter = ev.target.value;
+            this.relayout();
+            this.relayout();
+          }}
+          value={this.state.filter}/>
         <span className="input-group-btn">
           <button
+            data-toggle="tooltip"
+            title="Clear filter"
+            data-placement="bottom"
             type="button"
             className="btn btn-default"
-            disabled={!this.state.connected}
             onClick={(ev) => {this.setState(
-              {filter: this.state.filterField}, () => {
+              {filter: ''}, () => {
                 Object.keys(this.state.panes).map((paneID) => {
                   this.focusPane(paneID);
                 });
-                // TODO remove this once relayout is moved to a post-state
-                // update kind of thing
-                this.state.filter = this.state.filterField
-                this.relayout();
-                this.relayout();
-              }
-            )}}>
-            filter
+              });
+              // TODO remove this once relayout is moved to a post-state
+              // update kind of thing
+              this.state.filter = '';
+              this.relayout();
+              this.relayout();
+            }}>
+            <span
+              className="glyphicon glyphicon-erase">
+            </span>
           </button>
         </span>
       </div>
@@ -792,10 +803,10 @@ class App extends React.Component {
         return null;
       }
       let panelayout = getLayoutItem(this.state.layout, id);
-
+      let isVisible = pane.title.match(this.state.filter)
       return (
         <div key={pane.id}
-          style={pane.title.match(this.state.filter) ? {} : {display:'none'}}>
+          className={isVisible? '' : 'hidden-window'}>
           <Comp
             {...pane}
             key={pane.id}
