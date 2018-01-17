@@ -367,7 +367,7 @@ class Visdom(object):
         _assert_opts(opts)
 
         if svgfile is not None:
-            svgstr = loadfile(svgfile)
+            svgstr = str(loadfile(svgfile))
 
         assert svgstr is not None, 'should specify SVG string or filename'
         svg = re.search('<svg .+</svg>', svgstr, re.DOTALL)
