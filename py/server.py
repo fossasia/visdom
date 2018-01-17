@@ -230,7 +230,6 @@ class SocketHandler(tornado.websocket.WebSocketHandler):
         if cmd == 'save_layouts':
             if 'data' in msg:
                 self.layouts = msg.get('data')
-                print(self.layouts)
                 self.save_layouts()
                 self.broadcast_layouts()
 
