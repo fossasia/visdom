@@ -91,17 +91,15 @@ You can use the `filter` to dynamically sift through windows present in an env -
 > **Note**: If you have saved your current view, the view will be restored after clearing the filter.
 > <p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34849912-f0693f30-f6f1-11e7-90b6-2a39f83280e8.gif" width="500" /></p>
 
-### [BETA] Views
+### Views
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34618173-e2546f40-f20b-11e7-9969-16267891fb53.png" width="300" /></p>
 
 It is possible to manage the views simply by dragging the tops of windows around, however additional features exist to keep views organized and save common views. View management can be useful for saving and switching between multiple common organizations of your windows.
 
 #### Saving/Deleting Views
-Using the folder icon, a dialog window opens where views can be forked in the same way that envs can be. Saving a view will retain the position and sizes of all of the panes in a given environment.
+Using the folder icon, a dialog window opens where views can be forked in the same way that envs can be. Saving a view will retain the position and sizes of all of the panes in a given environment. Views are saved in `$HOME/.visdom/view/layouts.json` in the visdom filepath.
 
 > **Note**: Saved views are static, and editing a saved view copies that view over to the `current` view where editing can occur.
-
-> **Warning**: Saved views are currently only saved locally, and are lost on page refresh. Saving to server is coming soon.
 
 #### Re-Packing
 Using the repack icon (9 boxes), visdom will attempt to pack your windows in a way that they best fit while retaining row/column ordering.

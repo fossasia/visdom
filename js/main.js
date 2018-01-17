@@ -222,6 +222,9 @@ class App extends React.Component {
         }
         this.setState({envList: cmd.data, layoutLists: layoutLists})
         break;
+      case 'layout_update':
+        this.parseLayoutsFromServer(cmd.data);
+        break;
       default:
         console.error('unrecognized command', cmd);
     }
@@ -472,7 +475,54 @@ class App extends React.Component {
     }
   }
 
+  parseLayoutsFromServer(layoutJSON) {
+    // Handles syncing layout state from the server
+    if (layoutJSON.length == 0) {
+      return;  // Skip totally blank updates, these are empty inits
+    }
+    let layoutsObj = JSON.parse(layoutJSON);
+    let layoutLists = new Map();
+    for (let envName of Object.keys(layoutsObj)) {
+      let layoutList = new Map();
+      for (let layoutName of Object.keys(layoutsObj[envName])) {
+        let layoutMap = new Map();
+        for (let contentID of Object.keys(layoutsObj[envName][layoutName])) {
+          layoutMap.set(contentID, layoutsObj[envName][layoutName][contentID]);
+        }
+        layoutList.set(layoutName, layoutMap);
+      }
+      layoutLists.set(envName, layoutList);
+    }
+    let currList = this.getCurrLayoutList();
+    let layoutID = this.state.layoutID;
+    if (!currList.has(this.state.layoutID)) {
+      // If the current view was deleted by someone else (eek)
+      layoutID = DEFAULT_LAYOUT;
+    }
+    this.setState({layoutLists: layoutLists, layoutID: layoutID});
+  }
+
+  exportLayoutsToServer(layoutLists) {
+    // pushes layouts to the server
+    let objForm = {};
+    for (let [envName, layoutList] of layoutLists) {
+      objForm[envName] = {};
+      for (let [layoutName, layoutMap] of layoutList) {
+        objForm[envName][layoutName] = {};
+        for (let [contentID, contentLoc] of layoutMap) {
+          objForm[envName][layoutName][contentID] = contentLoc;
+        }
+      }
+    }
+    let exportForm = JSON.stringify(objForm);
+    this.sendSocketMessage({
+      cmd: 'save_layouts',
+      data: exportForm,
+    });
+  }
+
   saveLayout() {
+    // Saves the current view as a new layout, pushes to the server
     let sorted = sortLayout(this.state.layout);
     let layoutMap = new Map();
     for (var idx = 0; idx < sorted.length; idx++) {
@@ -482,12 +532,15 @@ class App extends React.Component {
     }
     let layoutLists = this.state.layoutLists;
     layoutLists.get(this.state.envID).set(this.state.saveText, layoutMap);
+    this.exportLayoutsToServer(layoutLists);
     this.setState({layoutLists: layoutLists, layoutID: this.state.saveText});
   }
 
   deleteLayout() {
+    // Deletes the selected view, pushes to server
     let layoutLists = this.state.layoutLists;
     layoutLists.get(this.state.envID).delete(this.state.modifyID);
+    this.exportLayoutsToServer(layoutLists);
     this.setState({layoutLists: layoutLists});
   }
 
@@ -580,16 +633,6 @@ class App extends React.Component {
         style={MODAL_STYLE}
       >
         <span className="visdom-title">Manage Views</span>
-        <br/>
-        <strong>
-          Currently these are only saved locally, and are lost on refresh
-        </strong>
-        <br/>
-        <em>
-          This feature is in beta, it's usually necessary to
-          <br/>
-          repack after selecting to restore your view
-        </em>
         <br/>
         Save or fork current layout:
         <br/>
