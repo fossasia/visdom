@@ -176,18 +176,15 @@ class SocketHandler(tornado.websocket.WebSocketHandler):
 
     def save_layouts(self):
         layout_filepath = os.path.join(FLAGS.env_path, 'view', LAYOUT_FILE)
-        fn = open(layout_filepath, 'w')
-        fn.write(self.layouts)
-        fn.close()
+        with open(layout_filepath, 'w') as fn:
+            fn.write(self.layouts)
 
     def load_layouts(self):
         layout_filepath = os.path.join(FLAGS.env_path, 'view', LAYOUT_FILE)
         ensure_dir_exists(layout_filepath)
         if os.path.isfile(layout_filepath):
-            fn = open(layout_filepath, 'r')
-            layouts = fn.read()
-            fn.close()
-            return layouts
+            with open(layout_filepath, 'r') as fn:
+                return fn.read()
         else:
             return ""
 

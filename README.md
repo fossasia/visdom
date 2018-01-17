@@ -97,7 +97,7 @@ You can use the `filter` to dynamically sift through windows present in an env -
 It is possible to manage the views simply by dragging the tops of windows around, however additional features exist to keep views organized and save common views. View management can be useful for saving and switching between multiple common organizations of your windows.
 
 #### Saving/Deleting Views
-Using the folder icon, a dialog window opens where views can be forked in the same way that envs can be. Saving a view will retain the position and sizes of all of the panes in a given environment. Views are saved in `view/layouts.json` in the visdom filepath.
+Using the folder icon, a dialog window opens where views can be forked in the same way that envs can be. Saving a view will retain the position and sizes of all of the panes in a given environment. Views are saved in `$HOME/.visdom/view/layouts.json` in the visdom filepath.
 
 > **Note**: Saved views are static, and editing a saved view copies that view over to the `current` view where editing can occur.
 
