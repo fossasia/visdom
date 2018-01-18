@@ -150,6 +150,15 @@ Visdom now can be accessed by going to `http://localhost:8097` in your browser, 
 >If the above does not work, try using an SSH tunnel to your server by adding the following line to your local  `~/.ssh/config`:
 ```LocalForward 127.0.0.1:8097 127.0.0.1:8097```.
 
+#### Command Line Options
+
+The following options can be provided to the server:
+
+1. `-port` : The port to run the server on.
+2. `-env_path` : The path to the serialized session to reload.
+3. `-logging_level` : Logging level (default = INFO). Accepts both standard text and numeric logging values. 
+
+
 #### Python example
 ```python
 import visdom
