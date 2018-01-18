@@ -158,7 +158,7 @@ The following options can be provided to the server:
 
 1. `-port` : The port to run the server on.
 2. `-env_path` : The path to the serialized session to reload.
-3. `-logging_level`'logging level (default = INFO).')
+3. `-logging_level` : Logging level (default = INFO). Accepts both standard text and numeric logging values. 
 
 
 #### Python example
