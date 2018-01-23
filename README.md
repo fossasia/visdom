@@ -479,6 +479,7 @@ The following `opts` are generic in the sense that they are the same for all vis
 - `opts.xtickvals`   : locations of ticks on x-axis (`table` of `number`s)
 - `opts.xticklabels` : ticks labels on x-axis (`table` of `string`s)
 - `opts.xtickstep`   : distances between ticks on x-axis (`number`)
+- `opts.xtickfont`   : font for x-axis labels (dict of [font information](https://plot.ly/javascript/reference/#layout-font))
 - `opts.ytype`       : type of y-axis (`'linear'` or `'log'`)
 - `opts.ylabel`      : label of y-axis
 - `opts.ytick`       : show ticks on y-axis (`boolean`)
@@ -487,6 +488,7 @@ The following `opts` are generic in the sense that they are the same for all vis
 - `opts.ytickvals`   : locations of ticks on y-axis (`table` of `number`s)
 - `opts.yticklabels` : ticks labels on y-axis (`table` of `string`s)
 - `opts.ytickstep`   : distances between ticks on y-axis (`number`)
+- `opts.ytickfont`   : font for y-axis labels (dict of [font information](https://plot.ly/javascript/reference/#layout-font))
 - `opts.marginleft`  : left margin (in pixels)
 - `opts.marginright` : right margin (in pixels)
 - `opts.margintop`   : top margin (in pixels)
