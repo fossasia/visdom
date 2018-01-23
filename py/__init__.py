@@ -83,18 +83,19 @@ def _scrub_dict(d):
         return d
 
 
-def _axisformat(x, opts):
-    fields = ['type', 'label', 'tickmin', 'tickmax', 'tickvals', 'ticklabels', 'tick' ]
-    if any([opts.get(x + i) for i in fields]):
+def _axisformat(xy, opts):
+    fields = ['type', 'label', 'tickmin', 'tickmax', 'tickvals', 'ticklabels', 'tick', 'tickfont' ]
+    if any([opts.get(xy + i) for i in fields]):
         return {
-            'type': opts.get(x + 'type'),
-            'title': opts.get(x + 'label'),
-            'range': [opts.get(x + 'tickmin'), opts.get(x + 'tickmax')]
-            if (opts.get(x + 'tickmin') and opts.get(x + 'tickmax')) is not None else None,
-            'tickvals': opts.get(x + 'tickvals'),
-            'ticktext': opts.get(x + 'ticklabels'),
-            'dtick': opts.get(x + 'tickstep'),
-            'showticklabels': opts.get(x + 'tick'),
+            'type': opts.get(xy + 'type'),
+            'title': opts.get(xy + 'label'),
+            'range': [opts.get(xy + 'tickmin'), opts.get(xy + 'tickmax')]
+            if (opts.get(xy + 'tickmin') and opts.get(xy + 'tickmax')) is not None else None,
+            'tickvals': opts.get(xy + 'tickvals'),
+            'ticktext': opts.get(xy + 'ticklabels'),
+            'dtick': opts.get(xy + 'tickstep'),
+            'showticklabels': opts.get(xy + 'tick'),
+            'tickfont': opts.get(xy + 'tickfont'),
         }
 
 
