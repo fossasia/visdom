@@ -143,6 +143,13 @@ viz.scatter(
     update='new'
 )
 
+# 2D scatter plot with text labels:
+viz.scatter(
+    X=np.random.rand(10, 2),
+    opts=dict(
+        textlabels=['Label %d' % (i + 1) for i in range(10)]
+    )
+)
 
 # bar plots
 viz.bar(X=np.random.rand(20))

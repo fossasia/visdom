@@ -337,6 +337,7 @@ M.scatter = argcheck{
        - `options.markersize`  : marker size (`number`; default = `'10'`)
        - `options.markercolor` : marker color (`torch.*Tensor`; default = `nil`)
        - `options.legend`      : `table` containing legend names
+       - `opts.textlabels`    : text label for each point (table: default = `nil`)
    ]],
    noordered = true,
    {name = 'self',    type = 'visdom.client'},

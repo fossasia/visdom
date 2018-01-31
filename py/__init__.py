@@ -368,7 +368,7 @@ class Visdom(object):
         _assert_opts(opts)
 
         if svgfile is not None:
-            svgstr = loadfile(svgfile)
+            svgstr = str(loadfile(svgfile))
 
         assert svgstr is not None, 'should specify SVG string or filename'
         svg = re.search('<svg .+</svg>', svgstr, re.DOTALL)
@@ -609,6 +609,7 @@ class Visdom(object):
         - `opts.markersymbol`: marker symbol (`string`; default = `'dot'`)
         - `opts.markersize`  : marker size (`number`; default = `'10'`)
         - `opts.markercolor` : marker color (`np.array`; default = `None`)
+        - `opts.textlabels`  : text label for each point (`list`: default = `None`)
         - `opts.legend`      : `table` containing legend names
         """
         if update == 'remove':
@@ -661,7 +662,10 @@ class Visdom(object):
 
         opts = {} if opts is None else opts
         opts['colormap'] = opts.get('colormap', 'Viridis')
-        opts['mode'] = opts.get('mode', 'markers')
+        if opts.get('textlabels') is None:
+            opts['mode'] = opts.get('mode', 'markers')
+        else:
+            opts['mode'] = opts.get('mode', 'markers+text')
         opts['markersymbol'] = opts.get('markersymbol', 'dot')
         opts['markersize'] = opts.get('markersize', 10)
 
@@ -686,6 +690,8 @@ class Visdom(object):
                     else str(k),
                     'type': 'scatter3d' if is3d else 'scatter',
                     'mode': opts.get('mode'),
+                    'text': opts.get('textlabels'),
+                    'textposition': 'right',
                     'marker': {
                         'size': opts.get('markersize'),
                         'symbol': opts.get('markersymbol'),
@@ -752,7 +758,7 @@ class Visdom(object):
         creating a new plot -- this can be used for efficient updating.
         """
         if update is not None:
-            if update is 'remove':
+            if update == 'remove':
                 return self.scatter(X=None, Y=None, opts=opts, win=win,
                                     env=env, update=update, name=name)
             else:
@@ -1050,8 +1056,8 @@ class Visdom(object):
 
         The following `options` are supported:
 
-        - `options.normalize`:  length of longest arrows (`number`)
-        - `options.arrowheads`: show arrow heads (`boolean`; default = `true`)
+        - `opts.normalize`:  length of longest arrows (`number`)
+        - `opts.arrowheads`: show arrow heads (`boolean`; default = `true`)
         """
 
         # assertions:
@@ -1174,7 +1180,7 @@ class Visdom(object):
 
         The following `options` are supported:
 
-        - `options.legend`: `table` containing legend names
+        - `opts.legend`: `table` containing legend names
         """
 
         X = np.squeeze(X)
@@ -1206,8 +1212,8 @@ class Visdom(object):
 
         The following `options` are supported:
 
-        - `options.color`: color (`string`)
-        - `options.opacity`: opacity of polygons (`number` between 0 and 1)
+        - `opts.color`: color (`string`)
+        - `opts.opacity`: opacity of polygons (`number` between 0 and 1)
         """
         opts = {} if opts is None else opts
         _assert_opts(opts)
