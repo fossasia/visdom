@@ -27,6 +27,27 @@ updatetextwindow = viz.text('Hello World! More text should be here')
 assert updatetextwindow is not None, 'Window was none'
 viz.text('And here it is', win=updatetextwindow, append=True)
 
+# audio demo:
+tensor = np.random.uniform(-1, 1, 441000)
+viz.audio(tensor=tensor, opts={'sample_frequency': 441000})
+
+# audio demo: download from http://www.externalharddrive.com/waves/animal/dolphin.wav
+try:
+    audio_url = 'http://www.externalharddrive.com/waves/animal/dolphin.wav'
+    # linux
+    if _platform == "linux" or _platform == "linux2":
+        audiofile = '/home/%s/dolphin.wav' % getpass.getuser()
+    # MAC OS X
+    elif _platform == "darwin":
+        audiofile = '/Users/%s/dolphin.wav' % getpass.getuser()
+    # download audio
+    urllib.request.urlretrieve(audio_url, audiofile)
+
+    if os.path.isfile(audiofile):
+        viz.audio(audiofile=audiofile)
+except BaseException:
+    print('Skipped audio example')
+
 # video demo:
 try:
     video = np.empty([256, 250, 250, 3], dtype=np.uint8)
@@ -47,7 +68,7 @@ try:
 
     if os.path.isfile(videofile):
         viz.video(videofile=videofile)
-except ImportError:
+except BaseException:
     print('Skipped video example')
 
 

@@ -876,12 +876,55 @@ M.svg = argcheck{
    end
 }
 
+-- audio file:
+M.audio = argcheck{
+   doc = [[
+   This function plays audio. It takes as input the filename of the audio
+   file or an `N` tensor containing the waveform (use an `Nx2` matrix for
+   stereo audio). The function does not support any plot-specific `opts`.
+
+   The following `opts` are supported:
+
+   - `opts.sample_frequency`: sample frequency (int > 0; default = 44100)
+   ]],
+   noordered = true,
+   {name = 'self',      type = 'visdom.client'},
+   {name = 'tensor',    type = 'torch.*Tensor', opt = true},
+   {name = 'audiofile', type = 'string', opt = true},
+   {name = 'opts',      type = 'table',  opt = true},
+   {name = 'options',   type = 'table',  opt = true},
+   {name = 'win',       type = 'string', opt = true},
+   {name = 'env',       type = 'string', opt = true},
+   call = function(self, tensor, audiofile, opts, options, win, env)
+      if options then
+         print(
+            [[WARNING: Argument `options` is deprecated and will soon be
+            removed. Use argument `opts` instead.]]
+         )
+      end
+      opts = opts or options or {}
+      local args = {}
+      local kwargs = {
+         tensor = tensor,
+         audiofile = audiofile,
+         win = win,
+         env = env,
+         opts = opts,
+      }
+      return self:py_func{func = 'audio', args = args, kwargs = kwargs}
+   end
+}
+
 -- video file:
 M.video = argcheck{
    doc = [[
       This function plays a video. It takes as input the filename of the video
       or a `LxCxHxW` tensor containing all the frames of the video. The function
-      does not support any plot-specific `options`.
+      does not support any plot-specific `opts`.
+
+      The following `opts` are supported:
+
+      - `opts.fps`: FPS for the video (`integer` > 0; default = 25)
    ]],
    noordered = true,
    {name = 'self',      type = 'visdom.client'},

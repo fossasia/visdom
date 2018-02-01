@@ -202,6 +202,7 @@ Visdom offers the following basic visualization functions:
 - [`vis.image`](#visimage)    : image
 - [`vis.images`](#visimages)   : list of images
 - [`vis.text`](#vistext)     : arbitrary HTML
+- [`vis.audio`](#visaudio)    : audio
 - [`vis.video`](#visvideo)    : videos
 - [`vis.svg`](#vissvg)      : SVG object
 - [`vis.save`](#vissave)     : serialize state server-side
@@ -272,6 +273,18 @@ The following arguments and `opts` are supported:
 This function prints text in a  box. You can use this to embed arbitrary HTML.
 It takes as input a `text` string.
 No specific `opts` are currently supported.
+
+#### vis.audio
+This function plays audio. It takes as input the filename of the audio
+file or an `N` tensor containing the waveform (use an `Nx2` matrix for stereo
+audio). The function does not support any plot-specific `opts`.
+
+The following `opts` are supported:
+
+- `opts.sample_frequency`: sample frequency (`integer` > 0; default = 44100)
+
+Known issue: Visdom uses scipy to convert tensor inputs to wave files. Some
+versions of Chrome are known not to play these wave files (Firefox and Safari work fine).
 
 #### vis.video
 This function plays a video. It takes as input the filename of the video

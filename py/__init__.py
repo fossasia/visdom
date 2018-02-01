@@ -463,11 +463,57 @@ class Visdom(object):
 
         return self.image(grid, win, env, opts)
 
+    def audio(self, tensor=None, audiofile=None, win=None, env=None, opts=None):
+        """
+        This function plays audio. It takes as input the filename of the audio
+        file or an `N` tensor containing the waveform (use an `Nx2` matrix for
+        stereo audio). The function does not support any plot-specific `opts`.
+
+        The following `opts` are supported:
+
+        - `opts.sample_frequency`: sample frequency (`integer` > 0; default = 44100)
+        """
+        opts = {} if opts is None else opts
+        opts['sample_frequency'] = opts.get('sample_frequency', 44100)
+        _assert_opts(opts)
+        assert tensor is not None or audiofile is not None, \
+            'should specify audio tensor or file'
+        if tensor is not None:
+            assert tensor.ndim == 1 or (tensor.ndim == 2 and tensor.shape[1] == 2), \
+                'tensor should be 1D vector or 2D matrix with 2 columns'
+
+        if tensor is not None:
+            import scipy.io.wavfile
+            import tempfile
+            audiofile = '/tmp/%s.wav' % next(tempfile._get_candidate_names())
+            tensor = np.int16(tensor / np.max(np.abs(tensor)) * 32767)
+            scipy.io.wavfile.write(audiofile, opts.get('sample_frequency'), tensor)
+
+        extension = audiofile.split('.')[-1].lower()
+        mimetypes = dict(wav='wav', mp3='mp3', ogg='ogg', flac='flac')
+        mimetype = mimetypes.get(extension)
+        assert mimetype is not None, 'unknown audio type: %s' % extension
+
+        bytestr = loadfile(audiofile)
+        videodata = """
+            <audio controls>
+                <source type="audio/%s" src="data:audio/%s;base64,%s">
+                Your browser does not support the audio tag.
+            </audio>
+        """ % (mimetype, mimetype, base64.b64encode(bytestr).decode('utf-8'))
+        opts['height'] = 80
+        opts['width'] = 330
+        return self.text(text=videodata, win=win, env=env, opts=opts)
+
     def video(self, tensor=None, videofile=None, win=None, env=None, opts=None):
         """
         This function plays a video. It takes as input the filename of the video
-        or a `LxHxWxC` tensor containing all the frames of the video. The function
-        does not support any plot-specific `options`.
+        `videofile` or a `LxHxWxC`-sized `tensor` containing all the frames of
+        the video as input. The function does not support any plot-specific `opts`.
+
+        The following `opts` are supported:
+
+        - `opts.fps`: FPS for the video (`integer` > 0; default = 25)
         """
         opts = {} if opts is None else opts
         opts['fps'] = opts.get('fps', 25)

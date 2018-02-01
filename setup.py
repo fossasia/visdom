@@ -4,6 +4,7 @@ readme = open('README.md').read()
 
 requirements = [
     'numpy>=1.8',
+    'scipy',
     'pillow',
     'requests',
     'tornado',
@@ -15,8 +16,8 @@ requirements = [
 setup(
     # Metadata
     name='visdom',
-    version='0.1.7.1',
-    author='Allan Jabri, Jack Urbanek',
+    version='0.1.7.2',
+    author='Allan Jabri, Jack Urbanek, Laurens van der Maaten',
     author_email='jju@fb.com',
     url='https://github.com/facebookresearch/visdom',
     description='A tool for visualizing live, rich data for Torch and Numpy',
