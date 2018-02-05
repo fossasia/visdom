@@ -116,8 +116,9 @@ def serialize_all(state):
 
 class Application(tornado.web.Application):
     def __init__(self):
-        state = {}
-        subs = {}
+        self.state = {}
+        self.subs = {}
+        self.sources = {}
 
         # reload state
         ensure_dir_exists(FLAGS.env_path)
@@ -127,22 +128,23 @@ class Application(tornado.web.Application):
             p = os.path.join(FLAGS.env_path, i)
             f = tornado.escape.json_decode(open(p, 'r').read())
             eid = i.replace('.json', '')
-            state[eid] = {'jsons': f['jsons'], 'reload': f['reload']}
+            self.state[eid] = {'jsons': f['jsons'], 'reload': f['reload']}
 
-        if 'main' not in state and 'main.json' not in l:
-            state['main'] = {'jsons': {}, 'reload': {}}
-            serialize_env(state, ['main'])
+        if 'main' not in self.state and 'main.json' not in l:
+            self.state['main'] = {'jsons': {}, 'reload': {}}
+            serialize_env(self.state, ['main'])
 
         handlers = [
-            (r"/events", PostHandler, dict(state=state, subs=subs)),
-            (r"/update", UpdateHandler, dict(state=state, subs=subs)),
-            (r"/close", CloseHandler, dict(state=state, subs=subs)),
-            (r"/socket", SocketHandler, dict(state=state, subs=subs)),
-            (r"/env/(.*)", EnvHandler, dict(state=state, subs=subs)),
-            (r"/save", SaveHandler, dict(state=state, subs=subs)),
-            (r"/error/(.*)", ErrorHandler, dict(state=state, subs=subs)),
-            (r"/win_exists", ExistsHandler, dict(state=state, subs=subs)),
-            (r"/(.*)", IndexHandler, dict(state=state, subs=subs)),
+            (r"/events", PostHandler, dict(app=self)),
+            (r"/update", UpdateHandler, dict(app=self)),
+            (r"/close", CloseHandler, dict(app=self)),
+            (r"/socket", SocketHandler, dict(app=self)),
+            (r"/vis_socket", VisSocketHandler, dict(app=self)),
+            (r"/env/(.*)", EnvHandler, dict(app=self)),
+            (r"/save", SaveHandler, dict(app=self)),
+            (r"/error/(.*)", ErrorHandler, dict(app=self)),
+            (r"/win_exists", ExistsHandler, dict(app=self)),
+            (r"/(.*)", IndexHandler, dict(app=self)),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)
 
@@ -155,12 +157,46 @@ def broadcast_envs(handler, target_subs=None):
             {'command': 'env_update', 'data': list(handler.state.keys())}
         ))
 
+class VisSocketHandler(tornado.websocket.WebSocketHandler):
+    def initialize(self, app):
+        self.state = app.state
+        self.subs = app.subs
+        self.sources = app.sources
+
+    def check_origin(self, origin):
+        return True
+
+    def open(self):
+        self.sid = str(hex(int(time.time() * 10000000))[2:])
+        if self not in list(self.sources.values()):
+            self.eid = 'main'
+            self.sources[self.sid] = self
+        logging.info('Opened visdom socket from ip: {}'.format(
+            self.request.remote_ip))
+
+        self.write_message(
+            json.dumps({'command': 'alive', 'data': 'vis_alive'}))
+
+    def on_message(self, message):
+        logging.info('from visdom client: {}'.format(message))
+        msg = tornado.escape.json_decode(tornado.escape.to_basestring(message))
+
+        cmd = msg.get('cmd')
+        if cmd == 'echo':
+            for sub in self.sources.values():
+                sub.write_message(json.dumps(msg))
+
+    def on_close(self):
+        if self in list(self.sources.values()):
+            self.sources.pop(self.sid, None)
+
 
 class SocketHandler(tornado.websocket.WebSocketHandler):
-    def initialize(self, state, subs):
+    def initialize(self, app):
         self.layouts = self.load_layouts()
-        self.state = state
-        self.subs = subs
+        self.state = app.state
+        self.subs = app.subs
+        self.sources = app.sources
         self.broadcast_layouts()
 
     def check_origin(self, origin):
@@ -347,9 +383,10 @@ def unpack_lua(req_args):
 
 
 class PostHandler(BaseHandler):
-    def initialize(self, state, subs):
-        self.state = state
-        self.subs = subs
+    def initialize(self, app):
+        self.state = app.state
+        self.subs = app.subs
+        self.sources = app.sources
         self.vis = visdom.Visdom(port=FLAGS.port, send=False)
         self.handlers = {
             'update': UpdateHandler,
@@ -396,9 +433,10 @@ class PostHandler(BaseHandler):
 
 
 class ExistsHandler(BaseHandler):
-    def initialize(self, state, subs):
-        self.state = state
-        self.subs = subs
+    def initialize(self, app):
+        self.state = app.state
+        self.subs = app.subs
+        self.sources = app.sources
 
     @staticmethod
     def wrap_func(handler, args):
@@ -417,9 +455,10 @@ class ExistsHandler(BaseHandler):
 
 
 class UpdateHandler(BaseHandler):
-    def initialize(self, state, subs):
-        self.state = state
-        self.subs = subs
+    def initialize(self, app):
+        self.state = app.state
+        self.subs = app.subs
+        self.sources = app.sources
 
     # TODO remove when updateTrace is to be deprecated
     @staticmethod
@@ -556,9 +595,10 @@ class UpdateHandler(BaseHandler):
 
 
 class CloseHandler(BaseHandler):
-    def initialize(self, state, subs):
-        self.state = state
-        self.subs = subs
+    def initialize(self, app):
+        self.state = app.state
+        self.subs = app.subs
+        self.sources = app.sources
 
     @staticmethod
     def wrap_func(handler, args):
@@ -580,9 +620,10 @@ class CloseHandler(BaseHandler):
 
 
 class DeleteEnvHandler(BaseHandler):
-    def initialize(self, state, subs):
-        self.state = state
-        self.subs = subs
+    def initialize(self, app):
+        self.state = app.state
+        self.subs = app.subs
+        self.sources = app.sources
 
     @staticmethod
     def wrap_func(handler, args):
@@ -628,14 +669,15 @@ def load_env(state, eid, socket):
 
 def gather_envs(state):
     items = [i.replace('.json', '') for i in os.listdir(FLAGS.env_path)
-                if '.json' in i]
+             if '.json' in i]
     return sorted(list(set(items + list(state.keys()))))
 
 
 class EnvHandler(BaseHandler):
-    def initialize(self, state, subs):
-        self.state = state
-        self.subs = subs
+    def initialize(self, app):
+        self.state = app.state
+        self.subs = app.subs
+        self.sources = app.sources
 
     def get(self, eid):
         items = gather_envs(self.state)
@@ -655,9 +697,10 @@ class EnvHandler(BaseHandler):
 
 
 class SaveHandler(BaseHandler):
-    def initialize(self, state, subs):
-        self.state = state
-        self.subs = subs
+    def initialize(self, app):
+        self.state = app.state
+        self.subs = app.subs
+        self.sources = app.sources
 
     @staticmethod
     def wrap_func(handler, args):
@@ -674,8 +717,8 @@ class SaveHandler(BaseHandler):
 
 
 class IndexHandler(BaseHandler):
-    def initialize(self, state, subs):
-        self.state = state
+    def initialize(self, app):
+        self.state = app.state
 
     def get(self, args, **kwargs):
         items = gather_envs(self.state)
@@ -753,7 +796,7 @@ def download_scripts(proxies=None, install_dir=None):
     from six.moves.urllib import request
     from six.moves.urllib.error import HTTPError, URLError
     handler = request.ProxyHandler(proxies) if proxies is not None \
-         else request.BaseHandler()
+        else request.BaseHandler()
     opener = request.build_opener(handler)
     request.install_opener(opener)
 

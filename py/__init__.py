@@ -12,6 +12,8 @@ from __future__ import unicode_literals
 import os.path
 import requests
 import traceback
+import threading
+import websocket
 import json
 import math
 import re
@@ -24,6 +26,7 @@ from six import string_types
 from six import BytesIO
 import logging
 import warnings
+import time
 
 try:
     import torchfile
@@ -32,7 +35,7 @@ except BaseException:
 
 logging.getLogger('requests').setLevel(logging.CRITICAL)
 logging.getLogger('urllib3').setLevel(logging.CRITICAL)
-
+logger = logging.getLogger(__name__)
 
 def isstr(s):
     return isinstance(s, string_types)
@@ -124,11 +127,12 @@ def _opts2layout(opts, is3d=False):
 
 def _markerColorCheck(mc, X, Y, L):
     assert isndarray(mc), 'mc should be a numpy ndarray'
-    assert mc.shape[0] == L or (mc.shape[0] == X.shape[0] and
-            (mc.ndim == 1 or mc.ndim == 2 and mc.shape[1] == 3)), \
-            ('marker colors have to be of size `%d` or `%d x 3` ' + \
-            ' or `%d` or `%d x 3`, but got: %s') % \
-            (X.shape[0], X.shape[1], L, L, 'x'.join(map(str,mc.shape)))
+    assert mc.shape[0] == L or (
+        mc.shape[0] == X.shape[0] and
+        (mc.ndim == 1 or mc.ndim == 2 and mc.shape[1] == 3)), \
+        ('marker colors have to be of size `%d` or `%d x 3` ' +
+         ' or `%d` or `%d x 3`, but got: %s') % \
+        (X.shape[0], X.shape[1], L, L, 'x'.join(map(str, mc.shape)))
 
     assert (mc >= 0).all(), 'marker colors have to be >= 0'
     assert (mc <= 255).all(), 'marker colors have to be <= 255'
@@ -228,6 +232,7 @@ class Visdom(object):
         env='main',
         send=True,
     ):
+        self.server_base_name = server[server.index("//")+2:]
         self.server = server
         self.endpoint = endpoint
         self.port = port
@@ -235,12 +240,61 @@ class Visdom(object):
         self.proxy = proxy
         self.env = env              # default env
         self.send = send
-
+        self.event_handlers = {}  # Haven't registered any events
         try:
             import torch  # noqa F401: we do use torch, just weirdly
             wrap_tensor_methods(self, pytorch_wrap)
         except ImportError:
             pass
+
+        if send:  # if you're talking to a server, get a backchannel
+            self.setup_socket()
+
+    def setup_socket(self):
+        # Setup socket to server
+        def on_message(ws, message):
+            message = json.loads(message)
+            if 'command' in message:
+                # Handle server commands
+                if message['command'] == 'alive':
+                    if 'data' in message and message['data'] == 'vis_alive':
+                        logger.info('Visdom successfully connected to server')
+                    else:
+                        logger.warn('Visdom server failed handshake, may not '
+                                    'be properly connected')
+            if 'target' in message:
+                if message['target'] in self.event_handlers:
+                    self.event_handlers[message['target']](message)
+
+        def on_error(ws, error):
+            logger.error(error)
+
+        def on_close(ws):
+            pass  # The socket will attempt to reopen
+
+        def run_socket(*args):
+            while True:
+                try:
+                    sock_addr = "ws://{}:{}/vis_socket".format(
+                        self.server_base_name, self.port)
+                    ws = websocket.WebSocketApp(
+                        sock_addr,
+                        on_message=on_message,
+                        on_error=on_error,
+                        on_close=on_close
+                    )
+                    ws.run_forever()
+                except Exception as e:
+                    logger.error('Socket had error {}, attempting restart'.format(e))
+                time.sleep(3)
+
+        # Start listening thread
+        self.socket_thread = threading.Thread(
+            target=run_socket,
+            name='Visdom-Socket-Thread'
+        )
+        self.socket_thread.daemon = True
+        self.socket_thread.start()
 
     # Utils
     def _send(self, msg, endpoint='events', quiet=False):
