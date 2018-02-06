@@ -157,6 +157,11 @@ def broadcast_envs(handler, target_subs=None):
             {'command': 'env_update', 'data': list(handler.state.keys())}
         ))
 
+def send_to_sources(handler, msg):
+    target_sources = handler.sources.values()
+    for source in target_sources:
+        source.write_message(json.dumps(msg))
+
 class VisSocketHandler(tornado.websocket.WebSocketHandler):
     def initialize(self, app):
         self.state = app.state
@@ -244,8 +249,14 @@ class SocketHandler(tornado.websocket.WebSocketHandler):
         if cmd == 'close':
             if 'data' in msg and 'eid' in msg:
                 logging.info('closing window {}'.format(msg['data']))
-                self.state[msg['eid']]['jsons'].pop(msg['data'], None)
-
+                p_data = self.state[msg['eid']]['jsons'].pop(msg['data'], None)
+                event = {
+                    'eventType': 'close',
+                    'target': msg['data'],
+                    'eid': msg['eid'],
+                    'paneData': p_data,
+                }
+                send_to_sources(self, event)
         elif cmd == 'save':
             # save localStorage window metadata
             if 'data' in msg and 'eid' in msg:
@@ -254,20 +265,23 @@ class SocketHandler(tornado.websocket.WebSocketHandler):
                 self.state[msg['eid']]['reload'] = msg['data']
                 self.eid = msg['eid']
                 serialize_env(self.state, [self.eid])
-
-        if cmd == 'delete_env':
+        elif cmd == 'delete_env':
             if 'eid' in msg:
                 logging.info('closing environment {}'.format(msg['eid']))
                 del self.state[msg['eid']]
                 p = os.path.join(FLAGS.env_path, "{0}.json".format(msg['eid']))
                 os.remove(p)
                 broadcast_envs(self)
-
-        if cmd == 'save_layouts':
+        elif cmd == 'save_layouts':
             if 'data' in msg:
                 self.layouts = msg.get('data')
                 self.save_layouts()
                 self.broadcast_layouts()
+        elif cmd == 'forward_to_vis':
+            packet = msg.get('data')
+            environment = self.state[packet['eid']]
+            packet['paneData'] = environment['jsons'][packet['target']]
+            send_to_sources(self, msg.get('data'))
 
     def on_close(self):
         if self in list(self.subs.values()):

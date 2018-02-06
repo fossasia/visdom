@@ -353,6 +353,12 @@ class App extends React.Component {
     });
   }
 
+  blurPane = (e) => {
+    this.setState({
+      focusedPaneID: null,
+    });
+  }
+
   resizePane = (layout, oldLayoutItem, layoutItem) => {
     this.setState({'layoutID': DEFAULT_LAYOUT})
     this.focusPane(layoutItem.i);
@@ -500,6 +506,23 @@ class App extends React.Component {
       layoutID = DEFAULT_LAYOUT;
     }
     this.setState({layoutLists: layoutLists, layoutID: layoutID});
+  }
+
+  broadcastKeyEvent = (event) => {
+    if (this.state.focusedPaneID === null) {
+      return;
+    }
+    let keyEvent = {
+      eventType: 'keyPress',
+      key: event.key,
+      keyCode: event.keyCode,
+      target: this.state.focusedPaneID,
+      eid: this.state.envID,
+    }
+    this.sendSocketMessage({
+      cmd: 'forward_to_vis',
+      data: keyEvent,
+    });
   }
 
   exportLayoutsToServer(layoutLists) {
@@ -896,7 +919,13 @@ class App extends React.Component {
             </button>
           </span>
         </div>
-        <div>
+        <div
+          tabIndex="-1"
+          className="no-focus"
+          onBlur={this.blurPane}
+          onKeyUp={(event) => {event.preventDefault();}}
+          onKeyDown={this.broadcastKeyEvent}
+          onKeyPress={(event) => {event.preventDefault();}}>
           <GridLayout
             className="layout"
             rowHeight={ROW_HEIGHT}

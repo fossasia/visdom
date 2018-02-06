@@ -27,26 +27,26 @@ updatetextwindow = viz.text('Hello World! More text should be here')
 assert updatetextwindow is not None, 'Window was none'
 viz.text('And here it is', win=updatetextwindow, append=True)
 
-# audio demo:
-tensor = np.random.uniform(-1, 1, 441000)
-viz.audio(tensor=tensor, opts={'sample_frequency': 441000})
+# text window with Callbacks
+txt = 'This is a write demo notepad. Type below. Delete clears text:<br>'
+callback_text_window = viz.text(txt)
 
-# audio demo: download from http://www.externalharddrive.com/waves/animal/dolphin.wav
-try:
-    audio_url = 'http://www.externalharddrive.com/waves/animal/dolphin.wav'
-    # linux
-    if _platform == "linux" or _platform == "linux2":
-        audiofile = '/home/%s/dolphin.wav' % getpass.getuser()
-    # MAC OS X
-    elif _platform == "darwin":
-        audiofile = '/Users/%s/dolphin.wav' % getpass.getuser()
-    # download audio
-    urllib.request.urlretrieve(audio_url, audiofile)
 
-    if os.path.isfile(audiofile):
-        viz.audio(audiofile=audiofile)
-except BaseException:
-    print('Skipped audio example')
+def type_callback(event):
+    if event['eventType'] == 'keyPress':
+        curr_txt = event['paneData']['content']
+        if event['key'] == 'Enter':
+            curr_txt += '<br>'
+        elif event['key'] == 'Backspace':
+            curr_txt = curr_txt[:-1]
+        elif event['key'] == 'Delete':
+            curr_txt = txt
+        elif len(event['key']) == 1:
+            curr_txt += event['key']
+        viz.text(curr_txt, win=callback_text_window)
+
+
+viz.event_handlers[callback_text_window] = type_callback
 
 # video demo:
 try:
@@ -401,3 +401,27 @@ try:
     viz.line(Y=torch.Tensor([[0., 0.], [1., 1.]]))
 except ImportError:
     print('Skipped PyTorch example')
+
+# audio demo:
+tensor = np.random.uniform(-1, 1, 441000)
+viz.audio(tensor=tensor, opts={'sample_frequency': 441000})
+
+# audio demo:
+# download from http://www.externalharddrive.com/waves/animal/dolphin.wav
+try:
+    audio_url = 'http://www.externalharddrive.com/waves/animal/dolphin.wav'
+    # linux
+    if _platform == "linux" or _platform == "linux2":
+        audiofile = '/home/%s/dolphin.wav' % getpass.getuser()
+    # MAC OS X
+    elif _platform == "darwin":
+        audiofile = '/Users/%s/dolphin.wav' % getpass.getuser()
+    # download audio
+    urllib.request.urlretrieve(audio_url, audiofile)
+
+    if os.path.isfile(audiofile):
+        viz.audio(audiofile=audiofile)
+except BaseException:
+    print('Skipped audio example')
+
+input('Waiting for callbacks, press enter to quit.')
