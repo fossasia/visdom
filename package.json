@@ -14,6 +14,6 @@
   },
   "scripts": {
     "dev": "webpack --watch --progress --colors",
-    "build": "$_ ./node_modules/webpack/bin/webpack.js -p"
+    "build": "webpack -p"
   }
 }
