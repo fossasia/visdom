@@ -62,8 +62,8 @@ Right now two callback events are supported:
 
 1. `close` - Triggers when a window is closed. Returns a dict with only the aforementioned fields.
 2. `keyPress` - Triggers when a key is pressed. Contains additional parameters:
-  - `key` - A string representation of the key pressed (applying state modifiers such as SHIFT)
-  - `keyCode` - The javascript event keycode for the pressed key (no modifiers)
+    - `key` - A string representation of the key pressed (applying state modifiers such as SHIFT)
+    - `keyCode` - The javascript event keycode for the pressed key (no modifiers)
 
 ### Environments
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34618198-fc63976c-f20b-11e7-9c0d-060132fdb37e.png" width="300" /></p>
