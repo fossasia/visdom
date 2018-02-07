@@ -251,10 +251,10 @@ class SocketHandler(tornado.websocket.WebSocketHandler):
                 logging.info('closing window {}'.format(msg['data']))
                 p_data = self.state[msg['eid']]['jsons'].pop(msg['data'], None)
                 event = {
-                    'eventType': 'close',
+                    'event_type': 'Close',
                     'target': msg['data'],
                     'eid': msg['eid'],
-                    'paneData': p_data,
+                    'pane_data': p_data,
                 }
                 send_to_sources(self, event)
         elif cmd == 'save':
@@ -280,7 +280,7 @@ class SocketHandler(tornado.websocket.WebSocketHandler):
         elif cmd == 'forward_to_vis':
             packet = msg.get('data')
             environment = self.state[packet['eid']]
-            packet['paneData'] = environment['jsons'][packet['target']]
+            packet['pane_data'] = environment['jsons'][packet['target']]
             send_to_sources(self, msg.get('data'))
 
     def on_close(self):

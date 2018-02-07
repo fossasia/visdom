@@ -51,8 +51,8 @@ The python Visdom implementation supports callbacks on a pane. The demo shows an
 
 You can subscribe a pane to events by adding a function to the `viz.event_handlers` dict for the pane id you want to subscribe. When an event occurs to that pane, your callback will be called on a dict containing:
 
- - `eventType`: one of the below event types
- - `paneData`: all of the stored contents for that pane including layout and content.
+ - `event_type`: one of the below event types
+ - `pane_data`: all of the stored contents for that pane including layout and content.
  - `eid`: the current environment id
  - `target`: the pane id the event is called on
 
@@ -60,10 +60,10 @@ Additional parameters are defined below.
 
 Right now two callback events are supported:
 
-1. `close` - Triggers when a window is closed. Returns a dict with only the aforementioned fields.
-2. `keyPress` - Triggers when a key is pressed. Contains additional parameters:
+1. `Close` - Triggers when a window is closed. Returns a dict with only the aforementioned fields.
+2. `KeyPress` - Triggers when a key is pressed. Contains additional parameters:
     - `key` - A string representation of the key pressed (applying state modifiers such as SHIFT)
-    - `keyCode` - The javascript event keycode for the pressed key (no modifiers)
+    - `key_code` - The javascript event keycode for the pressed key (no modifiers)
 
 ### Environments
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34618198-fc63976c-f20b-11e7-9c0d-060132fdb37e.png" width="300" /></p>

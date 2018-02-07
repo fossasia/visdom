@@ -513,9 +513,9 @@ class App extends React.Component {
       return;
     }
     let keyEvent = {
-      eventType: 'keyPress',
+      event_type: 'KeyPress',
       key: event.key,
-      keyCode: event.keyCode,
+      key_code: event.keyCode,
       target: this.state.focusedPaneID,
       eid: this.state.envID,
     }

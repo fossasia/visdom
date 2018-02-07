@@ -33,7 +33,7 @@ callback_text_window = viz.text(txt)
 
 
 def type_callback(event):
-    if event['eventType'] == 'keyPress':
+    if event['eventType'] == 'KeyPress':
         curr_txt = event['paneData']['content']
         if event['key'] == 'Enter':
             curr_txt += '<br>'
