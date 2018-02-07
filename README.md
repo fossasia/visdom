@@ -35,7 +35,7 @@ Organize your visualization space programmatically or through the UI to create d
 ## Concepts
 Visdom has a simple set of features that can be composed for various use-cases.
 
-### Panes
+### Windows
 <p align="center"><img align="center" src="https://lh3.googleusercontent.com/-kLnogsg9RCs/WLx34PEsGWI/AAAAAAAAnSs/7t_62pbfmfoEBnkcbKTXIqz0WM8pQJHVQCLcB/s0/Screen+Shot+2017-03-05+at+3.34.43+PM.png" width="500" /></p>
 
 
@@ -47,14 +47,14 @@ The UI begins as a blank slate -- you can populate it with plots, images, and te
 
 ##### Callbacks
 
-The python Visdom implementation supports callbacks on a pane. The demo shows an example of this in the form of an editable text pad. The functionality of these callbacks allows the Visdom object to receive and react to events that happen in the frontend.
+The python Visdom implementation supports callbacks on a window. The demo shows an example of this in the form of an editable text pad. The functionality of these callbacks allows the Visdom object to receive and react to events that happen in the frontend.
 
-You can subscribe a pane to events by adding a function to the `viz.event_handlers` dict for the pane id you want to subscribe. When an event occurs to that pane, your callback will be called on a dict containing:
+You can subscribe a window to events by adding a function to the event handlers dict for the window id you want to subscribe by calling `viz.register_event_handler(handler, win_id)` with your handler and the window id. Multiple handlers can be registered to the same window. You can remove all event handlers from a window using `viz.clear_event_handlers(win_id)`. When an event occurs to that window, your callbacks will be called on a dict containing:
 
  - `event_type`: one of the below event types
- - `pane_data`: all of the stored contents for that pane including layout and content.
+ - `pane_data`: all of the stored contents for that window including layout and content.
  - `eid`: the current environment id
- - `target`: the pane id the event is called on
+ - `target`: the window id the event is called on
 
 Additional parameters are defined below.
 
@@ -78,7 +78,7 @@ You can access a specific env via url: `http://localhost.com:8097/env/main`. If 
 From the main page it is possible to toggle between different environments using the environment selector. Selecting a new environment will query the server for the plots that exist in that environment.
 
 #### Clearing Environments
-You can use the eraser button to remove all of the current contents of an environment. This closes the plot panes for that environment but keeps the empty environment for new plots.
+You can use the eraser button to remove all of the current contents of an environment. This closes the plot windows for that environment but keeps the empty environment for new plots.
 
 #### Managing Environments
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34618262-3bb635c8-f20c-11e7-9370-9facfde0cfb7.png" width="400" /></p>
@@ -115,7 +115,7 @@ You can use the `filter` to dynamically sift through windows present in an env -
 It is possible to manage the views simply by dragging the tops of windows around, however additional features exist to keep views organized and save common views. View management can be useful for saving and switching between multiple common organizations of your windows.
 
 #### Saving/Deleting Views
-Using the folder icon, a dialog window opens where views can be forked in the same way that envs can be. Saving a view will retain the position and sizes of all of the panes in a given environment. Views are saved in `$HOME/.visdom/view/layouts.json` in the visdom filepath.
+Using the folder icon, a dialog window opens where views can be forked in the same way that envs can be. Saving a view will retain the position and sizes of all of the windows in a given environment. Views are saved in `$HOME/.visdom/view/layouts.json` in the visdom filepath.
 
 > **Note**: Saved views are static, and editing a saved view copies that view over to the `current` view where editing can occur.
 

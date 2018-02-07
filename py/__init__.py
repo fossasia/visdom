@@ -251,6 +251,15 @@ class Visdom(object):
         if send:  # if you're talking to a server, get a backchannel
             self.setup_socket()
 
+    def register_event_handler(handler, target):
+        assert callable(handler), 'Event handler must be a function'
+        if target not in self.event_handlers:
+            self.event_handlers[target] = []
+        self.event_handlers[target].append(handler)
+
+    def clear_event_handlers(target):
+        self.event_handlers[target] = []
+
     def setup_socket(self):
         # Setup socket to server
         def on_message(ws, message):
@@ -265,8 +274,8 @@ class Visdom(object):
                         logger.warn('Visdom server failed handshake, may not '
                                     'be properly connected')
             if 'target' in message:
-                if message['target'] in self.event_handlers:
-                    self.event_handlers[message['target']](message)
+                for handler in self.event_handlers.get(message['target'], []):
+                    handler(message)
 
         def on_error(ws, error):
             logger.error(error)
