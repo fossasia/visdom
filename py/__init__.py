@@ -729,11 +729,16 @@ class Visdom(object):
             ind = np.equal(Y, k)
             if ind.any():
                 mc = opts.get('markercolor')
+                if 'legend' in opts:
+                    trace_name = opts.get('legend')[k - 1]
+                elif X.shape[0] == 1 and name is not None:
+                    trace_name = name
+                else:
+                    trace_name = str(k)
                 _data = {
                     'x': nan2none(X.take(0, 1)[ind].tolist()),
                     'y': nan2none(X.take(1, 1)[ind].tolist()),
-                    'name': opts.get('legend')[k - 1] if 'legend' in opts
-                    else str(k),
+                    'name': trace_name,
                     'type': 'scatter3d' if is3d else 'scatter',
                     'mode': opts.get('mode'),
                     'text': opts.get('textlabels'),
