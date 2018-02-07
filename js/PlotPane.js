@@ -30,6 +30,9 @@ class PlotPane extends React.Component {
     else if (this.props.h !== nextProps.h || this.props.w !== nextProps.w) {
       return true;
     }
+    else if (this.props.isFocused !== nextProps.isFocused) {
+      return true;
+    }
     return false;
   }
 

@@ -55,6 +55,9 @@
     else if (this.props.children !== nextProps.children) {
       return true;
     }
+    else if (this.props.isFocused !== nextProps.isFocused) {
+      return true;
+    }
 
     return false;
   }
@@ -62,6 +65,7 @@
   render() {
     let windowClassNames = classNames({
       'window': true,
+      'focus': this.props.isFocused,
     });
 
     let barClassNames = classNames({
@@ -70,11 +74,13 @@
     });
 
     return (
-      <div className={windowClassNames} ref={(ref) => this._windowRef = ref}>
-        <div className={barClassNames} onClick={this.focus}
+      <div className={windowClassNames}
+        onClick={this.focus}
+        ref={(ref) => this._windowRef = ref}>
+        <div className={barClassNames}
           ref={(ref) => this._barRef = ref}>
           <button title="close" onClick={this.close}>X</button>
-          <button title="save" onClick={this.download}>&#10515;</button>
+          <button title="save" onClick={this.download}>&#8681;</button>
           <div>{this.props.title}</div>
         </div>
         <div className="content">{this.props.children}</div>
