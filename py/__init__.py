@@ -241,6 +241,7 @@ class Visdom(object):
         self.env = env              # default env
         self.send = send
         self.event_handlers = {}  # Haven't registered any events
+        self.socket_alive = False
         try:
             import torch  # noqa F401: we do use torch, just weirdly
             wrap_tensor_methods(self, pytorch_wrap)
@@ -259,6 +260,7 @@ class Visdom(object):
                 if message['command'] == 'alive':
                     if 'data' in message and message['data'] == 'vis_alive':
                         logger.info('Visdom successfully connected to server')
+                        self.socket_alive = True
                     else:
                         logger.warn('Visdom server failed handshake, may not '
                                     'be properly connected')
@@ -270,7 +272,7 @@ class Visdom(object):
             logger.error(error)
 
         def on_close(ws):
-            pass  # The socket will attempt to reopen
+            self.socket_alive = False
 
         def run_socket(*args):
             while True:
@@ -387,7 +389,7 @@ class Visdom(object):
         This function returns a bool indicating whether or
         not the server is connected.
         """
-        return self.win_exists('') is not None
+        return (self.win_exists('') is not None) and self.socket_alive
 
     # Content
 
