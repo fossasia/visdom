@@ -47,7 +47,7 @@ The UI begins as a blank slate -- you can populate it with plots, images, and te
 
 ##### Callbacks
 
-The python Visdom implementation supports callbacks on a pane. The demo shows an example of this in the form of an editable text pad. The functionality of these callbacks allows the Visdom object to recieve and react to events that happen in the frontend.
+The python Visdom implementation supports callbacks on a pane. The demo shows an example of this in the form of an editable text pad. The functionality of these callbacks allows the Visdom object to receive and react to events that happen in the frontend.
 
 You can subscribe a pane to events by adding a function to the `viz.event_handlers` dict for the pane id you want to subscribe. When an event occurs to that pane, your callback will be called on a dict containing:
 
