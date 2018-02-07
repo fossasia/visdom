@@ -251,13 +251,13 @@ class Visdom(object):
         if send:  # if you're talking to a server, get a backchannel
             self.setup_socket()
 
-    def register_event_handler(handler, target):
+    def register_event_handler(self, handler, target):
         assert callable(handler), 'Event handler must be a function'
         if target not in self.event_handlers:
             self.event_handlers[target] = []
         self.event_handlers[target].append(handler)
 
-    def clear_event_handlers(target):
+    def clear_event_handlers(self, target):
         self.event_handlers[target] = []
 
     def setup_socket(self):

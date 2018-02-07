@@ -33,8 +33,8 @@ callback_text_window = viz.text(txt)
 
 
 def type_callback(event):
-    if event['eventType'] == 'KeyPress':
-        curr_txt = event['paneData']['content']
+    if event['event_type'] == 'KeyPress':
+        curr_txt = event['pane_data']['content']
         if event['key'] == 'Enter':
             curr_txt += '<br>'
         elif event['key'] == 'Backspace':
@@ -46,7 +46,7 @@ def type_callback(event):
         viz.text(curr_txt, win=callback_text_window)
 
 
-viz.event_handlers[callback_text_window] = type_callback
+viz.register_event_handler(type_callback, callback_text_window)
 
 # video demo:
 try:
