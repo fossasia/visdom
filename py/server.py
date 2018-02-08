@@ -139,6 +139,7 @@ class Application(tornado.web.Application):
             (r"/close", CloseHandler, dict(state=state, subs=subs)),
             (r"/socket", SocketHandler, dict(state=state, subs=subs)),
             (r"/env/(.*)", EnvHandler, dict(state=state, subs=subs)),
+            (r"/compare/(.*)", CompareHandler, dict(state=state, subs=subs)),
             (r"/save", SaveHandler, dict(state=state, subs=subs)),
             (r"/error/(.*)", ErrorHandler, dict(state=state, subs=subs)),
             (r"/win_exists", ExistsHandler, dict(state=state, subs=subs)),
@@ -632,6 +633,94 @@ def gather_envs(state):
     return sorted(list(set(items + list(state.keys()))))
 
 
+def compare_envs(state, eids, socket):
+    logging.info('comparing envs')
+    eidNums = {e:str(i) for i,e in enumerate(eids)}
+    env = {}
+    envs = {}
+    for eid in eids:
+        if eid in state:
+            envs[eid] = state.get(eid)
+        else:
+            p = os.path.join(FLAGS.env_path, eid.strip(), '.json')
+            if os.path.exists(p):
+                env = tornado.escape.json_decode(open(p, 'r').read())
+                state[eid] = env
+                envs[eid] = env
+
+
+
+    res = copy.deepcopy(envs[list(envs.keys())[0]])
+    name2Wid = {res['jsons'][wid].get('title', None):wid+'_compare' for wid in res.get('jsons', {})
+                if 'title' in res['jsons'][wid]}
+    for wid in list(res['jsons'].keys()):
+        res['jsons'][wid+'_compare'] = res['jsons'][wid]
+        res['jsons'][wid] = None
+        res['jsons'].pop(wid)
+
+    for ix, eid in enumerate(envs.keys()):
+        env = envs[eid]
+        for wid in env.get('jsons',{}).keys():
+            win = env['jsons'][wid]
+            if win.get('type', None) != 'plot': continue
+            if 'content' not in win: continue
+            if 'title' not in win: continue
+            title = win['title']
+            if title not in name2Wid: continue
+
+            destWid = name2Wid[title]
+
+            if ix == 0:
+                res['jsons'][destWid]['has_compare'] = False
+                res['jsons'][destWid]['content']['layout']['showlegend'] = True
+                for di,d in enumerate(res['jsons'][destWid]['content']['data']):
+                    res['jsons'][destWid]['content']['data'][di]['name'] = '{}_{}'.format(eidNums[eid], d['name'])
+            else:
+                res['jsons'][destWid]['has_compare'] = True
+                for di,d in enumerate(win['content']['data']):
+                    d = copy.deepcopy(d)
+                    d['name'] = '{}_{}'.format(eidNums[eid], d['name'])
+                    res['jsons'][destWid]['content']['data'].append(d)
+
+    for k in res['jsons']:
+        if not res['jsons'][destWid]['has_compare']:
+            del res['jsons'][destWid]
+
+    tbl = """"<style>
+    table, th, td {{
+        border: 1px solid black;
+    }}
+    </style>
+    <table> {} </table>""".format(' '.join(["<tr> <td> {} </td> <td> {}</td></tr>".format(v,eidNums[v]) for v in eidNums]))
+
+    res['jsons']['window_comapre_legend'] = {"command": "window",
+                                             "id": "window_compare_legend",
+                                             "title": "compare_legend",
+                                             "inflate": True,
+                                             "width": None,
+                                             "height": None,
+                                             "contentID": "35e9f1d3cab700",
+                                             "content": tbl,
+                                             "type": "text",
+                                             "layout": {"title": "compare_legend"},
+                                             "i": 1}
+    if 'reload' in res:
+        socket.write_message(
+            json.dumps({'command': 'reload', 'data': res['reload']})
+        )
+
+    jsons = list(res.get('jsons', {}).values())
+    windows = sorted(jsons, key=lambda k: ('i' not in k, k.get('i', None)))
+    for v in windows:
+        socket.write_message(v)
+
+    socket.write_message(json.dumps({'command': 'layout'}))
+    socket.eid = eid
+
+
+
+
+
 class EnvHandler(BaseHandler):
     def initialize(self, state, subs):
         self.state = state
@@ -652,6 +741,33 @@ class EnvHandler(BaseHandler):
             tornado.escape.to_basestring(self.request.body)
         )['sid']
         load_env(self.state, args, self.subs[sid])
+
+
+class CompareHandler(BaseHandler):
+    def initialize(self, state, subs):
+        self.state = state
+        self.subs = subs
+
+    def get(self, eids):
+        print(eids)
+        logger.info(eids)
+        items = gather_envs(self.state)
+        eids = eids.split('+')
+        print(eids)
+        logger.info(eids)
+        eids = [x for x in eids if x in items]
+        self.render(
+            'index.html',
+            user=getpass.getuser(),
+            items=eids,
+            active_item=active
+        )
+
+    def post(self, args):
+        sid = tornado.escape.json_decode(
+            tornado.escape.to_basestring(self.request.body)
+        )['sid']
+        compare_envs(self.state, args.split('+'), self.subs[sid])
 
 
 class SaveHandler(BaseHandler):

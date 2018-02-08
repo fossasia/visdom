@@ -15,6 +15,13 @@
   },
   "scripts": {
     "dev": "webpack --watch --progress --colors",
-    "build": "$_ ./node_modules/webpack/bin/webpack.js -p"
+    "build": "webpack"
+  },
+  "dependencies": {
+    "create-react-class": "^15.6.3",
+    "css-loader": "^0.28.9",
+    "react": "^16.2.0",
+    "react-dom": "^16.2.0",
+    "style-loader": "^0.20.1"
   }
 }
