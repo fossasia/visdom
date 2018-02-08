@@ -544,12 +544,14 @@ class Visdom(object):
                 videofile,
                 fourcc,
                 opts.get('fps'),
-                (tensor.shape[1], tensor.shape[2])
+                (tensor.shape[2], tensor.shape[1])
             )
             assert writer.isOpened(), 'video writer could not be opened'
             for i in range(tensor.shape[0]):
+                # TODO mute opencv on this function call somehow
                 writer.write(tensor[i, :, :, :])
             writer.release()
+            sys.stderr = stderr
             writer = None
 
         extension = videofile.split(".")[-1].lower()
