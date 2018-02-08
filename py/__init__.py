@@ -616,7 +616,6 @@ class Visdom(object):
                 # TODO mute opencv on this function call somehow
                 writer.write(tensor[i, :, :, :])
             writer.release()
-            sys.stderr = stderr
             writer = None
 
         extension = videofile.split(".")[-1].lower()
