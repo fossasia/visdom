@@ -1089,7 +1089,7 @@
 	                            treeDefaultExpandAll: true,
 	                            treeNodeFilterProp: 'title',
 	                            treeDataSimpleMode: this.state.treeDataSimpleMode,
-	                            treeCheckable: true, showCheckedStrategy: _rcTreeSelect.SHOW_PARENT,
+	                            treeCheckable: true, showCheckedStrategy: _rcTreeSelect.SHOW_CHILD,
 	                            onChange: this.selectEnv2
 	                        })
 	                    ),

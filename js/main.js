@@ -13,7 +13,7 @@ import ReactModal from 'react-modal';
 var classNames = require('classnames');
 import 'rc-tree-select/assets/index.css';
 
-import TreeSelect, { SHOW_PARENT } from 'rc-tree-select';
+import TreeSelect, { SHOW_CHILD } from 'rc-tree-select';
 
 var ReactGridLayout = require('react-grid-layout');
 
@@ -847,7 +847,7 @@ class App extends React.Component {
             treeDefaultExpandAll
             treeNodeFilterProp="title"
             treeDataSimpleMode={this.state.treeDataSimpleMode}
-            treeCheckable showCheckedStrategy={SHOW_PARENT}
+            treeCheckable showCheckedStrategy={SHOW_CHILD}
             onChange={this.selectEnv2}
                     />
 
