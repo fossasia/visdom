@@ -6,6 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  *
  */
+var classNames = require('classnames');
 
  class Pane extends React.Component {
   _windowRef: null;

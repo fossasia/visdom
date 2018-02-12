@@ -20,8 +20,13 @@
   "dependencies": {
     "create-react-class": "^15.6.3",
     "css-loader": "^0.28.9",
-    "react": "^16.2.0",
-    "react-dom": "^16.2.0",
+    "jquery": "^3.3.1",
+    "rc-tree-select": "^1.12.9",
+    "react": "16.2.0",
+    "react-devtools": "^3.1.0",
+    "react-dom": "16.2.0",
+    "react-grid-layout": "0.16.3",
+    "react-modal": "^3.1.13",
     "style-loader": "^0.20.1"
   }
 }

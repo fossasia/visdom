@@ -9,9 +9,16 @@
 
 'use strict';
 import React from 'react';
+import ReactModal from 'react-modal';
+var classNames = require('classnames');
+import 'rc-tree-select/assets/index.css';
+
+import TreeSelect, { SHOW_PARENT } from 'rc-tree-select';
+
+var ReactGridLayout = require('react-grid-layout');
+
 import createClass from 'create-react-class';
 import PropTypes from 'prop-types';
-import Select from 'react-select';
 
 const TextPane = require('./TextPane');
 const ImagePane = require('./ImagePane');
@@ -60,7 +67,7 @@ class App extends React.Component {
         panes: {},
         focusedPaneID: null,
         envID: localStorage.getItem( 'envID' ) || null,
-        envIDs: JSON.parse(localStorage.getItem( 'envIDs' )) || {},
+        envIDs: {}, //JSON.parse(localStorage.getItem( 'envIDs' )) || {},
         saveText: ACTIVE_ENV,
         layoutID: DEFAULT_LAYOUT,
         // Bad form... make a copy of the global var we generated in python.
@@ -72,7 +79,11 @@ class App extends React.Component {
         layoutLists: new Map([['main', new Map([[DEFAULT_LAYOUT, new Map()]])]]),
         showEnvModal: false,
         showViewModal: false,
-        modifyID: null
+        modifyID: null,
+        treeDataSimpleMode: {
+            id: 'key',
+            rootPId: 0
+        }
     };
 
     _bin = null;
@@ -180,14 +191,20 @@ class App extends React.Component {
         socket.onmessage = this._handleMessage;
 
         socket.onopen = () => {
-            this.setState({connected: true});
+            this.setState({connected: true}, () => {console.log('callback');});
+            console.log('opening socket');
         };
 
-        socket.onerror = socket.onclose = () => {
-            this.setState({connected: false}, () => {
+        socket.onclose = () => {
+            console.log(this.state);
+            this.setState({connected: false}, function () {
+                console.log('closing socket');
                 this._socket = null;
+                console.log('closing socket');
             });
         };
+
+        socket.onerror = socket.onclose;
 
         this._socket = socket;
     }
@@ -288,6 +305,33 @@ class App extends React.Component {
         });
     }
 
+    selectEnv2 = (selectedNodes) => {
+        // currentNode: { label, value, children, expanded, checked, className, ...extraProps }
+        // selectedNodes: [{ label, value, children, expanded, checked, className, ...extraProps }]
+        console.log('selected nodes', selectedNodes);
+        var isSameEnv = selectedNodes.length == this.state.envIDs.length;
+        if (isSameEnv) {
+            for (var i=0; i<selectedNodes.length; i++) {
+                if (selectedNodes[i] != this.state.envIDs[i]) {
+                    isSameEnv=false;
+                    break;
+                }
+            }
+        }
+        var envID = null;
+        if (selectedNodes.length > 0) envID = selectedNodes[0];
+        this.setState({
+            envID: envID,
+            envIDs: selectedNodes,
+            saveText: envID,
+            panes: isSameEnv ? this.state.panes : {},
+            layout: isSameEnv ? this.state.layout : [],
+            focusedPaneID: isSameEnv ? this.state.focusedPaneID : null
+        });
+        localStorage.setItem( 'envID', envID );
+        localStorage.setItem( 'envIDs', JSON.stringify(selectedNodes) );
+        this.postForEnv(selectedNodes);
+    }
 
     selectEnv = (envID, event) => {
         let isSameEnv = envID === this.state.envID;
@@ -767,41 +811,46 @@ class App extends React.Component {
     renderEnvControls() {
         var slist = this.state.envList.slice();
         slist.sort();
-        let env_options = slist.map((env) => {
-            var check_space = false;
-            if (this.state.envIDs.includes(env)) {
-                check_space = true;
-            }
-            var envC = env + "___C";
-            var envR = env + "___R";
+        var roots = Array.from(new Set(slist.map((x) => {return x.split('_')[0];})));
 
-            return <li>
-                <a>
-                <input type="checkbox" id={envC} value={env} name="envSelectC" onClick={this.selectEnv.bind(this, env)} checked={check_space}/>
-                <label for={envR}>
-                <input type="radio" id={envR} value={env} name="envSelectR" onClick={this.selectEnv.bind(this, env)}/>
-                {env}</label>
-                </a>
-            </li>;
+        let env_options2 = slist.map((env, idx) => {
+            //var check_space = this.state.envIDs.includes(env);
+            return {
+                key:idx + 1 + roots.length,
+                pId:roots.indexOf(env.split('_')[0]) + 1,
+                label: env,
+                value: env
+            };
         });
 
-
+        env_options2 = env_options2.concat(roots.map((x, idx) => { return {
+            key: idx+1,
+            pId: 0,
+            label: x,
+            value: x
+        };}));
 
         return (
                 <span>
                 <span>Environment&nbsp;</span>
                 <div className="btn-group navbar-btn" role="group" aria-label="Environment:">
                 <div className="btn-group" role="group">
-                <button className="btn btn-default dropdown-toggle"
-                        type="button" id="envDropdown" data-toggle="dropdown"
-                        aria-haspopup="true" aria-expanded="true">
-                {this.state.envID}
-                &nbsp;
-                <span className="caret"></span>
-                </button>
-                <ul className="dropdown-menu" aria-labelledby="envDropdown">
-                {env_options}
-            </ul>
+                <TreeSelect
+            style={{ width: 750 }}
+            dropdownStyle={{ maxHeight: 900, overflow: 'auto' }}
+            placeholder={<i>Select environment(s)</i>}
+            searchPlaceholder="please search"
+            treeLine maxTagTextLength={1000}
+            inputValue={null}
+            value={this.state.envIDs}
+            treeData={env_options2}
+            treeDefaultExpandAll
+            treeNodeFilterProp="title"
+            treeDataSimpleMode={this.state.treeDataSimpleMode}
+            treeCheckable showCheckedStrategy={SHOW_PARENT}
+            onChange={this.selectEnv2}
+                    />
+
                 </div>
                 <button
             data-toggle="tooltip"
