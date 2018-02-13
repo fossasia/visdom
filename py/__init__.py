@@ -27,6 +27,7 @@ from six import BytesIO
 import logging
 import warnings
 import time
+import errno
 
 try:
     import torchfile
@@ -242,6 +243,7 @@ class Visdom(object):
         self.send = send
         self.event_handlers = {}  # Haven't registered any events
         self.socket_alive = False
+        self.use_socket = True
         try:
             import torch  # noqa F401: we do use torch, just weirdly
             wrap_tensor_methods(self, pytorch_wrap)
@@ -278,13 +280,18 @@ class Visdom(object):
                     handler(message)
 
         def on_error(ws, error):
-            logger.error(error)
+            if error.errno == errno.ECONNREFUSED:
+                logger.info("Socket refused connection, running socketless")
+                ws.close()
+                self.use_socket = False
+            else:
+                logger.error(error)
 
         def on_close(ws):
             self.socket_alive = False
 
         def run_socket(*args):
-            while True:
+            while self.use_socket:
                 try:
                     sock_addr = "ws://{}:{}/vis_socket".format(
                         self.server_base_name, self.port)
@@ -398,7 +405,8 @@ class Visdom(object):
         This function returns a bool indicating whether or
         not the server is connected.
         """
-        return (self.win_exists('') is not None) and self.socket_alive
+        return (self.win_exists('') is not None) and \
+            (self.socket_alive or not self.use_socket)
 
     # Content
 
