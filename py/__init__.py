@@ -355,6 +355,18 @@ class Visdom(object):
             'data': envs,
         }, 'save')
 
+    def get_window_data(self, win=None, env=None):
+        """
+        This function returns all the window data for a specified window in
+        an environment. Use win=None to get all the windows in the given
+        environment
+        """
+
+        return self._send(
+            msg={'win': win, 'eid': env},
+            endpoint='win_data'
+        )
+
     def close(self, win=None, env=None):
         """
         This function closes a specific window.

@@ -146,6 +146,7 @@ class Application(tornado.web.Application):
             (r"/save", SaveHandler, {'app': self}),
             (r"/error/(.*)", ErrorHandler, {'app': self}),
             (r"/win_exists", ExistsHandler, {'app': self}),
+            (r"/win_data", DataHandler, {'app': self}),
             (r"/(.*)", IndexHandler, {'app': self}),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)
@@ -729,6 +730,31 @@ class SaveHandler(BaseHandler):
         envs = [escape_eid(eid) for eid in envs]
         ret = serialize_env(handler.state, envs)  # this drops invalid env ids
         handler.write(json.dumps(ret))
+
+    def post(self):
+        args = tornado.escape.json_decode(
+            tornado.escape.to_basestring(self.request.body)
+        )
+        self.wrap_func(self, args)
+
+
+class DataHandler(BaseHandler):
+    def initialize(self, app):
+        self.state = app.state
+
+    @staticmethod
+    def wrap_func(handler, args):
+        eid = extract_eid(args)
+
+        if 'win' in args and args['win'] is not None:
+            handler.write(json.dumps(handler.state[eid]['jsons'][args['win']]))
+        else:
+            handler.write(json.dumps(handler.state[eid]['jsons']))
+
+        if args['win'] in handler.state[eid]['jsons']:
+            handler.write('true')
+        else:
+            handler.write('false')
 
     def post(self):
         args = tornado.escape.json_decode(
