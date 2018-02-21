@@ -27,10 +27,10 @@ from os.path import expanduser
 from zmq.eventloop import ioloop
 ioloop.install()  # Needs to happen before any tornado imports!
 
-import tornado.ioloop
-import tornado.web
-import tornado.websocket
-import tornado.escape
+import tornado.ioloop     # noqa E402: gotta install ioloop first
+import tornado.web        # noqa E402: gotta install ioloop first
+import tornado.websocket  # noqa E402: gotta install ioloop first
+import tornado.escape     # noqa E402: gotta install ioloop first
 
 parser = argparse.ArgumentParser(description='Start the visdom server.')
 parser.add_argument('-port', metavar='port', type=int, default=8097,
@@ -73,7 +73,8 @@ def ensure_dir_exists(path):
 
 def get_path(filename):
     """Get the path to an asset."""
-    cwd = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+    cwd = os.path.dirname(
+        os.path.abspath(inspect.getfile(inspect.currentframe())))
     return os.path.join(cwd, filename)
 
 
@@ -103,11 +104,11 @@ tornado_settings = {
 
 
 def serialize_env(state, eids):
-    l = [i for i in eids if i in state]
-    for i in l:
-        p = os.path.join(FLAGS.env_path, "{0}.json".format(i))
-        open(p, 'w').write(json.dumps(state[i]))
-    return l
+    env_ids = [i for i in eids if i in state]
+    for env_id in env_ids:
+        env_path = os.path.join(FLAGS.env_path, "{0}.json".format(env_id))
+        open(env_path, 'w').write(json.dumps(state[env_id]))
+    return env_ids
 
 
 def serialize_all(state):
@@ -122,29 +123,30 @@ class Application(tornado.web.Application):
 
         # reload state
         ensure_dir_exists(FLAGS.env_path)
-        l = [i for i in os.listdir(FLAGS.env_path) if '.json' in i]
+        env_jsons = [i for i in os.listdir(FLAGS.env_path) if '.json' in i]
 
-        for i in l:
-            p = os.path.join(FLAGS.env_path, i)
-            f = tornado.escape.json_decode(open(p, 'r').read())
-            eid = i.replace('.json', '')
-            self.state[eid] = {'jsons': f['jsons'], 'reload': f['reload']}
+        for env_json in env_jsons:
+            env_path = os.path.join(FLAGS.env_path, env_json)
+            env_data = tornado.escape.json_decode(open(env_path, 'r').read())
+            eid = env_json.replace('.json', '')
+            self.state[eid] = {'jsons': env_data['jsons'],
+                               'reload': env_data['reload']}
 
-        if 'main' not in self.state and 'main.json' not in l:
+        if 'main' not in self.state and 'main.json' not in env_jsons:
             self.state['main'] = {'jsons': {}, 'reload': {}}
             serialize_env(self.state, ['main'])
 
         handlers = [
-            (r"/events", PostHandler, dict(app=self)),
-            (r"/update", UpdateHandler, dict(app=self)),
-            (r"/close", CloseHandler, dict(app=self)),
-            (r"/socket", SocketHandler, dict(app=self)),
-            (r"/vis_socket", VisSocketHandler, dict(app=self)),
-            (r"/env/(.*)", EnvHandler, dict(app=self)),
-            (r"/save", SaveHandler, dict(app=self)),
-            (r"/error/(.*)", ErrorHandler, dict(app=self)),
-            (r"/win_exists", ExistsHandler, dict(app=self)),
-            (r"/(.*)", IndexHandler, dict(app=self)),
+            (r"/events", PostHandler, {'app': self}),
+            (r"/update", UpdateHandler, {'app': self}),
+            (r"/close", CloseHandler, {'app': self}),
+            (r"/socket", SocketHandler, {'app': self}),
+            (r"/vis_socket", VisSocketHandler, {'app': self}),
+            (r"/env/(.*)", EnvHandler, {'app': self}),
+            (r"/save", SaveHandler, {'app': self}),
+            (r"/error/(.*)", ErrorHandler, {'app': self}),
+            (r"/win_exists", ExistsHandler, {'app': self}),
+            (r"/(.*)", IndexHandler, {'app': self}),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)
 
@@ -157,10 +159,12 @@ def broadcast_envs(handler, target_subs=None):
             {'command': 'env_update', 'data': list(handler.state.keys())}
         ))
 
+
 def send_to_sources(handler, msg):
     target_sources = handler.sources.values()
     for source in target_sources:
         source.write_message(json.dumps(msg))
+
 
 class VisSocketHandler(tornado.websocket.WebSocketHandler):
     def initialize(self, app):
@@ -234,7 +238,8 @@ class SocketHandler(tornado.websocket.WebSocketHandler):
         if self not in list(self.subs.values()):
             self.eid = 'main'
             self.subs[self.sid] = self
-        logging.info('Opened new socket from ip: {}'.format(self.request.remote_ip))
+        logging.info(
+            'Opened new socket from ip: {}'.format(self.request.remote_ip))
 
         self.write_message(
             json.dumps({'command': 'register', 'data': self.sid}))
@@ -261,7 +266,8 @@ class SocketHandler(tornado.websocket.WebSocketHandler):
             # save localStorage window metadata
             if 'data' in msg and 'eid' in msg:
                 msg['eid'] = escape_eid(msg['eid'])
-                self.state[msg['eid']] = copy.deepcopy(self.state[msg['prev_eid']])
+                self.state[msg['eid']] = \
+                    copy.deepcopy(self.state[msg['prev_eid']])
                 self.state[msg['eid']]['reload'] = msg['data']
                 self.eid = msg['eid']
                 serialize_env(self.state, [self.eid])
@@ -304,11 +310,11 @@ class BaseHandler(tornado.web.RequestHandler):
             # 2. The actual Exception that was thrown
             # 3. The traceback opbject
             try:
-                params = dict(
-                    error=exc_info[1],
-                    trace_info=traceback.format_exception(*exc_info),
-                    request=self.request.__dict__
-                )
+                params = {
+                    'error': exc_info[1],
+                    'trace_info': traceback.format_exception(*exc_info),
+                    'request': self.request.__dict__
+                }
 
                 self.render("error.html", **params)
                 logging.error("rendering complete")
@@ -353,9 +359,9 @@ def window(args):
     }
 
     if ptype in ['image', 'text']:
-        p.update(dict(content=args['data'][0]['content'], type=ptype))
+        p.update({'content': args['data'][0]['content'], 'type': ptype})
     else:
-        p['content'] = dict(data=args['data'], layout=args['layout'])
+        p['content'] = {'data': args['data'], 'layout': args['layout']}
         p['type'] = 'plot'
 
     return p
@@ -500,7 +506,7 @@ class UpdateHandler(BaseHandler):
                 pdata[idx]['marker']['color'] = new_data['marker']
 
         for n, idx in enumerate(idxs):    # update traces
-            if all([math.isnan(i) or i is None for i in new_data['x'][n]]):
+            if all(math.isnan(i) or i is None for i in new_data['x'][n]):
                 continue
 
             pdata[idx]['x'] = (pdata[idx]['x'] + new_data['x'][n]) if append \
@@ -555,7 +561,7 @@ class UpdateHandler(BaseHandler):
 
         # Update traces
         for n, idx in enumerate(idxs):
-            if all([math.isnan(i) or i is None for i in new_data[n]['x']]):
+            if all(math.isnan(i) or i is None for i in new_data[n]['x']):
                 continue
             # handle data for plotting
             for axis in ['x', 'y']:
@@ -619,7 +625,8 @@ class CloseHandler(BaseHandler):
         eid = extract_eid(args)
         win = args.get('win')
 
-        keys = list(handler.state[eid]['jsons'].keys()) if win is None else [win]
+        keys = \
+            list(handler.state[eid]['jsons'].keys()) if win is None else [win]
         for win in keys:
             handler.state[eid]['jsons'].pop(win, None)
             broadcast(
@@ -720,7 +727,7 @@ class SaveHandler(BaseHandler):
     def wrap_func(handler, args):
         envs = args['data']
         envs = [escape_eid(eid) for eid in envs]
-        ret = serialize_env(handler.state, envs)  # this ignores invalid env ids
+        ret = serialize_env(handler.state, envs)  # this drops invalid env ids
         handler.write(json.dumps(ret))
 
     def post(self):
@@ -766,16 +773,16 @@ def download_scripts(proxies=None, install_dir=None):
     ext_files = {
         '%sjquery@3.1.1/dist/jquery.min.js' % b: 'jquery.min.js',
         '%sbootstrap@3.3.7/dist/js/bootstrap.min.js' % b: 'bootstrap.min.js',
-        '%sreact-resizable@1.4.6/css/styles.css' % b: 'react-resizable-styles.css',
-        '%sreact-grid-layout@0.14.0/css/styles.css' % b: 'react-grid-layout-styles.css',
-        '%sreact-modal@3.1.10/dist/react-modal.min.js' % b: 'react-modal.min.js',
+        '%sreact-resizable@1.4.6/css/styles.css' % b: 'react-resizable-styles.css',  # noqa
+        '%sreact-grid-layout@0.14.0/css/styles.css' % b: 'react-grid-layout-styles.css',  # noqa
+        '%sreact-modal@3.1.10/dist/react-modal.min.js' % b: 'react-modal.min.js',  # noqa
         '%sreact@15.6.1/dist/react.min.js' % b: 'react-react.min.js',
         '%sreact-dom@15.6.1/dist/react-dom.min.js' % b: 'react-dom.min.js',
         '%sclassnames@2.2.5' % b: 'classnames',
         '%slayout-bin-packer@1.2.2' % b: 'layout_bin_packer',
-        'https://raw.githubusercontent.com/STRML/react-grid-layout/0.14.0/dist/' +
+        'https://raw.githubusercontent.com/STRML/react-grid-layout/0.14.0/dist/' +  # noqa
         'react-grid-layout.min.js': 'react-grid-layout.min.js',
-        'https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_SVG':
+        'https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_SVG':  # noqa
             'mathjax-MathJax.js',
         # here is another url in case the cdn breaks down again.
         # https://raw.githubusercontent.com/plotly/plotly.js/master/dist/plotly.min.js
@@ -790,7 +797,7 @@ def download_scripts(proxies=None, install_dir=None):
             'glyphicons-halflings-regular.woff',
         '%sfonts/glyphicons-halflings-regular.ttf' % bb:
             'glyphicons-halflings-regular.ttf',
-        '%sfonts/glyphicons-halflings-regular.svg#glyphicons_halflingsregular' % bb:
+        '%sfonts/glyphicons-halflings-regular.svg#glyphicons_halflingsregular' % bb:  # noqa
             'glyphicons-halflings-regular.svg#glyphicons_halflingsregular',
     }
 
@@ -827,7 +834,8 @@ def download_scripts(proxies=None, install_dir=None):
         # download file:
         filename = '%s/static/%s/%s' % (install_dir, sub_dir, val)
         if not os.path.exists(filename):
-            req = request.Request(key, headers={'User-Agent': 'Chrome/30.0.0.0'})
+            req = request.Request(key,
+                                  headers={'User-Agent': 'Chrome/30.0.0.0'})
             try:
                 data = opener.open(req).read()
                 with open(filename, 'wb') as fwrite:
