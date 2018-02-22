@@ -349,6 +349,8 @@ The following `opts` are supported:
 - `opts.markercolor` : color per marker. (`torch.*Tensor`; default = `nil`)
 - `opts.legend`      : `table` containing legend names
 - `opts.textlabels`  : text label for each point (`list`: default = `None`)
+- `opts.layoutopts`  : dict of any additional options that plotly accepts for a layout
+- `opts.traceopts`   : dict mapping trace names or indices to dicts of additional options that plotly accepts for a trace.
 
 `opts.markercolor` is a Tensor with Integer values. The tensor can be of size `N` or `N x 3` or `K` or `K x 3`.
 
@@ -374,6 +376,8 @@ The following `opts` are supported:
 - `opts.markersymbol`: marker symbol (`string`; default = `'dot'`)
 - `opts.markersize`  : marker size (`number`; default = `'10'`)
 - `opts.legend`      : `table` containing legend names
+- `opts.layoutopts`  : `dict` of any additional options that plot.ly accepts for a layout
+- `opts.traceopts`   : `dict` mapping trace names or indices to `dict`s of additional options that plot.ly accepts for a trace.
 
 
 #### vis.updateTrace
@@ -407,6 +411,7 @@ The following `opts` are supported:
 
 - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
 - `opts.legend`  : `table` containing legend names
+- `opts.layoutopts`  : `dict` of any additional options that plot.ly accepts for a layout
 
 #### vis.heatmap
 This function draws a heatmap. It takes as input an `NxM` tensor `X` that
@@ -419,6 +424,7 @@ The following `opts` are supported:
 - `opts.xmax`       : clip maximum value (`number`; default = `X:max()`)
 - `opts.columnnames`: `table` containing x-axis labels
 - `opts.rownames`   : `table` containing y-axis labels
+- `opts.layoutopts`  : `dict` of any additional options that plot.ly accepts for a layout
 
 #### vis.bar
 This function draws a regular, stacked, or grouped bar plot. It takes as
@@ -433,6 +439,7 @@ The following plot-specific `opts` are currently supported:
 - `opts.rownames`: `table` containing x-axis labels
 - `opts.stacked`    : stack multiple columns in `X`
 - `opts.legend`     : `table` containing legend labels
+- `opts.layoutopts`  : `dict` of any additional options that plot.ly accepts for a layout
 
 #### vis.histogram
 This function draws a histogram of the specified data. It takes as input
@@ -442,6 +449,7 @@ histogram.
 The following plot-specific `opts` are currently supported:
 
 - `opts.numbins`: number of bins (`number`; default = 30)
+- `opts.layoutopts`  : `dict` of any additional options that plot.ly accepts for a layout
 
 #### vis.boxplot
 This function draws boxplots of the specified data. It takes as input
@@ -451,6 +459,7 @@ to construct the `M` boxplots.
 The following plot-specific `opts` are currently supported:
 
 - `opts.legend`: labels for each of the columns in `X`
+- `opts.layoutopts`  : `dict` of any additional options that plot.ly accepts for a layout
 
 #### vis.surf
 This function draws a surface plot. It takes as input an `NxM` tensor `X`
@@ -461,6 +470,7 @@ The following `opts` are supported:
 - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
 - `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
 - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
+- `opts.layoutopts`  : `dict` of any additional options that plot.ly accepts for a layout
 
 #### vis.contour
 This function draws a contour plot. It takes as input an `NxM` tensor `X`
@@ -471,6 +481,7 @@ The following `opts` are supported:
 - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
 - `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
 - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
+- `opts.layoutopts`  : `dict` of any additional options that plot.ly accepts for a layout
 
 #### vis.quiver
 This function draws a quiver plot in which the direction and length of the
@@ -482,6 +493,7 @@ The following `opts` are supported:
 
 - `opts.normalize`:  length of longest arrows (`number`)
 - `opts.arrowheads`: show arrow heads (`boolean`; default = `true`)
+- `opts.layoutopts`  : `dict` of any additional options that plot.ly accepts for a layout
 
 #### vis.mesh
 This function draws a mesh plot from a set of vertices defined in an
@@ -492,12 +504,13 @@ The following `opts` are supported:
 
 - `opts.color`: color (`string`)
 - `opts.opacity`: opacity of polygons (`number` between 0 and 1)
+- `opts.layoutopts`  : `dict` of any additional options that plot.ly accepts for a layout
 
 ### Customizing plots
 
 The plotting functions take an optional `opts` table as input that can be used to change (generic or plot-specific) properties of the plots. All input arguments are specified in a single table; the input arguments are matches based on the keys they have in the input table.
 
-The following `opts` are generic in the sense that they are the same for all visualizations (except `plot.image` and `plot.text`):
+The following `opts` are generic in the sense that they are the same for all visualizations (except `plot.image`, `plot.text`, `plot.video`, and `plot.audio`):
 
 - `opts.title`       : figure title
 - `opts.width`       : figure width
