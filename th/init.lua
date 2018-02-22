@@ -242,6 +242,27 @@ M.win_exists = argcheck{
    end
 }
 
+-- get data from an existing window
+M.get_window_data = argcheck{
+   doc = [[
+      This function returns all the window data for a specified window in
+      an environment. Use win=None to get all the windows in the given
+      environment. Env defaults to main
+   ]],
+   {name = 'self', type = 'visdom.client'},
+   {name = 'win',  type = 'string', opt = true},
+   {name = 'env',  type = 'string', opt = true},
+   call = function(self, win, env)
+      local args = {}
+      local kwargs = {win = win, env = env}
+      return self:py_func{
+         func = 'get_window_data',
+         args = args,
+         kwargs = kwargs,
+      }
+   end
+}
+
 -- check_connection
 M.check_connection = argcheck{
    doc = [[

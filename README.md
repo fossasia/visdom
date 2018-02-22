@@ -260,6 +260,7 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 ### Others
 - [`vis.close`](#visclose)    : close a window by id
 - [`vis.win_exists`](#viswin_exists) : check if a window already exists by id
+- [`vis.get_window_data`](#visget_window_data): get current data for a window
 - [`vis.check_connection`](#vischeck_connection): check if the server is connected
 
 ## Details
@@ -541,6 +542,13 @@ This function returns a bool indicating whether or not a window `win` exists on 
 
 Optional arguments:
 - `env`: Environment to search for the window in. Default is `None`.
+
+#### vis.get_window_data
+This function returns the window data for the given window. Returns data for all windows in an env if win is None.
+
+Arguments:
+- `env`: Environment to search for the window in.
+- `win`: Window to return data for. Set to `None` to retrieve all the windows in an environment.
 
 #### vis.check_connection
 
