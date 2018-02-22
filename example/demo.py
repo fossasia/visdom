@@ -14,13 +14,19 @@ import numpy as np
 import math
 import os.path
 import getpass
+import time
 from sys import platform as _platform
 from six.moves import urllib
+
 
 try:
     viz = Visdom()
 
-    assert viz.check_connection()
+    startup_sec = 1
+    while not viz.check_connection() and startup_sec > 0:
+        time.sleep(0.1)
+        startup_sec -= 0.1
+    assert viz.check_connection(), 'No connection could be formed quickly'
 
     textwindow = viz.text('Hello World!')
 
@@ -152,7 +158,7 @@ try:
     )
 
     # assert that the window exists
-    assert viz.win_exists(win)
+    assert viz.win_exists(win), 'Created window marked as not existing'
 
     # add new trace to scatter plot
     viz.scatter(
@@ -386,7 +392,7 @@ try:
     viz.close(win=textwindow)
 
     # assert that the closed window doesn't exist
-    assert not viz.win_exists(textwindow)
+    assert not viz.win_exists(textwindow), 'Closed window still exists'
 
     # Arbitrary visdom content
     trace = dict(x=[1, 2, 3], y=[4, 5, 6], mode="markers+lines", type='custom',
@@ -434,5 +440,5 @@ except BaseException as e:
         "which may not yet be pushed to pip. Please upgrade using "
         "`pip install -e .` or `easy_install .`\n"
         "If this does not resolve the problem, please open an issue on "
-        "our GitHub.".format(e)
+        "our GitHub.".format(repr(e))
     )
