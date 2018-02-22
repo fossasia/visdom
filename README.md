@@ -550,8 +550,6 @@ Arguments:
 - `env`: Environment to search for the window in.
 - `win`: Window to return data for. Set to `None` to retrieve all the windows in an environment.
 
-*Note:* This function is python-only and doesn't exist in the Lua version.
-
 #### vis.check_connection
 
 This function returns a bool indicating whether or not the server is connected.

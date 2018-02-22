@@ -747,6 +747,8 @@ class DataHandler(BaseHandler):
         eid = extract_eid(args)
 
         if 'win' in args and args['win'] is not None:
+            assert args['win'] in handler.state[eid]['jsons'], \
+                "Window {} doesn't exist in env {}".format(args['win'], eid)
             handler.write(json.dumps(handler.state[eid]['jsons'][args['win']]))
         else:
             handler.write(json.dumps(handler.state[eid]['jsons']))

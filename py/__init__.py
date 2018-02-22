@@ -359,7 +359,7 @@ class Visdom(object):
         """
         This function returns all the window data for a specified window in
         an environment. Use win=None to get all the windows in the given
-        environment
+        environment. Env defaults to main
         """
 
         return self._send(
