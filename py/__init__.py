@@ -123,8 +123,10 @@ def _opts2layout(opts, is3d=False):
     if opts.get('stacked'):
         layout['barmode'] = 'stack' if opts.get('stacked') else 'group'
 
-    if opts.get('layoutopts') is not None:
-        layout.update(opts.get('layoutopts'))
+    layout_opts = opts.get('layoutopts')
+    if layout_opts is not None:
+        if 'plotly' in layout_opts:
+            layout.update(layout_opts['plotly'])
 
     return _scrub_dict(layout)
 
@@ -802,7 +804,7 @@ class Visdom(object):
             assert type(opts['legend']) == list and len(opts['legend']) == K
 
         data = []
-        trace_opts = opts.get('traceopts', {})
+        trace_opts = opts.get('traceopts', {'plotly': {}})['plotly']
         for k in range(1, K + 1):
             ind = np.equal(Y, k)
             if ind.any():
