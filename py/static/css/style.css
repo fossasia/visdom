@@ -55,6 +55,12 @@ h1 {
 
 .navbar-form {margin-top:0px !important;}
 
+.no-focus {
+  border-color: transparent;
+  box-shadow: none;
+  outline-style: none;
+}
+
 .window {
   overflow: hidden;
   box-sizing: border-box;
@@ -82,8 +88,15 @@ h1 {
   font-size: 11px;
 }
 
+.window.focus {
+  background-color: #dedede;
+  border-color: #dedede;
+  outline-color: #6389d8;
+  outline-width: 4px;
+  outline-style: double;
+}
+
 .bar.focus {
-  /*background: #3b5998;*/
   font-weight: bold;
 }
 
@@ -160,8 +173,8 @@ doesn't override our desire to make them non-interactable */
 }
 
 .content-text {
-  overflow-y: scroll;
-  overflow-x: scroll;
+  overflow-y: auto;
+  overflow-x: auto;
   max-height: 100%;
   max-width: 100%;
 }

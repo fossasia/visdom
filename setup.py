@@ -11,6 +11,7 @@ requirements = [
     'pyzmq',
     'six',
     'torchfile',
+    'websocket-client',
 ]
 
 setup(

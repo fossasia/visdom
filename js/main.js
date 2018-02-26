@@ -305,7 +305,7 @@ class App extends React.Component {
         });
     }
 
-    selectEnv2 = (selectedNodes) => {
+    selectEnv = (selectedNodes) => {
         // currentNode: { label, value, children, expanded, checked, className, ...extraProps }
         // selectedNodes: [{ label, value, children, expanded, checked, className, ...extraProps }]
         console.log('selected nodes', selectedNodes);
@@ -332,66 +332,6 @@ class App extends React.Component {
         localStorage.setItem( 'envIDs', JSON.stringify(selectedNodes) );
         this.postForEnv(selectedNodes);
     }
-
-    selectEnv = (envID, event) => {
-        let isSameEnv = envID === this.state.envID;
-        console.log(event.target.type, envID, event.target);
-
-        if ( event.target.type == 'checkbox' ) {
-            if ( event.target.checked ) {
-                $('input[name="envSelectR"]').prop('checked', false);
-
-            }else {
-                $('input[name="envSelectR"]').prop('checked', true);
-
-            }
-
-        }
-        else {
-            if ( event.target.checked ) {
-                $('input[name="envSelectC"]').prop('checked', false);
-
-            }else {
-                $('input[name="envSelectC"]').prop('checked', true);
-            }
-        }
-
-
-        var checkboxes = document.getElementsByName("envSelectC");
-        var checkboxesChecked = [];
-        // loop over them all
-        for (var i=0; i<checkboxes.length; i++) {
-            // And stick the checked ones onto an array...
-            if (checkboxes[i].checked) {
-                checkboxesChecked.push(checkboxes[i].value);
-
-            }
-
-        }
-
-        if (checkboxesChecked.length == 0) {
-            // radio
-            checkboxesChecked = [envID];
-        }
-        if (this.state.envIDs.length != checkboxesChecked.length)
-            isSameEnv = false;
-
-        console.log(checkboxesChecked);
-
-        this.setState({
-            envID: envID,
-            envIDs: checkboxesChecked,
-            saveText: envID,
-            panes: isSameEnv ? this.state.panes : {},
-            layout: isSameEnv ? this.state.layout : [],
-            focusedPaneID: isSameEnv ? this.state.focusedPaneID : null
-        });
-        localStorage.setItem( 'envID', envID );
-        localStorage.setItem( 'envIDs', JSON.stringify(checkboxesChecked) );
-        this.postForEnv(checkboxesChecked);
-    }
-
-
     postForEnv = (envIDs) => {
         // This kicks off a new stream of events from the socket so there's nothing
         // to handle here. We might want to surface the error state.
@@ -407,25 +347,6 @@ class App extends React.Component {
         }
     }
 
-    selectEnvOld = (envID) => {
-        let isSameEnv = envID === this.state.envID;
-        var newenvids = {};
-        newenvids[envID] = true;
-        this.setState({
-            envID: envID,
-            envIDs: newenvids,
-            saveText: envID,
-            panes: isSameEnv ? this.state.panes : {},
-            layout: isSameEnv ? this.state.layout : [],
-            focusedPaneID: isSameEnv ? this.state.focusedPaneID : null
-        });
-        // This kicks off a new stream of events from the socket so there's nothing
-        // to handle here. We might want to surface the error state.
-        $.post(this.correctPathname() + 'env/' + envID,
-               JSON.stringify({'sid' : this.state.sessionID}));
-    }
-
-
     deleteEnv = () => {
         this.sendSocketMessage({
             cmd: 'delete_env',
@@ -434,244 +355,267 @@ class App extends React.Component {
         });
     }
 
-    saveEnv = () => {
-        if (!this.state.connected) {
-            return;
+
+  saveEnv = () => {
+    if (!this.state.connected) {
+      return;
+    }
+
+    this.updateLayout(this.state.layout);
+
+    let env = this._envFieldRef.value;
+
+    let payload = {};
+    Object.keys(this.state.panes).map((paneID) => {
+      payload[paneID] = JSON.parse(localStorage.getItem(this.keyLS(paneID)));
+    });
+
+    this.sendSocketMessage({
+      cmd: 'save',
+      data: payload,
+      prev_eid: this.state.envID,
+      eid: env
+    });
+
+    let newEnvList = this.state.envList;
+    if (newEnvList.indexOf(env) === -1) {
+      newEnvList.push(env);
+    }
+    let layoutLists = this.state.layoutLists;
+
+    for (var envIdx in newEnvList) {
+      if (!layoutLists.has(newEnvList[envIdx])) {
+        layoutLists.set(newEnvList[envIdx],
+          new Map([[DEFAULT_LAYOUT, new Map()]]));
+      }
+    }
+
+    this.setState({
+      envList: newEnvList,
+      layoutLists: layoutLists,
+      envID: env,
+    });
+  }
+
+  focusPane = (paneID) => {
+    this.setState({
+      focusedPaneID: paneID,
+    });
+  }
+
+  blurPane = (e) => {
+    this.setState({
+      focusedPaneID: null,
+    });
+  }
+
+  resizePane = (layout, oldLayoutItem, layoutItem) => {
+    this.setState({'layoutID': DEFAULT_LAYOUT})
+    this.focusPane(layoutItem.i);
+    this.updateLayout(layout);
+  }
+
+  movePane = (layout, oldLayoutItem, layoutItem) => {
+    this.setState({'layoutID': DEFAULT_LAYOUT})
+    this.updateLayout(layout);
+  }
+
+  rebin = (layout) => {
+    layout = layout ? layout : this.state.layout;
+    let layoutID = this.state.layoutID;
+    if (layoutID !== DEFAULT_LAYOUT) {
+      let envLayoutList = this.getCurrLayoutList();
+      let layoutMap = envLayoutList.get(this.state.layoutID);
+      layout = layout.map((paneLayout, idx) => {
+        if (layoutMap.has(paneLayout.i)) {
+          let storedVals = layoutMap.get(paneLayout.i);
+          paneLayout.h = storedVals[1];
+          paneLayout.height = storedVals[1];
+          paneLayout.w = storedVals[2];
+          paneLayout.width = storedVals[2];
         }
+        return paneLayout;
+      });
+    }
+    let contents = layout.map((paneLayout, idx) => {
+      return {
+        width: paneLayout.w,
+        height: paneLayout.h,
+      };
+    });
 
-        this.updateLayout(this.state.layout);
+    this._bin = new Bin.ShelfFirst(contents, this.state.cols);
+    return layout;
+  }
 
-        let env = this._envFieldRef.value;
+  getCurrLayoutList() {
+    if (this.state.layoutLists.has(this.state.envID)) {
+      return this.state.layoutLists.get(this.state.envID);
+    } else {
+      return new Map();
+    }
+  }
 
-        let payload = {};
-        Object.keys(this.state.panes).map((paneID) => {
-            payload[paneID] = JSON.parse(localStorage.getItem(this.keyLS(paneID)));
-        });
+  relayout = (pack) => {
+    let layout = this.rebin();
 
-        this.sendSocketMessage({
-            cmd: 'save',
-            data: payload,
-            prev_eid: this.state.envID,
-            eid: env
-        });
-
-        let newEnvList = this.state.envList;
-        if (newEnvList.indexOf(env) === -1) {
-            newEnvList.push(env);
+    let sorted = sortLayout(layout);
+    let newPanes = Object.assign({}, this.state.panes);
+    let filter = this.state.filter;
+    let old_sorted = sorted.slice();
+    let layoutID = this.state.layoutID;
+    let envLayoutList = this.getCurrLayoutList();
+    let layoutMap = envLayoutList.get(this.state.layoutID);
+    // Sort out things that were filtered away
+    sorted = sorted.sort(function(a, b) {
+      let diff = (newPanes[a.i].title.match(filter) != null) -
+              (newPanes[b.i].title.match(filter) != null);
+      if (diff != 0) {
+        return -diff;
+      } else if (layoutID !== DEFAULT_LAYOUT) {
+        let aVal = layoutMap.has(a.i) ? -layoutMap.get(a.i)[0] : 1;
+        let bVal = layoutMap.has(b.i) ? -layoutMap.get(b.i)[0] : 1;
+        let diff = bVal - aVal;
+        if (diff != 0) {
+          // At least one of the two was in the layout map.
+          return diff;
         }
-        let layoutLists = this.state.layoutLists;
+      }
+      return old_sorted.indexOf(a) - old_sorted.indexOf(b);  // stable sort
+    });
 
-        for (var envIdx in newEnvList) {
-            if (!layoutLists.has(newEnvList[envIdx])) {
-                layoutLists.set(newEnvList[envIdx],
-                                new Map([[DEFAULT_LAYOUT, new Map()]]));
-            }
-        }
+    let newLayout = sorted.map((paneLayout, idx) => {
+      let pos = this._bin.position(idx, this.state.cols);
 
-        this.setState({
-            envList: newEnvList,
-            layoutLists: layoutLists,
-            envID: env,
-        });
+      if (!newPanes[paneLayout.i]) debugger;
+      newPanes[paneLayout.i].i = idx;
+
+      return Object.assign({}, paneLayout, pos);
+    });
+
+    this.setState({panes: newPanes});
+    // TODO this is very non-conventional react, someday it shall be fixed but
+    // for now it's important to fix relayout grossness
+    this.state.panes = newPanes;
+    this.updateLayout(newLayout);
+  }
+
+  toggleOnlineState = () => {
+    if (this.state.connected) {
+      this.disconnect();
+    } else {
+      this.connect();
     }
+  }
 
-    focusPane = (paneID) => {
-        this.setState({
-            focusedPaneID: paneID,
-        });
+  updateLayout = (layout) => {
+    this.setState({layout: layout}, (newState) => {
+      this.state.layout.map((playout, idx) => {
+        localStorage.setItem(this.keyLS(playout.i), JSON.stringify(playout));
+      });
+    });
+    // TODO this is very non-conventional react, someday it shall be fixed but
+    // for now it's important to fix relayout grossness
+    this.state.layout = layout;
+  }
+
+  updateToLayout = (layoutID) => {
+    this.setState({layoutID: layoutID});
+    // TODO this is very non-conventional react, someday it shall be fixed but
+    // for now it's important to fix relayout grossness
+    this.state.layoutID = layoutID;
+    if (layoutID !== DEFAULT_LAYOUT) {
+      this.relayout();
+      this.relayout();
+      this.relayout();
     }
+  }
 
-    resizePane = (layout, oldLayoutItem, layoutItem) => {
-        this.setState({'layoutID': DEFAULT_LAYOUT})
-        this.focusPane(layoutItem.i);
-        this.updateLayout(layout);
+  parseLayoutsFromServer(layoutJSON) {
+    // Handles syncing layout state from the server
+    if (layoutJSON.length == 0) {
+      return;  // Skip totally blank updates, these are empty inits
     }
-
-    movePane = (layout, oldLayoutItem, layoutItem) => {
-        this.setState({'layoutID': DEFAULT_LAYOUT})
-        this.updateLayout(layout);
-    }
-
-    rebin = (layout) => {
-        layout = layout ? layout : this.state.layout;
-        let layoutID = this.state.layoutID;
-        if (layoutID !== DEFAULT_LAYOUT) {
-            let envLayoutList = this.getCurrLayoutList();
-            let layoutMap = envLayoutList.get(this.state.layoutID);
-            layout = layout.map((paneLayout, idx) => {
-                if (layoutMap.has(paneLayout.i)) {
-                    let storedVals = layoutMap.get(paneLayout.i);
-                    paneLayout.h = storedVals[1];
-                    paneLayout.height = storedVals[1];
-                    paneLayout.w = storedVals[2];
-                    paneLayout.width = storedVals[2];
-                }
-                return paneLayout;
-            });
-        }
-        let contents = layout.map((paneLayout, idx) => {
-            return {
-                width: paneLayout.w,
-                height: paneLayout.h,
-            };
-        });
-
-        this._bin = new Bin.ShelfFirst(contents, this.state.cols);
-        return layout;
-    }
-
-    getCurrLayoutList() {
-        if (this.state.layoutLists.has(this.state.envID)) {
-            return this.state.layoutLists.get(this.state.envID);
-        } else {
-            return new Map();
-        }
-    }
-
-    relayout = (pack) => {
-        let layout = this.rebin();
-
-        let sorted = sortLayout(layout);
-        let newPanes = Object.assign({}, this.state.panes);
-        let filter = this.state.filter;
-        let old_sorted = sorted.slice();
-        let layoutID = this.state.layoutID;
-        let envLayoutList = this.getCurrLayoutList();
-        let layoutMap = envLayoutList.get(this.state.layoutID);
-        // Sort out things that were filtered away
-        sorted = sorted.sort(function(a, b) {
-            let diff = (newPanes[a.i].title.match(filter) != null) -
-                (newPanes[b.i].title.match(filter) != null);
-            if (diff != 0) {
-                return -diff;
-            } else if (layoutID !== DEFAULT_LAYOUT) {
-                let aVal = layoutMap.has(a.i) ? -layoutMap.get(a.i)[0] : 1;
-                let bVal = layoutMap.has(b.i) ? -layoutMap.get(b.i)[0] : 1;
-                let diff = bVal - aVal;
-                if (diff != 0) {
-                    // At least one of the two was in the layout map.
-                    return diff;
-                }
-            }
-            return old_sorted.indexOf(a) - old_sorted.indexOf(b);  // stable sort
-        });
-
-        let newLayout = sorted.map((paneLayout, idx) => {
-            let pos = this._bin.position(idx, this.state.cols);
-
-            if (!newPanes[paneLayout.i]) debugger;
-            newPanes[paneLayout.i].i = idx;
-
-            return Object.assign({}, paneLayout, pos);
-        });
-
-        this.setState({panes: newPanes});
-        // TODO this is very non-conventional react, someday it shall be fixed but
-        // for now it's important to fix relayout grossness
-        this.state.panes = newPanes;
-        this.updateLayout(newLayout);
-    }
-
-    toggleOnlineState = () => {
-        console.log(this.state.connected);
-        if (this.state.connected) {
-            this.disconnect();
-        } else {
-            this.connect();
-        }
-    }
-
-    updateLayout = (layout) => {
-        this.setState({layout: layout}, (newState) => {
-            this.state.layout.map((playout, idx) => {
-                localStorage.setItem(this.keyLS(playout.i), JSON.stringify(playout));
-            });
-        });
-        // TODO this is very non-conventional react, someday it shall be fixed but
-        // for now it's important to fix relayout grossness
-        this.state.layout = layout;
-    }
-
-    updateToLayout = (layoutID) => {
-        this.setState({layoutID: layoutID});
-        // TODO this is very non-conventional react, someday it shall be fixed but
-        // for now it's important to fix relayout grossness
-        this.state.layoutID = layoutID;
-        if (layoutID !== DEFAULT_LAYOUT) {
-            this.relayout();
-            this.relayout();
-            this.relayout();
-        }
-    }
-
-    parseLayoutsFromServer(layoutJSON) {
-        // Handles syncing layout state from the server
-        if (layoutJSON.length == 0) {
-            return;  // Skip totally blank updates, these are empty inits
-        }
-        let layoutsObj = JSON.parse(layoutJSON);
-        let layoutLists = new Map();
-        for (let envName of Object.keys(layoutsObj)) {
-            let layoutList = new Map();
-            for (let layoutName of Object.keys(layoutsObj[envName])) {
-                let layoutMap = new Map();
-                for (let contentID of Object.keys(layoutsObj[envName][layoutName])) {
-                    layoutMap.set(contentID, layoutsObj[envName][layoutName][contentID]);
-                }
-                layoutList.set(layoutName, layoutMap);
-            }
-            layoutLists.set(envName, layoutList);
-        }
-        let currList = this.getCurrLayoutList();
-        let layoutID = this.state.layoutID;
-        if (!currList.has(this.state.layoutID)) {
-            // If the current view was deleted by someone else (eek)
-            layoutID = DEFAULT_LAYOUT;
-        }
-        this.setState({layoutLists: layoutLists, layoutID: layoutID});
-    }
-
-    exportLayoutsToServer(layoutLists) {
-        // pushes layouts to the server
-        let objForm = {};
-        for (let [envName, layoutList] of layoutLists) {
-            objForm[envName] = {};
-            for (let [layoutName, layoutMap] of layoutList) {
-                objForm[envName][layoutName] = {};
-                for (let [contentID, contentLoc] of layoutMap) {
-                    objForm[envName][layoutName][contentID] = contentLoc;
-                }
-            }
-        }
-        let exportForm = JSON.stringify(objForm);
-        this.sendSocketMessage({
-            cmd: 'save_layouts',
-            data: exportForm,
-        });
-    }
-
-    saveLayout() {
-        // Saves the current view as a new layout, pushes to the server
-        let sorted = sortLayout(this.state.layout);
+    let layoutsObj = JSON.parse(layoutJSON);
+    let layoutLists = new Map();
+    for (let envName of Object.keys(layoutsObj)) {
+      let layoutList = new Map();
+      for (let layoutName of Object.keys(layoutsObj[envName])) {
         let layoutMap = new Map();
-        for (var idx = 0; idx < sorted.length; idx++) {
-            let pane = this.state.panes[sorted[idx].i];
-            let currLayout = getLayoutItem(this.state.layout, pane.id);
-            layoutMap.set(sorted[idx].i, [idx, currLayout.h, currLayout.w]);
+        for (let contentID of Object.keys(layoutsObj[envName][layoutName])) {
+          layoutMap.set(contentID, layoutsObj[envName][layoutName][contentID]);
         }
-        let layoutLists = this.state.layoutLists;
-        layoutLists.get(this.state.envID).set(this.state.saveText, layoutMap);
-        this.exportLayoutsToServer(layoutLists);
-        this.setState({layoutLists: layoutLists, layoutID: this.state.saveText});
+        layoutList.set(layoutName, layoutMap);
+      }
+      layoutLists.set(envName, layoutList);
     }
+    let currList = this.getCurrLayoutList();
+    let layoutID = this.state.layoutID;
+    if (!currList.has(this.state.layoutID)) {
+      // If the current view was deleted by someone else (eek)
+      layoutID = DEFAULT_LAYOUT;
+    }
+    this.setState({layoutLists: layoutLists, layoutID: layoutID});
+  }
 
-    deleteLayout() {
-        // Deletes the selected view, pushes to server
-        let layoutLists = this.state.layoutLists;
-        layoutLists.get(this.state.envID).delete(this.state.modifyID);
-        this.exportLayoutsToServer(layoutLists);
-        this.setState({layoutLists: layoutLists});
+  broadcastKeyEvent = (event) => {
+    if (this.state.focusedPaneID === null) {
+      return;
     }
+    let keyEvent = {
+      event_type: 'KeyPress',
+      key: event.key,
+      key_code: event.keyCode,
+      target: this.state.focusedPaneID,
+      eid: this.state.envID,
+    }
+    this.sendSocketMessage({
+      cmd: 'forward_to_vis',
+      data: keyEvent,
+    });
+  }
+
+  exportLayoutsToServer(layoutLists) {
+    // pushes layouts to the server
+    let objForm = {};
+    for (let [envName, layoutList] of layoutLists) {
+      objForm[envName] = {};
+      for (let [layoutName, layoutMap] of layoutList) {
+        objForm[envName][layoutName] = {};
+        for (let [contentID, contentLoc] of layoutMap) {
+          objForm[envName][layoutName][contentID] = contentLoc;
+        }
+      }
+    }
+    let exportForm = JSON.stringify(objForm);
+    this.sendSocketMessage({
+      cmd: 'save_layouts',
+      data: exportForm,
+    });
+  }
+
+  saveLayout() {
+    // Saves the current view as a new layout, pushes to the server
+    let sorted = sortLayout(this.state.layout);
+    let layoutMap = new Map();
+    for (var idx = 0; idx < sorted.length; idx++) {
+      let pane = this.state.panes[sorted[idx].i];
+      let currLayout = getLayoutItem(this.state.layout, pane.id);
+      layoutMap.set(sorted[idx].i, [idx, currLayout.h, currLayout.w]);
+    }
+    let layoutLists = this.state.layoutLists;
+    layoutLists.get(this.state.envID).set(this.state.saveText, layoutMap);
+    this.exportLayoutsToServer(layoutLists);
+    this.setState({layoutLists: layoutLists, layoutID: this.state.saveText});
+  }
+
+  deleteLayout() {
+    // Deletes the selected view, pushes to server
+    let layoutLists = this.state.layoutLists;
+    layoutLists.get(this.state.envID).delete(this.state.modifyID);
+    this.exportLayoutsToServer(layoutLists);
+    this.setState({layoutLists: layoutLists});
+  }
 
     componentDidMount() {
         this.connect();
@@ -848,7 +792,7 @@ class App extends React.Component {
             treeNodeFilterProp="title"
             treeDataSimpleMode={this.state.treeDataSimpleMode}
             treeCheckable showCheckedStrategy={SHOW_CHILD}
-            onChange={this.selectEnv2}
+            onChange={this.selectEnv}
                     />
 
                 </div>
@@ -1039,10 +983,16 @@ class App extends React.Component {
             onClick={this.toggleOnlineState}>
                 {this.state.connected ? 'online' : 'offline'}
             </button>
-                </span>
-                </div>
-                <div>
-                <GridLayout
+          </span>
+        </div>
+        <div
+          tabIndex="-1"
+          className="no-focus"
+          onBlur={this.blurPane}
+          onKeyUp={(event) => {event.preventDefault();}}
+          onKeyDown={this.broadcastKeyEvent}
+          onKeyPress={(event) => {event.preventDefault();}}>
+          <GridLayout
             className="layout"
             rowHeight={ROW_HEIGHT}
             autoSize={false}
