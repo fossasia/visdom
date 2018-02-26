@@ -1,4 +1,4 @@
- /**
+/**
  * Copyright 2017-present, Facebook, Inc.
  * All rights reserved.
  *
@@ -34,26 +34,26 @@ const ROW_HEIGHT = 5; // pixels
 const MARGIN = 10; // pixels
 
 const PANES = {
-    image: ImagePane,
-    plot: PlotPane,
-    text: TextPane,
+  image: ImagePane,
+  plot: PlotPane,
+  text: TextPane,
 };
 
 const PANE_SIZE = {
-    image: [20, 20],
-    plot:  [30, 24],
-    text:  [20, 20],
+  image: [20, 20],
+  plot:  [30, 24],
+  text:  [20, 20],
 };
 
 const MODAL_STYLE = {
-    content : {
-        top                   : '50%',
-        left                  : '50%',
-        right                 : 'auto',
-        bottom                : 'auto',
-        marginRight           : '-50%',
-        transform             : 'translate(-50%, -50%)'
-    }
+  content : {
+    top                   : '50%',
+    left                  : '50%',
+    right                 : 'auto',
+    bottom                : 'auto',
+    marginRight           : '-50%',
+    transform             : 'translate(-50%, -50%)'
+  }
 };
 
 const DEFAULT_LAYOUT = 'current';
@@ -61,299 +61,299 @@ const DEFAULT_LAYOUT = 'current';
 // TODO: Move some of this to smaller components and/or use something like redux
 // to move state out of the app to a standalone store.
 class App extends React.Component {
-    state = {
-        connected: false,
-        sessionID: null,
-        panes: {},
-        focusedPaneID: null,
-        envID: localStorage.getItem( 'envID' ) || null,
-        envIDs: {}, //JSON.parse(localStorage.getItem( 'envIDs' )) || {},
-        saveText: ACTIVE_ENV,
-        layoutID: DEFAULT_LAYOUT,
-        // Bad form... make a copy of the global var we generated in python.
-        envList: ENV_LIST.slice(),
-        filter: '',
-        layout: [],
-        cols: 100,
-        width: 1280,
-        layoutLists: new Map([['main', new Map([[DEFAULT_LAYOUT, new Map()]])]]),
-        showEnvModal: false,
-        showViewModal: false,
-        modifyID: null,
-        treeDataSimpleMode: {
-            id: 'key',
-            rootPId: 0
+  state = {
+    connected: false,
+    sessionID: null,
+    panes: {},
+    focusedPaneID: null,
+    envID: localStorage.getItem( 'envID' ) || null,
+    envIDs: {}, //JSON.parse(localStorage.getItem( 'envIDs' )) || {},
+    saveText: ACTIVE_ENV,
+    layoutID: DEFAULT_LAYOUT,
+    // Bad form... make a copy of the global var we generated in python.
+    envList: ENV_LIST.slice(),
+    filter: '',
+    layout: [],
+    cols: 100,
+    width: 1280,
+    layoutLists: new Map([['main', new Map([[DEFAULT_LAYOUT, new Map()]])]]),
+    showEnvModal: false,
+    showViewModal: false,
+    modifyID: null,
+    treeDataSimpleMode: {
+      id: 'key',
+      rootPId: 0
+    }
+  };
+
+  _bin = null;
+  _socket = null;
+  _envFieldRef = null;
+  _timeoutID = null;
+  _pendingPanes = [];
+
+  colWidth = () => {
+    return (this.state.width - (MARGIN * (this.state.cols - 1))
+            - (MARGIN * 2)) / this.state.cols;
+  }
+
+  p2w = (w) => {  // translate pixels -> RGL grid coordinates
+    let colWidth = this.colWidth();
+    return (w + MARGIN) / (colWidth + MARGIN);
+  }
+
+  p2h = (h) => {
+    return (h + MARGIN) / (ROW_HEIGHT + MARGIN);
+  }
+
+  keyLS = (key) => {      // append env to pane id for localStorage key
+    return this.state.envID + '_' + key;
+  }
+
+  correctPathname = () => {
+    var pathname = window.location.pathname;
+    if (pathname.slice(-1) != '/') {
+      pathname = pathname + '/'
+    }
+    return pathname
+  }
+
+  addPaneBatched = (pane) => {
+    if (!this._timeoutID) {
+      this._timeoutID = setTimeout(this.processBatchedPanes, 100);
+    }
+    this._pendingPanes.push(pane);
+  }
+
+  processBatchedPanes = () => {
+    let newPanes = Object.assign({}, this.state.panes);
+    let newLayout = this.state.layout.slice();
+
+    this._pendingPanes.forEach((pane) => {
+      this.processPane(pane, newPanes, newLayout);
+    });
+
+    this._pendingPanes = [];
+    this._timeoutID = null;
+
+    this.setState({
+      panes: newPanes,
+      layout: newLayout
+    });
+  }
+
+  processPane = (newPane, newPanes, newLayout) => {
+    let exists = newPane.id in newPanes
+    newPanes[newPane.id] = newPane;
+
+    if (!exists) {
+      let stored = JSON.parse(localStorage.getItem(this.keyLS(newPane.id)));
+      if (this._bin == null) this.rebin();
+      if (stored) {
+        var paneLayout = stored;
+        this._bin.content.push(paneLayout);
+      } else {
+        let w = PANE_SIZE[newPane.type][0], h = PANE_SIZE[newPane.type][1];
+
+        if (newPane.width) w = this.p2w(newPane.width);
+        if (newPane.height) h = Math.ceil(this.p2h(newPane.height + 14));
+        if (newPane.content.caption) h += 1;
+
+        this._bin.content.push({width: w, height: h});
+
+        let pos = this._bin.position(newLayout.length, this.state.cols);
+
+        var paneLayout = {
+          i: newPane.id,
+          w: w, h: h,
+          width: w, height: h,
+          x: pos.x, y: pos.y,
+          static: false,
         }
+      }
+
+      newLayout.push(paneLayout);
+    } else {
+      let currLayout = getLayoutItem(newLayout, newPane.id);
+      if (newPane.width) currLayout.w = this.p2w(newPane.width);
+      if (newPane.height) currLayout.h = Math.ceil(this.p2h(newPane.height + 14));
+      if (newPane.content.caption) currLayout.h += 1;
+    }
+  }
+
+  connect = () => {
+    if (this._socket) {
+      return;
+    }
+    var url = window.location;
+    var socket = new WebSocket('ws://' + url.host + this.correctPathname() + 'socket');
+
+    socket.onmessage = this._handleMessage;
+
+    socket.onopen = () => {
+      this.setState({connected: true}, () => {console.log('callback');});
+      console.log('opening socket');
     };
 
-    _bin = null;
-    _socket = null;
-    _envFieldRef = null;
-    _timeoutID = null;
-    _pendingPanes = [];
+    socket.onclose = () => {
+      console.log(this.state);
+      this.setState({connected: false}, function () {
+        console.log('closing socket');
+        this._socket = null;
+        console.log('closing socket');
+      });
+    };
 
-    colWidth = () => {
-        return (this.state.width - (MARGIN * (this.state.cols - 1))
-                - (MARGIN * 2)) / this.state.cols;
-    }
+    socket.onerror = socket.onclose;
 
-    p2w = (w) => {  // translate pixels -> RGL grid coordinates
-        let colWidth = this.colWidth();
-        return (w + MARGIN) / (colWidth + MARGIN);
-    }
+    this._socket = socket;
+  }
 
-    p2h = (h) => {
-        return (h + MARGIN) / (ROW_HEIGHT + MARGIN);
-    }
+  _handleMessage = (evt) => {
+    var cmd = JSON.parse(evt.data);
 
-    keyLS = (key) => {      // append env to pane id for localStorage key
-        return this.state.envID + '_' + key;
-    }
-
-    correctPathname = () => {
-        var pathname = window.location.pathname;
-        if (pathname.slice(-1) != '/') {
-            pathname = pathname + '/'
+    switch (cmd.command) {
+    case 'register':
+      this.setState({
+        sessionID: cmd.data
+      }, () => {this.postForEnv(this.state.envIDs);});
+      break;
+    case 'pane':
+    case 'window':
+      this.addPaneBatched(cmd);
+      break;
+    case 'reload':
+      for (var it in cmd.data) {
+        localStorage.setItem(this.keyLS(it), JSON.stringify(cmd.data[it]));
+      }
+      break;
+    case 'close':
+      this.closePane(cmd.data);
+      break;
+    case 'layout':
+      this.relayout();
+      break;
+    case 'env_update':
+      let layoutLists = this.state.layoutLists;
+      for (var envIdx in cmd.data) {
+        if (!layoutLists.has(cmd.data[envIdx])) {
+          layoutLists.set(cmd.data[envIdx],
+                          new Map([[DEFAULT_LAYOUT, new Map()]]));
         }
-        return pathname
+      }
+      this.setState({envList: cmd.data, layoutLists: layoutLists})
+      break;
+    case 'layout_update':
+      this.parseLayoutsFromServer(cmd.data);
+      break;
+    default:
+      console.error('unrecognized command', cmd);
+    }
+  }
+
+  disconnect = () => {
+    this._socket.close();
+  }
+
+  sendSocketMessage(data) {
+    if (!this._socket) {
+      // TODO: error? warn?
+      return;
     }
 
-    addPaneBatched = (pane) => {
-        if (!this._timeoutID) {
-            this._timeoutID = setTimeout(this.processBatchedPanes, 100);
+    let msg = JSON.stringify(data);
+    return this._socket.send(msg);
+  }
+
+  closePane = (paneID, keepPosition = false, setState = true) => {
+    let newPanes = Object.assign({}, this.state.panes);
+    delete newPanes[paneID];
+    if (!keepPosition) {
+      localStorage.removeItem(this.keyLS(this.id));
+
+      this.sendSocketMessage({
+        cmd: 'close',
+        data: paneID,
+        eid: this.state.envID,
+      });
+    }
+
+    if (setState) {
+      let focusedPaneID = this.state.focusedPaneID;
+      // Make sure we remove the pane from our layout.
+      let newLayout = this.state.layout.filter(
+        (paneLayout) => paneLayout.i !== paneID)
+
+      this.setState({
+        layout: newLayout,
+        panes: newPanes,
+        focusedPaneID: focusedPaneID === paneID ? null : focusedPaneID,
+      }, () => {this.relayout();});
+    }
+  }
+
+  closeAllPanes = () => {
+    console.log('clear all panes');
+    Object.keys(this.state.panes).map((paneID) => {
+      this.closePane(paneID, false, false);
+    });
+    this.rebin();
+    this.setState({
+      layout: [],
+      panes: {},
+      focusedPaneID: null,
+    });
+  }
+
+  selectEnv = (selectedNodes) => {
+    // currentNode: { label, value, children, expanded, checked, className, ...extraProps }
+    // selectedNodes: [{ label, value, children, expanded, checked, className, ...extraProps }]
+    console.log('selected nodes', selectedNodes);
+    var isSameEnv = selectedNodes.length == this.state.envIDs.length;
+    if (isSameEnv) {
+      for (var i=0; i<selectedNodes.length; i++) {
+        if (selectedNodes[i] != this.state.envIDs[i]) {
+          isSameEnv=false;
+          break;
         }
-        this._pendingPanes.push(pane);
+      }
     }
-
-    processBatchedPanes = () => {
-        let newPanes = Object.assign({}, this.state.panes);
-        let newLayout = this.state.layout.slice();
-
-        this._pendingPanes.forEach((pane) => {
-            this.processPane(pane, newPanes, newLayout);
-        });
-
-        this._pendingPanes = [];
-        this._timeoutID = null;
-
-        this.setState({
-            panes: newPanes,
-            layout: newLayout
-        });
+    var envID = null;
+    if (selectedNodes.length > 0) envID = selectedNodes[0];
+    this.setState({
+      envID: envID,
+      envIDs: selectedNodes,
+      saveText: envID,
+      panes: isSameEnv ? this.state.panes : {},
+      layout: isSameEnv ? this.state.layout : [],
+      focusedPaneID: isSameEnv ? this.state.focusedPaneID : null
+    });
+    localStorage.setItem( 'envID', envID );
+    localStorage.setItem( 'envIDs', JSON.stringify(selectedNodes) );
+    this.postForEnv(selectedNodes);
+  }
+  postForEnv = (envIDs) => {
+    // This kicks off a new stream of events from the socket so there's nothing
+    // to handle here. We might want to surface the error state.
+    console.log('posting for env', envIDs);
+    if (envIDs.length == 1 ) {
+      $.post(this.correctPathname() + 'env/' + envIDs[0],
+             JSON.stringify({'sid' : this.state.sessionID}));
     }
+    else if(envIDs.length > 1) {
+      $.post(this.correctPathname() + 'compare/' + envIDs.join('+'),
+             JSON.stringify({'sid' : this.state.sessionID}));
 
-    processPane = (newPane, newPanes, newLayout) => {
-        let exists = newPane.id in newPanes
-        newPanes[newPane.id] = newPane;
-
-        if (!exists) {
-            let stored = JSON.parse(localStorage.getItem(this.keyLS(newPane.id)));
-            if (this._bin == null) this.rebin();
-            if (stored) {
-                var paneLayout = stored;
-                this._bin.content.push(paneLayout);
-            } else {
-                let w = PANE_SIZE[newPane.type][0], h = PANE_SIZE[newPane.type][1];
-
-                if (newPane.width) w = this.p2w(newPane.width);
-                if (newPane.height) h = Math.ceil(this.p2h(newPane.height + 14));
-                if (newPane.content.caption) h += 1;
-
-                this._bin.content.push({width: w, height: h});
-
-                let pos = this._bin.position(newLayout.length, this.state.cols);
-
-                var paneLayout = {
-                    i: newPane.id,
-                    w: w, h: h,
-                    width: w, height: h,
-                    x: pos.x, y: pos.y,
-                    static: false,
-                }
-            }
-
-            newLayout.push(paneLayout);
-        } else {
-            let currLayout = getLayoutItem(newLayout, newPane.id);
-            if (newPane.width) currLayout.w = this.p2w(newPane.width);
-            if (newPane.height) currLayout.h = Math.ceil(this.p2h(newPane.height + 14));
-            if (newPane.content.caption) currLayout.h += 1;
-        }
     }
+  }
 
-    connect = () => {
-        if (this._socket) {
-            return;
-        }
-        var url = window.location;
-        var socket = new WebSocket('ws://' + url.host + this.correctPathname() + 'socket');
-
-        socket.onmessage = this._handleMessage;
-
-        socket.onopen = () => {
-            this.setState({connected: true}, () => {console.log('callback');});
-            console.log('opening socket');
-        };
-
-        socket.onclose = () => {
-            console.log(this.state);
-            this.setState({connected: false}, function () {
-                console.log('closing socket');
-                this._socket = null;
-                console.log('closing socket');
-            });
-        };
-
-        socket.onerror = socket.onclose;
-
-        this._socket = socket;
-    }
-
-    _handleMessage = (evt) => {
-        var cmd = JSON.parse(evt.data);
-
-        switch (cmd.command) {
-        case 'register':
-            this.setState({
-                sessionID: cmd.data
-            }, () => {this.postForEnv(this.state.envIDs);});
-            break;
-        case 'pane':
-        case 'window':
-            this.addPaneBatched(cmd);
-            break;
-        case 'reload':
-            for (var it in cmd.data) {
-                localStorage.setItem(this.keyLS(it), JSON.stringify(cmd.data[it]));
-            }
-            break;
-        case 'close':
-            this.closePane(cmd.data);
-            break;
-        case 'layout':
-            this.relayout();
-            break;
-        case 'env_update':
-            let layoutLists = this.state.layoutLists;
-            for (var envIdx in cmd.data) {
-                if (!layoutLists.has(cmd.data[envIdx])) {
-                    layoutLists.set(cmd.data[envIdx],
-                                    new Map([[DEFAULT_LAYOUT, new Map()]]));
-                }
-            }
-            this.setState({envList: cmd.data, layoutLists: layoutLists})
-            break;
-        case 'layout_update':
-            this.parseLayoutsFromServer(cmd.data);
-            break;
-        default:
-            console.error('unrecognized command', cmd);
-        }
-    }
-
-    disconnect = () => {
-        this._socket.close();
-    }
-
-    sendSocketMessage(data) {
-        if (!this._socket) {
-            // TODO: error? warn?
-            return;
-        }
-
-        let msg = JSON.stringify(data);
-        return this._socket.send(msg);
-    }
-
-    closePane = (paneID, keepPosition = false, setState = true) => {
-        let newPanes = Object.assign({}, this.state.panes);
-        delete newPanes[paneID];
-        if (!keepPosition) {
-            localStorage.removeItem(this.keyLS(this.id));
-
-            this.sendSocketMessage({
-                cmd: 'close',
-                data: paneID,
-                eid: this.state.envID,
-            });
-        }
-
-        if (setState) {
-            let focusedPaneID = this.state.focusedPaneID;
-            // Make sure we remove the pane from our layout.
-            let newLayout = this.state.layout.filter(
-                (paneLayout) => paneLayout.i !== paneID)
-
-            this.setState({
-                layout: newLayout,
-                panes: newPanes,
-                focusedPaneID: focusedPaneID === paneID ? null : focusedPaneID,
-            }, () => {this.relayout();});
-        }
-    }
-
-    closeAllPanes = () => {
-        console.log('clear all panes');
-        Object.keys(this.state.panes).map((paneID) => {
-            this.closePane(paneID, false, false);
-        });
-        this.rebin();
-        this.setState({
-            layout: [],
-            panes: {},
-            focusedPaneID: null,
-        });
-    }
-
-    selectEnv = (selectedNodes) => {
-        // currentNode: { label, value, children, expanded, checked, className, ...extraProps }
-        // selectedNodes: [{ label, value, children, expanded, checked, className, ...extraProps }]
-        console.log('selected nodes', selectedNodes);
-        var isSameEnv = selectedNodes.length == this.state.envIDs.length;
-        if (isSameEnv) {
-            for (var i=0; i<selectedNodes.length; i++) {
-                if (selectedNodes[i] != this.state.envIDs[i]) {
-                    isSameEnv=false;
-                    break;
-                }
-            }
-        }
-        var envID = null;
-        if (selectedNodes.length > 0) envID = selectedNodes[0];
-        this.setState({
-            envID: envID,
-            envIDs: selectedNodes,
-            saveText: envID,
-            panes: isSameEnv ? this.state.panes : {},
-            layout: isSameEnv ? this.state.layout : [],
-            focusedPaneID: isSameEnv ? this.state.focusedPaneID : null
-        });
-        localStorage.setItem( 'envID', envID );
-        localStorage.setItem( 'envIDs', JSON.stringify(selectedNodes) );
-        this.postForEnv(selectedNodes);
-    }
-    postForEnv = (envIDs) => {
-        // This kicks off a new stream of events from the socket so there's nothing
-        // to handle here. We might want to surface the error state.
-        console.log('posting for env', envIDs);
-        if (envIDs.length == 1 ) {
-            $.post(this.correctPathname() + 'env/' + envIDs[0],
-                   JSON.stringify({'sid' : this.state.sessionID}));
-        }
-        else if(envIDs.length > 1) {
-            $.post(this.correctPathname() + 'compare/' + envIDs.join('+'),
-                   JSON.stringify({'sid' : this.state.sessionID}));
-
-        }
-    }
-
-    deleteEnv = () => {
-        this.sendSocketMessage({
-            cmd: 'delete_env',
-            prev_eid: this.state.envID,
-            eid: this.state.modifyID,
-        });
-    }
+  deleteEnv = () => {
+    this.sendSocketMessage({
+      cmd: 'delete_env',
+      prev_eid: this.state.envID,
+      eid: this.state.modifyID,
+    });
+  }
 
 
   saveEnv = () => {
@@ -386,7 +386,7 @@ class App extends React.Component {
     for (var envIdx in newEnvList) {
       if (!layoutLists.has(newEnvList[envIdx])) {
         layoutLists.set(newEnvList[envIdx],
-          new Map([[DEFAULT_LAYOUT, new Map()]]));
+                        new Map([[DEFAULT_LAYOUT, new Map()]]));
       }
     }
 
@@ -469,7 +469,7 @@ class App extends React.Component {
     // Sort out things that were filtered away
     sorted = sorted.sort(function(a, b) {
       let diff = (newPanes[a.i].title.match(filter) != null) -
-              (newPanes[b.i].title.match(filter) != null);
+          (newPanes[b.i].title.match(filter) != null);
       if (diff != 0) {
         return -diff;
       } else if (layoutID !== DEFAULT_LAYOUT) {
@@ -617,415 +617,415 @@ class App extends React.Component {
     this.setState({layoutLists: layoutLists});
   }
 
-    componentDidMount() {
-        this.connect();
-        console.log('on mount', this.state.envID, this.state.envIDs, this.state.sessionID);
-    }
+  componentDidMount() {
+    this.connect();
+    console.log('on mount', this.state.envID, this.state.envIDs, this.state.sessionID);
+  }
 
-    onWidthChange = (width, cols) => {
-        this.setState({cols: cols, width: width}, () => {this.relayout()});
-    }
+  onWidthChange = (width, cols) => {
+    this.setState({cols: cols, width: width}, () => {this.relayout()});
+  }
 
-    openEnvModal() {
-        this.setState({showEnvModal: true, saveText: this.state.envID});
-    }
+  openEnvModal() {
+    this.setState({showEnvModal: true, saveText: this.state.envID});
+  }
 
-    closeEnvModal() {
-        this.setState({showEnvModal: false});
-    }
+  closeEnvModal() {
+    this.setState({showEnvModal: false});
+  }
 
-    openViewModal() {
-        this.setState({showViewModal: true, saveText: this.state.layoutID});
-    }
+  openViewModal() {
+    this.setState({showViewModal: true, saveText: this.state.layoutID});
+  }
 
-    closeViewModal() {
-        this.setState({showViewModal: false});
-    }
+  closeViewModal() {
+    this.setState({showViewModal: false});
+  }
 
-    renderEnvModal() {
-        return (
-                <ReactModal
-            isOpen={this.state.showEnvModal}
-            onRequestClose={this.closeEnvModal.bind(this)}
-            contentLabel="Environment Management Modal"
-            ariaHideApp={false}
-            style={MODAL_STYLE}
-                >
-                <span className="visdom-title">Manage Environments</span>
-                <br/>
-                Save or fork current environment:
-                <br/>
-                <div className="form-inline">
-                <input
-            className="form-control"
-            type="text"
-            onChange={(ev) => {this.setState({saveText: ev.target.value})}}
-            value={this.state.saveText}
-            ref={(ref) => this._envFieldRef = ref}
-                />
-                <button
-            className="btn btn-default"
-            disabled={!this.state.connected}
-            onClick={this.saveEnv}>
-                {this.state.envList.indexOf(
-                    this.state.saveText) >= 0 ? 'save' : 'fork'}
-            </button>
-                </div>
-                <br/>
-                Delete environment selected in dropdown:
-                <br/>
-                <div className="form-inline">
-                <select
-            className="form-control"
-            disabled={!this.state.connected}
-            onChange={(ev) => {this.setState({modifyID: ev.target.value})}}
-            value={this.state.modifyID}>{
-                this.state.envList.map((env) => {
-                    return <option key={env} value={env}>{env}</option>;
-                })
-            }
-            </select>
-                <button
-            className="btn btn-default"
-            disabled={!this.state.connected || !this.state.modifyID
-                      || this.state.modifyID == 'main'}
-            onClick={this.deleteEnv.bind(this)}>
-                Delete
-            </button>
-                </div>
+  renderEnvModal() {
+    return (
+        <ReactModal
+      isOpen={this.state.showEnvModal}
+      onRequestClose={this.closeEnvModal.bind(this)}
+      contentLabel="Environment Management Modal"
+      ariaHideApp={false}
+      style={MODAL_STYLE}
+        >
+        <span className="visdom-title">Manage Environments</span>
+        <br/>
+        Save or fork current environment:
+        <br/>
+        <div className="form-inline">
+        <input
+      className="form-control"
+      type="text"
+      onChange={(ev) => {this.setState({saveText: ev.target.value})}}
+      value={this.state.saveText}
+      ref={(ref) => this._envFieldRef = ref}
+        />
+        <button
+      className="btn btn-default"
+      disabled={!this.state.connected}
+      onClick={this.saveEnv}>
+        {this.state.envList.indexOf(
+          this.state.saveText) >= 0 ? 'save' : 'fork'}
+      </button>
+        </div>
+        <br/>
+        Delete environment selected in dropdown:
+        <br/>
+        <div className="form-inline">
+        <select
+      className="form-control"
+      disabled={!this.state.connected}
+      onChange={(ev) => {this.setState({modifyID: ev.target.value})}}
+      value={this.state.modifyID}>{
+        this.state.envList.map((env) => {
+          return <option key={env} value={env}>{env}</option>;
+        })
+      }
+      </select>
+        <button
+      className="btn btn-default"
+      disabled={!this.state.connected || !this.state.modifyID
+                || this.state.modifyID == 'main'}
+      onClick={this.deleteEnv.bind(this)}>
+        Delete
+      </button>
+        </div>
       </ReactModal>
-        );
-    }
+    );
+  }
 
-    renderViewModal() {
-        return (
-                <ReactModal
-            isOpen={this.state.showViewModal}
-            onRequestClose={this.closeViewModal.bind(this)}
-            contentLabel="Layout Views Management Modal"
-            ariaHideApp={false}
-            style={MODAL_STYLE}
-                >
-                <span className="visdom-title">Manage Views</span>
-                <br/>
-                Save or fork current layout:
-                <br/>
-                <div className="form-inline">
-                <input
-            className="form-control"
-            type="text"
-            onChange={(ev) => {this.setState({saveText: ev.target.value})}}
-            value={this.state.saveText}
-                />
-                <button
-            className="btn btn-default"
-            disabled={!this.state.connected ||
-                      this.state.saveText == DEFAULT_LAYOUT}
-            onClick={this.saveLayout.bind(this)}>
-                {this.getCurrLayoutList().has(
-                    this.state.saveText) ? 'save' : 'fork'}
-            </button>
-                </div>
-                <br/>
-                Delete layout view selected in dropdown:
-                <br/>
-                <div className="form-inline">
-                <select
-            className="form-control"
-            disabled={!this.state.connected}
-            onChange={(ev) => {this.setState({modifyID: ev.target.value})}}
-            value={this.state.modifyID}>{
-                Array.from(this.getCurrLayoutList().keys()).map((view) => {
-                    return <option key={view} value={view}>{view}</option>;
-                })
-            }
-            </select>
-                <button
-            className="btn btn-default"
-            disabled={!this.state.connected || !this.state.modifyID
-                      || this.state.modifyID == DEFAULT_LAYOUT}
-            onClick={this.deleteLayout.bind(this)}>
-                Delete
-            </button>
-                </div>
+  renderViewModal() {
+    return (
+        <ReactModal
+      isOpen={this.state.showViewModal}
+      onRequestClose={this.closeViewModal.bind(this)}
+      contentLabel="Layout Views Management Modal"
+      ariaHideApp={false}
+      style={MODAL_STYLE}
+        >
+        <span className="visdom-title">Manage Views</span>
+        <br/>
+        Save or fork current layout:
+        <br/>
+        <div className="form-inline">
+        <input
+      className="form-control"
+      type="text"
+      onChange={(ev) => {this.setState({saveText: ev.target.value})}}
+      value={this.state.saveText}
+        />
+        <button
+      className="btn btn-default"
+      disabled={!this.state.connected ||
+                this.state.saveText == DEFAULT_LAYOUT}
+      onClick={this.saveLayout.bind(this)}>
+        {this.getCurrLayoutList().has(
+          this.state.saveText) ? 'save' : 'fork'}
+      </button>
+        </div>
+        <br/>
+        Delete layout view selected in dropdown:
+        <br/>
+        <div className="form-inline">
+        <select
+      className="form-control"
+      disabled={!this.state.connected}
+      onChange={(ev) => {this.setState({modifyID: ev.target.value})}}
+      value={this.state.modifyID}>{
+        Array.from(this.getCurrLayoutList().keys()).map((view) => {
+          return <option key={view} value={view}>{view}</option>;
+        })
+      }
+      </select>
+        <button
+      className="btn btn-default"
+      disabled={!this.state.connected || !this.state.modifyID
+                || this.state.modifyID == DEFAULT_LAYOUT}
+      onClick={this.deleteLayout.bind(this)}>
+        Delete
+      </button>
+        </div>
       </ReactModal>
-        );
-    }
+    );
+  }
 
-    renderEnvControls() {
-        var slist = this.state.envList.slice();
-        slist.sort();
-        var roots = Array.from(new Set(slist.map((x) => {return x.split('_')[0];})));
+  renderEnvControls() {
+    var slist = this.state.envList.slice();
+    slist.sort();
+    var roots = Array.from(new Set(slist.map((x) => {return x.split('_')[0];})));
 
-        let env_options2 = slist.map((env, idx) => {
-            //var check_space = this.state.envIDs.includes(env);
-            return {
-                key:idx + 1 + roots.length,
-                pId:roots.indexOf(env.split('_')[0]) + 1,
-                label: env,
-                value: env
-            };
+    let env_options2 = slist.map((env, idx) => {
+      //var check_space = this.state.envIDs.includes(env);
+      return {
+        key:idx + 1 + roots.length,
+        pId:roots.indexOf(env.split('_')[0]) + 1,
+        label: env,
+        value: env
+      };
+    });
+
+    env_options2 = env_options2.concat(roots.map((x, idx) => { return {
+      key: idx+1,
+      pId: 0,
+      label: x,
+      value: x
+    };}));
+
+    return (
+        <span>
+        <span>Environment&nbsp;</span>
+        <div className="btn-group navbar-btn" role="group" aria-label="Environment:">
+        <div className="btn-group" role="group">
+        <TreeSelect
+      style={{ width: 750 }}
+      dropdownStyle={{ maxHeight: 900, overflow: 'auto' }}
+      placeholder={<i>Select environment(s)</i>}
+      searchPlaceholder="please search"
+      treeLine maxTagTextLength={1000}
+      inputValue={null}
+      value={this.state.envIDs}
+      treeData={env_options2}
+      treeDefaultExpandAll
+      treeNodeFilterProp="title"
+      treeDataSimpleMode={this.state.treeDataSimpleMode}
+      treeCheckable showCheckedStrategy={SHOW_CHILD}
+      onChange={this.selectEnv}
+        />
+
+      </div>
+        <button
+      data-toggle="tooltip"
+      title="Clear Current Environment"
+      data-placement="bottom"
+      className="btn btn-default"
+      disabled={!this.state.connected}
+      onClick={this.closeAllPanes}>
+        <span
+      className="glyphicon glyphicon-erase">
+        </span>
+        </button>
+        <button
+      data-toggle="tooltip"
+      title="Manage Environments"
+      data-placement="bottom"
+      className="btn btn-default"
+      disabled={!this.state.connected}
+      onClick={this.openEnvModal.bind(this)}>
+        <span
+      className="glyphicon glyphicon-folder-open">
+        </span>
+        </button>
+        </div>
+        </span>
+    )
+  }
+
+  renderViewControls() {
+    let view_options = Array.from(
+      this.getCurrLayoutList().keys()).map((view) => {
+        let check_space = ''
+        if (view == this.state.layoutID) {
+          check_space = <span>&nbsp;&#10003;</span>;
+        }
+        return <li>
+          <a href="#" onClick={this.updateToLayout.bind(this, view)}>
+          {view}
+        {check_space}
+        </a>
+          </li>;
+      }
+                                          )
+    return (
+        <span>
+        <span>View&nbsp;</span>
+        <div className="btn-group navbar-btn" role="group" aria-label="View:">
+        <div className="btn-group" role="group">
+        <button className="btn btn-default dropdown-toggle"
+      type="button" id="viewDropdown" data-toggle="dropdown"
+      aria-haspopup="true" aria-expanded="true">
+        {this.state.layoutID}
+        &nbsp;
+        <span className="caret"></span>
+        </button>
+        <ul className="dropdown-menu" aria-labelledby="viewDropdown">
+        {view_options}
+      </ul>
+        </div>
+        <button
+      data-toggle="tooltip"
+      title="Repack"
+      data-placement="bottom"
+      className="btn btn-default"
+      onClick={(ev) => {this.relayout(); this.relayout();}}>
+        <span
+      className="glyphicon glyphicon-th">
+        </span>
+        </button>
+        <button
+      data-toggle="tooltip"
+      title="Manage Views"
+      data-placement="bottom"
+      className="btn btn-default"
+      disabled={!this.state.connected}
+      onClick={(ev) => {this.openViewModal()}}>
+        <span
+      className="glyphicon glyphicon-folder-open">
+        </span>
+        </button>
+        </div>
+        </span>
+    )
+  }
+
+  renderFilterControl() {
+    return (
+        <div className="input-group navbar-btn">
+        <input type="text" className="form-control" placeholder="Filter text"
+      onChange={(ev) => {
+        this.setState(
+          {filter: ev.target.value}, () => {
+            Object.keys(this.state.panes).map((paneID) => {
+              this.focusPane(paneID);
+            });
+          });
+        // TODO remove this once relayout is moved to a post-state
+        // update kind of thing
+        this.state.filter = ev.target.value;
+        this.relayout();
+        this.relayout();
+      }}
+      value={this.state.filter}/>
+        <span className="input-group-btn">
+        <button
+      data-toggle="tooltip"
+      title="Clear filter"
+      data-placement="bottom"
+      type="button"
+      className="btn btn-default"
+      onClick={(ev) => {this.setState(
+        {filter: ''}, () => {
+          Object.keys(this.state.panes).map((paneID) => {
+            this.focusPane(paneID);
+          });
         });
+                        // TODO remove this once relayout is moved to a post-state
+                        // update kind of thing
+                        this.state.filter = '';
+                        this.relayout();
+                        this.relayout();
+                       }}>
+        <span
+      className="glyphicon glyphicon-erase">
+        </span>
+        </button>
+        </span>
+        </div>
+    );
+  }
 
-        env_options2 = env_options2.concat(roots.map((x, idx) => { return {
-            key: idx+1,
-            pId: 0,
-            label: x,
-            value: x
-        };}));
+  render() {
+    let panes = Object.keys(this.state.panes).map((id) => {
+      let pane = this.state.panes[id];
+      let Comp = PANES[pane.type];
+      if (!Comp) {
+        console.error('unrecognized pane type: ', pane);
+        return null;
+      }
+      let panelayout = getLayoutItem(this.state.layout, id);
+      let isVisible = pane.title.match(this.state.filter)
+      return (
+          <div key={pane.id}
+        className={isVisible? '' : 'hidden-window'}>
+          <Comp
+        {...pane}
+        key={pane.id}
+        onClose={this.closePane}
+        onFocus={this.focusPane}
+        onInflate={this.onInflate}
+        isFocused={pane.id === this.state.focusedPaneID}
+        w={panelayout.w}
+        h={panelayout.h}
+          />
+          </div>
+      );
+    });
 
-        return (
-                <span>
-                <span>Environment&nbsp;</span>
-                <div className="btn-group navbar-btn" role="group" aria-label="Environment:">
-                <div className="btn-group" role="group">
-                <TreeSelect
-            style={{ width: 750 }}
-            dropdownStyle={{ maxHeight: 900, overflow: 'auto' }}
-            placeholder={<i>Select environment(s)</i>}
-            searchPlaceholder="please search"
-            treeLine maxTagTextLength={1000}
-            inputValue={null}
-            value={this.state.envIDs}
-            treeData={env_options2}
-            treeDefaultExpandAll
-            treeNodeFilterProp="title"
-            treeDataSimpleMode={this.state.treeDataSimpleMode}
-            treeCheckable showCheckedStrategy={SHOW_CHILD}
-            onChange={this.selectEnv}
-                    />
+    let envModal = this.renderEnvModal();
+    let viewModal = this.renderViewModal();
+    let envControls = this.renderEnvControls();
+    let viewControls = this.renderViewControls();
+    let filterControl = this.renderFilterControl();
 
-                </div>
-                <button
-            data-toggle="tooltip"
-            title="Clear Current Environment"
-            data-placement="bottom"
-            className="btn btn-default"
-            disabled={!this.state.connected}
-            onClick={this.closeAllPanes}>
-                <span
-            className="glyphicon glyphicon-erase">
-                </span>
-                </button>
-                <button
-            data-toggle="tooltip"
-            title="Manage Environments"
-            data-placement="bottom"
-            className="btn btn-default"
-            disabled={!this.state.connected}
-            onClick={this.openEnvModal.bind(this)}>
-                <span
-            className="glyphicon glyphicon-folder-open">
-                </span>
-                </button>
-                </div>
-                </span>
-        )
-    }
-
-    renderViewControls() {
-        let view_options = Array.from(
-            this.getCurrLayoutList().keys()).map((view) => {
-                let check_space = ''
-                if (view == this.state.layoutID) {
-                    check_space = <span>&nbsp;&#10003;</span>;
-                }
-                return <li>
-                    <a href="#" onClick={this.updateToLayout.bind(this, view)}>
-                    {view}
-                {check_space}
-                </a>
-                    </li>;
-            }
-                                                )
-        return (
-                <span>
-                <span>View&nbsp;</span>
-                <div className="btn-group navbar-btn" role="group" aria-label="View:">
-                <div className="btn-group" role="group">
-                <button className="btn btn-default dropdown-toggle"
-            type="button" id="viewDropdown" data-toggle="dropdown"
-            aria-haspopup="true" aria-expanded="true">
-                {this.state.layoutID}
-                &nbsp;
-                <span className="caret"></span>
-                </button>
-                <ul className="dropdown-menu" aria-labelledby="viewDropdown">
-                {view_options}
-            </ul>
-                </div>
-                <button
-            data-toggle="tooltip"
-            title="Repack"
-            data-placement="bottom"
-            className="btn btn-default"
-            onClick={(ev) => {this.relayout(); this.relayout();}}>
-                <span
-            className="glyphicon glyphicon-th">
-                </span>
-                </button>
-                <button
-            data-toggle="tooltip"
-            title="Manage Views"
-            data-placement="bottom"
-            className="btn btn-default"
-            disabled={!this.state.connected}
-            onClick={(ev) => {this.openViewModal()}}>
-                <span
-            className="glyphicon glyphicon-folder-open">
-                </span>
-                </button>
-                </div>
-                </span>
-        )
-    }
-
-    renderFilterControl() {
-        return (
-                <div className="input-group navbar-btn">
-                <input type="text" className="form-control" placeholder="Filter text"
-            onChange={(ev) => {
-                this.setState(
-                    {filter: ev.target.value}, () => {
-                        Object.keys(this.state.panes).map((paneID) => {
-                            this.focusPane(paneID);
-                        });
-                    });
-                // TODO remove this once relayout is moved to a post-state
-                // update kind of thing
-                this.state.filter = ev.target.value;
-                this.relayout();
-                this.relayout();
-            }}
-            value={this.state.filter}/>
-                <span className="input-group-btn">
-                <button
-            data-toggle="tooltip"
-            title="Clear filter"
-            data-placement="bottom"
-            type="button"
-            className="btn btn-default"
-            onClick={(ev) => {this.setState(
-                {filter: ''}, () => {
-                    Object.keys(this.state.panes).map((paneID) => {
-                        this.focusPane(paneID);
-                    });
-                });
-                              // TODO remove this once relayout is moved to a post-state
-                              // update kind of thing
-                              this.state.filter = '';
-                              this.relayout();
-                              this.relayout();
-                             }}>
-                <span
-            className="glyphicon glyphicon-erase">
-                </span>
-                </button>
-                </span>
-                </div>
-        );
-    }
-
-    render() {
-        let panes = Object.keys(this.state.panes).map((id) => {
-            let pane = this.state.panes[id];
-            let Comp = PANES[pane.type];
-            if (!Comp) {
-                console.error('unrecognized pane type: ', pane);
-                return null;
-            }
-            let panelayout = getLayoutItem(this.state.layout, id);
-            let isVisible = pane.title.match(this.state.filter)
-            return (
-                    <div key={pane.id}
-                className={isVisible? '' : 'hidden-window'}>
-                    <Comp
-                {...pane}
-                key={pane.id}
-                onClose={this.closePane}
-                onFocus={this.focusPane}
-                onInflate={this.onInflate}
-                isFocused={pane.id === this.state.focusedPaneID}
-                w={panelayout.w}
-                h={panelayout.h}
-                    />
-                    </div>
-            );
-        });
-
-        let envModal = this.renderEnvModal();
-        let viewModal = this.renderViewModal();
-        let envControls = this.renderEnvControls();
-        let viewControls = this.renderViewControls();
-        let filterControl = this.renderFilterControl();
-
-        return (
-                <div>
-                {envModal}
-            {viewModal}
-                <div className="navbar-form navbar-default">
-                <span className="navbar-brand visdom-title">visdom</span>
-                <span className="vertical-line"></span>
-                &nbsp;&nbsp;
-            {envControls}
-                &nbsp;&nbsp;
-                <span className="vertical-line"></span>
-                &nbsp;&nbsp;
-            {viewControls}
-                <span style={{float: 'right'}}>
-                {filterControl}
-                &nbsp;&nbsp;
-                <button
-            className={classNames({
-                'btn': true,
-                'btn-success': this.state.connected,
-                'btn-danger': !this.state.connected})}
-            onClick={this.toggleOnlineState}>
-                {this.state.connected ? 'online' : 'offline'}
-            </button>
-          </span>
+    return (
+        <div>
+        {envModal}
+      {viewModal}
+        <div className="navbar-form navbar-default">
+        <span className="navbar-brand visdom-title">visdom</span>
+        <span className="vertical-line"></span>
+        &nbsp;&nbsp;
+      {envControls}
+        &nbsp;&nbsp;
+        <span className="vertical-line"></span>
+        &nbsp;&nbsp;
+      {viewControls}
+        <span style={{float: 'right'}}>
+        {filterControl}
+        &nbsp;&nbsp;
+        <button
+      className={classNames({
+        'btn': true,
+        'btn-success': this.state.connected,
+        'btn-danger': !this.state.connected})}
+      onClick={this.toggleOnlineState}>
+        {this.state.connected ? 'online' : 'offline'}
+      </button>
+        </span>
         </div>
         <div
-          tabIndex="-1"
-          className="no-focus"
-          onBlur={this.blurPane}
-          onKeyUp={(event) => {event.preventDefault();}}
-          onKeyDown={this.broadcastKeyEvent}
-          onKeyPress={(event) => {event.preventDefault();}}>
-          <GridLayout
-            className="layout"
-            rowHeight={ROW_HEIGHT}
-            autoSize={false}
-            margin={[MARGIN,MARGIN]}
-            layout={this.state.layout}
-            draggableHandle={'.bar'}
-            onLayoutChange={this.handleLayoutChange}
-            onWidthChange={this.onWidthChange}
-            onResizeStop={this.resizePane}
-            onDragStop={this.movePane}>
-                {panes}
-            </GridLayout>
-                </div>
-                </div>
-        )
-    }
+      tabIndex="-1"
+      className="no-focus"
+      onBlur={this.blurPane}
+      onKeyUp={(event) => {event.preventDefault();}}
+      onKeyDown={this.broadcastKeyEvent}
+      onKeyPress={(event) => {event.preventDefault();}}>
+        <GridLayout
+      className="layout"
+      rowHeight={ROW_HEIGHT}
+      autoSize={false}
+      margin={[MARGIN,MARGIN]}
+      layout={this.state.layout}
+      draggableHandle={'.bar'}
+      onLayoutChange={this.handleLayoutChange}
+      onWidthChange={this.onWidthChange}
+      onResizeStop={this.resizePane}
+      onDragStop={this.movePane}>
+        {panes}
+      </GridLayout>
+        </div>
+        </div>
+    )
+  }
 }
 
 
 function load() {
-    ReactDOM.render(
-            <App />,
-        document.getElementById('app')
-    );
-    document.removeEventListener('DOMContentLoaded', load);
+  ReactDOM.render(
+      <App />,
+    document.getElementById('app')
+  );
+  document.removeEventListener('DOMContentLoaded', load);
 }
 
 document.addEventListener('DOMContentLoaded', load);
 
 $(document).ready(function(){
-    $('[data-toggle="tooltip"]').tooltip({
-        container: 'body',
-        delay: {show: 600, hide: 100},
-        trigger : 'hover',
-    });
+  $('[data-toggle="tooltip"]').tooltip({
+    container: 'body',
+    delay: {show: 600, hide: 100},
+    trigger : 'hover',
+  });
 });
