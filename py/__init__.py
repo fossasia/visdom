@@ -12,6 +12,8 @@ from __future__ import unicode_literals
 import os.path
 import requests
 import traceback
+import threading
+import websocket
 import json
 import math
 import re
@@ -24,6 +26,8 @@ from six import string_types
 from six import BytesIO
 import logging
 import warnings
+import time
+import errno
 
 try:
     import torchfile
@@ -32,7 +36,7 @@ except BaseException:
 
 logging.getLogger('requests').setLevel(logging.CRITICAL)
 logging.getLogger('urllib3').setLevel(logging.CRITICAL)
-
+logger = logging.getLogger(__name__)
 
 def isstr(s):
     return isinstance(s, string_types)
@@ -124,11 +128,12 @@ def _opts2layout(opts, is3d=False):
 
 def _markerColorCheck(mc, X, Y, L):
     assert isndarray(mc), 'mc should be a numpy ndarray'
-    assert mc.shape[0] == L or (mc.shape[0] == X.shape[0] and
-            (mc.ndim == 1 or mc.ndim == 2 and mc.shape[1] == 3)), \
-            ('marker colors have to be of size `%d` or `%d x 3` ' + \
-            ' or `%d` or `%d x 3`, but got: %s') % \
-            (X.shape[0], X.shape[1], L, L, 'x'.join(map(str,mc.shape)))
+    assert mc.shape[0] == L or (
+        mc.shape[0] == X.shape[0] and
+        (mc.ndim == 1 or mc.ndim == 2 and mc.shape[1] == 3)), \
+        ('marker colors have to be of size `%d` or `%d x 3` ' +
+         ' or `%d` or `%d x 3`, but got: %s') % \
+        (X.shape[0], X.shape[1], L, L, 'x'.join(map(str, mc.shape)))
 
     assert (mc >= 0).all(), 'marker colors have to be >= 0'
     assert (mc <= 255).all(), 'marker colors have to be <= 255'
@@ -228,6 +233,7 @@ class Visdom(object):
         env='main',
         send=True,
     ):
+        self.server_base_name = server[server.index("//")+2:]
         self.server = server
         self.endpoint = endpoint
         self.port = port
@@ -235,12 +241,78 @@ class Visdom(object):
         self.proxy = proxy
         self.env = env              # default env
         self.send = send
-
+        self.event_handlers = {}  # Haven't registered any events
+        self.socket_alive = False
+        self.use_socket = True
         try:
             import torch  # noqa F401: we do use torch, just weirdly
             wrap_tensor_methods(self, pytorch_wrap)
         except ImportError:
             pass
+
+        if send:  # if you're talking to a server, get a backchannel
+            self.setup_socket()
+
+    def register_event_handler(self, handler, target):
+        assert callable(handler), 'Event handler must be a function'
+        if target not in self.event_handlers:
+            self.event_handlers[target] = []
+        self.event_handlers[target].append(handler)
+
+    def clear_event_handlers(self, target):
+        self.event_handlers[target] = []
+
+    def setup_socket(self):
+        # Setup socket to server
+        def on_message(ws, message):
+            message = json.loads(message)
+            if 'command' in message:
+                # Handle server commands
+                if message['command'] == 'alive':
+                    if 'data' in message and message['data'] == 'vis_alive':
+                        logger.info('Visdom successfully connected to server')
+                        self.socket_alive = True
+                    else:
+                        logger.warn('Visdom server failed handshake, may not '
+                                    'be properly connected')
+            if 'target' in message:
+                for handler in self.event_handlers.get(message['target'], []):
+                    handler(message)
+
+        def on_error(ws, error):
+            if error.errno == errno.ECONNREFUSED:
+                logger.info("Socket refused connection, running socketless")
+                ws.close()
+                self.use_socket = False
+            else:
+                logger.error(error)
+
+        def on_close(ws):
+            self.socket_alive = False
+
+        def run_socket(*args):
+            while self.use_socket:
+                try:
+                    sock_addr = "ws://{}:{}/vis_socket".format(
+                        self.server_base_name, self.port)
+                    ws = websocket.WebSocketApp(
+                        sock_addr,
+                        on_message=on_message,
+                        on_error=on_error,
+                        on_close=on_close
+                    )
+                    ws.run_forever()
+                except Exception as e:
+                    logger.error('Socket had error {}, attempting restart'.format(e))
+                time.sleep(3)
+
+        # Start listening thread
+        self.socket_thread = threading.Thread(
+            target=run_socket,
+            name='Visdom-Socket-Thread'
+        )
+        self.socket_thread.daemon = True
+        self.socket_thread.start()
 
     # Utils
     def _send(self, msg, endpoint='events', quiet=False):
@@ -282,6 +354,18 @@ class Visdom(object):
         return self._send({
             'data': envs,
         }, 'save')
+
+    def get_window_data(self, win=None, env=None):
+        """
+        This function returns all the window data for a specified window in
+        an environment. Use win=None to get all the windows in the given
+        environment. Env defaults to main
+        """
+
+        return self._send(
+            msg={'win': win, 'eid': env},
+            endpoint='win_data'
+        )
 
     def close(self, win=None, env=None):
         """
@@ -333,7 +417,8 @@ class Visdom(object):
         This function returns a bool indicating whether or
         not the server is connected.
         """
-        return self.win_exists('') is not None
+        return (self.win_exists('') is not None) and \
+            (self.socket_alive or not self.use_socket)
 
     # Content
 
@@ -544,10 +629,11 @@ class Visdom(object):
                 videofile,
                 fourcc,
                 opts.get('fps'),
-                (tensor.shape[1], tensor.shape[2])
+                (tensor.shape[2], tensor.shape[1])
             )
             assert writer.isOpened(), 'video writer could not be opened'
             for i in range(tensor.shape[0]):
+                # TODO mute opencv on this function call somehow
                 writer.write(tensor[i, :, :, :])
             writer.release()
             writer = None
@@ -729,11 +815,16 @@ class Visdom(object):
             ind = np.equal(Y, k)
             if ind.any():
                 mc = opts.get('markercolor')
+                if 'legend' in opts:
+                    trace_name = opts.get('legend')[k - 1]
+                elif X.shape[0] == 1 and name is not None:
+                    trace_name = name
+                else:
+                    trace_name = str(k)
                 _data = {
                     'x': nan2none(X.take(0, 1)[ind].tolist()),
                     'y': nan2none(X.take(1, 1)[ind].tolist()),
-                    'name': opts.get('legend')[k - 1] if 'legend' in opts
-                    else str(k),
+                    'name': trace_name,
                     'type': 'scatter3d' if is3d else 'scatter',
                     'mode': opts.get('mode'),
                     'text': opts.get('textlabels'),

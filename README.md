@@ -35,7 +35,7 @@ Organize your visualization space programmatically or through the UI to create d
 ## Concepts
 Visdom has a simple set of features that can be composed for various use-cases.
 
-### Panes
+### Windows
 <p align="center"><img align="center" src="https://lh3.googleusercontent.com/-kLnogsg9RCs/WLx34PEsGWI/AAAAAAAAnSs/7t_62pbfmfoEBnkcbKTXIqz0WM8pQJHVQCLcB/s0/Screen+Shot+2017-03-05+at+3.34.43+PM.png" width="500" /></p>
 
 
@@ -45,7 +45,25 @@ The UI begins as a blank slate -- you can populate it with plots, images, and te
 
 > **Tip**: You can use the zoom of your browser to adjust the scale of the UI.
 
+##### Callbacks
 
+The python Visdom implementation supports callbacks on a window. The demo shows an example of this in the form of an editable text pad. The functionality of these callbacks allows the Visdom object to receive and react to events that happen in the frontend.
+
+You can subscribe a window to events by adding a function to the event handlers dict for the window id you want to subscribe by calling `viz.register_event_handler(handler, win_id)` with your handler and the window id. Multiple handlers can be registered to the same window. You can remove all event handlers from a window using `viz.clear_event_handlers(win_id)`. When an event occurs to that window, your callbacks will be called on a dict containing:
+
+ - `event_type`: one of the below event types
+ - `pane_data`: all of the stored contents for that window including layout and content.
+ - `eid`: the current environment id
+ - `target`: the window id the event is called on
+
+Additional parameters are defined below.
+
+Right now two callback events are supported:
+
+1. `Close` - Triggers when a window is closed. Returns a dict with only the aforementioned fields.
+2. `KeyPress` - Triggers when a key is pressed. Contains additional parameters:
+    - `key` - A string representation of the key pressed (applying state modifiers such as SHIFT)
+    - `key_code` - The javascript event keycode for the pressed key (no modifiers)
 
 ### Environments
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34618198-fc63976c-f20b-11e7-9c0d-060132fdb37e.png" width="300" /></p>
@@ -60,7 +78,7 @@ You can access a specific env via url: `http://localhost.com:8097/env/main`. If 
 From the main page it is possible to toggle between different environments using the environment selector. Selecting a new environment will query the server for the plots that exist in that environment.
 
 #### Clearing Environments
-You can use the eraser button to remove all of the current contents of an environment. This closes the plot panes for that environment but keeps the empty environment for new plots.
+You can use the eraser button to remove all of the current contents of an environment. This closes the plot windows for that environment but keeps the empty environment for new plots.
 
 #### Managing Environments
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34618262-3bb635c8-f20c-11e7-9370-9facfde0cfb7.png" width="400" /></p>
@@ -97,7 +115,7 @@ You can use the `filter` to dynamically sift through windows present in an env -
 It is possible to manage the views simply by dragging the tops of windows around, however additional features exist to keep views organized and save common views. View management can be useful for saving and switching between multiple common organizations of your windows.
 
 #### Saving/Deleting Views
-Using the folder icon, a dialog window opens where views can be forked in the same way that envs can be. Saving a view will retain the position and sizes of all of the panes in a given environment. Views are saved in `$HOME/.visdom/view/layouts.json` in the visdom filepath.
+Using the folder icon, a dialog window opens where views can be forked in the same way that envs can be. Saving a view will retain the position and sizes of all of the windows in a given environment. Views are saved in `$HOME/.visdom/view/layouts.json` in the visdom filepath.
 
 > **Note**: Saved views are static, and editing a saved view copies that view over to the `current` view where editing can occur.
 
@@ -242,6 +260,7 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 ### Others
 - [`vis.close`](#visclose)    : close a window by id
 - [`vis.win_exists`](#viswin_exists) : check if a window already exists by id
+- [`vis.get_window_data`](#visget_window_data): get current data for a window
 - [`vis.check_connection`](#vischeck_connection): check if the server is connected
 
 ## Details
@@ -523,6 +542,13 @@ This function returns a bool indicating whether or not a window `win` exists on 
 
 Optional arguments:
 - `env`: Environment to search for the window in. Default is `None`.
+
+#### vis.get_window_data
+This function returns the window data for the given window. Returns data for all windows in an env if win is None.
+
+Arguments:
+- `env`: Environment to search for the window in.
+- `win`: Window to return data for. Set to `None` to retrieve all the windows in an environment.
 
 #### vis.check_connection
 
