@@ -779,8 +779,9 @@ class App extends React.Component {
         <div className="btn-group navbar-btn" role="group" aria-label="Environment:">
           <div className="btn-group" role="group">
             <TreeSelect
-              style={{ width: 750 }}
-              dropdownStyle={{ maxHeight: 900, overflow: 'auto' }}
+              style={{display: 'block', width: 750, height: 30, overflow: 'auto'}}
+              allowClear={true}
+              dropdownStyle={{maxHeight: 900, overflow: 'auto'}}
               placeholder={<i>Select environment(s)</i>}
               searchPlaceholder="please search"
               treeLine maxTagTextLength={1000}
