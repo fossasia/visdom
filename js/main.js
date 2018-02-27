@@ -67,7 +67,7 @@ class App extends React.Component {
     panes: {},
     focusedPaneID: null,
     envID: localStorage.getItem( 'envID' ) || null,
-    envIDs: {}, //JSON.parse(localStorage.getItem( 'envIDs' )) || {},
+    envIDs: JSON.parse(localStorage.getItem( 'envIDs' )) || {},
     saveText: ACTIVE_ENV,
     layoutID: DEFAULT_LAYOUT,
     // Bad form... make a copy of the global var we generated in python.
@@ -83,7 +83,9 @@ class App extends React.Component {
     treeDataSimpleMode: {
       id: 'key',
       rootPId: 0
-    }
+    },
+    envSelectorStyle: {display: 'block', width: 750, height: 30, overflow: 'auto'},
+    flexSelectorOnHover: true
   };
 
   _bin = null;
@@ -91,6 +93,7 @@ class App extends React.Component {
   _envFieldRef = null;
   _timeoutID = null;
   _pendingPanes = [];
+  _firstLoad = true;
 
   colWidth = () => {
     return (this.state.width - (MARGIN * (this.state.cols - 1))
@@ -616,7 +619,16 @@ class App extends React.Component {
 
   componentDidMount() {
     this.connect();
-    console.log('on mount', this.state.envID, this.state.envIDs, this.state.sessionID);
+  }
+
+  componentDidUpdate() {
+    if (this._firstLoad && this.state.sessionID) {
+      this._firstLoad = false;
+      console.log('on componentDidUpdate loading environments', this.state.envIDs);
+      if (this.state.envIDs.length > 0) {
+        this.postForEnv(this.state.envIDs);
+      }
+    }
   }
 
   onWidthChange = (width, cols) => {
@@ -751,6 +763,18 @@ class App extends React.Component {
     );
   }
 
+  mouseOverSelect = () => {
+    if (this.state.flexSelectorOnHover) {
+      this.setState({'envSelectorStyle': {display: 'flex', width: 750, 'min-width': 750, 'flex-direction': 'column'}});
+    }
+  }
+
+  mouseOutSelect = () => {
+    if (this.state.flexSelectorOnHover) {
+      this.setState({'envSelectorStyle': {display: 'block', width: 750, height: 30, overflow: 'auto'}});
+    }
+  }
+
   renderEnvControls() {
     var slist = this.state.envList.slice();
     slist.sort();
@@ -777,9 +801,9 @@ class App extends React.Component {
       <span>
         <span>Environment&nbsp;</span>
         <div className="btn-group navbar-btn" role="group" aria-label="Environment:">
-          <div className="btn-group" role="group">
+          <div className="btn-group" role="group"  onMouseEnter={this.mouseOverSelect} onMouseLeave={this.mouseOutSelect}>
             <TreeSelect
-              style={{display: 'block', width: 750, height: 30, overflow: 'auto'}}
+              style={this.state.envSelectorStyle}
               allowClear={true}
               dropdownStyle={{maxHeight: 900, overflow: 'auto'}}
               placeholder={<i>Select environment(s)</i>}
