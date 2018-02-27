@@ -466,7 +466,7 @@ class App extends React.Component {
     // Sort out things that were filtered away
     sorted = sorted.sort(function(a, b) {
       let diff = (newPanes[a.i].title.match(filter) != null) -
-          (newPanes[b.i].title.match(filter) != null);
+              (newPanes[b.i].title.match(filter) != null);
       if (diff != 0) {
         return -diff;
       } else if (layoutID !== DEFAULT_LAYOUT) {
@@ -664,8 +664,8 @@ class App extends React.Component {
             className="btn btn-default"
             disabled={!this.state.connected}
             onClick={this.saveEnv}>
-              {this.state.envList.indexOf(
-                this.state.saveText) >= 0 ? 'save' : 'fork'}
+            {this.state.envList.indexOf(
+              this.state.saveText) >= 0 ? 'save' : 'fork'}
           </button>
         </div>
         <br/>
@@ -685,8 +685,8 @@ class App extends React.Component {
           </select>
           <button
             className="btn btn-default"
-            disabled={!this.state.connected || !this.state.modifyID
-                      || this.state.modifyID == 'main'}
+            disabled={!this.state.connected || !this.state.modifyID ||
+                      this.state.modifyID == 'main'}
             onClick={this.deleteEnv.bind(this)}>
             Delete
           </button>
@@ -720,8 +720,8 @@ class App extends React.Component {
             disabled={!this.state.connected ||
                       this.state.saveText == DEFAULT_LAYOUT}
             onClick={this.saveLayout.bind(this)}>
-              {this.getCurrLayoutList().has(
-                this.state.saveText) ? 'save' : 'fork'}
+            {this.getCurrLayoutList().has(
+              this.state.saveText) ? 'save' : 'fork'}
           </button>
         </div>
         <br/>
@@ -741,8 +741,8 @@ class App extends React.Component {
           </select>
           <button
             className="btn btn-default"
-            disabled={!this.state.connected || !this.state.modifyID
-                      || this.state.modifyID == DEFAULT_LAYOUT}
+            disabled={!this.state.connected || !this.state.modifyID ||
+                      this.state.modifyID == DEFAULT_LAYOUT}
             onClick={this.deleteLayout.bind(this)}>
             Delete
           </button>
@@ -889,7 +889,8 @@ class App extends React.Component {
                 Object.keys(this.state.panes).map((paneID) => {
                   this.focusPane(paneID);
                 });
-              });
+              }
+            );
             // TODO remove this once relayout is moved to a post-state
             // update kind of thing
             this.state.filter = ev.target.value;
@@ -915,7 +916,7 @@ class App extends React.Component {
               this.state.filter = '';
               this.relayout();
               this.relayout();
-             }}>
+            }}>
             <span
               className="glyphicon glyphicon-erase">
             </span>
