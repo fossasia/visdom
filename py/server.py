@@ -711,8 +711,6 @@ def compare_envs(state, eids, socket):
                 state[eid] = env
                 envs[eid] = env
 
-
-
     res = copy.deepcopy(envs[list(envs.keys())[0]])
     name2Wid = {res['jsons'][wid].get('title', None):wid+'_compare' for wid in res.get('jsons', {})
                 if 'title' in res['jsons'][wid]}
@@ -732,31 +730,41 @@ def compare_envs(state, eids, socket):
             if title not in name2Wid: continue
 
             destWid = name2Wid[title]
-
+            # Combine plots with the same window title. If plot data source was
+            # labeled "name" in the legend, rename to "envId_legend" where
+            # envId is enumeration of the selected environments (not the long
+            # environment id string). This makes plot lines more readable.
             if ix == 0:
                 res['jsons'][destWid]['has_compare'] = False
                 res['jsons'][destWid]['content']['layout']['showlegend'] = True
-                for di,d in enumerate(res['jsons'][destWid]['content']['data']):
-                    res['jsons'][destWid]['content']['data'][di]['name'] = '{}_{}'.format(eidNums[eid], d['name'])
+                for dataIdx,data in enumerate(res['jsons'][destWid]['content']['data']):
+                    res['jsons'][destWid]['content']['data'][dataIdx]['name'] = '{}_{}'.format(eidNums[eid], data['name'])
             else:
+                # has_compare will be set to True only if the window title is shared by at least 2 envs.
                 res['jsons'][destWid]['has_compare'] = True
-                for di,d in enumerate(win['content']['data']):
-                    d = copy.deepcopy(d)
-                    d['name'] = '{}_{}'.format(eidNums[eid], d['name'])
-                    res['jsons'][destWid]['content']['data'].append(d)
+                for dataIdx,data in enumerate(win['content']['data']):
+                    data = copy.deepcopy(data)
+                    data['name'] = '{}_{}'.format(eidNums[eid], data['name'])
+                    res['jsons'][destWid]['content']['data'].append(data)
 
+    # Make sure that only plots that are shared by at least two envs are shown.
+    # Check has_compare flag
     for k in res['jsons']:
         if not res['jsons'][destWid]['has_compare']:
             del res['jsons'][destWid]
+
+    # create legend mapping environment names to environment numbers so one can
+    # look it up for the new legend
+    tableRows = ["""<tr> <td> {} </td> <td> {} </td> </tr>""".format(v,eidNums[v]) for v in eidNums]
 
     tbl = """"<style>
     table, th, td {{
         border: 1px solid black;
     }}
     </style>
-    <table> {} </table>""".format(' '.join(["<tr> <td> {} </td> <td> {}</td></tr>".format(v,eidNums[v]) for v in eidNums]))
+    <table> {} </table>""".format(' '.join(tableRows))
 
-    res['jsons']['window_comapre_legend'] = {"command": "window",
+    res['jsons']['window_compare_legend'] = {"command": "window",
                                              "id": "window_compare_legend",
                                              "title": "compare_legend",
                                              "inflate": True,
@@ -779,9 +787,6 @@ def compare_envs(state, eids, socket):
 
     socket.write_message(json.dumps({'command': 'layout'}))
     socket.eid = eid
-
-
-
 
 
 class EnvHandler(BaseHandler):

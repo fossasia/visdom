@@ -1,11 +1,11 @@
 /**
- * Copyright 2017-present, Facebook, Inc.
- * All rights reserved.
- *
- * This source code is licensed under the license found in the
- * LICENSE file in the root directory of this source tree.
- *
- */
+* Copyright 2017-present, Facebook, Inc.
+* All rights reserved.
+*
+* This source code is licensed under the license found in the
+* LICENSE file in the root directory of this source tree.
+*
+*/
 
 'use strict';
 import React from 'react';
@@ -94,7 +94,7 @@ class App extends React.Component {
 
   colWidth = () => {
     return (this.state.width - (MARGIN * (this.state.cols - 1))
-            - (MARGIN * 2)) / this.state.cols;
+      - (MARGIN * 2)) / this.state.cols;
   }
 
   p2w = (w) => {  // translate pixels -> RGL grid coordinates
@@ -138,7 +138,7 @@ class App extends React.Component {
 
     this.setState({
       panes: newPanes,
-      layout: newLayout
+      layout: newLayout,
     });
   }
 
@@ -148,7 +148,9 @@ class App extends React.Component {
 
     if (!exists) {
       let stored = JSON.parse(localStorage.getItem(this.keyLS(newPane.id)));
-      if (this._bin == null) this.rebin();
+      if (this._bin == null) {
+        this.rebin();
+      }
       if (stored) {
         var paneLayout = stored;
         this._bin.content.push(paneLayout);
@@ -191,16 +193,13 @@ class App extends React.Component {
     socket.onmessage = this._handleMessage;
 
     socket.onopen = () => {
-      this.setState({connected: true}, () => {console.log('callback');});
-      console.log('opening socket');
+      this.setState({connected: true});
     };
 
     socket.onclose = () => {
       console.log(this.state);
       this.setState({connected: false}, function () {
-        console.log('closing socket');
         this._socket = null;
-        console.log('closing socket');
       });
     };
 
@@ -213,41 +212,41 @@ class App extends React.Component {
     var cmd = JSON.parse(evt.data);
 
     switch (cmd.command) {
-    case 'register':
-      this.setState({
-        sessionID: cmd.data
-      }, () => {this.postForEnv(this.state.envIDs);});
-      break;
-    case 'pane':
-    case 'window':
-      this.addPaneBatched(cmd);
-      break;
-    case 'reload':
-      for (var it in cmd.data) {
-        localStorage.setItem(this.keyLS(it), JSON.stringify(cmd.data[it]));
-      }
-      break;
-    case 'close':
-      this.closePane(cmd.data);
-      break;
-    case 'layout':
-      this.relayout();
-      break;
-    case 'env_update':
-      let layoutLists = this.state.layoutLists;
-      for (var envIdx in cmd.data) {
-        if (!layoutLists.has(cmd.data[envIdx])) {
-          layoutLists.set(cmd.data[envIdx],
-                          new Map([[DEFAULT_LAYOUT, new Map()]]));
+      case 'register':
+        this.setState({
+          sessionID: cmd.data
+        }, () => {this.postForEnv(this.state.envIDs);});
+        break;
+      case 'pane':
+      case 'window':
+        this.addPaneBatched(cmd);
+        break;
+      case 'reload':
+        for (var it in cmd.data) {
+          localStorage.setItem(this.keyLS(it), JSON.stringify(cmd.data[it]));
         }
-      }
-      this.setState({envList: cmd.data, layoutLists: layoutLists})
-      break;
-    case 'layout_update':
-      this.parseLayoutsFromServer(cmd.data);
-      break;
-    default:
-      console.error('unrecognized command', cmd);
+        break;
+      case 'close':
+        this.closePane(cmd.data);
+        break;
+      case 'layout':
+        this.relayout();
+        break;
+      case 'env_update':
+        let layoutLists = this.state.layoutLists;
+        for (var envIdx in cmd.data) {
+          if (!layoutLists.has(cmd.data[envIdx])) {
+            layoutLists.set(cmd.data[envIdx],
+                            new Map([[DEFAULT_LAYOUT, new Map()]]));
+          }
+        }
+        this.setState({envList: cmd.data, layoutLists: layoutLists})
+        break;
+      case 'layout_update':
+        this.parseLayoutsFromServer(cmd.data);
+        break;
+      default:
+        console.error('unrecognized command', cmd);
     }
   }
 
@@ -326,10 +325,10 @@ class App extends React.Component {
       saveText: envID,
       panes: isSameEnv ? this.state.panes : {},
       layout: isSameEnv ? this.state.layout : [],
-      focusedPaneID: isSameEnv ? this.state.focusedPaneID : null
+      focusedPaneID: isSameEnv ? this.state.focusedPaneID : null,
     });
-    localStorage.setItem( 'envID', envID );
-    localStorage.setItem( 'envIDs', JSON.stringify(selectedNodes) );
+    localStorage.setItem('envID', envID);
+    localStorage.setItem('envIDs', JSON.stringify(selectedNodes));
     this.postForEnv(selectedNodes);
   }
   postForEnv = (envIDs) => {
@@ -354,7 +353,6 @@ class App extends React.Component {
       eid: this.state.modifyID,
     });
   }
-
 
   saveEnv = () => {
     if (!this.state.connected) {
@@ -386,7 +384,7 @@ class App extends React.Component {
     for (var envIdx in newEnvList) {
       if (!layoutLists.has(newEnvList[envIdx])) {
         layoutLists.set(newEnvList[envIdx],
-                        new Map([[DEFAULT_LAYOUT, new Map()]]));
+          new Map([[DEFAULT_LAYOUT, new Map()]]));
       }
     }
 
