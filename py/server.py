@@ -723,11 +723,15 @@ def compare_envs(state, eids, socket):
         env = envs[eid]
         for wid in env.get('jsons',{}).keys():
             win = env['jsons'][wid]
-            if win.get('type', None) != 'plot': continue
-            if 'content' not in win: continue
-            if 'title' not in win: continue
+            if win.get('type', None) != 'plot':
+                continue
+            if 'content' not in win:
+                continue
+            if 'title' not in win:
+                continue
             title = win['title']
-            if title not in name2Wid: continue
+            if title not in name2Wid:
+                continue
 
             destWid = name2Wid[title]
             # Combine plots with the same window title. If plot data source was
@@ -737,25 +741,25 @@ def compare_envs(state, eids, socket):
             if ix == 0:
                 res['jsons'][destWid]['has_compare'] = False
                 res['jsons'][destWid]['content']['layout']['showlegend'] = True
-                for dataIdx,data in enumerate(res['jsons'][destWid]['content']['data']):
+                for dataIdx, data in enumerate(res['jsons'][destWid]['content']['data']):
                     res['jsons'][destWid]['content']['data'][dataIdx]['name'] = '{}_{}'.format(eidNums[eid], data['name'])
             else:
                 # has_compare will be set to True only if the window title is shared by at least 2 envs.
                 res['jsons'][destWid]['has_compare'] = True
-                for dataIdx,data in enumerate(win['content']['data']):
+                for _dataIdx, data in enumerate(win['content']['data']):
                     data = copy.deepcopy(data)
                     data['name'] = '{}_{}'.format(eidNums[eid], data['name'])
                     res['jsons'][destWid]['content']['data'].append(data)
 
     # Make sure that only plots that are shared by at least two envs are shown.
     # Check has_compare flag
-    for k in res['jsons']:
+    for destWid in res['jsons']:
         if not res['jsons'][destWid]['has_compare']:
             del res['jsons'][destWid]
 
     # create legend mapping environment names to environment numbers so one can
     # look it up for the new legend
-    tableRows = ["""<tr> <td> {} </td> <td> {} </td> </tr>""".format(v,eidNums[v]) for v in eidNums]
+    tableRows = ["""<tr> <td> {} </td> <td> {} </td> </tr>""".format(v, eidNums[v]) for v in eidNums]
 
     tbl = """"<style>
     table, th, td {{
@@ -764,17 +768,19 @@ def compare_envs(state, eids, socket):
     </style>
     <table> {} </table>""".format(' '.join(tableRows))
 
-    res['jsons']['window_compare_legend'] = {"command": "window",
-                                             "id": "window_compare_legend",
-                                             "title": "compare_legend",
-                                             "inflate": True,
-                                             "width": None,
-                                             "height": None,
-                                             "contentID": "35e9f1d3cab700",
-                                             "content": tbl,
-                                             "type": "text",
-                                             "layout": {"title": "compare_legend"},
-                                             "i": 1}
+    res['jsons']['window_compare_legend'] = {
+        "command": "window",
+        "id": "window_compare_legend",
+        "title": "compare_legend",
+        "inflate": True,
+        "width": None,
+        "height": None,
+        "contentID": "35e9f1d3cab700",
+        "content": tbl,
+        "type": "text",
+        "layout": {"title": "compare_legend"},
+        "i": 1
+    }
     if 'reload' in res:
         socket.write_message(
             json.dumps({'command': 'reload', 'data': res['reload']})

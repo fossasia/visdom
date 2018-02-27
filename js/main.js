@@ -196,14 +196,12 @@ class App extends React.Component {
       this.setState({connected: true});
     };
 
-    socket.onclose = () => {
+    socket.onerror = socket.onclose = () => {
       console.log(this.state);
       this.setState({connected: false}, function () {
         this._socket = null;
       });
     };
-
-    socket.onerror = socket.onclose;
 
     this._socket = socket;
   }
@@ -214,7 +212,7 @@ class App extends React.Component {
     switch (cmd.command) {
       case 'register':
         this.setState({
-          sessionID: cmd.data
+          sessionID: cmd.data,
         }, () => {this.postForEnv(this.state.envIDs);});
         break;
       case 'pane':
@@ -331,6 +329,7 @@ class App extends React.Component {
     localStorage.setItem('envIDs', JSON.stringify(selectedNodes));
     this.postForEnv(selectedNodes);
   }
+
   postForEnv = (envIDs) => {
     // This kicks off a new stream of events from the socket so there's nothing
     // to handle here. We might want to surface the error state.
@@ -642,54 +641,55 @@ class App extends React.Component {
 
   renderEnvModal() {
     return (
-        <ReactModal
-      isOpen={this.state.showEnvModal}
-      onRequestClose={this.closeEnvModal.bind(this)}
-      contentLabel="Environment Management Modal"
-      ariaHideApp={false}
-      style={MODAL_STYLE}
-        >
+      <ReactModal
+        isOpen={this.state.showEnvModal}
+        onRequestClose={this.closeEnvModal.bind(this)}
+        contentLabel="Environment Management Modal"
+        ariaHideApp={false}
+        style={MODAL_STYLE}
+      >
         <span className="visdom-title">Manage Environments</span>
         <br/>
         Save or fork current environment:
         <br/>
         <div className="form-inline">
-        <input
-      className="form-control"
-      type="text"
-      onChange={(ev) => {this.setState({saveText: ev.target.value})}}
-      value={this.state.saveText}
-      ref={(ref) => this._envFieldRef = ref}
-        />
-        <button
-      className="btn btn-default"
-      disabled={!this.state.connected}
-      onClick={this.saveEnv}>
-        {this.state.envList.indexOf(
-          this.state.saveText) >= 0 ? 'save' : 'fork'}
-      </button>
+          <input
+            className="form-control"
+            type="text"
+            onChange={(ev) => {this.setState({saveText: ev.target.value})}}
+            value={this.state.saveText}
+            ref={(ref) => this._envFieldRef = ref}
+          />
+          <button
+            className="btn btn-default"
+            disabled={!this.state.connected}
+            onClick={this.saveEnv}>
+              {this.state.envList.indexOf(
+                this.state.saveText) >= 0 ? 'save' : 'fork'}
+          </button>
         </div>
         <br/>
         Delete environment selected in dropdown:
         <br/>
         <div className="form-inline">
-        <select
-      className="form-control"
-      disabled={!this.state.connected}
-      onChange={(ev) => {this.setState({modifyID: ev.target.value})}}
-      value={this.state.modifyID}>{
-        this.state.envList.map((env) => {
-          return <option key={env} value={env}>{env}</option>;
-        })
-      }
-      </select>
-        <button
-      className="btn btn-default"
-      disabled={!this.state.connected || !this.state.modifyID
-                || this.state.modifyID == 'main'}
-      onClick={this.deleteEnv.bind(this)}>
-        Delete
-      </button>
+          <select
+            className="form-control"
+            disabled={!this.state.connected}
+            onChange={(ev) => {this.setState({modifyID: ev.target.value})}}
+            value={this.state.modifyID}>
+            {
+              this.state.envList.map((env) => {
+                return <option key={env} value={env}>{env}</option>;
+              })
+            }
+          </select>
+          <button
+            className="btn btn-default"
+            disabled={!this.state.connected || !this.state.modifyID
+                      || this.state.modifyID == 'main'}
+            onClick={this.deleteEnv.bind(this)}>
+            Delete
+          </button>
         </div>
       </ReactModal>
     );
@@ -697,54 +697,55 @@ class App extends React.Component {
 
   renderViewModal() {
     return (
-        <ReactModal
-      isOpen={this.state.showViewModal}
-      onRequestClose={this.closeViewModal.bind(this)}
-      contentLabel="Layout Views Management Modal"
-      ariaHideApp={false}
-      style={MODAL_STYLE}
-        >
+      <ReactModal
+        isOpen={this.state.showViewModal}
+        onRequestClose={this.closeViewModal.bind(this)}
+        contentLabel="Layout Views Management Modal"
+        ariaHideApp={false}
+        style={MODAL_STYLE}
+      >
         <span className="visdom-title">Manage Views</span>
         <br/>
         Save or fork current layout:
         <br/>
         <div className="form-inline">
-        <input
-      className="form-control"
-      type="text"
-      onChange={(ev) => {this.setState({saveText: ev.target.value})}}
-      value={this.state.saveText}
-        />
-        <button
-      className="btn btn-default"
-      disabled={!this.state.connected ||
-                this.state.saveText == DEFAULT_LAYOUT}
-      onClick={this.saveLayout.bind(this)}>
-        {this.getCurrLayoutList().has(
-          this.state.saveText) ? 'save' : 'fork'}
-      </button>
+          <input
+            className="form-control"
+            type="text"
+            onChange={(ev) => {this.setState({saveText: ev.target.value})}}
+            value={this.state.saveText}
+          />
+          <button
+            className="btn btn-default"
+            disabled={!this.state.connected ||
+                      this.state.saveText == DEFAULT_LAYOUT}
+            onClick={this.saveLayout.bind(this)}>
+              {this.getCurrLayoutList().has(
+                this.state.saveText) ? 'save' : 'fork'}
+          </button>
         </div>
         <br/>
         Delete layout view selected in dropdown:
         <br/>
         <div className="form-inline">
-        <select
-      className="form-control"
-      disabled={!this.state.connected}
-      onChange={(ev) => {this.setState({modifyID: ev.target.value})}}
-      value={this.state.modifyID}>{
-        Array.from(this.getCurrLayoutList().keys()).map((view) => {
-          return <option key={view} value={view}>{view}</option>;
-        })
-      }
-      </select>
-        <button
-      className="btn btn-default"
-      disabled={!this.state.connected || !this.state.modifyID
-                || this.state.modifyID == DEFAULT_LAYOUT}
-      onClick={this.deleteLayout.bind(this)}>
-        Delete
-      </button>
+          <select
+            className="form-control"
+            disabled={!this.state.connected}
+            onChange={(ev) => {this.setState({modifyID: ev.target.value})}}
+            value={this.state.modifyID}>
+            {
+              Array.from(this.getCurrLayoutList().keys()).map((view) => {
+                return <option key={view} value={view}>{view}</option>;
+              })
+            }
+          </select>
+          <button
+            className="btn btn-default"
+            disabled={!this.state.connected || !this.state.modifyID
+                      || this.state.modifyID == DEFAULT_LAYOUT}
+            onClick={this.deleteLayout.bind(this)}>
+            Delete
+          </button>
         </div>
       </ReactModal>
     );
@@ -773,51 +774,50 @@ class App extends React.Component {
     };}));
 
     return (
-        <span>
+      <span>
         <span>Environment&nbsp;</span>
         <div className="btn-group navbar-btn" role="group" aria-label="Environment:">
-        <div className="btn-group" role="group">
-        <TreeSelect
-      style={{ width: 750 }}
-      dropdownStyle={{ maxHeight: 900, overflow: 'auto' }}
-      placeholder={<i>Select environment(s)</i>}
-      searchPlaceholder="please search"
-      treeLine maxTagTextLength={1000}
-      inputValue={null}
-      value={this.state.envIDs}
-      treeData={env_options2}
-      treeDefaultExpandAll
-      treeNodeFilterProp="title"
-      treeDataSimpleMode={this.state.treeDataSimpleMode}
-      treeCheckable showCheckedStrategy={SHOW_CHILD}
-      onChange={this.selectEnv}
-        />
-
-      </div>
-        <button
-      data-toggle="tooltip"
-      title="Clear Current Environment"
-      data-placement="bottom"
-      className="btn btn-default"
-      disabled={!this.state.connected}
-      onClick={this.closeAllPanes}>
-        <span
-      className="glyphicon glyphicon-erase">
-        </span>
-        </button>
-        <button
-      data-toggle="tooltip"
-      title="Manage Environments"
-      data-placement="bottom"
-      className="btn btn-default"
-      disabled={!this.state.connected}
-      onClick={this.openEnvModal.bind(this)}>
-        <span
-      className="glyphicon glyphicon-folder-open">
-        </span>
-        </button>
+          <div className="btn-group" role="group">
+            <TreeSelect
+              style={{ width: 750 }}
+              dropdownStyle={{ maxHeight: 900, overflow: 'auto' }}
+              placeholder={<i>Select environment(s)</i>}
+              searchPlaceholder="please search"
+              treeLine maxTagTextLength={1000}
+              inputValue={null}
+              value={this.state.envIDs}
+              treeData={env_options2}
+              treeDefaultExpandAll
+              treeNodeFilterProp="title"
+              treeDataSimpleMode={this.state.treeDataSimpleMode}
+              treeCheckable showCheckedStrategy={SHOW_CHILD}
+              onChange={this.selectEnv}
+            />
+          </div>
+          <button
+            data-toggle="tooltip"
+            title="Clear Current Environment"
+            data-placement="bottom"
+            className="btn btn-default"
+            disabled={!this.state.connected}
+            onClick={this.closeAllPanes}>
+            <span
+              className="glyphicon glyphicon-erase">
+            </span>
+          </button>
+          <button
+            data-toggle="tooltip"
+            title="Manage Environments"
+            data-placement="bottom"
+            className="btn btn-default"
+            disabled={!this.state.connected}
+            onClick={this.openEnvModal.bind(this)}>
+            <span
+              className="glyphicon glyphicon-folder-open">
+            </span>
+          </button>
         </div>
-        </span>
+      </span>
     )
   }
 
@@ -830,97 +830,97 @@ class App extends React.Component {
         }
         return <li>
           <a href="#" onClick={this.updateToLayout.bind(this, view)}>
-          {view}
-        {check_space}
-        </a>
-          </li>;
+            {view}
+            {check_space}
+          </a>
+        </li>;
       }
-                                          )
+    )
     return (
-        <span>
+      <span>
         <span>View&nbsp;</span>
         <div className="btn-group navbar-btn" role="group" aria-label="View:">
-        <div className="btn-group" role="group">
-        <button className="btn btn-default dropdown-toggle"
-      type="button" id="viewDropdown" data-toggle="dropdown"
-      aria-haspopup="true" aria-expanded="true">
-        {this.state.layoutID}
-        &nbsp;
-        <span className="caret"></span>
-        </button>
-        <ul className="dropdown-menu" aria-labelledby="viewDropdown">
-        {view_options}
-      </ul>
+          <div className="btn-group" role="group">
+            <button className="btn btn-default dropdown-toggle"
+              type="button" id="viewDropdown" data-toggle="dropdown"
+              aria-haspopup="true" aria-expanded="true">
+              {this.state.layoutID}
+              &nbsp;
+              <span className="caret"></span>
+            </button>
+            <ul className="dropdown-menu" aria-labelledby="viewDropdown">
+              {view_options}
+            </ul>
+          </div>
+          <button
+            data-toggle="tooltip"
+            title="Repack"
+            data-placement="bottom"
+            className="btn btn-default"
+            onClick={(ev) => {this.relayout(); this.relayout();}}>
+            <span
+              className="glyphicon glyphicon-th">
+            </span>
+          </button>
+          <button
+            data-toggle="tooltip"
+            title="Manage Views"
+            data-placement="bottom"
+            className="btn btn-default"
+            disabled={!this.state.connected}
+            onClick={(ev) => {this.openViewModal()}}>
+            <span
+              className="glyphicon glyphicon-folder-open">
+            </span>
+          </button>
         </div>
-        <button
-      data-toggle="tooltip"
-      title="Repack"
-      data-placement="bottom"
-      className="btn btn-default"
-      onClick={(ev) => {this.relayout(); this.relayout();}}>
-        <span
-      className="glyphicon glyphicon-th">
-        </span>
-        </button>
-        <button
-      data-toggle="tooltip"
-      title="Manage Views"
-      data-placement="bottom"
-      className="btn btn-default"
-      disabled={!this.state.connected}
-      onClick={(ev) => {this.openViewModal()}}>
-        <span
-      className="glyphicon glyphicon-folder-open">
-        </span>
-        </button>
-        </div>
-        </span>
+      </span>
     )
   }
 
   renderFilterControl() {
     return (
-        <div className="input-group navbar-btn">
+      <div className="input-group navbar-btn">
         <input type="text" className="form-control" placeholder="Filter text"
-      onChange={(ev) => {
-        this.setState(
-          {filter: ev.target.value}, () => {
-            Object.keys(this.state.panes).map((paneID) => {
-              this.focusPane(paneID);
-            });
-          });
-        // TODO remove this once relayout is moved to a post-state
-        // update kind of thing
-        this.state.filter = ev.target.value;
-        this.relayout();
-        this.relayout();
-      }}
-      value={this.state.filter}/>
+          onChange={(ev) => {
+            this.setState(
+              {filter: ev.target.value}, () => {
+                Object.keys(this.state.panes).map((paneID) => {
+                  this.focusPane(paneID);
+                });
+              });
+            // TODO remove this once relayout is moved to a post-state
+            // update kind of thing
+            this.state.filter = ev.target.value;
+            this.relayout();
+            this.relayout();
+          }}
+          value={this.state.filter}/>
         <span className="input-group-btn">
-        <button
-      data-toggle="tooltip"
-      title="Clear filter"
-      data-placement="bottom"
-      type="button"
-      className="btn btn-default"
-      onClick={(ev) => {this.setState(
-        {filter: ''}, () => {
-          Object.keys(this.state.panes).map((paneID) => {
-            this.focusPane(paneID);
-          });
-        });
-                        // TODO remove this once relayout is moved to a post-state
-                        // update kind of thing
-                        this.state.filter = '';
-                        this.relayout();
-                        this.relayout();
-                       }}>
-        <span
-      className="glyphicon glyphicon-erase">
+          <button
+            data-toggle="tooltip"
+            title="Clear filter"
+            data-placement="bottom"
+            type="button"
+            className="btn btn-default"
+            onClick={(ev) => {this.setState(
+              {filter: ''}, () => {
+                Object.keys(this.state.panes).map((paneID) => {
+                  this.focusPane(paneID);
+                });
+              });
+              // TODO remove this once relayout is moved to a post-state
+              // update kind of thing
+              this.state.filter = '';
+              this.relayout();
+              this.relayout();
+             }}>
+            <span
+              className="glyphicon glyphicon-erase">
+            </span>
+          </button>
         </span>
-        </button>
-        </span>
-        </div>
+      </div>
     );
   }
 
@@ -935,19 +935,19 @@ class App extends React.Component {
       let panelayout = getLayoutItem(this.state.layout, id);
       let isVisible = pane.title.match(this.state.filter)
       return (
-          <div key={pane.id}
-        className={isVisible? '' : 'hidden-window'}>
+        <div key={pane.id}
+          className={isVisible? '' : 'hidden-window'}>
           <Comp
-        {...pane}
-        key={pane.id}
-        onClose={this.closePane}
-        onFocus={this.focusPane}
-        onInflate={this.onInflate}
-        isFocused={pane.id === this.state.focusedPaneID}
-        w={panelayout.w}
-        h={panelayout.h}
+            {...pane}
+            key={pane.id}
+            onClose={this.closePane}
+            onFocus={this.focusPane}
+            onInflate={this.onInflate}
+            isFocused={pane.id === this.state.focusedPaneID}
+            w={panelayout.w}
+            h={panelayout.h}
           />
-          </div>
+        </div>
       );
     });
 
@@ -958,53 +958,53 @@ class App extends React.Component {
     let filterControl = this.renderFilterControl();
 
     return (
-        <div>
+      <div>
         {envModal}
-      {viewModal}
+        {viewModal}
         <div className="navbar-form navbar-default">
-        <span className="navbar-brand visdom-title">visdom</span>
-        <span className="vertical-line"></span>
-        &nbsp;&nbsp;
-      {envControls}
-        &nbsp;&nbsp;
-        <span className="vertical-line"></span>
-        &nbsp;&nbsp;
-      {viewControls}
-        <span style={{float: 'right'}}>
-        {filterControl}
-        &nbsp;&nbsp;
-        <button
-      className={classNames({
-        'btn': true,
-        'btn-success': this.state.connected,
-        'btn-danger': !this.state.connected})}
-      onClick={this.toggleOnlineState}>
-        {this.state.connected ? 'online' : 'offline'}
-      </button>
-        </span>
+          <span className="navbar-brand visdom-title">visdom</span>
+          <span className="vertical-line"></span>
+          &nbsp;&nbsp;
+          {envControls}
+          &nbsp;&nbsp;
+          <span className="vertical-line"></span>
+          &nbsp;&nbsp;
+          {viewControls}
+          <span style={{float: 'right'}}>
+            {filterControl}
+            &nbsp;&nbsp;
+            <button
+              className={classNames({
+                'btn': true,
+                'btn-success': this.state.connected,
+                'btn-danger': !this.state.connected})}
+              onClick={this.toggleOnlineState}>
+              {this.state.connected ? 'online' : 'offline'}
+            </button>
+          </span>
         </div>
         <div
-      tabIndex="-1"
-      className="no-focus"
-      onBlur={this.blurPane}
-      onKeyUp={(event) => {event.preventDefault();}}
-      onKeyDown={this.broadcastKeyEvent}
-      onKeyPress={(event) => {event.preventDefault();}}>
-        <GridLayout
-      className="layout"
-      rowHeight={ROW_HEIGHT}
-      autoSize={false}
-      margin={[MARGIN,MARGIN]}
-      layout={this.state.layout}
-      draggableHandle={'.bar'}
-      onLayoutChange={this.handleLayoutChange}
-      onWidthChange={this.onWidthChange}
-      onResizeStop={this.resizePane}
-      onDragStop={this.movePane}>
-        {panes}
-      </GridLayout>
+          tabIndex="-1"
+          className="no-focus"
+          onBlur={this.blurPane}
+          onKeyUp={(event) => {event.preventDefault();}}
+          onKeyDown={this.broadcastKeyEvent}
+          onKeyPress={(event) => {event.preventDefault();}}>
+          <GridLayout
+            className="layout"
+            rowHeight={ROW_HEIGHT}
+            autoSize={false}
+            margin={[MARGIN,MARGIN]}
+            layout={this.state.layout}
+            draggableHandle={'.bar'}
+            onLayoutChange={this.handleLayoutChange}
+            onWidthChange={this.onWidthChange}
+            onResizeStop={this.resizePane}
+            onDragStop={this.movePane}>
+            {panes}
+          </GridLayout>
         </div>
-        </div>
+      </div>
     )
   }
 }
@@ -1012,7 +1012,7 @@ class App extends React.Component {
 
 function load() {
   ReactDOM.render(
-      <App />,
+    <App />,
     document.getElementById('app')
   );
   document.removeEventListener('DOMContentLoaded', load);
