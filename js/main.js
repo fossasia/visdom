@@ -306,9 +306,6 @@ class App extends React.Component {
   }
 
   selectEnv = (selectedNodes) => {
-    // currentNode: { label, value, children, expanded, checked, className, ...extraProps }
-    // selectedNodes: [{ label, value, children, expanded, checked, className, ...extraProps }]
-    console.log('selected nodes', selectedNodes);
     var isSameEnv = selectedNodes.length == this.state.envIDs.length;
     if (isSameEnv) {
       for (var i=0; i<selectedNodes.length; i++) {
@@ -336,7 +333,6 @@ class App extends React.Component {
   postForEnv = (envIDs) => {
     // This kicks off a new stream of events from the socket so there's nothing
     // to handle here. We might want to surface the error state.
-    console.log('posting for env', envIDs);
     if (envIDs.length == 1 ) {
       $.post(this.correctPathname() + 'env/' + envIDs[0],
              JSON.stringify({'sid' : this.state.sessionID}));
