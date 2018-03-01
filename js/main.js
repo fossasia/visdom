@@ -95,6 +95,11 @@ class App extends React.Component {
   _pendingPanes = [];
   _firstLoad = true;
 
+  constructor() {
+    super();
+    this.updateDimensions = this.updateDimensions.bind(this);
+  }
+
   colWidth = () => {
     return (this.state.width - (MARGIN * (this.state.cols - 1))
       - (MARGIN * 2)) / this.state.cols;
@@ -615,10 +620,31 @@ class App extends React.Component {
     this.setState({layoutLists: layoutLists});
   }
 
+  updateDimensions() {
+    console.log('resize to ', window.innerWidth);
+    this.setState({
+      'width': window.innerWidth,
+      'envSelectorStyle': {display: 'block', width: this.getEnvSelectWidth(window.innerWidth), height: 30, overflow: 'auto'}
+    });
+  }
+
+  getEnvSelectWidth(w) {
+    return Math.max(w/3,50);
+  }
+
+  componentWillMount() {
+    this.updateDimensions();
+  }
+  componentWillUnmount() {
+    //Remove event listener
+    window.removeEventListener("resize", this.updateDimensions);
+  }
+
   componentDidMount() {
+    window.addEventListener("resize", this.updateDimensions);
     this.setState({
       'width':window.innerWidth,
-      'envSelectorStyle': {display: 'block', width: window.innerWidth/2, height: 30, overflow: 'auto'}
+      'envSelectorStyle': {display: 'block', width: this.getEnvSelectWidth(window.innerWidth), height: 30, overflow: 'auto'}
     });
     this.connect();
   }
@@ -774,13 +800,13 @@ class App extends React.Component {
 
   mouseOverSelect = () => {
     if (this.state.flexSelectorOnHover) {
-      this.setState({'envSelectorStyle': {display: 'flex', width: this.state.width/2, 'min-width': this.state.width/2, 'flex-direction': 'column'}});
+      this.setState({'envSelectorStyle': {display: 'flex', width: this.getEnvSelectWidth(this.state.width), 'min-width': this.getEnvSelectWidth(this.state.width), 'flex-direction': 'column'}});
     }
   }
 
   mouseOutSelect = () => {
     if (this.state.flexSelectorOnHover) {
-      this.setState({'envSelectorStyle': {display: 'block', width: this.state.width/2, height: 30, overflow: 'auto'}});
+      this.setState({'envSelectorStyle': {display: 'block', width: this.getEnvSelectWidth(this.state.width), height: 30, overflow: 'auto'}});
     }
   }
 
@@ -885,7 +911,7 @@ class App extends React.Component {
               type="button" id="viewDropdown" data-toggle="dropdown"
               aria-haspopup="true" aria-expanded="true"
               disabled={!(this.state.connected && this.state.envID)}>
-              {this.state.layoutID}
+              {(this.state.envID == null) ? 'compare' : this.state.layoutID}
               &nbsp;
               <span className="caret"></span>
             </button>

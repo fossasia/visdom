@@ -753,8 +753,8 @@ def compare_envs(state, eids, socket):
 
     # Make sure that only plots that are shared by at least two envs are shown.
     # Check has_compare flag
-    for destWid in res['jsons']:
-        if not res['jsons'][destWid]['has_compare']:
+    for destWid in list(res['jsons'].keys()):
+        if ('has_compare' not in res['jsons'][destWid]) or (not res['jsons'][destWid]['has_compare']):
             del res['jsons'][destWid]
 
     # create legend mapping environment names to environment numbers so one can
@@ -819,16 +819,15 @@ class EnvHandler(BaseHandler):
 
 
 class CompareHandler(BaseHandler):
-    def initialize(self, state, subs):
-        self.state = state
-        self.subs = subs
+    def initialize(self, app):
+        self.state = app.state
+        self.subs = app.subs
+        self.sources = app.sources
 
     def get(self, eids):
-        print(eids)
         logger.info(eids)
         items = gather_envs(self.state)
         eids = eids.split('+')
-        print(eids)
         logger.info(eids)
         eids = [x for x in eids if x in items]
         self.render(
