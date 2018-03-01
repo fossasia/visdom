@@ -315,7 +315,7 @@ class App extends React.Component {
       }
     }
     var envID = null;
-    if (selectedNodes.length > 0) {
+    if (selectedNodes.length == 1) {
       envID = selectedNodes[0];
     }
     this.setState({
@@ -391,6 +391,7 @@ class App extends React.Component {
       envList: newEnvList,
       layoutLists: layoutLists,
       envID: env,
+      envIDs: [env],
     });
   }
 
@@ -682,7 +683,7 @@ class App extends React.Component {
           />
           <button
             className="btn btn-default"
-            disabled={!this.state.connected}
+            disabled={!(this.state.connected && this.state.envID && (this.state.saveText.length > 0))}
             onClick={this.saveEnv}>
             {this.state.envList.indexOf(
               this.state.saveText) >= 0 ? 'save' : 'fork'}
