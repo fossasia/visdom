@@ -926,24 +926,25 @@ def download_scripts(proxies=None, install_dir=None):
     b = 'https://unpkg.com/'
     bb = '%sbootstrap@3.3.7/dist/' % b
     ext_files = {
+        ## js
         '%sjquery@3.1.1/dist/jquery.min.js' % b: 'jquery.min.js',
         '%sbootstrap@3.3.7/dist/js/bootstrap.min.js' % b: 'bootstrap.min.js',
-        '%sreact-resizable@1.4.6/css/styles.css' % b: 'react-resizable-styles.css',  # noqa
-        '%sreact-grid-layout@0.14.0/css/styles.css' % b: 'react-grid-layout-styles.css',  # noqa
-        '%sreact-modal@3.1.10/dist/react-modal.min.js' % b: 'react-modal.min.js',  # noqa
-        '%sreact@15.6.1/dist/react.min.js' % b: 'react-react.min.js',
-        '%sreact-dom@15.6.1/dist/react-dom.min.js' % b: 'react-dom.min.js',
-        '%sclassnames@2.2.5' % b: 'classnames',
-        '%slayout-bin-packer@1.2.2' % b: 'layout_bin_packer',
-        'https://raw.githubusercontent.com/STRML/react-grid-layout/0.14.0/dist/' +  # noqa
-        'react-grid-layout.min.js': 'react-grid-layout.min.js',
+        '%sreact@16.2.0/dist/react.min.js' % b: 'react-react.min.js',
+        '%sreact-dom@16.2.0/dist/react-dom.min.js' % b: 'react-dom.min.js',
         'https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_SVG':  # noqa
             'mathjax-MathJax.js',
         # here is another url in case the cdn breaks down again.
         # https://raw.githubusercontent.com/plotly/plotly.js/master/dist/plotly.min.js
-        'https://cdn.plot.ly/plotly-latest.min.js':
-            'plotly-plotly.min.js',
+        'https://cdn.plot.ly/plotly-latest.min.js': 'plotly-plotly.min.js',
+
+        ## css
+        '%sreact-resizable@1.4.6/css/styles.css' % b: 'react-resizable-styles.css',  # noqa
+        '%sreact-grid-layout@0.16.3/css/styles.css' % b: 'react-grid-layout-styles.css',  # noqa
         '%scss/bootstrap.min.css' % bb: 'bootstrap.min.css',
+
+        ## fonts
+        '%sclassnames@2.2.5' % b: 'classnames',
+        '%slayout-bin-packer@1.2.2' % b: 'layout_bin_packer',
         '%sfonts/glyphicons-halflings-regular.eot' % bb:
             'glyphicons-halflings-regular.eot',
         '%sfonts/glyphicons-halflings-regular.woff2' % bb:
