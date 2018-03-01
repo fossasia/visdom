@@ -66,8 +66,8 @@ class App extends React.Component {
     sessionID: null,
     panes: {},
     focusedPaneID: null,
-    envID: localStorage.getItem( 'envID' ) || null,
-    envIDs: JSON.parse(localStorage.getItem( 'envIDs' )) || {},
+    envID: localStorage.getItem( 'envID' ) || 'main',
+    envIDs: JSON.parse(localStorage.getItem( 'envIDs' )) || ['main'],
     saveText: ACTIVE_ENV,
     layoutID: DEFAULT_LAYOUT,
     // Bad form... make a copy of the global var we generated in python.
@@ -84,7 +84,7 @@ class App extends React.Component {
       id: 'key',
       rootPId: 0
     },
-    envSelectorStyle: {display: 'block', width: 750, height: 30, overflow: 'auto'},
+    envSelectorStyle: {display: 'block', width: 1280/2, height: 30, overflow: 'auto'},
     flexSelectorOnHover: true
   };
 
@@ -146,7 +146,7 @@ class App extends React.Component {
   }
 
   processPane = (newPane, newPanes, newLayout) => {
-    let exists = newPane.id in newPanes
+    let exists = newPane.id in newPanes;
     newPanes[newPane.id] = newPane;
 
     if (!exists) {
@@ -200,7 +200,6 @@ class App extends React.Component {
     };
 
     socket.onerror = socket.onclose = () => {
-      console.log(this.state);
       this.setState({connected: false}, function () {
         this._socket = null;
       });
@@ -316,7 +315,9 @@ class App extends React.Component {
       }
     }
     var envID = null;
-    if (selectedNodes.length > 0) envID = selectedNodes[0];
+    if (selectedNodes.length > 0) {
+      envID = selectedNodes[0];
+    }
     this.setState({
       envID: envID,
       envIDs: selectedNodes,
@@ -614,6 +615,10 @@ class App extends React.Component {
   }
 
   componentDidMount() {
+    this.setState({
+      'width':window.innerWidth,
+      'envSelectorStyle': {display: 'block', width: window.innerWidth/2, height: 30, overflow: 'auto'}
+    });
     this.connect();
   }
 
@@ -623,6 +628,13 @@ class App extends React.Component {
       console.log('on componentDidUpdate loading environments', this.state.envIDs);
       if (this.state.envIDs.length > 0) {
         this.postForEnv(this.state.envIDs);
+      }
+      else {
+        this.setState({
+          'envIDs': ['main'],
+          'envID': 'main'
+        });
+        this.postForEnv(['main']);
       }
     }
   }
@@ -761,13 +773,13 @@ class App extends React.Component {
 
   mouseOverSelect = () => {
     if (this.state.flexSelectorOnHover) {
-      this.setState({'envSelectorStyle': {display: 'flex', width: 750, 'min-width': 750, 'flex-direction': 'column'}});
+      this.setState({'envSelectorStyle': {display: 'flex', width: this.state.width/2, 'min-width': this.state.width/2, 'flex-direction': 'column'}});
     }
   }
 
   mouseOutSelect = () => {
     if (this.state.flexSelectorOnHover) {
-      this.setState({'envSelectorStyle': {display: 'block', width: 750, height: 30, overflow: 'auto'}});
+      this.setState({'envSelectorStyle': {display: 'block', width: this.state.width/2, height: 30, overflow: 'auto'}});
     }
   }
 
@@ -778,6 +790,9 @@ class App extends React.Component {
 
     let env_options2 = slist.map((env, idx) => {
       //var check_space = this.state.envIDs.includes(env);
+      if (env.split('_').length == 1) {
+        return null;
+      }
       return {
         key:idx + 1 + roots.length,
         pId:roots.indexOf(env.split('_')[0]) + 1,
@@ -785,6 +800,8 @@ class App extends React.Component {
         value: env
       };
     });
+
+    env_options2 = env_options2.filter(x => x != null);
 
     env_options2 = env_options2.concat(roots.map((x, idx) => { return {
       key: idx+1,
@@ -812,6 +829,7 @@ class App extends React.Component {
               treeNodeFilterProp="title"
               treeDataSimpleMode={this.state.treeDataSimpleMode}
               treeCheckable showCheckedStrategy={SHOW_CHILD}
+              dropdownMatchSelectWidth={false}
               onChange={this.selectEnv}
             />
           </div>
