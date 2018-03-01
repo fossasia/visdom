@@ -839,7 +839,7 @@ class App extends React.Component {
             title="Clear Current Environment"
             data-placement="bottom"
             className="btn btn-default"
-            disabled={!this.state.connected}
+            disabled={!(this.state.connected && this.state.envID)}
             onClick={this.closeAllPanes}>
             <span
               className="glyphicon glyphicon-erase">
@@ -850,7 +850,7 @@ class App extends React.Component {
             title="Manage Environments"
             data-placement="bottom"
             className="btn btn-default"
-            disabled={!this.state.connected}
+            disabled={!(this.state.connected && this.state.envID)}
             onClick={this.openEnvModal.bind(this)}>
             <span
               className="glyphicon glyphicon-folder-open">
@@ -883,7 +883,8 @@ class App extends React.Component {
           <div className="btn-group" role="group">
             <button className="btn btn-default dropdown-toggle"
               type="button" id="viewDropdown" data-toggle="dropdown"
-              aria-haspopup="true" aria-expanded="true">
+              aria-haspopup="true" aria-expanded="true"
+              disabled={!(this.state.connected && this.state.envID)}>
               {this.state.layoutID}
               &nbsp;
               <span className="caret"></span>
@@ -907,7 +908,7 @@ class App extends React.Component {
             title="Manage Views"
             data-placement="bottom"
             className="btn btn-default"
-            disabled={!this.state.connected}
+            disabled={!(this.state.connected && this.state.envID)}
             onClick={(ev) => {this.openViewModal()}}>
             <span
               className="glyphicon glyphicon-folder-open">
