@@ -28,6 +28,7 @@ import logging
 import warnings
 import time
 import errno
+import io
 
 try:
     import torchfile
@@ -37,6 +38,7 @@ except BaseException:
 logging.getLogger('requests').setLevel(logging.CRITICAL)
 logging.getLogger('urllib3').setLevel(logging.CRITICAL)
 logger = logging.getLogger(__name__)
+
 
 def isstr(s):
     return isinstance(s, string_types)
@@ -233,7 +235,7 @@ class Visdom(object):
         env='main',
         send=True,
     ):
-        self.server_base_name = server[server.index("//")+2:]
+        self.server_base_name = server[server.index("//") + 2:]
         self.server = server
         self.endpoint = endpoint
         self.port = port
@@ -459,6 +461,28 @@ class Visdom(object):
         svg = re.search('<svg .+</svg>', svgstr, re.DOTALL)
         assert svg is not None, 'could not parse SVG string'
         return self.text(text=svg.group(0), win=win, env=env, opts=opts)
+
+    def matplot(self, plot, opts=None, env=None, win=None):
+        """
+        This function draws a Matplotlib `plot`. The function does not support
+        any plot-specific `opts`.
+        """
+        opts = {} if opts is None else opts
+        _assert_opts(opts)
+
+        # write plot to SVG buffer:
+        buffer = io.StringIO()
+        plot.savefig(buffer, format='svg')
+        buffer.seek(0)
+        svg = buffer.read()
+        buffer.close()
+
+        # show SVG:
+        if 'height' not in opts:
+            opts['height'] = 1.4 * int(re.search('height\="([0-9]*)pt"', svg).group(1))
+        if 'width' not in opts:
+            opts['width'] = 1.35 * int(re.search('width\="([0-9]*)pt"', svg).group(1))
+        return self.svg(svgstr=svg, opts=opts, env=env, win=win)
 
     def image(self, img, win=None, env=None, opts=None):
         """

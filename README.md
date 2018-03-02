@@ -223,6 +223,7 @@ Visdom offers the following basic visualization functions:
 - [`vis.audio`](#visaudio)    : audio
 - [`vis.video`](#visvideo)    : videos
 - [`vis.svg`](#vissvg)      : SVG object
+- [`vis.matplot`](#vismatplot)  : matplotlib plot
 - [`vis.save`](#vissave)     : serialize state server-side
 
 ### Plotting
@@ -323,6 +324,10 @@ to support the Theano codec in an OGG container (Chrome supports this).
 This function draws an SVG object. It takes as input a SVG string `svgstr` or
 the name of an SVG file `svgfile`. The function does not support any specific
 `opts`.
+
+#### vis.matplot
+This function draws a Matplotlib `plot`. The function does not support
+any plot-specific `opts`.
 
 #### vis.save
 This function saves the `envs` that are alive on the visdom server. It takes input a list (in python) or table (in lua) of env ids to be saved.

@@ -53,6 +53,16 @@ try:
 
     viz.register_event_handler(type_callback, callback_text_window)
 
+    # matplotlib demo:
+    try:
+        import matplotlib.pyplot as plt
+        plt.plot([1, 23, 2, 4])
+        plt.ylabel('some numbers')
+        viz.matplot(plt)
+    except BaseException as err:
+        print('Skipped matplotlib example')
+        print('Error message: ', err)
+
     # video demo:
     try:
         video = np.empty([256, 250, 250, 3], dtype=np.uint8)
