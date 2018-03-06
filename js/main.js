@@ -84,8 +84,8 @@ class App extends React.Component {
       id: 'key',
       rootPId: 0
     },
-    envSelectorStyle: {display: 'block', width: 1280/2, height: 30, overflow: 'auto'},
-    flexSelectorOnHover: true
+    envSelectorStyle: {width: 1280/2 },
+    flexSelectorOnHover: false
   };
 
   _bin = null;
@@ -624,7 +624,7 @@ class App extends React.Component {
     console.log('resize to ', window.innerWidth);
     this.setState({
       'width': window.innerWidth,
-      'envSelectorStyle': {display: 'block', width: this.getEnvSelectWidth(window.innerWidth), height: 30, overflow: 'auto'}
+      'envSelectorStyle': {width: this.getEnvSelectWidth(window.innerWidth)}
     });
   }
 
@@ -644,7 +644,7 @@ class App extends React.Component {
     window.addEventListener("resize", this.updateDimensions);
     this.setState({
       'width':window.innerWidth,
-      'envSelectorStyle': {display: 'block', width: this.getEnvSelectWidth(window.innerWidth), height: 30, overflow: 'auto'}
+      'envSelectorStyle': {width: this.getEnvSelectWidth(window.innerWidth)}
     });
     this.connect();
   }
@@ -841,13 +841,13 @@ class App extends React.Component {
       <span>
         <span>Environment&nbsp;</span>
         <div className="btn-group navbar-btn" role="group" aria-label="Environment:">
-          <div className="btn-group" role="group"  onMouseEnter={this.mouseOverSelect} onMouseLeave={this.mouseOutSelect}>
+        <div className="btn-group" role="group"  onMouseEnter={this.mouseOverSelect} onMouseLeave={this.mouseOutSelect}>
             <TreeSelect
               style={this.state.envSelectorStyle}
               allowClear={true}
               dropdownStyle={{maxHeight: 900, overflow: 'auto'}}
               placeholder={<i>Select environment(s)</i>}
-              searchPlaceholder="please search"
+              searchPlaceholder="search"
               treeLine maxTagTextLength={1000}
               inputValue={null}
               value={this.state.envIDs}

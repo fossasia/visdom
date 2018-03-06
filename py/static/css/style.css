@@ -182,3 +182,9 @@ doesn't override our desire to make them non-interactable */
 .vertical-line {
   border-left: thin solid #ccc;
 }
+
+.rc-tree-select-selection--multiple {
+    max-height: 35px;
+    min-height: 35px;
+    overflow-y: scroll;
+}
