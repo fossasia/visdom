@@ -35,7 +35,6 @@ DEFAULT_ENV_PATH = '%s/.visdom/' % expanduser("~")
 DEFAULT_PORT = 8097
 
 
-
 def get_rand_id():
     return str(hex(int(time.time() * 10000000))[2:])
 
@@ -120,14 +119,14 @@ class Application(tornado.web.Application):
             (r"/events", PostHandler, {'app': self, 'port': self.port}),
             (r"/update", UpdateHandler, {'app': self}),
             (r"/close", CloseHandler, {'app': self}),
-            (r"/socket", SocketHandler, {'app': self, 'env_path': self.env_path}),
+            (r"/socket", SocketHandler, {'app': self}),
             (r"/vis_socket", VisSocketHandler, {'app': self}),
-            (r"/env/(.*)", EnvHandler, {'app': self, 'env_path': self.env_path}),
-            (r"/save", SaveHandler, {'app': self, 'env_path': self.env_path}),
+            (r"/env/(.*)", EnvHandler, {'app': self}),
+            (r"/save", SaveHandler, {'app': self}),
             (r"/error/(.*)", ErrorHandler, {'app': self}),
             (r"/win_exists", ExistsHandler, {'app': self}),
             (r"/win_data", DataHandler, {'app': self}),
-            (r"/(.*)", IndexHandler, {'app': self, 'env_path': self.env_path}),
+            (r"/(.*)", IndexHandler, {'app': self}),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)
 
@@ -152,6 +151,8 @@ class VisSocketHandler(tornado.websocket.WebSocketHandler):
         self.state = app.state
         self.subs = app.subs
         self.sources = app.sources
+        self.port = app.port
+        self.env_path = app.env_path
 
     def check_origin(self, origin):
         return True
@@ -182,8 +183,9 @@ class VisSocketHandler(tornado.websocket.WebSocketHandler):
 
 
 class SocketHandler(tornado.websocket.WebSocketHandler):
-    def initialize(self, app, env_path=DEFAULT_ENV_PATH):
-        self.env_path = env_path
+    def initialize(self, app):
+        self.port = app.port
+        self.env_path = app.env_path
         self.layouts = self.load_layouts()
         self.state = app.state
         self.subs = app.subs
@@ -385,11 +387,13 @@ def unpack_lua(req_args):
 
 
 class PostHandler(BaseHandler):
-    def initialize(self, app, port=DEFAULT_PORT):
+    def initialize(self, app):
         self.state = app.state
         self.subs = app.subs
         self.sources = app.sources
-        self.vis = visdom.Visdom(port=port, send=False)
+        self.port = app.port
+        self.env_path = app.env_path
+        self.vis = visdom.Visdom(port=self.port, send=False)
         self.handlers = {
             'update': UpdateHandler,
             'save': SaveHandler,
@@ -439,6 +443,8 @@ class ExistsHandler(BaseHandler):
         self.state = app.state
         self.subs = app.subs
         self.sources = app.sources
+        self.port = app.port
+        self.env_path = app.env_path
 
     @staticmethod
     def wrap_func(handler, args):
@@ -461,6 +467,8 @@ class UpdateHandler(BaseHandler):
         self.state = app.state
         self.subs = app.subs
         self.sources = app.sources
+        self.port = app.port
+        self.env_path = app.env_path
 
     # TODO remove when updateTrace is to be deprecated
     @staticmethod
@@ -601,6 +609,8 @@ class CloseHandler(BaseHandler):
         self.state = app.state
         self.subs = app.subs
         self.sources = app.sources
+        self.port = app.port
+        self.env_path = app.env_path
 
     @staticmethod
     def wrap_func(handler, args):
@@ -623,11 +633,12 @@ class CloseHandler(BaseHandler):
 
 
 class DeleteEnvHandler(BaseHandler):
-    def initialize(self, app, env_path=DEFAULT_ENV_PATH):
+    def initialize(self, app):
         self.state = app.state
         self.subs = app.subs
         self.sources = app.sources
-        self.env_path = env_path
+        self.port = app.port
+        self.env_path = app.env_path
 
     @staticmethod
     def wrap_func(handler, args):
@@ -678,11 +689,12 @@ def gather_envs(state, env_path=DEFAULT_ENV_PATH):
 
 
 class EnvHandler(BaseHandler):
-    def initialize(self, app, env_path=DEFAULT_ENV_PATH):
+    def initialize(self, app):
         self.state = app.state
         self.subs = app.subs
         self.sources = app.sources
-        self.env_path = env_path
+        self.port = app.port
+        self.env_path = app.env_path
 
     def get(self, eid):
         items = gather_envs(self.state, env_path=self.env_path)
@@ -702,11 +714,12 @@ class EnvHandler(BaseHandler):
 
 
 class SaveHandler(BaseHandler):
-    def initialize(self, app, env_path=DEFAULT_ENV_PATH):
+    def initialize(self, app):
         self.state = app.state
         self.subs = app.subs
         self.sources = app.sources
-        self.env_app = env_path
+        self.port = app.port
+        self.env_path = app.env_path
 
     @staticmethod
     def wrap_func(handler, args):
@@ -725,6 +738,8 @@ class SaveHandler(BaseHandler):
 class DataHandler(BaseHandler):
     def initialize(self, app):
         self.state = app.state
+        self.port = app.port
+        self.env_path = app.env_path
 
     @staticmethod
     def wrap_func(handler, args):
@@ -750,9 +765,10 @@ class DataHandler(BaseHandler):
 
 
 class IndexHandler(BaseHandler):
-    def initialize(self, app, env_path=DEFAULT_ENV_PATH):
+    def initialize(self, app):
         self.state = app.state
-        self.env_path = env_path
+        self.port = app.port
+        self.env_path = app.env_path
 
     def get(self, args, **kwargs):
         items = gather_envs(self.state, env_path=self.env_path)
