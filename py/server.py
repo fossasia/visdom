@@ -6,25 +6,23 @@
 
 """Server"""
 
-from __future__ import print_function
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import unicode_literals
+from __future__ import absolute_import, division, print_function, unicode_literals
 
-import math
-import json
-import logging
-import traceback
-import os
-import inspect
-import time
-import getpass
 import argparse
 import copy
-import visdom
-
+import getpass
+import inspect
+import json
+import logging
+import math
+import os
+import time
+import traceback
 from os.path import expanduser
+
+import visdom
 from zmq.eventloop import ioloop
+
 ioloop.install()  # Needs to happen before any tornado imports!
 
 import tornado.ioloop     # noqa E402: gotta install ioloop first
@@ -32,30 +30,10 @@ import tornado.web        # noqa E402: gotta install ioloop first
 import tornado.websocket  # noqa E402: gotta install ioloop first
 import tornado.escape     # noqa E402: gotta install ioloop first
 
-parser = argparse.ArgumentParser(description='Start the visdom server.')
-parser.add_argument('-port', metavar='port', type=int, default=8097,
-                    help='port to run the server on.')
-parser.add_argument('-env_path', metavar='env_path', type=str,
-                    default='%s/.visdom/' % expanduser("~"),
-                    help='path to serialized session to reload.')
-parser.add_argument('-logging_level', metavar='logger_level', default='INFO',
-                    help='logging level (default = INFO). Can take logging '
-                         'level name or int (example: 20)')
-FLAGS = parser.parse_args()
-
 LAYOUT_FILE = 'layouts.json'
+DEFAULT_ENV_PATH = '%s/.visdom/' % expanduser("~")
+DEFAULT_PORT = 8097
 
-try:
-    logging_level = int(FLAGS.logging_level)
-except (ValueError,):
-    try:
-        logging_level = logging._checkLevel(FLAGS.logging_level)
-    except ValueError:
-        raise KeyError(
-            "Invalid logging level : {0}".format(FLAGS.logging_level)
-        )
-
-logging.getLogger().setLevel(logging_level)
 
 
 def get_rand_id():
@@ -103,51 +81,53 @@ tornado_settings = {
 }
 
 
-def serialize_env(state, eids):
+def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
     env_ids = [i for i in eids if i in state]
     for env_id in env_ids:
-        env_path = os.path.join(FLAGS.env_path, "{0}.json".format(env_id))
-        open(env_path, 'w').write(json.dumps(state[env_id]))
+        env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
+        open(env_path_file, 'w').write(json.dumps(state[env_id]))
     return env_ids
 
 
-def serialize_all(state):
-    serialize_env(state, list(state.keys()))
+def serialize_all(state, env_path=DEFAULT_ENV_PATH):
+    serialize_env(state, list(state.keys()), env_path=env_path)
 
 
 class Application(tornado.web.Application):
-    def __init__(self):
+    def __init__(self, port=DEFAULT_PORT, env_path=DEFAULT_ENV_PATH):
         self.state = {}
         self.subs = {}
         self.sources = {}
+        self.env_path = env_path
+        self.port = port
 
         # reload state
-        ensure_dir_exists(FLAGS.env_path)
-        env_jsons = [i for i in os.listdir(FLAGS.env_path) if '.json' in i]
+        ensure_dir_exists(env_path)
+        env_jsons = [i for i in os.listdir(env_path) if '.json' in i]
 
         for env_json in env_jsons:
-            env_path = os.path.join(FLAGS.env_path, env_json)
-            env_data = tornado.escape.json_decode(open(env_path, 'r').read())
+            env_path_file = os.path.join(env_path, env_json)
+            env_data = tornado.escape.json_decode(open(env_path_file, 'r').read())
             eid = env_json.replace('.json', '')
             self.state[eid] = {'jsons': env_data['jsons'],
                                'reload': env_data['reload']}
 
         if 'main' not in self.state and 'main.json' not in env_jsons:
             self.state['main'] = {'jsons': {}, 'reload': {}}
-            serialize_env(self.state, ['main'])
+            serialize_env(self.state, ['main'], env_path=self.env_path)
 
         handlers = [
-            (r"/events", PostHandler, {'app': self}),
+            (r"/events", PostHandler, {'app': self, 'port': self.port}),
             (r"/update", UpdateHandler, {'app': self}),
             (r"/close", CloseHandler, {'app': self}),
-            (r"/socket", SocketHandler, {'app': self}),
+            (r"/socket", SocketHandler, {'app': self, 'env_path': self.env_path}),
             (r"/vis_socket", VisSocketHandler, {'app': self}),
-            (r"/env/(.*)", EnvHandler, {'app': self}),
-            (r"/save", SaveHandler, {'app': self}),
+            (r"/env/(.*)", EnvHandler, {'app': self, 'env_path': self.env_path}),
+            (r"/save", SaveHandler, {'app': self, 'env_path': self.env_path}),
             (r"/error/(.*)", ErrorHandler, {'app': self}),
             (r"/win_exists", ExistsHandler, {'app': self}),
             (r"/win_data", DataHandler, {'app': self}),
-            (r"/(.*)", IndexHandler, {'app': self}),
+            (r"/(.*)", IndexHandler, {'app': self, 'env_path': self.env_path}),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)
 
@@ -202,7 +182,8 @@ class VisSocketHandler(tornado.websocket.WebSocketHandler):
 
 
 class SocketHandler(tornado.websocket.WebSocketHandler):
-    def initialize(self, app):
+    def initialize(self, app, env_path=DEFAULT_ENV_PATH):
+        self.env_path = env_path
         self.layouts = self.load_layouts()
         self.state = app.state
         self.subs = app.subs
@@ -221,12 +202,12 @@ class SocketHandler(tornado.websocket.WebSocketHandler):
             ))
 
     def save_layouts(self):
-        layout_filepath = os.path.join(FLAGS.env_path, 'view', LAYOUT_FILE)
+        layout_filepath = os.path.join(self.env_path, 'view', LAYOUT_FILE)
         with open(layout_filepath, 'w') as fn:
             fn.write(self.layouts)
 
     def load_layouts(self):
-        layout_filepath = os.path.join(FLAGS.env_path, 'view', LAYOUT_FILE)
+        layout_filepath = os.path.join(self.env_path, 'view', LAYOUT_FILE)
         ensure_dir_exists(layout_filepath)
         if os.path.isfile(layout_filepath):
             with open(layout_filepath, 'r') as fn:
@@ -271,12 +252,12 @@ class SocketHandler(tornado.websocket.WebSocketHandler):
                     copy.deepcopy(self.state[msg['prev_eid']])
                 self.state[msg['eid']]['reload'] = msg['data']
                 self.eid = msg['eid']
-                serialize_env(self.state, [self.eid])
+                serialize_env(self.state, [self.eid], env_path=self.env_path)
         elif cmd == 'delete_env':
             if 'eid' in msg:
                 logging.info('closing environment {}'.format(msg['eid']))
                 del self.state[msg['eid']]
-                p = os.path.join(FLAGS.env_path, "{0}.json".format(msg['eid']))
+                p = os.path.join(self.env_path, "{0}.json".format(msg['eid']))
                 os.remove(p)
                 broadcast_envs(self)
         elif cmd == 'save_layouts':
@@ -404,11 +385,11 @@ def unpack_lua(req_args):
 
 
 class PostHandler(BaseHandler):
-    def initialize(self, app):
+    def initialize(self, app, port=DEFAULT_PORT):
         self.state = app.state
         self.subs = app.subs
         self.sources = app.sources
-        self.vis = visdom.Visdom(port=FLAGS.port, send=False)
+        self.vis = visdom.Visdom(port=port, send=False)
         self.handlers = {
             'update': UpdateHandler,
             'save': SaveHandler,
@@ -642,17 +623,18 @@ class CloseHandler(BaseHandler):
 
 
 class DeleteEnvHandler(BaseHandler):
-    def initialize(self, app):
+    def initialize(self, app, env_path=DEFAULT_ENV_PATH):
         self.state = app.state
         self.subs = app.subs
         self.sources = app.sources
+        self.env_path = env_path
 
     @staticmethod
     def wrap_func(handler, args):
         eid = extract_eid(args)
         if eid is not None:
             del handler.state[eid]
-            p = os.path.join(FLAGS.env_path, "{0}.json".format(eid))
+            p = os.path.join(handler.env_path, "{0}.json".format(eid))
             os.remove(p)
             broadcast_envs(handler)
 
@@ -663,14 +645,14 @@ class DeleteEnvHandler(BaseHandler):
         self.wrap_func(self, args)
 
 
-def load_env(state, eid, socket):
+def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
     """ load an environment to a client by socket """
 
     env = {}
     if eid in state:
         env = state.get(eid)
     else:
-        p = os.path.join(FLAGS.env_path, eid.strip(), '.json')
+        p = os.path.join(env_path, eid.strip(), '.json')
         if os.path.exists(p):
             env = tornado.escape.json_decode(open(p, 'r').read())
             state[eid] = env
@@ -689,20 +671,21 @@ def load_env(state, eid, socket):
     socket.eid = eid
 
 
-def gather_envs(state):
-    items = [i.replace('.json', '') for i in os.listdir(FLAGS.env_path)
+def gather_envs(state, env_path=DEFAULT_ENV_PATH):
+    items = [i.replace('.json', '') for i in os.listdir(env_path)
              if '.json' in i]
     return sorted(list(set(items + list(state.keys()))))
 
 
 class EnvHandler(BaseHandler):
-    def initialize(self, app):
+    def initialize(self, app, env_path=DEFAULT_ENV_PATH):
         self.state = app.state
         self.subs = app.subs
         self.sources = app.sources
+        self.env_path = env_path
 
     def get(self, eid):
-        items = gather_envs(self.state)
+        items = gather_envs(self.state, env_path=self.env_path)
         active = 'main' if eid not in items else eid
         self.render(
             'index.html',
@@ -715,20 +698,21 @@ class EnvHandler(BaseHandler):
         sid = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )['sid']
-        load_env(self.state, args, self.subs[sid])
+        load_env(self.state, args, self.subs[sid], env_path=self.env_path)
 
 
 class SaveHandler(BaseHandler):
-    def initialize(self, app):
+    def initialize(self, app, env_path=DEFAULT_ENV_PATH):
         self.state = app.state
         self.subs = app.subs
         self.sources = app.sources
+        self.env_app = env_path
 
     @staticmethod
     def wrap_func(handler, args):
         envs = args['data']
         envs = [escape_eid(eid) for eid in envs]
-        ret = serialize_env(handler.state, envs)  # this drops invalid env ids
+        ret = serialize_env(handler.state, envs, env_path=handler.env_path)  # this drops invalid env ids
         handler.write(json.dumps(ret))
 
     def post(self):
@@ -766,11 +750,12 @@ class DataHandler(BaseHandler):
 
 
 class IndexHandler(BaseHandler):
-    def initialize(self, app):
+    def initialize(self, app, env_path=DEFAULT_ENV_PATH):
         self.state = app.state
+        self.env_path = env_path
 
     def get(self, args, **kwargs):
-        items = gather_envs(self.state)
+        items = gather_envs(self.state, env_path=self.env_path)
         self.render(
             'index.html',
             user=getpass.getuser(),
@@ -876,20 +861,48 @@ def download_scripts(proxies=None, install_dir=None):
                     exc.reason, key))
 
 
-def main(print_func=None):
+def start_server(port=DEFAULT_PORT, env_path=DEFAULT_ENV_PATH, print_func=None):
     print("It's Alive!")
-    app = Application()
-    app.listen(FLAGS.port, max_buffer_size=1024 ** 3)
+    app = Application(port=port, env_path=env_path)
+    app.listen(port, max_buffer_size=1024 ** 3)
     logging.info("Application Started")
     if "HOSTNAME" in os.environ:
         hostname = os.environ["HOSTNAME"]
     else:
         hostname = "localhost"
     if print_func is None:
-        print("You can navigate to http://%s:%s" % (hostname, FLAGS.port))
+        print("You can navigate to http://%s:%s" % (hostname, port))
     else:
-        print_func(FLAGS.port)
+        print_func(port)
     ioloop.IOLoop.instance().start()
+
+
+def main(print_func=None):
+
+    parser = argparse.ArgumentParser(description='Start the visdom server.')
+    parser.add_argument('-port', metavar='port', type=int, default=DEFAULT_PORT,
+                        help='port to run the server on.')
+    parser.add_argument('-env_path', metavar='env_path', type=str,
+                        default=DEFAULT_ENV_PATH,
+                        help='path to serialized session to reload.')
+    parser.add_argument('-logging_level', metavar='logger_level', default='INFO',
+                        help='logging level (default = INFO). Can take logging '
+                             'level name or int (example: 20)')
+    FLAGS = parser.parse_args()
+
+    try:
+        logging_level = int(FLAGS.logging_level)
+    except (ValueError,):
+        try:
+            logging_level = logging._checkLevel(FLAGS.logging_level)
+        except ValueError:
+            raise KeyError(
+                "Invalid logging level : {0}".format(FLAGS.logging_level)
+            )
+
+    logging.getLogger().setLevel(logging_level)
+
+    start_server(port=FLAGS.port, env_path=FLAGS.env_path, print_func=print_func)
 
 
 if __name__ == "__main__":
