@@ -72,7 +72,7 @@ class App extends React.Component {
     layoutID: DEFAULT_LAYOUT,
     // Bad form... make a copy of the global var we generated in python.
     envList: ENV_LIST.slice(),
-    filter: '',
+    filter: localStorage.getItem('filter') || '',
     layout: [],
     cols: 100,
     width: 1280,
@@ -957,6 +957,7 @@ class App extends React.Component {
                 });
               }
             );
+            localStorage.setItem('filter', ev.target.value);
             // TODO remove this once relayout is moved to a post-state
             // update kind of thing
             this.state.filter = ev.target.value;
