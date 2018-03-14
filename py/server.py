@@ -116,7 +116,7 @@ class Application(tornado.web.Application):
             serialize_env(self.state, ['main'], env_path=self.env_path)
 
         handlers = [
-            (r"/events", PostHandler, {'app': self, 'port': self.port}),
+            (r"/events", PostHandler, {'app': self}),
             (r"/update", UpdateHandler, {'app': self}),
             (r"/close", CloseHandler, {'app': self}),
             (r"/socket", SocketHandler, {'app': self}),
