@@ -801,6 +801,7 @@ class Visdom(object):
                     Y = None
 
         assert X.ndim == 2, 'X should have two dims'
+
         assert X.shape[1] == 2 or X.shape[1] == 3, 'X should have 2 or 3 cols'
 
         if Y is not None:
@@ -925,6 +926,11 @@ class Visdom(object):
             else:
                 assert X is not None, 'must specify x-values for line update'
         assert Y.ndim == 1 or Y.ndim == 2, 'Y should have 1 or 2 dim'
+        if Y.ndim == 2:
+            assert Y.shape[1] > 0, 'must plot one line at least'
+            if Y.shape[1] == 1:
+                Y = Y.reshape(Y.shape[0])
+                X = X.reshape(X.shape[0])
 
         if X is not None:
             assert X.ndim == 1 or X.ndim == 2, 'X should have 1 or 2 dim'
