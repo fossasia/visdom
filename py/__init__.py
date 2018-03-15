@@ -926,14 +926,15 @@ class Visdom(object):
                 assert X is not None, 'must specify x-values for line update'
         assert Y.ndim == 1 or Y.ndim == 2, 'Y should have 1 or 2 dim'
         assert Y.shape[-1] > 0, 'must plot one line at least'
-        if Y.ndim == 2 and Y.shape[1] == 1:
-                Y = Y.reshape(Y.shape[0])
-                X = X.reshape(X.shape[0])
 
         if X is not None:
             assert X.ndim == 1 or X.ndim == 2, 'X should have 1 or 2 dim'
         else:
             X = np.linspace(0, 1, Y.shape[0])
+
+        if Y.ndim == 2 and Y.shape[1] == 1:
+                Y = Y.reshape(Y.shape[0])
+                X = X.reshape(X.shape[0])
 
         if Y.ndim == 2 and X.ndim == 1:
             X = np.tile(X, (Y.shape[1], 1)).transpose()
