@@ -801,10 +801,10 @@ class Visdom(object):
                     Y = None
 
         assert X.ndim == 2, 'X should have two dims'
+
         assert X.shape[1] == 2 or X.shape[1] == 3, 'X should have 2 or 3 cols'
 
         if Y is not None:
-            Y = np.squeeze(Y)
             assert Y.ndim == 1, 'Y should be one-dimensional'
             assert X.shape[0] == Y.shape[0], 'sizes of X and Y should match'
         else:
