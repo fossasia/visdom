@@ -841,7 +841,7 @@ class Visdom(object):
                 mc = opts.get('markercolor')
                 if 'legend' in opts:
                     trace_name = opts.get('legend')[k - 1]
-                elif X.shape[0] == 1 and name is not None:
+                elif K == 1 and name is not None:
                     trace_name = name
                 else:
                     trace_name = str(k)
@@ -925,11 +925,16 @@ class Visdom(object):
             else:
                 assert X is not None, 'must specify x-values for line update'
         assert Y.ndim == 1 or Y.ndim == 2, 'Y should have 1 or 2 dim'
+        assert Y.shape[-1] > 0, 'must plot one line at least'
 
         if X is not None:
             assert X.ndim == 1 or X.ndim == 2, 'X should have 1 or 2 dim'
         else:
             X = np.linspace(0, 1, Y.shape[0])
+
+        if Y.ndim == 2 and Y.shape[1] == 1:
+                Y = Y.reshape(Y.shape[0])
+                X = X.reshape(X.shape[0])
 
         if Y.ndim == 2 and X.ndim == 1:
             X = np.tile(X, (Y.shape[1], 1)).transpose()
