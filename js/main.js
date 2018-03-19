@@ -981,6 +981,7 @@ class App extends React.Component {
               // TODO remove this once relayout is moved to a post-state
               // update kind of thing
               this.state.filter = '';
+              localStorage.setItem('filter', '');
               this.relayout();
               this.relayout();
             }}>

@@ -187,6 +187,7 @@ doesn't override our desire to make them non-interactable */
     max-height: 35px;
     min-height: 35px;
     overflow-y: scroll;
+    overflow: hidden;
 }
 
 .rc-tree-select-selection--multiple .rc-tree-select-search__field__placeholder {
