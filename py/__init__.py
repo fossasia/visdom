@@ -239,6 +239,7 @@ class Visdom(object):
         proxy=None,
         env='main',
         send=True,
+        raise_exceptions=None
     ):
         self.server_base_name = server[server.index("//") + 2:]
         self.server = server
@@ -251,6 +252,7 @@ class Visdom(object):
         self.event_handlers = {}  # Haven't registered any events
         self.socket_alive = False
         self.use_socket = True
+        self.raise_exceptions = raise_exceptions  # Flag to indicate whether to raise errors or suppress them
         try:
             import torch  # noqa F401: we do use torch, just weirdly
             wrap_tensor_methods(self, pytorch_wrap)
@@ -342,11 +344,19 @@ class Visdom(object):
             )
             return r.text
         except BaseException:
-            if not quiet:
-                print("Exception in user code:")
-                print('-' * 60)
-                traceback.print_exc()
-            return False
+            if self.raise_exceptions:
+                raise ConnectionError("Error connecting to Visdom server")
+            else:
+                if self.raise_exceptions is None:
+                    warnings.warn("Visdom is eventually changing to default to raising exceptions rather than "
+                                  "ignoring. This change is expected to happen by July 2018. Please set "
+                                  "`raise_exceptions` to False to retain desired behavior.",
+                                  PendingDeprecationWarning)
+                if not quiet:
+                    print("Exception in user code:")
+                    print('-' * 60)
+                    traceback.print_exc()
+                return False
 
     def save(self, envs):
         """
@@ -411,7 +421,12 @@ class Visdom(object):
         or not a window exists on the server already.
         Returns None if something went wrong
         """
-        e = self._win_exists_wrap(win, env)
+        try:
+            e = self._win_exists_wrap(win, env)
+        except ConnectionError:
+            print("Error connecting to Visdom server!")
+            return None
+
         if e == 'true':
             return True
         elif e == 'false':
