@@ -342,8 +342,11 @@ class Visdom(object):
             if self.raise_exceptions:
                 raise ConnectionError("Error connecting to Visdom server")
             else:
-                DeprecationWarning("Visdom is eventually changing to default to raising exceptionsrather than "
-                                   "ignoring. This change is expected to happen by July 2018")
+                if self.raise_exceptions is None:
+                    warnings.warn("Visdom is eventually changing to default to raising exceptions rather than "
+                                  "ignoring. This change is expected to happen by July 2018. Please set "
+                                  "`raise_exceptions` to False to retain desired behavior.",
+                                  PendingDeprecationWarning)
                 if not quiet:
                     print("Exception in user code:")
                     print('-' * 60)
