@@ -442,6 +442,10 @@ try:
     except BaseException:
         print('Skipped audio example')
 
+    try:
+        input = raw_input  # for Python 2 compatibility
+    except NameError:
+        pass
     input('Waiting for callbacks, press enter to quit.')
 except BaseException as e:
     print(

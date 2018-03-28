@@ -479,9 +479,13 @@ class Visdom(object):
 
         # show SVG:
         if 'height' not in opts:
-            opts['height'] = 1.4 * int(re.search('height\="([0-9]*)pt"', svg).group(1))
+            height = re.search('height\="([0-9\.]*)pt"', svg)
+            if height is not None:
+                opts['height'] = 1.4 * int(math.ceil(float(height.group(1))))
         if 'width' not in opts:
-            opts['width'] = 1.35 * int(re.search('width\="([0-9]*)pt"', svg).group(1))
+            width = re.search('width\="([0-9\.]*)pt"', svg)
+            if width is not None:
+                opts['width'] = 1.35 * int(math.ceil(float(width.group(1))))
         return self.svg(svgstr=svg, opts=opts, env=env, win=win)
 
     def image(self, img, win=None, env=None, opts=None):
