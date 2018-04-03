@@ -297,7 +297,6 @@ class App extends React.Component {
   }
 
   closeAllPanes = () => {
-    console.log('clear all panes');
     Object.keys(this.state.panes).map((paneID) => {
       this.closePane(paneID, false, false);
     });
@@ -621,7 +620,6 @@ class App extends React.Component {
   }
 
   updateDimensions() {
-    console.log('resize to ', window.innerWidth);
     this.setState({
       'width': window.innerWidth,
       'envSelectorStyle': {width: this.getEnvSelectWidth(window.innerWidth)}
@@ -652,7 +650,6 @@ class App extends React.Component {
   componentDidUpdate() {
     if (this._firstLoad && this.state.sessionID) {
       this._firstLoad = false;
-      console.log('on componentDidUpdate loading environments', this.state.envIDs);
       if (this.state.envIDs.length > 0) {
         this.postForEnv(this.state.envIDs);
       }
@@ -709,7 +706,8 @@ class App extends React.Component {
           />
           <button
             className="btn btn-default"
-            disabled={!(this.state.connected && this.state.envID && (this.state.saveText.length > 0))}
+            disabled={!(this.state.connected && this.state.envID &&
+                      (this.state.saveText.length > 0))}
             onClick={this.saveEnv}>
             {this.state.envList.indexOf(
               this.state.saveText) >= 0 ? 'save' : 'fork'}
@@ -800,20 +798,36 @@ class App extends React.Component {
 
   mouseOverSelect = () => {
     if (this.state.flexSelectorOnHover) {
-      this.setState({'envSelectorStyle': {display: 'flex', width: this.getEnvSelectWidth(this.state.width), 'min-width': this.getEnvSelectWidth(this.state.width), 'flex-direction': 'column'}});
+      this.setState({
+        'envSelectorStyle': {
+          display: 'flex',
+          width: this.getEnvSelectWidth(this.state.width),
+          'min-width': this.getEnvSelectWidth(this.state.width),
+          'flex-direction': 'column'
+        }
+      });
     }
   }
 
   mouseOutSelect = () => {
     if (this.state.flexSelectorOnHover) {
-      this.setState({'envSelectorStyle': {display: 'block', width: this.getEnvSelectWidth(this.state.width), height: 30, overflow: 'auto'}});
+      this.setState({
+        'envSelectorStyle': {
+          display: 'block',
+          width: this.getEnvSelectWidth(this.state.width),
+          height: 30,
+          overflow: 'auto'
+        }
+      });
     }
   }
 
   renderEnvControls() {
     var slist = this.state.envList.slice();
     slist.sort();
-    var roots = Array.from(new Set(slist.map((x) => {return x.split('_')[0];})));
+    var roots = Array.from(
+      new Set(slist.map((x) => {return x.split('_')[0];}))
+    );
 
     let env_options2 = slist.map((env, idx) => {
       //var check_space = this.state.envIDs.includes(env);
@@ -840,8 +854,13 @@ class App extends React.Component {
     return (
       <span>
         <span>Environment&nbsp;</span>
-        <div className="btn-group navbar-btn" role="group" aria-label="Environment:">
-        <div className="btn-group" role="group"  onMouseEnter={this.mouseOverSelect} onMouseLeave={this.mouseOutSelect}>
+        <div className="btn-group navbar-btn"
+          role="group"
+          aria-label="Environment:">
+          <div className="btn-group"
+            role="group"
+            onMouseEnter={this.mouseOverSelect}
+            onMouseLeave={this.mouseOutSelect}>
             <TreeSelect
               style={this.state.envSelectorStyle}
               allowClear={true}
