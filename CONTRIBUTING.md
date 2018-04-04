@@ -46,6 +46,7 @@ wget https://unpkg.com/react-resizable@1.4.6/css/styles.css -O visdom/static/css
 wget https://unpkg.com/react-grid-layout@0.14.0/css/styles.css -O visdom/static/css/react-grid-layout-styles.css
 wget https://unpkg.com/react@15.6.1/dist/react.min.js -O visdom/static/js/react-react.min.js
 wget https://unpkg.com/react-dom@15.6.1/dist/react-dom.min.js -O visdom/static/js/react-dom.min.js
+wget https://unpkg.com/react-modal@3.1.10/dist/react-modal.min.js -O visdom/static/js/react-modal.min.js
 wget https://unpkg.com/classnames@2.2.5 -O visdom/static/fonts/classnames
 wget https://unpkg.com/layout-bin-packer@1.2.2 -O visdom/static/fonts/layout_bin_packer
 wget https://cdn.rawgit.com/STRML/react-grid-layout/0.14.0/dist/react-grid-layout.min.js -O visdom/static/js/react-grid-layout.min.js
