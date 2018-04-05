@@ -91,7 +91,7 @@ def loadfile(filename):
 
 def _scrub_dict(d):
     if type(d) is dict:
-        return {(k, _scrub_dict(v)) for k, v in list(d.items())
+        return {k: _scrub_dict(v) for k, v in list(d.items())
                 if v is not None and _scrub_dict(v) is not None}
     else:
         return d
