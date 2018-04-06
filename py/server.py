@@ -698,7 +698,7 @@ def gather_envs(state):
 
 def compare_envs(state, eids, socket):
     logging.info('comparing envs')
-    eidNums = {e:str(i) for i,e in enumerate(eids)}
+    eidNums = {e: str(i) for i, e in enumerate(eids)}
     env = {}
     envs = {}
     for eid in eids:
@@ -712,7 +712,8 @@ def compare_envs(state, eids, socket):
                 envs[eid] = env
 
     res = copy.deepcopy(envs[list(envs.keys())[0]])
-    name2Wid = {res['jsons'][wid].get('title', None):wid+'_compare' for wid in res.get('jsons', {})
+    name2Wid = {res['jsons'][wid].get('title', None): wid+'_compare'
+                for wid in res.get('jsons', {})
                 if 'title' in res['jsons'][wid]}
     for wid in list(res['jsons'].keys()):
         res['jsons'][wid+'_compare'] = res['jsons'][wid]
@@ -721,7 +722,7 @@ def compare_envs(state, eids, socket):
 
     for ix, eid in enumerate(envs.keys()):
         env = envs[eid]
-        for wid in env.get('jsons',{}).keys():
+        for wid in env.get('jsons', {}).keys():
             win = env['jsons'][wid]
             if win.get('type', None) != 'plot':
                 continue
@@ -734,32 +735,37 @@ def compare_envs(state, eids, socket):
                 continue
 
             destWid = name2Wid[title]
+            destWidJson = res['jsons'][destWid]
             # Combine plots with the same window title. If plot data source was
             # labeled "name" in the legend, rename to "envId_legend" where
             # envId is enumeration of the selected environments (not the long
             # environment id string). This makes plot lines more readable.
             if ix == 0:
-                res['jsons'][destWid]['has_compare'] = False
-                res['jsons'][destWid]['content']['layout']['showlegend'] = True
-                for dataIdx, data in enumerate(res['jsons'][destWid]['content']['data']):
-                    res['jsons'][destWid]['content']['data'][dataIdx]['name'] = '{}_{}'.format(eidNums[eid], data['name'])
+                destWidJson['has_compare'] = False
+                destWidJson['content']['layout']['showlegend'] = True
+                for dataIdx, data in enumerate(destWidJson['content']['data']):
+                    destWidJson['content']['data'][dataIdx]['name'] = \
+                        '{}_{}'.format(eidNums[eid], data['name'])
             else:
-                # has_compare will be set to True only if the window title is shared by at least 2 envs.
-                res['jsons'][destWid]['has_compare'] = True
+                # has_compare will be set to True only if the window title is
+                # shared by at least 2 envs.
+                destWidJson['has_compare'] = True
                 for _dataIdx, data in enumerate(win['content']['data']):
                     data = copy.deepcopy(data)
                     data['name'] = '{}_{}'.format(eidNums[eid], data['name'])
-                    res['jsons'][destWid]['content']['data'].append(data)
+                    destWidJson['content']['data'].append(data)
 
     # Make sure that only plots that are shared by at least two envs are shown.
     # Check has_compare flag
     for destWid in list(res['jsons'].keys()):
-        if ('has_compare' not in res['jsons'][destWid]) or (not res['jsons'][destWid]['has_compare']):
+        if ('has_compare' not in res['jsons'][destWid]) or \
+                (not res['jsons'][destWid]['has_compare']):
             del res['jsons'][destWid]
 
     # create legend mapping environment names to environment numbers so one can
     # look it up for the new legend
-    tableRows = ["""<tr> <td> {} </td> <td> {} </td> </tr>""".format(v, eidNums[v]) for v in eidNums]
+    tableRows = ["<tr> <td> {} </td> <td> {} </td> </tr>".format(v, eidNums[v])
+                 for v in eidNums]
 
     tbl = """"<style>
     table, th, td {{
@@ -775,7 +781,7 @@ def compare_envs(state, eids, socket):
         "inflate": True,
         "width": None,
         "height": None,
-        "contentID": "35e9f1d3cab700",
+        "contentID": "compare_legend",
         "content": tbl,
         "type": "text",
         "layout": {"title": "compare_legend"},
@@ -824,18 +830,17 @@ class CompareHandler(BaseHandler):
         self.subs = app.subs
         self.sources = app.sources
 
-    def get(self, eids):
-        logger.info(eids)
-        items = gather_envs(self.state)
-        eids = eids.split('+')
-        logger.info(eids)
-        eids = [x for x in eids if x in items]
-        self.render(
-            'index.html',
-            user=getpass.getuser(),
-            items=eids,
-            active_item=active
-        )
+    # TODO fix get paths for compare
+    # def get(self, eids):
+    #     items = gather_envs(self.state)
+    #     eids = eids.split('+')
+    #     eids = [x for x in eids if x in items]
+    #     self.render(
+    #         'index.html',
+    #         user=getpass.getuser(),
+    #         items=eids,
+    #         active_item=active
+    #     )
 
     def post(self, args):
         sid = tornado.escape.json_decode(
