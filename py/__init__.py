@@ -595,7 +595,7 @@ class Visdom(object):
         nmaps = tensor.shape[0]
         xmaps = min(nrow, nmaps)
         ymaps = int(math.ceil(float(nmaps) / xmaps))
-        height = int(tensor.shape[2] + 2 * padding),
+        height = int(tensor.shape[2] + 2 * padding)
         width = int(tensor.shape[3] + 2 * padding)
 
         grid = np.ones([3, height * ymaps, width * xmaps])
