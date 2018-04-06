@@ -2,3 +2,10 @@ node_modules
 build
 th/CMakeLists.txt
 th/build.luarocks
+dist/
+visdom*.tgz
+visdom.egg-info/
+setup.cfg
+py/static/fonts/
+py/static/css/
+py/static/js/
