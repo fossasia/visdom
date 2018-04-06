@@ -72,10 +72,16 @@ You can partition your visualization space with `envs`. By default, every user w
 
 You can access a specific env via url: `http://localhost.com:8097/env/main`. If your server is hosted, you can share this url so others can see your visualizations too.
 
+Environments are automatically hierarchically organized by the first `_`. 
+
 #### Selecting Environments
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34618242-261d55d4-f20c-11e7-820d-c16731248b26.png" width="300" /></p>
 
-From the main page it is possible to toggle between different environments using the environment selector. Selecting a new environment will query the server for the plots that exist in that environment.
+From the main page it is possible to toggle between different environments using the environment selector. Selecting a new environment will query the server for the plots that exist in that environment. The environment selector allows for searching and filtering for the new enironment.
+
+#### Comparing Environments
+
+From the main page it is possible to compare different environments using the environment selector. Selecting multiple environments in the check box will query the server for the plots with the same titles in all environments and plot them in a single plot. An additional compare legend pane is created with a number corresponding to each selected environment. Individual plots are updated with legends corresponding to "x_name" where `x` is a number corresponding with the compare legend pane and `name` is the original name in the legend.
 
 #### Clearing Environments
 You can use the eraser button to remove all of the current contents of an environment. This closes the plot windows for that environment but keeps the empty environment for new plots.

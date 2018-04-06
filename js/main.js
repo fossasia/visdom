@@ -8,6 +8,17 @@
 */
 
 'use strict';
+import React from 'react';
+import ReactModal from 'react-modal';
+var classNames = require('classnames');
+import 'rc-tree-select/assets/index.css';
+
+import TreeSelect, { SHOW_CHILD } from 'rc-tree-select';
+
+var ReactGridLayout = require('react-grid-layout');
+
+import createClass from 'create-react-class';
+import PropTypes from 'prop-types';
 
 const TextPane = require('./TextPane');
 const ImagePane = require('./ImagePane');
@@ -55,12 +66,13 @@ class App extends React.Component {
     sessionID: null,
     panes: {},
     focusedPaneID: null,
-    envID: ACTIVE_ENV,
+    envID: localStorage.getItem( 'envID' ) || 'main',
+    envIDs: JSON.parse(localStorage.getItem( 'envIDs' )) || ['main'],
     saveText: ACTIVE_ENV,
     layoutID: DEFAULT_LAYOUT,
     // Bad form... make a copy of the global var we generated in python.
     envList: ENV_LIST.slice(),
-    filter: '',
+    filter: localStorage.getItem('filter') || '',
     layout: [],
     cols: 100,
     width: 1280,
@@ -68,6 +80,12 @@ class App extends React.Component {
     showEnvModal: false,
     showViewModal: false,
     modifyID: null,
+    treeDataSimpleMode: {
+      id: 'key',
+      rootPId: 0
+    },
+    envSelectorStyle: {width: 1280/2 },
+    flexSelectorOnHover: false
   };
 
   _bin = null;
@@ -75,6 +93,12 @@ class App extends React.Component {
   _envFieldRef = null;
   _timeoutID = null;
   _pendingPanes = [];
+  _firstLoad = true;
+
+  constructor() {
+    super();
+    this.updateDimensions = this.updateDimensions.bind(this);
+  }
 
   colWidth = () => {
     return (this.state.width - (MARGIN * (this.state.cols - 1))
@@ -127,12 +151,14 @@ class App extends React.Component {
   }
 
   processPane = (newPane, newPanes, newLayout) => {
-    let exists = newPane.id in newPanes
+    let exists = newPane.id in newPanes;
     newPanes[newPane.id] = newPane;
 
     if (!exists) {
       let stored = JSON.parse(localStorage.getItem(this.keyLS(newPane.id)));
-
+      if (this._bin == null) {
+        this.rebin();
+      }
       if (stored) {
         var paneLayout = stored;
         this._bin.content.push(paneLayout);
@@ -169,7 +195,6 @@ class App extends React.Component {
     if (this._socket) {
       return;
     }
-
     var url = window.location;
     var socket = new WebSocket('ws://' + url.host + this.correctPathname() + 'socket');
 
@@ -177,13 +202,13 @@ class App extends React.Component {
 
     socket.onopen = () => {
       this.setState({connected: true});
-    }
+    };
 
     socket.onerror = socket.onclose = () => {
-      this.setState({connected: false}, () => {
+      this.setState({connected: false}, function () {
         this._socket = null;
       });
-    }
+    };
 
     this._socket = socket;
   }
@@ -195,7 +220,7 @@ class App extends React.Component {
       case 'register':
         this.setState({
           sessionID: cmd.data,
-        }, () => {this.selectEnv(this.state.envID)});
+        }, () => {this.postForEnv(this.state.envIDs);});
         break;
       case 'pane':
       case 'window':
@@ -217,7 +242,7 @@ class App extends React.Component {
         for (var envIdx in cmd.data) {
           if (!layoutLists.has(cmd.data[envIdx])) {
             layoutLists.set(cmd.data[envIdx],
-              new Map([[DEFAULT_LAYOUT, new Map()]]));
+                            new Map([[DEFAULT_LAYOUT, new Map()]]));
           }
         }
         this.setState({envList: cmd.data, layoutLists: layoutLists})
@@ -261,7 +286,7 @@ class App extends React.Component {
       let focusedPaneID = this.state.focusedPaneID;
       // Make sure we remove the pane from our layout.
       let newLayout = this.state.layout.filter(
-         (paneLayout) => paneLayout.i !== paneID)
+        (paneLayout) => paneLayout.i !== paneID)
 
       this.setState({
         layout: newLayout,
@@ -283,19 +308,45 @@ class App extends React.Component {
     });
   }
 
-  selectEnv = (envID) => {
-    let isSameEnv = envID === this.state.envID;
+  selectEnv = (selectedNodes) => {
+    var isSameEnv = selectedNodes.length == this.state.envIDs.length;
+    if (isSameEnv) {
+      for (var i=0; i<selectedNodes.length; i++) {
+        if (selectedNodes[i] != this.state.envIDs[i]) {
+          isSameEnv=false;
+          break;
+        }
+      }
+    }
+    var envID = null;
+    if (selectedNodes.length == 1) {
+      envID = selectedNodes[0];
+    }
     this.setState({
       envID: envID,
+      envIDs: selectedNodes,
       saveText: envID,
       panes: isSameEnv ? this.state.panes : {},
       layout: isSameEnv ? this.state.layout : [],
       focusedPaneID: isSameEnv ? this.state.focusedPaneID : null,
     });
+    localStorage.setItem('envID', envID);
+    localStorage.setItem('envIDs', JSON.stringify(selectedNodes));
+    this.postForEnv(selectedNodes);
+  }
+
+  postForEnv = (envIDs) => {
     // This kicks off a new stream of events from the socket so there's nothing
     // to handle here. We might want to surface the error state.
-    $.post(this.correctPathname() + 'env/' + envID,
-      JSON.stringify({'sid' : this.state.sessionID}));
+    if (envIDs.length == 1 ) {
+      $.post(this.correctPathname() + 'env/' + envIDs[0],
+             JSON.stringify({'sid' : this.state.sessionID}));
+    }
+    else if(envIDs.length > 1) {
+      $.post(this.correctPathname() + 'compare/' + envIDs.join('+'),
+             JSON.stringify({'sid' : this.state.sessionID}));
+
+    }
   }
 
   deleteEnv = () => {
@@ -344,6 +395,7 @@ class App extends React.Component {
       envList: newEnvList,
       layoutLists: layoutLists,
       envID: env,
+      envIDs: [env],
     });
   }
 
@@ -567,8 +619,48 @@ class App extends React.Component {
     this.setState({layoutLists: layoutLists});
   }
 
+  updateDimensions() {
+    this.setState({
+      'width': window.innerWidth,
+      'envSelectorStyle': {width: this.getEnvSelectWidth(window.innerWidth)}
+    });
+  }
+
+  getEnvSelectWidth(w) {
+    return Math.max(w/3,50);
+  }
+
+  componentWillMount() {
+    this.updateDimensions();
+  }
+  componentWillUnmount() {
+    //Remove event listener
+    window.removeEventListener("resize", this.updateDimensions);
+  }
+
   componentDidMount() {
+    window.addEventListener("resize", this.updateDimensions);
+    this.setState({
+      'width':window.innerWidth,
+      'envSelectorStyle': {width: this.getEnvSelectWidth(window.innerWidth)}
+    });
     this.connect();
+  }
+
+  componentDidUpdate() {
+    if (this._firstLoad && this.state.sessionID) {
+      this._firstLoad = false;
+      if (this.state.envIDs.length > 0) {
+        this.postForEnv(this.state.envIDs);
+      }
+      else {
+        this.setState({
+          'envIDs': ['main'],
+          'envID': 'main'
+        });
+        this.postForEnv(['main']);
+      }
+    }
   }
 
   onWidthChange = (width, cols) => {
@@ -614,7 +706,8 @@ class App extends React.Component {
           />
           <button
             className="btn btn-default"
-            disabled={!this.state.connected}
+            disabled={!(this.state.connected && this.state.envID &&
+                      (this.state.saveText.length > 0))}
             onClick={this.saveEnv}>
             {this.state.envList.indexOf(
               this.state.saveText) >= 0 ? 'save' : 'fork'}
@@ -628,7 +721,8 @@ class App extends React.Component {
             className="form-control"
             disabled={!this.state.connected}
             onChange={(ev) => {this.setState({modifyID: ev.target.value})}}
-            value={this.state.modifyID}>{
+            value={this.state.modifyID}>
+            {
               this.state.envList.map((env) => {
                 return <option key={env} value={env}>{env}</option>;
               })
@@ -636,8 +730,8 @@ class App extends React.Component {
           </select>
           <button
             className="btn btn-default"
-            disabled={!this.state.connected || !this.state.modifyID
-                       || this.state.modifyID == 'main'}
+            disabled={!this.state.connected || !this.state.modifyID ||
+                      this.state.modifyID == 'main'}
             onClick={this.deleteEnv.bind(this)}>
             Delete
           </button>
@@ -683,7 +777,8 @@ class App extends React.Component {
             className="form-control"
             disabled={!this.state.connected}
             onChange={(ev) => {this.setState({modifyID: ev.target.value})}}
-            value={this.state.modifyID}>{
+            value={this.state.modifyID}>
+            {
               Array.from(this.getCurrLayoutList().keys()).map((view) => {
                 return <option key={view} value={view}>{view}</option>;
               })
@@ -691,8 +786,8 @@ class App extends React.Component {
           </select>
           <button
             className="btn btn-default"
-            disabled={!this.state.connected || !this.state.modifyID
-                       || this.state.modifyID == DEFAULT_LAYOUT}
+            disabled={!this.state.connected || !this.state.modifyID ||
+                      this.state.modifyID == DEFAULT_LAYOUT}
             onClick={this.deleteLayout.bind(this)}>
             Delete
           </button>
@@ -701,41 +796,95 @@ class App extends React.Component {
     );
   }
 
+  mouseOverSelect = () => {
+    if (this.state.flexSelectorOnHover) {
+      this.setState({
+        'envSelectorStyle': {
+          display: 'flex',
+          width: this.getEnvSelectWidth(this.state.width),
+          'min-width': this.getEnvSelectWidth(this.state.width),
+          'flex-direction': 'column'
+        }
+      });
+    }
+  }
+
+  mouseOutSelect = () => {
+    if (this.state.flexSelectorOnHover) {
+      this.setState({
+        'envSelectorStyle': {
+          display: 'block',
+          width: this.getEnvSelectWidth(this.state.width),
+          height: 30,
+          overflow: 'auto'
+        }
+      });
+    }
+  }
+
   renderEnvControls() {
-    let env_options = this.state.envList.map((env) => {
-      let check_space = ''
-      if (env == this.state.envID) {
-        check_space = <span>&nbsp;&#10003;</span>;
+    var slist = this.state.envList.slice();
+    slist.sort();
+    var roots = Array.from(
+      new Set(slist.map((x) => {return x.split('_')[0];}))
+    );
+
+    let env_options2 = slist.map((env, idx) => {
+      //var check_space = this.state.envIDs.includes(env);
+      if (env.split('_').length == 1) {
+        return null;
       }
-      return <li>
-        <a href="#" onClick={this.selectEnv.bind(this, env)}>
-          {env}
-          {check_space}
-        </a>
-      </li>;
-    })
+      return {
+        key:idx + 1 + roots.length,
+        pId:roots.indexOf(env.split('_')[0]) + 1,
+        label: env,
+        value: env
+      };
+    });
+
+    env_options2 = env_options2.filter(x => x != null);
+
+    env_options2 = env_options2.concat(roots.map((x, idx) => { return {
+      key: idx+1,
+      pId: 0,
+      label: x,
+      value: x
+    };}));
+
     return (
       <span>
         <span>Environment&nbsp;</span>
-        <div className="btn-group navbar-btn" role="group" aria-label="Environment:">
-          <div className="btn-group" role="group">
-            <button className="btn btn-default dropdown-toggle"
-                    type="button" id="envDropdown" data-toggle="dropdown"
-                    aria-haspopup="true" aria-expanded="true">
-              {this.state.envID}
-              &nbsp;
-              <span className="caret"></span>
-            </button>
-            <ul className="dropdown-menu" aria-labelledby="envDropdown">
-              {env_options}
-            </ul>
+        <div className="btn-group navbar-btn"
+          role="group"
+          aria-label="Environment:">
+          <div className="btn-group"
+            role="group"
+            onMouseEnter={this.mouseOverSelect}
+            onMouseLeave={this.mouseOutSelect}>
+            <TreeSelect
+              style={this.state.envSelectorStyle}
+              allowClear={true}
+              dropdownStyle={{maxHeight: 900, overflow: 'auto'}}
+              placeholder={<i>Select environment(s)</i>}
+              searchPlaceholder="search"
+              treeLine maxTagTextLength={1000}
+              inputValue={null}
+              value={this.state.envIDs}
+              treeData={env_options2}
+              treeDefaultExpandAll
+              treeNodeFilterProp="title"
+              treeDataSimpleMode={this.state.treeDataSimpleMode}
+              treeCheckable showCheckedStrategy={SHOW_CHILD}
+              dropdownMatchSelectWidth={false}
+              onChange={this.selectEnv}
+            />
           </div>
           <button
             data-toggle="tooltip"
             title="Clear Current Environment"
             data-placement="bottom"
             className="btn btn-default"
-            disabled={!this.state.connected}
+            disabled={!(this.state.connected && this.state.envID)}
             onClick={this.closeAllPanes}>
             <span
               className="glyphicon glyphicon-erase">
@@ -746,7 +895,7 @@ class App extends React.Component {
             title="Manage Environments"
             data-placement="bottom"
             className="btn btn-default"
-            disabled={!this.state.connected}
+            disabled={!(this.state.connected && this.state.envID)}
             onClick={this.openEnvModal.bind(this)}>
             <span
               className="glyphicon glyphicon-folder-open">
@@ -778,9 +927,10 @@ class App extends React.Component {
         <div className="btn-group navbar-btn" role="group" aria-label="View:">
           <div className="btn-group" role="group">
             <button className="btn btn-default dropdown-toggle"
-                    type="button" id="viewDropdown" data-toggle="dropdown"
-                    aria-haspopup="true" aria-expanded="true">
-              {this.state.layoutID}
+              type="button" id="viewDropdown" data-toggle="dropdown"
+              aria-haspopup="true" aria-expanded="true"
+              disabled={!(this.state.connected && this.state.envID)}>
+              {(this.state.envID == null) ? 'compare' : this.state.layoutID}
               &nbsp;
               <span className="caret"></span>
             </button>
@@ -803,7 +953,7 @@ class App extends React.Component {
             title="Manage Views"
             data-placement="bottom"
             className="btn btn-default"
-            disabled={!this.state.connected}
+            disabled={!(this.state.connected && this.state.envID)}
             onClick={(ev) => {this.openViewModal()}}>
             <span
               className="glyphicon glyphicon-folder-open">
@@ -823,8 +973,10 @@ class App extends React.Component {
               {filter: ev.target.value}, () => {
                 Object.keys(this.state.panes).map((paneID) => {
                   this.focusPane(paneID);
-              });
-            });
+                });
+              }
+            );
+            localStorage.setItem('filter', ev.target.value);
             // TODO remove this once relayout is moved to a post-state
             // update kind of thing
             this.state.filter = ev.target.value;
@@ -848,6 +1000,7 @@ class App extends React.Component {
               // TODO remove this once relayout is moved to a post-state
               // update kind of thing
               this.state.filter = '';
+              localStorage.setItem('filter', '');
               this.relayout();
               this.relayout();
             }}>
@@ -857,7 +1010,7 @@ class App extends React.Component {
           </button>
         </span>
       </div>
-    )
+    );
   }
 
   render() {
@@ -957,9 +1110,9 @@ function load() {
 document.addEventListener('DOMContentLoaded', load);
 
 $(document).ready(function(){
-    $('[data-toggle="tooltip"]').tooltip({
-      container: 'body',
-      delay: {show: 600, hide: 100},
-      trigger : 'hover',
-    });
+  $('[data-toggle="tooltip"]').tooltip({
+    container: 'body',
+    delay: {show: 600, hide: 100},
+    trigger : 'hover',
+  });
 });

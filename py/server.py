@@ -125,6 +125,7 @@ class Application(tornado.web.Application):
             (r"/socket", SocketHandler, {'app': self}),
             (r"/vis_socket", VisSocketHandler, {'app': self}),
             (r"/env/(.*)", EnvHandler, {'app': self}),
+            (r"/compare/(.*)", CompareHandler, {'app': self}),
             (r"/save", SaveHandler, {'app': self}),
             (r"/error/(.*)", ErrorHandler, {'app': self}),
             (r"/win_exists", ExistsHandler, {'app': self}),
@@ -691,6 +692,111 @@ def gather_envs(state, env_path=DEFAULT_ENV_PATH):
     return sorted(list(set(items + list(state.keys()))))
 
 
+def compare_envs(state, eids, socket):
+    logging.info('comparing envs')
+    eidNums = {e: str(i) for i, e in enumerate(eids)}
+    env = {}
+    envs = {}
+    for eid in eids:
+        if eid in state:
+            envs[eid] = state.get(eid)
+        else:
+            p = os.path.join(FLAGS.env_path, eid.strip(), '.json')
+            if os.path.exists(p):
+                env = tornado.escape.json_decode(open(p, 'r').read())
+                state[eid] = env
+                envs[eid] = env
+
+    res = copy.deepcopy(envs[list(envs.keys())[0]])
+    name2Wid = {res['jsons'][wid].get('title', None): wid+'_compare'
+                for wid in res.get('jsons', {})
+                if 'title' in res['jsons'][wid]}
+    for wid in list(res['jsons'].keys()):
+        res['jsons'][wid+'_compare'] = res['jsons'][wid]
+        res['jsons'][wid] = None
+        res['jsons'].pop(wid)
+
+    for ix, eid in enumerate(envs.keys()):
+        env = envs[eid]
+        for wid in env.get('jsons', {}).keys():
+            win = env['jsons'][wid]
+            if win.get('type', None) != 'plot':
+                continue
+            if 'content' not in win:
+                continue
+            if 'title' not in win:
+                continue
+            title = win['title']
+            if title not in name2Wid:
+                continue
+
+            destWid = name2Wid[title]
+            destWidJson = res['jsons'][destWid]
+            # Combine plots with the same window title. If plot data source was
+            # labeled "name" in the legend, rename to "envId_legend" where
+            # envId is enumeration of the selected environments (not the long
+            # environment id string). This makes plot lines more readable.
+            if ix == 0:
+                destWidJson['has_compare'] = False
+                destWidJson['content']['layout']['showlegend'] = True
+                for dataIdx, data in enumerate(destWidJson['content']['data']):
+                    destWidJson['content']['data'][dataIdx]['name'] = \
+                        '{}_{}'.format(eidNums[eid], data['name'])
+            else:
+                # has_compare will be set to True only if the window title is
+                # shared by at least 2 envs.
+                destWidJson['has_compare'] = True
+                for _dataIdx, data in enumerate(win['content']['data']):
+                    data = copy.deepcopy(data)
+                    data['name'] = '{}_{}'.format(eidNums[eid], data['name'])
+                    destWidJson['content']['data'].append(data)
+
+    # Make sure that only plots that are shared by at least two envs are shown.
+    # Check has_compare flag
+    for destWid in list(res['jsons'].keys()):
+        if ('has_compare' not in res['jsons'][destWid]) or \
+                (not res['jsons'][destWid]['has_compare']):
+            del res['jsons'][destWid]
+
+    # create legend mapping environment names to environment numbers so one can
+    # look it up for the new legend
+    tableRows = ["<tr> <td> {} </td> <td> {} </td> </tr>".format(v, eidNums[v])
+                 for v in eidNums]
+
+    tbl = """"<style>
+    table, th, td {{
+        border: 1px solid black;
+    }}
+    </style>
+    <table> {} </table>""".format(' '.join(tableRows))
+
+    res['jsons']['window_compare_legend'] = {
+        "command": "window",
+        "id": "window_compare_legend",
+        "title": "compare_legend",
+        "inflate": True,
+        "width": None,
+        "height": None,
+        "contentID": "compare_legend",
+        "content": tbl,
+        "type": "text",
+        "layout": {"title": "compare_legend"},
+        "i": 1
+    }
+    if 'reload' in res:
+        socket.write_message(
+            json.dumps({'command': 'reload', 'data': res['reload']})
+        )
+
+    jsons = list(res.get('jsons', {}).values())
+    windows = sorted(jsons, key=lambda k: ('i' not in k, k.get('i', None)))
+    for v in windows:
+        socket.write_message(v)
+
+    socket.write_message(json.dumps({'command': 'layout'}))
+    socket.eid = eid
+
+
 class EnvHandler(BaseHandler):
     def initialize(self, app):
         self.state = app.state
@@ -714,6 +820,31 @@ class EnvHandler(BaseHandler):
             tornado.escape.to_basestring(self.request.body)
         )['sid']
         load_env(self.state, args, self.subs[sid], env_path=self.env_path)
+
+
+class CompareHandler(BaseHandler):
+    def initialize(self, app):
+        self.state = app.state
+        self.subs = app.subs
+        self.sources = app.sources
+
+    # TODO fix get paths for compare
+    # def get(self, eids):
+    #     items = gather_envs(self.state)
+    #     eids = eids.split('+')
+    #     eids = [x for x in eids if x in items]
+    #     self.render(
+    #         'index.html',
+    #         user=getpass.getuser(),
+    #         items=eids,
+    #         active_item=active
+    #     )
+
+    def post(self, args):
+        sid = tornado.escape.json_decode(
+            tornado.escape.to_basestring(self.request.body)
+        )['sid']
+        compare_envs(self.state, args.split('+'), self.subs[sid])
 
 
 class SaveHandler(BaseHandler):
@@ -804,24 +935,25 @@ def download_scripts(proxies=None, install_dir=None):
     b = 'https://unpkg.com/'
     bb = '%sbootstrap@3.3.7/dist/' % b
     ext_files = {
+        ## js
         '%sjquery@3.1.1/dist/jquery.min.js' % b: 'jquery.min.js',
         '%sbootstrap@3.3.7/dist/js/bootstrap.min.js' % b: 'bootstrap.min.js',
-        '%sreact-resizable@1.4.6/css/styles.css' % b: 'react-resizable-styles.css',  # noqa
-        '%sreact-grid-layout@0.14.0/css/styles.css' % b: 'react-grid-layout-styles.css',  # noqa
-        '%sreact-modal@3.1.10/dist/react-modal.min.js' % b: 'react-modal.min.js',  # noqa
-        '%sreact@15.6.1/dist/react.min.js' % b: 'react-react.min.js',
-        '%sreact-dom@15.6.1/dist/react-dom.min.js' % b: 'react-dom.min.js',
-        '%sclassnames@2.2.5' % b: 'classnames',
-        '%slayout-bin-packer@1.2.2' % b: 'layout_bin_packer',
-        'https://raw.githubusercontent.com/STRML/react-grid-layout/0.14.0/dist/' +  # noqa
-        'react-grid-layout.min.js': 'react-grid-layout.min.js',
+        '%sreact@16.2.0/dist/react.min.js' % b: 'react-react.min.js',
+        '%sreact-dom@16.2.0/dist/react-dom.min.js' % b: 'react-dom.min.js',
         'https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_SVG':  # noqa
             'mathjax-MathJax.js',
         # here is another url in case the cdn breaks down again.
         # https://raw.githubusercontent.com/plotly/plotly.js/master/dist/plotly.min.js
-        'https://cdn.plot.ly/plotly-latest.min.js':
-            'plotly-plotly.min.js',
+        'https://cdn.plot.ly/plotly-latest.min.js': 'plotly-plotly.min.js',
+
+        ## css
+        '%sreact-resizable@1.4.6/css/styles.css' % b: 'react-resizable-styles.css',  # noqa
+        '%sreact-grid-layout@0.16.3/css/styles.css' % b: 'react-grid-layout-styles.css',  # noqa
         '%scss/bootstrap.min.css' % bb: 'bootstrap.min.css',
+
+        ## fonts
+        '%sclassnames@2.2.5' % b: 'classnames',
+        '%slayout-bin-packer@1.2.2' % b: 'layout_bin_packer',
         '%sfonts/glyphicons-halflings-regular.eot' % bb:
             'glyphicons-halflings-regular.eot',
         '%sfonts/glyphicons-halflings-regular.woff2' % bb:
