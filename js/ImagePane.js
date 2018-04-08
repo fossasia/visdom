@@ -13,9 +13,9 @@ class ImagePane extends React.Component {
   _paneRef = null;
 
   state: State = {
-      scale: 1.,
-      tx: 0.,
-      ty: 0.,
+    scale: 1.,
+    tx: 0.,
+    ty: 0.,
   }
 
   handleDownload = () => {
@@ -26,37 +26,37 @@ class ImagePane extends React.Component {
   }
 
   handleZoom = (ev) => {
-     if (ev.ctrlKey) {
-         var s = Math.exp(-ev.deltaY/100);
-         this.setState({scale: this.state.scale * s});
-         ev.stopPropagation();
-         ev.preventDefault();
-     } else if(ev.shiftKey) {
-         //var direction = natural.checked ? -1 : 1;
-         var direction =  -1;
-         this.setState({tx: this.state.tx + ev.deltaX * direction});
-         this.setState({ty: this.state.ty + ev.deltaY * direction});
-         ev.stopPropagation();
-         ev.preventDefault();
-     }
+    if (ev.ctrlKey) {
+      var s = Math.exp(-ev.deltaY/100);
+      this.setState({scale: this.state.scale * s});
+      ev.stopPropagation();
+      ev.preventDefault();
+    } else if(ev.shiftKey) {
+      //var direction = natural.checked ? -1 : 1;
+      var direction =  -1;
+      this.setState({tx: this.state.tx + ev.deltaX * direction});
+      this.setState({ty: this.state.ty + ev.deltaY * direction});
+      ev.stopPropagation();
+      ev.preventDefault();
+    }
   }
 
   handleReset = () => {
-      this.setState({
-          scale: 1.,
-          tx: 0.,
-          ty: 0.
-      });
+    this.setState({
+      scale: 1.,
+      tx: 0.,
+      ty: 0.
+    });
   }
 
   render() {
-      let content = this.props.content;
-      const divstyle = {
-          left: this.state.tx,
-          top: this.state.ty,
-          position: "relative",
-          display: "block",
-      };
+    let content = this.props.content;
+    const divstyle = {
+      left: this.state.tx,
+      top: this.state.ty,
+      position: "relative",
+      display: "block",
+    };
     return (
       <Pane
         {...this.props}

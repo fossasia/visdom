@@ -33,9 +33,9 @@ class Pane extends React.Component {
   }
 
   zoom = (ev) => {
-      if (this.props.handleZoom) {
-          this.props.handleZoom(ev);
-      }
+    if (this.props.handleZoom) {
+      this.props.handleZoom(ev);
+    }
   }
 
   resize = () => {
