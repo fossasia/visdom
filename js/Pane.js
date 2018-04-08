@@ -96,7 +96,7 @@ class Pane extends React.Component {
           ref={(ref) => this._barRef = ref}>
           <button title="close" onClick={this.close}>X</button>
           <button title="save" onClick={this.download}>&#8681;</button>
-          <button title="reset" onClick={this.reset}>&#10226;</button>
+          <button title="reset" onClick={this.reset} hidden={!this.props.handleReset}>&#10226;</button>
           <div>{this.props.title}</div>
         </div>
         <div className="content">{this.props.children}</div>
