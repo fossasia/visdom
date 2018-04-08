@@ -184,10 +184,17 @@ doesn't override our desire to make them non-interactable */
 }
 
 .rc-tree-select-selection--multiple {
-    max-height: 35px;
-    min-height: 35px;
+    max-height: 34px;
+    min-height: 34px;
     overflow-y: scroll;
-    overflow: hidden;
+}
+
+.rc-tree-select-selection--multiple .rc-tree-select-selection__clear {
+  right: 20px;
+}
+
+.rc-tree-select-selection {
+  border-radius: 6px 0px 0px 6px;
 }
 
 .rc-tree-select-selection--multiple .rc-tree-select-search__field__placeholder {
