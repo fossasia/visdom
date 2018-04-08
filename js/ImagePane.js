@@ -41,12 +41,12 @@ class ImagePane extends React.Component {
      }
   }
 
-  resetZoom = (ev) => {
+  handleReset = () => {
       this.setState({
-             scale: 1.,
-             tx: 0.,
-             ty: 0.
-         });
+          scale: 1.,
+          tx: 0.,
+          ty: 0.
+      });
   }
 
   render() {
@@ -61,18 +61,19 @@ class ImagePane extends React.Component {
       <Pane
         {...this.props}
         handleDownload={this.handleDownload}
-        onDoubleClick={this.resetZoom}
+        handleReset={this.handleReset.bind(this)}
+        handleZoom={this.handleZoom.bind(this)}
         ref={(ref) => this._paneRef = ref}>
-            <div style={divstyle}>
-        <img
-          className="content-image cssTransforms"
-        src={content.src}
-          width={Math.ceil(1 + this.props.width * this.state.scale) + "px"}
-          height={Math.ceil(1 + this.props.height * this.state.scale) + "px"}
-          onWheel={this.handleZoom.bind(this)}
-        onDoubleClick={this.resetZoom.bind(this)}
+        <div style={divstyle}>
+          <img
+            className="content-image cssTransforms"
+            src={content.src}
+            width={Math.ceil(1 + this.props.width * this.state.scale) + "px"}
+            height={Math.ceil(1 + this.props.height * this.state.scale) + "px"}
+            onWheel={this.handleZoom.bind(this)}
+            onDoubleClick={this.handleReset.bind(this)}
             />
-            </div>
+        </div>
         <p className="caption">{content.caption}</p>
       </Pane>
     )
