@@ -70,7 +70,6 @@ class ImagePane extends React.Component {
             src={content.src}
             width={Math.ceil(1 + this.props.width * this.state.scale) + "px"}
             height={Math.ceil(1 + this.props.height * this.state.scale) + "px"}
-            onWheel={this.handleZoom.bind(this)}
             onDoubleClick={this.handleReset.bind(this)}
             />
         </div>

@@ -8,4 +8,5 @@ visdom.egg-info/
 setup.cfg
 py/static/fonts/
 py/static/css/
-py/static/js/
+py/static/js/*.min.js
+py/static/js/mathjax-MathJax.js
