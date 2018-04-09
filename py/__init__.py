@@ -35,6 +35,14 @@ try:
 except BaseException:
     from . import torchfile
 
+try:
+    raise ConnectionError()
+except NameError:  # python 2 doesn't have ConnectionError
+    class ConnectionError(Exception):
+        pass
+except ConnectionError:
+    pass
+
 logging.getLogger('requests').setLevel(logging.CRITICAL)
 logging.getLogger('urllib3').setLevel(logging.CRITICAL)
 logger = logging.getLogger(__name__)
@@ -83,20 +91,23 @@ def loadfile(filename):
 
 def _scrub_dict(d):
     if type(d) is dict:
-        return dict((k, _scrub_dict(v)) for k, v in list(d.items())
-                    if v is not None and _scrub_dict(v) is not None)
+        return {k: _scrub_dict(v) for k, v in list(d.items())
+                if v is not None and _scrub_dict(v) is not None}
     else:
         return d
 
 
 def _axisformat(xy, opts):
-    fields = ['type', 'label', 'tickmin', 'tickmax', 'tickvals', 'ticklabels', 'tick', 'tickfont' ]
-    if any([opts.get(xy + i) for i in fields]):
+    fields = ['type', 'label', 'tickmin', 'tickmax', 'tickvals', 'ticklabels',
+              'tick', 'tickfont']
+    if any(opts.get(xy + i) for i in fields):
+        has_ticks = (opts.get(xy + 'tickmin') and opts.get(xy + 'tickmax')) \
+            is not None
         return {
             'type': opts.get(xy + 'type'),
             'title': opts.get(xy + 'label'),
-            'range': [opts.get(xy + 'tickmin'), opts.get(xy + 'tickmax')]
-            if (opts.get(xy + 'tickmin') and opts.get(xy + 'tickmax')) is not None else None,
+            'range': [opts.get(xy + 'tickmin'),
+                      opts.get(xy + 'tickmax')] if has_ticks else None,
             'tickvals': opts.get(xy + 'tickvals'),
             'ticktext': opts.get(xy + 'ticklabels'),
             'dtick': opts.get(xy + 'tickstep'),
@@ -124,6 +135,11 @@ def _opts2layout(opts, is3d=False):
 
     if opts.get('stacked'):
         layout['barmode'] = 'stack' if opts.get('stacked') else 'group'
+
+    layout_opts = opts.get('layoutopts')
+    if layout_opts is not None:
+        if 'plotly' in layout_opts:
+            layout.update(layout_opts['plotly'])
 
     return _scrub_dict(layout)
 
@@ -234,6 +250,7 @@ class Visdom(object):
         proxy=None,
         env='main',
         send=True,
+        raise_exceptions=None
     ):
         self.server_base_name = server[server.index("//") + 2:]
         self.server = server
@@ -246,6 +263,8 @@ class Visdom(object):
         self.event_handlers = {}  # Haven't registered any events
         self.socket_alive = False
         self.use_socket = True
+        # Flag to indicate whether to raise errors or suppress them
+        self.raise_exceptions = raise_exceptions
         try:
             import torch  # noqa F401: we do use torch, just weirdly
             wrap_tensor_methods(self, pytorch_wrap)
@@ -337,11 +356,23 @@ class Visdom(object):
             )
             return r.text
         except BaseException:
-            if not quiet:
-                print("Exception in user code:")
-                print('-' * 60)
-                traceback.print_exc()
-            return False
+            if self.raise_exceptions:
+                raise ConnectionError("Error connecting to Visdom server")
+            else:
+                if self.raise_exceptions is None:
+                    warnings.warn(
+                        "Visdom is eventually changing to default to raising "
+                        "exceptions rather than ignoring/printing. This change"
+                        " is expected to happen by July 2018. Please set "
+                        "`raise_exceptions` to False to retain current "
+                        "behavior.",
+                        PendingDeprecationWarning
+                    )
+                if not quiet:
+                    print("Exception in user code:")
+                    print('-' * 60)
+                    traceback.print_exc()
+                return False
 
     def save(self, envs):
         """
@@ -406,7 +437,12 @@ class Visdom(object):
         or not a window exists on the server already.
         Returns None if something went wrong
         """
-        e = self._win_exists_wrap(win, env)
+        try:
+            e = self._win_exists_wrap(win, env)
+        except ConnectionError:
+            print("Error connecting to Visdom server!")
+            return None
+
         if e == 'true':
             return True
         elif e == 'false':
@@ -479,9 +515,13 @@ class Visdom(object):
 
         # show SVG:
         if 'height' not in opts:
-            opts['height'] = 1.4 * int(re.search('height\="([0-9]*)pt"', svg).group(1))
+            height = re.search('height\="([0-9\.]*)pt"', svg)
+            if height is not None:
+                opts['height'] = 1.4 * int(math.ceil(float(height.group(1))))
         if 'width' not in opts:
-            opts['width'] = 1.35 * int(re.search('width\="([0-9]*)pt"', svg).group(1))
+            width = re.search('width\="([0-9\.]*)pt"', svg)
+            if width is not None:
+                opts['width'] = 1.35 * int(math.ceil(float(width.group(1))))
         return self.svg(svgstr=svg, opts=opts, env=env, win=win)
 
     def image(self, img, win=None, env=None, opts=None):
@@ -555,7 +595,8 @@ class Visdom(object):
         nmaps = tensor.shape[0]
         xmaps = min(nrow, nmaps)
         ymaps = int(math.ceil(float(nmaps) / xmaps))
-        height, width = int(tensor.shape[2] + 2 * padding), int(tensor.shape[3] + 2 * padding)
+        height = int(tensor.shape[2] + 2 * padding)
+        width = int(tensor.shape[3] + 2 * padding)
 
         grid = np.ones([3, height * ymaps, width * xmaps])
         k = 0
@@ -599,7 +640,7 @@ class Visdom(object):
             scipy.io.wavfile.write(audiofile, opts.get('sample_frequency'), tensor)
 
         extension = audiofile.split('.')[-1].lower()
-        mimetypes = dict(wav='wav', mp3='mp3', ogg='ogg', flac='flac')
+        mimetypes = {'wav': 'wav', 'mp3': 'mp3', 'ogg': 'ogg', 'flac': 'flac'}
         mimetype = mimetypes.get(extension)
         assert mimetype is not None, 'unknown audio type: %s' % extension
 
@@ -663,7 +704,7 @@ class Visdom(object):
             writer = None
 
         extension = videofile.split(".")[-1].lower()
-        mimetypes = dict(mp4='mp4', ogv='ogg', avi='avi', webm='webm')
+        mimetypes = {'mp4': 'mp4', 'ogv': 'ogg', 'avi': 'avi', 'webm': 'webm'}
         mimetype = mimetypes.get(extension)
         assert mimetype is not None, 'unknown video type: %s' % extension
 
@@ -835,13 +876,14 @@ class Visdom(object):
             assert type(opts['legend']) == list and len(opts['legend']) == K
 
         data = []
+        trace_opts = opts.get('traceopts', {'plotly': {}})['plotly']
         for k in range(1, K + 1):
             ind = np.equal(Y, k)
             if ind.any():
                 mc = opts.get('markercolor')
                 if 'legend' in opts:
                     trace_name = opts.get('legend')[k - 1]
-                elif X.shape[0] == 1 and name is not None:
+                elif K == 1 and name is not None:
                     trace_name = name
                 else:
                     trace_name = str(k)
@@ -868,6 +910,9 @@ class Visdom(object):
 
                 if is3d:
                     _data['z'] = X.take(2, 1)[ind].tolist()
+
+                if trace_name in trace_opts:
+                    _data.update(trace_opts[trace_name])
 
                 data.append(_scrub_dict(_data))
 
@@ -925,11 +970,16 @@ class Visdom(object):
             else:
                 assert X is not None, 'must specify x-values for line update'
         assert Y.ndim == 1 or Y.ndim == 2, 'Y should have 1 or 2 dim'
+        assert Y.shape[-1] > 0, 'must plot one line at least'
 
         if X is not None:
             assert X.ndim == 1 or X.ndim == 2, 'X should have 1 or 2 dim'
         else:
             X = np.linspace(0, 1, Y.shape[0])
+
+        if Y.ndim == 2 and Y.shape[1] == 1:
+                Y = Y.reshape(Y.shape[0])
+                X = X.reshape(X.shape[0])
 
         if Y.ndim == 2 and X.ndim == 1:
             X = np.tile(X, (Y.shape[1], 1)).transpose()
