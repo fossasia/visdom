@@ -13,7 +13,9 @@ class ImagePane extends React.Component {
   _paneRef = null;
 
   state: State = {
-     scale: 1.,
+    scale: 1.,
+    tx: 0.,
+    ty: 0.,
   }
 
   handleDownload = () => {
@@ -24,37 +26,53 @@ class ImagePane extends React.Component {
   }
 
   handleZoom = (ev) => {
-     let delta = (ev.deltaMode === ev.DOM_DELTA_PIXEL) ? ev.deltaY :
-                                                         ev.deltaY * 40;
-     let scalefactor = Math.exp(-delta / 5000.);
-     this.setState(
-        {scale: this.state.scale * scalefactor}
-     );
-     ev.stopPropagation();
-     ev.preventDefault();
+    if(ev.altKey) {
+      //var direction = natural.checked ? -1 : 1;
+      var direction =  -1;
+      this.setState({tx: this.state.tx + ev.deltaX * direction});
+      this.setState({ty: this.state.ty + ev.deltaY * direction});
+      ev.stopPropagation();
+      ev.preventDefault();
+    } else if (ev.ctrlKey) {
+      var s = Math.exp(-ev.deltaY/100);
+      this.setState({scale: this.state.scale * s});
+      ev.stopPropagation();
+      ev.preventDefault();
+    }
   }
 
-  resetZoom = (ev) => {
-     this.setState(
-       {scale: 1.}
-    );
+  handleReset = () => {
+    this.setState({
+      scale: 1.,
+      tx: 0.,
+      ty: 0.
+    });
   }
 
   render() {
     let content = this.props.content;
+    const divstyle = {
+      left: this.state.tx,
+      top: this.state.ty,
+      position: "relative",
+      display: "block",
+    };
     return (
       <Pane
         {...this.props}
         handleDownload={this.handleDownload}
+        handleReset={this.handleReset.bind(this)}
+        handleZoom={this.handleZoom.bind(this)}
         ref={(ref) => this._paneRef = ref}>
-        <img
-          className="content-image"
-          src={content.src}
-          width={Math.ceil(1 + this.props.width * this.state.scale) + "px"}
-          height={Math.ceil(1 + this.props.height * this.state.scale) + "px"}
-          onWheel={this.handleZoom.bind(this)}
-          onDoubleClick={this.resetZoom.bind(this)}
-        />
+        <div style={divstyle}>
+          <img
+            className="content-image cssTransforms"
+            src={content.src}
+            width={Math.ceil(1 + this.props.width * this.state.scale) + "px"}
+            height={Math.ceil(1 + this.props.height * this.state.scale) + "px"}
+            onDoubleClick={this.handleReset.bind(this)}
+            />
+        </div>
         <p className="caption">{content.caption}</p>
       </Pane>
     )
