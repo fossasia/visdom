@@ -26,7 +26,7 @@ class ImagePane extends React.Component {
   }
 
   handleZoom = (ev) => {
-    if(ev.shiftKey) {
+    if(ev.altKey) {
       //var direction = natural.checked ? -1 : 1;
       var direction =  -1;
       this.setState({tx: this.state.tx + ev.deltaX * direction});
