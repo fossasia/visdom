@@ -27,7 +27,7 @@ setup(
 
     # Package info
     packages=['visdom'],
-    package_dir={'visdom': 'py'},
+    package_dir={'': 'py'},
     package_data={'visdom': ['static/*.*', 'static/**/*']},
     include_package_data=True,
     zip_safe=False,
