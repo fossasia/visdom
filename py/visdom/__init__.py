@@ -247,7 +247,8 @@ class Visdom(object):
         endpoint='events',
         port=8097,
         ipv6=True,
-        proxy=None,
+        http_proxy_host=None,
+        http_proxy_port=None,
         env='main',
         send=True,
         raise_exceptions=None
@@ -257,7 +258,8 @@ class Visdom(object):
         self.endpoint = endpoint
         self.port = port
         self.ipv6 = ipv6
-        self.proxy = proxy
+        self.http_proxy_host = http_proxy_host
+        self.http_proxy_port = http_proxy_port
         self.env = env              # default env
         self.send = send
         self.event_handlers = {}  # Haven't registered any events
@@ -322,7 +324,8 @@ class Visdom(object):
                         on_error=on_error,
                         on_close=on_close
                     )
-                    ws.run_forever()
+                    ws.run_forever(http_proxy_host=self.http_proxy_host,
+                                   http_proxy_port=self.http_proxy_port)
                 except Exception as e:
                     logger.error('Socket had error {}, attempting restart'.format(e))
                 time.sleep(3)
