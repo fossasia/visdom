@@ -3,7 +3,7 @@ module.exports = {
     './js/main.js',
   ],
   output: {
-    filename: 'py/static/js/main.js'
+    filename: 'py/visdom/static/js/main.js'
   },
   module: {
     loaders: [
