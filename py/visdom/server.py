@@ -816,11 +816,11 @@ class EnvHandler(BaseHandler):
 
     def get(self, eid):
         items = gather_envs(self.state, env_path=self.env_path)
-        active = 'main' if eid not in items else eid
+        active = '' if eid not in items else eid
         self.render(
             'index.html',
             user=getpass.getuser(),
-            items=[active],
+            items=items,
             active_item=active
         )
 
@@ -838,17 +838,18 @@ class CompareHandler(BaseHandler):
         self.sources = app.sources
         self.env_path = app.env_path
 
-    # TODO fix get paths for compare
-    # def get(self, eids):
-    #     items = gather_envs(self.state)
-    #     eids = eids.split('+')
-    #     eids = [x for x in eids if x in items]
-    #     self.render(
-    #         'index.html',
-    #         user=getpass.getuser(),
-    #         items=eids,
-    #         active_item=active
-    #     )
+    def get(self, eids):
+        items = gather_envs(self.state)
+        eids = eids.split('+')
+        # Filter out eids that don't exist
+        eids = [x for x in eids if x in items]
+        eids = '+'.join(eids)
+        self.render(
+            'index.html',
+            user=getpass.getuser(),
+            items=items,
+            active_item=eids
+        )
 
     def post(self, args):
         sid = tornado.escape.json_decode(
@@ -922,7 +923,7 @@ class IndexHandler(BaseHandler):
             'index.html',
             user=getpass.getuser(),
             items=items,
-            active_item='main'
+            active_item=''
         )
 
 
