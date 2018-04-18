@@ -58,6 +58,23 @@ const MODAL_STYLE = {
 
 const DEFAULT_LAYOUT = 'current';
 
+var use_env = null;
+var use_envs = null;
+if (ACTIVE_ENV !== '') {
+  if (ACTIVE_ENV.indexOf('+') > -1) {
+    // Compare case
+    use_env = null;
+    use_envs = ACTIVE_ENV.split('+');
+  } else {
+    // not compare case
+    use_env = ACTIVE_ENV;
+    use_envs = [ACTIVE_ENV];
+  }
+} else {
+  use_env = localStorage.getItem( 'envID' ) || 'main';
+  use_envs = JSON.parse(localStorage.getItem( 'envIDs' )) || ['main']
+}
+
 // TODO: Move some of this to smaller components and/or use something like redux
 // to move state out of the app to a standalone store.
 class App extends React.Component {
@@ -66,8 +83,8 @@ class App extends React.Component {
     sessionID: null,
     panes: {},
     focusedPaneID: null,
-    envID: localStorage.getItem( 'envID' ) || 'main',
-    envIDs: JSON.parse(localStorage.getItem( 'envIDs' )) || ['main'],
+    envID: use_env,
+    envIDs: use_envs,
     saveText: ACTIVE_ENV,
     layoutID: DEFAULT_LAYOUT,
     // Bad form... make a copy of the global var we generated in python.
@@ -120,10 +137,15 @@ class App extends React.Component {
 
   correctPathname = () => {
     var pathname = window.location.pathname;
-    if (pathname.slice(-1) != '/') {
-      pathname = pathname + '/'
+    if (pathname.indexOf('/env/') > -1) {
+      pathname = pathname.split('/env/')[0];
+    } else if (pathname.indexOf('/compare/') > -1) {
+      pathname = pathname.split('/compare/')[0];
     }
-    return pathname
+    if (pathname.slice(-1) != '/') {
+      pathname = pathname + '/';
+    }
+    return pathname;
   }
 
   addPaneBatched = (pane) => {
