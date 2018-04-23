@@ -80,6 +80,7 @@ if (ACTIVE_ENV !== '') {
 class App extends React.Component {
   state = {
     connected: false,
+    readonly: false,
     sessionID: null,
     panes: {},
     focusedPaneID: null,
@@ -242,6 +243,7 @@ class App extends React.Component {
       case 'register':
         this.setState({
           sessionID: cmd.data,
+          readonly: cmd.readonly,
         }, () => {this.postForEnv(this.state.envIDs);});
         break;
       case 'pane':
@@ -292,6 +294,9 @@ class App extends React.Component {
   }
 
   closePane = (paneID, keepPosition = false, setState = true) => {
+    if (this.state.readonly) {
+      return;
+    }
     let newPanes = Object.assign({}, this.state.panes);
     delete newPanes[paneID];
     if (!keepPosition) {
@@ -319,6 +324,9 @@ class App extends React.Component {
   }
 
   closeAllPanes = () => {
+    if (this.state.readonly) {
+      return;
+    }
     Object.keys(this.state.panes).map((paneID) => {
       this.closePane(paneID, false, false);
     });
@@ -583,7 +591,7 @@ class App extends React.Component {
   }
 
   broadcastKeyEvent = (event) => {
-    if (this.state.focusedPaneID === null) {
+    if (this.state.focusedPaneID === null || this.state.readonly) {
       return;
     }
     let keyEvent = {
@@ -906,7 +914,7 @@ class App extends React.Component {
             title="Clear Current Environment"
             data-placement="bottom"
             className="btn btn-default"
-            disabled={!(this.state.connected && this.state.envID)}
+            disabled={!(this.state.connected && this.state.envID && !this.state.readonly)}
             onClick={this.closeAllPanes}>
             <span
               className="glyphicon glyphicon-erase">
@@ -917,7 +925,7 @@ class App extends React.Component {
             title="Manage Environments"
             data-placement="bottom"
             className="btn btn-default"
-            disabled={!(this.state.connected && this.state.envID)}
+            disabled={!(this.state.connected && this.state.envID && !this.state.readonly)}
             onClick={this.openEnvModal.bind(this)}>
             <span
               className="glyphicon glyphicon-folder-open">
@@ -975,7 +983,7 @@ class App extends React.Component {
             title="Manage Views"
             data-placement="bottom"
             className="btn btn-default"
-            disabled={!(this.state.connected && this.state.envID)}
+            disabled={!(this.state.connected && this.state.envID && !this.state.readonly)}
             onClick={(ev) => {this.openViewModal()}}>
             <span
               className="glyphicon glyphicon-folder-open">
@@ -1087,10 +1095,12 @@ class App extends React.Component {
             <button
               className={classNames({
                 'btn': true,
-                'btn-success': this.state.connected,
-                'btn-danger': !this.state.connected})}
+                'btn-warning': this.state.connected && this.state.readonly,
+                'btn-success': this.state.connected && !this.state.readonly,
+                'btn-danger': !this.state.connected
+                })}
               onClick={this.toggleOnlineState}>
-              {this.state.connected ? 'online' : 'offline'}
+              {this.state.connected ? (this.state.readonly ? 'readonly' : 'online') : 'offline'}
             </button>
           </span>
         </div>
