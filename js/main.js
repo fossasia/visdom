@@ -983,7 +983,7 @@ class App extends React.Component {
             title="Manage Views"
             data-placement="bottom"
             className="btn btn-default"
-            disabled={!(this.state.connected && this.state.envID)}
+            disabled={!(this.state.connected && this.state.envID && !this.state.readonly)}
             onClick={(ev) => {this.openViewModal()}}>
             <span
               className="glyphicon glyphicon-folder-open">
