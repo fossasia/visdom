@@ -232,7 +232,8 @@ class SocketHandler(tornado.websocket.WebSocketHandler):
             'Opened new socket from ip: {}'.format(self.request.remote_ip))
 
         self.write_message(
-            json.dumps({'command': 'register', 'data': self.sid, 'readonly': self.readonly}))
+            json.dumps({'command': 'register', 'data': self.sid,
+                        'readonly': self.readonly}))
         self.broadcast_layouts([self])
         broadcast_envs(self, [self])
 
@@ -369,7 +370,11 @@ def broadcast(self, msg, eid):
 
 def register_window(self, p, eid):
     # in case env doesn't exist
-    self.state[eid] = self.state.get(eid, {'jsons': {}, 'reload': {}})
+    is_new_env = False
+    if eid not in self.state:
+        is_new_env = True
+        self.state[eid] = self.state.get(eid, {'jsons': {}, 'reload': {}})
+
     env = self.state[eid]['jsons']
 
     if p['id'] in env:
@@ -380,7 +385,8 @@ def register_window(self, p, eid):
     env[p['id']] = p
 
     broadcast(self, p, eid)
-    broadcast_envs(self)
+    if is_new_env:
+        broadcast_envs(self)
     self.write(p['id'])
 
 
@@ -953,11 +959,11 @@ def download_scripts(proxies=None, install_dir=None):
     b = 'https://unpkg.com/'
     bb = '%sbootstrap@3.3.7/dist/' % b
     ext_files = {
-        ## js
+        # - js
         '%sjquery@3.1.1/dist/jquery.min.js' % b: 'jquery.min.js',
         '%sbootstrap@3.3.7/dist/js/bootstrap.min.js' % b: 'bootstrap.min.js',
         '%sreact@16.2.0/umd/react.production.min.js' % b: 'react-react.min.js',
-        '%sreact-dom@16.2.0/umd/react-dom.production.min.js' % b: 'react-dom.min.js',
+        '%sreact-dom@16.2.0/umd/react-dom.production.min.js' % b: 'react-dom.min.js',  # noqa
         '%sreact-modal@3.1.10/dist/react-modal.min.js' % b: 'react-modal.min.js',  # noqa
         'https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_SVG':  # noqa
             'mathjax-MathJax.js',
@@ -965,12 +971,12 @@ def download_scripts(proxies=None, install_dir=None):
         # https://raw.githubusercontent.com/plotly/plotly.js/master/dist/plotly.min.js
         'https://cdn.plot.ly/plotly-latest.min.js': 'plotly-plotly.min.js',
 
-        ## css
+        # - css
         '%sreact-resizable@1.4.6/css/styles.css' % b: 'react-resizable-styles.css',  # noqa
         '%sreact-grid-layout@0.16.3/css/styles.css' % b: 'react-grid-layout-styles.css',  # noqa
         '%scss/bootstrap.min.css' % bb: 'bootstrap.min.css',
 
-        ## fonts
+        # - fonts
         '%sclassnames@2.2.5' % b: 'classnames',
         '%slayout-bin-packer@1.2.2' % b: 'layout_bin_packer',
         '%sfonts/glyphicons-halflings-regular.eot' % bb:
