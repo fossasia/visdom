@@ -373,7 +373,7 @@ def register_window(self, p, eid):
     is_new_env = False
     if eid not in self.state:
         is_new_env = True
-        self.state[eid] = self.state.get(eid, {'jsons': {}, 'reload': {}})
+        self.state[eid] = {'jsons': {}, 'reload': {}}
 
     env = self.state[eid]['jsons']
 
