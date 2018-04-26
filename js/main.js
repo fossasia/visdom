@@ -103,7 +103,8 @@ class App extends React.Component {
       rootPId: 0
     },
     envSelectorStyle: {width: 1280/2 },
-    flexSelectorOnHover: false
+    flexSelectorOnHover: false,
+    confirmClear: false,
   };
 
   _bin = null;
@@ -335,7 +336,22 @@ class App extends React.Component {
       layout: [],
       panes: {},
       focusedPaneID: null,
+      confirmClear: false,
     });
+  }
+
+  triggerClear = () => {
+    if (this.state.confirmClear) {
+      this.closeAllPanes();
+    } else {
+      this.setState({confirmClear: true});
+    }
+  }
+
+  cancelClear = () => {
+    if (this.state.confirmClear) {
+      this.setState({confirmClear: false});
+    }
   }
 
   selectEnv = (selectedNodes) => {
@@ -691,6 +707,16 @@ class App extends React.Component {
         this.postForEnv(['main']);
       }
     }
+
+    // Bootstrap tooltips need some encouragement
+    if (this.state.confirmClear) {
+      $("#clear-button").attr('data-original-title', "Are you sure?")
+                        .tooltip('fixTitle')
+                        .tooltip('show');
+    } else {
+      $("#clear-button").attr('data-original-title', "Clear Current Environment")
+                        .tooltip('fixTitle');
+    }
   }
 
   onWidthChange = (width, cols) => {
@@ -881,6 +907,14 @@ class App extends React.Component {
       value: x
     };}));
 
+    if (this.state.confirmClear) {
+      var clearText = "Are you sure?";
+      var clearStyle = "btn btn-warning";
+    } else {
+      var clearText = "Clear Current Environment";
+      var clearStyle = "btn btn-default";
+    }
+
     return (
       <span>
         <span>Environment&nbsp;</span>
@@ -910,12 +944,14 @@ class App extends React.Component {
             />
           </div>
           <button
+            id="clear-button"
             data-toggle="tooltip"
-            title="Clear Current Environment"
+            title={clearText}
             data-placement="bottom"
-            className="btn btn-default"
+            className={clearStyle}
             disabled={!(this.state.connected && this.state.envID && !this.state.readonly)}
-            onClick={this.closeAllPanes}>
+            onClick={this.triggerClear}
+            onBlur={this.cancelClear}>
             <span
               className="glyphicon glyphicon-erase">
             </span>
