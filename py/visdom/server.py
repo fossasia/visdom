@@ -131,6 +131,7 @@ class Application(tornado.web.Application):
             (r"/error/(.*)", ErrorHandler, {'app': self}),
             (r"/win_exists", ExistsHandler, {'app': self}),
             (r"/win_data", DataHandler, {'app': self}),
+            (r"/login(.*)", LoginHandler, {'app': self}),
             (r"/(.*)", IndexHandler, {'app': self}),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)
@@ -932,6 +933,21 @@ class IndexHandler(BaseHandler):
             active_item=''
         )
 
+class LoginHandler(BaseHandler):
+    def initialize(self, app):
+        self.state = app.state
+        self.port = app.port
+        self.env_path = app.env_path
+
+    def get(self, args, **kwargs):
+        items = gather_envs(self.state, env_path=self.env_path)
+        self.render(
+            'login.html',
+            user=getpass.getuser(),
+            items=items,
+            active_item=''
+        )
+
 
 class ErrorHandler(BaseHandler):
     def get(self, text):
@@ -1032,9 +1048,10 @@ def download_scripts(proxies=None, install_dir=None):
                     exc.reason, key))
 
 
-def start_server(port=DEFAULT_PORT, env_path=DEFAULT_ENV_PATH, readonly=False, print_func=None):
+def start_server(port=DEFAULT_PORT, env_path=DEFAULT_ENV_PATH, readonly=False, print_func=None, with_login=False):
     print("It's Alive!")
     app = Application(port=port, env_path=env_path, readonly=readonly)
+
     app.listen(port, max_buffer_size=1024 ** 3)
     logging.info("Application Started")
     if "HOSTNAME" in os.environ:
@@ -1061,6 +1078,7 @@ def main(print_func=None):
                              'level name or int (example: 20)')
     parser.add_argument('-readonly', help='start in readonly mode',
                         action = 'store_true')
+    parser.add_argument('--with-login', type=bool, default=False ,help='start the server with authentication')
     FLAGS = parser.parse_args()
 
     try:
