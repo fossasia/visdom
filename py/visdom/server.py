@@ -96,13 +96,15 @@ def serialize_all(state, env_path=DEFAULT_ENV_PATH):
 
 
 class Application(tornado.web.Application):
-    def __init__(self, port=DEFAULT_PORT, env_path=DEFAULT_ENV_PATH, readonly=False):
+    def __init__(self, port=DEFAULT_PORT, env_path=DEFAULT_ENV_PATH, readonly=False, with_login=False):
         self.state = {}
         self.subs = {}
         self.sources = {}
         self.env_path = env_path
         self.port = port
         self.readonly = readonly
+        self.with_login = with_login
+        self.user_login = False
 
         # reload state
         ensure_dir_exists(env_path)
@@ -929,15 +931,34 @@ class IndexHandler(BaseHandler):
         self.state = app.state
         self.port = app.port
         self.env_path = app.env_path
+        self.with_login = app.with_login
+        self.user_login = app.user_login
 
     def get(self, args, **kwargs):
         items = gather_envs(self.state, env_path=self.env_path)
-        self.render(
-            'index.html',
-            user=getpass.getuser(),
-            items=items,
-            active_item=''
-        )
+        if self.with_login == False:
+           self.render(
+                'index.html',
+                user=getpass.getuser(),
+                items=items,
+                active_item=''
+            ) 
+
+        if self.with_login and self.user_login:
+            self.render(
+                'index.html',
+                user=getpass.getuser(),
+                items=items,
+                active_item=''
+            )
+        else:
+            self.render(
+                'login.html',
+                user=getpass.getuser(),
+                items=items,
+                active_item=''
+            )
+
 
 class LoginHandler(BaseHandler):
     def initialize(self, app):
@@ -953,6 +974,9 @@ class LoginHandler(BaseHandler):
             items=items,
             active_item=''
         )
+
+    def post(self):
+        pass
 
 
 class ErrorHandler(BaseHandler):
@@ -1056,7 +1080,7 @@ def download_scripts(proxies=None, install_dir=None):
 
 def start_server(port=DEFAULT_PORT, env_path=DEFAULT_ENV_PATH, readonly=False, print_func=None, with_login=False):
     print("It's Alive!")
-    app = Application(port=port, env_path=env_path, readonly=readonly)
+    app = Application(port=port, env_path=env_path, readonly=readonly, with_login=with_login)
 
     app.listen(port, max_buffer_size=1024 ** 3)
     logging.info("Application Started")
@@ -1084,7 +1108,8 @@ def main(print_func=None):
                              'level name or int (example: 20)')
     parser.add_argument('-readonly', help='start in readonly mode',
                         action = 'store_true')
-    parser.add_argument('--with-login', type=bool, default=False ,help='start the server with authentication')
+    parser.add_argument('-with_login', default=False, 
+                        action='store_true', help='start the server with authentication')
     FLAGS = parser.parse_args()
 
     try:
@@ -1099,7 +1124,7 @@ def main(print_func=None):
 
     logging.getLogger().setLevel(logging_level)
 
-    start_server(port=FLAGS.port, env_path=FLAGS.env_path, readonly=FLAGS.readonly, print_func=print_func)
+    start_server(port=FLAGS.port, env_path=FLAGS.env_path, readonly=FLAGS.readonly, print_func=print_func, with_login=FLAGS.with_login)
 
 
 if __name__ == "__main__":
