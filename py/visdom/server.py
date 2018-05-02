@@ -840,7 +840,8 @@ class EnvHandler(BaseHandler):
         sid = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )['sid']
-        load_env(self.state, args, self.subs[sid], env_path=self.env_path)
+        if sid in self.subs:
+            load_env(self.state, args, self.subs[sid], env_path=self.env_path)
 
 
 class CompareHandler(BaseHandler):
@@ -867,8 +868,9 @@ class CompareHandler(BaseHandler):
         sid = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )['sid']
-        compare_envs(self.state, args.split('+'), self.subs[sid],
-                     self.env_path)
+        if sid in self.subs:
+            compare_envs(self.state, args.split('+'), self.subs[sid],
+                         self.env_path)
 
 
 class SaveHandler(BaseHandler):
