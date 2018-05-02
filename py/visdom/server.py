@@ -14,6 +14,7 @@ from __future__ import unicode_literals
 import argparse
 import copy
 import getpass
+import hashlib
 import inspect
 import json
 import logging
@@ -96,7 +97,7 @@ def serialize_all(state, env_path=DEFAULT_ENV_PATH):
 
 
 class Application(tornado.web.Application):
-    def __init__(self, port=DEFAULT_PORT, env_path=DEFAULT_ENV_PATH, readonly=False, with_login=False):
+    def __init__(self, port=DEFAULT_PORT, env_path=DEFAULT_ENV_PATH, readonly=False, with_login=False, user=False):
         self.state = {}
         self.subs = {}
         self.sources = {}
@@ -104,7 +105,7 @@ class Application(tornado.web.Application):
         self.port = port
         self.readonly = readonly
         self.with_login = with_login
-        self.user_login = False
+        self.user_login = user 
 
         # reload state
         ensure_dir_exists(env_path)
@@ -133,7 +134,6 @@ class Application(tornado.web.Application):
             (r"/error/(.*)", ErrorHandler, {'app': self}),
             (r"/win_exists", ExistsHandler, {'app': self}),
             (r"/win_data", DataHandler, {'app': self}),
-            (r"/login(.*)", LoginHandler, {'app': self}),
             (r"/(.*)", IndexHandler, {'app': self}),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)
@@ -944,14 +944,14 @@ class IndexHandler(BaseHandler):
                 active_item=''
             ) 
 
-        if self.with_login and self.user_login:
+        if self.with_login and self.user_login['login']:
             self.render(
                 'index.html',
                 user=getpass.getuser(),
                 items=items,
                 active_item=''
             )
-        else:
+        elif self.with_login:
             self.render(
                 'login.html',
                 user=getpass.getuser(),
@@ -959,24 +959,22 @@ class IndexHandler(BaseHandler):
                 active_item=''
             )
 
+    def post(self, arg, **kwargs):
+        username = self.get_argument("username") 
+        password = hashlib.sha256(self.get_argument("password").encode("utf-8")).hexdigest()
 
-class LoginHandler(BaseHandler):
-    def initialize(self, app):
-        self.state = app.state
-        self.port = app.port
-        self.env_path = app.env_path
-
-    def get(self, args, **kwargs):
-        items = gather_envs(self.state, env_path=self.env_path)
-        self.render(
-            'login.html',
-            user=getpass.getuser(),
-            items=items,
-            active_item=''
-        )
-
-    def post(self):
-        pass
+        if (username == self.user_login["username"]) and (password == self.user_login["password"]):
+            self.user_login["login"] = True
+            self.redirect("/")
+        else:
+            items = gather_envs(self.state, env_path=self.env_path)
+            self.render(
+                'incorrect.html',
+                user=getpass.getuser(),
+                items=items,
+                active_item=''
+            )
+        
 
 
 class ErrorHandler(BaseHandler):
@@ -1078,9 +1076,9 @@ def download_scripts(proxies=None, install_dir=None):
                     exc.reason, key))
 
 
-def start_server(port=DEFAULT_PORT, env_path=DEFAULT_ENV_PATH, readonly=False, print_func=None, with_login=False):
+def start_server(port=DEFAULT_PORT, env_path=DEFAULT_ENV_PATH, readonly=False, print_func=None, with_login=False, user=False):
     print("It's Alive!")
-    app = Application(port=port, env_path=env_path, readonly=readonly, with_login=with_login)
+    app = Application(port=port, env_path=env_path, readonly=readonly, with_login=with_login, user=user)
 
     app.listen(port, max_buffer_size=1024 ** 3)
     logging.info("Application Started")
@@ -1124,7 +1122,18 @@ def main(print_func=None):
 
     logging.getLogger().setLevel(logging_level)
 
-    start_server(port=FLAGS.port, env_path=FLAGS.env_path, readonly=FLAGS.readonly, print_func=print_func, with_login=FLAGS.with_login)
+    if FLAGS.with_login:
+        username = input("Please input your username: ")
+        password = input("Please input your password: ")
+        user = {
+            "username": username,
+            "password": hashlib.sha256(password.encode("utf-8")).hexdigest(),
+            "login": False
+        }
+    else:
+        user = False
+    
+    start_server(port=FLAGS.port, env_path=FLAGS.env_path, readonly=FLAGS.readonly, print_func=print_func, with_login=FLAGS.with_login, user=user)
 
 
 if __name__ == "__main__":
