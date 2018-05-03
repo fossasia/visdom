@@ -23,7 +23,7 @@ setup(
     url='https://github.com/facebookresearch/visdom',
     description='A tool for visualizing live, rich data for Torch and Numpy',
     long_description=readme,
-    license='CC-BY-4.0',
+    license='CC-BY-NC-4.0',
 
     # Package info
     packages=['visdom'],
