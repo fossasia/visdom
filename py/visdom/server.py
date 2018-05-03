@@ -913,11 +913,6 @@ class DataHandler(BaseHandler):
         else:
             handler.write(json.dumps(handler.state[eid]['jsons']))
 
-        if args['win'] in handler.state[eid]['jsons']:
-            handler.write('true')
-        else:
-            handler.write('false')
-
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
