@@ -336,7 +336,7 @@ the name of an SVG file `svgfile`. The function does not support any specific
 This function draws a Matplotlib `plot`. The function does not support
 any plot-specific `opts`.
 
-Note: `matplot` is not rendered using the same backend as plotly plots, and is somewhat less efficient. Too many matplot windows may degrade visdom performance.
+Note: `matplot` is not rendered using the same backend as plotly plots, and is somewhat less efficient. Using too many matplot windows may degrade visdom performance.
 
 #### vis.save
 This function saves the `envs` that are alive on the visdom server. It takes input a list (in python) or table (in lua) of env ids to be saved.
