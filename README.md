@@ -72,7 +72,7 @@ You can partition your visualization space with `envs`. By default, every user w
 
 You can access a specific env via url: `http://localhost.com:8097/env/main`. If your server is hosted, you can share this url so others can see your visualizations too.
 
-Environments are automatically hierarchically organized by the first `_`. 
+Environments are automatically hierarchically organized by the first `_`.
 
 #### Selecting Environments
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34618242-261d55d4-f20c-11e7-820d-c16731248b26.png" width="300" /></p>
@@ -239,7 +239,6 @@ We have wrapped several common plot types to make creating basic visualizations 
 The following API is currently supported:
 - [`vis.scatter`](#visscatter)  : 2D or 3D scatter plots
 - [`vis.line`](#visline)     : line plots
-- [`vis.updateTrace`](#visupdatetrace)     : update existing line/scatter plots
 - [`vis.stem`](#visstem)     : stem plots
 - [`vis.heatmap`](#visheatmap)  : heatmap plots
 - [`vis.bar`](#visbar)  : bar graphs
@@ -394,26 +393,6 @@ The following `opts` are supported:
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 - `opts.traceopts`   : `dict` mapping trace names or indices to `dict`s of additional options that plot.ly accepts for a trace.
 
-
-#### vis.updateTrace
-This function allows updating of data for extant line or scatter plots.
-
-It is up to the user to specify `name` of an existing trace if they want
-to add to it, and a new `name` if they want to add a trace to the plot.
-By default, if no legend is specified at time of first creation,
-the `name` is the index of the line in the legend.
-
-If no `name` is specified, all traces should be updated.
-Trace update data that is all `NaN` is ignored;
-this can be used for masking update.
-
-The `append` parameter determines if the update data should be appended
-to or replaces existing data.
-
-There are no `opts` because they are assumed to be inherited from the
-specified plot.
-
-*Note: This function will be deprecated in upcoming versions.*
 
 #### vis.stem
 This function draws a stem plot. It takes as input an `N` or `NxM` tensor
