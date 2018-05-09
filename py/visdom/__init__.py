@@ -488,7 +488,7 @@ class Visdom(object):
         """
         This function draws an SVG object. It takes as input an SVG string or the
         name of an SVG file. The function does not support any plot-specific
-        `options`.
+        `opts`.
         """
         opts = {} if opts is None else opts
         _assert_opts(opts)
@@ -736,7 +736,7 @@ class Visdom(object):
         The `append` parameter determines if the update data should be appended
         to or replaces existing data.
 
-        There are less options because they are assumed to inherited from the
+        There are less opts because they are assumed to inherited from the
         specified plot.
         """
         warnings.warn("updateTrace is going to be deprecated in the next "
@@ -1268,7 +1268,7 @@ class Visdom(object):
         tensors `gridX` and `gridY` can be provided that specify the offsets of
         the arrows; by default, the arrows will be done on a regular grid.
 
-        The following `options` are supported:
+        The following `opts` are supported:
 
         - `opts.normalize`:  length of longest arrows (`number`)
         - `opts.arrowheads`: show arrow heads (`boolean`; default = `true`)
@@ -1392,7 +1392,7 @@ class Visdom(object):
         """
         This function draws a pie chart based on the `N` tensor `X`.
 
-        The following `options` are supported:
+        The following `opts` are supported:
 
         - `opts.legend`: `table` containing legend names
         """
@@ -1424,7 +1424,7 @@ class Visdom(object):
         `Nx2` or `Nx3` matrix `X`, and polygons defined in an optional `Mx2` or
         `Mx3` matrix `Y`.
 
-        The following `options` are supported:
+        The following `opts` are supported:
 
         - `opts.color`: color (`string`)
         - `opts.opacity`: opacity of polygons (`number` between 0 and 1)
