@@ -72,7 +72,7 @@ You can partition your visualization space with `envs`. By default, every user w
 
 You can access a specific env via url: `http://localhost.com:8097/env/main`. If your server is hosted, you can share this url so others can see your visualizations too.
 
-Environments are automatically hierarchically organized by the first `_`. 
+Environments are automatically hierarchically organized by the first `_`.
 
 #### Selecting Environments
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34618242-261d55d4-f20c-11e7-820d-c16731248b26.png" width="300" /></p>
