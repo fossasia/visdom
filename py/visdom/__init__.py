@@ -233,8 +233,7 @@ def pytorch_wrap(fn):
 
 def wrap_tensor_methods(cls, wrapper):
     fns = ['_surface', 'bar', 'boxplot', 'surf', 'heatmap', 'histogram', 'svg',
-           'image', 'images', 'line', 'pie', 'scatter', 'stem', 'quiver', 'contour',
-           'updateTrace']
+           'image', 'images', 'line', 'pie', 'scatter', 'stem', 'quiver', 'contour']
     for key in [k for k in dir(cls) if k in fns]:
         setattr(cls, key, wrapper(getattr(cls, key)))
 
@@ -719,61 +718,6 @@ class Visdom(object):
             </video>
         """ % (mimetype, mimetype, base64.b64encode(bytestr).decode('utf-8'))
         return self.text(text=videodata, win=win, env=env, opts=opts)
-
-    def updateTrace(self, X, Y, win, env=None, name=None,
-                    append=True, opts=None):
-        """
-        This function allows updating of the data of a line or scatter plot.
-
-        It is up to the user to specify `name` of an existing trace if they want
-        to add to it, and a new `name` if they want to add a trace to the plot.
-        By default, if no legend is specified, the `name` is the index of the
-        line in the legend.
-
-        If no `name` is specified, all traces should be updated.
-        Update data that is all NaN is ignored (can be used for masking update).
-
-        The `append` parameter determines if the update data should be appended
-        to or replaces existing data.
-
-        There are less opts because they are assumed to inherited from the
-        specified plot.
-        """
-        warnings.warn("updateTrace is going to be deprecated in the next "
-                      "version of `visdom`. Please to use `scatter(.., "
-                      "update='append',name=<traceName>)` or `line(.., "
-                      "update='append',name=<traceName>)` as required.",
-                      PendingDeprecationWarning)
-        assert win is not None
-
-        assert Y.shape == X.shape, 'Y should be same size as X'
-        if X.ndim > 2:
-            X = np.squeeze(X)
-            Y = np.squeeze(Y)
-        assert X.ndim == 1 or X.ndim == 2, 'Updated X should be 1 or 2 dim'
-
-        if name:
-            assert len(name) >= 0, 'name of trace should be nonempty string'
-            assert X.ndim == 1, 'updating by name expects 1-dim data'
-
-        if opts is not None and opts.get('markercolor') is not None:
-            K = int(Y.max())
-            opts['markercolor'] = _markerColorCheck(
-                opts['markercolor'], X, Y, K)
-
-        data = {'x': X.transpose().tolist(), 'y': Y.transpose().tolist()}
-        if X.ndim == 1:
-            data['x'] = [data['x']]
-            data['y'] = [data['y']]
-
-        return self._send({
-            'data': data,
-            'win': win,
-            'eid': env,
-            'name': name,
-            'append': append,
-            'opts': opts,
-        }, endpoint='update')
 
     def update_window_opts(self, win, opts, env=None):
         """

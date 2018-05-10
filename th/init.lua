@@ -247,47 +247,6 @@ M.update_window_opts = argcheck{
    end
 }
 
-M.updateTrace = argcheck{
-   doc = [[
-      This function allows updating of the data of a line or scatter plot.
-
-      It is up to the user to specify `name` of an existing trace if they want
-      to add to it, and a new `name` if they want to add a trace to the plot.
-      By default, if no legend is specified, the `name` is the index of the line
-      in the legend.
-
-      If no `name` is specified, all traces should be updated.
-      Update data that is all NaN is ignored (can be used for masking updates).
-
-      The `append` parameter determines if the update data should be appended to
-      or replaces existing data.
-
-      There are less options because they are assumed to inherited from the
-      specified plot.
-   ]],
-   {name = 'self',         type = 'visdom.client'},
-   {name = 'Y',            type = 'torch.*Tensor'},
-   {name = 'X',            type = 'torch.*Tensor'},
-   {name = 'win',          type = 'string'},
-   {name = 'env',          type = 'string',        opt = true},
-   {name = 'name',         type = 'string',        opt = true},
-   {name = 'append',       type = 'boolean',       opt = true},
-   {name = 'opts',         type = 'table',         opt = true},
-   {name = 'options',      type = 'table',         opt = true},
-   call = function(self, Y, X, win, env, name, append, opts, options)
-      if options then
-         print(
-            [[WARNING: Argument `options` is deprecated and will soon be
-            removed. Use argument `opts` instead.]]
-         )
-      end
-      opts = opts or options or {}
-      local args = {X, Y, win}
-      local kwargs = {name = name, append = append, env = env, opts = opts}
-      return self:py_func{func = 'updateTrace', args = args, kwargs = kwargs}
-   end
-}
-
 -- scatter plot:
 M.scatter = argcheck{
    doc = [[
