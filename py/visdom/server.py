@@ -923,7 +923,7 @@ def download_scripts(proxies=None, install_dir=None):
         '%sreact@16.2.0/umd/react.production.min.js' % b: 'react-react.min.js',
         '%sreact-dom@16.2.0/umd/react-dom.production.min.js' % b: 'react-dom.min.js',  # noqa
         '%sreact-modal@3.1.10/dist/react-modal.min.js' % b: 'react-modal.min.js',  # noqa
-        'https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_SVG':  # noqa
+        'https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_SVG':  # noqa
             'mathjax-MathJax.js',
         # here is another url in case the cdn breaks down again.
         # https://raw.githubusercontent.com/plotly/plotly.js/master/dist/plotly.min.js
