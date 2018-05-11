@@ -50,7 +50,7 @@ wget https://unpkg.com/react-modal@3.1.10/dist/react-modal.min.js -O visdom/stat
 wget https://unpkg.com/classnames@2.2.5 -O visdom/static/fonts/classnames
 wget https://unpkg.com/layout-bin-packer@1.2.2 -O visdom/static/fonts/layout_bin_packer
 wget https://cdn.rawgit.com/STRML/react-grid-layout/0.14.0/dist/react-grid-layout.min.js -O visdom/static/js/react-grid-layout.min.js
-wget https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_SVG -O visdom/static/js/mathjax-MathJax.js
+wget https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_SVG -O visdom/static/js/mathjax-MathJax.js
 wget https://cdn.rawgit.com/plotly/plotly.js/master/dist/plotly.min.js -O visdom/static/js/plotly-plotly.min.js
 wget https://unpkg.com/bootstrap@3.3.7/dist/css/bootstrap.min.css -O visdom/static/css/bootstrap.min.css
 wget https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.eot -O visdom/static/fonts/glyphicons-halflings-regular.eot
