@@ -10,3 +10,4 @@ py/static/fonts/
 py/static/css/
 py/static/js/*.min.js
 py/static/js/mathjax-MathJax.js
+py/static/version.built

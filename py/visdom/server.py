@@ -37,6 +37,7 @@ LAYOUT_FILE = 'layouts.json'
 DEFAULT_ENV_PATH = '%s/.visdom/' % expanduser("~")
 DEFAULT_PORT = 8097
 
+here = os.path.abspath(os.path.dirname(__file__))
 
 def get_rand_id():
     return str(hex(int(time.time() * 10000000))[2:])
@@ -969,6 +970,16 @@ def download_scripts(proxies=None, install_dir=None):
     opener = request.build_opener(handler)
     request.install_opener(opener)
 
+    built_path = os.path.join(here, 'static/version.built')
+    is_built = False
+    if os.path.exists(built_path):
+        with open(built_path, 'r') as build_file:
+            build_version = build_file.read().strip()
+        if build_version == visdom.__version__:
+            is_built = True
+        else:
+            os.remove(built_path)
+
     # download files one-by-one:
     for (key, val) in ext_files.items():
 
@@ -981,7 +992,7 @@ def download_scripts(proxies=None, install_dir=None):
 
         # download file:
         filename = '%s/static/%s/%s' % (install_dir, sub_dir, val)
-        if not os.path.exists(filename):
+        if not os.path.exists(filename) or not is_built:
             req = request.Request(key,
                                   headers={'User-Agent': 'Chrome/30.0.0.0'})
             try:
@@ -994,6 +1005,10 @@ def download_scripts(proxies=None, install_dir=None):
             except URLError as exc:
                 logging.error('Error {} while downloading {}'.format(
                     exc.reason, key))
+
+    if not is_built:
+        with open(built_path, 'w+') as build_file:
+            build_file.write(visdom.__version__)
 
 
 def start_server(port=DEFAULT_PORT, env_path=DEFAULT_ENV_PATH, readonly=False, print_func=None):
