@@ -23,3 +23,5 @@ wget https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.w
 wget https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.woff -O py/static/fonts/glyphicons-halflings-regular.woff
 wget https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.ttf -O py/static/fonts/glyphicons-halflings-regular.ttf
 wget "https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.svg#glyphicons_halflingsregular" -O py/static/fonts/glyphicons-halflings-regular.svg#glyphicons_halflingsregular
+
+cat py/visdom/VERSION > py/visdom/static/version.built
