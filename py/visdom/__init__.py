@@ -817,6 +817,12 @@ class Visdom(object):
             opts['markercolor'] = _markerColorCheck(
                 opts['markercolor'], X, Y, K)
 
+        L = opts.get('textlabels')
+        if L is not None:
+            L = np.squeeze(L)
+            assert len(L) == X.shape[0], \
+                'textlabels and X should have same shape'
+
         _assert_opts(opts)
 
         if opts.get('legend'):
@@ -840,7 +846,7 @@ class Visdom(object):
                     'name': trace_name,
                     'type': 'scatter3d' if is3d else 'scatter',
                     'mode': opts.get('mode'),
-                    'text': opts.get('textlabels'),
+                    'text': L[ind].tolist() if L is not None else None,
                     'textposition': 'right',
                     'marker': {
                         'size': opts.get('markersize'),
