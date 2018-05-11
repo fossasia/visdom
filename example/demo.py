@@ -186,6 +186,14 @@ try:
             textlabels=['Label %d' % (i + 1) for i in range(10)]
         )
     )
+    viz.scatter(
+        X=np.random.rand(10, 2),
+        Y=[1] * 5 + [2] * 3 + [3] * 2,
+        opts=dict(
+            legend=['A', 'B', 'C'],
+            textlabels=['Label %d' % (i + 1) for i in range(10)]
+        )
+    )
 
     # bar plots
     viz.bar(X=np.random.rand(20))
