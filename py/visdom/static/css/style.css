@@ -1,54 +1,54 @@
 /**
-* Copyright 2017-present, Facebook, Inc.
-* All rights reserved.
-*
-* This source code is licensed under the license found in the
-* LICENSE file in the root directory of this source tree.
-*
-*/
+ * Copyright 2017-present, Facebook, Inc.
+ * All rights reserved.
+ *
+ * This source code is licensed under the license found in the
+ * LICENSE file in the root directory of this source tree.
+ *
+ */
 
-* {
-margin: 0;
-padding: 0;
-border: 0;
-font-family: "Open Sans", sans-serif;
-font-weight: lighter;
+ * {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-family: "Open Sans", sans-serif;
+  font-weight: lighter;
 }
 
 body{
-  background-color: transparent;
+   background-color: transparent;
 }
 
 html{
-  background-color: #3b5998;
+   background-color: #3b5998;
 }
 
 h1 {
-  text-align: center;
+   text-align: center;
 }
 
 .visdom-title {
-    font-weight: lighter;
-    font-size: 18px;
-    padding: 13px;
+   font-weight: lighter;
+   font-size: 18px;
+   padding: 13px;
 }
 
 .navbar-default {
-    background-color: #F0F0F0;
-    border-color: transparent;
+   background-color: #F0F0F0;
+   border-color: transparent;
 }
 
 .form-inline {
-    padding: 5px;
+   padding: 5px;
 }
 
 .form-inline > .btn {
-    margin-right: 10px;
-    margin-left: 5px;
+   margin-right: 10px;
+   margin-left: 5px;
 }
 
 .form-inline > .form-control {
-    margin-left: 5px;
+   margin-left: 5px;
 }
 
 .navbar {min-height:30px !important;}
@@ -101,19 +101,19 @@ h1 {
 }
 
 .bar button {
-    font-size: 8px;
+   font-size: 8px;
 }
 
 button {
-    font-size: 14px;
-    line-height: 14px;
-    cursor: pointer;
-    border-radius: 1px;
-    border-color:transparent;
+   font-size: 14px;
+   line-height: 14px;
+   cursor: pointer;
+   border-radius: 1px;
+   border-color:transparent;
 }
 
 .btn:focus,.btn:active {
-    outline: none !important;
+   outline: none !important;
 }
 
 .bar button {
