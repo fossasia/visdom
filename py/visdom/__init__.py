@@ -30,6 +30,13 @@ import time
 import errno
 import io
 
+
+here = os.path.abspath(os.path.dirname(__file__))
+
+with open(os.path.join(here, 'VERSION')) as version_file:
+    __version__ = version_file.read().strip()
+
+
 try:
     import torchfile
 except BaseException:
@@ -233,8 +240,7 @@ def pytorch_wrap(fn):
 
 def wrap_tensor_methods(cls, wrapper):
     fns = ['_surface', 'bar', 'boxplot', 'surf', 'heatmap', 'histogram', 'svg',
-           'image', 'images', 'line', 'pie', 'scatter', 'stem', 'quiver', 'contour',
-           'updateTrace']
+           'image', 'images', 'line', 'pie', 'scatter', 'stem', 'quiver', 'contour']
     for key in [k for k in dir(cls) if k in fns]:
         setattr(cls, key, wrapper(getattr(cls, key)))
 
@@ -488,7 +494,7 @@ class Visdom(object):
         """
         This function draws an SVG object. It takes as input an SVG string or the
         name of an SVG file. The function does not support any plot-specific
-        `options`.
+        `opts`.
         """
         opts = {} if opts is None else opts
         _assert_opts(opts)
@@ -720,61 +726,6 @@ class Visdom(object):
         """ % (mimetype, mimetype, base64.b64encode(bytestr).decode('utf-8'))
         return self.text(text=videodata, win=win, env=env, opts=opts)
 
-    def updateTrace(self, X, Y, win, env=None, name=None,
-                    append=True, opts=None):
-        """
-        This function allows updating of the data of a line or scatter plot.
-
-        It is up to the user to specify `name` of an existing trace if they want
-        to add to it, and a new `name` if they want to add a trace to the plot.
-        By default, if no legend is specified, the `name` is the index of the
-        line in the legend.
-
-        If no `name` is specified, all traces should be updated.
-        Update data that is all NaN is ignored (can be used for masking update).
-
-        The `append` parameter determines if the update data should be appended
-        to or replaces existing data.
-
-        There are less options because they are assumed to inherited from the
-        specified plot.
-        """
-        warnings.warn("updateTrace is going to be deprecated in the next "
-                      "version of `visdom`. Please to use `scatter(.., "
-                      "update='append',name=<traceName>)` or `line(.., "
-                      "update='append',name=<traceName>)` as required.",
-                      PendingDeprecationWarning)
-        assert win is not None
-
-        assert Y.shape == X.shape, 'Y should be same size as X'
-        if X.ndim > 2:
-            X = np.squeeze(X)
-            Y = np.squeeze(Y)
-        assert X.ndim == 1 or X.ndim == 2, 'Updated X should be 1 or 2 dim'
-
-        if name:
-            assert len(name) >= 0, 'name of trace should be nonempty string'
-            assert X.ndim == 1, 'updating by name expects 1-dim data'
-
-        if opts is not None and opts.get('markercolor') is not None:
-            K = int(Y.max())
-            opts['markercolor'] = _markerColorCheck(
-                opts['markercolor'], X, Y, K)
-
-        data = {'x': X.transpose().tolist(), 'y': Y.transpose().tolist()}
-        if X.ndim == 1:
-            data['x'] = [data['x']]
-            data['y'] = [data['y']]
-
-        return self._send({
-            'data': data,
-            'win': win,
-            'eid': env,
-            'name': name,
-            'append': append,
-            'opts': opts,
-        }, endpoint='update')
-
     def update_window_opts(self, win, opts, env=None):
         """
         This function allows pushing new options to an existing plot window
@@ -873,6 +824,12 @@ class Visdom(object):
             opts['markercolor'] = _markerColorCheck(
                 opts['markercolor'], X, Y, K)
 
+        L = opts.get('textlabels')
+        if L is not None:
+            L = np.squeeze(L)
+            assert len(L) == X.shape[0], \
+                'textlabels and X should have same shape'
+
         _assert_opts(opts)
 
         if opts.get('legend'):
@@ -896,7 +853,7 @@ class Visdom(object):
                     'name': trace_name,
                     'type': 'scatter3d' if is3d else 'scatter',
                     'mode': opts.get('mode'),
-                    'text': opts.get('textlabels'),
+                    'text': L[ind].tolist() if L is not None else None,
                     'textposition': 'right',
                     'marker': {
                         'size': opts.get('markersize'),
@@ -1268,7 +1225,7 @@ class Visdom(object):
         tensors `gridX` and `gridY` can be provided that specify the offsets of
         the arrows; by default, the arrows will be done on a regular grid.
 
-        The following `options` are supported:
+        The following `opts` are supported:
 
         - `opts.normalize`:  length of longest arrows (`number`)
         - `opts.arrowheads`: show arrow heads (`boolean`; default = `true`)
@@ -1392,7 +1349,7 @@ class Visdom(object):
         """
         This function draws a pie chart based on the `N` tensor `X`.
 
-        The following `options` are supported:
+        The following `opts` are supported:
 
         - `opts.legend`: `table` containing legend names
         """
@@ -1424,7 +1381,7 @@ class Visdom(object):
         `Nx2` or `Nx3` matrix `X`, and polygons defined in an optional `Mx2` or
         `Mx3` matrix `Y`.
 
-        The following `options` are supported:
+        The following `opts` are supported:
 
         - `opts.color`: color (`string`)
         - `opts.opacity`: opacity of polygons (`number` between 0 and 1)

@@ -22,54 +22,6 @@ local argcheck = require 'argcheck'
 local visdom = {}
 local M = torch.class('visdom.client', visdom)
 
--- function that performs assertions on options:
-local assertOptions = argcheck{
-   {name = 'options', type = 'table'},
-   call = function(options)
-      if options.colormap then
-         assert(type(options.colormap) == 'string', 'colormap should be string')
-      end
-      if options.color then
-         assert(type(options.color) == 'string', 'color should be string')
-      end
-      if options.mode then
-         assert(type(options.mode) == 'string', 'mode should be a string')
-      end
-      if options.markersymbol then
-         assert(type(options.markersymbol) == 'string',
-            'marker symbol should be string')
-      end
-      if options.markersize then
-         assert(type(options.markersize) == 'number' or options.markersize > 0,
-            'marker size should be a positive number')
-      end
-      if options.columnnames then
-         assert(type(options.columnnames) == 'table',
-            'columnnames should be a table with column names')
-      end
-      if options.rownames then
-         assert(type(options.rownames) == 'table',
-            'rownames should be a table with row names')
-      end
-      if options.jpgquality then
-         assert(type(options.jpgquality) == 'number',
-            'JPG quality should be a number')
-         assert(options.jpgquality > 0 and options.jpgquality <= 100,
-            'JPG quality should be number between 0 and 100')
-      end
-      if options.fps then
-         assert(type(options.fps) == 'number', 'fps should be a number')
-         assert(options.fps > 0 , 'fps should be greater than zero')
-      end
-      if options.opacity then
-         assert(type(options.opacity) == 'number',
-            'opacity should be a number')
-         assert(options.opacity >= 0 and options.opacity <= 1,
-            'opacity should be a number between 0 and 1')
-      end
-   end
-}
-
 -- initialize plotting object:
 M.__init = argcheck{
    doc = [[
@@ -113,34 +65,34 @@ M.__init = argcheck{
       `win` of the window it plotted in. One can also specify the `env`, (a
        workspace id), to which the visualization should be added.
 
-      In addition, the plotting functions take an optional `options` table as
+      In addition, the plotting functions take an optional `opts` table as
       input that can be used to change (generic or plot-specific) properties of
       the plots. All input arguments are specified in a single table; the input
       arguments are matches based on the keys they have in the input table.
 
-      The following `options` are generic in the sense that they are the same
+      The following `opts` are generic in the sense that they are the same
       for all visualizations (except `plot.image` and `plot.text`):
 
-      - `options.title`       : figure title
-      - `options.width`       : figure width
-      - `options.height`      : figure height
-      - `options.showlegend`  : show legend (`true` or `false`)
-      - `options.xtype`       : type of x-axis (`'linear'` or `'log'`)
-      - `options.xlabel`      : label of x-axis
-      - `options.xtick`       : show ticks on x-axis (`boolean`)
-      - `options.xtickmin`    : first tick on x-axis (`number`)
-      - `options.xtickmax`    : last tick on x-axis (`number`)
-      - `options.xtickstep`   : distances between ticks on x-axis (`number`)
-      - `options.ytype`       : type of y-axis (`'linear'` or `'log'`)
-      - `options.ylabel`      : label of y-axis
-      - `options.ytick`       : show ticks on y-axis (`boolean`)
-      - `options.ytickmin`    : first tick on y-axis (`number`)
-      - `options.ytickmax`    : last tick on y-axis (`number`)
-      - `options.ytickstep`   : distances between ticks on y-axis (`number`)
-      - `options.marginleft`  : left margin (in pixels)
-      - `options.marginright` : right margin (in pixels)
-      - `options.margintop`   : top margin (in pixels)
-      - `options.marginbottom`: bottom margin (in pixels)
+      - `opts.title`       : figure title
+      - `opts.width`       : figure width
+      - `opts.height`      : figure height
+      - `opts.showlegend`  : show legend (`true` or `false`)
+      - `opts.xtype`       : type of x-axis (`'linear'` or `'log'`)
+      - `opts.xlabel`      : label of x-axis
+      - `opts.xtick`       : show ticks on x-axis (`boolean`)
+      - `opts.xtickmin`    : first tick on x-axis (`number`)
+      - `opts.xtickmax`    : last tick on x-axis (`number`)
+      - `opts.xtickstep`   : distances between ticks on x-axis (`number`)
+      - `opts.ytype`       : type of y-axis (`'linear'` or `'log'`)
+      - `opts.ylabel`      : label of y-axis
+      - `opts.ytick`       : show ticks on y-axis (`boolean`)
+      - `opts.ytickmin`    : first tick on y-axis (`number`)
+      - `opts.ytickmax`    : last tick on y-axis (`number`)
+      - `opts.ytickstep`   : distances between ticks on y-axis (`number`)
+      - `opts.marginleft`  : left margin (in pixels)
+      - `opts.marginright` : right margin (in pixels)
+      - `opts.margintop`   : top margin (in pixels)
+      - `opts.marginbottom`: bottom margin (in pixels)
 
       The other options are visualization-specific, and are described in the
       documentation of the functions.
@@ -295,47 +247,6 @@ M.update_window_opts = argcheck{
    end
 }
 
-M.updateTrace = argcheck{
-   doc = [[
-      This function allows updating of the data of a line or scatter plot.
-
-      It is up to the user to specify `name` of an existing trace if they want
-      to add to it, and a new `name` if they want to add a trace to the plot.
-      By default, if no legend is specified, the `name` is the index of the line
-      in the legend.
-
-      If no `name` is specified, all traces should be updated.
-      Update data that is all NaN is ignored (can be used for masking updates).
-
-      The `append` parameter determines if the update data should be appended to
-      or replaces existing data.
-
-      There are less options because they are assumed to inherited from the
-      specified plot.
-   ]],
-   {name = 'self',         type = 'visdom.client'},
-   {name = 'Y',            type = 'torch.*Tensor'},
-   {name = 'X',            type = 'torch.*Tensor'},
-   {name = 'win',          type = 'string'},
-   {name = 'env',          type = 'string',        opt = true},
-   {name = 'name',         type = 'string',        opt = true},
-   {name = 'append',       type = 'boolean',       opt = true},
-   {name = 'opts',         type = 'table',         opt = true},
-   {name = 'options',      type = 'table',         opt = true},
-   call = function(self, Y, X, win, env, name, append, opts, options)
-      if options then
-         print(
-            [[WARNING: Argument `options` is deprecated and will soon be
-            removed. Use argument `opts` instead.]]
-         )
-      end
-      opts = opts or options or {}
-      local args = {X, Y, win}
-      local kwargs = {name = name, append = append, env = env, opts = opts}
-      return self:py_func{func = 'updateTrace', args = args, kwargs = kwargs}
-   end
-}
-
 -- scatter plot:
 M.scatter = argcheck{
    doc = [[
@@ -351,13 +262,13 @@ M.scatter = argcheck{
       Use `name` if you want to update a specific trace.
       Update data that is all NaN is ignored (can be used for masking updates).
 
-      The following `options` are supported:
+      The following `opts` are supported:
 
-       - `options.colormap`    : colormap (`string`; default = `'Viridis'`)
-       - `options.markersymbol`: marker symbol (`string`; default = `'dot'`)
-       - `options.markersize`  : marker size (`number`; default = `'10'`)
-       - `options.markercolor` : marker color (`torch.*Tensor`; default = `nil`)
-       - `options.legend`      : `table` containing legend names
+       - `opts.colormap`    : colormap (`string`; default = `'Viridis'`)
+       - `opts.markersymbol`: marker symbol (`string`; default = `'dot'`)
+       - `opts.markersize`  : marker size (`number`; default = `'10'`)
+       - `opts.markercolor` : marker color (`torch.*Tensor`; default = `nil`)
+       - `opts.legend`      : `table` containing legend names
        - `opts.textlabels`    : text label for each point (table: default = `nil`)
    ]],
    noordered = true,
@@ -365,19 +276,12 @@ M.scatter = argcheck{
    {name = 'X',       type = 'torch.*Tensor'},
    {name = 'Y',       type = 'torch.*Tensor', opt = true},
    {name = 'opts',    type = 'table',         opt = true},
-   {name = 'options', type = 'table',         opt = true},
    {name = 'win',     type = 'string',        opt = true},
    {name = 'env',     type = 'string',        opt = true},
    {name = 'update',  type = 'string',        opt = true},
    {name = 'name',    type = 'string',        opt = true},
-   call = function(self, X, Y, opts, options, win, env, update)
-      if options then
-         print(
-            [[WARNING: Argument `options` is deprecated and will soon be
-            removed. Use argument `opts` instead.]]
-         )
-      end
-      opts = opts or options or {}
+   call = function(self, X, Y, opts, win, env, update)
+      opts = opts or {}
       local args = {X}
       local kwargs = {
          Y = Y,
@@ -406,32 +310,25 @@ M.line = argcheck{
       Use `name` if you want to update a specific trace.
       Update data that is all NaN is ignored (can be used for masking updates).
 
-      The following `options` are supported:
-       - `options.fillarea`    : fill area below line (`boolean`)
-       - `options.colormap`    : colormap (`string`; default = `'Viridis'`)
-       - `options.markers`     : show markers (`boolean`; default = `false`)
-       - `options.markersymbol`: marker symbol (`string`; default = `'dot'`)
-       - `options.markersize`  : marker size (`number`; default = `'10'`)
-       - `options.legend`      : `table` containing legend names
+      The following `opts` are supported:
+       - `opts.fillarea`    : fill area below line (`boolean`)
+       - `opts.colormap`    : colormap (`string`; default = `'Viridis'`)
+       - `opts.markers`     : show markers (`boolean`; default = `false`)
+       - `opts.markersymbol`: marker symbol (`string`; default = `'dot'`)
+       - `opts.markersize`  : marker size (`number`; default = `'10'`)
+       - `opts.legend`      : `table` containing legend names
    ]],
    noordered = true,
    {name = 'self',    type = 'visdom.client'},
    {name = 'Y',       type = 'torch.*Tensor'},
    {name = 'X',       type = 'torch.*Tensor', opt = true},
    {name = 'opts',    type = 'table',         opt = true},
-   {name = 'options', type = 'table',         opt = true},
    {name = 'win',     type = 'string',        opt = true},
    {name = 'env',     type = 'string',        opt = true},
    {name = 'update',  type = 'string',        opt = true},
    {name = 'name',    type = 'string',        opt = true},
-   call = function(self, Y, X, opts, options, win, env, update)
-      if options then
-         print(
-            [[WARNING: Argument `options` is deprecated and will soon be
-            removed. Use argument `opts` instead.]]
-         )
-      end
-      opts = opts or options or {}
+   call = function(self, Y, X, opts, win, env, update)
+      opts = opts or {}
       local args = {Y}
       local kwargs = {
          X = X,
@@ -454,27 +351,20 @@ M.stem = argcheck{
       as well; if `Y` is an `N` tensor then all `M` time series are assumed to
       have the same timestamps.
 
-      The following `options` are supported:
+      The following `opts` are supported:
 
-       - `options.colormap`: colormap (`string`; default = `'Viridis'`)
-       - `options.legend`  : `table` containing legend names
+       - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
+       - `opts.legend`  : `table` containing legend names
    ]],
    noordered = true,
    {name = 'self',    type = 'visdom.client'},
    {name = 'X',       type = 'torch.*Tensor'},
    {name = 'Y',       type = 'torch.*Tensor', opt = true},
    {name = 'opts',    type = 'table',         opt = true},
-   {name = 'options', type = 'table',         opt = true},
    {name = 'win',     type = 'string',        opt = true},
    {name = 'env',     type = 'string',        opt = true},
-   call = function(self, X, Y, opts, options, win, env)
-      if options then
-         print(
-            [[WARNING: Argument `options` is deprecated and will soon be
-            removed. Use argument `opts` instead.]]
-         )
-      end
-      opts = opts or options or {}
+   call = function(self, X, Y, opts, win, env)
+      opts = opts or {}
       local args = {X}
       local kwargs = {Y = Y, win = win, env = env, opts = opts}
       return self:py_func{func = 'stem', args = args, kwargs = kwargs}
@@ -487,29 +377,22 @@ M.heatmap = argcheck{
       This function draws a heatmap. It takes as input an `NxM` tensor `X` that
       specifies the value at each location in the heatmap.
 
-      The following `options` are supported:
+      The following `opts` are supported:
 
-       - `options.colormap`: colormap (`string`; default = `'Viridis'`)
-       - `options.xmin`    : clip minimum value (`number`; default = `X:min()`)
-       - `options.xmax`    : clip maximum value (`number`; default = `X:max()`)
-       - `options.columnnames`: `table` containing x-axis labels
-       - `options.rownames`: `table` containing y-axis labels
+       - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
+       - `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
+       - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
+       - `opts.columnnames`: `table` containing x-axis labels
+       - `opts.rownames`: `table` containing y-axis labels
    ]],
    noordered = true,
    {name = 'self',    type = 'visdom.client'},
    {name = 'X',       type = 'torch.*Tensor'},
    {name = 'opts',    type = 'table',  opt = true},
-   {name = 'options', type = 'table',  opt = true},
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
-   call = function(self, X, opts, options, win, env)
-      if options then
-         print(
-            [[WARNING: Argument `options` is deprecated and will soon be
-            removed. Use argument `opts` instead.]]
-         )
-      end
-      opts = opts or options or {}
+   call = function(self, X, opts, win, env)
+      opts = opts or {}
       local args = {X}
       local kwargs = {win = win, env = env, opts = opts}
       return self:py_func{func = 'heatmap', args = args, kwargs = kwargs}
@@ -522,32 +405,25 @@ M.bar = argcheck{
       This function draws a regular, stacked, or grouped bar plot. It takes as
       input an `N` or `NxM` tensor `X` that specifies the height of each of the
       bars. If `X` contains `M` columns, the values corresponding to each row
-      are either stacked or grouped (dependending on how `options.stacked` is
+      are either stacked or grouped (dependending on how `opts.stacked` is
       set). In addition to `X`, an (optional) `N` tensor `Y` can be specified
       that contains the corresponding x-axis values.
 
-      The following plot-specific `options` are currently supported:
+      The following plot-specific `opts` are currently supported:
 
-       - `options.rownames`: `table` containing x-axis labels
-       - `options.stacked` : stack multiple columns in `X`
-       - `options.legend`  : `table` containing legend labels
+       - `opts.rownames`: `table` containing x-axis labels
+       - `opts.stacked` : stack multiple columns in `X`
+       - `opts.legend`  : `table` containing legend labels
    ]],
    noordered = true,
    {name = 'self',    type = 'visdom.client'},
    {name = 'X',       type = 'torch.*Tensor'},
    {name = 'Y',       type = 'torch.*Tensor', opt = true},
    {name = 'opts',    type = 'table',         opt = true},
-   {name = 'options', type = 'table',         opt = true},
    {name = 'win',     type = 'string',        opt = true},
    {name = 'env',     type = 'string',        opt = true},
-   call = function(self, X, Y, opts, options, win, env)
-      if options then
-         print(
-            [[WARNING: Argument `options` is deprecated and will soon be
-            removed. Use argument `opts` instead.]]
-         )
-      end
-      opts = opts or options or {}
+   call = function(self, X, Y, opts, win, env)
+      opts = opts or {}
       local args = {X}
       local kwargs = {Y = Y, win = win, env = env, opts = opts}
       return self:py_func{func = 'bar', args = args, kwargs = kwargs}
@@ -561,25 +437,18 @@ M.histogram = argcheck{
       an `N` tensor `X` that specifies the data of which to construct the
       histogram.
 
-      The following plot-specific `options` are currently supported:
+      The following plot-specific `opts` are currently supported:
 
-       - `options.numbins`: number of bins (`number`; default = 30)
+       - `opts.numbins`: number of bins (`number`; default = 30)
    ]],
    noordered = true,
    {name = 'self',    type = 'visdom.client'},
    {name = 'X',       type = 'torch.*Tensor'},
    {name = 'opts',    type = 'table',  opt = true},
-   {name = 'options', type = 'table',  opt = true},
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
-   call = function(self, X, opts, options, win, env)
-      if options then
-         print(
-            [[WARNING: Argument `options` is deprecated and will soon be
-            removed. Use argument `opts` instead.]]
-         )
-      end
-      opts = opts or options or {}
+   call = function(self, X, opts, win, env)
+      opts = opts or {}
       local args = {X}
       local kwargs = {win = win, env = env, opts = opts}
       return self:py_func{func = 'histogram', args = args, kwargs = kwargs}
@@ -593,25 +462,18 @@ M.boxplot = argcheck{
       an `N` or an `NxM` tensor `X` that specifies the `N` data values of which
       to construct the `M` boxplots.
 
-      The following plot-specific `options` are currently supported:
+      The following plot-specific `opts` are currently supported:
 
-       - `options.legend`: labels for each of the columns in `X`
+       - `opts.legend`: labels for each of the columns in `X`
    ]],
    noordered = true,
    {name = 'self',    type = 'visdom.client'},
    {name = 'X',       type = 'torch.*Tensor'},
    {name = 'opts',    type = 'table',  opt = true},
-   {name = 'options', type = 'table',  opt = true},
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
-   call = function(self, X, opts, options, win, env)
-      if options then
-         print(
-            [[WARNING: Argument `options` is deprecated and will soon be
-            removed. Use argument `opts` instead.]]
-         )
-      end
-      opts = opts or options or {}
+   call = function(self, X, opts, win, env)
+      opts = opts or {}
       local args = {X}
       local kwargs = {win = win, env = env, opts = opts}
       return self:py_func{func = 'boxplot', args = args, kwargs = kwargs}
@@ -624,27 +486,20 @@ M.surf = argcheck{
       This function draws a surface plot. It takes as input an `NxM` tensor `X`
       that specifies the value at each location in the surface plot.
 
-      The following `options` are supported:
+      The following `opts` are supported:
 
-       - `options.colormap`: colormap (`string`; default = `'Viridis'`)
-       - `options.xmin`    : clip minimum value (`number`; default = `X:min()`)
-       - `options.xmax`    : clip maximum value (`number`; default = `X:max()`)
+       - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
+       - `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
+       - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
    ]],
    noordered = true,
    {name = 'self',    type = 'visdom.client'},
    {name = 'X',       type = 'torch.*Tensor'},
    {name = 'opts',    type = 'table',  opt = true},
-   {name = 'options', type = 'table',  opt = true},
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
-   call = function(self, X, opts, options, win, env)
-      if options then
-         print(
-            [[WARNING: Argument `options` is deprecated and will soon be
-            removed. Use argument `opts` instead.]]
-         )
-      end
-      opts = opts or options or {}
+   call = function(self, X, opts, win, env)
+      opts = opts or {}
       local args = {X}
       local kwargs = {win = win, env = env, opts = opts}
       return self:py_func{func = 'surf', args = args, kwargs = kwargs}
@@ -657,27 +512,20 @@ M.contour = argcheck{
       This function draws a contour plot. It takes as input an `NxM` tensor `X`
       that specifies the value at each location in the contour plot.
 
-      The following `options` are supported:
+      The following `opts` are supported:
 
-       - `options.colormap`: colormap (`string`; default = `'Viridis'`)
-       - `options.xmin`    : clip minimum value (`number`; default = `X:min()`)
-       - `options.xmax`    : clip maximum value (`number`; default = `X:max()`)
+       - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
+       - `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
+       - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
    ]],
    noordered = true,
    {name = 'self',    type = 'visdom.client'},
    {name = 'X',       type = 'torch.*Tensor'},
    {name = 'opts',    type = 'table',  opt = true},
-   {name = 'options', type = 'table',  opt = true},
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
-   call = function(self, X, opts, options, win, env)
-      if options then
-         print(
-            [[WARNING: Argument `options` is deprecated and will soon be
-            removed. Use argument `opts` instead.]]
-         )
-      end
-      opts = opts or options or {}
+   call = function(self, X, opts, win, env)
+      opts = opts or {}
       local args = {X}
       local kwargs = {win = win, env = env, opts = opts}
       return self:py_func{func = 'contour', args = args, kwargs = kwargs}
@@ -692,10 +540,10 @@ M.quiver = argcheck{
       tensors `gridX` and `gridY` can be provided that specify the offsets of
       the arrows; by default, the arrows will be done on a regular grid.
 
-      The following `options` are supported:
+      The following `opts` are supported:
 
-       - `options.normalize`:  length of longest arrows (`number`)
-       - `options.arrowheads`: show arrow heads (`boolean`; default = `true`)
+       - `opts.normalize`:  length of longest arrows (`number`)
+       - `opts.arrowheads`: show arrow heads (`boolean`; default = `true`)
    ]],
    noordered = true,
    {name = 'self',    type = 'visdom.client'},
@@ -704,17 +552,10 @@ M.quiver = argcheck{
    {name = 'gridX',   type = 'torch.*Tensor', opt = true},
    {name = 'gridY',   type = 'torch.*Tensor', opt = true},
    {name = 'opts',    type = 'table',         opt = true},
-   {name = 'options', type = 'table',         opt = true},
    {name = 'win',     type = 'string',        opt = true},
    {name = 'env',     type = 'string',        opt = true},
-   call = function(self, X, Y, gridX, gridY, opts, options, win, env)
-      if options then
-         print(
-            [[WARNING: Argument `options` is deprecated and will soon be
-            removed. Use argument `opts` instead.]]
-         )
-      end
-      opts = opts or options or {}
+   call = function(self, X, Y, gridX, gridY, opts, win, env)
+      opts = opts or {}
       local args = {X, Y}
       local kwargs = {
          gridX = gridX,
@@ -732,25 +573,18 @@ M.pie = argcheck{
    doc = [[
       This function draws a pie chart based on the `N` tensor `X`.
 
-      The following `options` are supported:
+      The following `opts` are supported:
 
-       - `options.legend`: `table` containing legend names
+       - `opts.legend`: `table` containing legend names
    ]],
    noordered = true,
    {name = 'self',    type = 'visdom.client'},
    {name = 'X',       type = 'torch.*Tensor'},
    {name = 'opts',    type = 'table',  opt = true},
-   {name = 'options', type = 'table',  opt = true},
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
-   call = function(self, X, opts, options, win, env)
-      if options then
-         print(
-            [[WARNING: Argument `options` is deprecated and will soon be
-            removed. Use argument `opts` instead.]]
-         )
-      end
-      opts = opts or options or {}
+   call = function(self, X, opts, win, env)
+      opts = opts or {}
       local args = {X}
       local kwargs = {win = win, env = env, opts = opts}
       return self:py_func{func = 'pie', args = args, kwargs = kwargs}
@@ -764,26 +598,19 @@ M.mesh = argcheck{
       `Nx2` or `Nx3` matrix `X`, and polygons defined in an optional `Mx2` or
       `Mx3` matrix `Y`.
 
-      The following `options` are supported:
+      The following `opts` are supported:
 
-      - `options.color`: color (`string`)
-      - `options.opacity`: opacity of polygons (`number` between 0 and 1)
+      - `opts.color`: color (`string`)
+      - `opts.opacity`: opacity of polygons (`number` between 0 and 1)
    ]],
    {name = 'self',    type = 'visdom.client'},
    {name = 'X',       type = 'torch.*Tensor'},
    {name = 'Y',       type = 'torch.*Tensor', opt = true},
    {name = 'opts',    type = 'table',  opt = true},
-   {name = 'options', type = 'table',  opt = true},
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
-   call = function(self, X, Y, opts, options, win, env)
-      if options then
-         print(
-            [[WARNING: Argument `options` is deprecated and will soon be
-            removed. Use argument `opts` instead.]]
-         )
-      end
-      opts = opts or options or {}
+   call = function(self, X, Y, opts, win, env)
+      opts = opts or {}
       local args = {X}
       local kwargs = {Y = Y, win = win, env = env, opts = opts}
       return self:py_func{func = 'mesh', args = args, kwargs = kwargs}
@@ -796,25 +623,18 @@ M.image = argcheck{
       This function draws an img. It takes as input an `CxHxW` tensor `img`
       that contains the image.
 
-      The following `options` are supported:
+      The following `opts` are supported:
 
-       - `options.jpgquality`: JPG quality (`number` 0-100; default = 100)
+       - `opts.jpgquality`: JPG quality (`number` 0-100; default = 100)
    ]],
    noordered = true,
    {name = 'self',    type = 'visdom.client'},
    {name = 'img',     type = 'torch.*Tensor'},
    {name = 'opts',    type = 'table',  opt = true},
-   {name = 'options', type = 'table',  opt = true},
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
-   call = function(self, img, opts, options, win, env)
-      if options then
-         print(
-            [[WARNING: Argument `options` is deprecated and will soon be
-            removed. Use argument `opts` instead.]]
-         )
-      end
-      opts = opts or options or {}
+   call = function(self, img, opts, win, env)
+      opts = opts or {}
       local args = {img}
       local kwargs = {win = win, env = env, opts = opts}
       return self:py_func{func = 'image', args = args, kwargs = kwargs}
@@ -837,17 +657,10 @@ M.images = argcheck{
    {name = 'nrow',    type = 'number', opt = true},
    {name = 'padding', type = 'number', opt = true},
    {name = 'opts',    type = 'table',  opt = true},
-   {name = 'options', type = 'table',  opt = true},
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
-   call = function(self, table, tensor, nrow, padding, opts, options, win, env)
-      if options then
-         print(
-            [[WARNING: Argument `options` is deprecated and will soon be
-            removed. Use argument `opts` instead.]]
-         )
-      end
-      opts = opts or options or {}
+   call = function(self, table, tensor, nrow, padding, opts, win, env)
+      opts = opts or {}
       assert(table or tensor)
       local input = table or tensor
       local args = {input}
@@ -867,24 +680,17 @@ M.svg = argcheck{
    doc = [[
       This function draws an SVG object. It takes as input an SVG string or the
       name of an SVG file. The function does not support any plot-specific
-      `options`.
+      `opts`.
    ]],
    noordered = true,
    {name = 'self',    type = 'visdom.client'},
    {name = 'svgstr',  type = 'string', opt = true},
    {name = 'svgfile', type = 'string', opt = true},
    {name = 'opts',    type = 'table',  opt = true},
-   {name = 'options', type = 'table',  opt = true},
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
-   call = function(self, svgstr, svgfile, opts, options, win, env)
-      if options then
-         print(
-            [[WARNING: Argument `options` is deprecated and will soon be
-            removed. Use argument `opts` instead.]]
-         )
-      end
-      opts = opts or options or {}
+   call = function(self, svgstr, svgfile, opts, win, env)
+      opts = opts or {}
       local args = {}
       local kwargs = {
          svgstr = svgstr,
@@ -913,17 +719,10 @@ M.audio = argcheck{
    {name = 'tensor',    type = 'torch.*Tensor', opt = true},
    {name = 'audiofile', type = 'string', opt = true},
    {name = 'opts',      type = 'table',  opt = true},
-   {name = 'options',   type = 'table',  opt = true},
    {name = 'win',       type = 'string', opt = true},
    {name = 'env',       type = 'string', opt = true},
-   call = function(self, tensor, audiofile, opts, options, win, env)
-      if options then
-         print(
-            [[WARNING: Argument `options` is deprecated and will soon be
-            removed. Use argument `opts` instead.]]
-         )
-      end
-      opts = opts or options or {}
+   call = function(self, tensor, audiofile, opts, win, env)
+      opts = opts or {}
       local args = {}
       local kwargs = {
          tensor = tensor,
@@ -952,17 +751,10 @@ M.video = argcheck{
    {name = 'tensor',    type = 'torch.ByteTensor', opt = true},
    {name = 'videofile', type = 'string', opt = true},
    {name = 'opts',    type = 'table',  opt = true},
-   {name = 'options',   type = 'table',  opt = true},
    {name = 'win',       type = 'string', opt = true},
    {name = 'env',       type = 'string', opt = true},
-   call = function(self, tensor, videofile, opts, options, win, env)
-      if options then
-         print(
-            [[WARNING: Argument `options` is deprecated and will soon be
-            removed. Use argument `opts` instead.]]
-         )
-      end
-      opts = opts or options or {}
+   call = function(self, tensor, videofile, opts, win, env)
+      opts = opts or {}
       local args = {}
       local kwargs = {
          tensor = tensor,
@@ -979,24 +771,17 @@ M.video = argcheck{
 M.text = argcheck{
    doc = [[
       This function prints text in a box. It takes as input an `text` string.
-      No specific `options` are currently supported.
+      No specific `opts` are currently supported.
    ]],
    noordered = true,
    {name = 'self',    type = 'visdom.client'},
    {name = 'text',    type = 'string'},
    {name = 'opts',    type = 'table',  opt = true},
-   {name = 'options', type = 'table',  opt = true},
    {name = 'win',     type = 'string', opt = true},
    {name = 'env',     type = 'string', opt = true},
    {name = 'append',  type = 'boolean', opt = true},
-   call = function(self, text, opts, options, win, env, append)
-      if options then
-         print(
-            [[WARNING: Argument `options` is deprecated and will soon be
-            removed. Use argument `opts` instead.]]
-         )
-      end
-      opts = opts or options or {}
+   call = function(self, text, opts, win, env, append)
+      opts = opts or {}
       local args = {text}
       local kwargs = {win = win, env = env, opts = opts, append = append}
       return self:py_func{func = 'text', args = args, kwargs = kwargs}
@@ -1065,10 +850,6 @@ M.py_func = argcheck {
 
      for k,v in pairs(kwargs or {}) do
        kwargs[k] = prep(v)
-       if k == 'options' then
-         kwargs.opts = kwargs.options
-         kwargs.options = nil
-       end
      end
 
      local ret = self:sendRequest{

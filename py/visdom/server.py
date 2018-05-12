@@ -38,6 +38,7 @@ LAYOUT_FILE = 'layouts.json'
 DEFAULT_ENV_PATH = '%s/.visdom/' % expanduser("~")
 DEFAULT_PORT = 8097
 
+here = os.path.abspath(os.path.dirname(__file__))
 
 def get_rand_id():
     return str(hex(int(time.time() * 10000000))[2:])
@@ -489,42 +490,6 @@ class UpdateHandler(BaseHandler):
         self.port = app.port
         self.env_path = app.env_path
 
-    # TODO remove when updateTrace is to be deprecated
-    @staticmethod
-    def update_updateTrace(p, args):
-        pdata = p['content']['data']
-
-        new_data = args['data']
-        name = args.get('name')
-        append = args.get('append')
-
-        idxs = list(range(len(pdata)))
-
-        if name is not None:
-            assert len(new_data['x']) == 1
-            idxs = [i for i in idxs if pdata[i]['name'] == name]
-
-        # inject new trace
-        if len(idxs) == 0:
-            idx = len(pdata)
-            pdata.append(dict(pdata[0]))   # plot is not empty, clone an entry
-            pdata[idx]['name'] = name
-            idxs = [idx]
-            append = False
-            if 'marker' in new_data:
-                pdata[idx]['marker']['color'] = new_data['marker']
-
-        for n, idx in enumerate(idxs):    # update traces
-            if all(math.isnan(i) or i is None for i in new_data['x'][n]):
-                continue
-
-            pdata[idx]['x'] = (pdata[idx]['x'] + new_data['x'][n]) if append \
-                else new_data['x'][n]
-            pdata[idx]['y'] = (pdata[idx]['y'] + new_data['y'][n]) if append \
-                else new_data['y'][n]
-
-        return p
-
     @staticmethod
     def update(p, args):
         # Update text in window, separated by a line break
@@ -535,9 +500,6 @@ class UpdateHandler(BaseHandler):
         pdata = p['content']['data']
 
         new_data = args.get('data')
-        # TODO remove when updateTrace is deprecated
-        if isinstance(new_data, dict):
-            return UpdateHandler.update_updateTrace(p, args)
         p = update_window(p, args)
         name = args.get('name')
         if name is None and new_data is None:
@@ -843,7 +805,8 @@ class EnvHandler(BaseHandler):
         sid = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )['sid']
-        load_env(self.state, args, self.subs[sid], env_path=self.env_path)
+        if sid in self.subs:
+            load_env(self.state, args, self.subs[sid], env_path=self.env_path)
 
 
 class CompareHandler(BaseHandler):
@@ -870,8 +833,9 @@ class CompareHandler(BaseHandler):
         sid = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )['sid']
-        compare_envs(self.state, args.split('+'), self.subs[sid],
-                     self.env_path)
+        if sid in self.subs:
+            compare_envs(self.state, args.split('+'), self.subs[sid],
+                         self.env_path)
 
 
 class SaveHandler(BaseHandler):
@@ -913,11 +877,6 @@ class DataHandler(BaseHandler):
             handler.write(json.dumps(handler.state[eid]['jsons'][args['win']]))
         else:
             handler.write(json.dumps(handler.state[eid]['jsons']))
-
-        if args['win'] in handler.state[eid]['jsons']:
-            handler.write('true')
-        else:
-            handler.write('false')
 
     def post(self):
         args = tornado.escape.json_decode(
@@ -985,12 +944,11 @@ class ErrorHandler(BaseHandler):
 
 # function that downloads and installs javascript, css, and font dependencies:
 def download_scripts(proxies=None, install_dir=None):
-
+    import visdom
     print("Downloading scripts. It might take a while.")
 
     # location in which to download stuff:
     if install_dir is None:
-        import visdom
         install_dir = os.path.dirname(visdom.__file__)
 
     # all files that need to be downloaded:
@@ -1003,7 +961,7 @@ def download_scripts(proxies=None, install_dir=None):
         '%sreact@16.2.0/umd/react.production.min.js' % b: 'react-react.min.js',
         '%sreact-dom@16.2.0/umd/react-dom.production.min.js' % b: 'react-dom.min.js',  # noqa
         '%sreact-modal@3.1.10/dist/react-modal.min.js' % b: 'react-modal.min.js',  # noqa
-        'https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_SVG':  # noqa
+        'https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_SVG':  # noqa
             'mathjax-MathJax.js',
         # here is another url in case the cdn breaks down again.
         # https://raw.githubusercontent.com/plotly/plotly.js/master/dist/plotly.min.js
@@ -1049,6 +1007,16 @@ def download_scripts(proxies=None, install_dir=None):
     opener = request.build_opener(handler)
     request.install_opener(opener)
 
+    built_path = os.path.join(here, 'static/version.built')
+    is_built = False
+    if os.path.exists(built_path):
+        with open(built_path, 'r') as build_file:
+            build_version = build_file.read().strip()
+        if build_version == visdom.__version__:
+            is_built = True
+        else:
+            os.remove(built_path)
+
     # download files one-by-one:
     for (key, val) in ext_files.items():
 
@@ -1061,7 +1029,7 @@ def download_scripts(proxies=None, install_dir=None):
 
         # download file:
         filename = '%s/static/%s/%s' % (install_dir, sub_dir, val)
-        if not os.path.exists(filename):
+        if not os.path.exists(filename) or not is_built:
             req = request.Request(key,
                                   headers={'User-Agent': 'Chrome/30.0.0.0'})
             try:
@@ -1074,6 +1042,10 @@ def download_scripts(proxies=None, install_dir=None):
             except URLError as exc:
                 logging.error('Error {} while downloading {}'.format(
                     exc.reason, key))
+
+    if not is_built:
+        with open(built_path, 'w+') as build_file:
+            build_file.write(visdom.__version__)
 
 
 def start_server(port=DEFAULT_PORT, env_path=DEFAULT_ENV_PATH, readonly=False, print_func=None, with_login=False, user=False):

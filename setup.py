@@ -1,4 +1,10 @@
+import os
 from setuptools import setup
+
+here = os.path.abspath(os.path.dirname(__file__))
+
+with open(os.path.join(here, 'py/visdom/VERSION')) as version_file:
+    version = version_file.read().strip()
 
 readme = open('README.md').read()
 
@@ -17,13 +23,13 @@ requirements = [
 setup(
     # Metadata
     name='visdom',
-    version='0.1.7.2',
+    version=version,
     author='Allan Jabri, Jack Urbanek, Laurens van der Maaten',
     author_email='jju@fb.com',
     url='https://github.com/facebookresearch/visdom',
     description='A tool for visualizing live, rich data for Torch and Numpy',
     long_description=readme,
-    license='CC-BY-4.0',
+    license='CC-BY-NC-4.0',
 
     # Package info
     packages=['visdom'],
