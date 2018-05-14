@@ -250,7 +250,8 @@ class Visdom(object):
         http_proxy_port=None,
         env='main',
         send=True,
-        raise_exceptions=None
+        raise_exceptions=None,
+        use_incoming_socket=True,
     ):
         self.server_base_name = server[server.index("//") + 2:]
         self.server = server
@@ -263,7 +264,7 @@ class Visdom(object):
         self.send = send
         self.event_handlers = {}  # Haven't registered any events
         self.socket_alive = False
-        self.use_socket = True
+        self.use_socket = use_incoming_socket
         # Flag to indicate whether to raise errors or suppress them
         self.raise_exceptions = raise_exceptions
         try:
@@ -274,6 +275,9 @@ class Visdom(object):
 
         if send:  # if you're talking to a server, get a backchannel
             self.setup_socket()
+        # Wait for initialization before starting
+        while self.use_socket and not self.socket_alive:
+            time.sleep(0.1)
 
     def register_event_handler(self, handler, target):
         assert callable(handler), 'Event handler must be a function'
