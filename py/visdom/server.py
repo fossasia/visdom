@@ -81,7 +81,8 @@ tornado_settings = {
     "debug": "/dbg/" in __file__,
     "static_path": get_path('static'),
     "template_path": get_path('static'),
-    "compiled_template_cache": False
+    "compiled_template_cache": False,
+    "cookie_secret": "YOUR SECRET HERE"
 }
 
 
@@ -297,6 +298,9 @@ class BaseHandler(tornado.web.RequestHandler):
     def __init__(self, *request, **kwargs):
         self.include_host = True
         super(BaseHandler, self).__init__(*request, **kwargs)
+
+    def get_current_user(self):
+        return self.get_secure_cookie("user_password")
 
     def write_error(self, status_code, **kwargs):
         logging.error("ERROR: %s: %s" % (status_code, kwargs))
@@ -895,15 +899,8 @@ class IndexHandler(BaseHandler):
 
     def get(self, args, **kwargs):
         items = gather_envs(self.state, env_path=self.env_path)
-        if self.with_login == False:
-           self.render(
-                'index.html',
-                user=getpass.getuser(),
-                items=items,
-                active_item=''
-            ) 
 
-        if self.with_login and self.user_login['login']:
+        if (not self.with_login) or self.with_login and self.current_user:
             self.render(
                 'index.html',
                 user=getpass.getuser(),
@@ -923,7 +920,7 @@ class IndexHandler(BaseHandler):
         password = hashlib.sha256(self.get_argument("password").encode("utf-8")).hexdigest()
 
         if (username == self.user_login["username"]) and (password == self.user_login["password"]):
-            self.user_login["login"] = True
+            self.set_secure_cookie("user_password", username + password) 
             self.redirect("/")
         else:
             items = gather_envs(self.state, env_path=self.env_path)
@@ -1100,7 +1097,6 @@ def main(print_func=None):
         user = {
             "username": username,
             "password": hashlib.sha256(password.encode("utf-8")).hexdigest(),
-            "login": False
         }
     else:
         user = False
