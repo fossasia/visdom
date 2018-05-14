@@ -283,8 +283,18 @@ class Visdom(object):
         if send:  # if you're talking to a server, get a backchannel
             self.setup_socket()
         # Wait for initialization before starting
-        while self.use_socket and not self.socket_alive:
+        time_spent = 0
+        while self.use_socket and not self.socket_alive and time_spent < 5:
             time.sleep(0.1)
+            time_spent += 0.1
+        if time_spent > 5:
+            logger.warn(
+                'Visdom python client failed to establish socket to get '
+                'messages from the server. This feature is optional and '
+                'can be disabled by initializing Visdom with '
+                '`use_incoming_socket=False`, which will prevent waiting for '
+                'this request to timeout.'
+            )
 
     def register_event_handler(self, handler, target):
         assert callable(handler), 'Event handler must be a function'
