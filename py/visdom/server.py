@@ -410,7 +410,9 @@ class PostHandler(BaseHandler):
         self.sources = app.sources
         self.port = app.port
         self.env_path = app.env_path
-        self.vis = visdom.Visdom(port=self.port, send=False)
+        self.vis = visdom.Visdom(
+            port=self.port, send=False, use_incoming_socket=False
+        )
         self.handlers = {
             'update': UpdateHandler,
             'save': SaveHandler,
