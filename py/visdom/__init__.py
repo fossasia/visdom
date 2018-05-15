@@ -283,7 +283,7 @@ class Visdom(object):
         # when talking to a server, get a backchannel
         if send and use_incoming_socket:
             self.setup_socket()
-        elif not use_incoming_socket:
+        elif send and not use_incoming_socket:
             logger.warn(
                 'Without the incoming socket you cannot receive events from '
                 'the server or register event handlers to your Visdom client.'
