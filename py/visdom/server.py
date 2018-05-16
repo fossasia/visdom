@@ -147,7 +147,6 @@ class Application(tornado.web.Application):
             (r"/win_data", DataHandler, {'app': self}),
             (r"/(.*)", IndexHandler, {'app': self}),
         ]
-
         super(Application, self).__init__(handlers, **tornado_settings)
 
 
@@ -950,7 +949,6 @@ class IndexHandler(BaseHandler):
                 items=items,
                 active_item=''
             )
-        
 
 
 class ErrorHandler(BaseHandler):
