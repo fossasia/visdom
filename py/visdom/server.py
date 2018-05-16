@@ -75,14 +75,21 @@ def extract_eid(args):
     eid = 'main' if args.get('eid') is None else args.get('eid')
     return escape_eid(eid)
 
+def set_cookie():
+    """Create cookie secret key for authentication"""
+    cookie_secret = input("Please input your cookie secret key here: ")
+    with open(DEFAULT_ENV_PATH + "COOKIE_SECRET", "w") as cookie_file:
+        cookie_file.write(cookie_secret)
+
 
 tornado_settings = {
     "autoescape": None,
     "debug": "/dbg/" in __file__,
     "static_path": get_path('static'),
     "template_path": get_path('static'),
-    "compiled_template_cache": False,
+    "compiled_template_cache": False
 }
+
 
 def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
     env_ids = [i for i in eids if i in state]
@@ -1088,6 +1095,10 @@ def main(print_func=None):
                         action = 'store_true')
     parser.add_argument('-enable_login', default=False, 
                         action='store_true', help='start the server with authentication')
+    parser.add_argument('-force_new_cookie', default=False, 
+                        action='store_true',
+                        help='start the server with the new cookie, '
+                             'available when -enable_login provided')
     FLAGS = parser.parse_args()
 
     try:
@@ -1105,15 +1116,17 @@ def main(print_func=None):
     if FLAGS.enable_login:
         username = input("Please input your username: ")
         password = getpass.getpass(prompt="Please input your password: ")
+        
         user_credential = {
             "username": username,
             "password": hashlib.sha256(password.encode("utf-8")).hexdigest(),
         }
 
         if not os.path.isfile(DEFAULT_ENV_PATH + "COOKIE_SECRET"):
-            with open(DEFAULT_ENV_PATH + "COOKIE_SECRET", "w") as file:
-                file.write(user_credential["username"] + user_credential["password"])
+            set_cookie()
 
+        if FLAGS.force_new_cookie:
+            set_cookie()
     else:
         user_credential = None 
     
