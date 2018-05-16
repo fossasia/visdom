@@ -915,7 +915,7 @@ class IndexHandler(BaseHandler):
 
     def get(self, args, **kwargs):
         items = gather_envs(self.state, env_path=self.env_path)
-        if (not self.login_enabled) or self.login_enabled and self.current_user: 
+        if (not self.login_enabled) or self.current_user: 
             """self.current_user is an authenticated user provided by Tornado, 
             available when we set self.get_current_user in BaseHandler, 
             and the default value of self.current_user is None
@@ -1123,8 +1123,7 @@ def main(print_func=None):
 
         if not os.path.isfile(DEFAULT_ENV_PATH + "COOKIE_SECRET"):
             set_cookie()
-
-        if FLAGS.force_new_cookie:
+        elif FLAGS.force_new_cookie:
             set_cookie()
     else:
         user_credential = None 
