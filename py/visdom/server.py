@@ -1066,7 +1066,6 @@ def download_scripts(proxies=None, install_dir=None):
 def start_server(port=DEFAULT_PORT, env_path=DEFAULT_ENV_PATH, readonly=False, print_func=None, user_credential=None):
     print("It's Alive!")
     app = Application(port=port, env_path=env_path, readonly=readonly, user_credential=user_credential)
-
     app.listen(port, max_buffer_size=1024 ** 3)
     logging.info("Application Started")
     if "HOSTNAME" in os.environ:
