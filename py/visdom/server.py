@@ -81,6 +81,10 @@ def set_cookie():
     with open(DEFAULT_ENV_PATH + "COOKIE_SECRET", "w") as cookie_file:
         cookie_file.write(cookie_secret)
 
+def hash_password(password):
+    """Hashing Password with SHA-256"""
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
 
 tornado_settings = {
     "autoescape": None,
@@ -935,20 +939,14 @@ class IndexHandler(BaseHandler):
             )
 
     def post(self, arg, **kwargs):
-        username = self.get_argument("username") 
-        password = hashlib.sha256(self.get_argument("password").encode("utf-8")).hexdigest()
+        json_obj = tornado.escape.json_decode(self.request.body)
+        username = json_obj["username"] 
+        password = hash_password(json_obj["password"])
 
         if (username == self.user_credential["username"]) and (password == self.user_credential["password"]):
             self.set_secure_cookie("user_password", username + password) 
-            self.redirect("/")
         else:
-            items = gather_envs(self.state, env_path=self.env_path)
-            self.render(
-                'incorrect.html',
-                user=getpass.getuser(),
-                items=items,
-                active_item=''
-            )
+            self.set_status(400)
 
 
 class ErrorHandler(BaseHandler):
@@ -981,6 +979,8 @@ def download_scripts(proxies=None, install_dir=None):
         # here is another url in case the cdn breaks down again.
         # https://raw.githubusercontent.com/plotly/plotly.js/master/dist/plotly.min.js
         'https://cdn.plot.ly/plotly-latest.min.js': 'plotly-plotly.min.js',
+        # Stanford Javascript Crypto Library for Password Has
+        '%ssjcl@1.0.7/sjcl.js' % b: 'sjcl.js',
 
         # - css
         '%sreact-resizable@1.4.6/css/styles.css' % b: 'react-resizable-styles.css',  # noqa
@@ -1118,7 +1118,7 @@ def main(print_func=None):
         
         user_credential = {
             "username": username,
-            "password": hashlib.sha256(password.encode("utf-8")).hexdigest(),
+            "password": hash_password(hash_password(password))  
         }
 
         if not os.path.isfile(DEFAULT_ENV_PATH + "COOKIE_SECRET"):

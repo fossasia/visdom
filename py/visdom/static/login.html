@@ -13,7 +13,44 @@
 
     <!-- Custom styles for this template -->
     <link href={{ static_url("css/login.css") }} rel="stylesheet">
-    
+
+    <!-- jQuery -->
+    <script src={{ static_url("js/jquery.min.js") }}></script> 
+
+    <!-- Hashing Password using Stanford Javascript Crypto Library-->
+    <script src={{ static_url("js/sjcl.js") }}></script>
+
+    <script>
+      $(document).ready(function () {
+          // initialize the viewer
+          $('#submitButton').click(function (event) {
+              var username = $("#inputUsername").val();
+              var password = $("#inputPassword").val();
+              password = sjcl.hash.sha256.hash(password)
+              var data =
+              {
+                  username: username,
+                  password: sjcl.codec.hex.fromBits(password)
+              };
+              var dataToSend = JSON.stringify(data);
+              $.ajax(
+                      {
+                          url: '/',
+                          type: 'POST',
+                          data: dataToSend,
+                          success:function() {
+                            window.location.replace("/")
+                          }, 
+                          error: function () {
+                            $("#errorMessage").text("Invalid Login Information");
+                          }
+                      });
+              event.preventDefault();
+          });
+      });
+
+  </script>
+
   </head>
 
   <body class="text-center">
@@ -23,7 +60,8 @@
       <input name=username type="username" id="inputUsername" class="form-control" placeholder="Username" required autofocus>
       <label for="inputPassword" class="sr-only">Password</label>
       <input name=password type="password" id="inputPassword" class="form-control" placeholder="Password" required>
-      <button class="btn btn-lg btn-primary btn-block" type="submit", formmethod="post">Login</button>
+      <button class="btn btn-lg btn-primary btn-block" type="submit" id="submitButton" >Login</button>
+      <p id="errorMessage"></p>
     </form>
   </body>
 </html>
