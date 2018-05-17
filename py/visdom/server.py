@@ -979,7 +979,7 @@ def download_scripts(proxies=None, install_dir=None):
         # here is another url in case the cdn breaks down again.
         # https://raw.githubusercontent.com/plotly/plotly.js/master/dist/plotly.min.js
         'https://cdn.plot.ly/plotly-latest.min.js': 'plotly-plotly.min.js',
-        # Stanford Javascript Crypto Library for Password Has
+        # Stanford Javascript Crypto Library for Password Hashing
         '%ssjcl@1.0.7/sjcl.js' % b: 'sjcl.js',
 
         # - css
