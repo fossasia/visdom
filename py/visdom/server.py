@@ -14,6 +14,7 @@ from __future__ import unicode_literals
 import argparse
 import copy
 import getpass
+import hashlib
 import inspect
 import json
 import logging
@@ -38,6 +39,7 @@ DEFAULT_ENV_PATH = '%s/.visdom/' % expanduser("~")
 DEFAULT_PORT = 8097
 
 here = os.path.abspath(os.path.dirname(__file__))
+
 
 def get_rand_id():
     return str(hex(int(time.time() * 10000000))[2:])
@@ -75,6 +77,18 @@ def extract_eid(args):
     return escape_eid(eid)
 
 
+def set_cookie():
+    """Create cookie secret key for authentication"""
+    cookie_secret = input("Please input your cookie secret key here: ")
+    with open(DEFAULT_ENV_PATH + "COOKIE_SECRET", "w") as cookie_file:
+        cookie_file.write(cookie_secret)
+
+
+def hash_password(password):
+    """Hashing Password with SHA-256"""
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
 tornado_settings = {
     "autoescape": None,
     "debug": "/dbg/" in __file__,
@@ -97,13 +111,21 @@ def serialize_all(state, env_path=DEFAULT_ENV_PATH):
 
 
 class Application(tornado.web.Application):
-    def __init__(self, port=DEFAULT_PORT, env_path=DEFAULT_ENV_PATH, readonly=False):
+    def __init__(self, port=DEFAULT_PORT, env_path=DEFAULT_ENV_PATH,
+                 readonly=False, user_credential=None):
         self.state = {}
         self.subs = {}
         self.sources = {}
         self.env_path = env_path
         self.port = port
         self.readonly = readonly
+        self.user_credential = user_credential
+        self.login_enabled = False
+
+        if user_credential:
+            self.login_enabled = True
+            tornado_settings["cookie_secret"] = \
+                open(DEFAULT_ENV_PATH + "COOKIE_SECRET", "r").read()
 
         # reload state
         ensure_dir_exists(env_path)
@@ -294,6 +316,17 @@ class BaseHandler(tornado.web.RequestHandler):
     def __init__(self, *request, **kwargs):
         self.include_host = True
         super(BaseHandler, self).__init__(*request, **kwargs)
+
+    def get_current_user(self):
+        """
+        This method determines the self.current_user
+        based the value of cookies that set in POST method
+        at IndexHandler by self.set_secure_cookie
+        """
+        try:
+            return self.get_secure_cookie("user_password")
+        except Exception:  # Not using secure cookies
+            return None
 
     def write_error(self, status_code, **kwargs):
         logging.error("ERROR: %s: %s" % (status_code, kwargs))
@@ -889,15 +922,40 @@ class IndexHandler(BaseHandler):
         self.state = app.state
         self.port = app.port
         self.env_path = app.env_path
+        self.login_enabled = app.login_enabled
+        self.user_credential = app.user_credential
 
     def get(self, args, **kwargs):
         items = gather_envs(self.state, env_path=self.env_path)
-        self.render(
-            'index.html',
-            user=getpass.getuser(),
-            items=items,
-            active_item=''
-        )
+        if (not self.login_enabled) or self.current_user:
+            """self.current_user is an authenticated user provided by Tornado,
+            available when we set self.get_current_user in BaseHandler,
+            and the default value of self.current_user is None
+            """
+            self.render(
+                'index.html',
+                user=getpass.getuser(),
+                items=items,
+                active_item=''
+            )
+        elif self.login_enabled:
+            self.render(
+                'login.html',
+                user=getpass.getuser(),
+                items=items,
+                active_item=''
+            )
+
+    def post(self, arg, **kwargs):
+        json_obj = tornado.escape.json_decode(self.request.body)
+        username = json_obj["username"]
+        password = hash_password(json_obj["password"])
+
+        if ((username == self.user_credential["username"]) and
+                (password == self.user_credential["password"])):
+            self.set_secure_cookie("user_password", username + password)
+        else:
+            self.set_status(400)
 
 
 class ErrorHandler(BaseHandler):
@@ -930,6 +988,8 @@ def download_scripts(proxies=None, install_dir=None):
         # here is another url in case the cdn breaks down again.
         # https://raw.githubusercontent.com/plotly/plotly.js/master/dist/plotly.min.js
         'https://cdn.plot.ly/plotly-latest.min.js': 'plotly-plotly.min.js',
+        # Stanford Javascript Crypto Library for Password Hashing
+        '%ssjcl@1.0.7/sjcl.js' % b: 'sjcl.js',
 
         # - css
         '%sreact-resizable@1.4.6/css/styles.css' % b: 'react-resizable-styles.css',  # noqa
@@ -1012,9 +1072,11 @@ def download_scripts(proxies=None, install_dir=None):
             build_file.write(visdom.__version__)
 
 
-def start_server(port=DEFAULT_PORT, env_path=DEFAULT_ENV_PATH, readonly=False, print_func=None):
+def start_server(port=DEFAULT_PORT, env_path=DEFAULT_ENV_PATH, readonly=False,
+                 print_func=None, user_credential=None):
     print("It's Alive!")
-    app = Application(port=port, env_path=env_path, readonly=readonly)
+    app = Application(port=port, env_path=env_path, readonly=readonly,
+                      user_credential=user_credential)
     app.listen(port, max_buffer_size=1024 ** 3)
     logging.info("Application Started")
     if "HOSTNAME" in os.environ:
@@ -1029,7 +1091,6 @@ def start_server(port=DEFAULT_PORT, env_path=DEFAULT_ENV_PATH, readonly=False, p
 
 
 def main(print_func=None):
-
     parser = argparse.ArgumentParser(description='Start the visdom server.')
     parser.add_argument('-port', metavar='port', type=int, default=DEFAULT_PORT,
                         help='port to run the server on.')
@@ -1040,7 +1101,13 @@ def main(print_func=None):
                         help='logging level (default = INFO). Can take logging '
                              'level name or int (example: 20)')
     parser.add_argument('-readonly', help='start in readonly mode',
-                        action = 'store_true')
+                        action='store_true')
+    parser.add_argument('-enable_login', default=False, action='store_true',
+                        help='start the server with authentication')
+    parser.add_argument('-force_new_cookie', default=False,
+                        action='store_true',
+                        help='start the server with the new cookie, '
+                             'available when -enable_login provided')
     FLAGS = parser.parse_args()
 
     try:
@@ -1055,7 +1122,24 @@ def main(print_func=None):
 
     logging.getLogger().setLevel(logging_level)
 
-    start_server(port=FLAGS.port, env_path=FLAGS.env_path, readonly=FLAGS.readonly, print_func=print_func)
+    if FLAGS.enable_login:
+        username = input("Please input your username: ")
+        password = getpass.getpass(prompt="Please input your password: ")
+
+        user_credential = {
+            "username": username,
+            "password": hash_password(hash_password(password))
+        }
+
+        if not os.path.isfile(DEFAULT_ENV_PATH + "COOKIE_SECRET"):
+            set_cookie()
+        elif FLAGS.force_new_cookie:
+            set_cookie()
+    else:
+        user_credential = None
+
+    start_server(port=FLAGS.port, env_path=FLAGS.env_path, readonly=FLAGS.readonly,
+                 print_func=print_func, user_credential=user_credential)
 
 
 if __name__ == "__main__":

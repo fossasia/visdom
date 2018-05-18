@@ -182,6 +182,8 @@ The following options can be provided to the server:
 2. `-env_path` : The path to the serialized session to reload.
 3. `-logging_level` : Logging level (default = INFO). Accepts both standard text and numeric logging values.
 4. `-readonly` : Flag to start server in readonly mode.
+5. `-enable_login` : Flag to setup authentication for the sever, requiring a username and password to login.
+6. `-force_new_cookie` : Flag to reset the secure cookie used by the server, invalidating current login cookies. Requires `-enable_login`.
 
 
 #### Python example
