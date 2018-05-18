@@ -89,7 +89,6 @@ h1 {
 }
 
 .window.focus {
-  background-color: #dedede;
   border-color: #dedede;
   outline-color: #6389d8;
   outline-width: 4px;
@@ -98,6 +97,7 @@ h1 {
 
 .bar.focus {
   font-weight: bold;
+  background-color: #dedede;
 }
 
 .bar button {
@@ -199,4 +199,27 @@ doesn't override our desire to make them non-interactable */
 
 .rc-tree-select-selection--multiple .rc-tree-select-search__field__placeholder {
     top: 8px;
+}
+
+.table-properties td {
+    border: solid 1px #dedede;
+}
+
+.table-properties td.table-properties-name {
+    padding: 0px 10px 0px 2px;
+    text-align: right;
+    background-color: #F0F0F0;
+}
+
+.table-properties td.table-properties-value {
+    padding: 0;
+}
+
+.table-properties td input {
+    width: 100%;
+    height: 100%;
+}
+
+.content-properties {
+    background-color: #ffffff;
 }

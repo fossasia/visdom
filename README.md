@@ -58,12 +58,15 @@ You can subscribe a window to events by adding a function to the event handlers 
 
 Additional parameters are defined below.
 
-Right now two callback events are supported:
+Right now three callback events are supported:
 
 1. `Close` - Triggers when a window is closed. Returns a dict with only the aforementioned fields.
 2. `KeyPress` - Triggers when a key is pressed. Contains additional parameters:
     - `key` - A string representation of the key pressed (applying state modifiers such as SHIFT)
     - `key_code` - The javascript event keycode for the pressed key (no modifiers)
+3. `PropertyUpdate` - Triggers when a property is updated in Property pane
+    - `propertyId` - Position in properties list
+    - `value` - New property value    
 
 ### Environments
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34618198-fc63976c-f20b-11e7-9c0d-060132fdb37e.png" width="300" /></p>
@@ -227,6 +230,7 @@ Visdom offers the following basic visualization functions:
 - [`vis.image`](#visimage)    : image
 - [`vis.images`](#visimages)   : list of images
 - [`vis.text`](#vistext)     : arbitrary HTML
+- [`vis.properties`](#visproperties)     : properties grid
 - [`vis.audio`](#visaudio)    : audio
 - [`vis.video`](#visvideo)    : videos
 - [`vis.svg`](#vissvg)      : SVG object
@@ -298,6 +302,25 @@ The following arguments and `opts` are supported:
 #### vis.text
 This function prints text in a  box. You can use this to embed arbitrary HTML.
 It takes as input a `text` string.
+No specific `opts` are currently supported.
+
+#### vis.properties
+This function shows editable properties in a pane. Properties are expected to be a List of Dicts e.g.:
+```
+properties = [{'type': 'text', 'name': 'Text input', 'value': 'initial'},
+              {'type': 'number', 'name': 'Number input', 'value': '12'},
+              {'type': 'button', 'name': 'Button', 'value': 'Start'}, ]
+```
+Supported types:
+ - text: string
+ - number: decimal number
+ - button: button labeled with "value"
+
+Callback are called on property value update:
+ - `event_type`: `"PropertyUpdate"`
+ - `propertyId`: position in the `properties` list
+ - `value`: new value
+
 No specific `opts` are currently supported.
 
 #### vis.audio

@@ -788,6 +788,35 @@ M.text = argcheck{
    end
 }
 
+-- properties:
+M.properties = argcheck{
+   doc = [[
+        This function shows editable properties in a pane. Properties are expected to be a List of Dicts e.g.:
+        properties = [{'type': 'text', 'name': 'Text input', 'value': 'initial'},
+                      {'type': 'number', 'name': 'Number input', 'value': '12'},
+                      {'type': 'button', 'name': 'Button', 'value': 'Start'}, ]
+
+        Supported types:
+            - text: A string
+            - number: A decimal number
+            - button: Shows button labeled with "value"
+
+        No specific `opts` are currently supported.
+   ]],
+   noordered = true,
+   {name = 'self',    type = 'visdom.client'},
+   {name = 'data',    type = 'table'},
+   {name = 'opts',    type = 'table',  opt = true},
+   {name = 'win',     type = 'string', opt = true},
+   {name = 'env',     type = 'string', opt = true},
+   call = function(self, data, opts, win, env)
+      opts = opts or {}
+      local args = {data}
+      local kwargs = {win = win, env = env, opts = opts}
+      return self:py_func{func = 'properties', args = args, kwargs = kwargs}
+   end
+}
+
 -- close a window:
 M.close = argcheck{
    doc = [[
