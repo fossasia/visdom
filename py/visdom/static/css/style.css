@@ -215,9 +215,15 @@ doesn't override our desire to make them non-interactable */
     padding: 0;
 }
 
+.table-properties td.table-properties-value input[type=checkbox]
+{
+    -ms-transform: scale(1.5); /* IE */
+    -moz-transform: scale(1.5); /* FF */
+    -webkit-transform: scale(1.5); /* Safari and Chrome */
+    -o-transform: scale(1.5); /* Opera */
+}
 .table-properties td input {
     width: 100%;
-    height: 100%;
 }
 
 .content-properties {

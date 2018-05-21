@@ -87,6 +87,15 @@ class PropertiesPane extends React.Component {
                   className="btn btn-sm"
                   onClick={() => this.updateValue(propId, "clicked")}
               >{prop.value}</button>
+          case 'checkbox':
+              return <label className="checkbox-inline">
+                        <input
+                            type="checkbox"
+                            checked={prop.value}
+                            onChange={() => this.updateValue(propId, !prop.value)}
+                        />
+                        &nbsp;
+                </label>;
       }
   };
 

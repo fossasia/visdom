@@ -307,15 +307,19 @@ No specific `opts` are currently supported.
 #### vis.properties
 This function shows editable properties in a pane. Properties are expected to be a List of Dicts e.g.:
 ```
-properties = [{'type': 'text', 'name': 'Text input', 'value': 'initial'},
-              {'type': 'number', 'name': 'Number input', 'value': '12'},
-              {'type': 'button', 'name': 'Button', 'value': 'Start'}, ]
+    properties = [
+        {'type': 'text', 'name': 'Text input', 'value': 'initial'},
+        {'type': 'number', 'name': 'Number input', 'value': '12'},
+        {'type': 'button', 'name': 'Button', 'value': 'Start'},
+        {'type': 'checkbox', 'name': 'Checkbox', 'value': True},
+    ]
 ```
 Supported types:
  - text: string
  - number: decimal number
  - button: button labeled with "value"
-
+ - checkbox: boolean value rendered as a checkbox 
+ 
 Callback are called on property value update:
  - `event_type`: `"PropertyUpdate"`
  - `propertyId`: position in the `properties` list

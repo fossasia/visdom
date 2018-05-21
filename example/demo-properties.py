@@ -48,22 +48,30 @@ try:
     viz.register_event_handler(type_callback, callback_text_window)
 
     # Properties window
-    properties = [{'type': 'text', 'name': 'Text input', 'value': 'initial'},
-                  {'type': 'number', 'name': 'Number input', 'value': '12'},
-                  {'type': 'button', 'name': 'Button', 'value': 'Start'}, ]
+    properties = [
+        {'type': 'text', 'name': 'Text input', 'value': 'initial'},
+        {'type': 'number', 'name': 'Number input', 'value': '12'},
+        {'type': 'button', 'name': 'Button', 'value': 'Start'},
+        {'type': 'checkbox', 'name': 'Checkbox', 'value': True},
+    ]
 
     properties_window = viz.properties(properties)
 
     def properties_callback(event):
         if event['event_type'] == 'PropertyUpdate':
-            propId = event['propertyId']
-            if propId == 2:
-                new_value = 'Stop' if properties[propId]['value'] == 'Start' else 'Start'
+            prop_id = event['propertyId']
+            value = event['value']
+            if prop_id == 0:
+                new_value = value + '_updated'
+            elif prop_id == 1:
+                new_value = value + '0'
+            elif prop_id == 2:
+                new_value = 'Stop' if properties[prop_id]['value'] == 'Start' else 'Start'
             else:
-                new_value = event['value'] + '0'
-            properties[propId]['value'] = new_value
+                new_value = value
+            properties[prop_id]['value'] = new_value
             viz.properties(properties, win=properties_window)
-            viz.text(f"Updated: {properties[event['propertyId']]['name']} => {event['value']}",
+            viz.text(f"Updated: {properties[event['propertyId']]['name']} => {str(event['value'])}",
                      win=callback_text_window, append=True)
 
     viz.register_event_handler(properties_callback, properties_window)
