@@ -53,6 +53,7 @@ try:
         {'type': 'number', 'name': 'Number input', 'value': '12'},
         {'type': 'button', 'name': 'Button', 'value': 'Start'},
         {'type': 'checkbox', 'name': 'Checkbox', 'value': True},
+        {'type': 'select', 'name': 'Select', 'value': 1, 'values': ['Red', 'Green', 'Blue']},
     ]
 
     properties_window = viz.properties(properties)

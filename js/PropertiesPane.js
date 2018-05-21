@@ -89,13 +89,20 @@ class PropertiesPane extends React.Component {
               >{prop.value}</button>
           case 'checkbox':
               return <label className="checkbox-inline">
-                        <input
-                            type="checkbox"
-                            checked={prop.value}
-                            onChange={() => this.updateValue(propId, !prop.value)}
-                        />
-                        &nbsp;
-                </label>;
+                  <input
+                      type="checkbox"
+                      checked={prop.value}
+                      onChange={() => this.updateValue(propId, !prop.value)}
+                  />
+                  &nbsp;
+              </label>;
+          case 'select':
+              return <select className="form-control"
+                             onChange={(event) => this.updateValue(propId, event.target.value)}
+                             value={prop.value}
+              >
+                  {prop.values.map((name, id) => <option value={id}>{name}</option>)}
+              </select>;
       }
   };
 
