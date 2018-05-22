@@ -96,6 +96,18 @@ def loadfile(filename):
     return str
 
 
+def _title2str(opts):
+    if opts.get('title'):
+        if isnum(opts.get('title')):
+            title = str(opts.get('title'))
+            logger.warn('Numerical title %s has been casted to a string' % \
+                        title)
+            opts['title'] = title
+            return opts
+        else:
+            return opts
+
+
 def _scrub_dict(d):
     if type(d) is dict:
         return {k: _scrub_dict(v) for k, v in list(d.items())
@@ -224,6 +236,9 @@ def _assert_opts(opts):
     if opts.get('fps'):
         assert isnum(opts.get('fps')), 'fps should be a number'
         assert opts.get('fps') > 0, 'fps must be greater than 0'
+
+    if opts.get('title'):
+        assert isstr(opts.get('title')), 'title should be a string'
 
 
 def pytorch_wrap(fn):
@@ -499,6 +514,7 @@ class Visdom(object):
         No specific `opts` are currently supported.
         """
         opts = {} if opts is None else opts
+        _title2str(opts)
         _assert_opts(opts)
         data = [{'content': text, 'type': 'text'}]
 
@@ -521,6 +537,7 @@ class Visdom(object):
         `opts`.
         """
         opts = {} if opts is None else opts
+        _title2str(opts)
         _assert_opts(opts)
 
         if svgfile is not None:
@@ -537,6 +554,7 @@ class Visdom(object):
         any plot-specific `opts`.
         """
         opts = {} if opts is None else opts
+        _title2str(opts)
         _assert_opts(opts)
 
         # write plot to SVG buffer:
@@ -564,6 +582,7 @@ class Visdom(object):
         uint8 in [0, 255].
         """
         opts = {} if opts is None else opts
+        _title2str(opts)
         _assert_opts(opts)
         opts['width'] = opts.get('width', img.shape[img.ndim - 1])
         opts['height'] = opts.get('height', img.shape[img.ndim - 2])
@@ -658,6 +677,7 @@ class Visdom(object):
         """
         opts = {} if opts is None else opts
         opts['sample_frequency'] = opts.get('sample_frequency', 44100)
+        _title2str(opts)
         _assert_opts(opts)
         assert tensor is not None or audiofile is not None, \
             'should specify audio tensor or file'
@@ -700,6 +720,7 @@ class Visdom(object):
         """
         opts = {} if opts is None else opts
         opts['fps'] = opts.get('fps', 25)
+        _title2str(opts)
         _assert_opts(opts)
         assert tensor is not None or videofile is not None, \
             'should specify video tensor or file'
@@ -854,6 +875,7 @@ class Visdom(object):
             assert len(L) == X.shape[0], \
                 'textlabels and X should have same shape'
 
+        _title2str(opts)
         _assert_opts(opts)
 
         if opts.get('legend'):
@@ -975,6 +997,7 @@ class Visdom(object):
         opts['fillarea'] = opts.get('fillarea', False)
         opts['mode'] = 'lines+markers' if opts.get('markers') else 'lines'
 
+        _title2str(opts)
         _assert_opts(opts)
 
         if Y.ndim == 1:
@@ -1009,6 +1032,7 @@ class Visdom(object):
         opts['xmin'] = opts.get('xmin', np.asscalar(X.min()))
         opts['xmax'] = opts.get('xmax', np.asscalar(X.max()))
         opts['colormap'] = opts.get('colormap', 'Viridis')
+        _title2str(opts)
         _assert_opts(opts)
 
         if opts.get('columnnames') is not None:
@@ -1072,6 +1096,7 @@ class Visdom(object):
         opts = {} if opts is None else opts
         opts['stacked'] = opts.get('stacked', False)
 
+        _title2str(opts)
         _assert_opts(opts)
 
         if opts.get('rownames') is not None:
@@ -1117,6 +1142,7 @@ class Visdom(object):
 
         opts = {} if opts is None else opts
         opts['numbins'] = opts.get('numbins', min(30, len(X)))
+        _title2str(opts)
         _assert_opts(opts)
 
         minx, maxx = X.min(), X.max()
@@ -1147,6 +1173,7 @@ class Visdom(object):
             X = X[:, None]
 
         opts = {} if opts is None else opts
+        _title2str(opts)
         _assert_opts(opts)
 
         if opts.get('legend') is not None:
@@ -1194,6 +1221,7 @@ class Visdom(object):
         opts['xmin'] = opts.get('xmin', X.min())
         opts['xmax'] = opts.get('xmax', X.max())
         opts['colormap'] = opts.get('colormap', 'Viridis')
+        _title2str(opts)
         _assert_opts(opts)
 
         data = [{
@@ -1273,6 +1301,7 @@ class Visdom(object):
         opts = {} if opts is None else opts
         opts['mode'] = 'lines'
         opts['arrowheads'] = opts.get('arrowheads', True)
+        _title2str(opts)
         _assert_opts(opts)
 
         # normalize vectors to unit length:
@@ -1365,6 +1394,7 @@ class Visdom(object):
 
         opts = {} if opts is None else opts
         opts['mode'] = 'lines'
+        _title2str(opts)
         _assert_opts(opts)
 
         return self.scatter(X=data, Y=labels, opts=opts, win=win, env=env)
@@ -1384,6 +1414,7 @@ class Visdom(object):
             'X cannot contain negative values'
 
         opts = {} if opts is None else opts
+        _title2str(opts)
         _assert_opts(opts)
 
         data = [{
@@ -1411,6 +1442,7 @@ class Visdom(object):
         - `opts.opacity`: opacity of polygons (`number` between 0 and 1)
         """
         opts = {} if opts is None else opts
+        _title2str(opts)
         _assert_opts(opts)
 
         X = np.asarray(X)
