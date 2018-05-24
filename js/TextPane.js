@@ -1,5 +1,3 @@
-import EventSystem from "./EventSystem";
-
 /**
  * Copyright 2017-present, Facebook, Inc.
  * All rights reserved.
@@ -9,6 +7,7 @@ import EventSystem from "./EventSystem";
  *
  */
 
+import EventSystem from "./EventSystem";
 const Pane = require('./Pane');
 
 class TextPane extends React.Component {

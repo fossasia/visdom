@@ -10,14 +10,8 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from visdom import Visdom
-import numpy as np
-import math
-import os.path
-import getpass
 import time
-from sys import platform as _platform
-from six.moves import urllib
-
+import numpy as np
 
 try:
     viz = Visdom()
@@ -27,6 +21,29 @@ try:
         time.sleep(0.1)
         startup_sec -= 0.1
     assert viz.check_connection(), 'No connection could be formed quickly'
+
+    # image callback demo
+    def show_color_image_window(color, win=None):
+        image = np.full([3, 256, 256], color, dtype=float)
+        return viz.image(
+            image,
+            opts=dict(title='Colors', caption='Press arrows to alter color.'),
+            win=win
+        )
+
+    image_color = 0
+    callback_image_window = show_color_image_window(image_color)
+
+    def image_callback(event):
+        global image_color
+        if event['event_type'] == 'KeyPress':
+            if event['key'] == 'ArrowRight':
+                image_color = min(image_color + 0.2, 1)
+            if event['key'] == 'ArrowLeft':
+                image_color = max(image_color - 0.2, 0)
+            show_color_image_window(image_color, callback_image_window)
+
+    viz.register_event_handler(image_callback, callback_image_window)
 
     # text window with Callbacks
     txt = 'This is a write demo notepad. Type below. Delete clears text:<br>'
@@ -72,7 +89,7 @@ try:
                 new_value = value
             properties[prop_id]['value'] = new_value
             viz.properties(properties, win=properties_window)
-            viz.text(f"Updated: {properties[event['propertyId']]['name']} => {str(event['value'])}",
+            viz.text("Updated: {} => {}".format(properties[event['propertyId']]['name'], str(event['value'])),
                      win=callback_text_window, append=True)
 
     viz.register_event_handler(properties_callback, properties_window)

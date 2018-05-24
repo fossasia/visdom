@@ -614,6 +614,15 @@ class App extends React.Component {
     EventSystem.publish('global.event', event);
   }
 
+  /**
+   * Send message to backend.
+   *
+   * The `data` object is extended by pane and environment Id.
+   * This function is exposed to Pane components through `appApi` prop.
+   * Note: Only focused panes should call this method.
+   *
+   * @param data Data to be sent to backend.
+   */
   sendPaneMessage = (data) => {
     if (this.state.focusedPaneID === null || this.state.readonly) {
       return;

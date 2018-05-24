@@ -791,14 +791,16 @@ M.text = argcheck{
 -- properties:
 M.properties = argcheck{
    doc = [[
-        This function shows editable properties in a pane. Properties are expected to be a List of Dicts e.g.:
+        This function shows editable properties in a pane.
+        Properties are expected to be a List of Dicts e.g.:
         ```
             properties = [
                 {'type': 'text', 'name': 'Text input', 'value': 'initial'},
                 {'type': 'number', 'name': 'Number input', 'value': '12'},
                 {'type': 'button', 'name': 'Button', 'value': 'Start'},
                 {'type': 'checkbox', 'name': 'Checkbox', 'value': True},
-                {'type': 'select', 'name': 'Select', 'value': 1, 'values': ['Red', 'Green', 'Blue']},
+                {'type': 'select', 'name': 'Select', 'value': 1,
+                 'values': ['Red', 'Green', 'Blue']},
             ]
         ```
         Supported types:
