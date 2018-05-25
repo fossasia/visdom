@@ -530,6 +530,47 @@ class Visdom(object):
             'opts': opts,
         }, endpoint=endpoint)
 
+    def properties(self, data, win=None, env=None, opts=None):
+        """
+        This function shows editable properties in a pane.
+        Properties are expected to be a List of Dicts e.g.:
+        ```
+            properties = [
+                {'type': 'text', 'name': 'Text input', 'value': 'initial'},
+                {'type': 'number', 'name': 'Number input', 'value': '12'},
+                {'type': 'button', 'name': 'Button', 'value': 'Start'},
+                {'type': 'checkbox', 'name': 'Checkbox', 'value': True},
+                {'type': 'select', 'name': 'Select', 'value': 1,
+                 'values': ['Red', 'Green', 'Blue']},
+            ]
+        ```
+        Supported types:
+         - text: string
+         - number: decimal number
+         - button: button labeled with "value"
+         - checkbox: boolean value rendered as a checkbox
+         - select: multiple values select box
+            - `value`: id of selected value (zero based)
+            - `values`: list of possible values
+
+        Callback are called on property value update:
+         - `event_type`: `"PropertyUpdate"`
+         - `propertyId`: position in the `properties` list
+         - `value`: new value
+
+        No specific `opts` are currently supported.
+        """
+        opts = {} if opts is None else opts
+        _assert_opts(opts)
+        data = [{'content': data, 'type': 'properties'}]
+
+        return self._send({
+            'data': data,
+            'win': win,
+            'eid': env,
+            'opts': opts,
+        }, endpoint='events')
+
     def svg(self, svgstr=None, svgfile=None, win=None, env=None, opts=None):
         """
         This function draws an SVG object. It takes as input an SVG string or the

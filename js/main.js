@@ -14,12 +14,14 @@ var classNames = require('classnames');
 import 'rc-tree-select/assets/index.css';
 
 import TreeSelect, { SHOW_CHILD } from 'rc-tree-select';
+import EventSystem from './EventSystem'
 
 var ReactGridLayout = require('react-grid-layout');
 
 import createClass from 'create-react-class';
 import PropTypes from 'prop-types';
 
+const PropertiesPane = require('./PropertiesPane');
 const TextPane = require('./TextPane');
 const ImagePane = require('./ImagePane');
 const PlotPane = require('./PlotPane');
@@ -37,12 +39,14 @@ const PANES = {
   image: ImagePane,
   plot: PlotPane,
   text: TextPane,
+  properties: PropertiesPane,
 };
 
 const PANE_SIZE = {
   image: [20, 20],
   plot:  [30, 24],
   text:  [20, 20],
+  properties:  [20, 20],
 };
 
 const MODAL_STYLE = {
@@ -445,10 +449,10 @@ class App extends React.Component {
     });
   }
 
-  focusPane = (paneID) => {
+  focusPane = (paneID, cb) => {
     this.setState({
       focusedPaneID: paneID,
-    });
+    }, cb);
   }
 
   blurPane = (e) => {
@@ -606,20 +610,31 @@ class App extends React.Component {
     this.setState({layoutLists: layoutLists, layoutID: layoutID});
   }
 
-  broadcastKeyEvent = (event) => {
+  publishEvent = (event) => {
+    EventSystem.publish('global.event', event);
+  }
+
+  /**
+   * Send message to backend.
+   *
+   * The `data` object is extended by pane and environment Id.
+   * This function is exposed to Pane components through `appApi` prop.
+   * Note: Only focused panes should call this method.
+   *
+   * @param data Data to be sent to backend.
+   */
+  sendPaneMessage = (data) => {
     if (this.state.focusedPaneID === null || this.state.readonly) {
       return;
     }
-    let keyEvent = {
-      event_type: 'KeyPress',
-      key: event.key,
-      key_code: event.keyCode,
+    let finalData = {
       target: this.state.focusedPaneID,
       eid: this.state.envID,
-    }
+    };
+    $.extend(finalData, data);
     this.sendSocketMessage({
       cmd: 'forward_to_vis',
-      data: keyEvent,
+      data: finalData,
     });
   }
 
@@ -1101,6 +1116,7 @@ class App extends React.Component {
             isFocused={pane.id === this.state.focusedPaneID}
             w={panelayout.w}
             h={panelayout.h}
+            appApi={{sendPaneMessage: this.sendPaneMessage}}
           />
         </div>
       );
@@ -1144,9 +1160,10 @@ class App extends React.Component {
           tabIndex="-1"
           className="no-focus"
           onBlur={this.blurPane}
-          onKeyUp={(event) => {event.preventDefault();}}
-          onKeyDown={this.broadcastKeyEvent}
-          onKeyPress={(event) => {event.preventDefault();}}>
+          onKeyUp={this.publishEvent}
+          onKeyDown={this.publishEvent}
+          onKeyPress={this.publishEvent}
+        >
           <GridLayout
             className="layout"
             rowHeight={ROW_HEIGHT}

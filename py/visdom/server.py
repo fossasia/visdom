@@ -387,7 +387,7 @@ def window(args):
         'contentID': get_rand_id(),   # to detected updated windows
     }
 
-    if ptype in ['image', 'text']:
+    if ptype in ['image', 'text', 'properties']:
         p.update({'content': args['data'][0]['content'], 'type': ptype})
     else:
         p['content'] = {'data': args['data'], 'layout': args['layout']}
