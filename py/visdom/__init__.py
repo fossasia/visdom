@@ -22,6 +22,7 @@ import numpy as np
 from PIL import Image
 import base64 as b64
 import numbers
+import six
 from six import string_types
 from six import BytesIO
 import logging
@@ -616,8 +617,8 @@ class Visdom(object):
             else:
                 try:
                     soup = bs4.BeautifulSoup(svg, 'xml')
-                except bs4.FeatureNotFound:
-                    raise ImportError("No module named 'lxml'")
+                except bs4.FeatureNotFound as e:
+                    six.raise_from(ImportError("No module named 'lxml'"), e)
                 height = soup.svg.attrs.pop('height', None)
                 width = soup.svg.attrs.pop('width', None)
                 svg = str(soup)
