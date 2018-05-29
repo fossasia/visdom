@@ -597,8 +597,9 @@ class Visdom(object):
 
     def matplot(self, plot, opts=None, env=None, win=None):
         """
-        This function draws a Matplotlib `plot`. The function does not support
-        any plot-specific `opts`.
+        This function draws a Matplotlib `plot`. The function supports
+        one plot-specific option: `resizable`. When set to `True` the plot
+        is resized with the pane.
         """
         opts = {} if opts is None else opts
         _title2str(opts)
