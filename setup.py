@@ -1,5 +1,14 @@
 import os
 from setuptools import setup
+from pkg_resources import get_distribution, DistributionNotFound
+
+
+def get_dist(pkgname):
+    try:
+        return get_distribution(pkgname)
+    except DistributionNotFound:
+        return None
+
 
 here = os.path.abspath(os.path.dirname(__file__))
 
@@ -11,7 +20,6 @@ readme = open('README.md').read()
 requirements = [
     'numpy>=1.8',
     'scipy',
-    'pillow',
     'requests',
     'tornado',
     'pyzmq',
@@ -19,6 +27,8 @@ requirements = [
     'torchfile',
     'websocket-client',
 ]
+pillow_req = 'pillow-simd' if get_dist('pillow-simd') is not None else 'pillow'
+requirements.append(pillow_req)
 
 setup(
     # Metadata
