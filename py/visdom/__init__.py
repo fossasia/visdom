@@ -599,7 +599,8 @@ class Visdom(object):
         """
         This function draws a Matplotlib `plot`. The function supports
         one plot-specific option: `resizable`. When set to `True` the plot
-        is resized with the pane.
+        is resized with the pane. You need `beautifulsoup4` and `lxml`
+        packages installed to use this option.
         """
         opts = {} if opts is None else opts
         _title2str(opts)
