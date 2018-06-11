@@ -301,6 +301,10 @@ class Visdom(object):
         except ImportError:
             pass
 
+        self._send({
+            'eid': env,
+        }, endpoint='env/' + env)
+
         # when talking to a server, get a backchannel
         if send and use_incoming_socket:
             self.setup_socket()
