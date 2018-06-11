@@ -249,11 +249,11 @@ def _assert_opts(opts):
 
 def pytorch_wrap(fn):
     def result(*args, **kwargs):
-        args = (a.cpu().numpy() if type(a).__module__.startswith('torch') else a for a in args)
+        args = (a.cpu().detach().numpy() if type(a).__module__.startswith('torch') else a for a in args)
 
         for k in kwargs:
             if type(kwargs[k]).__module__.startswith('torch'):
-                kwargs[k] = kwargs[k].cpu().numpy()
+                kwargs[k] = kwargs[k].cpu().detach().numpy()
 
         return fn(*args, **kwargs)
     return result
