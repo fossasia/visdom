@@ -22,6 +22,7 @@ import numpy as np
 from PIL import Image
 import base64 as b64
 import numbers
+import six
 from six import string_types
 from six import BytesIO
 import logging
@@ -29,6 +30,11 @@ import warnings
 import time
 import errno
 import io
+try:
+    import bs4
+    BS4_AVAILABLE = True
+except ImportError:
+    BS4_AVAILABLE = False
 
 
 here = os.path.abspath(os.path.dirname(__file__))
@@ -591,8 +597,10 @@ class Visdom(object):
 
     def matplot(self, plot, opts=None, env=None, win=None):
         """
-        This function draws a Matplotlib `plot`. The function does not support
-        any plot-specific `opts`.
+        This function draws a Matplotlib `plot`. The function supports
+        one plot-specific option: `resizable`. When set to `True` the plot
+        is resized with the pane. You need `beautifulsoup4` and `lxml`
+        packages installed to use this option.
         """
         opts = {} if opts is None else opts
         _title2str(opts)
@@ -605,13 +613,28 @@ class Visdom(object):
         svg = buffer.read()
         buffer.close()
 
+        if opts.get('resizable', False):
+            if not BS4_AVAILABLE:
+                raise ImportError("No module named 'bs4'")
+            else:
+                try:
+                    soup = bs4.BeautifulSoup(svg, 'xml')
+                except bs4.FeatureNotFound as e:
+                    six.raise_from(ImportError("No module named 'lxml'"), e)
+                height = soup.svg.attrs.pop('height', None)
+                width = soup.svg.attrs.pop('width', None)
+                svg = str(soup)
+        else:
+            height = None
+            width = None
+
         # show SVG:
         if 'height' not in opts:
-            height = re.search('height\="([0-9\.]*)pt"', svg)
+            height = height or re.search('height\="([0-9\.]*)pt"', svg)
             if height is not None:
                 opts['height'] = 1.4 * int(math.ceil(float(height.group(1))))
         if 'width' not in opts:
-            width = re.search('width\="([0-9\.]*)pt"', svg)
+            width = width or re.search('width\="([0-9\.]*)pt"', svg)
             if width is not None:
                 opts['width'] = 1.35 * int(math.ceil(float(width.group(1))))
         return self.svg(svgstr=svg, opts=opts, env=env, win=win)

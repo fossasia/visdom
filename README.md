@@ -365,8 +365,12 @@ the name of an SVG file `svgfile`. The function does not support any specific
 `opts`.
 
 #### vis.matplot
-This function draws a Matplotlib `plot`. The function does not support
-any plot-specific `opts`.
+This function draws a Matplotlib `plot`. The function supports
+one plot-specific option: `resizable`.
+
+> **Note** When set to `True` the plot is resized with the
+pane. You need `beautifulsoup4` and `lxml`
+packages installed to use this option.
 
 > **Note**: `matplot` is not rendered using the same backend as plotly plots, and is somewhat less efficient. Using too many matplot windows may degrade visdom performance.
 
