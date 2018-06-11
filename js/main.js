@@ -274,7 +274,15 @@ class App extends React.Component {
                             new Map([[DEFAULT_LAYOUT, new Map()]]));
           }
         }
-        this.setState({envList: cmd.data, layoutLists: layoutLists})
+        if (!this.state.showEnvModal || (this.state.modifyID in cmd.data)) {
+          this.setState({envList: cmd.data, layoutLists: layoutLists})
+        } else {
+          this.setState({
+            envList: cmd.data,
+            layoutLists: layoutLists,
+            modifyID: cmd.data[0],
+          })
+        }
         break;
       case 'layout_update':
         this.parseLayoutsFromServer(cmd.data);
@@ -739,7 +747,11 @@ class App extends React.Component {
   }
 
   openEnvModal() {
-    this.setState({showEnvModal: true, saveText: this.state.envID});
+    this.setState({
+      showEnvModal: true,
+      saveText: this.state.envID,
+      modifyID: this.state.envList[0]
+    });
   }
 
   closeEnvModal() {
@@ -747,7 +759,11 @@ class App extends React.Component {
   }
 
   openViewModal() {
-    this.setState({showViewModal: true, saveText: this.state.layoutID});
+    this.setState({
+      showViewModal: true,
+      saveText: this.state.layoutID,
+      modifyID: this.state.layoutLists.get(this.state.envID).keys()[0],
+    });
   }
 
   closeViewModal() {
