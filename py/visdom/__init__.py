@@ -280,6 +280,7 @@ class Visdom(object):
         send=True,
         raise_exceptions=None,
         use_incoming_socket=True,
+        log_to_filename=None,
     ):
         self.server_base_name = server[server.index("//") + 2:]
         self.server = server
@@ -295,6 +296,7 @@ class Visdom(object):
         self.use_socket = use_incoming_socket
         # Flag to indicate whether to raise errors or suppress them
         self.raise_exceptions = raise_exceptions
+        self.log_to_filename = log_to_filename
         try:
             import torch  # noqa F401: we do use torch, just weirdly
             wrap_tensor_methods(self, pytorch_wrap)
@@ -390,7 +392,7 @@ class Visdom(object):
         self.socket_thread.start()
 
     # Utils
-    def _send(self, msg, endpoint='events', quiet=False):
+    def _send(self, msg, endpoint='events', quiet=False, from_log=False):
         """
         This function sends specified JSON request to the Tornado server. This
         function should generally not be called by the user, unless you want to
@@ -408,6 +410,15 @@ class Visdom(object):
                 "{0}:{1}/{2}".format(self.server, self.port, endpoint),
                 data=json.dumps(msg),
             )
+            if self.log_to_filename is not None and not from_log:
+                if endpoint in ['events', 'update']:
+                    if msg['win'] is None:
+                        msg['win'] = r.text
+                    with open(self.log_to_filename, 'a+') as log_file:
+                        log_file.write(json.dumps([
+                            endpoint,
+                            msg,
+                        ]) + '\n')
             return r.text
         except BaseException:
             if self.raise_exceptions:
@@ -511,6 +522,17 @@ class Visdom(object):
         """
         return (self.win_exists('') is not None) and \
             (self.socket_alive or not self.use_socket)
+
+    def replay_log(self, log_filename):
+        """
+        This function takes the contents of a visdom log and replays them to
+        the current server to restore the state or handle any missing entries.
+        """
+        with open(log_filename) as f:
+            log_entries = f.readlines()
+        for entry in log_entries:
+            endpoint, msg = json.loads(entry)
+            self._send(msg, endpoint, from_log=True)
 
     # Content
 

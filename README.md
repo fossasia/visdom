@@ -227,6 +227,19 @@ th example/demo2.lua
 ## API
 For a quick introduction into the capabilities of `visdom`, have a look at the `example` directory, or read the details below.
 
+### Visdom Arguments (Python only)
+The python visdom client takes a few options:
+- `server`: the hostname of your visdom server (default: `'http://localhost'`)
+- `port`: the port for your visdom server (default: `8097`)
+- `env`: Default environment to plot to when no `env` is provided (default: `main`)
+- `raise_exceptions`: Raise exceptions upon failure rather than printing them (default: `True` (soon))
+- `log_to_filename`: If not none, log all plotting and updating events to the given file (append mode) so that they can be replayed later using `replay_log` (default: `None`)
+- `use_incoming_socket`: enable use of the socket for receiving events from the web client, allowing user to register callbacks (default: `True`)
+- `http_proxy_host`: host to proxy your incoming socket through (default: `None`)
+- `http_proxy_port`: port to proxy your incoming socket through (default: `None`)
+
+Other options are either currently unused (endpoint, ipv6) or used for internal functionality (send allows the visdom server to replicate events for the lua client).
+
 ### Basics
 Visdom offers the following basic visualization functions:
 - [`vis.image`](#visimage)    : image
@@ -275,6 +288,7 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 - [`vis.win_exists`](#viswin_exists) : check if a window already exists by id
 - [`vis.get_window_data`](#visget_window_data): get current data for a window
 - [`vis.check_connection`](#vischeck_connection): check if the server is connected
+- [`vis.replay_log`](#visreplay_log): replay the actions from the provided log file
 
 ## Details
 ![visdom_big](https://lh3.googleusercontent.com/-bqH9UXCw-BE/WL2UsdrrbAI/AAAAAAAAnYc/emrxwCmnrW4_CLTyyUttB0SYRJ-i4CCiQCLcB/s0/Screen+Shot+2017-03-06+at+10.51.02+AM.png"visdom_big")
@@ -321,11 +335,11 @@ Supported types:
  - text: string
  - number: decimal number
  - button: button labeled with "value"
- - checkbox: boolean value rendered as a checkbox 
+ - checkbox: boolean value rendered as a checkbox
  - select: multiple values select box
     - `value`: id of selected value (zero based)
     - `values`: list of possible values
- 
+
 Callback are called on property value update:
  - `event_type`: `"PropertyUpdate"`
  - `propertyId`: position in the `properties` list
@@ -596,6 +610,12 @@ Arguments:
 #### vis.check_connection
 
 This function returns a bool indicating whether or not the server is connected.
+
+#### vis.replay_log
+This function takes the contents of a visdom log and replays them to the current server to restore a state or handle any missing entries.
+
+Arguments:
+- `log_filename`: log file to replay the contents of.
 
 ## To Do
 
