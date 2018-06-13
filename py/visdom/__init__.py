@@ -39,9 +39,11 @@ except ImportError:
 
 here = os.path.abspath(os.path.dirname(__file__))
 
-with open(os.path.join(here, 'VERSION')) as version_file:
-    __version__ = version_file.read().strip()
-
+try:
+    with open(os.path.join(here, 'VERSION')) as version_file:
+        __version__ = version_file.read().strip()
+except Exception:
+    __version__ = 'no_version_file'
 
 try:
     import torchfile

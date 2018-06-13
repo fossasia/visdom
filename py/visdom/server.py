@@ -1033,7 +1033,7 @@ def download_scripts(proxies=None, install_dir=None):
     request.install_opener(opener)
 
     built_path = os.path.join(here, 'static/version.built')
-    is_built = False
+    is_built = visdom.__version__ == 'no_version_file'
     if os.path.exists(built_path):
         with open(built_path, 'r') as build_file:
             build_version = build_file.read().strip()
