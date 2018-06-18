@@ -602,7 +602,7 @@ class UpdateHandler(BaseHandler):
 
         if not (p['type'] == 'text' or
                 p['content']['data'][0]['type'] in ['scatter', 'custom']):
-            handler.write('win is not scatter or text, was {}'.format(
+            handler.write('win is not scatter, custom, or text; was {}'.format(
                 p['content']['data'][0]['type']))
             return
 
