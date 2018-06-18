@@ -23,6 +23,7 @@ by a firewall, or you may need to specify a proxy server when starting the
 visdom server (via the `-proxy` option). In some cases, it may help to set up an
 SSH tunnel to your server by adding the following line to your local
 `~/.ssh/config`: `LocalForward 127.0.0.1:8097 127.0.0.1:8097`
+It's also possible that the port is being blocked by your firewall, and some users have reported that the `sudo ufw allow 8097` command helps them.
 
 **Issue: I see a blue screen in my browser, but I do not see visualizations.**
 There may be an issue with downloading the JavaScript dependencies. This is,
