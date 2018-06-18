@@ -169,7 +169,7 @@ luarocks make
 Start the server (probably in a  `screen` or `tmux`) :
 
 ```bash
-python -m visdom.server
+visdom
 ```
 
 Visdom now can be accessed by going to `http://localhost:8097` in your browser, or your own host address if specified.
