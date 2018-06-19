@@ -1144,6 +1144,10 @@ def main(print_func=None):
                  print_func=print_func, user_credential=user_credential)
 
 
-if __name__ == "__main__":
+def download_scripts_and_run():
     download_scripts()
     main()
+
+
+if __name__ == "__main__":
+    download_scripts_and_run()
