@@ -371,6 +371,8 @@ def update_window(p, args):
 
 def window(args):
     """ Build a window dict structure for sending to client """
+    # TODO only send *updates* to the clients, rather than the full window.
+    # as long-running image histories will grow linearly in size
     uid = args.get('win', 'window_' + get_rand_id())
     if uid is None:
         uid = 'window_' + get_rand_id()
@@ -388,7 +390,14 @@ def window(args):
         'contentID': get_rand_id(),   # to detected updated windows
     }
 
-    if ptype in ['image', 'text', 'properties']:
+    if ptype == 'image_history':
+        p.update({
+            'content': [args['data'][0]['content']],
+            'selected': 0,
+            'type': ptype,
+            'show_slider': opts.get('show_slider', True)
+        })
+    elif ptype in ['image', 'text', 'properties']:
         p.update({'content': args['data'][0]['content'], 'type': ptype})
     else:
         p['content'] = {'data': args['data'], 'layout': args['layout']}
@@ -530,6 +539,20 @@ class UpdateHandler(BaseHandler):
             p['content'] += "<br>" + args['data'][0]['content']
             return p
 
+        if p['type'] == 'image_history':
+            utype = args['data'][0]['type']
+            if utype == 'image_history':
+                p['content'].append(args['data'][0]['content'])
+                p['selected'] = len(p['content']) - 1
+            elif utype == 'image_update_selected':
+                # TODO implement python client function for this
+                # Bound the update to within the dims of the array
+                selected = args['data']
+                selected_not_neg = max(0, selected)
+                selected_exists = min(len(p['content'])-1, selected_not_neg)
+                p['selected'] = selected_exists
+            return p
+
         pdata = p['content']['data']
 
         new_data = args.get('data')
@@ -600,10 +623,11 @@ class UpdateHandler(BaseHandler):
 
         p = handler.state[eid]['jsons'][args['win']]
 
-        if not (p['type'] == 'text' or
+        if not (p['type'] == 'text' or p['type'] == 'image_history' or
                 p['content']['data'][0]['type'] in ['scatter', 'custom']):
-            handler.write('win is not scatter, custom, or text; was {}'.format(
-                p['content']['data'][0]['type']))
+            handler.write(
+                'win is not scatter, custom, image_history, or text; '
+                'was {}'.format(p['content']['data'][0]['type']))
             return
 
         p = UpdateHandler.update(p, args)

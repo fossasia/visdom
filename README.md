@@ -301,8 +301,9 @@ that contains the image.
 
 The following `opts` are supported:
 
-- `opts.jpgquality`: JPG quality (`number` 0-100; default = 100)
-- `opts.caption`: Caption for the image
+- `jpgquality`: JPG quality (`number` 0-100; default = 100)
+- `caption`: Caption for the image
+- `store_history`: Keep all images stored to the same window and attach a slider to the bottom that will let you select the image to view. You must always provide this opt when sending new images to an image with history.
 
 #### vis.images
 

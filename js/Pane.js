@@ -100,6 +100,7 @@ class Pane extends React.Component {
           <div>{this.props.title}</div>
         </div>
         <div className="content">{this.props.children}</div>
+        <div className="widgets">{this.props.widgets}</div>
       </div>
     );
   }
