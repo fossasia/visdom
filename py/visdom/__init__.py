@@ -30,6 +30,7 @@ import warnings
 import time
 import errno
 import io
+from functools import wraps
 try:
     import bs4
     BS4_AVAILABLE = True
@@ -248,25 +249,26 @@ def _assert_opts(opts):
     if opts.get('title'):
         assert isstr(opts.get('title')), 'title should be a string'
 
+try:
+    import torch
+    _using_torch = True
+except ImportError:
+    _using_torch = False
 
-def pytorch_wrap(fn):
-    def result(*args, **kwargs):
-        args = (a.cpu().detach().numpy() if type(a).__module__.startswith('torch') else a for a in args)
+def _torch_to_numpy(a):
+    if _using_torch and isinstance(a, torch.Tensor):
+        return a.cpu().detach().numpy()
+    else:
+        return a
 
-        for k in kwargs:
-            if type(kwargs[k]).__module__.startswith('torch'):
-                kwargs[k] = kwargs[k].cpu().detach().numpy()
+def pytorch_wrap(f):
+    @wraps(f)
+    def wrapped_f(*args, **kwargs):
+        args = (_torch_to_numpy(arg) for arg in args)
+        kwargs = {k: _torch_to_numpy(v) for (k, v) in kwargs.items()}
+        return f(*args, **kwargs)
 
-        return fn(*args, **kwargs)
-    return result
-
-
-def wrap_tensor_methods(cls, wrapper):
-    fns = ['_surface', 'bar', 'boxplot', 'surf', 'heatmap', 'histogram', 'svg',
-           'image', 'images', 'line', 'pie', 'scatter', 'stem', 'quiver', 'contour']
-    for key in [k for k in dir(cls) if k in fns]:
-        setattr(cls, key, wrapper(getattr(cls, key)))
-
+    return wrapped_f
 
 class Visdom(object):
 
@@ -299,11 +301,6 @@ class Visdom(object):
         # Flag to indicate whether to raise errors or suppress them
         self.raise_exceptions = raise_exceptions
         self.log_to_filename = log_to_filename
-        try:
-            import torch  # noqa F401: we do use torch, just weirdly
-            wrap_tensor_methods(self, pytorch_wrap)
-        except ImportError:
-            pass
 
         # when talking to a server, get a backchannel
         if send and use_incoming_socket:
@@ -601,6 +598,7 @@ class Visdom(object):
             'opts': opts,
         }, endpoint='events')
 
+    @pytorch_wrap
     def svg(self, svgstr=None, svgfile=None, win=None, env=None, opts=None):
         """
         This function draws an SVG object. It takes as input an SVG string or the
@@ -663,6 +661,7 @@ class Visdom(object):
                 opts['width'] = 1.35 * int(math.ceil(float(width.group(1))))
         return self.svg(svgstr=svg, opts=opts, env=env, win=win)
 
+    @pytorch_wrap
     def image(self, img, win=None, env=None, opts=None):
         """
         This function draws an img. It takes as input an `CxHxW` or `HxW` tensor
@@ -706,6 +705,7 @@ class Visdom(object):
             'opts': opts,
         })
 
+    @pytorch_wrap
     def images(self, tensor, nrow=8, padding=2,
                win=None, env=None, opts=None):
         """
@@ -753,6 +753,7 @@ class Visdom(object):
 
         return self.image(grid, win, env, opts)
 
+    @pytorch_wrap
     def audio(self, tensor=None, audiofile=None, win=None, env=None, opts=None):
         """
         This function plays audio. It takes as input the filename of the audio
@@ -796,6 +797,7 @@ class Visdom(object):
         opts['width'] = 330
         return self.text(text=videodata, win=win, env=env, opts=opts)
 
+    @pytorch_wrap
     def video(self, tensor=None, videofile=None, win=None, env=None, opts=None):
         """
         This function plays a video. It takes as input the filename of the video
@@ -872,6 +874,7 @@ class Visdom(object):
         }
         return self._send(data_to_send, endpoint='update')
 
+    @pytorch_wrap
     def scatter(self, X, Y=None, win=None, env=None, opts=None, update=None,
                 name=None):
         """
@@ -1030,6 +1033,7 @@ class Visdom(object):
 
         return self._send(data_to_send, endpoint=endpoint)
 
+    @pytorch_wrap
     def line(self, Y, X=None, win=None, env=None, opts=None, update=None,
              name=None):
         """
@@ -1101,6 +1105,7 @@ class Visdom(object):
         return self.scatter(X=linedata, Y=labels, opts=opts, win=win, env=env,
                             update=update, name=name)
 
+    @pytorch_wrap
     def heatmap(self, X, win=None, env=None, opts=None):
         """
         This function draws a heatmap. It takes as input an `NxM` tensor `X`
@@ -1149,6 +1154,7 @@ class Visdom(object):
             'opts': opts,
         })
 
+    @pytorch_wrap
     def bar(self, X, Y=None, win=None, env=None, opts=None):
         """
         This function draws a regular, stacked, or grouped bar plot. It takes as
@@ -1214,6 +1220,7 @@ class Visdom(object):
             'opts': opts,
         })
 
+    @pytorch_wrap
     def histogram(self, X, win=None, env=None, opts=None):
         """
         This function draws a histogram of the specified data. It takes as input
@@ -1245,6 +1252,7 @@ class Visdom(object):
             env=env
         )
 
+    @pytorch_wrap
     def boxplot(self, X, win=None, env=None, opts=None):
         """
         This function draws boxplots of the specified data. It takes as input
@@ -1289,6 +1297,7 @@ class Visdom(object):
             'opts': opts,
         })
 
+    @pytorch_wrap
     def _surface(self, X, stype, win=None, env=None, opts=None):
         """
         This function draws a surface plot. It takes as input an `NxM` tensor
@@ -1329,6 +1338,7 @@ class Visdom(object):
             'opts': opts,
         })
 
+    @pytorch_wrap
     def surf(self, X, win=None, env=None, opts=None):
         """
         This function draws a surface plot. It takes as input an `NxM` tensor
@@ -1343,6 +1353,7 @@ class Visdom(object):
 
         return self._surface(X=X, stype='surface', opts=opts, win=win, env=env)
 
+    @pytorch_wrap
     def contour(self, X, win=None, env=None, opts=None):
         """
         This function draws a contour plot. It takes as input an `NxM` tensor
@@ -1357,6 +1368,7 @@ class Visdom(object):
 
         return self._surface(X=X, stype='contour', opts=opts, win=win, env=env)
 
+    @pytorch_wrap
     def quiver(self, X, Y, gridX=None, gridY=None,
                             win=None, env=None, opts=None):
         """
@@ -1440,6 +1452,7 @@ class Visdom(object):
         # generate scatter plot:
         return self.scatter(X=data, opts=opts, win=win, env=env)
 
+    @pytorch_wrap
     def stem(self, X, Y=None, win=None, env=None, opts=None):
         """
         This function draws a stem plot. It takes as input an `N` or `NxM`tensor
@@ -1487,6 +1500,7 @@ class Visdom(object):
 
         return self.scatter(X=data, Y=labels, opts=opts, win=win, env=env)
 
+    @pytorch_wrap
     def pie(self, X, win=None, env=None, opts=None):
         """
         This function draws a pie chart based on the `N` tensor `X`.
@@ -1518,6 +1532,7 @@ class Visdom(object):
             'opts': opts,
         })
 
+    @pytorch_wrap
     def mesh(self, X, Y=None, win=None, env=None, opts=None):
         """
         This function draws a mesh plot from a set of vertices defined in an
