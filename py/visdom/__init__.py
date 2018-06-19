@@ -256,7 +256,7 @@ except ImportError:
     _using_torch = False
 
 def _torch_to_numpy(a):
-    if _using_torch and isinstance(a, torch.Tensor):
+    if _using_torch and (isinstance(a, torch.Tensor) or isinstance(a, torch.nn.Parameter)):
         return a.cpu().detach().numpy()
     else:
         return a
