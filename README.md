@@ -408,7 +408,6 @@ reflected in the colors of the markers.
 
 The following `opts` are supported:
 
-- `opts.colormap`    : colormap (`string`; default = `'Viridis'`)
 - `opts.markersymbol`: marker symbol (`string`; default = `'dot'`)
 - `opts.markersize`  : marker size (`number`; default = `'10'`)
 - `opts.markercolor` : color per marker. (`torch.*Tensor`; default = `nil`)
@@ -436,7 +435,6 @@ lines will share the same x-axis values) or have the same size as `Y`.
 The following `opts` are supported:
 
 - `opts.fillarea`    : fill area below line (`boolean`)
-- `opts.colormap`    : colormap (`string`; default = `'Viridis'`)
 - `opts.markers`     : show markers (`boolean`; default = `false`)
 - `opts.markersymbol`: marker symbol (`string`; default = `'dot'`)
 - `opts.markersize`  : marker size (`number`; default = `'10'`)
