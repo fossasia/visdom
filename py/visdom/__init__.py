@@ -249,15 +249,19 @@ def _assert_opts(opts):
     if opts.get('title'):
         assert isstr(opts.get('title')), 'title should be a string'
 
+torch_types = []
 try:
     import torch
-    _using_torch = True
-except ImportError:
-    _using_torch = False
+    torch_types.append(torch.Tensor)
+    torch_types.append(torch.nn.Parameter)
+    torch_types.append(torch.autograd.Variable)
+except (ImportError, AttributeError):
+    pass
 
 def _torch_to_numpy(a):
-    if _using_torch and (isinstance(a, torch.Tensor) or isinstance(a, torch.nn.Parameter)):
-        return a.cpu().detach().numpy()
+    for kind in torch_types:
+        if isinstance(a, kind):
+            return a.cpu().detach().numpy()
     else:
         return a
 
