@@ -1,11 +1,11 @@
-from typing import Optional, List, Any, Union, Mapping, overload, AnyStr, Text
+from typing import Optional, List, Any, Union, Mapping, overload, Text
 
 ### Type aliases for commonly-used types.
 # For optional 'options' parameters.
 # The options parameters can be strongly-typed with the proposed TypedDict type once that is incorporated into the standard.
 # See  http://mypy.readthedocs.io/en/latest/more_types.html#typeddict.
-_OptOps = Optional[Mapping[AnyStr, Any]]
-_OptStr = Optional[AnyStr]  # For optional string parameters, like 'window' and 'env'.
+_OptOps = Optional[Mapping[Text, Any]]
+_OptStr = Optional[Text]  # For optional string parameters, like 'window' and 'env'.
 
 # No widely-deployed stubs exist at the moment for torch or numpy. When they are available, the correct type of the tensor-like inputs
 # to the plotting commands should be
@@ -22,28 +22,28 @@ _SendReturn = Text
 class Visdom:
     def __init__(
         self,
-        server: AnyStr = ...,
-        endpoint: AnyStr = ...,
+        server: Text = ...,
+        endpoint: Text = ...,
         port: int = ...,
         ipv6: bool = ...,
         http_proxy_host: _OptStr = ...,
         http_proxy_port: Optional[int] = ...,
-        env: AnyStr = ...,
+        env: Text = ...,
         send: bool = ...,
         raise_exceptions: Optional[bool] = ...,
         use_incoming_socket: bool = ...,
         log_to_filename: _OptStr = ...,
     ) -> None: ...
-    def _send(self, msg, endpoint: AnyStr = ..., quiet: bool = ..., from_log: bool = ...) -> _SendReturn: ...
-    def save(self, envs: List[AnyStr]) -> _SendReturn: ...
+    def _send(self, msg, endpoint: Text = ..., quiet: bool = ..., from_log: bool = ...) -> _SendReturn: ...
+    def save(self, envs: List[Text]) -> _SendReturn: ...
     def close(self, win: _OptStr = ..., env: _OptStr = ...) -> _SendReturn: ...
     def get_window_data(self, win: _OptStr = ..., env: _OptStr = ...) -> _SendReturn: ...
-    def delete_env(self, env: AnyStr) -> _SendReturn: ...
-    def win_exists(self, win: AnyStr, env: _OptStr = ...) -> Optional[bool]: ...
+    def delete_env(self, env: Text) -> _SendReturn: ...
+    def win_exists(self, win: Text, env: _OptStr = ...) -> Optional[bool]: ...
     def check_connection(self) -> bool: ...
-    def replay_log(self, log_filename: AnyStr) -> None: ...
+    def replay_log(self, log_filename: Text) -> None: ...
     def text(self,
-        text: AnyStr,
+        text: Text,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
@@ -79,7 +79,7 @@ class Visdom:
         env:_OptStr=...,
         opts:_OptOps=...
     ) -> _SendReturn: ...
-    def update_window_opts(self, win: AnyStr, opts: Mapping[AnyStr, Any], env: _OptStr = ...) -> _SendReturn: ...
+    def update_window_opts(self, win: Text, opts: Mapping[Text, Any], env: _OptStr = ...) -> _SendReturn: ...
     def scatter(
         self,
         X: Tensor,
