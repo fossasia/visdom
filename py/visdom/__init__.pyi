@@ -1,10 +1,10 @@
-from typing import Optional, List, Any, Union, Mapping, overload, AnyStr
+from typing import Optional, List, Any, Union, Mapping, overload, AnyStr, Text
 
 ### Type aliases for commonly-used types.
-# For optional 'options' parameters. 
+# For optional 'options' parameters.
 # The options parameters can be strongly-typed with the proposed TypedDict type once that is incorporated into the standard.
 # See  http://mypy.readthedocs.io/en/latest/more_types.html#typeddict.
-_OptOps = Optional[Mapping[AnyStr, Any]]  
+_OptOps = Optional[Mapping[AnyStr, Any]]
 _OptStr = Optional[AnyStr]  # For optional string parameters, like 'window' and 'env'.
 
 # No widely-deployed stubs exist at the moment for torch or numpy. When they are available, the correct type of the tensor-like inputs
@@ -17,7 +17,7 @@ Tensor = Any
 # It technically can return a union of several different types, but in normal usage,
 # it will return a single string. We only type it as such to prevent the need for users to unwrap the union.
 # See https://github.com/python/mypy/issues/1693.
-_SendReturn = AnyStr  
+_SendReturn = Text
 
 class Visdom:
     def __init__(

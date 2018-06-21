@@ -13,14 +13,14 @@ import os.path
 import requests
 import traceback
 import threading
-import websocket
+import websocket # type: ignore
 import json
 import math
 import re
 import base64
-import numpy as np
-from PIL import Image
-import base64 as b64
+import numpy as np # type: ignore
+from PIL import Image # type: ignore
+import base64 as b64 # type: ignore
 import numbers
 import six
 from six import string_types
@@ -32,7 +32,7 @@ import errno
 import io
 from functools import wraps
 try:
-    import bs4
+    import bs4 # type: ignore
     BS4_AVAILABLE = True
 except ImportError:
     BS4_AVAILABLE = False
@@ -47,7 +47,7 @@ except Exception:
     __version__ = 'no_version_file'
 
 try:
-    import torchfile
+    import torchfile # type: ignore
 except BaseException:
     from . import torchfile
 
@@ -807,7 +807,7 @@ class Visdom(object):
                 'tensor should be 1D vector or 2D matrix with 2 columns'
 
         if tensor is not None:
-            import scipy.io.wavfile
+            import scipy.io.wavfile # type: ignore
             import tempfile
             audiofile = '/tmp/%s.wav' % next(tempfile._get_candidate_names())
             tensor = np.int16(tensor / np.max(np.abs(tensor)) * 32767)
@@ -848,7 +848,7 @@ class Visdom(object):
             'should specify video tensor or file'
 
         if tensor is not None:
-            import cv2
+            import cv2 # type: ignore
             import tempfile
             assert tensor.ndim == 4, 'video should be in 4D tensor'
             videofile = '/tmp/%s.ogv' % next(tempfile._get_candidate_names())
