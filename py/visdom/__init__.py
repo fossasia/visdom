@@ -254,16 +254,19 @@ try:
     import torch
     torch_types.append(torch.Tensor)
     torch_types.append(torch.nn.Parameter)
-    torch_types.append(torch.autograd.Variable)
 except (ImportError, AttributeError):
     pass
 
 def _torch_to_numpy(a):
+    if isinstance(a, torch.autograd.Variable):  # For PyTorch < 0.4 comptability.        
+        warnings.warn("Support for versions of PyTorch less than 0.4 is deprecated and will eventually be removed.", DeprecationWarning)
+        a = a.data
     for kind in torch_types:
         if isinstance(a, kind):
-            return a.cpu().detach().numpy()
-    else:
-        return a
+            if hasattr(a, 'detach'):  # For PyTorch < 0.4 comptability, where non-Variable tensors do not have a 'detach' method.
+                a = a.detach()
+            return a.cpu().numpy()
+    return a
 
 def pytorch_wrap(f):
     @wraps(f)
