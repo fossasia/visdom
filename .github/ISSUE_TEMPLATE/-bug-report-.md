@@ -21,10 +21,10 @@ Give a clear and concise description of what you expected to happen.
 If applicable, add screenshots to help explain your problem.
 
 **Client logs:**
-For issues that make it to the point of reaching the frontend in a browser, please include the javascript logs from that browser. 
+For issues that make it to the point of reaching the frontend in a browser, please include the javascript logs from that browser. In Chrome, javascript logs can be found via View -> Developer -> JavaScript Console.
 
 **Server logs:**
-For any issue that involved launching the visdom server, please include the server logs:
+For any issues, please include the server logs. These are printed directly to stdout on the machine running `visdom` (`python -m visdom.server`).
 
 **Additional context**
 Add any other context about the problem here. (like proxy settings, network setup, overall goals, etc.)
