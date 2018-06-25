@@ -889,7 +889,6 @@ class Visdom(object):
 
         The following `opts` are supported:
 
-        - `opts.colormap`    : colormap (`string`; default = `'Viridis'`)
         - `opts.markersymbol`: marker symbol (`string`; default = `'dot'`)
         - `opts.markersize`  : marker size (`number`; default = `'10'`)
         - `opts.markercolor` : marker color (`np.array`; default = `None`)
@@ -945,7 +944,6 @@ class Visdom(object):
         is3d = X.shape[1] == 3
 
         opts = {} if opts is None else opts
-        opts['colormap'] = opts.get('colormap', 'Viridis')
         if opts.get('textlabels') is None:
             opts['mode'] = opts.get('mode', 'markers')
         else:
@@ -1048,7 +1046,6 @@ class Visdom(object):
         The following `opts` are supported:
 
         - `opts.fillarea`    : fill area below line (`boolean`)
-        - `opts.colormap`    : colormap (`string`; default = `'Viridis'`)
         - `opts.markers`     : show markers (`boolean`; default = `false`)
         - `opts.markersymbol`: marker symbol (`string`; default = `'dot'`)
         - `opts.markersize`  : marker size (`number`; default = `'10'`)
