@@ -405,8 +405,7 @@ range between `1` and `K` can be specified as well -- the labels will be
 reflected in the colors of the markers.
 
 `update` can be used to efficiently update the data of an existing plot. Use `'append'` to append data, `'replace'` to use new data, or `'remove'` to remove the trace specified by `name`.
-Using `update='createappend'` will create a plot if it doesn't exist
-and append to the existing plot otherwise.
+Using `update='append'` will create a plot if it doesn't exist and append to the existing plot otherwise.
 If updating a single trace, use `name` to specify the name of the trace to be updated. Update data that is all NaN is ignored (can be used for masking update).
 
 

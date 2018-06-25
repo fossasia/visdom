@@ -886,7 +886,7 @@ class Visdom(object):
         delete the trace that is specified in `name`. If updating a single
         trace, use `name` to specify the name of the trace to be updated.
         Update data that is all NaN is ignored (can be used for masking update).
-        Using `update='createappend'` will create a plot if it doesn't exist
+        Using `update='append'` will create a plot if it doesn't exist
         and append to the existing plot otherwise.
 
         The following `opts` are supported:
@@ -915,8 +915,8 @@ class Visdom(object):
         elif update is not None:
             assert win is not None, 'Must define a window to update'
 
-            if update == 'createappend':
-                if not self.win_exists(win, env):
+            if update == 'append':
+                if win is None or not self.win_exists(win, env):
                     update = None
                 else:
                     update = 'append'
