@@ -686,12 +686,19 @@ class Visdom(object):
         """
         This function draws a Plotly 'Figure' object.
         """
-        return self._send({
-            'data': figure.data,
-            'layout': figure.layout,
-            'win': win,
-            'eid': env
-        })
+        try:
+            import plotly
+            # We do a round-trip of JSON encoding and decoding to make use of the Plotly JSON Encoder.
+            # The JSON encoder deals with converting numpy arrays to Python lists and several other edge cases.
+            figure_dict = json.loads(json.dumps(figure, cls=plotly.utils.PlotlyJSONEncoder))
+            return self._send({
+                'data': figure_dict['data'],
+                'layout': figure_dict['layout'],
+                'win': win,
+                'eid': env
+            })
+        except ImportError:
+            raise RuntimeError("Plotly must be installed to plot Plotly figures")
 
     @pytorch_wrap
     def image(self, img, win=None, env=None, opts=None):
