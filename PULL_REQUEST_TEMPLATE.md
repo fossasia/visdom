@@ -11,6 +11,9 @@
 <!--- Please describe in detail how you tested your changes. -->
 <!--- Include details of your testing environment, experiments you ran to see how -->
 <!--- your change affects existing areas of the code and their behaviors, etc. -->
+<!--- One method of testing is to run the `demo.py` script from the examples -->
+<!--- both on your branch and a clean branch and ensure that none of the functionality -->
+<!--- appears different. Be sure to install from source when testing. -->
 
 ## Screenshots (if appropriate):
 
@@ -26,3 +29,4 @@
 - [ ] My code follows the code style of this project.
 - [ ] My change requires a change to the documentation.
 - [ ] I have updated the documentation accordingly.
+- [ ] For JavaScript changes, I have re-generated the minified JavaScript code.
