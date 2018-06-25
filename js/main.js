@@ -750,7 +750,7 @@ class App extends React.Component {
     this.setState({
       showEnvModal: true,
       saveText: this.state.envID,
-      modifyID: this.state.envList[0]
+      modifyID: this.state.envList[0],
     });
   }
 
