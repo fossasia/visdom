@@ -392,6 +392,10 @@ packages installed to use this option.
 
 > **Note**: `matplot` is not rendered using the same backend as plotly plots, and is somewhat less efficient. Using too many matplot windows may degrade visdom performance.
 
+#### vis.plotlyplot
+
+This function draws a Plotly `Figure` object. It does not explicitly take options as it assumes you have already explicitly configured the figure's `layout`. 
+
 #### vis.save
 This function saves the `envs` that are alive on the visdom server. It takes input a list (in python) or table (in lua) of env ids to be saved.
 
