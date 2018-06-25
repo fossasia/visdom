@@ -682,6 +682,17 @@ class Visdom(object):
                 opts['width'] = 1.35 * int(math.ceil(float(width.group(1))))
         return self.svg(svgstr=svg, opts=opts, env=env, win=win)
 
+    def plotlyplot(self, figure, win=None, env=None):
+        """
+        This function draws a Plotly 'Figure' object.
+        """
+        return self._send({
+            'data': figure.data,
+            'layout': figure.layout,
+            'win': win,
+            'eid': env
+        })
+
     @pytorch_wrap
     def image(self, img, win=None, env=None, opts=None):
         """
