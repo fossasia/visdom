@@ -673,7 +673,6 @@ class DeleteEnvHandler(BaseHandler):
 
 def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
     """ load an environment to a client by socket """
-
     env = {}
     if eid in state:
         env = state.get(eid)
@@ -836,12 +835,19 @@ class EnvHandler(BaseHandler):
         )
 
     def post(self, args):
-        sid = tornado.escape.json_decode(
+        msg_args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
-        )['sid']
-        if sid in self.subs:
-            load_env(self.state, args, self.subs[sid], env_path=self.env_path)
-
+        )
+        if 'sid' in msg_args:
+            sid = msg_args['sid']
+            if sid in self.subs:
+                load_env(self.state, args, self.subs[sid],
+                         env_path=self.env_path)
+        if 'eid' in msg_args:
+            eid = msg_args['eid']
+            if eid not in self.state:
+                self.state[eid] = {'jsons': {}, 'reload': {}}
+                broadcast_envs(self)
 
 class CompareHandler(BaseHandler):
     def initialize(self, app):

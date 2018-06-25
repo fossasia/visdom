@@ -287,10 +287,12 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 
 ### Others
 - [`vis.close`](#visclose)    : close a window by id
+- [`vis.delete_env`](#visdelete_env) : delete an environment by env_id
 - [`vis.win_exists`](#viswin_exists) : check if a window already exists by id
 - [`vis.get_window_data`](#visget_window_data): get current data for a window
 - [`vis.check_connection`](#vischeck_connection): check if the server is connected
 - [`vis.replay_log`](#visreplay_log): replay the actions from the provided log file
+
 
 ## Details
 ![visdom_big](https://lh3.googleusercontent.com/-bqH9UXCw-BE/WL2UsdrrbAI/AAAAAAAAnYc/emrxwCmnrW4_CLTyyUttB0SYRJ-i4CCiQCLcB/s0/Screen+Shot+2017-03-06+at+10.51.02+AM.png"visdom_big")
@@ -592,6 +594,13 @@ documentation of the functions.
 #### vis.close
 
 This function closes a specific window. It takes input window id `win` and environment id `eid`. Use `win` as `None` to close all windows in an environment.
+
+#### vis.delete_env
+
+This function deletes a specified env entirely. It takes env id `eid` as input.
+
+> **Note**: `delete_env` is deletes all data for an environment and is IRREVERSIBLE. Do not use unless you absolutely want to remove an environment.
+
 
 #### vis.win_exists
 
