@@ -684,7 +684,9 @@ class Visdom(object):
 
     def plotlyplot(self, figure, win=None, env=None):
         """
-        This function draws a Plotly 'Figure' object.
+        This function draws a Plotly 'Figure' object. It does not explicitly take options as it assumes you have already explicitly configured the figure's layout.
+
+        Note: You must have the 'plotly' Python package installed to use this function. 
         """
         try:
             import plotly

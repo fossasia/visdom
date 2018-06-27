@@ -396,6 +396,8 @@ packages installed to use this option.
 
 This function draws a Plotly `Figure` object. It does not explicitly take options as it assumes you have already explicitly configured the figure's `layout`. 
 
+> **Note** You must have the `plotly` Python package installed to use this function. It can typically be installed by running `pip install plotly`. 
+
 #### vis.save
 This function saves the `envs` that are alive on the visdom server. It takes input a list (in python) or table (in lua) of env ids to be saved.
 
