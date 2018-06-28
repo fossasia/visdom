@@ -1006,7 +1006,7 @@ def download_scripts(proxies=None, install_dir=None):
 
         # - fonts
         '%sclassnames@2.2.5' % b: 'classnames',
-        '%slayout-bin-packer@1.2.2' % b: 'layout_bin_packer',
+        '%slayout-bin-packer@1.4.0' % b: 'layout_bin_packer',
         '%sfonts/glyphicons-halflings-regular.eot' % bb:
             'glyphicons-halflings-regular.eot',
         '%sfonts/glyphicons-halflings-regular.woff2' % bb:
