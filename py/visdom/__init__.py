@@ -259,7 +259,9 @@ except (ImportError, AttributeError):
     pass
 
 
-def _torch_to_numpy(a):
+def _to_numpy(a):
+    if isinstance(a, list):
+        return np.array(a)
     if len(torch_types) > 0:
         if isinstance(a, torch.autograd.Variable):
             # For PyTorch < 0.4 comptability.
@@ -280,8 +282,8 @@ def _torch_to_numpy(a):
 def pytorch_wrap(f):
     @wraps(f)
     def wrapped_f(*args, **kwargs):
-        args = (_torch_to_numpy(arg) for arg in args)
-        kwargs = {k: _torch_to_numpy(v) for (k, v) in kwargs.items()}
+        args = (_to_numpy(arg) for arg in args)
+        kwargs = {k: _to_numpy(v) for (k, v) in kwargs.items()}
         return f(*args, **kwargs)
 
     return wrapped_f

@@ -9,7 +9,7 @@ _OptStr = Optional[Text]  # For optional string parameters, like 'window' and 'e
 
 # No widely-deployed stubs exist at the moment for torch or numpy. When they are available, the correct type of the tensor-like inputs
 # to the plotting commands should be
-# Tensor = Union[torch.Tensor, numpy.ndarray]
+# Tensor = Union[torch.Tensor, numpy.ndarray, List]
 # For now, we fall back to 'Any'.
 Tensor = Any
 
