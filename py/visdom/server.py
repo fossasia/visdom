@@ -315,7 +315,7 @@ class SocketHandler(tornado.websocket.WebSocketHandler):
 
 class BaseHandler(tornado.web.RequestHandler):
     def __init__(self, *request, **kwargs):
-        self.include_host = True
+        self.include_host = False
         super(BaseHandler, self).__init__(*request, **kwargs)
 
     def get_current_user(self):
