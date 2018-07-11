@@ -195,7 +195,7 @@ class App extends React.Component {
 
         if (newPane.width) w = this.p2w(newPane.width);
         if (newPane.height) h = Math.ceil(this.p2h(newPane.height + 14));
-        if (newPane.content.caption) h += 1;
+        if (newPane.content && newPane.content.caption) h += 1;
 
         this._bin.content.push({width: w, height: h});
 
@@ -215,7 +215,7 @@ class App extends React.Component {
       let currLayout = getLayoutItem(newLayout, newPane.id);
       if (newPane.width) currLayout.w = this.p2w(newPane.width);
       if (newPane.height) currLayout.h = Math.ceil(this.p2h(newPane.height + 14));
-      if (newPane.content.caption) currLayout.h += 1;
+      if (newPane.content && newPane.content.caption) currLayout.h += 1;
     }
   }
 
