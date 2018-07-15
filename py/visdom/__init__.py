@@ -25,6 +25,7 @@ import numbers
 import six
 from six import string_types
 from six import BytesIO
+from six.moves import urllib
 import logging
 import warnings
 import time
@@ -389,10 +390,15 @@ class Visdom(object):
             self.socket_alive = False
 
         def run_socket(*args):
+            host_scheme = urllib.parse.urlparse(self.server).scheme
+            if host_scheme == "https":
+                ws_scheme = "wss"
+            else:
+                ws_scheme = "ws"
             while self.use_socket:
                 try:
-                    sock_addr = "ws://{}:{}/vis_socket".format(
-                        self.server_base_name, self.port)
+                    sock_addr = "{}://{}:{}/vis_socket".format(
+                        ws_scheme, self.server_base_name, self.port)
                     ws = websocket.WebSocketApp(
                         sock_addr,
                         on_message=on_message,

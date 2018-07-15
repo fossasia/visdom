@@ -224,7 +224,13 @@ class App extends React.Component {
       return;
     }
     var url = window.location;
-    var socket = new WebSocket('ws://' + url.host + this.correctPathname() + 'socket');
+    var ws_protocol = null;
+    if (url.protocol == "https:") {
+      ws_protocol = 'wss';
+    } else {
+      ws_protocol = 'ws';
+    }
+    var socket = new WebSocket(ws_protocol + '://' + url.host + this.correctPathname() + 'socket');
 
     socket.onmessage = this._handleMessage;
 
