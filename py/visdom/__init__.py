@@ -1355,8 +1355,8 @@ class Visdom(object):
         assert X.ndim == 2, 'X should be two-dimensional'
 
         opts = {} if opts is None else opts
-        opts['xmin'] = opts.get('xmin', X.min())
-        opts['xmax'] = opts.get('xmax', X.max())
+        opts['xmin'] = float(opts.get('xmin', X.min()))
+        opts['xmax'] = float(opts.get('xmax', X.max()))
         opts['colormap'] = opts.get('colormap', 'Viridis')
         _title2str(opts)
         _assert_opts(opts)
