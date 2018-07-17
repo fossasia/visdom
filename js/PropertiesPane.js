@@ -31,7 +31,7 @@ class Text extends React.Component {
         this.state = {
             propsValue: props.value,
             actualValue: props.value,
-            waitingToConfirmSubmit: false
+            isEdited: false
         };
     }
 
@@ -51,32 +51,31 @@ class Text extends React.Component {
         }
     };
 
-    submit = () => {
-        if (this.props.submitHandler) {
-            this.setState(
-                {waitingToConfirmSubmit: true},
-                () => this.props.submitHandler(this.state.actualValue)
-            );
-        }
-    }
+    onBlur = () => {
+        this.setState({isEdited: false}, () => {
+            if (this.props.submitHandler) {
+                this.props.submitHandler(this.state.actualValue);
+            }
+        });
+    };
+
+    onFocus = () => {
+        this.setState({isEdited: true});
+    };
 
     componentWillReceiveProps(nextProps) {
-        if (this.state.propsValue !== nextProps.value) {
-            let newState = this.isBeingEdited()
+        if (this.state.propsValue !== nextProps.value || !this.state.isEdited) {
+            let newState = this.state.isEdited
                 ? {propsValue: nextProps.value}
                 : {propsValue: nextProps.value, actualValue: nextProps.value};
             this.setState(newState);
         }
     }
 
-    isBeingEdited() {
-        return !this.state.waitingToConfirmSubmit && (this.state.propsValue !== this.state.actualValue);
-    }
-
     render() {
         return (
             <input type="text" ref={this.textInput.setRef} value={this.state.actualValue} onChange={this.handleChange}
-                   onKeyPress={this.handleKeyPress} onBlur={this.submit}/>
+                   onKeyPress={this.handleKeyPress} onBlur={this.onBlur} onFocus={this.onFocus}/>
         );
     }
 }
