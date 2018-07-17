@@ -21,6 +21,8 @@ var ReactGridLayout = require('react-grid-layout');
 import createClass from 'create-react-class';
 import PropTypes from 'prop-types';
 
+var md5 = require('md5');
+
 const PropertiesPane = require('./PropertiesPane');
 const TextPane = require('./TextPane');
 const ImagePane = require('./ImagePane');
@@ -744,6 +746,25 @@ class App extends React.Component {
 
   onWidthChange = (width, cols) => {
     this.setState({cols: cols, width: width}, () => {this.relayout()});
+  }
+
+  generateWindowHash = (windowId) => {
+    let windowContent = this.state.panes[windowId];
+
+    //Convert JSON data to string with a space of 2. This detail is important.
+    let content_string = JSON.stringify(windowContent, null, 2);
+    return md5(content_string)
+  }
+
+  getWindowHash = (windowId) => {
+    let url = "http://" + window.location.host + "/win_hash";
+
+    let body = {
+      "win" : windowId,
+      "env" : this.state.envID
+    }
+
+    return $.post(url, JSON.stringify(body))
   }
 
   openEnvModal() {

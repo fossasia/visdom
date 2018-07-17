@@ -537,6 +537,37 @@ class Visdom(object):
         else:
             return None
 
+    def _win_hash_wrap(self, win, env=None):
+        """
+        This function returns a hash of the contents of
+        the window if the window exists.
+        Return None otherwise.
+        """
+        assert win is not None
+
+        return self._send({
+            'win': win,
+            'env': env,
+        }, endpoint='win_hash', quiet=True)
+
+
+    def win_hash(self, win, env=None):
+        """
+        This function returns md5 hash of the contents
+        of a window if it exists on the server.
+        Returns None, otherwise
+        """
+        try:
+            e = self._win_hash_wrap(win, env)
+        except ConnectionError:
+            print("Error connecting to Visdom server!")
+            return None
+
+        if re.match(r"([a-fA-F\d]{32})", e):
+            return e
+
+        return None
+
     def check_connection(self):
         """
         This function returns a bool indicating whether or
