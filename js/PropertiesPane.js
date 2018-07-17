@@ -13,35 +13,50 @@ const Pane = require('./Pane');
 class Text extends React.Component {
     constructor(props) {
         super(props);
-        this.state = {value: props.value};
+        this.state = {
+            propsValue: props.value,
+            actualValue: props.value,
+            waitingToConfirmSubmit: false
+        };
     }
 
     handleChange = (event) => {
         let newValue = event.target.value;
-        if( this.props.validateHandler && !this.props.validateHandler(newValue)) {
+        if (this.props.validateHandler && !this.props.validateHandler(newValue)) {
             event.preventDefault();
         } else {
-            this.setState({value: newValue});
+            this.setState({actualValue: newValue});
         }
     };
 
     handleKeyPress = (event) => {
-        if( event.key === "Enter") {
-            if( this.props.submitHandler ) {
-                this.props.submitHandler(this.state.value);
+        if (event.key === "Enter") {
+            if (this.props.submitHandler) {
+                this.setState(
+                    {waitingToConfirmSubmit: true},
+                    () => this.props.submitHandler(this.state.actualValue)
+                );
             }
         }
     };
 
     componentWillReceiveProps(nextProps) {
-        if( this.state.value !== nextProps.value) {
-            this.setState({value: nextProps.value});
+        if (this.state.propsValue !== nextProps.value) {
+            let newState = this.isBeingEdited()
+                ? {propsValue: nextProps.value}
+                : {propsValue: nextProps.value, actualValue: nextProps.value};
+            this.setState(newState);
         }
+    }
+
+    isBeingEdited() {
+        return !this.state.waitingToConfirmSubmit && (this.state.propsValue !== this.state.actualValue);
     }
 
     render() {
         return (
-            <input type="text" value={this.state.value} onChange={this.handleChange} onKeyPress={this.handleKeyPress}/>
+            <input type="text" value={this.state.actualValue} onChange={this.handleChange}
+                   onKeyPress={this.handleKeyPress}/>
         );
     }
 }
