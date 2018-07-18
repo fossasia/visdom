@@ -694,7 +694,7 @@ class Visdom(object):
         """
         This function draws a Plotly 'Figure' object. It does not explicitly take options as it assumes you have already explicitly configured the figure's layout.
 
-        Note: You must have the 'plotly' Python package installed to use this function. 
+        Note: You must have the 'plotly' Python package installed to use this function.
         """
         try:
             import plotly
@@ -938,6 +938,8 @@ class Visdom(object):
         delete the trace that is specified in `name`. If updating a single
         trace, use `name` to specify the name of the trace to be updated.
         Update data that is all NaN is ignored (can be used for masking update).
+        Using `update='append'` will create a plot if it doesn't exist
+        and append to the existing plot otherwise.
 
         The following `opts` are supported:
 
@@ -962,7 +964,13 @@ class Visdom(object):
             return self._send(data_to_send, endpoint='update')
 
         elif update is not None:
-            assert win is not None
+            assert win is not None, 'Must define a window to update'
+
+            if update == 'append':
+                if win is None or not self.win_exists(win, env):
+                    update = None
+                else:
+                    update = 'append'
 
             # case when X is 1 dimensional and corresponding values on y-axis
             # are passed in parameter Y
@@ -1095,6 +1103,8 @@ class Visdom(object):
         delete the trace that is specified in `name`. If updating a
         single trace, use `name` to specify the name of the trace to be updated.
         Update data that is all NaN is ignored (can be used for masking update).
+        Using `update='append'` will create a plot if it doesn't exist
+        and append to the existing plot otherwise.
 
         The following `opts` are supported:
 
