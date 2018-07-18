@@ -19,15 +19,18 @@ class ImagePane extends React.Component {
     ty: 0.,
   }
 
-  onEvent = (e) => {
+  drag_start_x = null;
+  drag_start_y = null;
+
+  onEvent = (event) => {
       if( !this.props.isFocused ) {
           return;
       }
 
-      switch(e.type) {
+      switch(event.type) {
           case 'keydown':
           case 'keypress':
-              e.preventDefault();
+              event.preventDefault();
               break;
           case 'keyup':
               this.props.appApi.sendPaneMessage(
@@ -59,16 +62,45 @@ class ImagePane extends React.Component {
     if(ev.altKey) {
       //var direction = natural.checked ? -1 : 1;
       var direction =  -1;
-      this.setState({tx: this.state.tx + ev.deltaX * direction});
-      this.setState({ty: this.state.ty + ev.deltaY * direction});
+      this.setState({tx: this.state.tx + ev.deltaX * direction*50});
+      this.setState({ty: this.state.ty + ev.deltaY * direction*50});
       ev.stopPropagation();
       ev.preventDefault();
     } else if (ev.ctrlKey) {
-      var s = Math.exp(-ev.deltaY/100);
-      this.setState({scale: this.state.scale * s});
+      // get the x and y offset of the pane
+      var rect = this._paneRef._windowRef.children[1].getBoundingClientRect();
+      // Compute the coords of the mouse relative to the top left of the pane
+      var xscreen = ev.clientX - rect.x;
+      var yscreen = ev.clientY - rect.y;
+      // Compute the coords of the pixel under the mouse wrt the image top left
+      var ximage = (xscreen - this.state.tx) / this.state.scale;
+      var yimage = (yscreen - this.state.ty) / this.state.scale;
+      var new_scale = this.state.scale * Math.exp(-ev.deltaY/25);
+      // Update the state.
+      // The offset is modifed such that the pixel under the mouse
+      // is the same after zooming
+      this.setState({
+        scale: new_scale,
+        tx: xscreen - new_scale*ximage,
+        ty: yscreen - new_scale*yimage
+      });
       ev.stopPropagation();
       ev.preventDefault();
     }
+  }
+
+  handleDragStart = (ev) => {
+    this.drag_start_x = ev.screenX;
+    this.drag_start_y = ev.screenY;
+  }
+
+  handleDragOver = (ev) => {
+    this.setState({
+      tx: this.state.tx + ev.screenX - this.drag_start_x,
+      ty: this.state.ty + ev.screenY - this.drag_start_y,
+    });
+    this.drag_start_x = ev.screenX;
+    this.drag_start_y = ev.screenY;
   }
 
   handleReset = () => {
@@ -84,8 +116,7 @@ class ImagePane extends React.Component {
     const divstyle = {
       left: this.state.tx,
       top: this.state.ty,
-      position: "relative",
-      display: "block",
+      position: "absolute",
     };
     return (
       <Pane
@@ -101,6 +132,8 @@ class ImagePane extends React.Component {
             width={Math.ceil(1 + this.props.width * this.state.scale) + "px"}
             height={Math.ceil(1 + this.props.height * this.state.scale) + "px"}
             onDoubleClick={this.handleReset.bind(this)}
+            onDragStart={this.handleDragStart.bind(this)}
+            onDragOver={this.handleDragOver.bind(this)}
             />
         </div>
         <p className="caption">{content.caption}</p>
