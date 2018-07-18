@@ -751,7 +751,8 @@ class App extends React.Component {
   generateWindowHash = (windowId) => {
     let windowContent = this.state.panes[windowId];
 
-    //Convert JSON data to string with a space of 2. This detail is important.
+    /*Convert JSON data to string with a space of 2. This detail is important.
+    It ensures that the server and browser generate same JSON string */
     let content_string = JSON.stringify(windowContent, null, 2);
     return md5(content_string)
   }

@@ -156,7 +156,7 @@ class Application(tornado.web.Application):
             (r"/win_data", DataHandler, {'app': self}),
             (r"/delete_env", DeleteEnvHandler, {'app': self}),
             (r"/win_hash", HashHandler, {'app': self}),
-            (r"/(.*)", IndexHandler, {'app': self})
+            (r"/(.*)", IndexHandler, {'app': self}),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)
 
