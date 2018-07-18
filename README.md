@@ -166,13 +166,15 @@ luarocks make
 
 ## Usage
 
-Start the server (probably in a  `screen` or `tmux`) :
+Start the server (probably in a  `screen` or `tmux`) from the command line:
 
 ```bash
-python -m visdom.server
+> visdom
 ```
 
 Visdom now can be accessed by going to `http://localhost:8097` in your browser, or your own host address if specified.
+
+> The `visdom` command is equivalent to running `python -m visdom.server`. 
 
 >If the above does not work, try using an SSH tunnel to your server by adding the following line to your local  `~/.ssh/config`:
 ```LocalForward 127.0.0.1:8097 127.0.0.1:8097```.
@@ -285,10 +287,12 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 
 ### Others
 - [`vis.close`](#visclose)    : close a window by id
+- [`vis.delete_env`](#visdelete_env) : delete an environment by env_id
 - [`vis.win_exists`](#viswin_exists) : check if a window already exists by id
 - [`vis.get_window_data`](#visget_window_data): get current data for a window
 - [`vis.check_connection`](#vischeck_connection): check if the server is connected
 - [`vis.replay_log`](#visreplay_log): replay the actions from the provided log file
+
 
 ## Details
 ![visdom_big](https://lh3.googleusercontent.com/-bqH9UXCw-BE/WL2UsdrrbAI/AAAAAAAAnYc/emrxwCmnrW4_CLTyyUttB0SYRJ-i4CCiQCLcB/s0/Screen+Shot+2017-03-06+at+10.51.02+AM.png"visdom_big")
@@ -388,6 +392,12 @@ packages installed to use this option.
 
 > **Note**: `matplot` is not rendered using the same backend as plotly plots, and is somewhat less efficient. Using too many matplot windows may degrade visdom performance.
 
+#### vis.plotlyplot
+
+This function draws a Plotly `Figure` object. It does not explicitly take options as it assumes you have already explicitly configured the figure's `layout`. 
+
+> **Note** You must have the `plotly` Python package installed to use this function. It can typically be installed by running `pip install plotly`. 
+
 #### vis.save
 This function saves the `envs` that are alive on the visdom server. It takes input a list (in python) or table (in lua) of env ids to be saved.
 
@@ -411,7 +421,6 @@ If updating a single trace, use `name` to specify the name of the trace to be up
 
 The following `opts` are supported:
 
-- `opts.colormap`    : colormap (`string`; default = `'Viridis'`)
 - `opts.markersymbol`: marker symbol (`string`; default = `'dot'`)
 - `opts.markersize`  : marker size (`number`; default = `'10'`)
 - `opts.markercolor` : color per marker. (`torch.*Tensor`; default = `nil`)
@@ -439,7 +448,6 @@ lines will share the same x-axis values) or have the same size as `Y`.
 The following `opts` are supported:
 
 - `opts.fillarea`    : fill area below line (`boolean`)
-- `opts.colormap`    : colormap (`string`; default = `'Viridis'`)
 - `opts.markers`     : show markers (`boolean`; default = `false`)
 - `opts.markersymbol`: marker symbol (`string`; default = `'dot'`)
 - `opts.markersize`  : marker size (`number`; default = `'10'`)
@@ -595,6 +603,13 @@ documentation of the functions.
 #### vis.close
 
 This function closes a specific window. It takes input window id `win` and environment id `eid`. Use `win` as `None` to close all windows in an environment.
+
+#### vis.delete_env
+
+This function deletes a specified env entirely. It takes env id `eid` as input.
+
+> **Note**: `delete_env` is deletes all data for an environment and is IRREVERSIBLE. Do not use unless you absolutely want to remove an environment.
+
 
 #### vis.win_exists
 

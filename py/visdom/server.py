@@ -673,7 +673,6 @@ class DeleteEnvHandler(BaseHandler):
 
 def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
     """ load an environment to a client by socket """
-
     env = {}
     if eid in state:
         env = state.get(eid)
@@ -836,12 +835,19 @@ class EnvHandler(BaseHandler):
         )
 
     def post(self, args):
-        sid = tornado.escape.json_decode(
+        msg_args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
-        )['sid']
-        if sid in self.subs:
-            load_env(self.state, args, self.subs[sid], env_path=self.env_path)
-
+        )
+        if 'sid' in msg_args:
+            sid = msg_args['sid']
+            if sid in self.subs:
+                load_env(self.state, args, self.subs[sid],
+                         env_path=self.env_path)
+        if 'eid' in msg_args:
+            eid = msg_args['eid']
+            if eid not in self.state:
+                self.state[eid] = {'jsons': {}, 'reload': {}}
+                broadcast_envs(self)
 
 class CompareHandler(BaseHandler):
     def initialize(self, app):
@@ -1000,7 +1006,7 @@ def download_scripts(proxies=None, install_dir=None):
 
         # - fonts
         '%sclassnames@2.2.5' % b: 'classnames',
-        '%slayout-bin-packer@1.2.2' % b: 'layout_bin_packer',
+        '%slayout-bin-packer@1.4.0' % b: 'layout_bin_packer',
         '%sfonts/glyphicons-halflings-regular.eot' % bb:
             'glyphicons-halflings-regular.eot',
         '%sfonts/glyphicons-halflings-regular.woff2' % bb:
@@ -1144,6 +1150,10 @@ def main(print_func=None):
                  print_func=print_func, user_credential=user_credential)
 
 
-if __name__ == "__main__":
+def download_scripts_and_run():
     download_scripts()
     main()
+
+
+if __name__ == "__main__":
+    download_scripts_and_run()
