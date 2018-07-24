@@ -25,6 +25,7 @@ import numbers
 import six
 from six import string_types
 from six import BytesIO
+from six.moves import urllib
 import logging
 import warnings
 import time
@@ -389,10 +390,15 @@ class Visdom(object):
             self.socket_alive = False
 
         def run_socket(*args):
+            host_scheme = urllib.parse.urlparse(self.server).scheme
+            if host_scheme == "https":
+                ws_scheme = "wss"
+            else:
+                ws_scheme = "ws"
             while self.use_socket:
                 try:
-                    sock_addr = "ws://{}:{}/vis_socket".format(
-                        self.server_base_name, self.port)
+                    sock_addr = "{}://{}:{}/vis_socket".format(
+                        ws_scheme, self.server_base_name, self.port)
                     ws = websocket.WebSocketApp(
                         sock_addr,
                         on_message=on_message,
@@ -719,7 +725,7 @@ class Visdom(object):
         """
         This function draws a Plotly 'Figure' object. It does not explicitly take options as it assumes you have already explicitly configured the figure's layout.
 
-        Note: You must have the 'plotly' Python package installed to use this function. 
+        Note: You must have the 'plotly' Python package installed to use this function.
         """
         try:
             import plotly
@@ -963,6 +969,8 @@ class Visdom(object):
         delete the trace that is specified in `name`. If updating a single
         trace, use `name` to specify the name of the trace to be updated.
         Update data that is all NaN is ignored (can be used for masking update).
+        Using `update='append'` will create a plot if it doesn't exist
+        and append to the existing plot otherwise.
 
         The following `opts` are supported:
 
@@ -987,7 +995,13 @@ class Visdom(object):
             return self._send(data_to_send, endpoint='update')
 
         elif update is not None:
-            assert win is not None
+            assert win is not None, 'Must define a window to update'
+
+            if update == 'append':
+                if win is None or not self.win_exists(win, env):
+                    update = None
+                else:
+                    update = 'append'
 
             # case when X is 1 dimensional and corresponding values on y-axis
             # are passed in parameter Y
@@ -1120,6 +1134,8 @@ class Visdom(object):
         delete the trace that is specified in `name`. If updating a
         single trace, use `name` to specify the name of the trace to be updated.
         Update data that is all NaN is ignored (can be used for masking update).
+        Using `update='append'` will create a plot if it doesn't exist
+        and append to the existing plot otherwise.
 
         The following `opts` are supported:
 
@@ -1386,8 +1402,8 @@ class Visdom(object):
         assert X.ndim == 2, 'X should be two-dimensional'
 
         opts = {} if opts is None else opts
-        opts['xmin'] = opts.get('xmin', X.min())
-        opts['xmax'] = opts.get('xmax', X.max())
+        opts['xmin'] = float(opts.get('xmin', X.min()))
+        opts['xmax'] = float(opts.get('xmax', X.max()))
         opts['colormap'] = opts.get('colormap', 'Viridis')
         _title2str(opts)
         _assert_opts(opts)
