@@ -22,6 +22,7 @@
     "create-react-class": "^15.6.3",
     "css-loader": "^0.28.9",
     "jquery": "^3.3.1",
+    "md5": "^2.2.1",
     "rc-tree-select": "^1.12.9",
     "react": "16.2.0",
     "react-devtools": "^3.1.0",
