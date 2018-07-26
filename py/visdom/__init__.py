@@ -375,7 +375,7 @@ class Visdom(object):
                         logger.warn('Visdom server failed handshake, may not '
                                     'be properly connected')
             if 'target' in message:
-                for handler in self.event_handlers.get(message['target'], []):
+                for handler in list(self.event_handlers.get(message['target'], [])):
                     handler(message)
 
         def on_error(ws, error):
