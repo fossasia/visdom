@@ -23,32 +23,33 @@ class ImagePane extends React.Component {
   drag_start_y = null;
 
   onEvent = (event) => {
-      if( !this.props.isFocused ) {
-          return;
-      }
+    if (!this.props.isFocused) {
+      return;
+    }
 
-      switch(event.type) {
-          case 'keydown':
-          case 'keypress':
-              event.preventDefault();
-              break;
-          case 'keyup':
-              this.props.appApi.sendPaneMessage(
-                  {
-                      event_type: 'KeyPress',
-                      key: event.key,
-                      key_code: event.keyCode,
-                  }
-              );
-              break;
-      }
+    switch (event.type) {
+      case 'keydown':
+      case 'keypress':
+        event.preventDefault();
+        break;
+      case 'keyup':
+        this.props.appApi.sendPaneMessage(
+            {
+              event_type: 'KeyPress',
+              key: event.key,
+              key_code: event.keyCode,
+            }
+        );
+        break;
+    }
   };
 
   componentDidMount() {
-      EventSystem.subscribe('global.event', this.onEvent)
+    EventSystem.subscribe('global.event', this.onEvent)
   }
+
   componentWillMount() {
-      EventSystem.unsubscribe('global.event', this.onEvent)
+    EventSystem.unsubscribe('global.event', this.onEvent)
   }
 
   handleDownload = () => {
