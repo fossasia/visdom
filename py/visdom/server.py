@@ -601,7 +601,7 @@ class UpdateHandler(BaseHandler):
         p = handler.state[eid]['jsons'][args['win']]
 
         if not (p['type'] == 'text' or
-                p['content']['data'][0]['type'] in ['scatter', 'custom']):
+                p['content']['data'][0]['type'] in ['scatter', 'scattergl', 'custom']):
             handler.write('win is not scatter, custom, or text; was {}'.format(
                 p['content']['data'][0]['type']))
             return

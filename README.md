@@ -429,6 +429,7 @@ The following `opts` are supported:
 - `opts.textlabels`  : text label for each point (`list`: default = `None`)
 - `opts.layoutopts`  : dict of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 - `opts.traceopts`   : dict mapping trace names or indices to dicts of additional options that the graph backend accepts. For example `traceopts = {'plotly': {'myTrace': {'mode': 'markers'}}}`.
+- `opts.webgl`       : use WebGL for plotting (`boolean`; default = `false`). It is useful when there are too many points. 
 
 `opts.markercolor` is a Tensor with Integer values. The tensor can be of size `N` or `N x 3` or `K` or `K x 3`.
 
@@ -455,6 +456,7 @@ The following `opts` are supported:
 - `opts.legend`      : `table` containing legend names
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 - `opts.traceopts`   : `dict` mapping trace names or indices to `dict`s of additional options that plot.ly accepts for a trace.
+- `opts.webgl`       : use WebGL for plotting (`boolean`; default = `false`). It is useful when there are too many points.
 
 
 #### vis.stem
