@@ -1074,7 +1074,7 @@ class Visdom(object):
                     'x': nan2none(X.take(0, 1)[ind].tolist()),
                     'y': nan2none(X.take(1, 1)[ind].tolist()),
                     'name': trace_name,
-                    'type': 'scatter3d' if is3d else 'scatter',
+                    'type': 'scatter3d' if is3d else ('scattergl' if opts.get('webgl', False) else 'scatter'),
                     'mode': opts.get('mode'),
                     'text': L[ind].tolist() if L is not None else None,
                     'textposition': 'right',
