@@ -245,6 +245,15 @@ try:
         opts=dict(markers=False),
     )
 
+    # line using WebGL
+    webgl_num_points = 200000
+    webgl_x = np.linspace(-1, 0, webgl_num_points)
+    webgl_y = webgl_x**3
+    viz.line(X=webgl_x, Y=webgl_y,
+             opts=dict(title='{} points using WebGL'.format(webgl_num_points), webgl=True),
+             win="WebGL demo")
+
+
     # line updates
     win = viz.line(
         X=np.column_stack((np.arange(0, 10), np.arange(0, 10))),
@@ -280,6 +289,14 @@ try:
         update='insert'
     )
     viz.line(X=None, Y=None, win=win, name='delete this', update='remove')
+
+    viz.line(
+        X=webgl_x+1.,
+        Y=(webgl_x+1.)**3,
+        win="WebGL demo",
+        update='append',
+        opts=dict(title='{} points using WebGL'.format(webgl_num_points*2), webgl=True)
+    )
 
     Y = np.linspace(0, 4, 200)
     win = viz.line(
