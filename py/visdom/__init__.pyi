@@ -89,6 +89,7 @@ class Visdom:
         env: _OptStr = ...,
         update: _OptStr = ...,
         name: _OptStr = ...,
+        opts: _OptOpts = ...
     ) -> _SendReturn: ...
     def line(
         self,
@@ -98,6 +99,7 @@ class Visdom:
         env: _OptStr = ...,
         update: _OptStr = ...,
         name: _OptStr = ...,
+        opts: _OptOps = ...
     ) -> _SendReturn: ...
     def grid(
         self,
