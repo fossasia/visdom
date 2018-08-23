@@ -411,7 +411,8 @@ class Visdom(object):
                         on_close=on_close
                     )
                     ws.run_forever(http_proxy_host=self.http_proxy_host,
-                                   http_proxy_port=self.http_proxy_port)
+                                   http_proxy_port=self.http_proxy_port,
+                                   ping_timeout=100.0)
                     ws.close()
                 except Exception as e:
                     logger.error(
