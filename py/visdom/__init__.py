@@ -744,6 +744,13 @@ class Visdom(object):
             # numpy arrays to Python lists and several other edge cases.
             figure_dict = json.loads(
                 json.dumps(figure, cls=plotly.utils.PlotlyJSONEncoder))
+
+            # If opts title is not added, the title is not added to the top right of the window.
+            # We add the paramater to opts manually if it exists.
+            opts = dict()
+            if 'title' in figure_dict['layout']:
+                opts['title'] = figure_dict['layout']['title']
+
             return self._send({
                 'data': figure_dict['data'],
                 'layout': figure_dict['layout'],
