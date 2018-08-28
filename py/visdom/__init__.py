@@ -755,7 +755,8 @@ class Visdom(object):
                 'data': figure_dict['data'],
                 'layout': figure_dict['layout'],
                 'win': win,
-                'eid': env
+                'eid': env,
+                'opts': opts
             })
         except ImportError:
             raise RuntimeError(
