@@ -375,15 +375,20 @@ class Visdom(object):
                         logger.warn('Visdom server failed handshake, may not '
                                     'be properly connected')
             if 'target' in message:
-                for handler in list(self.event_handlers.get(message['target'], [])):
+                for handler in list(
+                        self.event_handlers.get(message['target'], [])):
                     handler(message)
 
         def on_error(ws, error):
-            if error.errno == errno.ECONNREFUSED:
-                logger.info("Socket refused connection, running socketless")
-                ws.close()
-                self.use_socket = False
-            else:
+            try:
+                if error.errno == errno.ECONNREFUSED:
+                    logger.info(
+                        "Socket refused connection, running socketless")
+                    ws.close()
+                    self.use_socket = False
+                else:
+                    logger.error(error)
+            except AttributeError:
                 logger.error(error)
 
         def on_close(ws):
@@ -406,9 +411,12 @@ class Visdom(object):
                         on_close=on_close
                     )
                     ws.run_forever(http_proxy_host=self.http_proxy_host,
-                                   http_proxy_port=self.http_proxy_port)
+                                   http_proxy_port=self.http_proxy_port,
+                                   ping_timeout=100.0)
+                    ws.close()
                 except Exception as e:
-                    logger.error('Socket had error {}, attempting restart'.format(e))
+                    logger.error(
+                        'Socket had error {}, attempting restart'.format(e))
                 time.sleep(3)
 
         # Start listening thread
@@ -556,7 +564,6 @@ class Visdom(object):
             'env': env,
         }, endpoint='win_hash', quiet=True)
 
-
     def win_hash(self, win, env=None):
         """
         This function returns md5 hash of the contents
@@ -661,9 +668,9 @@ class Visdom(object):
     @pytorch_wrap
     def svg(self, svgstr=None, svgfile=None, win=None, env=None, opts=None):
         """
-        This function draws an SVG object. It takes as input an SVG string or the
-        name of an SVG file. The function does not support any plot-specific
-        `opts`.
+        This function draws an SVG object. It takes as input an SVG string or
+        the name of an SVG file. The function does not support any
+        plot-specific `opts`.
         """
         opts = {} if opts is None else opts
         _title2str(opts)
@@ -723,15 +730,20 @@ class Visdom(object):
 
     def plotlyplot(self, figure, win=None, env=None):
         """
-        This function draws a Plotly 'Figure' object. It does not explicitly take options as it assumes you have already explicitly configured the figure's layout.
+        This function draws a Plotly 'Figure' object. It does not explicitly
+        take options as it assumes you have already explicitly configured the
+        figure's layout.
 
-        Note: You must have the 'plotly' Python package installed to use this function.
+        Note: You must have the 'plotly' Python package installed to use
+        this function.
         """
         try:
             import plotly
-            # We do a round-trip of JSON encoding and decoding to make use of the Plotly JSON Encoder.
-            # The JSON encoder deals with converting numpy arrays to Python lists and several other edge cases.
-            figure_dict = json.loads(json.dumps(figure, cls=plotly.utils.PlotlyJSONEncoder))
+            # We do a round-trip of JSON encoding and decoding to make use of
+            # the Plotly JSON Encoder. The JSON encoder deals with converting
+            # numpy arrays to Python lists and several other edge cases.
+            figure_dict = json.loads(
+                json.dumps(figure, cls=plotly.utils.PlotlyJSONEncoder))
             return self._send({
                 'data': figure_dict['data'],
                 'layout': figure_dict['layout'],
@@ -739,7 +751,8 @@ class Visdom(object):
                 'eid': env
             })
         except ImportError:
-            raise RuntimeError("Plotly must be installed to plot Plotly figures")
+            raise RuntimeError(
+                "Plotly must be installed to plot Plotly figures")
 
     @pytorch_wrap
     def image(self, img, win=None, env=None, opts=None):
@@ -1070,11 +1083,13 @@ class Visdom(object):
                     trace_name = name
                 else:
                     trace_name = str(k)
+                use_gl = opts.get('webgl', False)
                 _data = {
                     'x': nan2none(X.take(0, 1)[ind].tolist()),
                     'y': nan2none(X.take(1, 1)[ind].tolist()),
                     'name': trace_name,
-                    'type': 'scatter3d' if is3d else ('scattergl' if opts.get('webgl', False) else 'scatter'),
+                    'type': 'scatter3d' if is3d else (
+                        'scattergl' if use_gl else 'scatter'),
                     'mode': opts.get('mode'),
                     'text': L[ind].tolist() if L is not None else None,
                     'textposition': 'right',
@@ -1457,7 +1472,7 @@ class Visdom(object):
 
     @pytorch_wrap
     def quiver(self, X, Y, gridX=None, gridY=None,
-                            win=None, env=None, opts=None):
+               win=None, env=None, opts=None):
         """
         This function draws a quiver plot in which the direction and length of the
         arrows is determined by the `NxM` tensors `X` and `Y`. Two optional `NxM`
@@ -1478,9 +1493,11 @@ class Visdom(object):
         # make sure we have a grid:
         N, M = X.shape[0], X.shape[1]
         if gridX is None:
-            gridX = np.broadcast_to(np.expand_dims(np.arange(0, N), axis=1), (N, M))
+            gridX = np.broadcast_to(
+                np.expand_dims(np.arange(0, N), axis=1), (N, M))
         if gridY is None:
-            gridY = np.broadcast_to(np.expand_dims(np.arange(0, M), axis=0), (N, M))
+            gridY = np.broadcast_to(
+                np.expand_dims(np.arange(0, M), axis=0), (N, M))
         assert gridX.shape == X.shape, 'X and gridX should have the same size'
         assert gridY.shape == Y.shape, 'Y and gridY should have the same size'
 
@@ -1565,7 +1582,7 @@ class Visdom(object):
             Y = Y[:, None]
         assert Y.shape[0] == X.shape[0], 'number of rows in X and Y must match'
         assert Y.shape[1] == 1 or Y.shape[1] == X.shape[1], \
-                'Y should be a single column or the same number of columns as X'
+            'Y should be a single column or the same number of columns as X'
 
         if Y.shape[1] < X.shape[1]:
             Y = np.tile(Y, (1, X.shape[1]))
