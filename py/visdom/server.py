@@ -1113,7 +1113,8 @@ def start_server(port=DEFAULT_PORT, hostname=DEFAULT_HOSTNAME, env_path=DEFAULT_
                       user_credential=user_credential)
     app.listen(port, max_buffer_size=1024 ** 3)
     logging.info("Application Started")
-    if "HOSTNAME" in os.environ:
+
+    if "HOSTNAME" in os.environ and hostname == DEFAULT_HOSTNAME:
         hostname = os.environ["HOSTNAME"]
     else:
         hostname = hostname
