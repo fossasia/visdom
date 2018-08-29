@@ -37,6 +37,7 @@ import tornado.escape     # noqa E402: gotta install ioloop first
 LAYOUT_FILE = 'layouts.json'
 DEFAULT_ENV_PATH = '%s/.visdom/' % expanduser("~")
 DEFAULT_PORT = 8097
+DEFAULT_HOSTNAME = "localhost"
 
 here = os.path.abspath(os.path.dirname(__file__))
 
@@ -1105,17 +1106,18 @@ def download_scripts(proxies=None, install_dir=None):
             build_file.write(visdom.__version__)
 
 
-def start_server(port=DEFAULT_PORT, env_path=DEFAULT_ENV_PATH, readonly=False,
-                 print_func=None, user_credential=None):
+def start_server(port=DEFAULT_PORT, hostname=DEFAULT_HOSTNAME, env_path=DEFAULT_ENV_PATH,
+                 readonly=False, print_func=None, user_credential=None):
     print("It's Alive!")
     app = Application(port=port, env_path=env_path, readonly=readonly,
                       user_credential=user_credential)
     app.listen(port, max_buffer_size=1024 ** 3)
     logging.info("Application Started")
-    if "HOSTNAME" in os.environ:
+
+    if "HOSTNAME" in os.environ and hostname == DEFAULT_HOSTNAME:
         hostname = os.environ["HOSTNAME"]
     else:
-        hostname = "localhost"
+        hostname = hostname
     if print_func is None:
         print("You can navigate to http://%s:%s" % (hostname, port))
     else:
@@ -1127,6 +1129,8 @@ def main(print_func=None):
     parser = argparse.ArgumentParser(description='Start the visdom server.')
     parser.add_argument('-port', metavar='port', type=int, default=DEFAULT_PORT,
                         help='port to run the server on.')
+    parser.add_argument('-hostname', metavar='hostname', type=str,
+                        default=DEFAULT_HOSTNAME, help='host to run the server on.')
     parser.add_argument('-env_path', metavar='env_path', type=str,
                         default=DEFAULT_ENV_PATH,
                         help='path to serialized session to reload.')
@@ -1171,8 +1175,8 @@ def main(print_func=None):
     else:
         user_credential = None
 
-    start_server(port=FLAGS.port, env_path=FLAGS.env_path, readonly=FLAGS.readonly,
-                 print_func=print_func, user_credential=user_credential)
+    start_server(port=FLAGS.port, hostname=FLAGS.hostname, env_path=FLAGS.env_path,
+                 readonly=FLAGS.readonly, print_func=print_func, user_credential=user_credential)
 
 
 def download_scripts_and_run():

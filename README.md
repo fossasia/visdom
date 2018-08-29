@@ -184,11 +184,13 @@ Visdom now can be accessed by going to `http://localhost:8097` in your browser, 
 The following options can be provided to the server:
 
 1. `-port` : The port to run the server on.
-2. `-env_path` : The path to the serialized session to reload.
-3. `-logging_level` : Logging level (default = INFO). Accepts both standard text and numeric logging values.
-4. `-readonly` : Flag to start server in readonly mode.
-5. `-enable_login` : Flag to setup authentication for the sever, requiring a username and password to login.
-6. `-force_new_cookie` : Flag to reset the secure cookie used by the server, invalidating current login cookies. Requires `-enable_login`.
+2. `-hostname` : The hostname to run the server on.
+3. `-env_path` : The path to the serialized session to reload.
+4. `-logging_level` : Logging level (default = INFO). Accepts both standard text and numeric logging values.
+5. `-readonly` : Flag to start server in readonly mode.
+6. `-enable_login` : Flag to setup authentication for the sever, requiring a username and password to login.
+7. `-force_new_cookie` : Flag to reset the secure cookie used by the server, invalidating current login cookies. 
+Requires `-enable_login`.
 
 
 #### Python example

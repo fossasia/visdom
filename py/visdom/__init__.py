@@ -306,8 +306,12 @@ class Visdom(object):
         use_incoming_socket=True,
         log_to_filename=None,
     ):
-        self.server_base_name = server[server.index("//") + 2:]
-        self.server = server
+        if '//' not in server:
+            self.server_base_name = server
+            self.server = 'http://' + server
+        else:
+            self.server_base_name = server[server.index("//") + 2:]
+            self.server = server
         self.endpoint = endpoint
         self.port = port
         self.ipv6 = ipv6
