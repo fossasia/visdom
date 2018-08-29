@@ -289,6 +289,7 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 - [`vis.close`](#visclose)    : close a window by id
 - [`vis.delete_env`](#visdelete_env) : delete an environment by env_id
 - [`vis.win_exists`](#viswin_exists) : check if a window already exists by id
+- [`vis.win_hash`](#viswin_hash): get md5 hash of window's contents
 - [`vis.get_window_data`](#visget_window_data): get current data for a window
 - [`vis.check_connection`](#vischeck_connection): check if the server is connected
 - [`vis.replay_log`](#visreplay_log): replay the actions from the provided log file
@@ -414,7 +415,10 @@ scatter plot. An optional `N` tensor `Y` containing discrete labels that
 range between `1` and `K` can be specified as well -- the labels will be
 reflected in the colors of the markers.
 
-`update` can be used to efficiently update the data of an existing plot. Use 'append' to append data, 'replace' to use new data, or 'remove' to remove the trace specified by `name`. If updating a single trace, use `name` to specify the name of the trace to be updated. Update data that is all NaN is ignored (can be used for masking update).
+`update` can be used to efficiently update the data of an existing plot. Use `'append'` to append data, `'replace'` to use new data, or `'remove'` to remove the trace specified by `name`.
+Using `update='append'` will create a plot if it doesn't exist and append to the existing plot otherwise.
+If updating a single trace, use `name` to specify the name of the trace to be updated. Update data that is all NaN is ignored (can be used for masking update).
+
 
 The following `opts` are supported:
 
@@ -425,6 +429,7 @@ The following `opts` are supported:
 - `opts.textlabels`  : text label for each point (`list`: default = `None`)
 - `opts.layoutopts`  : dict of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 - `opts.traceopts`   : dict mapping trace names or indices to dicts of additional options that the graph backend accepts. For example `traceopts = {'plotly': {'myTrace': {'mode': 'markers'}}}`.
+- `opts.webgl`       : use WebGL for plotting (`boolean`; default = `false`). It is faster if a plot contains too many points. Use sparingly as browsers won't allow more than a couple of WebGL contexts on a single page.
 
 `opts.markercolor` is a Tensor with Integer values. The tensor can be of size `N` or `N x 3` or `K` or `K x 3`.
 
@@ -451,6 +456,7 @@ The following `opts` are supported:
 - `opts.legend`      : `table` containing legend names
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 - `opts.traceopts`   : `dict` mapping trace names or indices to `dict`s of additional options that plot.ly accepts for a trace.
+- `opts.webgl`       : use WebGL for plotting (`boolean`; default = `false`). It is faster if a plot contains too many points. Use sparingly as browsers won't allow more than a couple of WebGL contexts on a single page.
 
 
 #### vis.stem
@@ -614,6 +620,14 @@ This function returns a bool indicating whether or not a window `win` exists on 
 
 Optional arguments:
 - `env`: Environment to search for the window in. Default is `None`.
+
+#### vis.win_hash
+
+This function returns md5 hash of the contents of a window `win` if it exists on the server. Returns None otherwise.
+
+Optional arguments:
+- `env` : Environment to search for the window in. Default is `None`.
+
 
 #### vis.get_window_data
 This function returns the window data for the given window. Returns data for all windows in an env if win is None.

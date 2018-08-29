@@ -21,6 +21,8 @@ var ReactGridLayout = require('react-grid-layout');
 import createClass from 'create-react-class';
 import PropTypes from 'prop-types';
 
+var md5 = require('md5');
+
 const PropertiesPane = require('./PropertiesPane');
 const TextPane = require('./TextPane');
 const ImagePane = require('./ImagePane');
@@ -195,7 +197,7 @@ class App extends React.Component {
 
         if (newPane.width) w = this.p2w(newPane.width);
         if (newPane.height) h = Math.ceil(this.p2h(newPane.height + 14));
-        if (newPane.content.caption) h += 1;
+        if (newPane.content && newPane.content.caption) h += 1;
 
         this._bin.content.push({width: w, height: h});
 
@@ -215,7 +217,7 @@ class App extends React.Component {
       let currLayout = getLayoutItem(newLayout, newPane.id);
       if (newPane.width) currLayout.w = this.p2w(newPane.width);
       if (newPane.height) currLayout.h = Math.ceil(this.p2h(newPane.height + 14));
-      if (newPane.content.caption) currLayout.h += 1;
+      if (newPane.content && newPane.content.caption) currLayout.h += 1;
     }
   }
 
@@ -750,6 +752,26 @@ class App extends React.Component {
 
   onWidthChange = (width, cols) => {
     this.setState({cols: cols, width: width}, () => {this.relayout()});
+  }
+
+  generateWindowHash = (windowId) => {
+    let windowContent = this.state.panes[windowId];
+
+    /*Convert JSON data to string with a space of 2. This detail is important.
+    It ensures that the server and browser generate same JSON string */
+    let content_string = JSON.stringify(windowContent, null, 2);
+    return md5(content_string)
+  }
+
+  getWindowHash = (windowId) => {
+    let url = "http://" + window.location.host + "/win_hash";
+
+    let body = {
+      "win" : windowId,
+      "env" : this.state.envID
+    }
+
+    return $.post(url, JSON.stringify(body))
   }
 
   openEnvModal() {
