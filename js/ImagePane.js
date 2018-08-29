@@ -17,6 +17,7 @@ class ImagePane extends React.Component {
     scale: 1.,
     tx: 0.,
     ty: 0.,
+    mouse_location: {x: 0., y: 0},
   }
 
   drag_start_x = null;
@@ -103,6 +104,18 @@ class ImagePane extends React.Component {
     this.drag_start_y = ev.screenY;
   }
 
+  handleMouseOver = (ev) => {
+    // get the x and y offset of the pane
+    var rect = this._paneRef._windowRef.children[1].getBoundingClientRect();
+    // Compute the coords of the mouse relative to the top left of the pane
+    var xscreen = ev.clientX - rect.x;
+    var yscreen = ev.clientY - rect.y;
+    // Compute the coords of the pixel under the mouse wrt the image top left
+    var ximage = (xscreen - this.state.tx) / this.state.scale;
+    var yimage = (yscreen - this.state.ty) / this.state.scale;
+    this.setState({mouse_location: {x: Math.round(ximage), y: Math.round(yimage)}});
+  }
+
   handleReset = () => {
     this.setState({
       scale: 1.,
@@ -124,6 +137,7 @@ class ImagePane extends React.Component {
         handleDownload={this.handleDownload}
         handleReset={this.handleReset.bind(this)}
         handleZoom={this.handleZoom.bind(this)}
+        handleMouseMove={this.handleMouseOver.bind(this)}
         ref={(ref) => this._paneRef = ref}>
         <div style={divstyle}>
           <img
@@ -137,6 +151,9 @@ class ImagePane extends React.Component {
             />
         </div>
         <p className="caption">{content.caption}</p>
+        <span className="mouse_image_location">
+          {this.state.mouse_location.x + ' / ' + this.state.mouse_location.y}
+        </span>
       </Pane>
     )
   }
