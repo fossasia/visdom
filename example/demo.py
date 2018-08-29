@@ -22,11 +22,8 @@ from six.moves import urllib
 try:
     viz = Visdom()
 
-    startup_sec = 1
-    while not viz.check_connection() and startup_sec > 0:
-        time.sleep(0.1)
-        startup_sec -= 0.1
-    assert viz.check_connection(), 'No connection could be formed quickly'
+    assert viz.check_connection(timeout_seconds=3), \
+        'No connection could be formed quickly'
 
     textwindow = viz.text('Hello World!')
 

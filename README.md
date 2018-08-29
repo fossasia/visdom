@@ -174,7 +174,7 @@ Start the server (probably in a  `screen` or `tmux`) from the command line:
 
 Visdom now can be accessed by going to `http://localhost:8097` in your browser, or your own host address if specified.
 
-> The `visdom` command is equivalent to running `python -m visdom.server`. 
+> The `visdom` command is equivalent to running `python -m visdom.server`.
 
 >If the above does not work, try using an SSH tunnel to your server by adding the following line to your local  `~/.ssh/config`:
 ```LocalForward 127.0.0.1:8097 127.0.0.1:8097```.
@@ -395,9 +395,9 @@ packages installed to use this option.
 
 #### vis.plotlyplot
 
-This function draws a Plotly `Figure` object. It does not explicitly take options as it assumes you have already explicitly configured the figure's `layout`. 
+This function draws a Plotly `Figure` object. It does not explicitly take options as it assumes you have already explicitly configured the figure's `layout`.
 
-> **Note** You must have the `plotly` Python package installed to use this function. It can typically be installed by running `pip install plotly`. 
+> **Note** You must have the `plotly` Python package installed to use this function. It can typically be installed by running `pip install plotly`.
 
 #### vis.save
 This function saves the `envs` that are alive on the visdom server. It takes input a list (in python) or table (in lua) of env ids to be saved.
@@ -638,7 +638,7 @@ Arguments:
 
 #### vis.check_connection
 
-This function returns a bool indicating whether or not the server is connected.
+This function returns a bool indicating whether or not the server is connected. It accepts an optional argument for a number of seconds to wait for the server to come up.
 
 #### vis.replay_log
 This function takes the contents of a visdom log and replays them to the current server to restore a state or handle any missing entries.

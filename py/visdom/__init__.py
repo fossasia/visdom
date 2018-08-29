@@ -580,13 +580,26 @@ class Visdom(object):
 
         return None
 
-    def check_connection(self):
+    def _has_connection(self):
         """
         This function returns a bool indicating whether or
         not the server is connected.
         """
         return (self.win_exists('') is not None) and \
             (self.socket_alive or not self.use_socket)
+
+    def check_connection(self, timeout_seconds=0):
+        """
+        This function returns a bool indicating whether or
+        not the server is connected within some timeout. It waits for
+        timeout_seconds before determining if the server responds.
+        """
+        timeout_seconds
+        while not self._has_connection() and timeout_seconds > 0:
+            time.sleep(0.1)
+            timeout_seconds -= 0.1
+
+        self._has_connection()
 
     def replay_log(self, log_filename):
         """
