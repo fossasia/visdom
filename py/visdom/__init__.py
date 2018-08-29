@@ -594,12 +594,12 @@ class Visdom(object):
         not the server is connected within some timeout. It waits for
         timeout_seconds before determining if the server responds.
         """
-        timeout_seconds
         while not self._has_connection() and timeout_seconds > 0:
             time.sleep(0.1)
             timeout_seconds -= 0.1
+            print('waiting')
 
-        self._has_connection()
+        return self._has_connection()
 
     def replay_log(self, log_filename):
         """
