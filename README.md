@@ -643,7 +643,7 @@ Arguments:
 
 #### vis.check_connection
 
-This function returns a bool indicating whether or not the server is connected.
+This function returns a bool indicating whether or not the server is connected. It accepts an optional argument `timeout_seconds` for a number of seconds to wait for the server to come up.
 
 #### vis.replay_log
 This function takes the contents of a visdom log and replays them to the current server to restore a state or handle any missing entries.
