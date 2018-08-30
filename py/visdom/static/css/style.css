@@ -153,6 +153,18 @@ button {
   display: block;
 }
 
+.mouse_image_location{
+  background: white;
+  position: absolute;
+  left: 0;
+  bottom: 1px;
+  display: none;
+}
+
+.content:hover .mouse_image_location{
+  display: block;
+}
+
 .content-plot {
   background: white;
   font-size:10px;
