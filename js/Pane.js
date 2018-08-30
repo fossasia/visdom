@@ -38,6 +38,12 @@ class Pane extends React.Component {
     }
   }
 
+  over = (ev) => {
+    if (this.props.handleMouseMove) {
+      this.props.handleMouseMove(ev);
+    }
+  }
+
   resize = () => {
     if (this.props.resize) {
       this.props.onResize();
@@ -91,6 +97,7 @@ class Pane extends React.Component {
         onClick={this.focus}
         onDoubleClick={this.reset}
         onWheel={this.zoom}
+        onMouseMove={this.over}
         ref={(ref) => this._windowRef = ref}>
         <div className={barClassNames}
           ref={(ref) => this._barRef = ref}>
