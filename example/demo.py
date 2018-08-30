@@ -10,6 +10,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from visdom import Visdom
+import argparse
 import numpy as np
 import math
 import os.path
@@ -19,8 +20,18 @@ from sys import platform as _platform
 from six.moves import urllib
 
 
+DEFAULT_PORT = 8097
+DEFAULT_HOSTNAME = "http://localhost"
+parser = argparse.ArgumentParser(description='Demo arguments')
+parser.add_argument('-port', metavar='port', type=int, default=DEFAULT_PORT,
+                    help='port the visdom server is running on.')
+parser.add_argument('-server', metavar='server', type=str,
+                    default=DEFAULT_HOSTNAME,
+                    help='Server address of the target to run the demo on.')
+FLAGS = parser.parse_args()
+
 try:
-    viz = Visdom()
+    viz = Visdom(port=FLAGS.port, server=FLAGS.server)
 
     startup_sec = 1
     while not viz.check_connection() and startup_sec > 0:
