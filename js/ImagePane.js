@@ -17,7 +17,7 @@ class ImagePane extends React.Component {
     scale: 1.,
     tx: 0.,
     ty: 0.,
-    mouse_location: {x: 0., y: 0},
+    mouse_location: {x: 0., y: 0, visibility: 'hidden'},
   }
 
   drag_start_x = null;
@@ -107,14 +107,18 @@ class ImagePane extends React.Component {
 
   handleMouseOver = (ev) => {
     // get the x and y offset of the pane
-    var rect = this._paneRef._windowRef.children[1].getBoundingClientRect();
-    // Compute the coords of the mouse relative to the top left of the pane
-    var xscreen = ev.clientX - rect.x;
-    var yscreen = ev.clientY - rect.y;
-    // Compute the coords of the pixel under the mouse wrt the image top left
-    var ximage = (xscreen - this.state.tx) / this.state.scale;
-    var yimage = (yscreen - this.state.ty) / this.state.scale;
-    this.setState({mouse_location: {x: Math.round(ximage), y: Math.round(yimage)}});
+    if (ev.altKey){
+      var rect = this._paneRef._windowRef.children[1].getBoundingClientRect();
+      // Compute the coords of the mouse relative to the top left of the pane
+      var xscreen = ev.clientX - rect.x;
+      var yscreen = ev.clientY - rect.y;
+      // Compute the coords of the pixel under the mouse wrt the image top left
+      var ximage = Math.round((xscreen - this.state.tx) / this.state.scale);
+      var yimage = Math.round((yscreen - this.state.ty) / this.state.scale);
+      this.setState({mouse_location: {x: ximage, y: yimage, visibility: 'visible'}});
+    } else {
+      this.setState({mouse_location: {x: 0, y: 0, visibility: 'hidden'}});
+    }
   }
 
   handleReset = () => {
@@ -152,7 +156,9 @@ class ImagePane extends React.Component {
             />
         </div>
         <p className="caption">{content.caption}</p>
-        <span className="mouse_image_location">
+        <span
+          className="mouse_image_location"
+          style={{visibility: this.state.mouse_location.visibility}}>
           {this.state.mouse_location.x + ' / ' + this.state.mouse_location.y}
         </span>
       </Pane>
