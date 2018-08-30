@@ -174,7 +174,7 @@ Start the server (probably in a  `screen` or `tmux`) from the command line:
 
 Visdom now can be accessed by going to `http://localhost:8097` in your browser, or your own host address if specified.
 
-> The `visdom` command is equivalent to running `python -m visdom.server`. 
+> The `visdom` command is equivalent to running `python -m visdom.server`.
 
 >If the above does not work, try using an SSH tunnel to your server by adding the following line to your local  `~/.ssh/config`:
 ```LocalForward 127.0.0.1:8097 127.0.0.1:8097```.
@@ -189,7 +189,7 @@ The following options can be provided to the server:
 4. `-logging_level` : Logging level (default = INFO). Accepts both standard text and numeric logging values.
 5. `-readonly` : Flag to start server in readonly mode.
 6. `-enable_login` : Flag to setup authentication for the sever, requiring a username and password to login.
-7. `-force_new_cookie` : Flag to reset the secure cookie used by the server, invalidating current login cookies. 
+7. `-force_new_cookie` : Flag to reset the secure cookie used by the server, invalidating current login cookies.
 Requires `-enable_login`.
 
 
@@ -291,6 +291,7 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 - [`vis.close`](#visclose)    : close a window by id
 - [`vis.delete_env`](#visdelete_env) : delete an environment by env_id
 - [`vis.win_exists`](#viswin_exists) : check if a window already exists by id
+- [`vis.get_env_list`](#visget_env_list) : get a list of all of the environments on your server
 - [`vis.win_hash`](#viswin_hash): get md5 hash of window's contents
 - [`vis.get_window_data`](#visget_window_data): get current data for a window
 - [`vis.check_connection`](#vischeck_connection): check if the server is connected
@@ -397,9 +398,9 @@ packages installed to use this option.
 
 #### vis.plotlyplot
 
-This function draws a Plotly `Figure` object. It does not explicitly take options as it assumes you have already explicitly configured the figure's `layout`. 
+This function draws a Plotly `Figure` object. It does not explicitly take options as it assumes you have already explicitly configured the figure's `layout`.
 
-> **Note** You must have the `plotly` Python package installed to use this function. It can typically be installed by running `pip install plotly`. 
+> **Note** You must have the `plotly` Python package installed to use this function. It can typically be installed by running `pip install plotly`.
 
 #### vis.save
 This function saves the `envs` that are alive on the visdom server. It takes input a list (in python) or table (in lua) of env ids to be saved.
@@ -622,6 +623,10 @@ This function returns a bool indicating whether or not a window `win` exists on 
 
 Optional arguments:
 - `env`: Environment to search for the window in. Default is `None`.
+
+#### vis.get_env_list
+
+This function returns a list of all of the environments on the server at the time of calling. It takes no arguments.
 
 #### vis.win_hash
 
