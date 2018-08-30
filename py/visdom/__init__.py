@@ -306,8 +306,12 @@ class Visdom(object):
         use_incoming_socket=True,
         log_to_filename=None,
     ):
-        self.server_base_name = server[server.index("//") + 2:]
-        self.server = server
+        if '//' not in server:
+            self.server_base_name = server
+            self.server = 'http://' + server
+        else:
+            self.server_base_name = server[server.index("//") + 2:]
+            self.server = server
         self.endpoint = endpoint
         self.port = port
         self.ipv6 = ipv6
@@ -744,11 +748,19 @@ class Visdom(object):
             # numpy arrays to Python lists and several other edge cases.
             figure_dict = json.loads(
                 json.dumps(figure, cls=plotly.utils.PlotlyJSONEncoder))
+
+            # If opts title is not added, the title is not added to the top right of the window.
+            # We add the paramater to opts manually if it exists.
+            opts = dict()
+            if 'title' in figure_dict['layout']:
+                opts['title'] = figure_dict['layout']['title']
+
             return self._send({
                 'data': figure_dict['data'],
                 'layout': figure_dict['layout'],
                 'win': win,
-                'eid': env
+                'eid': env,
+                'opts': opts
             })
         except ImportError:
             raise RuntimeError(
