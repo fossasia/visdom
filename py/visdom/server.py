@@ -157,6 +157,7 @@ class Application(tornado.web.Application):
             (r"/win_data", DataHandler, {'app': self}),
             (r"/delete_env", DeleteEnvHandler, {'app': self}),
             (r"/win_hash", HashHandler, {'app': self}),
+            (r"/env_state", EnvStateHandler, {'app': self}),
             (r"/(.*)", IndexHandler, {'app': self}),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)
@@ -670,6 +671,25 @@ class DeleteEnvHandler(BaseHandler):
             tornado.escape.to_basestring(self.request.body)
         )
         self.wrap_func(self, args)
+
+
+class EnvStateHandler(BaseHandler):
+    def initialize(self, app):
+        self.app = app
+        self.state = app.state
+
+    @staticmethod
+    def wrap_func(handler, args):
+        # TODO if an env is provided return the state of that env
+        all_eids = list(handler.state.keys())
+        handler.write(json.dumps(all_eids))
+
+    def post(self):
+        args = tornado.escape.json_decode(
+            tornado.escape.to_basestring(self.request.body)
+        )
+        self.wrap_func(self, args)
+
 
 class HashHandler(BaseHandler):
     def initialize(self, app):

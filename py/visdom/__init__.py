@@ -561,6 +561,13 @@ class Visdom(object):
             'eid': env,
         }, endpoint='win_exists', quiet=True)
 
+    def get_env_list(self):
+        """
+        This function returns a list of all of the env names that are currently
+        in the server.
+        """
+        return json.loads(self._send({}, endpoint='env_state', quiet=True))
+
     def win_exists(self, win, env=None):
         """
         This function returns a bool indicating whether
