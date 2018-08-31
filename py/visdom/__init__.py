@@ -1176,11 +1176,13 @@ class Visdom(object):
                 if marker_prop in opts:
                     del opts[marker_prop]
 
+        # Only send updates to the layout on the first plot, future updates
+        # need to use `update_window_opts`
         data_to_send = {
             'data': data,
             'win': win,
             'eid': env,
-            'layout': _opts2layout(opts, is3d),
+            'layout': _opts2layout(opts, is3d) if update is None else {},
             'opts': opts,
         }
         endpoint = 'events'
