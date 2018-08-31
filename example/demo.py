@@ -33,11 +33,8 @@ FLAGS = parser.parse_args()
 try:
     viz = Visdom(port=FLAGS.port, server=FLAGS.server)
 
-    startup_sec = 1
-    while not viz.check_connection() and startup_sec > 0:
-        time.sleep(0.1)
-        startup_sec -= 0.1
-    assert viz.check_connection(), 'No connection could be formed quickly'
+    assert viz.check_connection(timeout_seconds=3), \
+        'No connection could be formed quickly'
 
     textwindow = viz.text('Hello World!')
 
@@ -141,12 +138,23 @@ try:
         ),
     )
 
+    # 3d scatterplot with custom labels and ranges
     viz.scatter(
         X=np.random.rand(100, 3),
         Y=(Y + 1.5).astype(int),
         opts=dict(
             legend=['Men', 'Women'],
             markersize=5,
+            xtickmin=0,
+            xtickmax=2,
+            xlabel='Arbitrary',
+            xtickvals=[0, 0.75, 1.6, 2],
+            ytickmin=0,
+            ytickmax=2,
+            ytickstep=0.5,
+            ztickmin=0,
+            ztickmax=1,
+            ztickstep=0.5,
         )
     )
 
@@ -408,7 +416,6 @@ try:
         ),
         update='append',
         win=win)
-
 
     # mesh plot
     x = [0, 0, 1, 1, 0, 0, 1, 1]

@@ -13,14 +13,14 @@ import os.path
 import requests
 import traceback
 import threading
-import websocket # type: ignore
+import websocket  # type: ignore
 import json
 import math
 import re
 import base64
-import numpy as np # type: ignore
-from PIL import Image # type: ignore
-import base64 as b64 # type: ignore
+import numpy as np  # type: ignore
+from PIL import Image  # type: ignore
+import base64 as b64  # type: ignore
 import numbers
 import six
 from six import string_types
@@ -33,7 +33,7 @@ import errno
 import io
 from functools import wraps
 try:
-    import bs4 # type: ignore
+    import bs4  # type: ignore
     BS4_AVAILABLE = True
 except ImportError:
     BS4_AVAILABLE = False
@@ -48,7 +48,7 @@ except Exception:
     __version__ = 'no_version_file'
 
 try:
-    import torchfile # type: ignore
+    import torchfile  # type: ignore
 except BaseException:
     from . import torchfile
 
@@ -110,7 +110,7 @@ def _title2str(opts):
     if opts.get('title'):
         if isnum(opts.get('title')):
             title = str(opts.get('title'))
-            logger.warn('Numerical title %s has been casted to a string' % \
+            logger.warn('Numerical title %s has been casted to a string' %
                         title)
             opts['title'] = title
             return opts
@@ -145,22 +145,47 @@ def _axisformat(xy, opts):
         }
 
 
+def _axisformat3d(xyz, opts):
+    fields = ['type', 'label', 'tickmin', 'tickmax', 'tickvals', 'ticklabels',
+              'tick', 'tickfont']
+    if any(opts.get(xyz + i) for i in fields):
+        has_ticks = (opts.get(xyz + 'tickmin') and opts.get(xyz + 'tickmax')) \
+            is not None
+        has_step = has_ticks and opts.get(xyz + 'tickstep') is not None
+        return {
+            'type': opts.get(xyz + 'type'),
+            'title': opts.get(xyz + 'label'),
+            'range': [opts.get(xyz + 'tickmin'),
+                      opts.get(xyz + 'tickmax')] if has_ticks else None,
+            'tickvals': opts.get(xyz + 'tickvals'),
+            'ticktext': opts.get(xyz + 'ticklabels'),
+            'nticks': ((opts.get(xyz + 'tickmax') - opts.get(xyz + 'tickmin'))/
+                       opts.get(xyz + 'tickstep')) if has_step else None,
+            'tickfont': opts.get(xyz + 'tickfont'),
+        }
+
+
 def _opts2layout(opts, is3d=False):
     layout = {
         'showlegend': opts.get('showlegend', 'legend' in opts),
         'title': opts.get('title'),
-        'xaxis': _axisformat('x', opts),
-        'yaxis': _axisformat('y', opts),
         'margin': {
-            'l': opts.get('marginleft', 60),
+            'l': opts.get('marginleft', 0 if is3d else 60),
             'r': opts.get('marginright', 60),
-            't': opts.get('margintop', 60),
-            'b': opts.get('marginbottom', 60),
+            't': opts.get('margintop', 20 if is3d else 60),
+            'b': opts.get('marginbottom', 0 if is3d else 60),
         }
     }
 
     if is3d:
-        layout['zaxis'] = _axisformat('z', opts)
+        layout['scene'] = {
+            'xaxis': _axisformat3d('x', opts),
+            'yaxis': _axisformat3d('y', opts),
+            'zaxis': _axisformat3d('z', opts),
+        }
+    else:
+        layout['xaxis'] = _axisformat('x', opts)
+        layout['yaxis'] = _axisformat('x', opts)
 
     if opts.get('stacked'):
         layout['barmode'] = 'stack' if opts.get('stacked') else 'group'
@@ -536,6 +561,13 @@ class Visdom(object):
             'eid': env,
         }, endpoint='win_exists', quiet=True)
 
+    def get_env_list(self):
+        """
+        This function returns a list of all of the env names that are currently
+        in the server.
+        """
+        return json.loads(self._send({}, endpoint='env_state', quiet=True))
+
     def win_exists(self, win, env=None):
         """
         This function returns a bool indicating whether
@@ -585,13 +617,26 @@ class Visdom(object):
 
         return None
 
-    def check_connection(self):
+    def _has_connection(self):
         """
         This function returns a bool indicating whether or
         not the server is connected.
         """
         return (self.win_exists('') is not None) and \
             (self.socket_alive or not self.use_socket)
+
+    def check_connection(self, timeout_seconds=0):
+        """
+        This function returns a bool indicating whether or
+        not the server is connected within some timeout. It waits for
+        timeout_seconds before determining if the server responds.
+        """
+        while not self._has_connection() and timeout_seconds > 0:
+            time.sleep(0.1)
+            timeout_seconds -= 0.1
+            print('waiting')
+
+        return self._has_connection()
 
     def replay_log(self, log_filename):
         """
@@ -1131,11 +1176,13 @@ class Visdom(object):
                 if marker_prop in opts:
                     del opts[marker_prop]
 
+        # Only send updates to the layout on the first plot, future updates
+        # need to use `update_window_opts`
         data_to_send = {
             'data': data,
             'win': win,
             'eid': env,
-            'layout': _opts2layout(opts, is3d),
+            'layout': _opts2layout(opts, is3d) if update is None else {},
             'opts': opts,
         }
         endpoint = 'events'
