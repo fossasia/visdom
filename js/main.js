@@ -261,7 +261,6 @@ class App extends React.Component {
 
   _handleMessage = (evt) => {
     var cmd = JSON.parse(evt.data);
-
     switch (cmd.command) {
       case 'register':
         this.setState({
@@ -271,7 +270,14 @@ class App extends React.Component {
         break;
       case 'pane':
       case 'window':
-        this.addPaneBatched(cmd);
+        // If we're in compare mode and recieve an update to an environment
+        // that is selected that isn't from the compare output, we need to
+        // reload the compare output
+        if (this.state.envIDs.length > 1 && cmd.has_compare !== true) {
+          this.postForEnv(this.state.envIDs);
+        } else {
+          this.addPaneBatched(cmd);
+        }
         break;
       case 'reload':
         for (var it in cmd.data) {

@@ -404,8 +404,12 @@ def window(args):
 
 def broadcast(self, msg, eid):
     for s in self.subs:
-        if self.subs[s].eid == eid:
-            self.subs[s].write_message(msg)
+        if type(self.subs[s].eid) is list:
+            if eid in self.subs[s].eid:
+                self.subs[s].write_message(msg)
+        else:
+            if self.subs[s].eid == eid:
+                self.subs[s].write_message(msg)
 
 
 def register_window(self, p, eid):
@@ -799,6 +803,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
                     continue  # Skip windows with unnamed data
                 destWidJson['has_compare'] = False
                 destWidJson['content']['layout']['showlegend'] = True
+                destWidJson['contentID'] = get_rand_id()
                 for dataIdx, data in enumerate(destWidJson['content']['data']):
                     if 'name' not in data:
                         break  # stop working with this plot, not right format
@@ -848,7 +853,8 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         "content": tbl,
         "type": "text",
         "layout": {"title": "compare_legend"},
-        "i": 1
+        "i": 1,
+        "has_compare": True,
     }
     if 'reload' in res:
         socket.write_message(
@@ -861,7 +867,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         socket.write_message(v)
 
     socket.write_message(json.dumps({'command': 'layout'}))
-    socket.eid = eid
+    socket.eid = eids
 
 
 class EnvHandler(BaseHandler):
