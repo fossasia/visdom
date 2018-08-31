@@ -357,11 +357,13 @@ class BaseHandler(tornado.web.RequestHandler):
 def update_window(p, args):
     """Adds new args to a window if they exist"""
     content = p['content']
-    layout = content['layout']
-    layout.update(args.get('layout', {}))
+    layout_update = args.get('layout', {})
+    for layout_name, layout_val in layout_update.items():
+        if layout_val is not None:
+            content['layout'][layout_name] = layout_val
     opts = args.get('opts', {})
     for opt_name, opt_val in opts.items():
-        if opt_name in p:
+        if opt_val is not None:
             p[opt_name] = opt_val
 
     if 'legend' in opts:
