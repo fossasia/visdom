@@ -143,6 +143,16 @@ class App extends React.Component {
     return this.state.envID + '_' + key;
   }
 
+  getValidFilter = (filter) => {
+    // Ensure the regex filter is valid
+    try {
+      'test_string'.match(filter);
+    } catch(e) {
+      filter = '';
+    }
+    return filter
+  }
+
   correctPathname = () => {
     var pathname = window.location.pathname;
     if (pathname.indexOf('/env/') > -1) {
@@ -529,7 +539,7 @@ class App extends React.Component {
 
     let sorted = sortLayout(layout);
     let newPanes = Object.assign({}, this.state.panes);
-    let filter = this.state.filter;
+    let filter = this.getValidFilter(this.state.filter);
     let old_sorted = sorted.slice();
     let layoutID = this.state.layoutID;
     let envLayoutList = this.getCurrLayoutList();
@@ -1147,7 +1157,8 @@ class App extends React.Component {
         return null;
       }
       let panelayout = getLayoutItem(this.state.layout, id);
-      let isVisible = pane.title.match(this.state.filter)
+      let filter = this.getValidFilter(this.state.filter);
+      let isVisible = pane.title.match(filter)
       return (
         <div key={pane.id}
           className={isVisible? '' : 'hidden-window'}>
