@@ -38,6 +38,7 @@ LAYOUT_FILE = 'layouts.json'
 DEFAULT_ENV_PATH = '%s/.visdom/' % expanduser("~")
 DEFAULT_PORT = 8097
 DEFAULT_HOSTNAME = "localhost"
+DEFAULT_BASE_URL = "/"
 
 here = os.path.abspath(os.path.dirname(__file__))
 
@@ -112,13 +113,14 @@ def serialize_all(state, env_path=DEFAULT_ENV_PATH):
 
 
 class Application(tornado.web.Application):
-    def __init__(self, port=DEFAULT_PORT, env_path=DEFAULT_ENV_PATH,
+    def __init__(self, port=DEFAULT_PORT, base_url=DEFAULT_BASE_URL, env_path=DEFAULT_ENV_PATH,
                  readonly=False, user_credential=None):
         self.state = {}
         self.subs = {}
         self.sources = {}
         self.env_path = env_path
         self.port = port
+        self.base_url = base_url
         self.readonly = readonly
         self.user_credential = user_credential
         self.login_enabled = False
@@ -143,22 +145,23 @@ class Application(tornado.web.Application):
             self.state['main'] = {'jsons': {}, 'reload': {}}
             serialize_env(self.state, ['main'], env_path=self.env_path)
 
+        tornado_settings['static_url_prefix'] = self.base_url + "/static/"
         handlers = [
-            (r"/events", PostHandler, {'app': self}),
-            (r"/update", UpdateHandler, {'app': self}),
-            (r"/close", CloseHandler, {'app': self}),
-            (r"/socket", SocketHandler, {'app': self}),
-            (r"/vis_socket", VisSocketHandler, {'app': self}),
-            (r"/env/(.*)", EnvHandler, {'app': self}),
-            (r"/compare/(.*)", CompareHandler, {'app': self}),
-            (r"/save", SaveHandler, {'app': self}),
-            (r"/error/(.*)", ErrorHandler, {'app': self}),
-            (r"/win_exists", ExistsHandler, {'app': self}),
-            (r"/win_data", DataHandler, {'app': self}),
-            (r"/delete_env", DeleteEnvHandler, {'app': self}),
-            (r"/win_hash", HashHandler, {'app': self}),
-            (r"/env_state", EnvStateHandler, {'app': self}),
-            (r"/(.*)", IndexHandler, {'app': self}),
+            (r"%s/events" % self.base_url, PostHandler, {'app': self}),
+            (r"%s/update" % self.base_url, UpdateHandler, {'app': self}),
+            (r"%s/close" % self.base_url, CloseHandler, {'app': self}),
+            (r"%s/socket" % self.base_url, SocketHandler, {'app': self}),
+            (r"%s/vis_socket" % self.base_url, VisSocketHandler, {'app': self}),
+            (r"%s/env/(.*)" % self.base_url, EnvHandler, {'app': self}),
+            (r"%s/compare/(.*)" % self.base_url, CompareHandler, {'app': self}),
+            (r"%s/save" % self.base_url, SaveHandler, {'app': self}),
+            (r"%s/error/(.*)" % self.base_url, ErrorHandler, {'app': self}),
+            (r"%s/win_exists" % self.base_url, ExistsHandler, {'app': self}),
+            (r"%s/win_data" % self.base_url, DataHandler, {'app': self}),
+            (r"%s/delete_env" % self.base_url, DeleteEnvHandler, {'app': self}),
+            (r"%s/win_hash" % self.base_url, HashHandler, {'app': self}),
+            (r"%s/env_state" % self.base_url, EnvStateHandler, {'app': self}),
+            (r"%s(.*)" % self.base_url, IndexHandler, {'app': self}),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)
 
@@ -1128,10 +1131,10 @@ def download_scripts(proxies=None, install_dir=None):
             build_file.write(visdom.__version__)
 
 
-def start_server(port=DEFAULT_PORT, hostname=DEFAULT_HOSTNAME, env_path=DEFAULT_ENV_PATH,
+def start_server(port=DEFAULT_PORT, hostname=DEFAULT_HOSTNAME, base_url=DEFAULT_BASE_URL, env_path=DEFAULT_ENV_PATH,
                  readonly=False, print_func=None, user_credential=None):
     print("It's Alive!")
-    app = Application(port=port, env_path=env_path, readonly=readonly,
+    app = Application(port=port, base_url=base_url, env_path=env_path, readonly=readonly,
                       user_credential=user_credential)
     app.listen(port, max_buffer_size=1024 ** 3)
     logging.info("Application Started")
@@ -1141,7 +1144,7 @@ def start_server(port=DEFAULT_PORT, hostname=DEFAULT_HOSTNAME, env_path=DEFAULT_
     else:
         hostname = hostname
     if print_func is None:
-        print("You can navigate to http://%s:%s" % (hostname, port))
+        print("You can navigate to http://%s:%s%s" % (hostname, port, base_url))
     else:
         print_func(port)
     ioloop.IOLoop.instance().start()
@@ -1153,6 +1156,8 @@ def main(print_func=None):
                         help='port to run the server on.')
     parser.add_argument('-hostname', metavar='hostname', type=str,
                         default=DEFAULT_HOSTNAME, help='host to run the server on.')
+    parser.add_argument('-base_url', metavar='base_url', type=str,
+                        default=DEFAULT_BASE_URL, help='base url for server (default = /).')
     parser.add_argument('-env_path', metavar='env_path', type=str,
                         default=DEFAULT_ENV_PATH,
                         help='path to serialized session to reload.')
@@ -1168,6 +1173,8 @@ def main(print_func=None):
                         help='start the server with the new cookie, '
                              'available when -enable_login provided')
     FLAGS = parser.parse_args()
+
+    base_url = FLAGS.base_url if FLAGS.base_url != DEFAULT_BASE_URL else ""  # Need some preprocessing
 
     try:
         logging_level = int(FLAGS.logging_level)
@@ -1197,7 +1204,7 @@ def main(print_func=None):
     else:
         user_credential = None
 
-    start_server(port=FLAGS.port, hostname=FLAGS.hostname, env_path=FLAGS.env_path,
+    start_server(port=FLAGS.port, hostname=FLAGS.hostname, base_url=base_url, env_path=FLAGS.env_path,
                  readonly=FLAGS.readonly, print_func=print_func, user_credential=user_credential)
 
 

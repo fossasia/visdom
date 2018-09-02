@@ -25,6 +25,7 @@ class Visdom:
         server: Text = ...,
         endpoint: Text = ...,
         port: int = ...,
+        base_url: Text = ...,
         ipv6: bool = ...,
         http_proxy_host: _OptStr = ...,
         http_proxy_port: Optional[int] = ...,
