@@ -948,7 +948,7 @@ class Visdom(object):
         return self.text(text=videodata, win=win, env=env, opts=opts)
 
     @pytorch_wrap
-    def video(self, tensor=None, videofile=None, win=None, env=None, opts=None, dim='LxHxWxC'):
+    def video(self, tensor=None, dim='LxHxWxC', videofile=None, win=None, env=None, opts=None):
         """
         This function plays a video. It takes as input the filename of the video
         `videofile` or a `LxHxWxC`-sized `tensor` containing all the frames of
