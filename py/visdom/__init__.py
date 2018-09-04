@@ -948,7 +948,7 @@ class Visdom(object):
         return self.text(text=videodata, win=win, env=env, opts=opts)
 
     @pytorch_wrap
-    def video(self, tensor=None, videofile=None, win=None, env=None, opts=None):
+    def video(self, tensor=None, videofile=None, win=None, env=None, opts=None, dim='LxHxWxC'):
         """
         This function plays a video. It takes as input the filename of the video
         `videofile` or a `LxHxWxC`-sized `tensor` containing all the frames of
@@ -969,6 +969,9 @@ class Visdom(object):
             import cv2 # type: ignore
             import tempfile
             assert tensor.ndim == 4, 'video should be in 4D tensor'
+            assert dim == 'LxHxWxC' or dim == 'LxCxHxW', 'dimension argument should be LxHxWxC or LxCxHxW'
+            if dim == 'LxCxHxW':
+                tensor = tensor.transpose([0, 2, 3, 1])
             videofile = '/tmp/%s.ogv' % next(tempfile._get_candidate_names())
             if cv2.__version__.startswith('2'):  # OpenCV 2
                 fourcc = cv2.cv.CV_FOURCC(
