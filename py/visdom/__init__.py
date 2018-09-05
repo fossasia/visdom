@@ -340,7 +340,13 @@ class Visdom(object):
             self.server = server
         self.endpoint = endpoint
         self.port = port
-        self.base_url = base_url if base_url != "/" else "" #Need some preprocessing
+        # preprocess base_url
+        self.base_url = base_url if base_url != "/" else ""
+        assert self.base_url == '' or self.base_url.startswith('/'), \
+            'base_url should start with /'
+        assert self.base_url == '' or not self.base_url.endswith('/'), \
+            'base_url should not end with / as it is appended automatically'
+
         self.ipv6 = ipv6
         self.http_proxy_host = http_proxy_host
         self.http_proxy_port = http_proxy_port
