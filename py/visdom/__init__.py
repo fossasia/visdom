@@ -322,6 +322,7 @@ class Visdom(object):
         server='http://localhost',
         endpoint='events',
         port=8097,
+        base_url='/',
         ipv6=True,
         http_proxy_host=None,
         http_proxy_port=None,
@@ -339,6 +340,13 @@ class Visdom(object):
             self.server = server
         self.endpoint = endpoint
         self.port = port
+        # preprocess base_url
+        self.base_url = base_url if base_url != "/" else ""
+        assert self.base_url == '' or self.base_url.startswith('/'), \
+            'base_url should start with /'
+        assert self.base_url == '' or not self.base_url.endswith('/'), \
+            'base_url should not end with / as it is appended automatically'
+
         self.ipv6 = ipv6
         self.http_proxy_host = http_proxy_host
         self.http_proxy_port = http_proxy_port
@@ -431,8 +439,8 @@ class Visdom(object):
                 ws_scheme = "ws"
             while self.use_socket:
                 try:
-                    sock_addr = "{}://{}:{}/vis_socket".format(
-                        ws_scheme, self.server_base_name, self.port)
+                    sock_addr = "{}://{}:{}{}/vis_socket".format(
+                        ws_scheme, self.server_base_name, self.port, self.base_url)
                     ws = websocket.WebSocketApp(
                         sock_addr,
                         on_message=on_message,
@@ -472,7 +480,7 @@ class Visdom(object):
 
         try:
             r = requests.post(
-                "{0}:{1}/{2}".format(self.server, self.port, endpoint),
+                "{0}:{1}{2}/{3}".format(self.server, self.port, self.base_url, endpoint),
                 data=json.dumps(msg),
             )
             if self.log_to_filename is not None and not from_log:

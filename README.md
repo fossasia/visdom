@@ -185,11 +185,12 @@ The following options can be provided to the server:
 
 1. `-port` : The port to run the server on.
 2. `-hostname` : The hostname to run the server on.
-3. `-env_path` : The path to the serialized session to reload.
-4. `-logging_level` : Logging level (default = INFO). Accepts both standard text and numeric logging values.
-5. `-readonly` : Flag to start server in readonly mode.
-6. `-enable_login` : Flag to setup authentication for the sever, requiring a username and password to login.
-7. `-force_new_cookie` : Flag to reset the secure cookie used by the server, invalidating current login cookies.
+3. `-base_url` : The base server url (default = /).
+4. `-env_path` : The path to the serialized session to reload.
+5. `-logging_level` : Logging level (default = INFO). Accepts both standard text and numeric logging values.
+6. `-readonly` : Flag to start server in readonly mode.
+7. `-enable_login` : Flag to setup authentication for the sever, requiring a username and password to login.
+8. `-force_new_cookie` : Flag to reset the secure cookie used by the server, invalidating current login cookies.
 Requires `-enable_login`.
 
 
@@ -235,6 +236,7 @@ For a quick introduction into the capabilities of `visdom`, have a look at the `
 The python visdom client takes a few options:
 - `server`: the hostname of your visdom server (default: `'http://localhost'`)
 - `port`: the port for your visdom server (default: `8097`)
+- `base_url`: the base visdom server url (default: `/`)
 - `env`: Default environment to plot to when no `env` is provided (default: `main`)
 - `raise_exceptions`: Raise exceptions upon failure rather than printing them (default: `True` (soon))
 - `log_to_filename`: If not none, log all plotting and updating events to the given file (append mode) so that they can be replayed later using `replay_log` (default: `None`)
