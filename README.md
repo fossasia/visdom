@@ -245,6 +245,8 @@ The python visdom client takes a few options:
 - `use_incoming_socket`: enable use of the socket for receiving events from the web client, allowing user to register callbacks (default: `True`)
 - `http_proxy_host`: host to proxy your incoming socket through (default: `None`)
 - `http_proxy_port`: port to proxy your incoming socket through (default: `None`)
+- `username`: username to use for authentication, if server started with `-enable_login` (default: `None`)
+- `password`: password to use for authentication, if server started with `-enable_login` (default: `None`)
 
 Other options are either currently unused (endpoint, ipv6) or used for internal functionality (send allows the visdom server to replicate events for the lua client).
 
