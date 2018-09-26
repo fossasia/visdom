@@ -39,22 +39,6 @@ try:
 except ImportError:
     BS4_AVAILABLE = False
 
-import http.client as http_client
-
-http_client.HTTPConnection.debuglevel = 1
-
-logging.basicConfig()
-logging.getLogger().setLevel(logging.DEBUG)
-requests_log = logging.getLogger("requests.packages.urllib3")
-requests_log.setLevel(logging.DEBUG)
-requests_log.propagate = True
-
-logger = logging.getLogger('websocket')
-logger.setLevel(logging.DEBUG)
-
-
-THREAD_LOCAL = type('storage', (object,), {})  # threading.local()
-
 
 here = os.path.abspath(os.path.dirname(__file__))
 
@@ -483,7 +467,6 @@ class Visdom(object):
                 try:
                     sock_addr = "{}://{}:{}{}/vis_socket".format(
                         ws_scheme, self.server_base_name, self.port, self.base_url)
-                    cookie = "'foobar': 'baz', user_password': '%s'" % self.session.cookies.get('user_password', '')
                     ws = websocket.WebSocketApp(
                         sock_addr,
                         on_message=on_message,
