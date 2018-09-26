@@ -15,6 +15,7 @@ import traceback
 import threading
 import websocket  # type: ignore
 import json
+import hashlib
 import math
 import re
 import base64
@@ -37,6 +38,22 @@ try:
     BS4_AVAILABLE = True
 except ImportError:
     BS4_AVAILABLE = False
+
+import http.client as http_client
+
+http_client.HTTPConnection.debuglevel = 1
+
+logging.basicConfig()
+logging.getLogger().setLevel(logging.DEBUG)
+requests_log = logging.getLogger("requests.packages.urllib3")
+requests_log.setLevel(logging.DEBUG)
+requests_log.propagate = True
+
+logger = logging.getLogger('websocket')
+logger.setLevel(logging.DEBUG)
+
+
+THREAD_LOCAL = type('storage', (object,), {})  # threading.local()
 
 
 here = os.path.abspath(os.path.dirname(__file__))
@@ -331,6 +348,8 @@ class Visdom(object):
         raise_exceptions=None,
         use_incoming_socket=True,
         log_to_filename=None,
+        username=None,
+        password=None
     ):
         if '//' not in server:
             self.server_base_name = server
@@ -358,6 +377,12 @@ class Visdom(object):
         # Flag to indicate whether to raise errors or suppress them
         self.raise_exceptions = raise_exceptions
         self.log_to_filename = log_to_filename
+        self._session = None
+
+        self.username = username
+        if self.username:
+            assert password, 'no password given for authentication'
+            self.password = hashlib.sha256(password.encode("utf-8")).hexdigest()
 
         self._send({
             'eid': env,
@@ -386,6 +411,23 @@ class Visdom(object):
                 '`use_incoming_socket=False`, which will prevent waiting for '
                 'this request to timeout.'
             )
+
+    @property
+    def session(self):
+        if self._session:
+            return self._session
+        logging.warning("Setting up a new session...")
+        sess = requests.Session()
+        if self.username:
+            resp = sess.post("%s:%s" % (self.server, self.port), json=dict(
+                username=self.username,
+                password=self.password))
+            if resp.status_code != requests.codes.ok:
+                raise RuntimeError("Authentication failed")
+            logging.info('Authentication succeeded')
+        self._session = sess
+        return sess
+
 
     def register_event_handler(self, handler, target):
         assert callable(handler), 'Event handler must be a function'
@@ -441,11 +483,13 @@ class Visdom(object):
                 try:
                     sock_addr = "{}://{}:{}{}/vis_socket".format(
                         ws_scheme, self.server_base_name, self.port, self.base_url)
+                    cookie = "'foobar': 'baz', user_password': '%s'" % self.session.cookies.get('user_password', '')
                     ws = websocket.WebSocketApp(
                         sock_addr,
                         on_message=on_message,
                         on_error=on_error,
-                        on_close=on_close
+                        on_close=on_close,
+                        header={'Cookie: user_password=' + self.session.cookies.get('user_password', '')}
                     )
                     ws.run_forever(http_proxy_host=self.http_proxy_host,
                                    http_proxy_port=self.http_proxy_port,
@@ -479,7 +523,7 @@ class Visdom(object):
             return msg, endpoint
 
         try:
-            r = requests.post(
+            r = self.session.post(
                 "{0}:{1}{2}/{3}".format(self.server, self.port, self.base_url, endpoint),
                 data=json.dumps(msg),
             )
