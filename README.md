@@ -660,11 +660,8 @@ This function takes the contents of a visdom log and replays them to the current
 Arguments:
 - `log_filename`: log file to replay the contents of.
 
-## To Do
-
-- [ ] Command line tool for easy systematic plotting from live logs.
-- [ ] Filtering through windows with regex by title (or meta field)
-- [ ] Compiling react by python server at runtime
+## License
+visdom is Creative Commons Attribution-NonCommercial 4.0 International Public licensed, as found in the LICENSE file.
 
 ## Contributing
 See guidelines for contributing [here.](./CONTRIBUTING.md)
