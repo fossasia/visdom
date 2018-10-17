@@ -185,7 +185,7 @@ def _opts2layout(opts, is3d=False):
         }
     else:
         layout['xaxis'] = _axisformat('x', opts)
-        layout['yaxis'] = _axisformat('x', opts)
+        layout['yaxis'] = _axisformat('y', opts)
 
     if opts.get('stacked'):
         layout['barmode'] = 'stack' if opts.get('stacked') else 'group'
