@@ -1168,7 +1168,7 @@ def main(print_func=None):
     parser.add_argument('-port', metavar='port', type=int,
                         default=DEFAULT_PORT,
                         help='port to run the server on.')
-    parser.add_argument('-hostname', metavar='hostname', type=str,
+    parser.add_argument('--hostname', metavar='hostname', type=str,
                         default=DEFAULT_HOSTNAME,
                         help='host to run the server on.')
     parser.add_argument('-base_url', metavar='base_url', type=str,
