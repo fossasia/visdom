@@ -37,6 +37,8 @@ Note that the variables `$ANACONDA_FOLDER`, `$PYTHON_VERSION`, and
 `$VISDOM_VERSION` may not be set and depend on your configuration. Furthermore,
 if you are installing from source or using another method of installing
 dependancies, the folder to use may be different.
+if it report a SSL: [CERTIFICATE_VERIFY_FAILED] error , check your  `/Applications/Python3.7/Install Certificates.command ` ,
+and this error might be solved.
 
 * View the `download.sh` script and either execute it to automatically download the resources or manually download all the files that it requests.
 
