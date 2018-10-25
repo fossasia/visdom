@@ -1137,7 +1137,7 @@ class Visdom(object):
         _assert_opts(opts)
 
         if opts.get('legend'):
-            assert type(opts['legend']) == list and len(opts['legend']) >= K, \
+            assert type(opts['legend']) == list and K <= len(opts['legend']), \
                 'largest label should not be greater than size of the ' \
                 'legends table'
 
