@@ -1110,7 +1110,7 @@ class Visdom(object):
             Y = np.ones(X.shape[0], dtype=int)
 
         assert np.equal(np.mod(Y, 1), 0).all(), 'labels should be integers'
-        assert Y.min() == 1, 'labels are assumed to be between 1 and K'
+        assert Y.min() >= 1, 'labels are assumed to be between 1 and K'
 
         K = int(Y.max())
         is3d = X.shape[1] == 3
@@ -1137,7 +1137,9 @@ class Visdom(object):
         _assert_opts(opts)
 
         if opts.get('legend'):
-            assert type(opts['legend']) == list and len(opts['legend']) == K
+            assert type(opts['legend']) == list and K <= len(opts['legend']), \
+                'largest label should not be greater than size of the ' \
+                'legends table'
 
         data = []
         trace_opts = opts.get('traceopts', {'plotly': {}})['plotly']
