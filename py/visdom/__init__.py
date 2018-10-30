@@ -354,6 +354,7 @@ class Visdom(object):
         self.send = send
         self.event_handlers = {}  # Haven't registered any events
         self.socket_alive = False
+        self.socket_connection_achieved = False
         self.use_socket = use_incoming_socket
         # Flag to indicate whether to raise errors or suppress them
         self.raise_exceptions = raise_exceptions
@@ -408,6 +409,7 @@ class Visdom(object):
                     if 'data' in message and message['data'] == 'vis_alive':
                         logger.info('Visdom successfully connected to server')
                         self.socket_alive = True
+                        self.socket_connection_achieved = True
                     else:
                         logger.warn('Visdom server failed handshake, may not '
                                     'be properly connected')
@@ -417,16 +419,17 @@ class Visdom(object):
                     handler(message)
 
         def on_error(ws, error):
-            try:
-                if error.errno == errno.ECONNREFUSED:
+            if hasattr(error, "errno") and  error.errno == errno.ECONNREFUSED:
+                if not self.socket_connection_achieved:
+                    #
+                    # Visdom will stop trying to use the socket only if it
+                    # never succeeded in acquiring it.
+                    #
                     logger.info(
                         "Socket refused connection, running socketless")
-                    ws.close()
                     self.use_socket = False
-                else:
-                    logger.error(error)
-            except AttributeError:
-                logger.error(error)
+            logger.error(error)
+            ws.close()
 
         def on_close(ws):
             self.socket_alive = False
