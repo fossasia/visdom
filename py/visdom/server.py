@@ -43,6 +43,15 @@ DEFAULT_BASE_URL = "/"
 here = os.path.abspath(os.path.dirname(__file__))
 
 
+def check_auth(f):
+    def _check_auth(self, *args, **kwargs):
+        if self.login_enabled and not self.current_user:
+            self.set_status(400)
+            return
+        f(self, *args, **kwargs)
+    return _check_auth
+
+
 def get_rand_id():
     return str(hex(int(time.time() * 10000000))[2:])
 
@@ -186,18 +195,35 @@ def send_to_sources(handler, msg):
         source.write_message(json.dumps(msg))
 
 
-class VisSocketHandler(tornado.websocket.WebSocketHandler):
+class BaseWebSocketHandler(tornado.websocket.WebSocketHandler):
+    def get_current_user(self):
+        """
+        This method determines the self.current_user
+        based the value of cookies that set in POST method
+        at IndexHandler by self.set_secure_cookie
+        """
+        try:
+            return self.get_secure_cookie("user_password")
+        except Exception:  # Not using secure cookies
+            return None
+
+
+class VisSocketHandler(BaseWebSocketHandler):
     def initialize(self, app):
         self.state = app.state
         self.subs = app.subs
         self.sources = app.sources
         self.port = app.port
         self.env_path = app.env_path
+        self.login_enabled = app.login_enabled
 
     def check_origin(self, origin):
         return True
 
     def open(self):
+        if self.login_enabled and not self.current_user:
+            self.close()
+            return
         self.sid = str(hex(int(time.time() * 10000000))[2:])
         if self not in list(self.sources.values()):
             self.eid = 'main'
@@ -222,7 +248,7 @@ class VisSocketHandler(tornado.websocket.WebSocketHandler):
             self.sources.pop(self.sid, None)
 
 
-class SocketHandler(tornado.websocket.WebSocketHandler):
+class SocketHandler(BaseWebSocketHandler):
     def initialize(self, app):
         self.port = app.port
         self.env_path = app.env_path
@@ -232,6 +258,7 @@ class SocketHandler(tornado.websocket.WebSocketHandler):
         self.sources = app.sources
         self.broadcast_layouts()
         self.readonly = app.readonly
+        self.login_enabled = app.login_enabled
 
     def check_origin(self, origin):
         return True
@@ -259,6 +286,10 @@ class SocketHandler(tornado.websocket.WebSocketHandler):
             return ""
 
     def open(self):
+        if self.login_enabled and not self.current_user:
+            print("AUTH Failed in SocketHandler")
+            self.close()
+            return
         self.sid = str(hex(int(time.time() * 10000000))[2:])
         if self not in list(self.subs.values()):
             self.eid = 'main'
@@ -461,6 +492,7 @@ class PostHandler(BaseHandler):
         self.sources = app.sources
         self.port = app.port
         self.env_path = app.env_path
+        self.login_enabled = app.login_enabled
         self.vis = visdom.Visdom(
             port=self.port, send=False, use_incoming_socket=False
         )
@@ -485,6 +517,7 @@ class PostHandler(BaseHandler):
 
         return func(*args, **kwargs)
 
+    @check_auth
     def post(self):
         req = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -515,6 +548,7 @@ class ExistsHandler(BaseHandler):
         self.sources = app.sources
         self.port = app.port
         self.env_path = app.env_path
+        self.login_enabled = app.login_enabled
 
     @staticmethod
     def wrap_func(handler, args):
@@ -524,6 +558,7 @@ class ExistsHandler(BaseHandler):
         else:
             handler.write('false')
 
+    @check_auth
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -538,6 +573,7 @@ class UpdateHandler(BaseHandler):
         self.sources = app.sources
         self.port = app.port
         self.env_path = app.env_path
+        self.login_enabled = app.login_enabled
 
     @staticmethod
     def update(p, args):
@@ -628,7 +664,11 @@ class UpdateHandler(BaseHandler):
         broadcast(handler, p, eid)
         handler.write(p['id'])
 
+    @check_auth
     def post(self):
+        if self.login_enabled and not self.current_user:
+            self.set_status(400)
+            return
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
@@ -642,6 +682,7 @@ class CloseHandler(BaseHandler):
         self.sources = app.sources
         self.port = app.port
         self.env_path = app.env_path
+        self.login_enabled = app.login_enabled
 
     @staticmethod
     def wrap_func(handler, args):
@@ -656,6 +697,7 @@ class CloseHandler(BaseHandler):
                 handler, json.dumps({'command': 'close', 'data': win}), eid
             )
 
+    @check_auth
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -670,6 +712,7 @@ class DeleteEnvHandler(BaseHandler):
         self.sources = app.sources
         self.port = app.port
         self.env_path = app.env_path
+        self.login_enabled = app.login_enabled
 
     @staticmethod
     def wrap_func(handler, args):
@@ -680,6 +723,7 @@ class DeleteEnvHandler(BaseHandler):
             os.remove(p)
             broadcast_envs(handler)
 
+    @check_auth
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -691,6 +735,7 @@ class EnvStateHandler(BaseHandler):
     def initialize(self, app):
         self.app = app
         self.state = app.state
+        self.login_enabled = app.login_enabled
 
     @staticmethod
     def wrap_func(handler, args):
@@ -698,6 +743,7 @@ class EnvStateHandler(BaseHandler):
         all_eids = list(handler.state.keys())
         handler.write(json.dumps(all_eids))
 
+    @check_auth
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -709,6 +755,7 @@ class HashHandler(BaseHandler):
     def initialize(self, app):
         self.app = app
         self.state = app.state
+        self.login_enabled = app.login_enabled
 
     @staticmethod
     def wrap_func(handler, args):
@@ -724,6 +771,7 @@ class HashHandler(BaseHandler):
         else:
             handler.write('false')
 
+    @check_auth
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -885,7 +933,9 @@ class EnvHandler(BaseHandler):
         self.sources = app.sources
         self.port = app.port
         self.env_path = app.env_path
+        self.login_enabled = app.login_enabled
 
+    @check_auth
     def get(self, eid):
         items = gather_envs(self.state, env_path=self.env_path)
         active = '' if eid not in items else eid
@@ -896,6 +946,7 @@ class EnvHandler(BaseHandler):
             active_item=active
         )
 
+    @check_auth
     def post(self, args):
         msg_args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -917,7 +968,9 @@ class CompareHandler(BaseHandler):
         self.subs = app.subs
         self.sources = app.sources
         self.env_path = app.env_path
+        self.login_enabled = app.login_enabled
 
+    @check_auth
     def get(self, eids):
         items = gather_envs(self.state)
         eids = eids.split('+')
@@ -931,6 +984,7 @@ class CompareHandler(BaseHandler):
             active_item=eids
         )
 
+    @check_auth
     def post(self, args):
         sid = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -947,6 +1001,7 @@ class SaveHandler(BaseHandler):
         self.sources = app.sources
         self.port = app.port
         self.env_path = app.env_path
+        self.login_enabled = app.login_enabled
 
     @staticmethod
     def wrap_func(handler, args):
@@ -956,6 +1011,7 @@ class SaveHandler(BaseHandler):
         ret = serialize_env(handler.state, envs, env_path=handler.env_path)
         handler.write(json.dumps(ret))
 
+    @check_auth
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -968,6 +1024,7 @@ class DataHandler(BaseHandler):
         self.state = app.state
         self.port = app.port
         self.env_path = app.env_path
+        self.login_enabled = app.login_enabled
 
     @staticmethod
     def wrap_func(handler, args):
@@ -980,6 +1037,7 @@ class DataHandler(BaseHandler):
         else:
             handler.write(json.dumps(handler.state[eid]['jsons']))
 
+    @check_auth
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
