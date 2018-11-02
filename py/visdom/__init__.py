@@ -1133,8 +1133,7 @@ class Visdom(object):
         assert X.shape[1] == 2 or X.shape[1] == 3, 'X should have 2 or 3 cols'
 
         if Y is not None:
-            Y = np.squeeze(Y)
-            assert Y.ndim == 1, 'Y should be one-dimensional'
+            Y = np.ravel(Y)
             assert X.shape[0] == Y.shape[0], 'sizes of X and Y should match'
         else:
             Y = np.ones(X.shape[0], dtype=int)
@@ -1159,7 +1158,7 @@ class Visdom(object):
 
         L = opts.get('textlabels')
         if L is not None:
-            L = np.squeeze(L)
+            L = np.ravel(L)
             assert len(L) == X.shape[0], \
                 'textlabels and X should have same shape'
 
