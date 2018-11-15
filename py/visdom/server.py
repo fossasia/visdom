@@ -146,8 +146,15 @@ class Application(tornado.web.Application):
 
         for env_json in env_jsons:
             env_path_file = os.path.join(env_path, env_json)
-            env_data = \
-                tornado.escape.json_decode(open(env_path_file, 'r').read())
+            try:
+                env_data = \
+                    tornado.escape.json_decode(open(env_path_file, 'r').read())
+            except Exception as e:
+                logging.warn(
+                    "Failed loading environment json: {} - {}".format(
+                        env_path_file, repr(e)))
+                continue
+
             eid = env_json.replace('.json', '')
             self.state[eid] = {'jsons': env_data['jsons'],
                                'reload': env_data['reload']}
