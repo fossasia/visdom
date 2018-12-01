@@ -523,7 +523,7 @@ class Visdom(object):
                             msg,
                         ]) + '\n')
             return r.text
-        except BaseException:
+        except requests.RequestException:
             if self.raise_exceptions:
                 raise ConnectionError("Error connecting to Visdom server")
             else:
