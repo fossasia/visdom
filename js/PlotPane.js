@@ -20,6 +20,20 @@ class PlotPane extends React.Component {
   }
 
   componentDidUpdate(prevProps, prevState) {
+    console.log(prevProps.content.data, this.props.content.data);
+    console.log(prevProps.content.layout, this.props.content.layout);
+    let trace_visibility_by_name = {};
+    let trace_idx = null;
+    for (trace_idx in prevProps.content.data) {
+      let trace = prevProps.content.data[trace_idx];
+      trace_visibility_by_name[trace.name] = trace.visible;
+    }
+    console.log(trace_visibility_by_name);
+    for (trace_idx in this.props.content.data) {
+      let trace = this.props.content.data[trace_idx];
+      trace.visible = trace_visibility_by_name[trace.name];
+      console.log('Updating', trace, 'visibility');
+    }
     this.newPlot();
   }
 
@@ -37,7 +51,7 @@ class PlotPane extends React.Component {
   }
 
   newPlot = () => {
-    Plotly.newPlot(
+    let plot = Plotly.newPlot(
       this.props.contentID,
       this.props.content.data,
       this.props.content.layout,
