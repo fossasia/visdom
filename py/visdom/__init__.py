@@ -1106,7 +1106,7 @@ class Visdom(object):
         - `opts.markersymbol`: marker symbol (`string`; default = `'dot'`)
         - `opts.markersize`  : marker size (`number`; default = `'10'`)
         - `opts.markercolor` : marker color (`np.array`; default = `None`)
-        - `opts.dash`        : dash type (`np.array`; default = None`)
+        - `opts.dash`        : dash type (`np.array`; default = 'solid'`)
         - `opts.textlabels`  : text label for each point (`list`: default = `None`)
         - `opts.legend`      : `table` containing legend names
         """
