@@ -1202,8 +1202,6 @@ class Visdom(object):
         dash = opts.get('dash')
         mc = opts.get('markercolor')
         lc = opts.get('linecolor')
-        print(opts.get('title', None))
-        print(lc)
 
         for k in range(1, K + 1):
             ind = np.equal(Y, k)
