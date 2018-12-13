@@ -20,19 +20,32 @@ class PlotPane extends React.Component {
   }
 
   componentDidUpdate(prevProps, prevState) {
-    console.log(prevProps.content.data, this.props.content.data);
-    console.log(prevProps.content.layout, this.props.content.layout);
+    // Retain trace visibility between old and new plots
     let trace_visibility_by_name = {};
     let trace_idx = null;
     for (trace_idx in prevProps.content.data) {
       let trace = prevProps.content.data[trace_idx];
       trace_visibility_by_name[trace.name] = trace.visible;
     }
-    console.log(trace_visibility_by_name);
     for (trace_idx in this.props.content.data) {
       let trace = this.props.content.data[trace_idx];
       trace.visible = trace_visibility_by_name[trace.name];
-      console.log('Updating', trace, 'visibility');
+    }
+
+    // Copy user modified zooms
+    let old_x = prevProps.content.layout.xaxis;
+    let new_x = this.props.content.layout.xaxis;
+    let new_range_set = new_x !== undefined && new_x.autorange === false;
+    if (old_x.autorange === false && !new_range_set) {
+      // Take the old x axis layout if changed
+      this.props.content.layout.xaxis = old_x;
+    }
+    let old_y = prevProps.content.layout.yaxis;
+    let new_y = this.props.content.layout.yaxis;
+    new_range_set = new_y !== undefined && new_y.autorange === false;
+    if (old_y.autorange === false && !new_range_set) {
+      // Take the old y axis layout if changed
+      this.props.content.layout.yaxis = old_y;
     }
     this.newPlot();
   }
@@ -51,12 +64,12 @@ class PlotPane extends React.Component {
   }
 
   newPlot = () => {
-    let plot = Plotly.newPlot(
+    Plotly.newPlot(
       this.props.contentID,
       this.props.content.data,
       this.props.content.layout,
       {showLink: true, linkText: ' '}
-    )
+    );
   }
 
   handleDownload = () => {
