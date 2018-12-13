@@ -330,6 +330,11 @@ try:
         )),
         opts={
             'dash': np.array(['solid', 'dash', 'dashdot']),
+            'linecolor': np.array([
+                [0, 191, 255],
+                [0, 191, 255],
+                [255, 0, 0],
+            ]),
             'title': 'Different line dash types'
         }
     )
@@ -341,6 +346,9 @@ try:
         name='4',
         update='insert',
         opts={
+            'linecolor': np.array([
+                [255, 0, 0],
+            ]),
             'dash': np.array(['dot']),
         }
     )
