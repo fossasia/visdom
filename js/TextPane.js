@@ -7,9 +7,39 @@
  *
  */
 
+import EventSystem from "./EventSystem";
 const Pane = require('./Pane');
 
 class TextPane extends React.Component {
+
+  onEvent = (e) => {
+      if( !this.props.isFocused ) {
+          return;
+      }
+
+      switch(e.type) {
+          case 'keydown':
+          case 'keypress':
+              e.preventDefault();
+              break;
+          case 'keyup':
+              this.props.appApi.sendPaneMessage(
+                  {
+                      event_type: 'KeyPress',
+                      key: event.key,
+                      key_code: event.keyCode,
+                  }
+              );
+              break;
+      }
+  };
+
+  componentDidMount() {
+      EventSystem.subscribe('global.event', this.onEvent)
+  }
+  componentWillMount() {
+      EventSystem.unsubscribe('global.event', this.onEvent)
+  }
 
   handleDownload = () => {
     var blob = new Blob([this.props.content], {type:"text/plain"});

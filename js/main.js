@@ -14,12 +14,16 @@ var classNames = require('classnames');
 import 'rc-tree-select/assets/index.css';
 
 import TreeSelect, { SHOW_CHILD } from 'rc-tree-select';
+import EventSystem from './EventSystem'
 
 var ReactGridLayout = require('react-grid-layout');
 
 import createClass from 'create-react-class';
 import PropTypes from 'prop-types';
 
+var md5 = require('md5');
+
+const PropertiesPane = require('./PropertiesPane');
 const TextPane = require('./TextPane');
 const ImagePane = require('./ImagePane');
 const PlotPane = require('./PlotPane');
@@ -37,12 +41,14 @@ const PANES = {
   image: ImagePane,
   plot: PlotPane,
   text: TextPane,
+  properties: PropertiesPane,
 };
 
 const PANE_SIZE = {
   image: [20, 20],
   plot:  [30, 24],
   text:  [20, 20],
+  properties:  [20, 20],
 };
 
 const MODAL_STYLE = {
@@ -58,16 +64,34 @@ const MODAL_STYLE = {
 
 const DEFAULT_LAYOUT = 'current';
 
+var use_env = null;
+var use_envs = null;
+if (ACTIVE_ENV !== '') {
+  if (ACTIVE_ENV.indexOf('+') > -1) {
+    // Compare case
+    use_env = null;
+    use_envs = ACTIVE_ENV.split('+');
+  } else {
+    // not compare case
+    use_env = ACTIVE_ENV;
+    use_envs = [ACTIVE_ENV];
+  }
+} else {
+  use_env = localStorage.getItem( 'envID' ) || 'main';
+  use_envs = JSON.parse(localStorage.getItem( 'envIDs' )) || ['main']
+}
+
 // TODO: Move some of this to smaller components and/or use something like redux
 // to move state out of the app to a standalone store.
 class App extends React.Component {
   state = {
     connected: false,
+    readonly: false,
     sessionID: null,
     panes: {},
     focusedPaneID: null,
-    envID: localStorage.getItem( 'envID' ) || 'main',
-    envIDs: JSON.parse(localStorage.getItem( 'envIDs' )) || ['main'],
+    envID: use_env,
+    envIDs: use_envs,
     saveText: ACTIVE_ENV,
     layoutID: DEFAULT_LAYOUT,
     // Bad form... make a copy of the global var we generated in python.
@@ -85,7 +109,8 @@ class App extends React.Component {
       rootPId: 0
     },
     envSelectorStyle: {width: 1280/2 },
-    flexSelectorOnHover: false
+    flexSelectorOnHover: false,
+    confirmClear: false,
   };
 
   _bin = null;
@@ -118,12 +143,27 @@ class App extends React.Component {
     return this.state.envID + '_' + key;
   }
 
+  getValidFilter = (filter) => {
+    // Ensure the regex filter is valid
+    try {
+      'test_string'.match(filter);
+    } catch(e) {
+      filter = '';
+    }
+    return filter
+  }
+
   correctPathname = () => {
     var pathname = window.location.pathname;
-    if (pathname.slice(-1) != '/') {
-      pathname = pathname + '/'
+    if (pathname.indexOf('/env/') > -1) {
+      pathname = pathname.split('/env/')[0];
+    } else if (pathname.indexOf('/compare/') > -1) {
+      pathname = pathname.split('/compare/')[0];
     }
-    return pathname
+    if (pathname.slice(-1) != '/') {
+      pathname = pathname + '/';
+    }
+    return pathname;
   }
 
   addPaneBatched = (pane) => {
@@ -167,7 +207,7 @@ class App extends React.Component {
 
         if (newPane.width) w = this.p2w(newPane.width);
         if (newPane.height) h = Math.ceil(this.p2h(newPane.height + 14));
-        if (newPane.content.caption) h += 1;
+        if (newPane.content && newPane.content.caption) h += 1;
 
         this._bin.content.push({width: w, height: h});
 
@@ -187,7 +227,7 @@ class App extends React.Component {
       let currLayout = getLayoutItem(newLayout, newPane.id);
       if (newPane.width) currLayout.w = this.p2w(newPane.width);
       if (newPane.height) currLayout.h = Math.ceil(this.p2h(newPane.height + 14));
-      if (newPane.content.caption) currLayout.h += 1;
+      if (newPane.content && newPane.content.caption) currLayout.h += 1;
     }
   }
 
@@ -196,7 +236,13 @@ class App extends React.Component {
       return;
     }
     var url = window.location;
-    var socket = new WebSocket('ws://' + url.host + this.correctPathname() + 'socket');
+    var ws_protocol = null;
+    if (url.protocol == "https:") {
+      ws_protocol = 'wss';
+    } else {
+      ws_protocol = 'ws';
+    }
+    var socket = new WebSocket(ws_protocol + '://' + url.host + this.correctPathname() + 'socket');
 
     socket.onmessage = this._handleMessage;
 
@@ -215,16 +261,23 @@ class App extends React.Component {
 
   _handleMessage = (evt) => {
     var cmd = JSON.parse(evt.data);
-
     switch (cmd.command) {
       case 'register':
         this.setState({
           sessionID: cmd.data,
+          readonly: cmd.readonly,
         }, () => {this.postForEnv(this.state.envIDs);});
         break;
       case 'pane':
       case 'window':
-        this.addPaneBatched(cmd);
+        // If we're in compare mode and recieve an update to an environment
+        // that is selected that isn't from the compare output, we need to
+        // reload the compare output
+        if (this.state.envIDs.length > 1 && cmd.has_compare !== true) {
+          this.postForEnv(this.state.envIDs);
+        } else {
+          this.addPaneBatched(cmd);
+        }
         break;
       case 'reload':
         for (var it in cmd.data) {
@@ -245,7 +298,15 @@ class App extends React.Component {
                             new Map([[DEFAULT_LAYOUT, new Map()]]));
           }
         }
-        this.setState({envList: cmd.data, layoutLists: layoutLists})
+        if (!this.state.showEnvModal || (this.state.modifyID in cmd.data)) {
+          this.setState({envList: cmd.data, layoutLists: layoutLists})
+        } else {
+          this.setState({
+            envList: cmd.data,
+            layoutLists: layoutLists,
+            modifyID: cmd.data[0],
+          })
+        }
         break;
       case 'layout_update':
         this.parseLayoutsFromServer(cmd.data);
@@ -270,6 +331,9 @@ class App extends React.Component {
   }
 
   closePane = (paneID, keepPosition = false, setState = true) => {
+    if (this.state.readonly) {
+      return;
+    }
     let newPanes = Object.assign({}, this.state.panes);
     delete newPanes[paneID];
     if (!keepPosition) {
@@ -297,6 +361,9 @@ class App extends React.Component {
   }
 
   closeAllPanes = () => {
+    if (this.state.readonly) {
+      return;
+    }
     Object.keys(this.state.panes).map((paneID) => {
       this.closePane(paneID, false, false);
     });
@@ -305,7 +372,22 @@ class App extends React.Component {
       layout: [],
       panes: {},
       focusedPaneID: null,
+      confirmClear: false,
     });
+  }
+
+  triggerClear = () => {
+    if (this.state.confirmClear) {
+      this.closeAllPanes();
+    } else {
+      this.setState({confirmClear: true});
+    }
+  }
+
+  cancelClear = () => {
+    if (this.state.confirmClear) {
+      this.setState({confirmClear: false});
+    }
   }
 
   selectEnv = (selectedNodes) => {
@@ -399,10 +481,10 @@ class App extends React.Component {
     });
   }
 
-  focusPane = (paneID) => {
+  focusPane = (paneID, cb) => {
     this.setState({
       focusedPaneID: paneID,
-    });
+    }, cb);
   }
 
   blurPane = (e) => {
@@ -463,7 +545,7 @@ class App extends React.Component {
 
     let sorted = sortLayout(layout);
     let newPanes = Object.assign({}, this.state.panes);
-    let filter = this.state.filter;
+    let filter = this.getValidFilter(this.state.filter);
     let old_sorted = sorted.slice();
     let layoutID = this.state.layoutID;
     let envLayoutList = this.getCurrLayoutList();
@@ -560,20 +642,31 @@ class App extends React.Component {
     this.setState({layoutLists: layoutLists, layoutID: layoutID});
   }
 
-  broadcastKeyEvent = (event) => {
-    if (this.state.focusedPaneID === null) {
+  publishEvent = (event) => {
+    EventSystem.publish('global.event', event);
+  }
+
+  /**
+   * Send message to backend.
+   *
+   * The `data` object is extended by pane and environment Id.
+   * This function is exposed to Pane components through `appApi` prop.
+   * Note: Only focused panes should call this method.
+   *
+   * @param data Data to be sent to backend.
+   */
+  sendPaneMessage = (data) => {
+    if (this.state.focusedPaneID === null || this.state.readonly) {
       return;
     }
-    let keyEvent = {
-      event_type: 'KeyPress',
-      key: event.key,
-      key_code: event.keyCode,
+    let finalData = {
       target: this.state.focusedPaneID,
       eid: this.state.envID,
-    }
+    };
+    $.extend(finalData, data);
     this.sendSocketMessage({
       cmd: 'forward_to_vis',
-      data: keyEvent,
+      data: finalData,
     });
   }
 
@@ -661,14 +754,48 @@ class App extends React.Component {
         this.postForEnv(['main']);
       }
     }
+
+    // Bootstrap tooltips need some encouragement
+    if (this.state.confirmClear) {
+      $("#clear-button").attr('data-original-title', "Are you sure?")
+                        .tooltip('fixTitle')
+                        .tooltip('show');
+    } else {
+      $("#clear-button").attr('data-original-title', "Clear Current Environment")
+                        .tooltip('fixTitle');
+    }
   }
 
   onWidthChange = (width, cols) => {
     this.setState({cols: cols, width: width}, () => {this.relayout()});
   }
 
+  generateWindowHash = (windowId) => {
+    let windowContent = this.state.panes[windowId];
+
+    /*Convert JSON data to string with a space of 2. This detail is important.
+    It ensures that the server and browser generate same JSON string */
+    let content_string = JSON.stringify(windowContent, null, 2);
+    return md5(content_string)
+  }
+
+  getWindowHash = (windowId) => {
+    let url = "http://" + window.location.host + "/win_hash";
+
+    let body = {
+      "win" : windowId,
+      "env" : this.state.envID
+    }
+
+    return $.post(url, JSON.stringify(body))
+  }
+
   openEnvModal() {
-    this.setState({showEnvModal: true, saveText: this.state.envID});
+    this.setState({
+      showEnvModal: true,
+      saveText: this.state.envID,
+      modifyID: this.state.envList[0],
+    });
   }
 
   closeEnvModal() {
@@ -676,7 +803,11 @@ class App extends React.Component {
   }
 
   openViewModal() {
-    this.setState({showViewModal: true, saveText: this.state.layoutID});
+    this.setState({
+      showViewModal: true,
+      saveText: this.state.layoutID,
+      modifyID: this.state.layoutLists.get(this.state.envID).keys()[0],
+    });
   }
 
   closeViewModal() {
@@ -851,6 +982,14 @@ class App extends React.Component {
       value: x
     };}));
 
+    if (this.state.confirmClear) {
+      var clearText = "Are you sure?";
+      var clearStyle = "btn btn-warning";
+    } else {
+      var clearText = "Clear Current Environment";
+      var clearStyle = "btn btn-default";
+    }
+
     return (
       <span>
         <span>Environment&nbsp;</span>
@@ -880,12 +1019,14 @@ class App extends React.Component {
             />
           </div>
           <button
+            id="clear-button"
             data-toggle="tooltip"
-            title="Clear Current Environment"
+            title={clearText}
             data-placement="bottom"
-            className="btn btn-default"
-            disabled={!(this.state.connected && this.state.envID)}
-            onClick={this.closeAllPanes}>
+            className={clearStyle}
+            disabled={!(this.state.connected && this.state.envID && !this.state.readonly)}
+            onClick={this.triggerClear}
+            onBlur={this.cancelClear}>
             <span
               className="glyphicon glyphicon-erase">
             </span>
@@ -895,7 +1036,7 @@ class App extends React.Component {
             title="Manage Environments"
             data-placement="bottom"
             className="btn btn-default"
-            disabled={!(this.state.connected && this.state.envID)}
+            disabled={!(this.state.connected && this.state.envID && !this.state.readonly)}
             onClick={this.openEnvModal.bind(this)}>
             <span
               className="glyphicon glyphicon-folder-open">
@@ -953,7 +1094,7 @@ class App extends React.Component {
             title="Manage Views"
             data-placement="bottom"
             className="btn btn-default"
-            disabled={!(this.state.connected && this.state.envID)}
+            disabled={!(this.state.connected && this.state.envID && !this.state.readonly)}
             onClick={(ev) => {this.openViewModal()}}>
             <span
               className="glyphicon glyphicon-folder-open">
@@ -1022,7 +1163,8 @@ class App extends React.Component {
         return null;
       }
       let panelayout = getLayoutItem(this.state.layout, id);
-      let isVisible = pane.title.match(this.state.filter)
+      let filter = this.getValidFilter(this.state.filter);
+      let isVisible = pane.title.match(filter)
       return (
         <div key={pane.id}
           className={isVisible? '' : 'hidden-window'}>
@@ -1035,6 +1177,7 @@ class App extends React.Component {
             isFocused={pane.id === this.state.focusedPaneID}
             w={panelayout.w}
             h={panelayout.h}
+            appApi={{sendPaneMessage: this.sendPaneMessage}}
           />
         </div>
       );
@@ -1065,10 +1208,12 @@ class App extends React.Component {
             <button
               className={classNames({
                 'btn': true,
-                'btn-success': this.state.connected,
-                'btn-danger': !this.state.connected})}
+                'btn-warning': this.state.connected && this.state.readonly,
+                'btn-success': this.state.connected && !this.state.readonly,
+                'btn-danger': !this.state.connected
+                })}
               onClick={this.toggleOnlineState}>
-              {this.state.connected ? 'online' : 'offline'}
+              {this.state.connected ? (this.state.readonly ? 'readonly' : 'online') : 'offline'}
             </button>
           </span>
         </div>
@@ -1076,9 +1221,10 @@ class App extends React.Component {
           tabIndex="-1"
           className="no-focus"
           onBlur={this.blurPane}
-          onKeyUp={(event) => {event.preventDefault();}}
-          onKeyDown={this.broadcastKeyEvent}
-          onKeyPress={(event) => {event.preventDefault();}}>
+          onKeyUp={this.publishEvent}
+          onKeyDown={this.publishEvent}
+          onKeyPress={this.publishEvent}
+        >
           <GridLayout
             className="layout"
             rowHeight={ROW_HEIGHT}

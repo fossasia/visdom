@@ -7,13 +7,50 @@
  *
  */
 
+import EventSystem from "./EventSystem";
 const Pane = require('./Pane');
 
 class ImagePane extends React.Component {
   _paneRef = null;
 
   state: State = {
-     scale: 1.,
+    scale: 1.,
+    tx: 0.,
+    ty: 0.,
+    mouse_location: {x: 0., y: 0, visibility: 'hidden'},
+  }
+
+  drag_start_x = null;
+  drag_start_y = null;
+
+  onEvent = (event) => {
+    if (!this.props.isFocused) {
+      return;
+    }
+
+    switch (event.type) {
+      case 'keydown':
+      case 'keypress':
+        event.preventDefault();
+        break;
+      case 'keyup':
+        this.props.appApi.sendPaneMessage(
+            {
+              event_type: 'KeyPress',
+              key: event.key,
+              key_code: event.keyCode,
+            }
+        );
+        break;
+    }
+  };
+
+  componentDidMount() {
+    EventSystem.subscribe('global.event', this.onEvent)
+  }
+
+  componentWillMount() {
+    EventSystem.unsubscribe('global.event', this.onEvent)
   }
 
   handleDownload = () => {
@@ -24,38 +61,106 @@ class ImagePane extends React.Component {
   }
 
   handleZoom = (ev) => {
-     let delta = (ev.deltaMode === ev.DOM_DELTA_PIXEL) ? ev.deltaY :
-                                                         ev.deltaY * 40;
-     let scalefactor = Math.exp(-delta / 5000.);
-     this.setState(
-        {scale: this.state.scale * scalefactor}
-     );
-     ev.stopPropagation();
-     ev.preventDefault();
+    if(ev.altKey) {
+      //var direction = natural.checked ? -1 : 1;
+      var direction =  -1;
+      this.setState({tx: this.state.tx + ev.deltaX * direction*50});
+      this.setState({ty: this.state.ty + ev.deltaY * direction*50});
+      ev.stopPropagation();
+      ev.preventDefault();
+    } else if (ev.ctrlKey) {
+      // get the x and y offset of the pane
+      var rect = this._paneRef._windowRef.children[1].getBoundingClientRect();
+      // Compute the coords of the mouse relative to the top left of the pane
+      var xscreen = ev.clientX - rect.x;
+      var yscreen = ev.clientY - rect.y;
+      // Compute the coords of the pixel under the mouse wrt the image top left
+      var ximage = (xscreen - this.state.tx) / this.state.scale;
+      var yimage = (yscreen - this.state.ty) / this.state.scale;
+      var new_scale = this.state.scale * Math.exp(-ev.deltaY/25);
+      // Update the state.
+      // The offset is modifed such that the pixel under the mouse
+      // is the same after zooming
+      this.setState({
+        scale: new_scale,
+        tx: xscreen - new_scale*ximage,
+        ty: yscreen - new_scale*yimage
+      });
+      ev.stopPropagation();
+      ev.preventDefault();
+    }
   }
 
-  resetZoom = (ev) => {
-     this.setState(
-       {scale: 1.}
-    );
+  handleDragStart = (ev) => {
+    this.drag_start_x = ev.screenX;
+    this.drag_start_y = ev.screenY;
+  }
+
+  handleDragOver = (ev) => {
+    this.setState({
+      tx: this.state.tx + ev.screenX - this.drag_start_x,
+      ty: this.state.ty + ev.screenY - this.drag_start_y,
+    });
+    this.drag_start_x = ev.screenX;
+    this.drag_start_y = ev.screenY;
+  }
+
+  handleMouseOver = (ev) => {
+    // get the x and y offset of the pane
+    if (ev.altKey){
+      var rect = this._paneRef._windowRef.children[1].getBoundingClientRect();
+      // Compute the coords of the mouse relative to the top left of the pane
+      var xscreen = ev.clientX - rect.x;
+      var yscreen = ev.clientY - rect.y;
+      // Compute the coords of the pixel under the mouse wrt the image top left
+      var ximage = Math.round((xscreen - this.state.tx) / this.state.scale);
+      var yimage = Math.round((yscreen - this.state.ty) / this.state.scale);
+      this.setState({mouse_location: {x: ximage, y: yimage, visibility: 'visible'}});
+    } else {
+      this.setState({mouse_location: {x: 0, y: 0, visibility: 'hidden'}});
+    }
+  }
+
+  handleReset = () => {
+    this.setState({
+      scale: 1.,
+      tx: 0.,
+      ty: 0.
+    });
   }
 
   render() {
     let content = this.props.content;
+    const divstyle = {
+      left: this.state.tx,
+      top: this.state.ty,
+      position: "absolute",
+    };
     return (
       <Pane
         {...this.props}
         handleDownload={this.handleDownload}
+        handleReset={this.handleReset.bind(this)}
+        handleZoom={this.handleZoom.bind(this)}
+        handleMouseMove={this.handleMouseOver.bind(this)}
         ref={(ref) => this._paneRef = ref}>
-        <img
-          className="content-image"
-          src={content.src}
-          width={Math.ceil(1 + this.props.width * this.state.scale) + "px"}
-          height={Math.ceil(1 + this.props.height * this.state.scale) + "px"}
-          onWheel={this.handleZoom.bind(this)}
-          onDoubleClick={this.resetZoom.bind(this)}
-        />
+        <div style={divstyle}>
+          <img
+            className="content-image cssTransforms"
+            src={content.src}
+            width={Math.ceil(1 + this.props.width * this.state.scale) + "px"}
+            height={Math.ceil(1 + this.props.height * this.state.scale) + "px"}
+            onDoubleClick={this.handleReset.bind(this)}
+            onDragStart={this.handleDragStart.bind(this)}
+            onDragOver={this.handleDragOver.bind(this)}
+            />
+        </div>
         <p className="caption">{content.caption}</p>
+        <span
+          className="mouse_image_location"
+          style={{visibility: this.state.mouse_location.visibility}}>
+          {this.state.mouse_location.x + ' / ' + this.state.mouse_location.y}
+        </span>
       </Pane>
     )
   }

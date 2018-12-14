@@ -8,7 +8,7 @@
  */
 var classNames = require('classnames');
 
- class Pane extends React.Component {
+class Pane extends React.Component {
   _windowRef: null;
   _barRef: null;
 
@@ -23,6 +23,24 @@ var classNames = require('classnames');
   download = () => {
     if (this.props.handleDownload) {
       this.props.handleDownload();
+    }
+  }
+
+  reset = () => {
+    if (this.props.handleReset) {
+      this.props.handleReset();
+    }
+  }
+
+  zoom = (ev) => {
+    if (this.props.handleZoom) {
+      this.props.handleZoom(ev);
+    }
+  }
+
+  over = (ev) => {
+    if (this.props.handleMouseMove) {
+      this.props.handleMouseMove(ev);
     }
   }
 
@@ -77,11 +95,15 @@ var classNames = require('classnames');
     return (
       <div className={windowClassNames}
         onClick={this.focus}
+        onDoubleClick={this.reset}
+        onWheel={this.zoom}
+        onMouseMove={this.over}
         ref={(ref) => this._windowRef = ref}>
         <div className={barClassNames}
           ref={(ref) => this._barRef = ref}>
           <button title="close" onClick={this.close}>X</button>
           <button title="save" onClick={this.download}>&#8681;</button>
+          <button title="reset" onClick={this.reset} hidden={!this.props.handleReset}>&#10226;</button>
           <div>{this.props.title}</div>
         </div>
         <div className="content">{this.props.children}</div>

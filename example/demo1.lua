@@ -96,11 +96,12 @@ local exists = plot:win_exists{
 if not exists then error("created window doesn't exist") end
 
 
-plot:updateTrace{                             -- add new trace to scatter plot
+plot:line{                             -- add new trace to scatter plot
    X = torch.randn(255),
    Y = torch.randn(255),
    win = id,
    name = 'new trace',
+   update = 'append',
 }
 
 -- 2D scatter plot with custom colors:
@@ -199,18 +200,20 @@ plot:line{
    update = 'append',
 }
 
-plot:updateTrace{
+plot:line{
    X = torch.range(1, 10),
    Y = torch.range(1, 10),
    win = id,
    name = '3',
+   update = 'append',
 }
 
-plot:updateTrace{
+plot:line{
    X = torch.range(1, 10),
    Y = torch.range(11, 20),
    win = id,
    name = '4',
+   update = 'append',
 }
 
 -- stacked line plot demo:

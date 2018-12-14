@@ -10,6 +10,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from visdom import Visdom
+import argparse
 import numpy as np
 import math
 import os.path
@@ -19,14 +20,21 @@ from sys import platform as _platform
 from six.moves import urllib
 
 
-try:
-    viz = Visdom()
+DEFAULT_PORT = 8097
+DEFAULT_HOSTNAME = "http://localhost"
+parser = argparse.ArgumentParser(description='Demo arguments')
+parser.add_argument('-port', metavar='port', type=int, default=DEFAULT_PORT,
+                    help='port the visdom server is running on.')
+parser.add_argument('-server', metavar='server', type=str,
+                    default=DEFAULT_HOSTNAME,
+                    help='Server address of the target to run the demo on.')
+FLAGS = parser.parse_args()
 
-    startup_sec = 1
-    while not viz.check_connection() and startup_sec > 0:
-        time.sleep(0.1)
-        startup_sec -= 0.1
-    assert viz.check_connection(), 'No connection could be formed quickly'
+try:
+    viz = Visdom(port=FLAGS.port, server=FLAGS.server)
+
+    assert viz.check_connection(timeout_seconds=3), \
+        'No connection could be formed quickly'
 
     textwindow = viz.text('Hello World!')
 
@@ -130,12 +138,23 @@ try:
         ),
     )
 
+    # 3d scatterplot with custom labels and ranges
     viz.scatter(
         X=np.random.rand(100, 3),
         Y=(Y + 1.5).astype(int),
         opts=dict(
             legend=['Men', 'Women'],
             markersize=5,
+            xtickmin=0,
+            xtickmax=2,
+            xlabel='Arbitrary',
+            xtickvals=[0, 0.75, 1.6, 2],
+            ytickmin=0,
+            ytickmax=2,
+            ytickstep=0.5,
+            ztickmin=0,
+            ztickmax=1,
+            ztickstep=0.5,
         )
     )
 
@@ -183,6 +202,14 @@ try:
     viz.scatter(
         X=np.random.rand(10, 2),
         opts=dict(
+            textlabels=['Label %d' % (i + 1) for i in range(10)]
+        )
+    )
+    viz.scatter(
+        X=np.random.rand(10, 2),
+        Y=[1] * 5 + [2] * 3 + [3] * 2,
+        opts=dict(
+            legend=['A', 'B', 'C'],
             textlabels=['Label %d' % (i + 1) for i in range(10)]
         )
     )
@@ -237,6 +264,15 @@ try:
         opts=dict(markers=False),
     )
 
+    # line using WebGL
+    webgl_num_points = 200000
+    webgl_x = np.linspace(-1, 0, webgl_num_points)
+    webgl_y = webgl_x**3
+    viz.line(X=webgl_x, Y=webgl_y,
+             opts=dict(title='{} points using WebGL'.format(webgl_num_points), webgl=True),
+             win="WebGL demo")
+
+
     # line updates
     win = viz.line(
         X=np.column_stack((np.arange(0, 10), np.arange(0, 10))),
@@ -272,6 +308,14 @@ try:
         update='insert'
     )
     viz.line(X=None, Y=None, win=win, name='delete this', update='remove')
+
+    viz.line(
+        X=webgl_x+1.,
+        Y=(webgl_x+1.)**3,
+        win="WebGL demo",
+        update='append',
+        opts=dict(title='{} points using WebGL'.format(webgl_num_points*2), webgl=True)
+    )
 
     Y = np.linspace(0, 4, 200)
     win = viz.line(
@@ -372,7 +416,6 @@ try:
         ),
         update='append',
         win=win)
-
 
     # mesh plot
     x = [0, 0, 1, 1, 0, 0, 1, 1]
