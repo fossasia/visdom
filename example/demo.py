@@ -317,6 +317,42 @@ try:
         opts=dict(title='{} points using WebGL'.format(webgl_num_points*2), webgl=True)
     )
 
+    win = viz.line(
+        X=np.column_stack((
+            np.arange(0, 10),
+            np.arange(0, 10),
+            np.arange(0, 10),
+        )),
+        Y=np.column_stack((
+            np.linspace(5, 10, 10),
+            np.linspace(5, 10, 10) + 5,
+            np.linspace(5, 10, 10) + 10,
+        )),
+        opts={
+            'dash': np.array(['solid', 'dash', 'dashdot']),
+            'linecolor': np.array([
+                [0, 191, 255],
+                [0, 191, 255],
+                [255, 0, 0],
+            ]),
+            'title': 'Different line dash types'
+        }
+    )
+
+    viz.line(
+        X=np.arange(0, 10),
+        Y=np.linspace(5, 10, 10) + 15,
+        win=win,
+        name='4',
+        update='insert',
+        opts={
+            'linecolor': np.array([
+                [255, 0, 0],
+            ]),
+            'dash': np.array(['dot']),
+        }
+    )
+
     Y = np.linspace(0, 4, 200)
     win = viz.line(
         Y=np.column_stack((np.sqrt(Y), np.sqrt(Y) + 2)),
