@@ -61,11 +61,10 @@ class ImagePane extends React.Component {
   }
 
   handleZoom = (ev) => {
-      
     if(ev.altKey) {
       //var direction = natural.checked ? -1 : 1;
       var direction =  -1;
-      // Get browser independend scaling factor 
+      // Get browser independent scaling factor 
       var scrollDirectionX = Math.sign(ev.deltaX);
       var scrollDirectionY = Math.sign(ev.deltaY);
       // If shift is pressed only scroll sidewise (to allow scrolling to the side by keep shift pressed and using normal scrolling on the image pane)
@@ -81,7 +80,7 @@ class ImagePane extends React.Component {
     } else if (ev.ctrlKey) {
       // get the x and y offset of the pane
       var rect = this._paneRef._windowRef.children[1].getBoundingClientRect();
-      // Get browser independendgit scaling factor
+      // Get browser independent scaling factor
       var scrollDirectionY = Math.sign(ev.deltaY);
       // Compute the coords of the mouse relative to the top left of the pane
       var xscreen = ev.clientX - rect.x;
