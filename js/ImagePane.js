@@ -64,20 +64,31 @@ class ImagePane extends React.Component {
     if(ev.altKey) {
       //var direction = natural.checked ? -1 : 1;
       var direction =  -1;
-      this.setState({tx: this.state.tx + ev.deltaX * direction*50});
-      this.setState({ty: this.state.ty + ev.deltaY * direction*50});
+      // Get browser independent scaling factor 
+      var scrollDirectionX = Math.sign(ev.deltaX);
+      var scrollDirectionY = Math.sign(ev.deltaY);
+      // If shift is pressed only scroll sidewise (to allow scrolling to the side by keep shift pressed and using normal scrolling on the image pane)
+      if(ev.shiftKey){
+        this.setState({tx: this.state.tx + scrollDirectionY * direction*50});
+      }
+      else {
+        this.setState({tx: this.state.tx + scrollDirectionX * direction*50});
+        this.setState({ty: this.state.ty + scrollDirectionY * direction*50});
+      }
       ev.stopPropagation();
       ev.preventDefault();
     } else if (ev.ctrlKey) {
       // get the x and y offset of the pane
       var rect = this._paneRef._windowRef.children[1].getBoundingClientRect();
+      // Get browser independent scaling factor
+      var scrollDirectionY = Math.sign(ev.deltaY);
       // Compute the coords of the mouse relative to the top left of the pane
       var xscreen = ev.clientX - rect.x;
       var yscreen = ev.clientY - rect.y;
       // Compute the coords of the pixel under the mouse wrt the image top left
       var ximage = (xscreen - this.state.tx) / this.state.scale;
       var yimage = (yscreen - this.state.ty) / this.state.scale;
-      var new_scale = this.state.scale * Math.exp(-ev.deltaY/25);
+      var new_scale = this.state.scale * Math.exp(-scrollDirectionY/10);
       // Update the state.
       // The offset is modifed such that the pixel under the mouse
       // is the same after zooming
