@@ -230,6 +230,24 @@ def _markerColorCheck(mc, X, Y, L):
     return ret
 
 
+def _lineColorCheck(lc, K):
+    assert isndarray(lc), 'lc should be a numpy ndarray'
+    assert lc.shape[0] == K, 'lc should be same shape as K'
+
+    assert (lc >= 0).all(), 'line colors have to be >= 0'
+    assert (lc <= 255).all(), 'line colors have to be <= 255'
+    assert (lc == np.floor(lc)).all(), 'line colors are assumed to be ints'
+
+    return ['#%02x%02x%02x' % (i[0], i[1], i[2]) for i in lc]
+
+
+def _dashCheck(dash, K):
+    assert isndarray(dash), 'dash should be a numpy ndarray'
+    assert dash.shape[0] == K, 'dash should be same shape as K'
+
+    return dash
+
+
 def _assert_opts(opts):
     if opts.get('color'):
         assert isstr(opts.get('color')), 'color should be a string'
@@ -1088,6 +1106,7 @@ class Visdom(object):
         - `opts.markersymbol`: marker symbol (`string`; default = `'dot'`)
         - `opts.markersize`  : marker size (`number`; default = `'10'`)
         - `opts.markercolor` : marker color (`np.array`; default = `None`)
+        - `opts.dash`        : dash type (`np.array`; default = 'solid'`)
         - `opts.textlabels`  : text label for each point (`list`: default = `None`)
         - `opts.legend`      : `table` containing legend names
         """
@@ -1156,6 +1175,14 @@ class Visdom(object):
             opts['markercolor'] = _markerColorCheck(
                 opts['markercolor'], X, Y, K)
 
+        if opts.get('linecolor') is not None:
+            opts['linecolor'] = _lineColorCheck(
+                opts['linecolor'], K)
+
+        if opts.get('dash') is not None:
+            opts['dash'] = _dashCheck(
+                opts['dash'], K)
+
         L = opts.get('textlabels')
         if L is not None:
             L = np.ravel(L)
@@ -1172,10 +1199,13 @@ class Visdom(object):
 
         data = []
         trace_opts = opts.get('traceopts', {'plotly': {}})['plotly']
+        dash = opts.get('dash')
+        mc = opts.get('markercolor')
+        lc = opts.get('linecolor')
+
         for k in range(1, K + 1):
             ind = np.equal(Y, k)
             if ind.any():
-                mc = opts.get('markercolor')
                 if 'legend' in opts:
                     trace_name = opts.get('legend')[k - 1]
                 elif K == 1 and name is not None:
@@ -1192,13 +1222,17 @@ class Visdom(object):
                     'mode': opts.get('mode'),
                     'text': L[ind].tolist() if L is not None else None,
                     'textposition': 'right',
+                    'line': {
+                        'dash': dash[k-1] if dash is not None else None,
+                        'color': lc[k-1] if lc is not None else None,
+                    },
                     'marker': {
                         'size': opts.get('markersize'),
                         'symbol': opts.get('markersymbol'),
                         'color': mc[k] if mc is not None else None,
                         'line': {
                             'color': '#000000',
-                            'width': 0.5
+                            'width': 0.5,
                         }
                     }
                 }
@@ -1217,6 +1251,12 @@ class Visdom(object):
             for marker_prop in ['markercolor']:
                 if marker_prop in opts:
                     del opts[marker_prop]
+            for line_prop in ['linecolor']:
+                if line_prop in opts:
+                    del opts[line_prop]
+            for dash in ['dash']:
+                if dash in opts:
+                    del opts[dash]
 
         # Only send updates to the layout on the first plot, future updates
         # need to use `update_window_opts`
@@ -1259,6 +1299,8 @@ class Visdom(object):
         - `opts.markers`     : show markers (`boolean`; default = `false`)
         - `opts.markersymbol`: marker symbol (`string`; default = `'dot'`)
         - `opts.markersize`  : marker size (`number`; default = `'10'`)
+        - `opts.linecolor`   : line colors (`np.array`; default = None)
+        - `opts.dash`        : line dash type (`np.array`; default = None)
         - `opts.legend`      : `table` containing legend names
 
         If `update` is specified, the figure will be updated without
