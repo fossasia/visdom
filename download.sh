@@ -19,7 +19,7 @@ wget https://unpkg.com/bootstrap@3.3.7/dist/css/bootstrap.min.css -O py/static/c
 
 mkdir -p py/static/fonts
 wget https://unpkg.com/classnames@2.2.5 -O py/static/fonts/classnames
-wget https://unpkg.com/layout-bin-packer@1.4.0 -O py/static/fonts/layout_bin_packer
+wget https://unpkg.com/layout-bin-packer@1.4.0/dist/layout-bin-packer.js -O py/static/fonts/layout_bin_packer
 wget https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.eot -O py/static/fonts/glyphicons-halflings-regular.eot
 wget https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.woff2 -O py/static/fonts/glyphicons-halflings-regular.woff2
 wget https://unpkg.com/bootstrap@3.3.7/dist/fonts/glyphicons-halflings-regular.woff -O py/static/fonts/glyphicons-halflings-regular.woff
