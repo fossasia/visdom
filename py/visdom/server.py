@@ -1133,7 +1133,7 @@ def download_scripts(proxies=None, install_dir=None):
 
         # - fonts
         '%sclassnames@2.2.5' % b: 'classnames',
-        '%slayout-bin-packer@1.4.0' % b: 'layout_bin_packer',
+        '%slayout-bin-packer@1.4.0/dist/layout-bin-packer.js' % b: 'layout_bin_packer',
         '%sfonts/glyphicons-halflings-regular.eot' % bb:
             'glyphicons-halflings-regular.eot',
         '%sfonts/glyphicons-halflings-regular.woff2' % bb:
@@ -1180,11 +1180,12 @@ def download_scripts(proxies=None, install_dir=None):
     for (key, val) in ext_files.items():
 
         # set subdirectory:
-        sub_dir = 'fonts'
-        if '.js' in key:
+        if val.endswith('.js'):
             sub_dir = 'js'
-        if '.css' in key:
+        elif val.endswith('.css'):
             sub_dir = 'css'
+        else:
+            sub_dir = 'fonts'
 
         # download file:
         filename = '%s/static/%s/%s' % (install_dir, sub_dir, val)
