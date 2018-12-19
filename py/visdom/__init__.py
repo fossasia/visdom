@@ -27,12 +27,15 @@ import six
 from six import string_types
 from six import BytesIO
 from six.moves import urllib
+from six.moves.urllib.parse import urlparse
+from six.moves.urllib.parse import urlunparse
 import logging
 import warnings
 import time
 import errno
 import io
 from functools import wraps
+
 try:
     import bs4  # type: ignore
     BS4_AVAILABLE = True
@@ -353,12 +356,12 @@ class Visdom(object):
         username=None,
         password=None
     ):
-        if '//' not in server:
-            self.server_base_name = server
-            self.server = 'http://' + server
-        else:
-            self.server_base_name = server[server.index("//") + 2:]
-            self.server = server
+        parsed_url = urlparse(server)
+        if not parsed_url.scheme:
+            parsed_url = urlparse('http://{}'.format(server))
+        self.server_base_name = parsed_url.netloc
+        self.server = urlunparse((parsed_url.scheme, 
+                                  parsed_url.netloc,'','','',''))
         self.endpoint = endpoint
         self.port = port
         # preprocess base_url
