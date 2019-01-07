@@ -354,13 +354,14 @@ class Visdom(object):
         use_incoming_socket=True,
         log_to_filename=None,
         username=None,
-        password=None
+        password=None,
+        proxies=None
     ):
         parsed_url = urlparse(server)
         if not parsed_url.scheme:
             parsed_url = urlparse('http://{}'.format(server))
         self.server_base_name = parsed_url.netloc
-        self.server = urlunparse((parsed_url.scheme, 
+        self.server = urlunparse((parsed_url.scheme,
                                   parsed_url.netloc,'','','',''))
         self.endpoint = endpoint
         self.port = port
@@ -372,8 +373,6 @@ class Visdom(object):
             'base_url should not end with / as it is appended automatically'
 
         self.ipv6 = ipv6
-        self.http_proxy_host = http_proxy_host
-        self.http_proxy_port = http_proxy_port
         self.env = env              # default env
         self.send = send
         self.event_handlers = {}  # Haven't registered any events
@@ -384,6 +383,18 @@ class Visdom(object):
         self.raise_exceptions = raise_exceptions
         self.log_to_filename = log_to_filename
         self._session = None
+        self.proxies = proxies
+        self.http_proxy_host = None
+        self.http_proxy_port = None
+        if proxies is not None and 'http' in proxies:
+            self.http_proxy_host, self.http_proxy_port = proxies['http'].split(":")
+
+        if http_proxy_host is not None or http_proxy_port is not None:
+            warnings.warn(
+                "HTTP Proxy Port and Host args Deprecated. "
+                "Please use proxies arg.", DeprecationWarning)
+            self.http_proxy_host = http_proxy_host
+            self.http_proxy_port = http_proxy_port
 
         self.username = username
         if self.username:
@@ -424,6 +435,8 @@ class Visdom(object):
             return self._session
         logging.warning("Setting up a new session...")
         sess = requests.Session()
+        if self.proxies:
+            sess.proxies.update(self.proxies)
         if self.username:
             resp = sess.post("%s:%s" % (self.server, self.port), json=dict(
                 username=self.username,
