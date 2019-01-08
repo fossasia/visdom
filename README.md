@@ -243,10 +243,11 @@ The python visdom client takes a few options:
 - `raise_exceptions`: Raise exceptions upon failure rather than printing them (default: `True` (soon))
 - `log_to_filename`: If not none, log all plotting and updating events to the given file (append mode) so that they can be replayed later using `replay_log` (default: `None`)
 - `use_incoming_socket`: enable use of the socket for receiving events from the web client, allowing user to register callbacks (default: `True`)
-- `http_proxy_host`: host to proxy your incoming socket through (default: `None`)
-- `http_proxy_port`: port to proxy your incoming socket through (default: `None`)
+- `http_proxy_host`: Deprecated. Use Proxies argument for complete proxy support.
+- `http_proxy_port`: Deprecated. Use Proxies argument for complete proxy support.
 - `username`: username to use for authentication, if server started with `-enable_login` (default: `None`)
 - `password`: password to use for authentication, if server started with `-enable_login` (default: `None`)
+- `proxies`: Dictionary mapping protocol to the URL of the proxy (e.g. {‘http’: ‘foo.bar:3128’}) to be used on each Request. (default: `None`)
 
 Other options are either currently unused (endpoint, ipv6) or used for internal functionality (send allows the visdom server to replicate events for the lua client).
 
