@@ -998,7 +998,7 @@ class Visdom(object):
         assert mimetype is not None, 'unknown audio type: %s' % extension
 
         bytestr = loadfile(audiofile)
-        videodata = """
+        audiodata = """
             <audio controls>
                 <source type="audio/%s" src="data:audio/%s;base64,%s">
                 Your browser does not support the audio tag.
@@ -1006,7 +1006,7 @@ class Visdom(object):
         """ % (mimetype, mimetype, base64.b64encode(bytestr).decode('utf-8'))
         opts['height'] = 80
         opts['width'] = 330
-        return self.text(text=videodata, win=win, env=env, opts=opts)
+        return self.text(text=audiodata, win=win, env=env, opts=opts)
 
     @pytorch_wrap
     def video(self, tensor=None, dim='LxHxWxC', videofile=None, win=None, env=None, opts=None):
