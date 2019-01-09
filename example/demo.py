@@ -78,7 +78,10 @@ try:
         for n in range(256):
             video[n, :, :, :].fill(n)
         viz.video(tensor=video)
+    except BaseException:
+        print('Skipped video tensor example')
 
+    try:
         # video demo:
         # download video from http://media.w3.org/2010/05/sintel/trailer.ogv
         video_url = 'http://media.w3.org/2010/05/sintel/trailer.ogv'
@@ -88,7 +91,7 @@ try:
         if os.path.isfile(videofile):
             viz.video(videofile=videofile, opts={'width': 864, 'height': 480})
     except BaseException:
-        print('Skipped video example')
+        print('Skipped video file example')
 
     # image demo
     viz.image(
