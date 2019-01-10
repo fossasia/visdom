@@ -14,10 +14,8 @@ import argparse
 import numpy as np
 import math
 import os.path
-import getpass
 import time
 import tempfile
-from sys import platform as _platform
 from six.moves import urllib
 
 
