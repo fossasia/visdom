@@ -247,7 +247,7 @@ The python visdom client takes a few options:
 - `http_proxy_port`: Deprecated. Use Proxies argument for complete proxy support.
 - `username`: username to use for authentication, if server started with `-enable_login` (default: `None`)
 - `password`: password to use for authentication, if server started with `-enable_login` (default: `None`)
-- `proxies`: Dictionary mapping protocol to the URL of the proxy (e.g. {‘http’: ‘foo.bar:3128’}) to be used on each Request. (default: `None`)
+- `proxies`: Dictionary mapping protocol to the URL of the proxy (e.g. {`http`: `foo.bar:3128`}) to be used on each Request. (default: `None`)
 
 Other options are either currently unused (endpoint, ipv6) or used for internal functionality (send allows the visdom server to replicate events for the lua client).
 
