@@ -1,3 +1,9 @@
+# Copyright 2017-present, Facebook, Inc.
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
 from typing import Optional, List, Any, Union, Mapping, overload, Text
 
 ### Type aliases for commonly-used types.
@@ -131,4 +137,3 @@ class Visdom:
     def stem(self, X: Tensor, Y: Optional[Tensor] = ..., win: _OptStr = ..., env: _OptStr = ..., opts: _OptOps = ...) -> _SendReturn: ...
     def pie(self, X: Tensor, win: _OptStr = ..., env: _OptStr = ..., opts: _OptOps = ...) -> _SendReturn: ...
     def mesh(self, X: Tensor, Y: Optional[Tensor] = ..., win: _OptStr = ..., env: _OptStr = ..., opts: _OptOps = ...) -> _SendReturn: ...
-
