@@ -22,6 +22,8 @@ import createClass from 'create-react-class';
 import PropTypes from 'prop-types';
 
 var md5 = require('md5');
+var jsonpatch = require('fast-json-patch');
+
 
 const PropertiesPane = require('./PropertiesPane');
 const TextPane = require('./TextPane');
@@ -277,6 +279,25 @@ class App extends React.Component {
           this.postForEnv(this.state.envIDs);
         } else {
           this.addPaneBatched(cmd);
+        }
+        break;
+      case 'window_update':
+        if (this.state.envIDs.length > 1 && cmd.has_compare !== true) {
+          this.postForEnv(this.state.envIDs);
+        } else {
+          if (cmd.win in this.state.panes) {
+            let windowContent = this.state.panes[cmd.win];
+            let finalWindow = jsonpatch.applyPatch(windowContent, cmd.content).newDocument;
+            if (md5(JSON.stringify(finalWindow,null,2)) === cmd.finalHash) {
+              this.addPaneBatched(finalWindow);
+            } else {
+              // console.log(md5(finalWindow));
+              // console.log(md5(cmd.newP));
+              this.postForEnv(this.state.envIDs);
+            }
+          } else {
+            this.postForEnv(this.state.envIDs);
+          }
         }
         break;
       case 'reload':

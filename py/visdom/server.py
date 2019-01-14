@@ -17,6 +17,7 @@ import getpass
 import hashlib
 import inspect
 import json
+import jsonpatch
 import logging
 import math
 import os
@@ -573,6 +574,13 @@ class ExistsHandler(BaseHandler):
         self.wrap_func(self, args)
 
 
+def hash_md_window(window_json):
+    json_string = json.dumps(
+        window_json, indent=2
+    ).encode("utf-8")
+    return hashlib.md5(json_string).hexdigest()
+
+
 class UpdateHandler(BaseHandler):
     def initialize(self, app):
         self.state = app.state
@@ -583,8 +591,20 @@ class UpdateHandler(BaseHandler):
         self.login_enabled = app.login_enabled
 
     @staticmethod
+    def update_packet(p, args):
+        old_p = copy.deepcopy(p)
+        p = UpdateHandler.update(p, args)
+        p['contentID'] = get_rand_id()
+        patch = jsonpatch.make_patch(old_p, p)
+        diff = []
+        # This is to make the JSON Object serializable.
+        for op in patch:
+            diff.append(op)
+        return p, diff
+
+    @staticmethod
     def update(p, args):
-        # Update text in window, separated by a line break
+        # Update text in window, separated by a line break:
         if p['type'] == 'text':
             p['content'] += "<br>" + args['data'][0]['content']
             return p
@@ -665,10 +685,16 @@ class UpdateHandler(BaseHandler):
                 p['content']['data'][0]['type']))
             return
 
-        p = UpdateHandler.update(p, args)
-
-        p['contentID'] = get_rand_id()
-        broadcast(handler, p, eid)
+        p, update_packet = UpdateHandler.update_packet(p, args)
+        hashed = hash_md_window(p)
+        broadcast_packet = {
+            'command': 'window_update',
+            'win': args['win'],
+            'env': eid,
+            'content': update_packet,
+            'finalHash': hashed
+        }
+        broadcast(handler, broadcast_packet, eid)
         handler.write(p['id'])
 
     @check_auth
@@ -769,11 +795,7 @@ class HashHandler(BaseHandler):
         eid = extract_eid(args)
         handler_json = handler.state[eid]['jsons']
         if args['win'] in handler_json:
-            window_json = handler_json[args['win']]
-            json_string = json.dumps(
-                window_json, indent = 2
-            ).encode("utf-8")
-            hashed = hashlib.md5(json_string).hexdigest()
+            hashed = hash_md_window(handler_json[args['win']])
             handler.write(hashed)
         else:
             handler.write('false')
