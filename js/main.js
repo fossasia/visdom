@@ -758,11 +758,9 @@ class App extends React.Component {
     // Bootstrap tooltips need some encouragement
     if (this.state.confirmClear) {
       $("#clear-button").attr('data-original-title', "Are you sure?")
-                        .tooltip('fixTitle')
                         .tooltip('show');
     } else {
-      $("#clear-button").attr('data-original-title', "Clear Current Environment")
-                        .tooltip('fixTitle');
+      $("#clear-button").attr('data-original-title', "Clear Current Environment");
     }
   }
 
