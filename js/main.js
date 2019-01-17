@@ -39,8 +39,6 @@ const getLayoutItem = ReactGridLayout.utils.getLayoutItem;
 const ROW_HEIGHT = 5; // pixels
 const MARGIN = 10; // pixels
 
-var countUpdates = 0;
-
 const PANES = {
   image: ImagePane,
   plot: PlotPane,
@@ -390,6 +388,7 @@ class App extends React.Component {
       // Make sure we remove the pane from our layout.
       let newLayout = this.state.layout.filter(
         (paneLayout) => paneLayout.i !== paneID)
+
       this.setState({
         layout: newLayout,
         panes: newPanes,

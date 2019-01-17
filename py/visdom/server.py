@@ -56,9 +56,8 @@ def recursive_order(node):
         return ordered_mapping
     elif isinstance(node, Sequence) and not isinstance(node, (str, bytes)):
         return [recursive_order(item) for item in node]
-    if isinstance(node, float):
-        if node.is_integer():
-            return int(node)
+    if isinstance(node, float) and node.is_integer():
+        return int(node)
     return node
 
 def stringify(node):
@@ -618,7 +617,7 @@ class UpdateHandler(BaseHandler):
 
     @staticmethod
     def update(p, args):
-        # Update text in window, separated by a line break:
+        # Update text in window, separated by a line break
         if p['type'] == 'text':
             p['content'] += "<br>" + args['data'][0]['content']
             return p
