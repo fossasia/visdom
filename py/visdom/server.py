@@ -24,10 +24,10 @@ import os
 import time
 import traceback
 from os.path import expanduser
+from collections import OrderedDict, Mapping, Sequence
 
 import visdom
 from zmq.eventloop import ioloop
-
 ioloop.install()  # Needs to happen before any tornado imports!
 
 import tornado.ioloop     # noqa E402: gotta install ioloop first
@@ -42,7 +42,27 @@ DEFAULT_HOSTNAME = "localhost"
 DEFAULT_BASE_URL = "/"
 
 here = os.path.abspath(os.path.dirname(__file__))
+COMPACT_SEPARATORS = (',', ':')
 
+def order_by_key(kv):
+    key, val = kv
+    return key
+
+def recursive_order(node):
+    if isinstance(node, Mapping):
+        ordered_mapping = OrderedDict(sorted(node.items(), key=order_by_key))
+        for key, value in ordered_mapping.items():
+            ordered_mapping[key] = recursive_order(value)
+        return ordered_mapping
+    elif isinstance(node, Sequence) and not isinstance(node, (str, bytes)):
+        return [recursive_order(item) for item in node]
+    if isinstance(node, float):
+        if node.is_integer():
+            return int(node)
+    return node
+
+def stringify(node):
+    return json.dumps(recursive_order(node), separators=COMPACT_SEPARATORS)
 
 def check_auth(f):
     def _check_auth(self, *args, **kwargs):
@@ -575,9 +595,7 @@ class ExistsHandler(BaseHandler):
 
 
 def hash_md_window(window_json):
-    json_string = json.dumps(
-        window_json, indent=2
-    ).encode("utf-8")
+    json_string = stringify(window_json).encode("utf-8")
     return hashlib.md5(json_string).hexdigest()
 
 
@@ -596,11 +614,7 @@ class UpdateHandler(BaseHandler):
         p = UpdateHandler.update(p, args)
         p['contentID'] = get_rand_id()
         patch = jsonpatch.make_patch(old_p, p)
-        diff = []
-        # This is to make the JSON Object serializable.
-        for op in patch:
-            diff.append(op)
-        return p, diff
+        return p, patch.patch
 
     @staticmethod
     def update(p, args):
@@ -685,13 +699,13 @@ class UpdateHandler(BaseHandler):
                 p['content']['data'][0]['type']))
             return
 
-        p, update_packet = UpdateHandler.update_packet(p, args)
+        p, diff_packet = UpdateHandler.update_packet(p, args)
         hashed = hash_md_window(p)
         broadcast_packet = {
             'command': 'window_update',
             'win': args['win'],
             'env': eid,
-            'content': update_packet,
+            'content': diff_packet,
             'finalHash': hashed
         }
         broadcast(handler, broadcast_packet, eid)

@@ -23,7 +23,7 @@ import PropTypes from 'prop-types';
 
 var md5 = require('md5');
 var jsonpatch = require('fast-json-patch');
-
+var stringify = require('json-stable-stringify');
 
 const PropertiesPane = require('./PropertiesPane');
 const TextPane = require('./TextPane');
@@ -38,6 +38,8 @@ const getLayoutItem = ReactGridLayout.utils.getLayoutItem;
 
 const ROW_HEIGHT = 5; // pixels
 const MARGIN = 10; // pixels
+
+var countUpdates = 0;
 
 const PANES = {
   image: ImagePane,
@@ -91,6 +93,7 @@ class App extends React.Component {
     readonly: false,
     sessionID: null,
     panes: {},
+    consistent_pane_copy: {},
     focusedPaneID: null,
     envID: use_env,
     envIDs: use_envs,
@@ -197,6 +200,7 @@ class App extends React.Component {
     newPanes[newPane.id] = newPane;
 
     if (!exists) {
+      this.state.consistent_pane_copy[newPane.id] = JSON.parse(JSON.stringify(newPane)); //Deep Copy
       let stored = JSON.parse(localStorage.getItem(this.keyLS(newPane.id)));
       if (this._bin == null) {
         this.rebin();
@@ -261,6 +265,29 @@ class App extends React.Component {
     this._socket = socket;
   }
 
+  _checkWindow = (cmd, numTries) => {
+    if (cmd.win in this.state.consistent_pane_copy) {
+      let windowContent = this.state.consistent_pane_copy[cmd.win];
+      let finalWindow = jsonpatch.applyPatch(windowContent, cmd.content).newDocument;
+      let hashed = md5(stringify(finalWindow));
+      if (hashed === cmd.finalHash) {
+        this.state.consistent_pane_copy[cmd.win] = finalWindow;
+        let modifiedWindow = this.state.panes[cmd.win];
+        let modifiedFinalWindow = jsonpatch.applyPatch(modifiedWindow, cmd.content).newDocument;
+        this.addPaneBatched(modifiedFinalWindow);
+      } else {
+        this.postForEnv(this.state.envIDs);
+      }
+    } else {
+      numTries--;
+      if (numTries) {
+        setTimeout(this._checkWindow, 100, cmd, numTries);
+      } else {
+        this.postForEnv(this.state.envIDs);
+      }
+    }
+  }
+
   _handleMessage = (evt) => {
     var cmd = JSON.parse(evt.data);
     switch (cmd.command) {
@@ -285,19 +312,8 @@ class App extends React.Component {
         if (this.state.envIDs.length > 1 && cmd.has_compare !== true) {
           this.postForEnv(this.state.envIDs);
         } else {
-          if (cmd.win in this.state.panes) {
-            let windowContent = this.state.panes[cmd.win];
-            let finalWindow = jsonpatch.applyPatch(windowContent, cmd.content).newDocument;
-            if (md5(JSON.stringify(finalWindow,null,2)) === cmd.finalHash) {
-              this.addPaneBatched(finalWindow);
-            } else {
-              // console.log(md5(finalWindow));
-              // console.log(md5(cmd.newP));
-              this.postForEnv(this.state.envIDs);
-            }
-          } else {
-            this.postForEnv(this.state.envIDs);
-          }
+          let numTries = 3;
+          setTimeout(this._checkWindow, 0, cmd, numTries);
         }
         break;
       case 'reload':
@@ -356,7 +372,9 @@ class App extends React.Component {
       return;
     }
     let newPanes = Object.assign({}, this.state.panes);
+    let newPanesCopy = Object.assign({}, this.state.consistent_pane_copy);
     delete newPanes[paneID];
+    delete newPanesCopy[paneID];
     if (!keepPosition) {
       localStorage.removeItem(this.keyLS(this.id));
 
@@ -372,10 +390,10 @@ class App extends React.Component {
       // Make sure we remove the pane from our layout.
       let newLayout = this.state.layout.filter(
         (paneLayout) => paneLayout.i !== paneID)
-
       this.setState({
         layout: newLayout,
         panes: newPanes,
+        consistent_pane_copy: newPanesCopy,
         focusedPaneID: focusedPaneID === paneID ? null : focusedPaneID,
       }, () => {this.relayout();});
     }
@@ -392,6 +410,7 @@ class App extends React.Component {
     this.setState({
       layout: [],
       panes: {},
+      consistent_pane_copy: {},
       focusedPaneID: null,
       confirmClear: false,
     });
