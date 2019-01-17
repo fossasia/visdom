@@ -44,24 +44,6 @@ DEFAULT_BASE_URL = "/"
 here = os.path.abspath(os.path.dirname(__file__))
 COMPACT_SEPARATORS = (',', ':')
 
-def order_by_key(kv):
-    key, val = kv
-    return key
-
-def recursive_order(node):
-    if isinstance(node, Mapping):
-        ordered_mapping = OrderedDict(sorted(node.items(), key=order_by_key))
-        for key, value in ordered_mapping.items():
-            ordered_mapping[key] = recursive_order(value)
-        return ordered_mapping
-    elif isinstance(node, Sequence) and not isinstance(node, (str, bytes)):
-        return [recursive_order(item) for item in node]
-    if isinstance(node, float) and node.is_integer():
-        return int(node)
-    return node
-
-def stringify(node):
-    return json.dumps(recursive_order(node), separators=COMPACT_SEPARATORS)
 
 def check_auth(f):
     def _check_auth(self, *args, **kwargs):
@@ -593,6 +575,29 @@ class ExistsHandler(BaseHandler):
         self.wrap_func(self, args)
 
 
+def order_by_key(kv):
+    key, val = kv
+    return key
+
+
+# Based on json-stable-strinfy-python from @haochi with some usecase modifications
+def recursive_order(node):
+    if isinstance(node, Mapping):
+        ordered_mapping = OrderedDict(sorted(node.items(), key=order_by_key))
+        for key, value in ordered_mapping.items():
+            ordered_mapping[key] = recursive_order(value)
+        return ordered_mapping
+    elif isinstance(node, Sequence) and not isinstance(node, (str, bytes)):
+        return [recursive_order(item) for item in node]
+    if isinstance(node, float) and node.is_integer():
+        return int(node)
+    return node
+
+
+def stringify(node):
+    return json.dumps(recursive_order(node), separators=COMPACT_SEPARATORS)
+
+
 def hash_md_window(window_json):
     json_string = stringify(window_json).encode("utf-8")
     return hashlib.md5(json_string).hexdigest()
@@ -699,15 +704,18 @@ class UpdateHandler(BaseHandler):
             return
 
         p, diff_packet = UpdateHandler.update_packet(p, args)
-        hashed = hash_md_window(p)
-        broadcast_packet = {
-            'command': 'window_update',
-            'win': args['win'],
-            'env': eid,
-            'content': diff_packet,
-            'finalHash': hashed
-        }
-        broadcast(handler, broadcast_packet, eid)
+        if len(stringify(p)) <= len(stringify(diff_packet)):
+            broadcast(handler, p, eid)
+        else:
+            hashed = hash_md_window(p)
+            broadcast_packet = {
+                'command': 'window_update',
+                'win': args['win'],
+                'env': eid,
+                'content': diff_packet,
+                'finalHash': hashed
+            }
+            broadcast(handler, broadcast_packet, eid)
         handler.write(p['id'])
 
     @check_auth
