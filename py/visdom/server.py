@@ -1138,7 +1138,7 @@ class ErrorHandler(BaseHandler):
 # function that downloads and installs javascript, css, and font dependencies:
 def download_scripts(proxies=None, install_dir=None):
     import visdom
-    print("Downloading scripts. It might take a while.")
+    print("Checking for scripts.")
 
     # location in which to download stuff:
     if install_dir is None:
@@ -1211,6 +1211,8 @@ def download_scripts(proxies=None, install_dir=None):
             is_built = True
         else:
             os.remove(built_path)
+    if not is_built:
+        print('Downloading scripts, this may take a little while')
 
     # download files one-by-one:
     for (key, val) in ext_files.items():
