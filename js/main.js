@@ -265,6 +265,7 @@ class App extends React.Component {
 
   _checkWindow = (cmd, numTries) => {
     if (cmd.win in this.state.consistent_pane_copy) {
+      // Apply patch and check hash. Re-fetch if final window doesn't match hash
       let windowContent = this.state.consistent_pane_copy[cmd.win];
       let finalWindow = jsonpatch.applyPatch(windowContent, cmd.content).newDocument;
       let hashed = md5(stringify(finalWindow));
@@ -311,6 +312,7 @@ class App extends React.Component {
           this.postForEnv(this.state.envIDs);
         } else {
           let numTries = 3;
+          // Check to see if the window exists before trying to update
           setTimeout(this._checkWindow, 0, cmd, numTries);
         }
         break;

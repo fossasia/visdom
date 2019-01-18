@@ -580,7 +580,7 @@ def order_by_key(kv):
     return key
 
 
-# Based on json-stable-strinfy-python from @haochi with some usecase modifications
+# Based on json-stable-stringify-python from @haochi with some usecase modifications
 def recursive_order(node):
     if isinstance(node, Mapping):
         ordered_mapping = OrderedDict(sorted(node.items(), key=order_by_key))
@@ -617,6 +617,7 @@ class UpdateHandler(BaseHandler):
         old_p = copy.deepcopy(p)
         p = UpdateHandler.update(p, args)
         p['contentID'] = get_rand_id()
+        # TODO: make_patch isn't high performance. If bottlenecked we should build the patch ourselves.
         patch = jsonpatch.make_patch(old_p, p)
         return p, patch.patch
 
@@ -704,6 +705,7 @@ class UpdateHandler(BaseHandler):
             return
 
         p, diff_packet = UpdateHandler.update_packet(p, args)
+        # send the smaller of the patch and the updated pane
         if len(stringify(p)) <= len(stringify(diff_packet)):
             broadcast(handler, p, eid)
         else:
