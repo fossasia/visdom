@@ -42,6 +42,7 @@ requirements = [
     'tornado',
     'pyzmq',
     'six',
+    'jsonpatch',
     'torchfile',
     'websocket-client',
 ]

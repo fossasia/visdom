@@ -22,6 +22,8 @@ import createClass from 'create-react-class';
 import PropTypes from 'prop-types';
 
 var md5 = require('md5');
+var jsonpatch = require('fast-json-patch');
+var stringify = require('json-stable-stringify');
 
 const PropertiesPane = require('./PropertiesPane');
 const TextPane = require('./TextPane');
@@ -89,6 +91,7 @@ class App extends React.Component {
     readonly: false,
     sessionID: null,
     panes: {},
+    consistent_pane_copy: {},
     focusedPaneID: null,
     envID: use_env,
     envIDs: use_envs,
@@ -195,6 +198,7 @@ class App extends React.Component {
     newPanes[newPane.id] = newPane;
 
     if (!exists) {
+      this.state.consistent_pane_copy[newPane.id] = JSON.parse(JSON.stringify(newPane)); //Deep Copy
       let stored = JSON.parse(localStorage.getItem(this.keyLS(newPane.id)));
       if (this._bin == null) {
         this.rebin();
@@ -259,6 +263,30 @@ class App extends React.Component {
     this._socket = socket;
   }
 
+  _checkWindow = (cmd, numTries) => {
+    if (cmd.win in this.state.consistent_pane_copy) {
+      // Apply patch and check hash. Re-fetch if final window doesn't match hash
+      let windowContent = this.state.consistent_pane_copy[cmd.win];
+      let finalWindow = jsonpatch.applyPatch(windowContent, cmd.content).newDocument;
+      let hashed = md5(stringify(finalWindow));
+      if (hashed === cmd.finalHash) {
+        this.state.consistent_pane_copy[cmd.win] = finalWindow;
+        let modifiedWindow = this.state.panes[cmd.win];
+        let modifiedFinalWindow = jsonpatch.applyPatch(modifiedWindow, cmd.content).newDocument;
+        this.addPaneBatched(modifiedFinalWindow);
+      } else {
+        this.postForEnv(this.state.envIDs);
+      }
+    } else {
+      numTries--;
+      if (numTries) {
+        setTimeout(this._checkWindow, 100, cmd, numTries);
+      } else {
+        this.postForEnv(this.state.envIDs);
+      }
+    }
+  }
+
   _handleMessage = (evt) => {
     var cmd = JSON.parse(evt.data);
     switch (cmd.command) {
@@ -277,6 +305,15 @@ class App extends React.Component {
           this.postForEnv(this.state.envIDs);
         } else {
           this.addPaneBatched(cmd);
+        }
+        break;
+      case 'window_update':
+        if (this.state.envIDs.length > 1 && cmd.has_compare !== true) {
+          this.postForEnv(this.state.envIDs);
+        } else {
+          let numTries = 3;
+          // Check to see if the window exists before trying to update
+          setTimeout(this._checkWindow, 0, cmd, numTries);
         }
         break;
       case 'reload':
@@ -335,7 +372,9 @@ class App extends React.Component {
       return;
     }
     let newPanes = Object.assign({}, this.state.panes);
+    let newPanesCopy = Object.assign({}, this.state.consistent_pane_copy);
     delete newPanes[paneID];
+    delete newPanesCopy[paneID];
     if (!keepPosition) {
       localStorage.removeItem(this.keyLS(this.id));
 
@@ -355,6 +394,7 @@ class App extends React.Component {
       this.setState({
         layout: newLayout,
         panes: newPanes,
+        consistent_pane_copy: newPanesCopy,
         focusedPaneID: focusedPaneID === paneID ? null : focusedPaneID,
       }, () => {this.relayout();});
     }
@@ -371,6 +411,7 @@ class App extends React.Component {
     this.setState({
       layout: [],
       panes: {},
+      consistent_pane_copy: {},
       focusedPaneID: null,
       confirmClear: false,
     });
