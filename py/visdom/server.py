@@ -25,6 +25,7 @@ import time
 import traceback
 from os.path import expanduser
 from collections import OrderedDict, Mapping, Sequence
+from six import string_types
 
 import visdom
 from zmq.eventloop import ioloop
@@ -587,8 +588,13 @@ def recursive_order(node):
         for key, value in ordered_mapping.items():
             ordered_mapping[key] = recursive_order(value)
         return ordered_mapping
-    elif isinstance(node, Sequence) and not isinstance(node, (str, bytes)):
-        return [recursive_order(item) for item in node]
+    elif isinstance(node, Sequence):
+        if isinstance(node, (bytes,)):
+            return node
+        elif isinstance(node, string_types):
+            return node
+        else:
+            return [recursive_order(item) for item in node]
     if isinstance(node, float) and node.is_integer():
         return int(node)
     return node
