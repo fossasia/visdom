@@ -156,7 +156,7 @@ luarocks install visdom
 ```
 
 ```bash
-# Install python from source
+# Install visdom from source
 pip install -e .
 # If the above runs into issues, you can try the below
 easy_install .
