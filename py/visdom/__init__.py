@@ -870,7 +870,13 @@ class Visdom(object):
             # We add the paramater to opts manually if it exists.
             opts = dict()
             if 'title' in figure_dict['layout']:
-                opts['title'] = figure_dict['layout']['title']
+                title_prop = figure_dict['layout']['title']
+
+                # The title is now officially under a 'text' subproperty. Previously, the property
+                # itself could also directly reference the title.
+                # Although this latter behavior is now deprecated, we support both possibilities.
+                # Docs reference: https://plot.ly/python/reference/#layout-title-text
+                opts['title'] = title_prop['text'] if 'text' in title_prop else title_prop
 
             return self._send({
                 'data': figure_dict['data'],
