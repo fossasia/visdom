@@ -1,11 +1,11 @@
 /**
-* Copyright 2017-present, Facebook, Inc.
-* All rights reserved.
-*
-* This source code is licensed under the license found in the
-* LICENSE file in the root directory of this source tree.
-*
-*/
+ * Copyright 2017-present, Facebook, Inc.
+ * All rights reserved.
+ *
+ * This source code is licensed under the license found in the
+ * LICENSE file in the root directory of this source tree.
+ *
+ */
 
 'use strict';
 import React from 'react';
@@ -14,10 +14,9 @@ var classNames = require('classnames');
 import 'rc-tree-select/assets/index.css';
 
 import TreeSelect, { SHOW_CHILD } from 'rc-tree-select';
-import EventSystem from './EventSystem'
+import EventSystem from './EventSystem';
 
 var ReactGridLayout = require('react-grid-layout');
-
 
 import createClass from 'create-react-class';
 import PropTypes from 'prop-types';
@@ -49,20 +48,20 @@ const PANES = {
 
 const PANE_SIZE = {
   image: [20, 20],
-  plot:  [30, 24],
-  text:  [20, 20],
-  properties:  [20, 20],
+  plot: [30, 24],
+  text: [20, 20],
+  properties: [20, 20],
 };
 
 const MODAL_STYLE = {
-  content : {
-    top                   : '50%',
-    left                  : '50%',
-    right                 : 'auto',
-    bottom                : 'auto',
-    marginRight           : '-50%',
-    transform             : 'translate(-50%, -50%)'
-  }
+  content: {
+    top: '50%',
+    left: '50%',
+    right: 'auto',
+    bottom: 'auto',
+    marginRight: '-50%',
+    transform: 'translate(-50%, -50%)',
+  },
 };
 
 const DEFAULT_LAYOUT = 'current';
@@ -80,8 +79,8 @@ if (ACTIVE_ENV !== '') {
     use_envs = [ACTIVE_ENV];
   }
 } else {
-  use_env = localStorage.getItem( 'envID' ) || 'main';
-  use_envs = JSON.parse(localStorage.getItem( 'envIDs' )) || ['main']
+  use_env = localStorage.getItem('envID') || 'main';
+  use_envs = JSON.parse(localStorage.getItem('envIDs')) || ['main'];
 }
 
 // TODO: Move some of this to smaller components and/or use something like redux
@@ -110,9 +109,9 @@ class App extends React.Component {
     modifyID: null,
     treeDataSimpleMode: {
       id: 'key',
-      rootPId: 0
+      rootPId: 0,
     },
-    envSelectorStyle: {width: 1280/2 },
+    envSelectorStyle: { width: 1280 / 2 },
     flexSelectorOnHover: false,
     confirmClear: false,
   };
@@ -130,32 +129,36 @@ class App extends React.Component {
   }
 
   colWidth = () => {
-    return (this.state.width - (MARGIN * (this.state.cols - 1))
-      - (MARGIN * 2)) / this.state.cols;
-  }
+    return (
+      (this.state.width - MARGIN * (this.state.cols - 1) - MARGIN * 2) /
+      this.state.cols
+    );
+  };
 
-  p2w = (w) => {  // translate pixels -> RGL grid coordinates
+  p2w = w => {
+    // translate pixels -> RGL grid coordinates
     let colWidth = this.colWidth();
     return (w + MARGIN) / (colWidth + MARGIN);
-  }
+  };
 
-  p2h = (h) => {
+  p2h = h => {
     return (h + MARGIN) / (ROW_HEIGHT + MARGIN);
-  }
+  };
 
-  keyLS = (key) => {      // append env to pane id for localStorage key
+  keyLS = key => {
+    // append env to pane id for localStorage key
     return this.state.envID + '_' + key;
-  }
+  };
 
-  getValidFilter = (filter) => {
+  getValidFilter = filter => {
     // Ensure the regex filter is valid
     try {
       'test_string'.match(filter);
-    } catch(e) {
+    } catch (e) {
       filter = '';
     }
-    return filter
-  }
+    return filter;
+  };
 
   correctPathname = () => {
     var pathname = window.location.pathname;
@@ -168,20 +171,20 @@ class App extends React.Component {
       pathname = pathname + '/';
     }
     return pathname;
-  }
+  };
 
-  addPaneBatched = (pane) => {
+  addPaneBatched = pane => {
     if (!this._timeoutID) {
       this._timeoutID = setTimeout(this.processBatchedPanes, 100);
     }
     this._pendingPanes.push(pane);
-  }
+  };
 
   processBatchedPanes = () => {
     let newPanes = Object.assign({}, this.state.panes);
     let newLayout = this.state.layout.slice();
 
-    this._pendingPanes.forEach((pane) => {
+    this._pendingPanes.forEach(pane => {
       this.processPane(pane, newPanes, newLayout);
     });
 
@@ -192,14 +195,16 @@ class App extends React.Component {
       panes: newPanes,
       layout: newLayout,
     });
-  }
+  };
 
   processPane = (newPane, newPanes, newLayout) => {
     let exists = newPane.id in newPanes;
     newPanes[newPane.id] = newPane;
 
     if (!exists) {
-      this.state.consistent_pane_copy[newPane.id] = JSON.parse(JSON.stringify(newPane)); //Deep Copy
+      this.state.consistent_pane_copy[newPane.id] = JSON.parse(
+        JSON.stringify(newPane)
+      ); //Deep Copy
       let stored = JSON.parse(localStorage.getItem(this.keyLS(newPane.id)));
       if (this._bin == null) {
         this.rebin();
@@ -208,33 +213,38 @@ class App extends React.Component {
         var paneLayout = stored;
         this._bin.content.push(paneLayout);
       } else {
-        let w = PANE_SIZE[newPane.type][0], h = PANE_SIZE[newPane.type][1];
+        let w = PANE_SIZE[newPane.type][0],
+          h = PANE_SIZE[newPane.type][1];
 
         if (newPane.width) w = this.p2w(newPane.width);
         if (newPane.height) h = Math.ceil(this.p2h(newPane.height + 14));
         if (newPane.content && newPane.content.caption) h += 1;
 
-        this._bin.content.push({width: w, height: h});
+        this._bin.content.push({ width: w, height: h });
 
         let pos = this._bin.position(newLayout.length, this.state.cols);
 
         var paneLayout = {
           i: newPane.id,
-          w: w, h: h,
-          width: w, height: h,
-          x: pos.x, y: pos.y,
+          w: w,
+          h: h,
+          width: w,
+          height: h,
+          x: pos.x,
+          y: pos.y,
           static: false,
-        }
+        };
       }
 
       newLayout.push(paneLayout);
     } else {
       let currLayout = getLayoutItem(newLayout, newPane.id);
       if (newPane.width) currLayout.w = this.p2w(newPane.width);
-      if (newPane.height) currLayout.h = Math.ceil(this.p2h(newPane.height + 14));
+      if (newPane.height)
+        currLayout.h = Math.ceil(this.p2h(newPane.height + 14));
       if (newPane.content && newPane.content.caption) currLayout.h += 1;
     }
-  }
+  };
 
   connect = () => {
     if (this._socket) {
@@ -242,38 +252,44 @@ class App extends React.Component {
     }
     var url = window.location;
     var ws_protocol = null;
-    if (url.protocol == "https:") {
+    if (url.protocol == 'https:') {
       ws_protocol = 'wss';
     } else {
       ws_protocol = 'ws';
     }
-    var socket = new WebSocket(ws_protocol + '://' + url.host + this.correctPathname() + 'socket');
+    var socket = new WebSocket(
+      ws_protocol + '://' + url.host + this.correctPathname() + 'socket'
+    );
 
     socket.onmessage = this._handleMessage;
 
     socket.onopen = () => {
-      this.setState({connected: true});
+      this.setState({ connected: true });
     };
 
     socket.onerror = socket.onclose = () => {
-      this.setState({connected: false}, function () {
+      this.setState({ connected: false }, function() {
         this._socket = null;
       });
     };
 
     this._socket = socket;
-  }
+  };
 
   _checkWindow = (cmd, numTries) => {
     if (cmd.win in this.state.consistent_pane_copy) {
       // Apply patch and check hash. Re-fetch if final window doesn't match hash
       let windowContent = this.state.consistent_pane_copy[cmd.win];
-      let finalWindow = jsonpatch.applyPatch(windowContent, cmd.content).newDocument;
+      let finalWindow = jsonpatch.applyPatch(windowContent, cmd.content)
+        .newDocument;
       let hashed = md5(stringify(finalWindow));
       if (hashed === cmd.finalHash) {
         this.state.consistent_pane_copy[cmd.win] = finalWindow;
         let modifiedWindow = this.state.panes[cmd.win];
-        let modifiedFinalWindow = jsonpatch.applyPatch(modifiedWindow, cmd.content).newDocument;
+        let modifiedFinalWindow = jsonpatch.applyPatch(
+          modifiedWindow,
+          cmd.content
+        ).newDocument;
         this.addPaneBatched(modifiedFinalWindow);
       } else {
         this.postForEnv(this.state.envIDs);
@@ -286,16 +302,21 @@ class App extends React.Component {
         this.postForEnv(this.state.envIDs);
       }
     }
-  }
+  };
 
-  _handleMessage = (evt) => {
+  _handleMessage = evt => {
     var cmd = JSON.parse(evt.data);
     switch (cmd.command) {
       case 'register':
-        this.setState({
-          sessionID: cmd.data,
-          readonly: cmd.readonly,
-        }, () => {this.postForEnv(this.state.envIDs);});
+        this.setState(
+          {
+            sessionID: cmd.data,
+            readonly: cmd.readonly,
+          },
+          () => {
+            this.postForEnv(this.state.envIDs);
+          }
+        );
         break;
       case 'pane':
       case 'window':
@@ -332,18 +353,20 @@ class App extends React.Component {
         let layoutLists = this.state.layoutLists;
         for (var envIdx in cmd.data) {
           if (!layoutLists.has(cmd.data[envIdx])) {
-            layoutLists.set(cmd.data[envIdx],
-                            new Map([[DEFAULT_LAYOUT, new Map()]]));
+            layoutLists.set(
+              cmd.data[envIdx],
+              new Map([[DEFAULT_LAYOUT, new Map()]])
+            );
           }
         }
-        if (!this.state.showEnvModal || (this.state.modifyID in cmd.data)) {
-          this.setState({envList: cmd.data, layoutLists: layoutLists})
+        if (!this.state.showEnvModal || this.state.modifyID in cmd.data) {
+          this.setState({ envList: cmd.data, layoutLists: layoutLists });
         } else {
           this.setState({
             envList: cmd.data,
             layoutLists: layoutLists,
             modifyID: cmd.data[0],
-          })
+          });
         }
         break;
       case 'layout_update':
@@ -352,11 +375,11 @@ class App extends React.Component {
       default:
         console.error('unrecognized command', cmd);
     }
-  }
+  };
 
   disconnect = () => {
     this._socket.close();
-  }
+  };
 
   sendSocketMessage(data) {
     if (!this._socket) {
@@ -390,22 +413,28 @@ class App extends React.Component {
       let focusedPaneID = this.state.focusedPaneID;
       // Make sure we remove the pane from our layout.
       let newLayout = this.state.layout.filter(
-        (paneLayout) => paneLayout.i !== paneID)
+        paneLayout => paneLayout.i !== paneID
+      );
 
-      this.setState({
-        layout: newLayout,
-        panes: newPanes,
-        consistent_pane_copy: newPanesCopy,
-        focusedPaneID: focusedPaneID === paneID ? null : focusedPaneID,
-      }, () => {this.relayout();});
+      this.setState(
+        {
+          layout: newLayout,
+          panes: newPanes,
+          consistent_pane_copy: newPanesCopy,
+          focusedPaneID: focusedPaneID === paneID ? null : focusedPaneID,
+        },
+        () => {
+          this.relayout();
+        }
+      );
     }
-  }
+  };
 
   closeAllPanes = () => {
     if (this.state.readonly) {
       return;
     }
-    Object.keys(this.state.panes).map((paneID) => {
+    Object.keys(this.state.panes).map(paneID => {
       this.closePane(paneID, false, false);
     });
     this.rebin();
@@ -416,28 +445,28 @@ class App extends React.Component {
       focusedPaneID: null,
       confirmClear: false,
     });
-  }
+  };
 
   triggerClear = () => {
     if (this.state.confirmClear) {
       this.closeAllPanes();
     } else {
-      this.setState({confirmClear: true});
+      this.setState({ confirmClear: true });
     }
-  }
+  };
 
   cancelClear = () => {
     if (this.state.confirmClear) {
-      this.setState({confirmClear: false});
+      this.setState({ confirmClear: false });
     }
-  }
+  };
 
-  selectEnv = (selectedNodes) => {
+  selectEnv = selectedNodes => {
     var isSameEnv = selectedNodes.length == this.state.envIDs.length;
     if (isSameEnv) {
-      for (var i=0; i<selectedNodes.length; i++) {
+      for (var i = 0; i < selectedNodes.length; i++) {
         if (selectedNodes[i] != this.state.envIDs[i]) {
-          isSameEnv=false;
+          isSameEnv = false;
           break;
         }
       }
@@ -457,21 +486,23 @@ class App extends React.Component {
     localStorage.setItem('envID', envID);
     localStorage.setItem('envIDs', JSON.stringify(selectedNodes));
     this.postForEnv(selectedNodes);
-  }
+  };
 
-  postForEnv = (envIDs) => {
+  postForEnv = envIDs => {
     // This kicks off a new stream of events from the socket so there's nothing
     // to handle here. We might want to surface the error state.
-    if (envIDs.length == 1 ) {
-      $.post(this.correctPathname() + 'env/' + envIDs[0],
-             JSON.stringify({'sid' : this.state.sessionID}));
+    if (envIDs.length == 1) {
+      $.post(
+        this.correctPathname() + 'env/' + envIDs[0],
+        JSON.stringify({ sid: this.state.sessionID })
+      );
+    } else if (envIDs.length > 1) {
+      $.post(
+        this.correctPathname() + 'compare/' + envIDs.join('+'),
+        JSON.stringify({ sid: this.state.sessionID })
+      );
     }
-    else if(envIDs.length > 1) {
-      $.post(this.correctPathname() + 'compare/' + envIDs.join('+'),
-             JSON.stringify({'sid' : this.state.sessionID}));
-
-    }
-  }
+  };
 
   deleteEnv = () => {
     this.sendSocketMessage({
@@ -479,7 +510,7 @@ class App extends React.Component {
       prev_eid: this.state.envID,
       eid: this.state.modifyID,
     });
-  }
+  };
 
   saveEnv = () => {
     if (!this.state.connected) {
@@ -491,7 +522,7 @@ class App extends React.Component {
     let env = this._envFieldRef.value;
 
     let payload = {};
-    Object.keys(this.state.panes).map((paneID) => {
+    Object.keys(this.state.panes).map(paneID => {
       payload[paneID] = JSON.parse(localStorage.getItem(this.keyLS(paneID)));
     });
 
@@ -499,7 +530,7 @@ class App extends React.Component {
       cmd: 'save',
       data: payload,
       prev_eid: this.state.envID,
-      eid: env
+      eid: env,
     });
 
     let newEnvList = this.state.envList;
@@ -510,8 +541,10 @@ class App extends React.Component {
 
     for (var envIdx in newEnvList) {
       if (!layoutLists.has(newEnvList[envIdx])) {
-        layoutLists.set(newEnvList[envIdx],
-          new Map([[DEFAULT_LAYOUT, new Map()]]));
+        layoutLists.set(
+          newEnvList[envIdx],
+          new Map([[DEFAULT_LAYOUT, new Map()]])
+        );
       }
     }
 
@@ -521,32 +554,35 @@ class App extends React.Component {
       envID: env,
       envIDs: [env],
     });
-  }
+  };
 
   focusPane = (paneID, cb) => {
-    this.setState({
-      focusedPaneID: paneID,
-    }, cb);
-  }
+    this.setState(
+      {
+        focusedPaneID: paneID,
+      },
+      cb
+    );
+  };
 
-  blurPane = (e) => {
+  blurPane = e => {
     this.setState({
       focusedPaneID: null,
     });
-  }
+  };
 
   resizePane = (layout, oldLayoutItem, layoutItem) => {
-    this.setState({'layoutID': DEFAULT_LAYOUT})
+    this.setState({ layoutID: DEFAULT_LAYOUT });
     this.focusPane(layoutItem.i);
     this.updateLayout(layout);
-  }
+  };
 
   movePane = (layout, oldLayoutItem, layoutItem) => {
-    this.setState({'layoutID': DEFAULT_LAYOUT})
+    this.setState({ layoutID: DEFAULT_LAYOUT });
     this.updateLayout(layout);
-  }
+  };
 
-  rebin = (layout) => {
+  rebin = layout => {
     layout = layout ? layout : this.state.layout;
     let layoutID = this.state.layoutID;
     if (layoutID !== DEFAULT_LAYOUT) {
@@ -572,7 +608,7 @@ class App extends React.Component {
 
     this._bin = new Bin.ShelfFirst(contents, this.state.cols);
     return layout;
-  }
+  };
 
   getCurrLayoutList() {
     if (this.state.layoutLists.has(this.state.envID)) {
@@ -582,7 +618,7 @@ class App extends React.Component {
     }
   }
 
-  relayout = (pack) => {
+  relayout = pack => {
     let layout = this.rebin();
 
     let sorted = sortLayout(layout);
@@ -594,8 +630,9 @@ class App extends React.Component {
     let layoutMap = envLayoutList.get(this.state.layoutID);
     // Sort out things that were filtered away
     sorted = sorted.sort(function(a, b) {
-      let diff = (newPanes[a.i].title.match(filter) != null) -
-              (newPanes[b.i].title.match(filter) != null);
+      let diff =
+        (newPanes[a.i].title.match(filter) != null) -
+        (newPanes[b.i].title.match(filter) != null);
       if (diff != 0) {
         return -diff;
       } else if (layoutID !== DEFAULT_LAYOUT) {
@@ -607,7 +644,7 @@ class App extends React.Component {
           return diff;
         }
       }
-      return old_sorted.indexOf(a) - old_sorted.indexOf(b);  // stable sort
+      return old_sorted.indexOf(a) - old_sorted.indexOf(b); // stable sort
     });
 
     let newLayout = sorted.map((paneLayout, idx) => {
@@ -619,12 +656,12 @@ class App extends React.Component {
       return Object.assign({}, paneLayout, pos);
     });
 
-    this.setState({panes: newPanes});
+    this.setState({ panes: newPanes });
     // TODO this is very non-conventional react, someday it shall be fixed but
     // for now it's important to fix relayout grossness
     this.state.panes = newPanes;
     this.updateLayout(newLayout);
-  }
+  };
 
   toggleOnlineState = () => {
     if (this.state.connected) {
@@ -632,10 +669,10 @@ class App extends React.Component {
     } else {
       this.connect();
     }
-  }
+  };
 
-  updateLayout = (layout) => {
-    this.setState({layout: layout}, (newState) => {
+  updateLayout = layout => {
+    this.setState({ layout: layout }, newState => {
       this.state.layout.map((playout, idx) => {
         localStorage.setItem(this.keyLS(playout.i), JSON.stringify(playout));
       });
@@ -643,10 +680,10 @@ class App extends React.Component {
     // TODO this is very non-conventional react, someday it shall be fixed but
     // for now it's important to fix relayout grossness
     this.state.layout = layout;
-  }
+  };
 
-  updateToLayout = (layoutID) => {
-    this.setState({layoutID: layoutID});
+  updateToLayout = layoutID => {
+    this.setState({ layoutID: layoutID });
     // TODO this is very non-conventional react, someday it shall be fixed but
     // for now it's important to fix relayout grossness
     this.state.layoutID = layoutID;
@@ -655,12 +692,12 @@ class App extends React.Component {
       this.relayout();
       this.relayout();
     }
-  }
+  };
 
   parseLayoutsFromServer(layoutJSON) {
     // Handles syncing layout state from the server
     if (layoutJSON.length == 0) {
-      return;  // Skip totally blank updates, these are empty inits
+      return; // Skip totally blank updates, these are empty inits
     }
     let layoutsObj = JSON.parse(layoutJSON);
     let layoutLists = new Map();
@@ -681,12 +718,12 @@ class App extends React.Component {
       // If the current view was deleted by someone else (eek)
       layoutID = DEFAULT_LAYOUT;
     }
-    this.setState({layoutLists: layoutLists, layoutID: layoutID});
+    this.setState({ layoutLists: layoutLists, layoutID: layoutID });
   }
 
-  publishEvent = (event) => {
+  publishEvent = event => {
     EventSystem.publish('global.event', event);
-  }
+  };
 
   /**
    * Send message to backend.
@@ -697,7 +734,7 @@ class App extends React.Component {
    *
    * @param data Data to be sent to backend.
    */
-  sendPaneMessage = (data) => {
+  sendPaneMessage = data => {
     if (this.state.focusedPaneID === null || this.state.readonly) {
       return;
     }
@@ -710,7 +747,7 @@ class App extends React.Component {
       cmd: 'forward_to_vis',
       data: finalData,
     });
-  }
+  };
 
   exportLayoutsToServer(layoutLists) {
     // pushes layouts to the server
@@ -743,7 +780,7 @@ class App extends React.Component {
     let layoutLists = this.state.layoutLists;
     layoutLists.get(this.state.envID).set(this.state.saveText, layoutMap);
     this.exportLayoutsToServer(layoutLists);
-    this.setState({layoutLists: layoutLists, layoutID: this.state.saveText});
+    this.setState({ layoutLists: layoutLists, layoutID: this.state.saveText });
   }
 
   deleteLayout() {
@@ -751,18 +788,18 @@ class App extends React.Component {
     let layoutLists = this.state.layoutLists;
     layoutLists.get(this.state.envID).delete(this.state.modifyID);
     this.exportLayoutsToServer(layoutLists);
-    this.setState({layoutLists: layoutLists});
+    this.setState({ layoutLists: layoutLists });
   }
 
   updateDimensions() {
     this.setState({
-      'width': window.innerWidth,
-      'envSelectorStyle': {width: this.getEnvSelectWidth(window.innerWidth)}
+      width: window.innerWidth,
+      envSelectorStyle: { width: this.getEnvSelectWidth(window.innerWidth) },
     });
   }
 
   getEnvSelectWidth(w) {
-    return Math.max(w/3,50);
+    return Math.max(w / 3, 50);
   }
 
   componentWillMount() {
@@ -770,14 +807,14 @@ class App extends React.Component {
   }
   componentWillUnmount() {
     //Remove event listener
-    window.removeEventListener("resize", this.updateDimensions);
+    window.removeEventListener('resize', this.updateDimensions);
   }
 
   componentDidMount() {
-    window.addEventListener("resize", this.updateDimensions);
+    window.addEventListener('resize', this.updateDimensions);
     this.setState({
-      'width':window.innerWidth,
-      'envSelectorStyle': {width: this.getEnvSelectWidth(window.innerWidth)}
+      width: window.innerWidth,
+      envSelectorStyle: { width: this.getEnvSelectWidth(window.innerWidth) },
     });
     this.connect();
   }
@@ -787,11 +824,10 @@ class App extends React.Component {
       this._firstLoad = false;
       if (this.state.envIDs.length > 0) {
         this.postForEnv(this.state.envIDs);
-      }
-      else {
+      } else {
         this.setState({
-          'envIDs': ['main'],
-          'envID': 'main'
+          envIDs: ['main'],
+          envID: 'main',
         });
         this.postForEnv(['main']);
       }
@@ -799,36 +835,42 @@ class App extends React.Component {
 
     // Bootstrap tooltips need some encouragement
     if (this.state.confirmClear) {
-      $("#clear-button").attr('data-original-title', "Are you sure?")
-                        .tooltip('show');
+      $('#clear-button')
+        .attr('data-original-title', 'Are you sure?')
+        .tooltip('show');
     } else {
-      $("#clear-button").attr('data-original-title', "Clear Current Environment");
+      $('#clear-button').attr(
+        'data-original-title',
+        'Clear Current Environment'
+      );
     }
   }
 
   onWidthChange = (width, cols) => {
-    this.setState({cols: cols, width: width}, () => {this.relayout()});
-  }
+    this.setState({ cols: cols, width: width }, () => {
+      this.relayout();
+    });
+  };
 
-  generateWindowHash = (windowId) => {
+  generateWindowHash = windowId => {
     let windowContent = this.state.panes[windowId];
 
     /*Convert JSON data to string with a space of 2. This detail is important.
     It ensures that the server and browser generate same JSON string */
     let content_string = JSON.stringify(windowContent, null, 2);
-    return md5(content_string)
-  }
+    return md5(content_string);
+  };
 
-  getWindowHash = (windowId) => {
-    let url = "http://" + window.location.host + "/win_hash";
+  getWindowHash = windowId => {
+    let url = 'http://' + window.location.host + '/win_hash';
 
     let body = {
-      "win" : windowId,
-      "env" : this.state.envID
-    }
+      win: windowId,
+      env: this.state.envID,
+    };
 
-    return $.post(url, JSON.stringify(body))
-  }
+    return $.post(url, JSON.stringify(body));
+  };
 
   openEnvModal() {
     this.setState({
@@ -839,7 +881,7 @@ class App extends React.Component {
   }
 
   closeEnvModal() {
-    this.setState({showEnvModal: false});
+    this.setState({ showEnvModal: false });
   }
 
   openViewModal() {
@@ -851,7 +893,7 @@ class App extends React.Component {
   }
 
   closeViewModal() {
-    this.setState({showViewModal: false});
+    this.setState({ showViewModal: false });
   }
 
   renderEnvModal() {
@@ -864,46 +906,64 @@ class App extends React.Component {
         style={MODAL_STYLE}
       >
         <span className="visdom-title">Manage Environments</span>
-        <br/>
+        <br />
         Save or fork current environment:
-        <br/>
+        <br />
         <div className="form-inline">
           <input
             className="form-control"
             type="text"
-            onChange={(ev) => {this.setState({saveText: ev.target.value})}}
+            onChange={ev => {
+              this.setState({ saveText: ev.target.value });
+            }}
             value={this.state.saveText}
-            ref={(ref) => this._envFieldRef = ref}
+            ref={ref => (this._envFieldRef = ref)}
           />
           <button
             className="btn btn-default"
-            disabled={!(this.state.connected && this.state.envID &&
-                      (this.state.saveText.length > 0))}
-            onClick={this.saveEnv}>
-            {this.state.envList.indexOf(
-              this.state.saveText) >= 0 ? 'save' : 'fork'}
+            disabled={
+              !(
+                this.state.connected &&
+                this.state.envID &&
+                this.state.saveText.length > 0
+              )
+            }
+            onClick={this.saveEnv}
+          >
+            {this.state.envList.indexOf(this.state.saveText) >= 0
+              ? 'save'
+              : 'fork'}
           </button>
         </div>
-        <br/>
+        <br />
         Delete environment selected in dropdown:
-        <br/>
+        <br />
         <div className="form-inline">
           <select
             className="form-control"
             disabled={!this.state.connected}
-            onChange={(ev) => {this.setState({modifyID: ev.target.value})}}
-            value={this.state.modifyID}>
-            {
-              this.state.envList.map((env) => {
-                return <option key={env} value={env}>{env}</option>;
-              })
-            }
+            onChange={ev => {
+              this.setState({ modifyID: ev.target.value });
+            }}
+            value={this.state.modifyID}
+          >
+            {this.state.envList.map(env => {
+              return (
+                <option key={env} value={env}>
+                  {env}
+                </option>
+              );
+            })}
           </select>
           <button
             className="btn btn-default"
-            disabled={!this.state.connected || !this.state.modifyID ||
-                      this.state.modifyID == 'main'}
-            onClick={this.deleteEnv.bind(this)}>
+            disabled={
+              !this.state.connected ||
+              !this.state.modifyID ||
+              this.state.modifyID == 'main'
+            }
+            onClick={this.deleteEnv.bind(this)}
+          >
             Delete
           </button>
         </div>
@@ -921,45 +981,59 @@ class App extends React.Component {
         style={MODAL_STYLE}
       >
         <span className="visdom-title">Manage Views</span>
-        <br/>
+        <br />
         Save or fork current layout:
-        <br/>
+        <br />
         <div className="form-inline">
           <input
             className="form-control"
             type="text"
-            onChange={(ev) => {this.setState({saveText: ev.target.value})}}
+            onChange={ev => {
+              this.setState({ saveText: ev.target.value });
+            }}
             value={this.state.saveText}
           />
           <button
             className="btn btn-default"
-            disabled={!this.state.connected ||
-                      this.state.saveText == DEFAULT_LAYOUT}
-            onClick={this.saveLayout.bind(this)}>
-            {this.getCurrLayoutList().has(
-              this.state.saveText) ? 'save' : 'fork'}
+            disabled={
+              !this.state.connected || this.state.saveText == DEFAULT_LAYOUT
+            }
+            onClick={this.saveLayout.bind(this)}
+          >
+            {this.getCurrLayoutList().has(this.state.saveText)
+              ? 'save'
+              : 'fork'}
           </button>
         </div>
-        <br/>
+        <br />
         Delete layout view selected in dropdown:
-        <br/>
+        <br />
         <div className="form-inline">
           <select
             className="form-control"
             disabled={!this.state.connected}
-            onChange={(ev) => {this.setState({modifyID: ev.target.value})}}
-            value={this.state.modifyID}>
-            {
-              Array.from(this.getCurrLayoutList().keys()).map((view) => {
-                return <option key={view} value={view}>{view}</option>;
-              })
-            }
+            onChange={ev => {
+              this.setState({ modifyID: ev.target.value });
+            }}
+            value={this.state.modifyID}
+          >
+            {Array.from(this.getCurrLayoutList().keys()).map(view => {
+              return (
+                <option key={view} value={view}>
+                  {view}
+                </option>
+              );
+            })}
           </select>
           <button
             className="btn btn-default"
-            disabled={!this.state.connected || !this.state.modifyID ||
-                      this.state.modifyID == DEFAULT_LAYOUT}
-            onClick={this.deleteLayout.bind(this)}>
+            disabled={
+              !this.state.connected ||
+              !this.state.modifyID ||
+              this.state.modifyID == DEFAULT_LAYOUT
+            }
+            onClick={this.deleteLayout.bind(this)}
+          >
             Delete
           </button>
         </div>
@@ -970,34 +1044,38 @@ class App extends React.Component {
   mouseOverSelect = () => {
     if (this.state.flexSelectorOnHover) {
       this.setState({
-        'envSelectorStyle': {
+        envSelectorStyle: {
           display: 'flex',
           width: this.getEnvSelectWidth(this.state.width),
           'min-width': this.getEnvSelectWidth(this.state.width),
-          'flex-direction': 'column'
-        }
+          'flex-direction': 'column',
+        },
       });
     }
-  }
+  };
 
   mouseOutSelect = () => {
     if (this.state.flexSelectorOnHover) {
       this.setState({
-        'envSelectorStyle': {
+        envSelectorStyle: {
           display: 'block',
           width: this.getEnvSelectWidth(this.state.width),
           height: 30,
-          overflow: 'auto'
-        }
+          overflow: 'auto',
+        },
       });
     }
-  }
+  };
 
   renderEnvControls() {
     var slist = this.state.envList.slice();
     slist.sort();
     var roots = Array.from(
-      new Set(slist.map((x) => {return x.split('_')[0];}))
+      new Set(
+        slist.map(x => {
+          return x.split('_')[0];
+        })
+      )
     );
 
     let env_options2 = slist.map((env, idx) => {
@@ -1006,54 +1084,64 @@ class App extends React.Component {
         return null;
       }
       return {
-        key:idx + 1 + roots.length,
-        pId:roots.indexOf(env.split('_')[0]) + 1,
+        key: idx + 1 + roots.length,
+        pId: roots.indexOf(env.split('_')[0]) + 1,
         label: env,
-        value: env
+        value: env,
       };
     });
 
     env_options2 = env_options2.filter(x => x != null);
 
-    env_options2 = env_options2.concat(roots.map((x, idx) => { return {
-      key: idx+1,
-      pId: 0,
-      label: x,
-      value: x
-    };}));
+    env_options2 = env_options2.concat(
+      roots.map((x, idx) => {
+        return {
+          key: idx + 1,
+          pId: 0,
+          label: x,
+          value: x,
+        };
+      })
+    );
 
     if (this.state.confirmClear) {
-      var clearText = "Are you sure?";
-      var clearStyle = "btn btn-warning";
+      var clearText = 'Are you sure?';
+      var clearStyle = 'btn btn-warning';
     } else {
-      var clearText = "Clear Current Environment";
-      var clearStyle = "btn btn-default";
+      var clearText = 'Clear Current Environment';
+      var clearStyle = 'btn btn-default';
     }
 
     return (
       <span>
         <span>Environment&nbsp;</span>
-        <div className="btn-group navbar-btn"
+        <div
+          className="btn-group navbar-btn"
           role="group"
-          aria-label="Environment:">
-          <div className="btn-group"
+          aria-label="Environment:"
+        >
+          <div
+            className="btn-group"
             role="group"
             onMouseEnter={this.mouseOverSelect}
-            onMouseLeave={this.mouseOutSelect}>
+            onMouseLeave={this.mouseOutSelect}
+          >
             <TreeSelect
               style={this.state.envSelectorStyle}
               allowClear={true}
-              dropdownStyle={{maxHeight: 900, overflow: 'auto'}}
+              dropdownStyle={{ maxHeight: 900, overflow: 'auto' }}
               placeholder={<i>Select environment(s)</i>}
               searchPlaceholder="search"
-              treeLine maxTagTextLength={1000}
+              treeLine
+              maxTagTextLength={1000}
               inputValue={null}
               value={this.state.envIDs}
               treeData={env_options2}
               treeDefaultExpandAll
               treeNodeFilterProp="title"
               treeDataSimpleMode={this.state.treeDataSimpleMode}
-              treeCheckable showCheckedStrategy={SHOW_CHILD}
+              treeCheckable
+              showCheckedStrategy={SHOW_CHILD}
               dropdownMatchSelectWidth={false}
               onChange={this.selectEnv}
             />
@@ -1064,56 +1152,71 @@ class App extends React.Component {
             title={clearText}
             data-placement="bottom"
             className={clearStyle}
-            disabled={!(this.state.connected && this.state.envID && !this.state.readonly)}
+            disabled={
+              !(
+                this.state.connected &&
+                this.state.envID &&
+                !this.state.readonly
+              )
+            }
             onClick={this.triggerClear}
-            onBlur={this.cancelClear}>
-            <span
-              className="glyphicon glyphicon-erase">
-            </span>
+            onBlur={this.cancelClear}
+          >
+            <span className="glyphicon glyphicon-erase" />
           </button>
           <button
             data-toggle="tooltip"
             title="Manage Environments"
             data-placement="bottom"
             className="btn btn-default"
-            disabled={!(this.state.connected && this.state.envID && !this.state.readonly)}
-            onClick={this.openEnvModal.bind(this)}>
-            <span
-              className="glyphicon glyphicon-folder-open">
-            </span>
+            disabled={
+              !(
+                this.state.connected &&
+                this.state.envID &&
+                !this.state.readonly
+              )
+            }
+            onClick={this.openEnvModal.bind(this)}
+          >
+            <span className="glyphicon glyphicon-folder-open" />
           </button>
         </div>
       </span>
-    )
+    );
   }
 
   renderViewControls() {
-    let view_options = Array.from(
-      this.getCurrLayoutList().keys()).map((view) => {
-        let check_space = ''
-        if (view == this.state.layoutID) {
-          check_space = <span>&nbsp;&#10003;</span>;
-        }
-        return <li>
+    let view_options = Array.from(this.getCurrLayoutList().keys()).map(view => {
+      let check_space = '';
+      if (view == this.state.layoutID) {
+        check_space = <span>&nbsp;&#10003;</span>;
+      }
+      return (
+        <li>
           <a href="#" onClick={this.updateToLayout.bind(this, view)}>
             {view}
             {check_space}
           </a>
-        </li>;
-      }
-    )
+        </li>
+      );
+    });
     return (
       <span>
         <span>View&nbsp;</span>
         <div className="btn-group navbar-btn" role="group" aria-label="View:">
           <div className="btn-group" role="group">
-            <button className="btn btn-default dropdown-toggle"
-              type="button" id="viewDropdown" data-toggle="dropdown"
-              aria-haspopup="true" aria-expanded="true"
-              disabled={!(this.state.connected && this.state.envID)}>
-              {(this.state.envID == null) ? 'compare' : this.state.layoutID}
+            <button
+              className="btn btn-default dropdown-toggle"
+              type="button"
+              id="viewDropdown"
+              data-toggle="dropdown"
+              aria-haspopup="true"
+              aria-expanded="true"
+              disabled={!(this.state.connected && this.state.envID)}
+            >
+              {this.state.envID == null ? 'compare' : this.state.layoutID}
               &nbsp;
-              <span className="caret"></span>
+              <span className="caret" />
             </button>
             <ul className="dropdown-menu" aria-labelledby="viewDropdown">
               {view_options}
@@ -1124,39 +1227,49 @@ class App extends React.Component {
             title="Repack"
             data-placement="bottom"
             className="btn btn-default"
-            onClick={(ev) => {this.relayout(); this.relayout();}}>
-            <span
-              className="glyphicon glyphicon-th">
-            </span>
+            onClick={ev => {
+              this.relayout();
+              this.relayout();
+            }}
+          >
+            <span className="glyphicon glyphicon-th" />
           </button>
           <button
             data-toggle="tooltip"
             title="Manage Views"
             data-placement="bottom"
             className="btn btn-default"
-            disabled={!(this.state.connected && this.state.envID && !this.state.readonly)}
-            onClick={(ev) => {this.openViewModal()}}>
-            <span
-              className="glyphicon glyphicon-folder-open">
-            </span>
+            disabled={
+              !(
+                this.state.connected &&
+                this.state.envID &&
+                !this.state.readonly
+              )
+            }
+            onClick={ev => {
+              this.openViewModal();
+            }}
+          >
+            <span className="glyphicon glyphicon-folder-open" />
           </button>
         </div>
       </span>
-    )
+    );
   }
 
   renderFilterControl() {
     return (
       <div className="input-group navbar-btn">
-        <input type="text" className="form-control" placeholder="Filter text"
-          onChange={(ev) => {
-            this.setState(
-              {filter: ev.target.value}, () => {
-                Object.keys(this.state.panes).map((paneID) => {
-                  this.focusPane(paneID);
-                });
-              }
-            );
+        <input
+          type="text"
+          className="form-control"
+          placeholder="Filter text"
+          onChange={ev => {
+            this.setState({ filter: ev.target.value }, () => {
+              Object.keys(this.state.panes).map(paneID => {
+                this.focusPane(paneID);
+              });
+            });
             localStorage.setItem('filter', ev.target.value);
             // TODO remove this once relayout is moved to a post-state
             // update kind of thing
@@ -1164,7 +1277,8 @@ class App extends React.Component {
             this.relayout();
             this.relayout();
           }}
-          value={this.state.filter}/>
+          value={this.state.filter}
+        />
         <span className="input-group-btn">
           <button
             data-toggle="tooltip"
@@ -1172,9 +1286,9 @@ class App extends React.Component {
             data-placement="bottom"
             type="button"
             className="btn btn-default"
-            onClick={(ev) => {this.setState(
-              {filter: ''}, () => {
-                Object.keys(this.state.panes).map((paneID) => {
+            onClick={ev => {
+              this.setState({ filter: '' }, () => {
+                Object.keys(this.state.panes).map(paneID => {
                   this.focusPane(paneID);
                 });
               });
@@ -1184,10 +1298,9 @@ class App extends React.Component {
               localStorage.setItem('filter', '');
               this.relayout();
               this.relayout();
-            }}>
-            <span
-              className="glyphicon glyphicon-erase">
-            </span>
+            }}
+          >
+            <span className="glyphicon glyphicon-erase" />
           </button>
         </span>
       </div>
@@ -1195,7 +1308,7 @@ class App extends React.Component {
   }
 
   render() {
-    let panes = Object.keys(this.state.panes).map((id) => {
+    let panes = Object.keys(this.state.panes).map(id => {
       let pane = this.state.panes[id];
       let Comp = PANES[pane.type];
       if (!Comp) {
@@ -1204,10 +1317,9 @@ class App extends React.Component {
       }
       let panelayout = getLayoutItem(this.state.layout, id);
       let filter = this.getValidFilter(this.state.filter);
-      let isVisible = pane.title.match(filter)
+      let isVisible = pane.title.match(filter);
       return (
-        <div key={pane.id}
-          className={isVisible? '' : 'hidden-window'}>
+        <div key={pane.id} className={isVisible ? '' : 'hidden-window'}>
           <Comp
             {...pane}
             key={pane.id}
@@ -1217,7 +1329,7 @@ class App extends React.Component {
             isFocused={pane.id === this.state.focusedPaneID}
             w={panelayout.w}
             h={panelayout.h}
-            appApi={{sendPaneMessage: this.sendPaneMessage}}
+            appApi={{ sendPaneMessage: this.sendPaneMessage }}
           />
         </div>
       );
@@ -1235,25 +1347,30 @@ class App extends React.Component {
         {viewModal}
         <div className="navbar-form navbar-default">
           <span className="navbar-brand visdom-title">visdom</span>
-          <span className="vertical-line"></span>
+          <span className="vertical-line" />
           &nbsp;&nbsp;
           {envControls}
           &nbsp;&nbsp;
-          <span className="vertical-line"></span>
+          <span className="vertical-line" />
           &nbsp;&nbsp;
           {viewControls}
-          <span style={{float: 'right'}}>
+          <span style={{ float: 'right' }}>
             {filterControl}
             &nbsp;&nbsp;
             <button
               className={classNames({
-                'btn': true,
+                btn: true,
                 'btn-warning': this.state.connected && this.state.readonly,
                 'btn-success': this.state.connected && !this.state.readonly,
-                'btn-danger': !this.state.connected
-                })}
-              onClick={this.toggleOnlineState}>
-              {this.state.connected ? (this.state.readonly ? 'readonly' : 'online') : 'offline'}
+                'btn-danger': !this.state.connected,
+              })}
+              onClick={this.toggleOnlineState}
+            >
+              {this.state.connected
+                ? this.state.readonly
+                  ? 'readonly'
+                  : 'online'
+                : 'offline'}
             </button>
           </span>
         </div>
@@ -1269,36 +1386,33 @@ class App extends React.Component {
             className="layout"
             rowHeight={ROW_HEIGHT}
             autoSize={false}
-            margin={[MARGIN,MARGIN]}
+            margin={[MARGIN, MARGIN]}
             layout={this.state.layout}
             draggableHandle={'.bar'}
             onLayoutChange={this.handleLayoutChange}
             onWidthChange={this.onWidthChange}
             onResizeStop={this.resizePane}
-            onDragStop={this.movePane}>
+            onDragStop={this.movePane}
+          >
             {panes}
           </GridLayout>
         </div>
       </div>
-    )
+    );
   }
 }
 
-
 function load() {
-  ReactDOM.render(
-    <App />,
-    document.getElementById('app')
-  );
+  ReactDOM.render(<App />, document.getElementById('app'));
   document.removeEventListener('DOMContentLoaded', load);
 }
 
 document.addEventListener('DOMContentLoaded', load);
 
-$(document).ready(function(){
+$(document).ready(function() {
   $('[data-toggle="tooltip"]').tooltip({
     container: 'body',
-    delay: {show: 600, hide: 100},
-    trigger : 'hover',
+    delay: { show: 600, hide: 100 },
+    trigger: 'hover',
   });
 });
