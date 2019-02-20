@@ -9,5 +9,8 @@
     "browser": true,
     "es6": true,
     "commonjs": true
+  },
+  "rules": {
+    "react/prop-types": 0
   }
 }
