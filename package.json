@@ -1,6 +1,6 @@
 {
   "name": "visdom",
-  "private": "true",
+  "private": true,
   "version": "1.0.0",
   "main": "index.js",
   "license": "CC-BY-NC-4.0",
