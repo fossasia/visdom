@@ -7,16 +7,17 @@
  *
  */
 
- // @flow
+import React from "react";
+import ReactDOM from "react-dom";
 
-const Width: ProviderT = (ComposedComponent) => class extends React.Component {
+const Width = (ComposedComponent) => class Width extends React.Component {
 
-  state: State = {
+  state = {
     width: 1280,
     cols: 100,
   };
 
-  mounted: boolean = false;
+  mounted = false;
 
   componentDidMount() {
     this.mounted = true;
@@ -36,7 +37,8 @@ const Width: ProviderT = (ComposedComponent) => class extends React.Component {
     if (!this.mounted) return;
 
     let oldWidth = this.state.width;
-    const node = ReactDOM.findDOMNode(this);
+    const node = ReactDOM.findDOMNode(this); /* eslint-disable-line react/no-find-dom-node */
+
 
     this.setState({
         width: node.offsetWidth,
@@ -47,7 +49,7 @@ const Width: ProviderT = (ComposedComponent) => class extends React.Component {
     );
   }
 
-  onWindowResize = (_event: ?Event) => {
+  onWindowResize = () => {
     if (this.resizeTimer) clearTimeout(this.resizeTimer);
     this.resizeTimer = setTimeout(this.onWindowResizeStop, 200);
   }

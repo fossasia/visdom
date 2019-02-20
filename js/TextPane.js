@@ -7,6 +7,7 @@
  *
  */
 
+import React from "react";
 import EventSystem from "./EventSystem";
 const Pane = require('./Pane');
 
@@ -37,7 +38,7 @@ class TextPane extends React.Component {
   componentDidMount() {
       EventSystem.subscribe('global.event', this.onEvent)
   }
-  componentWillMount() {
+  UNSAFE_componentWillMount() {
       EventSystem.unsubscribe('global.event', this.onEvent)
   }
 

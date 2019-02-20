@@ -7,6 +7,7 @@
  *
  */
 
+import React from "react";
 const Pane = require('./Pane');
 
 class MyRef {
@@ -63,7 +64,7 @@ class Text extends React.Component {
     this.setState({isEdited: true});
   };
 
-  componentWillReceiveProps(nextProps) {
+  UNSAFE_componentWillReceiveProps(nextProps) {
     if (this.state.propsValue !== nextProps.value || !this.state.isEdited) {
       let newState = this.state.isEdited
           ? {propsValue: nextProps.value}
@@ -135,7 +136,7 @@ class PropertiesPane extends React.Component {
                        onChange={(event) => this.updateValue(propId, event.target.value)}
                        value={prop.value}
         >
-          {prop.values.map((name, id) => <option value={id}>{name}</option>)}
+          {prop.values.map((name, id) => <option key={id} value={id}>{name}</option>)}
         </select>;
     }
   };

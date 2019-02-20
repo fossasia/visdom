@@ -6,11 +6,13 @@
  * LICENSE file in the root directory of this source tree.
  *
  */
+
+import React from "react";
 var classNames = require('classnames');
 
 class Pane extends React.Component {
-  _windowRef: null;
-  _barRef: null;
+  _windowRef = null;
+  _barRef = null;
 
   close = () => {
     this.props.onClose(this.props.id);
@@ -64,7 +66,7 @@ class Pane extends React.Component {
     };
   }
 
-  shouldComponentUpdate(nextProps, nextState) {
+  shouldComponentUpdate(nextProps) {
     if (this.props.contentID !== nextProps.contentID){
       return true;
     }

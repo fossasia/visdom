@@ -12,5 +12,8 @@
   },
   "rules": {
     "react/prop-types": 0
+  },
+  "globals": {
+    "Plotly": "readable"
   }
 }

@@ -7,6 +7,7 @@
  *
  */
 
+import React from "react";
 const Pane = require('./Pane');
 
 class PlotPane extends React.Component {
@@ -19,7 +20,7 @@ class PlotPane extends React.Component {
     this.newPlot();
   }
 
-  componentDidUpdate(prevProps, prevState) {
+  componentDidUpdate(prevProps) {
     // Retain trace visibility between old and new plots
     let trace_visibility_by_name = {};
     let trace_idx = null;
@@ -50,7 +51,7 @@ class PlotPane extends React.Component {
     this.newPlot();
   }
 
-  shouldComponentUpdate(nextProps, nextState) {
+  shouldComponentUpdate(nextProps) {
     if (this.props.contentID !== nextProps.contentID) {
       return true;
     }

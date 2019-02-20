@@ -7,13 +7,14 @@
  *
  */
 
+import React from "react";
 import EventSystem from "./EventSystem";
 const Pane = require('./Pane');
 
 class ImagePane extends React.Component {
   _paneRef = null;
 
-  state: State = {
+  state = {
     scale: 1.,
     tx: 0.,
     ty: 0.,
@@ -49,7 +50,7 @@ class ImagePane extends React.Component {
     EventSystem.subscribe('global.event', this.onEvent)
   }
 
-  componentWillMount() {
+  UNSAFE_componentWillMount() {
     EventSystem.unsubscribe('global.event', this.onEvent)
   }
 
@@ -63,10 +64,10 @@ class ImagePane extends React.Component {
   handleZoom = (ev) => {
     if(ev.altKey) {
       //var direction = natural.checked ? -1 : 1;
-      var direction =  -1;
+      let direction =  -1;
       // Get browser independent scaling factor 
-      var scrollDirectionX = Math.sign(ev.deltaX);
-      var scrollDirectionY = Math.sign(ev.deltaY);
+      let scrollDirectionX = Math.sign(ev.deltaX);
+      let scrollDirectionY = Math.sign(ev.deltaY);
       // If shift is pressed only scroll sidewise (to allow scrolling to the side by keep shift pressed and using normal scrolling on the image pane)
       if(ev.shiftKey){
         this.setState({tx: this.state.tx + scrollDirectionY * direction*50});
@@ -79,16 +80,16 @@ class ImagePane extends React.Component {
       ev.preventDefault();
     } else if (ev.ctrlKey) {
       // get the x and y offset of the pane
-      var rect = this._paneRef._windowRef.children[1].getBoundingClientRect();
+      let rect = this._paneRef._windowRef.children[1].getBoundingClientRect();
       // Get browser independent scaling factor
-      var scrollDirectionY = Math.sign(ev.deltaY);
+      let scrollDirectionY = Math.sign(ev.deltaY);
       // Compute the coords of the mouse relative to the top left of the pane
-      var xscreen = ev.clientX - rect.x;
-      var yscreen = ev.clientY - rect.y;
+      let xscreen = ev.clientX - rect.x;
+      let yscreen = ev.clientY - rect.y;
       // Compute the coords of the pixel under the mouse wrt the image top left
-      var ximage = (xscreen - this.state.tx) / this.state.scale;
-      var yimage = (yscreen - this.state.ty) / this.state.scale;
-      var new_scale = this.state.scale * Math.exp(-scrollDirectionY/10);
+      let ximage = (xscreen - this.state.tx) / this.state.scale;
+      let yimage = (yscreen - this.state.ty) / this.state.scale;
+      let new_scale = this.state.scale * Math.exp(-scrollDirectionY/10);
       // Update the state.
       // The offset is modifed such that the pixel under the mouse
       // is the same after zooming
