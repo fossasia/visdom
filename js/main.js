@@ -7,8 +7,14 @@
  *
  */
 
+// TODO: FIX the following lint errors in this file over time so that nothing needs to be disabled:
+/* eslint-disable no-unused-vars, react/no-direct-mutation-state, no-redeclare, no-case-declarations, no-console, no-debugger */
+
+/* global ACTIVE_ENV ENV_LIST $ Bin */
+
 'use strict';
 import React from 'react';
+import ReactDOM from 'react-dom';
 import ReactModal from 'react-modal';
 var classNames = require('classnames');
 import 'rc-tree-select/assets/index.css';
@@ -802,7 +808,7 @@ class App extends React.Component {
     return Math.max(w / 3, 50);
   }
 
-  componentWillMount() {
+  UNSAFE_componentWillMount() {
     this.updateDimensions();
   }
   componentWillUnmount() {
@@ -1192,7 +1198,7 @@ class App extends React.Component {
         check_space = <span>&nbsp;&#10003;</span>;
       }
       return (
-        <li>
+        <li key={view}>
           <a href="#" onClick={this.updateToLayout.bind(this, view)}>
             {view}
             {check_space}
