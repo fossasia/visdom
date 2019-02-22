@@ -66,7 +66,9 @@ class ImagePane extends React.Component {
       // Get browser independent scaling factor
       let scrollDirectionX = Math.sign(ev.deltaX);
       let scrollDirectionY = Math.sign(ev.deltaY);
-      // If shift is pressed only scroll sidewise (to allow scrolling to the side by keep shift pressed and using normal scrolling on the image pane)
+      // If shift is pressed only scroll sidewise (to allow scrolling
+      // to the side by keep shift pressed and using normal scrolling
+      // on the image pane)
       if (ev.shiftKey) {
         this.setState({
           tx: this.state.tx + scrollDirectionY * direction * 50,

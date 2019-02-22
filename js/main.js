@@ -7,8 +7,12 @@
  *
  */
 
-// TODO: FIX the following lint errors in this file over time so that nothing needs to be disabled:
-/* eslint-disable no-unused-vars, react/no-direct-mutation-state, no-redeclare, no-case-declarations, no-console, no-debugger */
+// TODO: FIX the following lint errors in this file over time
+// so that nothing needs to be disabled:
+
+/* eslint-disable no-unused-vars, react/no-direct-mutation-state*/
+/* eslint-disable no-redeclare, no-case-declarations */
+/* eslint-disable no-console, no-debugger */
 
 /* global ACTIVE_ENV ENV_LIST $ Bin */
 
