@@ -117,7 +117,9 @@ class App extends React.Component {
       id: 'key',
       rootPId: 0,
     },
-    envSelectorStyle: { width: 1280 / 2 },
+    envSelectorStyle: {
+      width: 1280 / 2,
+    },
     flexSelectorOnHover: false,
     confirmClear: false,
   };
@@ -226,7 +228,10 @@ class App extends React.Component {
         if (newPane.height) h = Math.ceil(this.p2h(newPane.height + 14));
         if (newPane.content && newPane.content.caption) h += 1;
 
-        this._bin.content.push({ width: w, height: h });
+        this._bin.content.push({
+          width: w,
+          height: h,
+        });
 
         let pos = this._bin.position(newLayout.length, this.state.cols);
 
@@ -270,7 +275,9 @@ class App extends React.Component {
     socket.onmessage = this._handleMessage;
 
     socket.onopen = () => {
-      this.setState({ connected: true });
+      this.setState({
+        connected: true,
+      });
     };
 
     socket.onerror = socket.onclose = () => {
@@ -366,7 +373,10 @@ class App extends React.Component {
           }
         }
         if (!this.state.showEnvModal || this.state.modifyID in cmd.data) {
-          this.setState({ envList: cmd.data, layoutLists: layoutLists });
+          this.setState({
+            envList: cmd.data,
+            layoutLists: layoutLists,
+          });
         } else {
           this.setState({
             envList: cmd.data,
@@ -457,13 +467,17 @@ class App extends React.Component {
     if (this.state.confirmClear) {
       this.closeAllPanes();
     } else {
-      this.setState({ confirmClear: true });
+      this.setState({
+        confirmClear: true,
+      });
     }
   };
 
   cancelClear = () => {
     if (this.state.confirmClear) {
-      this.setState({ confirmClear: false });
+      this.setState({
+        confirmClear: false,
+      });
     }
   };
 
@@ -500,12 +514,16 @@ class App extends React.Component {
     if (envIDs.length == 1) {
       $.post(
         this.correctPathname() + 'env/' + envIDs[0],
-        JSON.stringify({ sid: this.state.sessionID })
+        JSON.stringify({
+          sid: this.state.sessionID,
+        })
       );
     } else if (envIDs.length > 1) {
       $.post(
         this.correctPathname() + 'compare/' + envIDs.join('+'),
-        JSON.stringify({ sid: this.state.sessionID })
+        JSON.stringify({
+          sid: this.state.sessionID,
+        })
       );
     }
   };
@@ -578,13 +596,17 @@ class App extends React.Component {
   };
 
   resizePane = (layout, oldLayoutItem, layoutItem) => {
-    this.setState({ layoutID: DEFAULT_LAYOUT });
+    this.setState({
+      layoutID: DEFAULT_LAYOUT,
+    });
     this.focusPane(layoutItem.i);
     this.updateLayout(layout);
   };
 
   movePane = (layout, oldLayoutItem, layoutItem) => {
-    this.setState({ layoutID: DEFAULT_LAYOUT });
+    this.setState({
+      layoutID: DEFAULT_LAYOUT,
+    });
     this.updateLayout(layout);
   };
 
@@ -662,7 +684,9 @@ class App extends React.Component {
       return Object.assign({}, paneLayout, pos);
     });
 
-    this.setState({ panes: newPanes });
+    this.setState({
+      panes: newPanes,
+    });
     // TODO this is very non-conventional react, someday it shall be fixed but
     // for now it's important to fix relayout grossness
     this.state.panes = newPanes;
@@ -689,7 +713,9 @@ class App extends React.Component {
   };
 
   updateToLayout = layoutID => {
-    this.setState({ layoutID: layoutID });
+    this.setState({
+      layoutID: layoutID,
+    });
     // TODO this is very non-conventional react, someday it shall be fixed but
     // for now it's important to fix relayout grossness
     this.state.layoutID = layoutID;
@@ -724,7 +750,10 @@ class App extends React.Component {
       // If the current view was deleted by someone else (eek)
       layoutID = DEFAULT_LAYOUT;
     }
-    this.setState({ layoutLists: layoutLists, layoutID: layoutID });
+    this.setState({
+      layoutLists: layoutLists,
+      layoutID: layoutID,
+    });
   }
 
   publishEvent = event => {
@@ -786,7 +815,10 @@ class App extends React.Component {
     let layoutLists = this.state.layoutLists;
     layoutLists.get(this.state.envID).set(this.state.saveText, layoutMap);
     this.exportLayoutsToServer(layoutLists);
-    this.setState({ layoutLists: layoutLists, layoutID: this.state.saveText });
+    this.setState({
+      layoutLists: layoutLists,
+      layoutID: this.state.saveText,
+    });
   }
 
   deleteLayout() {
@@ -794,13 +826,17 @@ class App extends React.Component {
     let layoutLists = this.state.layoutLists;
     layoutLists.get(this.state.envID).delete(this.state.modifyID);
     this.exportLayoutsToServer(layoutLists);
-    this.setState({ layoutLists: layoutLists });
+    this.setState({
+      layoutLists: layoutLists,
+    });
   }
 
   updateDimensions() {
     this.setState({
       width: window.innerWidth,
-      envSelectorStyle: { width: this.getEnvSelectWidth(window.innerWidth) },
+      envSelectorStyle: {
+        width: this.getEnvSelectWidth(window.innerWidth),
+      },
     });
   }
 
@@ -820,7 +856,9 @@ class App extends React.Component {
     window.addEventListener('resize', this.updateDimensions);
     this.setState({
       width: window.innerWidth,
-      envSelectorStyle: { width: this.getEnvSelectWidth(window.innerWidth) },
+      envSelectorStyle: {
+        width: this.getEnvSelectWidth(window.innerWidth),
+      },
     });
     this.connect();
   }
@@ -853,9 +891,15 @@ class App extends React.Component {
   }
 
   onWidthChange = (width, cols) => {
-    this.setState({ cols: cols, width: width }, () => {
-      this.relayout();
-    });
+    this.setState(
+      {
+        cols: cols,
+        width: width,
+      },
+      () => {
+        this.relayout();
+      }
+    );
   };
 
   generateWindowHash = windowId => {
@@ -887,7 +931,9 @@ class App extends React.Component {
   }
 
   closeEnvModal() {
-    this.setState({ showEnvModal: false });
+    this.setState({
+      showEnvModal: false,
+    });
   }
 
   openViewModal() {
@@ -899,7 +945,9 @@ class App extends React.Component {
   }
 
   closeViewModal() {
-    this.setState({ showViewModal: false });
+    this.setState({
+      showViewModal: false,
+    });
   }
 
   renderEnvModal() {
@@ -920,7 +968,9 @@ class App extends React.Component {
             className="form-control"
             type="text"
             onChange={ev => {
-              this.setState({ saveText: ev.target.value });
+              this.setState({
+                saveText: ev.target.value,
+              });
             }}
             value={this.state.saveText}
             ref={ref => (this._envFieldRef = ref)}
@@ -949,7 +999,9 @@ class App extends React.Component {
             className="form-control"
             disabled={!this.state.connected}
             onChange={ev => {
-              this.setState({ modifyID: ev.target.value });
+              this.setState({
+                modifyID: ev.target.value,
+              });
             }}
             value={this.state.modifyID}
           >
@@ -995,7 +1047,9 @@ class App extends React.Component {
             className="form-control"
             type="text"
             onChange={ev => {
-              this.setState({ saveText: ev.target.value });
+              this.setState({
+                saveText: ev.target.value,
+              });
             }}
             value={this.state.saveText}
           />
@@ -1019,7 +1073,9 @@ class App extends React.Component {
             className="form-control"
             disabled={!this.state.connected}
             onChange={ev => {
-              this.setState({ modifyID: ev.target.value });
+              this.setState({
+                modifyID: ev.target.value,
+              });
             }}
             value={this.state.modifyID}
           >
@@ -1135,7 +1191,10 @@ class App extends React.Component {
             <TreeSelect
               style={this.state.envSelectorStyle}
               allowClear={true}
-              dropdownStyle={{ maxHeight: 900, overflow: 'auto' }}
+              dropdownStyle={{
+                maxHeight: 900,
+                overflow: 'auto',
+              }}
               placeholder={<i>Select environment(s)</i>}
               searchPlaceholder="search"
               treeLine
@@ -1271,11 +1330,16 @@ class App extends React.Component {
           className="form-control"
           placeholder="Filter text"
           onChange={ev => {
-            this.setState({ filter: ev.target.value }, () => {
-              Object.keys(this.state.panes).map(paneID => {
-                this.focusPane(paneID);
-              });
-            });
+            this.setState(
+              {
+                filter: ev.target.value,
+              },
+              () => {
+                Object.keys(this.state.panes).map(paneID => {
+                  this.focusPane(paneID);
+                });
+              }
+            );
             localStorage.setItem('filter', ev.target.value);
             // TODO remove this once relayout is moved to a post-state
             // update kind of thing
@@ -1293,11 +1357,16 @@ class App extends React.Component {
             type="button"
             className="btn btn-default"
             onClick={ev => {
-              this.setState({ filter: '' }, () => {
-                Object.keys(this.state.panes).map(paneID => {
-                  this.focusPane(paneID);
-                });
-              });
+              this.setState(
+                {
+                  filter: '',
+                },
+                () => {
+                  Object.keys(this.state.panes).map(paneID => {
+                    this.focusPane(paneID);
+                  });
+                }
+              );
               // TODO remove this once relayout is moved to a post-state
               // update kind of thing
               this.state.filter = '';
@@ -1335,7 +1404,9 @@ class App extends React.Component {
             isFocused={pane.id === this.state.focusedPaneID}
             w={panelayout.w}
             h={panelayout.h}
-            appApi={{ sendPaneMessage: this.sendPaneMessage }}
+            appApi={{
+              sendPaneMessage: this.sendPaneMessage,
+            }}
           />
         </div>
       );
@@ -1360,7 +1431,11 @@ class App extends React.Component {
           <span className="vertical-line" />
           &nbsp;&nbsp;
           {viewControls}
-          <span style={{ float: 'right' }}>
+          <span
+            style={{
+              float: 'right',
+            }}
+          >
             {filterControl}
             &nbsp;&nbsp;
             <button
@@ -1418,7 +1493,10 @@ document.addEventListener('DOMContentLoaded', load);
 $(document).ready(function() {
   $('[data-toggle="tooltip"]').tooltip({
     container: 'body',
-    delay: { show: 600, hide: 100 },
+    delay: {
+      show: 600,
+      hide: 100,
+    },
     trigger: 'hover',
   });
 });

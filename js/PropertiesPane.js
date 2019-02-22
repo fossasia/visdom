@@ -40,7 +40,9 @@ class Text extends React.Component {
     if (this.props.validateHandler && !this.props.validateHandler(newValue)) {
       event.preventDefault();
     } else {
-      this.setState({ actualValue: newValue });
+      this.setState({
+        actualValue: newValue,
+      });
     }
   };
 
@@ -60,14 +62,21 @@ class Text extends React.Component {
   };
 
   onFocus = () => {
-    this.setState({ isEdited: true });
+    this.setState({
+      isEdited: true,
+    });
   };
 
   UNSAFE_componentWillReceiveProps(nextProps) {
     if (this.state.propsValue !== nextProps.value || !this.state.isEdited) {
       let newState = this.state.isEdited
-        ? { propsValue: nextProps.value }
-        : { propsValue: nextProps.value, actualValue: nextProps.value };
+        ? {
+            propsValue: nextProps.value,
+          }
+        : {
+            propsValue: nextProps.value,
+            actualValue: nextProps.value,
+          };
       this.setState(newState);
     }
   }

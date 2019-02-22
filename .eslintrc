@@ -7,7 +7,16 @@
     "commonjs": true
   },
   "rules": {
-    "react/prop-types": 0
+    "react/prop-types": 0,
+    "max-len": [
+      "error",
+      {
+        "code": 80,
+        "ignoreUrls": true,
+        "ignoreStrings": true,
+        "ignoreComments": true
+      }
+    ]
   },
   "settings": {
     "react": {
