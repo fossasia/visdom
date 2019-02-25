@@ -7,6 +7,7 @@
  *
  */
 
+import React from 'react';
 const Pane = require('./Pane');
 
 class PlotPane extends React.Component {
@@ -19,7 +20,7 @@ class PlotPane extends React.Component {
     this.newPlot();
   }
 
-  componentDidUpdate(prevProps, prevState) {
+  componentDidUpdate(prevProps) {
     // Retain trace visibility between old and new plots
     let trace_visibility_by_name = {};
     let trace_idx = null;
@@ -50,14 +51,12 @@ class PlotPane extends React.Component {
     this.newPlot();
   }
 
-  shouldComponentUpdate(nextProps, nextState) {
+  shouldComponentUpdate(nextProps) {
     if (this.props.contentID !== nextProps.contentID) {
       return true;
-    }
-    else if (this.props.h !== nextProps.h || this.props.w !== nextProps.w) {
+    } else if (this.props.h !== nextProps.h || this.props.w !== nextProps.w) {
       return true;
-    }
-    else if (this.props.isFocused !== nextProps.isFocused) {
+    } else if (this.props.isFocused !== nextProps.isFocused) {
       return true;
     }
     return false;
@@ -68,35 +67,36 @@ class PlotPane extends React.Component {
       this.props.contentID,
       this.props.content.data,
       this.props.content.layout,
-      {showLink: true, linkText: ' '}
+      { showLink: true, linkText: ' ' }
     );
-  }
+  };
 
   handleDownload = () => {
     Plotly.downloadImage(this._plotlyRef, {
       format: 'svg',
       filename: this.props.contentID,
     });
-  }
+  };
 
   resize = () => {
     this.componentDidUpdate();
-  }
+  };
 
   render() {
     return (
       <Pane
         {...this.props}
         handleDownload={this.handleDownload}
-        ref={(ref) => this._paneRef = ref}>
+        ref={ref => (this._paneRef = ref)}
+      >
         <div
           id={this.props.contentID}
-          style={{height: '100%', width: '100%'}}
+          style={{ height: '100%', width: '100%' }}
           className="plotly-graph-div"
-          ref={(ref) => this._plotlyRef = ref}
+          ref={ref => (this._plotlyRef = ref)}
         />
       </Pane>
-    )
+    );
   }
 }
 
