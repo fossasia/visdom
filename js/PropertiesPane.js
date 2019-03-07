@@ -7,10 +7,10 @@
  *
  */
 
+import React from 'react';
 const Pane = require('./Pane');
 
 class MyRef {
-
   constructor() {
     this._ref = null;
   }
@@ -19,9 +19,9 @@ class MyRef {
     return this._ref;
   }
 
-  setRef = (ref) => {
+  setRef = ref => {
     this._ref = ref;
-  }
+  };
 }
 
 class Text extends React.Component {
@@ -31,28 +31,30 @@ class Text extends React.Component {
     this.state = {
       propsValue: props.value,
       actualValue: props.value,
-      isEdited: false
+      isEdited: false,
     };
   }
 
-  handleChange = (event) => {
+  handleChange = event => {
     let newValue = event.target.value;
     if (this.props.validateHandler && !this.props.validateHandler(newValue)) {
       event.preventDefault();
     } else {
-      this.setState({actualValue: newValue});
+      this.setState({
+        actualValue: newValue,
+      });
     }
   };
 
-  handleKeyPress = (event) => {
-    if (event.key === "Enter") {
+  handleKeyPress = event => {
+    if (event.key === 'Enter') {
       let ref = this.textInput.getRef();
       if (ref) ref.blur(); // Blur invokes submit
     }
   };
 
   onBlur = () => {
-    this.setState({isEdited: false}, () => {
+    this.setState({ isEdited: false }, () => {
       if (this.props.submitHandler) {
         this.props.submitHandler(this.state.actualValue);
       }
@@ -60,32 +62,47 @@ class Text extends React.Component {
   };
 
   onFocus = () => {
-    this.setState({isEdited: true});
+    this.setState({
+      isEdited: true,
+    });
   };
 
-  componentWillReceiveProps(nextProps) {
+  UNSAFE_componentWillReceiveProps(nextProps) {
     if (this.state.propsValue !== nextProps.value || !this.state.isEdited) {
       let newState = this.state.isEdited
-          ? {propsValue: nextProps.value}
-          : {propsValue: nextProps.value, actualValue: nextProps.value};
+        ? {
+            propsValue: nextProps.value,
+          }
+        : {
+            propsValue: nextProps.value,
+            actualValue: nextProps.value,
+          };
       this.setState(newState);
     }
   }
 
   render() {
     return (
-        <input type="text" ref={this.textInput.setRef} value={this.state.actualValue} onChange={this.handleChange}
-               onKeyPress={this.handleKeyPress} onBlur={this.onBlur} onFocus={this.onFocus}/>
+      <input
+        type="text"
+        ref={this.textInput.setRef}
+        value={this.state.actualValue}
+        onChange={this.handleChange}
+        onKeyPress={this.handleKeyPress}
+        onBlur={this.onBlur}
+        onFocus={this.onFocus}
+      />
     );
   }
 }
 
 class PropertiesPane extends React.Component {
-
   handleDownload = () => {
-    var blob = new Blob([JSON.stringify(this.props.content)], {type: "application/json"});
+    var blob = new Blob([JSON.stringify(this.props.content)], {
+      type: 'application/json',
+    });
     var url = window.URL.createObjectURL(blob);
-    var link = document.createElement("a");
+    var link = document.createElement('a');
     link.download = 'visdom_properties.json';
     link.href = url;
     link.click();
@@ -93,68 +110,85 @@ class PropertiesPane extends React.Component {
 
   updateValue = (propId, value) => {
     this.props.onFocus(this.props.id, () => {
-      this.props.appApi.sendPaneMessage(
-          {
-            event_type: 'PropertyUpdate',
-            propertyId: propId,
-            value: value
-          }
-      );
+      this.props.appApi.sendPaneMessage({
+        event_type: 'PropertyUpdate',
+        propertyId: propId,
+        value: value,
+      });
     });
   };
 
   renderPropertyValue = (prop, propId) => {
     switch (prop.type) {
       case 'text':
-        return <Text
+        return (
+          <Text
             value={prop.value}
-            submitHandler={(value) => this.updateValue(propId, value)}
-        />;
+            submitHandler={value => this.updateValue(propId, value)}
+          />
+        );
       case 'number':
-        return <Text
+        return (
+          <Text
             value={prop.value}
-            submitHandler={(value) => this.updateValue(propId, value)}
-            validateHandler={(value) => value.match(/^[0-9]*([.][0-9]*)?$/i)}
-        />;
+            submitHandler={value => this.updateValue(propId, value)}
+            validateHandler={value => value.match(/^[0-9]*([.][0-9]*)?$/i)}
+          />
+        );
       case 'button':
-        return <button
+        return (
+          <button
             className="btn btn-sm"
-            onClick={() => this.updateValue(propId, "clicked")}
-        >{prop.value}</button>
+            onClick={() => this.updateValue(propId, 'clicked')}
+          >
+            {prop.value}
+          </button>
+        );
       case 'checkbox':
-        return <label className="checkbox-inline">
-          <input
+        return (
+          <label className="checkbox-inline">
+            <input
               type="checkbox"
               checked={prop.value}
               onChange={() => this.updateValue(propId, !prop.value)}
-          />
-          &nbsp;
-        </label>;
+            />
+            &nbsp;
+          </label>
+        );
       case 'select':
-        return <select className="form-control"
-                       onChange={(event) => this.updateValue(propId, event.target.value)}
-                       value={prop.value}
-        >
-          {prop.values.map((name, id) => <option value={id}>{name}</option>)}
-        </select>;
+        return (
+          <select
+            className="form-control"
+            onChange={event => this.updateValue(propId, event.target.value)}
+            value={prop.value}
+          >
+            {prop.values.map((name, id) => (
+              <option key={id} value={id}>
+                {name}
+              </option>
+            ))}
+          </select>
+        );
     }
   };
 
   render() {
     return (
-        <Pane {...this.props} handleDownload={this.handleDownload}>
-          <div className="content-properties">
-            <table className="table table-bordered table-condensed table-properties">
-              {this.props.content.map((prop, propId) =>
-                  <tr key={propId}>
-                    <td className="table-properties-name">{prop.name}</td>
-                    <td className="table-properties-value">{this.renderPropertyValue(prop, propId)}</td>
-                  </tr>
-              )}
-            </table>
-          </div>
-        </Pane>
-    )
+      <Pane {...this.props} handleDownload={this.handleDownload}>
+        <div className="content-properties">
+          <table className="table table-bordered table-condensed table-properties">
+            {this.props.content.map((prop, propId) => (
+              <tr key={propId}>
+                <td className="table-properties-name">{prop.name}</td>
+                <td className="table-properties-value">
+                  {this.renderPropertyValue(prop, propId)}
+                </td>
+              </tr>
+            ))}
+          </table>
+        </div>
+      </Pane>
+    );
   }
 }
 
