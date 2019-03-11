@@ -1393,8 +1393,7 @@ class App extends React.Component {
       try {
         let Comp = PANES[pane.type];
         if (!Comp) {
-          console.error('unrecognized pane type: ', pane);
-          return null;
+          throw new Error('unrecognized pane type: ' + pane);
         }
         let panelayout = getLayoutItem(this.state.layout, id);
         let filter = this.getValidFilter(this.state.filter);
