@@ -86,6 +86,10 @@ class Scene extends React.Component {
     // const width = this.mount.clientWidth;
     // const height = this.mount.clientHeight;
 
+    // References:
+    // https://blog.fastforwardlabs.com/2017/10/04/using-three-js-for-2d-data-visualization.html
+    // https://codepen.io/WebSeed/pen/MEBoRq
+
     const width = this.props.width;
     const height = this.props.height;
     const point_num = 500000;
