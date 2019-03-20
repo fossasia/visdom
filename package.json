@@ -24,13 +24,15 @@
   },
   "scripts": {
     "dev": "webpack --watch --progress --colors",
-    "build": "webpack -p",
+    "build": "webpack",
     "buckbuild": "$_ ./node_modules/webpack/bin/webpack.js -p",
     "lint": "eslint js/."
   },
   "dependencies": {
     "create-react-class": "^15.6.3",
     "css-loader": "^0.28.9",
+    "d3-selection": "^1.4.0",
+    "d3-zoom": "^1.7.3",
     "fast-json-patch": "^2.0.7",
     "jquery": "^3.3.1",
     "json-stable-stringify": "^1.0.1",
@@ -41,7 +43,8 @@
     "react-dom": "16.2.1",
     "react-grid-layout": "0.16.6",
     "react-modal": "^3.1.13",
-    "style-loader": "^0.20.1"
+    "style-loader": "^0.20.1",
+    "three": "^0.102.1"
   },
   "husky": {
     "hooks": {

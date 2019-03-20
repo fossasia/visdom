@@ -39,6 +39,7 @@ const PropertiesPane = require('./PropertiesPane');
 const TextPane = require('./TextPane');
 const ImagePane = require('./ImagePane');
 const PlotPane = require('./PlotPane');
+const EmbeddingsPane = require('./EmbeddingsPane');
 
 const WidthProvider = require('./Width').default;
 
@@ -52,7 +53,7 @@ const MARGIN = 10; // pixels
 const PANES = {
   image: ImagePane,
   plot: PlotPane,
-  text: TextPane,
+  text: EmbeddingsPane,
   properties: PropertiesPane,
 };
 
@@ -153,8 +154,17 @@ class App extends React.Component {
     return (w + MARGIN) / (colWidth + MARGIN);
   };
 
+  w2p = p => {
+    let colWidth = this.colWidth();
+    return p * (colWidth + MARGIN) - MARGIN;
+  };
+
   p2h = h => {
     return (h + MARGIN) / (ROW_HEIGHT + MARGIN);
+  };
+
+  h2p = p => {
+    return p * (ROW_HEIGHT + MARGIN) - MARGIN;
   };
 
   keyLS = key => {
@@ -243,8 +253,8 @@ class App extends React.Component {
           i: newPane.id,
           w: w,
           h: h,
-          width: w,
-          height: h,
+          width: newPane.width,
+          height: newPane.height,
           x: pos.x,
           y: pos.y,
           static: false,
@@ -1408,6 +1418,8 @@ class App extends React.Component {
             isFocused={pane.id === this.state.focusedPaneID}
             w={panelayout.w}
             h={panelayout.h}
+            width={this.w2p(panelayout.w)}
+            height={this.h2p(panelayout.h) - 14}
             appApi={{
               sendPaneMessage: this.sendPaneMessage,
             }}

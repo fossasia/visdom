@@ -127,6 +127,7 @@ button {
   height: calc( 100% - 14px );
   position: absolute;
   overflow: hidden;
+  left: 0;
 }
 
 .grip {
