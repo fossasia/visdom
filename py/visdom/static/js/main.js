@@ -44325,6 +44325,8 @@
 
 	'use strict';
 
+	var _slicedToArray = function () { function sliceIterator(arr, i) { var _arr = []; var _n = true; var _d = false; var _e = undefined; try { for (var _i = arr[Symbol.iterator](), _s; !(_n = (_s = _i.next()).done); _n = true) { _arr.push(_s.value); if (i && _arr.length === i) break; } } catch (err) { _d = true; _e = err; } finally { try { if (!_n && _i["return"]) _i["return"](); } finally { if (_d) throw _e; } } return _arr; } return function (arr, i) { if (Array.isArray(arr)) { return arr; } else if (Symbol.iterator in Object(arr)) { return sliceIterator(arr, i); } else { throw new TypeError("Invalid attempt to destructure non-iterable instance"); } }; }();
+
 	var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
 
 	var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
@@ -44350,6 +44352,8 @@
 	function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj.default = obj; return newObj; } }
 
 	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+	function _toConsumableArray(arr) { if (Array.isArray(arr)) { for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) { arr2[i] = arr[i]; } return arr2; } else { return Array.from(arr); } }
 
 	function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
 
@@ -44444,6 +44448,9 @@
 
 	    var _this2 = _possibleConstructorReturn(this, (Scene.__proto__ || Object.getPrototypeOf(Scene)).call(this, props));
 
+	    _this2.state = {};
+
+
 	    _this2.start = _this2.start.bind(_this2);
 	    _this2.stop = _this2.stop.bind(_this2);
 	    _this2.animate = _this2.animate.bind(_this2);
@@ -44469,6 +44476,10 @@
 
 	      // const width = this.mount.clientWidth;
 	      // const height = this.mount.clientHeight;
+
+	      // References:
+	      // https://blog.fastforwardlabs.com/2017/10/04/using-three-js-for-2d-data-visualization.html
+	      // https://codepen.io/WebSeed/pen/MEBoRq
 
 	      var width = this.props.width;
 	      var height = this.props.height;
@@ -44555,6 +44566,9 @@
 	      this.near = near;
 	      this.far = far;
 
+	      this.color_array = color_array;
+	      this.generated_points = generated_points;
+
 	      /* ----------------------------------------------------------- */
 
 	      var zoom = d3.zoom().scaleExtent([this.getScaleFromZ(far), this.getScaleFromZ(near)]).on('zoom', function () {
@@ -44571,6 +44585,30 @@
 	        camera.position.set(0, 0, far);
 	      };
 	      setUpZoom();
+
+	      /* ----------------------------------------------------------- */
+	      // hover stuff
+	      var raycaster = new THREE.Raycaster();
+	      raycaster.params.Points.threshold = 10;
+	      var hoverContainer = new THREE.Object3D();
+	      scene.add(hoverContainer);
+
+	      view.on('mousemove', function () {
+	        var _mouse = (0, _d3Selection.mouse)(view.node()),
+	            _mouse2 = _slicedToArray(_mouse, 2),
+	            mouseX = _mouse2[0],
+	            mouseY = _mouse2[1];
+
+	        var mouse_position = [mouseX, mouseY];
+	        console.log(mouseX, mouseY);
+	        _this3.checkIntersects(mouse_position, points, hoverContainer, circle_sprite);
+	      });
+
+	      view.on('mouseleave', function () {
+	        _this3.removeHighlights();
+	      });
+
+	      this.raycaster = raycaster;
 
 	      /* ----------------------------------------------------------- */
 
@@ -44622,6 +44660,80 @@
 
 	    /* end utility methods */
 
+	    // start hover interaction stuff
+
+	    // Hover and tooltip interaction
+
+	  }, {
+	    key: 'mouseToThree',
+	    value: function mouseToThree(mouseX, mouseY) {
+	      return new THREE.Vector3(mouseX / this.props.width * 2 - 1, -(mouseY / this.props.height) * 2 + 1, 1);
+	    }
+	  }, {
+	    key: 'checkIntersects',
+	    value: function checkIntersects(mouse_position, points, hoverContainer, circle_sprite) {
+	      var mouse_vector = this.mouseToThree.apply(this, _toConsumableArray(mouse_position));
+	      this.raycaster.setFromCamera(mouse_vector, this.camera);
+	      var intersects = this.raycaster.intersectObject(points);
+	      if (intersects[0]) {
+	        var sorted_intersects = this.sortIntersectsByDistanceToRay(intersects);
+	        var intersect = sorted_intersects[0];
+	        var index = intersect.index;
+	        var datum = this.generated_points[index];
+	        this.highlightPoint(datum, hoverContainer, circle_sprite);
+	        this.showTooltip(mouse_position, datum);
+	      } else {
+	        this.removeHighlights(hoverContainer);
+	        this.hideTooltip();
+	      }
+	    }
+	  }, {
+	    key: 'showTooltip',
+	    value: function showTooltip(mouse_position, datum) {
+	      console.log(datum);
+	      this.setState({ hovered: datum });
+	    }
+	  }, {
+	    key: 'hideTooltip',
+	    value: function hideTooltip() {
+	      this.setState({ hovered: null });
+	    }
+	  }, {
+	    key: 'sortIntersectsByDistanceToRay',
+	    value: function sortIntersectsByDistanceToRay(intersects) {
+	      // return _.sortBy(intersects, 'distanceToRay');
+	      return [].concat(_toConsumableArray(intersects)).sort(function (a, b) {
+	        return a.distanceToRay - b.distanceToRay;
+	      });
+	    }
+	  }, {
+	    key: 'highlightPoint',
+	    value: function highlightPoint(datum, hoverContainer, circle_sprite) {
+	      this.removeHighlights(hoverContainer);
+
+	      var geometry = new THREE.Geometry();
+	      geometry.vertices.push(new THREE.Vector3(datum.position[0], datum.position[1], 0));
+	      geometry.colors = [new THREE.Color(this.color_array[datum.group])];
+
+	      var material = new THREE.PointsMaterial({
+	        size: 26,
+	        sizeAttenuation: false,
+	        vertexColors: THREE.VertexColors,
+	        map: circle_sprite,
+	        transparent: true
+	      });
+
+	      var point = new THREE.Points(geometry, material);
+	      hoverContainer.add(point);
+	    }
+	  }, {
+	    key: 'removeHighlights',
+	    value: function removeHighlights(hoverContainer) {
+	      hoverContainer.remove.apply(hoverContainer, _toConsumableArray(hoverContainer.children));
+	    }
+
+	    // end hover interaction stuff
+
 	  }, {
 	    key: 'start',
 	    value: function start() {
@@ -44650,15 +44762,38 @@
 	    value: function render() {
 	      var _this4 = this;
 
-	      return _react2.default.createElement('div', {
-	        style: {
-	          width: this.props.width + 'px',
-	          height: this.props.height + 'px'
-	        },
-	        ref: function ref(mount) {
-	          _this4.mount = mount;
-	        }
-	      });
+	      return _react2.default.createElement(
+	        _react2.default.Fragment,
+	        null,
+	        this.state.hovered && _react2.default.createElement(
+	          'div',
+	          {
+	            style: {
+	              position: 'absolute',
+	              right: 0,
+	              top: 0,
+	              backgroundColor: 'rgba(0,0,0,0.85)',
+	              padding: 5,
+	              width: 150,
+	              color: 'white'
+	            }
+	          },
+	          _react2.default.createElement(
+	            'strong',
+	            null,
+	            this.state.hovered.name
+	          )
+	        ),
+	        _react2.default.createElement('div', {
+	          style: {
+	            width: this.props.width + 'px',
+	            height: this.props.height + 'px'
+	          },
+	          ref: function ref(mount) {
+	            _this4.mount = mount;
+	          }
+	        })
+	      );
 	    }
 	  }]);
 
