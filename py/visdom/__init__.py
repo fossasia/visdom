@@ -889,6 +889,29 @@ class Visdom(object):
             raise RuntimeError(
                 "Plotly must be installed to plot Plotly figures")
 
+    def embeddings(self, data=None, win=None, env=None, opts=None, append=False):
+        """
+        This function prints text in a box. It takes as input an `text` string.
+        No specific `opts` are currently supported.
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+        data = [{'content': data, 'type': 'embeddings'}]
+
+        if append:
+            endpoint = 'update'
+        else:
+            endpoint = 'events'
+
+        return self._send({
+            'data': data,
+            'win': win,
+            'eid': env,
+            'opts': opts,
+        }, endpoint=endpoint)
+
+
     @pytorch_wrap
     def image(self, img, win=None, env=None, opts=None):
         """

@@ -53,14 +53,16 @@ const MARGIN = 10; // pixels
 const PANES = {
   image: ImagePane,
   plot: PlotPane,
-  text: EmbeddingsPane,
+  text: TextPane,
   properties: PropertiesPane,
+  embeddings: EmbeddingsPane,
 };
 
 const PANE_SIZE = {
   image: [20, 20],
   plot: [30, 24],
   text: [20, 20],
+  embeddings: [20, 20],
   properties: [20, 20],
 };
 

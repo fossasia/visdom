@@ -143,14 +143,16 @@
 	var PANES = {
 	  image: ImagePane,
 	  plot: PlotPane,
-	  text: EmbeddingsPane,
-	  properties: PropertiesPane
+	  text: TextPane,
+	  properties: PropertiesPane,
+	  embeddings: EmbeddingsPane
 	};
 
 	var PANE_SIZE = {
 	  image: [20, 20],
 	  plot: [30, 24],
 	  text: [20, 20],
+	  embeddings: [20, 20],
 	  properties: [20, 20]
 	};
 
@@ -44772,7 +44774,7 @@
 	              position: 'absolute',
 	              right: 0,
 	              top: 0,
-	              backgroundColor: 'rgba(0,0,0,0.85)',
+	              backgroundColor: 'rgba(0,0,0,0.77)',
 	              padding: 5,
 	              width: 150,
 	              color: 'white'
