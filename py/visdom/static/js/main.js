@@ -44432,6 +44432,7 @@
 	        _extends({}, this.props, { handleDownload: this.handleDownload }),
 	        _react2.default.createElement(Scene, {
 	          key: this.props.height + '===' + this.props.width,
+	          content: this.props.content,
 	          height: this.props.height,
 	          width: this.props.width
 	        })
@@ -44498,16 +44499,22 @@
 	      var camera = new THREE.PerspectiveCamera(fov, width / height, near, far);
 	      camera.position.set(0, 0, far);
 
-	      var data_points = [];
-	      for (var i = 0; i < point_num; i++) {
-	        var position = this.randomPosition(radius);
-	        var name = 'Point ' + i;
-	        var group = Math.floor(Math.random() * 6);
-	        var point = { position: position, name: name, group: group };
-	        data_points.push(point);
-	      }
+	      // let data_points = [];
+	      // for (let i = 0; i < point_num; i++) {
+	      //   let position = this.randomPosition(radius);
+	      //   let name = 'Point ' + i;
+	      //   let group = Math.floor(Math.random() * 6);
+	      //   let point = { position, name, group };
+	      //   data_points.push(point);
+	      // }
 
-	      var generated_points = data_points;
+	      // let generated_points = data_points;
+
+	      var generated_points = this.props.content.map(function (p) {
+	        return Object.assign({}, p, {
+	          position: [p.position[0] * radius, p.position[1] * radius]
+	        });
+	      });
 
 	      var pointsGeometry = new THREE.Geometry();
 
@@ -44591,7 +44598,7 @@
 	      /* ----------------------------------------------------------- */
 	      // hover stuff
 	      var raycaster = new THREE.Raycaster();
-	      raycaster.params.Points.threshold = 10;
+	      raycaster.params.Points.threshold = 30;
 	      var hoverContainer = new THREE.Object3D();
 	      scene.add(hoverContainer);
 

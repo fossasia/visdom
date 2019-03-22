@@ -56,6 +56,7 @@ class EmbeddingsPane extends React.Component {
       <Pane {...this.props} handleDownload={this.handleDownload}>
         <Scene
           key={this.props.height + '===' + this.props.width}
+          content={this.props.content}
           height={this.props.height}
           width={this.props.width}
         />
@@ -120,16 +121,22 @@ class Scene extends React.Component {
     let camera = new THREE.PerspectiveCamera(fov, width / height, near, far);
     camera.position.set(0, 0, far);
 
-    let data_points = [];
-    for (let i = 0; i < point_num; i++) {
-      let position = this.randomPosition(radius);
-      let name = 'Point ' + i;
-      let group = Math.floor(Math.random() * 6);
-      let point = { position, name, group };
-      data_points.push(point);
-    }
+    // let data_points = [];
+    // for (let i = 0; i < point_num; i++) {
+    //   let position = this.randomPosition(radius);
+    //   let name = 'Point ' + i;
+    //   let group = Math.floor(Math.random() * 6);
+    //   let point = { position, name, group };
+    //   data_points.push(point);
+    // }
 
-    let generated_points = data_points;
+    // let generated_points = data_points;
+
+    let generated_points = this.props.content.map(p =>
+      Object.assign({}, p, {
+        position: [p.position[0] * radius, p.position[1] * radius],
+      })
+    );
 
     let pointsGeometry = new THREE.Geometry();
 
@@ -196,7 +203,7 @@ class Scene extends React.Component {
     /* ----------------------------------------------------------- */
     // hover stuff
     let raycaster = new THREE.Raycaster();
-    raycaster.params.Points.threshold = 10;
+    raycaster.params.Points.threshold = 30;
     let hoverContainer = new THREE.Object3D();
     scene.add(hoverContainer);
 
