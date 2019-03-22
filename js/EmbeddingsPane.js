@@ -12,7 +12,7 @@ import EventSystem from './EventSystem';
 const Pane = require('./Pane');
 import * as THREE from 'three';
 import * as d3 from 'd3-zoom';
-import { select, event as currentEvent } from 'd3-selection';
+import { select, event as currentEvent, mouse } from 'd3-selection';
 
 class EmbeddingsPane extends React.Component {
   onEvent = e => {
@@ -65,6 +65,8 @@ class EmbeddingsPane extends React.Component {
 }
 
 class Scene extends React.Component {
+  state = {};
+
   constructor(props) {
     super(props);
 
@@ -166,6 +168,9 @@ class Scene extends React.Component {
     this.near = near;
     this.far = far;
 
+    this.color_array = color_array;
+    this.generated_points = generated_points;
+
     /* ----------------------------------------------------------- */
 
     let zoom = d3
@@ -187,6 +192,31 @@ class Scene extends React.Component {
       camera.position.set(0, 0, far);
     };
     setUpZoom();
+
+    /* ----------------------------------------------------------- */
+    // hover stuff
+    let raycaster = new THREE.Raycaster();
+    raycaster.params.Points.threshold = 10;
+    let hoverContainer = new THREE.Object3D();
+    scene.add(hoverContainer);
+
+    view.on('mousemove', () => {
+      let [mouseX, mouseY] = mouse(view.node());
+      let mouse_position = [mouseX, mouseY];
+      console.log(mouseX, mouseY);
+      this.checkIntersects(
+        mouse_position,
+        points,
+        hoverContainer,
+        circle_sprite
+      );
+    });
+
+    view.on('mouseleave', () => {
+      this.removeHighlights();
+    });
+
+    this.raycaster = raycaster;
 
     /* ----------------------------------------------------------- */
 
@@ -231,6 +261,76 @@ class Scene extends React.Component {
 
   /* end utility methods */
 
+  // start hover interaction stuff
+
+  // Hover and tooltip interaction
+
+  mouseToThree(mouseX, mouseY) {
+    return new THREE.Vector3(
+      (mouseX / this.props.width) * 2 - 1,
+      -(mouseY / this.props.height) * 2 + 1,
+      1
+    );
+  }
+
+  checkIntersects(mouse_position, points, hoverContainer, circle_sprite) {
+    let mouse_vector = this.mouseToThree(...mouse_position);
+    this.raycaster.setFromCamera(mouse_vector, this.camera);
+    let intersects = this.raycaster.intersectObject(points);
+    if (intersects[0]) {
+      let sorted_intersects = this.sortIntersectsByDistanceToRay(intersects);
+      let intersect = sorted_intersects[0];
+      let index = intersect.index;
+      let datum = this.generated_points[index];
+      this.highlightPoint(datum, hoverContainer, circle_sprite);
+      this.showTooltip(mouse_position, datum);
+    } else {
+      this.removeHighlights(hoverContainer);
+      this.hideTooltip();
+    }
+  }
+
+  showTooltip(mouse_position, datum) {
+    console.log(datum);
+    this.setState({ hovered: datum });
+  }
+
+  hideTooltip() {
+    this.setState({ hovered: null });
+  }
+
+  sortIntersectsByDistanceToRay(intersects) {
+    // return _.sortBy(intersects, 'distanceToRay');
+    return [...intersects].sort((a, b) => a.distanceToRay - b.distanceToRay);
+  }
+
+  highlightPoint(datum, hoverContainer, circle_sprite) {
+    this.removeHighlights(hoverContainer);
+
+    let geometry = new THREE.Geometry();
+    geometry.vertices.push(
+      new THREE.Vector3(datum.position[0], datum.position[1], 0)
+    );
+    geometry.colors = [new THREE.Color(this.color_array[datum.group])];
+
+    let material = new THREE.PointsMaterial({
+      size: 26,
+      sizeAttenuation: false,
+      vertexColors: THREE.VertexColors,
+      map: circle_sprite,
+      transparent: true,
+    });
+
+    let point = new THREE.Points(geometry, material);
+    hoverContainer.add(point);
+  }
+
+  removeHighlights(hoverContainer) {
+    hoverContainer.remove(...hoverContainer.children);
+  }
+
+  // end hover interaction stuff
+
   start() {
     if (!this.frameId) {
       this.frameId = requestAnimationFrame(this.animate);
@@ -252,15 +352,32 @@ class Scene extends React.Component {
 
   render() {
     return (
-      <div
-        style={{
-          width: this.props.width + 'px',
-          height: this.props.height + 'px',
-        }}
-        ref={mount => {
-          this.mount = mount;
-        }}
-      />
+      <React.Fragment>
+        {this.state.hovered && (
+          <div
+            style={{
+              position: 'absolute',
+              right: 0,
+              top: 0,
+              backgroundColor: 'rgba(0,0,0,0.77)',
+              padding: 5,
+              width: 150,
+              color: 'white',
+            }}
+          >
+            <strong>{this.state.hovered.name}</strong>
+          </div>
+        )}
+        <div
+          style={{
+            width: this.props.width + 'px',
+            height: this.props.height + 'px',
+          }}
+          ref={mount => {
+            this.mount = mount;
+          }}
+        />
+      </React.Fragment>
     );
   }
 }
