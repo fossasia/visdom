@@ -342,8 +342,8 @@
 	            i: newPane.id,
 	            w: w,
 	            h: h,
-	            width: newPane.width,
-	            height: newPane.height,
+	            width: w,
+	            height: h,
 	            x: pos.x,
 	            y: pos.y,
 	            static: false
@@ -44459,7 +44459,6 @@
 	      var y = (d3_transform.y - _this2.props.height / 2) / scale;
 	      var z = _this2.getZFromScale(scale);
 	      _this2.raycaster.params.Points.threshold = 30 / (scale * 0.5);
-	      console.log(scale);
 	      _this2.camera.position.set(x, y, z);
 	    };
 
@@ -44614,8 +44613,6 @@
 
 	      /* ----------------------------------------------------------- */
 
-	      console.log([this.getScaleFromZ(far), this.getScaleFromZ(near)]);
-
 	      var zoom = d3.zoom().scaleExtent([this.getScaleFromZ(far), this.getScaleFromZ(near) - 1]).on('zoom', function () {
 	        var d3_transform = _d3Selection.event.transform;
 	        _this3.zoomHandler(d3_transform);
@@ -44701,7 +44698,6 @@
 	  }, {
 	    key: 'showTooltip',
 	    value: function showTooltip(mouse_position, datum) {
-	      console.log(datum);
 	      this.setState({ hovered: datum });
 	    }
 	  }, {
