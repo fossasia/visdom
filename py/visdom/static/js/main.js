@@ -144,7 +144,8 @@
 	  image_history: ImagePane,
 	  plot: PlotPane,
 	  text: TextPane,
-	  properties: PropertiesPane
+	  properties: PropertiesPane,
+	  embeddings: EmbeddingsPane
 	};
 
 	var PANE_SIZE = {
@@ -152,6 +153,7 @@
 	  image_history: [20, 20],
 	  plot: [30, 24],
 	  text: [20, 20],
+	  embeddings: [20, 20],
 	  properties: [20, 20]
 	};
 

@@ -515,7 +515,7 @@ def window(args):
             'type': ptype,
             'show_slider': opts.get('show_slider', True)
         })
-    elif ptype in ['image', 'text', 'properties']:
+    elif ptype in ['image', 'text', 'properties', 'embeddings']:
         p.update({'content': args['data'][0]['content'], 'type': ptype})
     else:
         p['content'] = {'data': args['data'], 'layout': args['layout']}
