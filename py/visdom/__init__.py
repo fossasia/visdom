@@ -1005,7 +1005,9 @@ class Visdom(object):
         if tensor is not None:
             import scipy.io.wavfile # type: ignore
             import tempfile
-            audiofile = '/tmp/%s.wav' % next(tempfile._get_candidate_names())
+            audiofile = os.path.join(
+                tempfile.gettempdir(),
+                '%s.wav' % next(tempfile._get_candidate_names()))
             tensor = np.int16(tensor / np.max(np.abs(tensor)) * 32767)
             scipy.io.wavfile.write(audiofile, opts.get('sample_frequency'), tensor)
 
@@ -1015,7 +1017,7 @@ class Visdom(object):
         assert mimetype is not None, 'unknown audio type: %s' % extension
 
         bytestr = loadfile(audiofile)
-        videodata = """
+        audiodata = """
             <audio controls>
                 <source type="audio/%s" src="data:audio/%s;base64,%s">
                 Your browser does not support the audio tag.
@@ -1023,7 +1025,7 @@ class Visdom(object):
         """ % (mimetype, mimetype, base64.b64encode(bytestr).decode('utf-8'))
         opts['height'] = 80
         opts['width'] = 330
-        return self.text(text=videodata, win=win, env=env, opts=opts)
+        return self.text(text=audiodata, win=win, env=env, opts=opts)
 
     @pytorch_wrap
     def video(self, tensor=None, dim='LxHxWxC', videofile=None, win=None, env=None, opts=None):
@@ -1050,7 +1052,9 @@ class Visdom(object):
             assert dim == 'LxHxWxC' or dim == 'LxCxHxW', 'dimension argument should be LxHxWxC or LxCxHxW'
             if dim == 'LxCxHxW':
                 tensor = tensor.transpose([0, 2, 3, 1])
-            videofile = '/tmp/%s.ogv' % next(tempfile._get_candidate_names())
+            videofile = os.path.join(
+                tempfile.gettempdir(),
+                '%s.ogv' % next(tempfile._get_candidate_names()))
             if cv2.__version__.startswith('2'):  # OpenCV 2
                 fourcc = cv2.cv.CV_FOURCC(
                     chr(ord('T')),
