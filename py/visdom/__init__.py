@@ -252,6 +252,14 @@ def _dashCheck(dash, K):
 
 
 def _assert_opts(opts):
+    remove_nones = ['title']
+    for to_remove in remove_nones:
+        if to_remove in opts and opts[to_remove] is None:
+            logger.warn(
+                'None-incompatible opt {} was provided None value '
+                'and was thus ignored'.format(to_remove))
+            del opts[to_remove]
+
     if opts.get('color'):
         assert isstr(opts.get('color')), 'color should be a string'
 
