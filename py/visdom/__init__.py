@@ -544,7 +544,8 @@ class Visdom(object):
 
         try:
             r = self.session.post(
-                "{0}:{1}{2}/{3}".format(self.server, self.port, self.base_url, endpoint),
+                "{0}:{1}{2}/{3}".format(self.server, self.port,
+                                        self.base_url, endpoint),
                 data=json.dumps(msg),
             )
             if self.log_to_filename is not None and not from_log:
@@ -557,7 +558,10 @@ class Visdom(object):
                             msg,
                         ]) + '\n')
             return r.text
-        except requests.RequestException:
+        except (
+            requests.RequestException, requests.ConnectionError,
+            requests.Timeout
+        ):
             if self.raise_exceptions:
                 raise ConnectionError("Error connecting to Visdom server")
             else:
