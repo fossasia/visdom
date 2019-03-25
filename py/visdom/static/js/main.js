@@ -131,7 +131,7 @@
 	var PlotPane = __webpack_require__(224);
 	var EmbeddingsPane = __webpack_require__(225);
 
-	var WidthProvider = __webpack_require__(236).default;
+	var WidthProvider = __webpack_require__(237).default;
 
 	var GridLayout = WidthProvider(ReactGridLayout);
 	var sortLayout = ReactGridLayout.utils.sortLayoutItemsByRowCol;
@@ -44351,6 +44351,10 @@
 
 	var _d3Selection = __webpack_require__(228);
 
+	var _debounce = __webpack_require__(236);
+
+	var _debounce2 = _interopRequireDefault(_debounce);
+
 	function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj.default = obj; return newObj; } }
 
 	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
@@ -44404,6 +44408,14 @@
 	          });
 	          break;
 	      }
+	    }, _this.onEntitySelection = function (e) {
+	      // TODO: [FIX] There's a bug when two embeddings view are opened,
+	      // only the focused one will have its tooltip values updated,
+	      // even if hovering over the unfocused view
+	      _this.props.appApi.sendPaneMessage({
+	        event_type: 'EntitySelected',
+	        entityId: e.name
+	      });
 	    }, _this.handleDownload = function () {
 	      var blob = new Blob([_this.props.content], { type: 'text/plain' });
 	      var url = window.URL.createObjectURL(blob);
@@ -44434,7 +44446,8 @@
 	          key: this.props.height + '===' + this.props.width,
 	          content: this.props.content,
 	          height: this.props.height,
-	          width: this.props.width
+	          width: this.props.width,
+	          onSelect: this.onEntitySelection
 	        })
 	      );
 	    }
@@ -44494,7 +44507,6 @@
 
 	      var width = this.props.width;
 	      var height = this.props.height;
-	      var point_num = 500000;
 	      var radius = 2000;
 	      var color_array = ['#1f78b4', '#b2df8a', '#33a02c', '#fb9a99', '#e31a1c', '#fdbf6f', '#ff7f00', '#6a3d9a', '#cab2d6', '#ffff99'];
 	      var circle_sprite = new THREE.TextureLoader().load('https://fastforwardlabs.github.io/visualization_assets/circle-sprite.png');
@@ -44507,18 +44519,9 @@
 	      var camera = new THREE.PerspectiveCamera(fov, width / height, near, far);
 	      camera.position.set(0, 0, far);
 
-	      // let data_points = [];
-	      // for (let i = 0; i < point_num; i++) {
-	      //   let position = this.randomPosition(radius);
-	      //   let name = 'Point ' + i;
-	      //   let group = Math.floor(Math.random() * 6);
-	      //   let point = { position, name, group };
-	      //   data_points.push(point);
-	      // }
-
-	      // let generated_points = data_points;
-
-	      var generated_points = this.props.content.map(function (p) {
+	      // TODO: Clean up temporary hack since content can either be:
+	      // [... , ...] or { data: [... , ...], selected: ...}
+	      var generated_points = (this.props.content.data || this.props.content).map(function (p) {
 	        return Object.assign({}, p, {
 	          position: [p.position[0] * radius, p.position[1] * radius]
 	        });
@@ -44585,6 +44588,9 @@
 
 	      this.color_array = color_array;
 	      this.generated_points = generated_points;
+	      this.debouncedFn = (0, _debounce2.default)(function (fn) {
+	        return fn();
+	      }, 300);
 
 	      /* ----------------------------------------------------------- */
 	      // hover stuff
@@ -44636,6 +44642,9 @@
 	    key: 'componentWillUnmount',
 	    value: function componentWillUnmount() {
 	      this.stop();
+	      var view = (0, _d3Selection.select)(this.renderer.domElement);
+	      view.on('mousemove', null);
+	      view.on('mouseleave', null);
 	      this.mount.removeChild(this.renderer.domElement);
 	    }
 
@@ -44648,7 +44657,9 @@
 	      var half_fov_radians = this.toRadians(half_fov);
 	      var half_fov_height = Math.tan(half_fov_radians) * camera_z_position;
 	      var fov_height = half_fov_height * 2;
-	      var scale = this.props.height / fov_height; // Divide visualization height by height derived from field of view
+
+	      // Divide visualization height by height derived from field of view
+	      var scale = this.props.height / fov_height;
 	      return scale;
 	    }
 	  }, {
@@ -44698,6 +44709,13 @@
 	  }, {
 	    key: 'showTooltip',
 	    value: function showTooltip(mouse_position, datum) {
+	      var _this4 = this;
+
+	      if (this.state.hovered && this.state.hovered !== datum) {
+	        this.debouncedFn(function () {
+	          return _this4.props.onSelect(datum);
+	        });
+	      }
 	      this.setState({ hovered: datum });
 	    }
 	  }, {
@@ -44767,7 +44785,7 @@
 	  }, {
 	    key: 'render',
 	    value: function render() {
-	      var _this4 = this;
+	      var _this5 = this;
 
 	      return _react2.default.createElement(
 	        _react2.default.Fragment,
@@ -44789,6 +44807,12 @@
 	            'strong',
 	            null,
 	            this.state.hovered.name
+	          ),
+	          _react2.default.createElement('br', null),
+	          _react2.default.createElement(
+	            'strong',
+	            null,
+	            this.props.content.selected
 	          )
 	        ),
 	        _react2.default.createElement('div', {
@@ -44797,7 +44821,7 @@
 	            height: this.props.height + 'px'
 	          },
 	          ref: function ref(mount) {
-	            _this4.mount = mount;
+	            _this5.mount = mount;
 	          }
 	        })
 	      );
@@ -97431,6 +97455,82 @@
 
 /***/ }),
 /* 236 */
+/***/ (function(module, exports) {
+
+	/**
+	 * Returns a function, that, as long as it continues to be invoked, will not
+	 * be triggered. The function will be called after it stops being called for
+	 * N milliseconds. If `immediate` is passed, trigger the function on the
+	 * leading edge, instead of the trailing. The function also has a property 'clear' 
+	 * that is a function which will clear the timer to prevent previously scheduled executions. 
+	 *
+	 * @source underscore.js
+	 * @see http://unscriptable.com/2009/03/20/debouncing-javascript-methods/
+	 * @param {Function} function to wrap
+	 * @param {Number} timeout in ms (`100`)
+	 * @param {Boolean} whether to execute at the beginning (`false`)
+	 * @api public
+	 */
+	function debounce(func, wait, immediate){
+	  var timeout, args, context, timestamp, result;
+	  if (null == wait) wait = 100;
+
+	  function later() {
+	    var last = Date.now() - timestamp;
+
+	    if (last < wait && last >= 0) {
+	      timeout = setTimeout(later, wait - last);
+	    } else {
+	      timeout = null;
+	      if (!immediate) {
+	        result = func.apply(context, args);
+	        context = args = null;
+	      }
+	    }
+	  };
+
+	  var debounced = function(){
+	    context = this;
+	    args = arguments;
+	    timestamp = Date.now();
+	    var callNow = immediate && !timeout;
+	    if (!timeout) timeout = setTimeout(later, wait);
+	    if (callNow) {
+	      result = func.apply(context, args);
+	      context = args = null;
+	    }
+
+	    return result;
+	  };
+
+	  debounced.clear = function() {
+	    if (timeout) {
+	      clearTimeout(timeout);
+	      timeout = null;
+	    }
+	  };
+	  
+	  debounced.flush = function() {
+	    if (timeout) {
+	      result = func.apply(context, args);
+	      context = args = null;
+	      
+	      clearTimeout(timeout);
+	      timeout = null;
+	    }
+	  };
+
+	  return debounced;
+	};
+
+	// Adds compatibility for ES modules
+	debounce.debounce = debounce;
+
+	module.exports = debounce;
+
+
+/***/ }),
+/* 237 */
 /***/ (function(module, exports, __webpack_require__) {
 
 	'use strict';
