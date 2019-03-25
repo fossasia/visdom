@@ -69,6 +69,10 @@ logging.getLogger('urllib3').setLevel(logging.CRITICAL)
 logger = logging.getLogger(__name__)
 
 
+def get_rand_id():
+    return str(hex(int(time.time() * 10000000))[2:])
+
+
 def isstr(s):
     return isinstance(s, string_types)
 
@@ -355,7 +359,8 @@ class Visdom(object):
         log_to_filename=None,
         username=None,
         password=None,
-        proxies=None
+        proxies=None,
+        offline=False
     ):
         parsed_url = urlparse(server)
         if not parsed_url.scheme:
@@ -382,6 +387,7 @@ class Visdom(object):
         # Flag to indicate whether to raise errors or suppress them
         self.raise_exceptions = raise_exceptions
         self.log_to_filename = log_to_filename
+        self.offline = offline
         self._session = None
         self.proxies = proxies
         self.http_proxy_host = None
@@ -400,6 +406,13 @@ class Visdom(object):
         if self.username:
             assert password, 'no password given for authentication'
             self.password = hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+        if self.offline:
+            self.use_socket = False
+            assert self.log_to_filename is not None, (
+                'Must use a log_to_filename for offline visdom')
+
+            return  # No need for the rest of this setup in offline visdom
 
         self._send({
             'eid': env,
@@ -446,7 +459,6 @@ class Visdom(object):
             logging.info('Authentication succeeded')
         self._session = sess
         return sess
-
 
     def register_event_handler(self, handler, target):
         assert callable(handler), 'Event handler must be a function'
@@ -529,6 +541,15 @@ class Visdom(object):
         self.socket_thread.start()
 
     # Utils
+    def _log(self, msg, endpoint):
+        if self.log_to_filename is not None:
+            if endpoint in ['events', 'update']:
+                with open(self.log_to_filename, 'a+') as log_file:
+                    log_file.write(json.dumps([
+                        endpoint,
+                        msg,
+                    ]) + '\n')
+
     def _send(self, msg, endpoint='events', quiet=False, from_log=False):
         """
         This function sends specified JSON request to the Tornado server. This
@@ -542,20 +563,21 @@ class Visdom(object):
         if not self.send:
             return msg, endpoint
 
+        if 'win' in msg and msg['win'] is None:
+            msg['win'] = 'window_' + get_rand_id()
+
+        if not from_log:
+            self._log(msg, endpoint)
+
+        if self.offline:
+            # If offline, don't even try to post
+            return msg['win'] if 'win' in msg else True
+
         try:
             r = self.session.post(
                 "{0}:{1}{2}/{3}".format(self.server, self.port, self.base_url, endpoint),
                 data=json.dumps(msg),
             )
-            if self.log_to_filename is not None and not from_log:
-                if endpoint in ['events', 'update']:
-                    if msg['win'] is None:
-                        msg['win'] = r.text
-                    with open(self.log_to_filename, 'a+') as log_file:
-                        log_file.write(json.dumps([
-                            endpoint,
-                            msg,
-                        ]) + '\n')
             return r.text
         except requests.RequestException:
             if self.raise_exceptions:
