@@ -13,6 +13,7 @@ const Pane = require('./Pane');
 import * as THREE from 'three';
 import * as d3 from 'd3-zoom';
 import { select, event as currentEvent, mouse } from 'd3-selection';
+import debounce from 'debounce';
 
 class EmbeddingsPane extends React.Component {
   onEvent = e => {
@@ -33,6 +34,16 @@ class EmbeddingsPane extends React.Component {
         });
         break;
     }
+  };
+
+  onEntitySelection = e => {
+    // TODO: [FIX] There's a bug when two embeddings view are opened,
+    // only the focused one will have its tooltip values updated,
+    // even if hovering over the unfocused view
+    this.props.appApi.sendPaneMessage({
+      event_type: 'EntitySelected',
+      entityId: e.name,
+    });
   };
 
   componentDidMount() {
@@ -59,6 +70,7 @@ class EmbeddingsPane extends React.Component {
           content={this.props.content}
           height={this.props.height}
           width={this.props.width}
+          onSelect={this.onEntitySelection}
         />
       </Pane>
     );
@@ -95,7 +107,6 @@ class Scene extends React.Component {
 
     const width = this.props.width;
     const height = this.props.height;
-    const point_num = 500000;
     let radius = 2000;
     let color_array = [
       '#1f78b4',
@@ -121,21 +132,13 @@ class Scene extends React.Component {
     let camera = new THREE.PerspectiveCamera(fov, width / height, near, far);
     camera.position.set(0, 0, far);
 
-    // let data_points = [];
-    // for (let i = 0; i < point_num; i++) {
-    //   let position = this.randomPosition(radius);
-    //   let name = 'Point ' + i;
-    //   let group = Math.floor(Math.random() * 6);
-    //   let point = { position, name, group };
-    //   data_points.push(point);
-    // }
-
-    // let generated_points = data_points;
-
-    let generated_points = this.props.content.map(p =>
-      Object.assign({}, p, {
-        position: [p.position[0] * radius, p.position[1] * radius],
-      })
+    // TODO: Clean up temporary hack since content can either be:
+    // [... , ...] or { data: [... , ...], selected: ...}
+    let generated_points = (this.props.content.data || this.props.content).map(
+      p =>
+        Object.assign({}, p, {
+          position: [p.position[0] * radius, p.position[1] * radius],
+        })
     );
 
     let pointsGeometry = new THREE.Geometry();
@@ -177,6 +180,7 @@ class Scene extends React.Component {
 
     this.color_array = color_array;
     this.generated_points = generated_points;
+    this.debouncedFn = debounce(fn => fn(), 300);
 
     /* ----------------------------------------------------------- */
     // hover stuff
@@ -233,6 +237,9 @@ class Scene extends React.Component {
 
   componentWillUnmount() {
     this.stop();
+    let view = select(this.renderer.domElement);
+    view.on('mousemove', null);
+    view.on('mouseleave', null);
     this.mount.removeChild(this.renderer.domElement);
   }
 
@@ -251,7 +258,9 @@ class Scene extends React.Component {
     let half_fov_radians = this.toRadians(half_fov);
     let half_fov_height = Math.tan(half_fov_radians) * camera_z_position;
     let fov_height = half_fov_height * 2;
-    let scale = this.props.height / fov_height; // Divide visualization height by height derived from field of view
+
+    // Divide visualization height by height derived from field of view
+    let scale = this.props.height / fov_height;
     return scale;
   }
 
@@ -299,6 +308,9 @@ class Scene extends React.Component {
   }
 
   showTooltip(mouse_position, datum) {
+    if (this.state.hovered && this.state.hovered !== datum) {
+      this.debouncedFn(() => this.props.onSelect(datum));
+    }
     this.setState({ hovered: datum });
   }
 
@@ -373,6 +385,8 @@ class Scene extends React.Component {
             }}
           >
             <strong>{this.state.hovered.name}</strong>
+            <br />
+            <strong>{this.props.content.selected}</strong>
           </div>
         )}
         <div
