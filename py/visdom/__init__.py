@@ -1347,7 +1347,7 @@ class Visdom(object):
             X = np.linspace(0, 1, Y.shape[0])
 
         if Y.ndim == 2 and Y.shape[1] == 1:
-                Y = Y.reshape(Y.shape[0])
+                Y = Y.reshape(1, Y.shape[0])
                 X = X.reshape(X.shape[0])
 
         if Y.ndim == 2 and X.ndim == 1:
