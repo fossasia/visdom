@@ -433,7 +433,7 @@ class Visdom(object):
     def session(self):
         if self._session:
             return self._session
-        logging.warning("Setting up a new session...")
+        logger.warning("Setting up a new session...")
         sess = requests.Session()
         if self.proxies:
             sess.proxies.update(self.proxies)
@@ -443,7 +443,7 @@ class Visdom(object):
                 password=self.password))
             if resp.status_code != requests.codes.ok:
                 raise RuntimeError("Authentication failed")
-            logging.info('Authentication succeeded')
+            logger.info('Authentication succeeded')
         self._session = sess
         return sess
 
