@@ -44464,7 +44464,7 @@
 
 	    var _this2 = _possibleConstructorReturn(this, (Scene.__proto__ || Object.getPrototypeOf(Scene)).call(this, props));
 
-	    _this2.state = {};
+	    _this2.state = { detailsLoading: false };
 
 	    _this2.zoomHandler = function (d3_transform) {
 	      var scale = d3_transform.k;
@@ -44492,6 +44492,13 @@
 	      var pt_x = Math.sqrt(pt_radius_sq) * Math.cos(pt_angle);
 	      var pt_y = Math.sqrt(pt_radius_sq) * Math.sin(pt_angle);
 	      return [pt_x, pt_y];
+	    }
+	  }, {
+	    key: 'componentWillReceiveProps',
+	    value: function componentWillReceiveProps(nextProps) {
+	      if (!this.props.content.selected || nextProps.content.selected.entityId !== this.props.content.selected.entityId) {
+	        this.setState({ detailsLoading: false });
+	      }
 	    }
 	  }, {
 	    key: 'componentDidMount',
@@ -44711,9 +44718,10 @@
 	    value: function showTooltip(mouse_position, datum) {
 	      var _this4 = this;
 
-	      if (this.state.hovered && this.state.hovered !== datum) {
+	      if (!this.state.hovered || this.state.hovered !== datum) {
+	        this.setState({ detailsLoading: true });
 	        this.debouncedFn(function () {
-	          return _this4.props.onSelect(datum);
+	          _this4.props.onSelect(datum);
 	        });
 	      }
 	      this.setState({ hovered: datum });
@@ -44809,11 +44817,12 @@
 	            this.state.hovered.name
 	          ),
 	          _react2.default.createElement('br', null),
-	          _react2.default.createElement(
-	            'strong',
-	            null,
-	            this.props.content.selected
-	          )
+	          this.props.content.selected && _react2.default.createElement('div', {
+	            style: { opacity: this.state.detailsLoading ? 0.2 : 1 },
+	            dangerouslySetInnerHTML: {
+	              __html: this.props.content.selected.html
+	            }
+	          })
 	        ),
 	        _react2.default.createElement('div', {
 	          style: {

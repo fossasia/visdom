@@ -78,7 +78,7 @@ class EmbeddingsPane extends React.Component {
 }
 
 class Scene extends React.Component {
-  state = {};
+  state = { detailsLoading: false };
 
   constructor(props) {
     super(props);
@@ -95,6 +95,16 @@ class Scene extends React.Component {
     var pt_x = Math.sqrt(pt_radius_sq) * Math.cos(pt_angle);
     var pt_y = Math.sqrt(pt_radius_sq) * Math.sin(pt_angle);
     return [pt_x, pt_y];
+  }
+
+  componentWillReceiveProps(nextProps) {
+    if (
+      !this.props.content.selected ||
+      nextProps.content.selected.entityId !==
+        this.props.content.selected.entityId
+    ) {
+      this.setState({ detailsLoading: false });
+    }
   }
 
   componentDidMount() {
@@ -308,8 +318,11 @@ class Scene extends React.Component {
   }
 
   showTooltip(mouse_position, datum) {
-    if (this.state.hovered && this.state.hovered !== datum) {
-      this.debouncedFn(() => this.props.onSelect(datum));
+    if (!this.state.hovered || this.state.hovered !== datum) {
+      this.setState({ detailsLoading: true });
+      this.debouncedFn(() => {
+        this.props.onSelect(datum);
+      });
     }
     this.setState({ hovered: datum });
   }
@@ -386,7 +399,14 @@ class Scene extends React.Component {
           >
             <strong>{this.state.hovered.name}</strong>
             <br />
-            <strong>{this.props.content.selected}</strong>
+            {this.props.content.selected && (
+              <div
+                style={{ opacity: this.state.detailsLoading ? 0.2 : 1 }}
+                dangerouslySetInnerHTML={{
+                  __html: this.props.content.selected.html,
+                }}
+              />
+            )}
           </div>
         )}
         <div
