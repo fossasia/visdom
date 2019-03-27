@@ -848,13 +848,17 @@ class Visdom(object):
 
         # show SVG:
         if 'height' not in opts:
-            height = height or re.search('height\="([0-9\.]*)pt"', svg)
+            height = height or re.search(r'height\="([0-9\.]*)pt"', svg)
             if height is not None:
-                opts['height'] = 1.4 * int(math.ceil(float(height.group(1))))
+                if not isstr(height):
+                    height = height.group(1)
+                opts['height'] = 1.4 * int(math.ceil(float(height)))
         if 'width' not in opts:
-            width = width or re.search('width\="([0-9\.]*)pt"', svg)
+            width = width or re.search(r'width\="([0-9\.]*)pt"', svg)
             if width is not None:
-                opts['width'] = 1.35 * int(math.ceil(float(width.group(1))))
+                if not isstr(width):
+                    width = width.group(1)
+                opts['width'] = 1.35 * int(math.ceil(float(width)))
         return self.svg(svgstr=svg, opts=opts, env=env, win=win)
 
     def plotlyplot(self, figure, win=None, env=None):
