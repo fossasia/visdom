@@ -44447,7 +44447,8 @@
 	          content: this.props.content,
 	          height: this.props.height,
 	          width: this.props.width,
-	          onSelect: this.onEntitySelection
+	          onSelect: this.onEntitySelection,
+	          interactive: this.props.isFocused
 	        })
 	      );
 	    }
@@ -44569,7 +44570,7 @@
 	      pointsGeometry.colors = colors;
 
 	      var pointsMaterial = new THREE.PointsMaterial({
-	        size: 8,
+	        size: 6,
 	        sizeAttenuation: false,
 	        vertexColors: THREE.VertexColors,
 	        map: circle_sprite,
@@ -44584,6 +44585,7 @@
 	      scene.background = new THREE.Color(0xefefef);
 
 	      renderer.setSize(width, height);
+	      renderer.setPixelRatio(window.devicePixelRatio);
 
 	      this.scene = scene;
 	      this.camera = camera;
@@ -44609,6 +44611,8 @@
 	      scene.add(hoverContainer);
 
 	      view.on('mousemove', function () {
+	        if (!_this3.props.interactive) return;
+
 	        var _mouse = (0, _d3Selection.mouse)(view.node()),
 	            _mouse2 = _slicedToArray(_mouse, 2),
 	            mouseX = _mouse2[0],
@@ -44749,7 +44753,7 @@
 	      geometry.colors = [new THREE.Color(this.color_array[datum.group])];
 
 	      var material = new THREE.PointsMaterial({
-	        size: 26,
+	        size: 16,
 	        sizeAttenuation: false,
 	        vertexColors: THREE.VertexColors,
 	        map: circle_sprite,
@@ -44826,6 +44830,7 @@
 	        ),
 	        _react2.default.createElement('div', {
 	          style: {
+	            opacity: this.props.interactive ? 1 : 0.2,
 	            width: this.props.width + 'px',
 	            height: this.props.height + 'px'
 	          },

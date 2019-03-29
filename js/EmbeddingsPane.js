@@ -71,6 +71,7 @@ class EmbeddingsPane extends React.Component {
           height={this.props.height}
           width={this.props.width}
           onSelect={this.onEntitySelection}
+          interactive={this.props.isFocused}
         />
       </Pane>
     );
@@ -164,7 +165,7 @@ class Scene extends React.Component {
     pointsGeometry.colors = colors;
 
     let pointsMaterial = new THREE.PointsMaterial({
-      size: 8,
+      size: 6,
       sizeAttenuation: false,
       vertexColors: THREE.VertexColors,
       map: circle_sprite,
@@ -179,6 +180,7 @@ class Scene extends React.Component {
     scene.background = new THREE.Color(0xefefef);
 
     renderer.setSize(width, height);
+    renderer.setPixelRatio(window.devicePixelRatio);
 
     this.scene = scene;
     this.camera = camera;
@@ -202,6 +204,7 @@ class Scene extends React.Component {
     scene.add(hoverContainer);
 
     view.on('mousemove', () => {
+      if (!this.props.interactive) return;
       let [mouseX, mouseY] = mouse(view.node());
       let mouse_position = [mouseX, mouseY];
       this.checkIntersects(
@@ -346,7 +349,7 @@ class Scene extends React.Component {
     geometry.colors = [new THREE.Color(this.color_array[datum.group])];
 
     let material = new THREE.PointsMaterial({
-      size: 26,
+      size: 16,
       sizeAttenuation: false,
       vertexColors: THREE.VertexColors,
       map: circle_sprite,
@@ -411,6 +414,7 @@ class Scene extends React.Component {
         )}
         <div
           style={{
+            opacity: this.props.interactive ? 1 : 0.2,
             width: this.props.width + 'px',
             height: this.props.height + 'px',
           }}
