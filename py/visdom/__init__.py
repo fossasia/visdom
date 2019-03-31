@@ -1066,9 +1066,9 @@ class Visdom(object):
         """
         This function plays a video. It takes as input the filename of the video
         `videofile` or a `LxHxWxC` or `LxCxHxW`-sized `tensor` containing all the frames of
-        the video as input, as specified in `dim`. The function does not support any plot-specific `opts`.
-
-        The following `opts` are supported:
+        the video as input, as specified in `dim`. The color channels must be in BGR order.
+        
+        The function does not support any plot-specific `opts`. The following video `opts` are supported:
 
         - `opts.fps`: FPS for the video (`integer` > 0; default = 25)
         """
