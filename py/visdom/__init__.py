@@ -1066,9 +1066,9 @@ class Visdom(object):
         """
         This function plays a video. It takes as input the filename of the video
         `videofile` or a `LxHxWxC` or `LxCxHxW`-sized `tensor` containing all the frames of
-        the video as input, as specified in `dim`. The function does not support any plot-specific `opts`.
-
-        The following `opts` are supported:
+        the video as input, as specified in `dim`. The color channels must be in BGR order.
+        
+        The function does not support any plot-specific `opts`. The following video `opts` are supported:
 
         - `opts.fps`: FPS for the video (`integer` > 0; default = 25)
         """
@@ -1096,7 +1096,7 @@ class Visdom(object):
                     chr(ord('E')),
                     chr(ord('O'))
                 )
-            elif cv2.__version__.startswith('3'):  # OpenCV 3
+            else:  # cv2.__version__.startswith(('3', '4')):  # OpenCV 3, 4
                 fourcc = cv2.VideoWriter_fourcc(
                     chr(ord('T')),
                     chr(ord('H')),
