@@ -428,8 +428,6 @@ def update_window(p, args):
 
 def window(args):
     """ Build a window dict structure for sending to client """
-    # TODO only send *updates* to the clients, rather than the full window.
-    # as long-running image histories will grow linearly in size
     uid = args.get('win', 'window_' + get_rand_id())
     if uid is None:
         uid = 'window_' + get_rand_id()
