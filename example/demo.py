@@ -97,6 +97,18 @@ try:
         opts=dict(title='Random!', caption='How random.'),
     )
 
+    # image history demo
+    viz.image(
+        np.random.rand(3, 512, 256),
+        win='image_history',
+        opts=dict(caption='First random', store_history=True, title='Pick your random!'),
+    )
+    viz.image(
+        np.random.rand(3, 512, 256),
+        win='image_history',
+        opts=dict(caption='Second random!', store_history=True),
+    )
+
     # grid of images
     viz.images(
         np.random.randn(20, 3, 64, 64),
