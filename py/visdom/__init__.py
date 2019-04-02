@@ -1075,9 +1075,13 @@ class Visdom(object):
         The function does not support any plot-specific `opts`. The following video `opts` are supported:
 
         - `opts.fps`: FPS for the video (`integer` > 0; default = 25)
+        - `opts.autoplay`: whether to autoplay the video when it's ready (`boolean`; default = `false`)
+        - `opts.loop`: whether to loop the video (`boolean`; default = `false`)
         """
         opts = {} if opts is None else opts
         opts['fps'] = opts.get('fps', 25)
+        opts['loop'] = opts.get('loop', False)
+        opts['autoplay'] = opts.get('autoplay', False)
         _title2str(opts)
         _assert_opts(opts)
         assert tensor is not None or videofile is not None, \
@@ -1125,13 +1129,15 @@ class Visdom(object):
         mimetype = mimetypes.get(extension)
         assert mimetype is not None, 'unknown video type: %s' % extension
 
+        flags = ' '.join([k for k in ('autoplay', 'loop') if opts[k]])
+
         bytestr = loadfile(videofile)
         videodata = """
-            <video controls>
+            <video controls %s>
                 <source type="video/%s" src="data:video/%s;base64,%s">
                 Your browser does not support the video tag.
             </video>
-        """ % (mimetype, mimetype, base64.b64encode(bytestr).decode('utf-8'))
+        """ % (flags, mimetype, mimetype, base64.b64encode(bytestr).decode('utf-8'))
         return self.text(text=videodata, win=win, env=env, opts=opts)
 
     def update_window_opts(self, win, opts, env=None):
