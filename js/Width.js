@@ -7,58 +7,64 @@
  *
  */
 
- // @flow
+import React from 'react';
+import ReactDOM from 'react-dom';
 
-const Width: ProviderT = (ComposedComponent) => class extends React.Component {
+const Width = ComposedComponent =>
+  class Width extends React.Component {
+    state = {
+      width: 1280,
+      cols: 100,
+    };
 
-  state: State = {
-    width: 1280,
-    cols: 100,
-  };
+    mounted = false;
 
-  mounted: boolean = false;
+    componentDidMount() {
+      this.mounted = true;
 
-  componentDidMount() {
-    this.mounted = true;
-
-    window.addEventListener('resize', this.onWindowResize);
-    this.onWindowResize();
-  }
-
-  componentWillUnmount() {
-    this.mounted = false;
-    window.removeEventListener('resize', this.onWindowResize);
-  }
-
-  resizeTimer = null;
-
-  onWindowResizeStop = () => {
-    if (!this.mounted) return;
-
-    let oldWidth = this.state.width;
-    const node = ReactDOM.findDOMNode(this);
-
-    this.setState({
-        width: node.offsetWidth,
-        cols: (node.offsetWidth / oldWidth) * this.state.cols
-      }, () => {
-        this.props.onWidthChange(this.state.width, this.state.cols);
-      }
-    );
-  }
-
-  onWindowResize = (_event: ?Event) => {
-    if (this.resizeTimer) clearTimeout(this.resizeTimer);
-    this.resizeTimer = setTimeout(this.onWindowResizeStop, 200);
-  }
-
-  render() {
-    if (this.props.measureBeforeMount && !this.mounted) {
-      return <div className={this.props.className} style={this.props.style} />;
+      window.addEventListener('resize', this.onWindowResize);
+      this.onWindowResize();
     }
 
-    return <ComposedComponent {...this.props} {...this.state} />;
-  }
-};
+    componentWillUnmount() {
+      this.mounted = false;
+      window.removeEventListener('resize', this.onWindowResize);
+    }
+
+    resizeTimer = null;
+
+    onWindowResizeStop = () => {
+      if (!this.mounted) return;
+
+      let oldWidth = this.state.width;
+      /* eslint-disable-next-line react/no-find-dom-node */
+      const node = ReactDOM.findDOMNode(this);
+
+      this.setState(
+        {
+          width: node.offsetWidth,
+          cols: (node.offsetWidth / oldWidth) * this.state.cols,
+        },
+        () => {
+          this.props.onWidthChange(this.state.width, this.state.cols);
+        }
+      );
+    };
+
+    onWindowResize = () => {
+      if (this.resizeTimer) clearTimeout(this.resizeTimer);
+      this.resizeTimer = setTimeout(this.onWindowResizeStop, 200);
+    };
+
+    render() {
+      if (this.props.measureBeforeMount && !this.mounted) {
+        return (
+          <div className={this.props.className} style={this.props.style} />
+        );
+      }
+
+      return <ComposedComponent {...this.props} {...this.state} />;
+    }
+  };
 
 export default Width;

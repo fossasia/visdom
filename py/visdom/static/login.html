@@ -1,3 +1,13 @@
+<!--
+
+Copyright 2017-present, Facebook, Inc.
+All rights reserved.
+
+This source code is licensed under the license found in the
+LICENSE file in the root directory of this source tree.
+
+-->
+
 <!doctype html>
 <html lang="en">
   <head>
@@ -15,7 +25,7 @@
     <link href={{ static_url("css/login.css") }} rel="stylesheet">
 
     <!-- jQuery -->
-    <script src={{ static_url("js/jquery.min.js") }}></script> 
+    <script src={{ static_url("js/jquery.min.js") }}></script>
 
     <!-- Hashing Password using Stanford Javascript Crypto Library-->
     <script src={{ static_url("js/sjcl.js") }}></script>
@@ -40,7 +50,7 @@
                           data: dataToSend,
                           success:function() {
                             window.location.replace("/")
-                          }, 
+                          },
                           error: function () {
                             $("#errorMessage").text("Invalid Login Information");
                           }
@@ -54,7 +64,7 @@
   </head>
 
   <body class="text-center">
-    <form class="form-signin"> 
+    <form class="form-signin">
       <h1 class="h3 mb-3 font-weight-normal">Visdom Login</h1>
       <label for="inputUsername" class="sr-only">Email address</label>
       <input name=username type="username" id="inputUsername" class="form-control" placeholder="Username" required autofocus>
