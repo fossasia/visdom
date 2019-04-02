@@ -125,6 +125,8 @@ button {
 .content {
   width: 100%;
   height: calc( 100% - 14px );
+  position: absolute;
+  overflow: hidden;
 }
 
 .widgets {
@@ -156,6 +158,18 @@ button {
   image-rendering: pixelated;
   background-color: white;
   margin: auto auto;
+  display: block;
+}
+
+.mouse_image_location{
+  background: white;
+  position: absolute;
+  left: 0;
+  bottom: 1px;
+  display: none;
+}
+
+.content:hover .mouse_image_location{
   display: block;
 }
 

@@ -17,16 +17,18 @@ import getpass
 import hashlib
 import inspect
 import json
+import jsonpatch
 import logging
 import math
 import os
 import time
 import traceback
 from os.path import expanduser
+from collections import OrderedDict, Mapping, Sequence
+from six import string_types
 
 import visdom
 from zmq.eventloop import ioloop
-
 ioloop.install()  # Needs to happen before any tornado imports!
 
 import tornado.ioloop     # noqa E402: gotta install ioloop first
@@ -37,8 +39,20 @@ import tornado.escape     # noqa E402: gotta install ioloop first
 LAYOUT_FILE = 'layouts.json'
 DEFAULT_ENV_PATH = '%s/.visdom/' % expanduser("~")
 DEFAULT_PORT = 8097
+DEFAULT_HOSTNAME = "localhost"
+DEFAULT_BASE_URL = "/"
 
 here = os.path.abspath(os.path.dirname(__file__))
+COMPACT_SEPARATORS = (',', ':')
+
+
+def check_auth(f):
+    def _check_auth(self, *args, **kwargs):
+        if self.login_enabled and not self.current_user:
+            self.set_status(400)
+            return
+        f(self, *args, **kwargs)
+    return _check_auth
 
 
 def get_rand_id():
@@ -111,13 +125,15 @@ def serialize_all(state, env_path=DEFAULT_ENV_PATH):
 
 
 class Application(tornado.web.Application):
-    def __init__(self, port=DEFAULT_PORT, env_path=DEFAULT_ENV_PATH,
-                 readonly=False, user_credential=None):
+    def __init__(self, port=DEFAULT_PORT, base_url='',
+                 env_path=DEFAULT_ENV_PATH, readonly=False,
+                 user_credential=None):
         self.state = {}
         self.subs = {}
         self.sources = {}
         self.env_path = env_path
         self.port = port
+        self.base_url = base_url
         self.readonly = readonly
         self.user_credential = user_credential
         self.login_enabled = False
@@ -133,7 +149,15 @@ class Application(tornado.web.Application):
 
         for env_json in env_jsons:
             env_path_file = os.path.join(env_path, env_json)
-            env_data = tornado.escape.json_decode(open(env_path_file, 'r').read())
+            try:
+                env_data = \
+                    tornado.escape.json_decode(open(env_path_file, 'r').read())
+            except Exception as e:
+                logging.warn(
+                    "Failed loading environment json: {} - {}".format(
+                        env_path_file, repr(e)))
+                continue
+
             eid = env_json.replace('.json', '')
             self.state[eid] = {'jsons': env_data['jsons'],
                                'reload': env_data['reload']}
@@ -142,20 +166,26 @@ class Application(tornado.web.Application):
             self.state['main'] = {'jsons': {}, 'reload': {}}
             serialize_env(self.state, ['main'], env_path=self.env_path)
 
+        tornado_settings['static_url_prefix'] = self.base_url + "/static/"
         handlers = [
-            (r"/events", PostHandler, {'app': self}),
-            (r"/update", UpdateHandler, {'app': self}),
-            (r"/close", CloseHandler, {'app': self}),
-            (r"/socket", SocketHandler, {'app': self}),
-            (r"/vis_socket", VisSocketHandler, {'app': self}),
-            (r"/env/(.*)", EnvHandler, {'app': self}),
-            (r"/compare/(.*)", CompareHandler, {'app': self}),
-            (r"/save", SaveHandler, {'app': self}),
-            (r"/error/(.*)", ErrorHandler, {'app': self}),
-            (r"/win_exists", ExistsHandler, {'app': self}),
-            (r"/win_data", DataHandler, {'app': self}),
-            (r"/delete_env", DeleteEnvHandler, {'app': self}),
-            (r"/(.*)", IndexHandler, {'app': self}),
+            (r"%s/events" % self.base_url, PostHandler, {'app': self}),
+            (r"%s/update" % self.base_url, UpdateHandler, {'app': self}),
+            (r"%s/close" % self.base_url, CloseHandler, {'app': self}),
+            (r"%s/socket" % self.base_url, SocketHandler, {'app': self}),
+            (r"%s/vis_socket" % self.base_url,
+                VisSocketHandler, {'app': self}),
+            (r"%s/env/(.*)" % self.base_url, EnvHandler, {'app': self}),
+            (r"%s/compare/(.*)" % self.base_url,
+                CompareHandler, {'app': self}),
+            (r"%s/save" % self.base_url, SaveHandler, {'app': self}),
+            (r"%s/error/(.*)" % self.base_url, ErrorHandler, {'app': self}),
+            (r"%s/win_exists" % self.base_url, ExistsHandler, {'app': self}),
+            (r"%s/win_data" % self.base_url, DataHandler, {'app': self}),
+            (r"%s/delete_env" % self.base_url,
+                DeleteEnvHandler, {'app': self}),
+            (r"%s/win_hash" % self.base_url, HashHandler, {'app': self}),
+            (r"%s/env_state" % self.base_url, EnvStateHandler, {'app': self}),
+            (r"%s(.*)" % self.base_url, IndexHandler, {'app': self}),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)
 
@@ -175,18 +205,35 @@ def send_to_sources(handler, msg):
         source.write_message(json.dumps(msg))
 
 
-class VisSocketHandler(tornado.websocket.WebSocketHandler):
+class BaseWebSocketHandler(tornado.websocket.WebSocketHandler):
+    def get_current_user(self):
+        """
+        This method determines the self.current_user
+        based the value of cookies that set in POST method
+        at IndexHandler by self.set_secure_cookie
+        """
+        try:
+            return self.get_secure_cookie("user_password")
+        except Exception:  # Not using secure cookies
+            return None
+
+
+class VisSocketHandler(BaseWebSocketHandler):
     def initialize(self, app):
         self.state = app.state
         self.subs = app.subs
         self.sources = app.sources
         self.port = app.port
         self.env_path = app.env_path
+        self.login_enabled = app.login_enabled
 
     def check_origin(self, origin):
         return True
 
     def open(self):
+        if self.login_enabled and not self.current_user:
+            self.close()
+            return
         self.sid = str(hex(int(time.time() * 10000000))[2:])
         if self not in list(self.sources.values()):
             self.eid = 'main'
@@ -211,7 +258,7 @@ class VisSocketHandler(tornado.websocket.WebSocketHandler):
             self.sources.pop(self.sid, None)
 
 
-class SocketHandler(tornado.websocket.WebSocketHandler):
+class SocketHandler(BaseWebSocketHandler):
     def initialize(self, app):
         self.port = app.port
         self.env_path = app.env_path
@@ -221,6 +268,7 @@ class SocketHandler(tornado.websocket.WebSocketHandler):
         self.sources = app.sources
         self.broadcast_layouts()
         self.readonly = app.readonly
+        self.login_enabled = app.login_enabled
 
     def check_origin(self, origin):
         return True
@@ -248,6 +296,10 @@ class SocketHandler(tornado.websocket.WebSocketHandler):
             return ""
 
     def open(self):
+        if self.login_enabled and not self.current_user:
+            print("AUTH Failed in SocketHandler")
+            self.close()
+            return
         self.sid = str(hex(int(time.time() * 10000000))[2:])
         if self not in list(self.subs.values()):
             self.eid = 'main'
@@ -315,7 +367,7 @@ class SocketHandler(tornado.websocket.WebSocketHandler):
 
 class BaseHandler(tornado.web.RequestHandler):
     def __init__(self, *request, **kwargs):
-        self.include_host = True
+        self.include_host = False
         super(BaseHandler, self).__init__(*request, **kwargs)
 
     def get_current_user(self):
@@ -331,6 +383,9 @@ class BaseHandler(tornado.web.RequestHandler):
 
     def write_error(self, status_code, **kwargs):
         logging.error("ERROR: %s: %s" % (status_code, kwargs))
+        if "exc_info" in kwargs:
+            logging.info('Traceback: {}'.format(
+                traceback.format_exception(*kwargs["exc_info"])))
         if self.settings.get("debug") and "exc_info" in kwargs:
             logging.error("rendering error page")
             import traceback
@@ -355,11 +410,13 @@ class BaseHandler(tornado.web.RequestHandler):
 def update_window(p, args):
     """Adds new args to a window if they exist"""
     content = p['content']
-    layout = content['layout']
-    layout.update(args.get('layout', {}))
+    layout_update = args.get('layout', {})
+    for layout_name, layout_val in layout_update.items():
+        if layout_val is not None:
+            content['layout'][layout_name] = layout_val
     opts = args.get('opts', {})
     for opt_name, opt_val in opts.items():
-        if opt_name in p:
+        if opt_val is not None:
             p[opt_name] = opt_val
 
     if 'legend' in opts:
@@ -408,8 +465,12 @@ def window(args):
 
 def broadcast(self, msg, eid):
     for s in self.subs:
-        if self.subs[s].eid == eid:
-            self.subs[s].write_message(msg)
+        if type(self.subs[s].eid) is list:
+            if eid in self.subs[s].eid:
+                self.subs[s].write_message(msg)
+        else:
+            if self.subs[s].eid == eid:
+                self.subs[s].write_message(msg)
 
 
 def register_window(self, p, eid):
@@ -453,6 +514,7 @@ class PostHandler(BaseHandler):
         self.sources = app.sources
         self.port = app.port
         self.env_path = app.env_path
+        self.login_enabled = app.login_enabled
         self.vis = visdom.Visdom(
             port=self.port, send=False, use_incoming_socket=False
         )
@@ -477,6 +539,7 @@ class PostHandler(BaseHandler):
 
         return func(*args, **kwargs)
 
+    @check_auth
     def post(self):
         req = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -507,21 +570,55 @@ class ExistsHandler(BaseHandler):
         self.sources = app.sources
         self.port = app.port
         self.env_path = app.env_path
+        self.login_enabled = app.login_enabled
 
     @staticmethod
     def wrap_func(handler, args):
         eid = extract_eid(args)
-
         if args['win'] in handler.state[eid]['jsons']:
             handler.write('true')
         else:
             handler.write('false')
 
+    @check_auth
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
         self.wrap_func(self, args)
+
+
+def order_by_key(kv):
+    key, val = kv
+    return key
+
+
+# Based on json-stable-stringify-python from @haochi with some usecase modifications
+def recursive_order(node):
+    if isinstance(node, Mapping):
+        ordered_mapping = OrderedDict(sorted(node.items(), key=order_by_key))
+        for key, value in ordered_mapping.items():
+            ordered_mapping[key] = recursive_order(value)
+        return ordered_mapping
+    elif isinstance(node, Sequence):
+        if isinstance(node, (bytes,)):
+            return node
+        elif isinstance(node, string_types):
+            return node
+        else:
+            return [recursive_order(item) for item in node]
+    if isinstance(node, float) and node.is_integer():
+        return int(node)
+    return node
+
+
+def stringify(node):
+    return json.dumps(recursive_order(node), separators=COMPACT_SEPARATORS)
+
+
+def hash_md_window(window_json):
+    json_string = stringify(window_json).encode("utf-8")
+    return hashlib.md5(json_string).hexdigest()
 
 
 class UpdateHandler(BaseHandler):
@@ -531,6 +628,17 @@ class UpdateHandler(BaseHandler):
         self.sources = app.sources
         self.port = app.port
         self.env_path = app.env_path
+        self.login_enabled = app.login_enabled
+
+    @staticmethod
+    def update_packet(p, args):
+        old_p = copy.deepcopy(p)
+        p = UpdateHandler.update(p, args)
+        p['contentID'] = get_rand_id()
+        # TODO: make_patch isn't high performance.
+        # If bottlenecked we should build the patch ourselves.
+        patch = jsonpatch.make_patch(old_p, p)
+        return p, patch.patch
 
     @staticmethod
     def update(p, args):
@@ -624,19 +732,32 @@ class UpdateHandler(BaseHandler):
         p = handler.state[eid]['jsons'][args['win']]
 
         if not (p['type'] == 'text' or p['type'] == 'image_history' or
-                p['content']['data'][0]['type'] in ['scatter', 'custom']):
-            handler.write(
-                'win is not scatter, custom, image_history, or text; '
-                'was {}'.format(p['content']['data'][0]['type']))
+                p['content']['data'][0]['type'] in ['scatter', 'scattergl', 'custom']):
+            handler.write('win is not scatter, custom, image_history, or text; was {}'.format(
+                p['content']['data'][0]['type']))
             return
 
-        p = UpdateHandler.update(p, args)
-
-        p['contentID'] = get_rand_id()
-        broadcast(handler, p, eid)
+        p, diff_packet = UpdateHandler.update_packet(p, args)
+        # send the smaller of the patch and the updated pane
+        if len(stringify(p)) <= len(stringify(diff_packet)):
+            broadcast(handler, p, eid)
+        else:
+            hashed = hash_md_window(p)
+            broadcast_packet = {
+                'command': 'window_update',
+                'win': args['win'],
+                'env': eid,
+                'content': diff_packet,
+                'finalHash': hashed
+            }
+            broadcast(handler, broadcast_packet, eid)
         handler.write(p['id'])
 
+    @check_auth
     def post(self):
+        if self.login_enabled and not self.current_user:
+            self.set_status(400)
+            return
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
@@ -650,6 +771,7 @@ class CloseHandler(BaseHandler):
         self.sources = app.sources
         self.port = app.port
         self.env_path = app.env_path
+        self.login_enabled = app.login_enabled
 
     @staticmethod
     def wrap_func(handler, args):
@@ -664,6 +786,7 @@ class CloseHandler(BaseHandler):
                 handler, json.dumps({'command': 'close', 'data': win}), eid
             )
 
+    @check_auth
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -678,6 +801,7 @@ class DeleteEnvHandler(BaseHandler):
         self.sources = app.sources
         self.port = app.port
         self.env_path = app.env_path
+        self.login_enabled = app.login_enabled
 
     @staticmethod
     def wrap_func(handler, args):
@@ -688,6 +812,51 @@ class DeleteEnvHandler(BaseHandler):
             os.remove(p)
             broadcast_envs(handler)
 
+    @check_auth
+    def post(self):
+        args = tornado.escape.json_decode(
+            tornado.escape.to_basestring(self.request.body)
+        )
+        self.wrap_func(self, args)
+
+
+class EnvStateHandler(BaseHandler):
+    def initialize(self, app):
+        self.app = app
+        self.state = app.state
+        self.login_enabled = app.login_enabled
+
+    @staticmethod
+    def wrap_func(handler, args):
+        # TODO if an env is provided return the state of that env
+        all_eids = list(handler.state.keys())
+        handler.write(json.dumps(all_eids))
+
+    @check_auth
+    def post(self):
+        args = tornado.escape.json_decode(
+            tornado.escape.to_basestring(self.request.body)
+        )
+        self.wrap_func(self, args)
+
+
+class HashHandler(BaseHandler):
+    def initialize(self, app):
+        self.app = app
+        self.state = app.state
+        self.login_enabled = app.login_enabled
+
+    @staticmethod
+    def wrap_func(handler, args):
+        eid = extract_eid(args)
+        handler_json = handler.state[eid]['jsons']
+        if args['win'] in handler_json:
+            hashed = hash_md_window(handler_json[args['win']])
+            handler.write(hashed)
+        else:
+            handler.write('false')
+
+    @check_auth
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -697,7 +866,6 @@ class DeleteEnvHandler(BaseHandler):
 
 def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
     """ load an environment to a client by socket """
-
     env = {}
     if eid in state:
         env = state.get(eid)
@@ -776,6 +944,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
                     continue  # Skip windows with unnamed data
                 destWidJson['has_compare'] = False
                 destWidJson['content']['layout']['showlegend'] = True
+                destWidJson['contentID'] = get_rand_id()
                 for dataIdx, data in enumerate(destWidJson['content']['data']):
                     if 'name' not in data:
                         break  # stop working with this plot, not right format
@@ -825,7 +994,8 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         "content": tbl,
         "type": "text",
         "layout": {"title": "compare_legend"},
-        "i": 1
+        "i": 1,
+        "has_compare": True,
     }
     if 'reload' in res:
         socket.write_message(
@@ -838,7 +1008,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         socket.write_message(v)
 
     socket.write_message(json.dumps({'command': 'layout'}))
-    socket.eid = eid
+    socket.eid = eids
 
 
 class EnvHandler(BaseHandler):
@@ -848,7 +1018,9 @@ class EnvHandler(BaseHandler):
         self.sources = app.sources
         self.port = app.port
         self.env_path = app.env_path
+        self.login_enabled = app.login_enabled
 
+    @check_auth
     def get(self, eid):
         items = gather_envs(self.state, env_path=self.env_path)
         active = '' if eid not in items else eid
@@ -859,13 +1031,21 @@ class EnvHandler(BaseHandler):
             active_item=active
         )
 
+    @check_auth
     def post(self, args):
-        sid = tornado.escape.json_decode(
+        msg_args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
-        )['sid']
-        if sid in self.subs:
-            load_env(self.state, args, self.subs[sid], env_path=self.env_path)
-
+        )
+        if 'sid' in msg_args:
+            sid = msg_args['sid']
+            if sid in self.subs:
+                load_env(self.state, args, self.subs[sid],
+                         env_path=self.env_path)
+        if 'eid' in msg_args:
+            eid = msg_args['eid']
+            if eid not in self.state:
+                self.state[eid] = {'jsons': {}, 'reload': {}}
+                broadcast_envs(self)
 
 class CompareHandler(BaseHandler):
     def initialize(self, app):
@@ -873,7 +1053,9 @@ class CompareHandler(BaseHandler):
         self.subs = app.subs
         self.sources = app.sources
         self.env_path = app.env_path
+        self.login_enabled = app.login_enabled
 
+    @check_auth
     def get(self, eids):
         items = gather_envs(self.state)
         eids = eids.split('+')
@@ -887,6 +1069,7 @@ class CompareHandler(BaseHandler):
             active_item=eids
         )
 
+    @check_auth
     def post(self, args):
         sid = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -903,6 +1086,7 @@ class SaveHandler(BaseHandler):
         self.sources = app.sources
         self.port = app.port
         self.env_path = app.env_path
+        self.login_enabled = app.login_enabled
 
     @staticmethod
     def wrap_func(handler, args):
@@ -912,6 +1096,7 @@ class SaveHandler(BaseHandler):
         ret = serialize_env(handler.state, envs, env_path=handler.env_path)
         handler.write(json.dumps(ret))
 
+    @check_auth
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -924,6 +1109,7 @@ class DataHandler(BaseHandler):
         self.state = app.state
         self.port = app.port
         self.env_path = app.env_path
+        self.login_enabled = app.login_enabled
 
     @staticmethod
     def wrap_func(handler, args):
@@ -936,6 +1122,7 @@ class DataHandler(BaseHandler):
         else:
             handler.write(json.dumps(handler.state[eid]['jsons']))
 
+    @check_auth
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -993,7 +1180,7 @@ class ErrorHandler(BaseHandler):
 # function that downloads and installs javascript, css, and font dependencies:
 def download_scripts(proxies=None, install_dir=None):
     import visdom
-    print("Downloading scripts. It might take a while.")
+    print("Checking for scripts.")
 
     # location in which to download stuff:
     if install_dir is None:
@@ -1024,7 +1211,7 @@ def download_scripts(proxies=None, install_dir=None):
 
         # - fonts
         '%sclassnames@2.2.5' % b: 'classnames',
-        '%slayout-bin-packer@1.2.2' % b: 'layout_bin_packer',
+        '%slayout-bin-packer@1.4.0/dist/layout-bin-packer.js' % b: 'layout_bin_packer',
         '%sfonts/glyphicons-halflings-regular.eot' % bb:
             'glyphicons-halflings-regular.eot',
         '%sfonts/glyphicons-halflings-regular.woff2' % bb:
@@ -1066,16 +1253,19 @@ def download_scripts(proxies=None, install_dir=None):
             is_built = True
         else:
             os.remove(built_path)
+    if not is_built:
+        print('Downloading scripts, this may take a little while')
 
     # download files one-by-one:
     for (key, val) in ext_files.items():
 
         # set subdirectory:
-        sub_dir = 'fonts'
-        if '.js' in key:
+        if val.endswith('.js'):
             sub_dir = 'js'
-        if '.css' in key:
+        elif val.endswith('.css'):
             sub_dir = 'css'
+        else:
+            sub_dir = 'fonts'
 
         # download file:
         filename = '%s/static/%s/%s' % (install_dir, sub_dir, val)
@@ -1098,19 +1288,22 @@ def download_scripts(proxies=None, install_dir=None):
             build_file.write(visdom.__version__)
 
 
-def start_server(port=DEFAULT_PORT, env_path=DEFAULT_ENV_PATH, readonly=False,
-                 print_func=None, user_credential=None):
+def start_server(port=DEFAULT_PORT, hostname=DEFAULT_HOSTNAME,
+                 base_url=DEFAULT_BASE_URL, env_path=DEFAULT_ENV_PATH,
+                 readonly=False, print_func=None, user_credential=None):
     print("It's Alive!")
-    app = Application(port=port, env_path=env_path, readonly=readonly,
-                      user_credential=user_credential)
+    app = Application(port=port, base_url=base_url, env_path=env_path,
+                      readonly=readonly, user_credential=user_credential)
     app.listen(port, max_buffer_size=1024 ** 3)
     logging.info("Application Started")
-    if "HOSTNAME" in os.environ:
+
+    if "HOSTNAME" in os.environ and hostname == DEFAULT_HOSTNAME:
         hostname = os.environ["HOSTNAME"]
     else:
-        hostname = "localhost"
+        hostname = hostname
     if print_func is None:
-        print("You can navigate to http://%s:%s" % (hostname, port))
+        print(
+            "You can navigate to http://%s:%s%s" % (hostname, port, base_url))
     else:
         print_func(port)
     ioloop.IOLoop.instance().start()
@@ -1118,14 +1311,22 @@ def start_server(port=DEFAULT_PORT, env_path=DEFAULT_ENV_PATH, readonly=False,
 
 def main(print_func=None):
     parser = argparse.ArgumentParser(description='Start the visdom server.')
-    parser.add_argument('-port', metavar='port', type=int, default=DEFAULT_PORT,
+    parser.add_argument('-port', metavar='port', type=int,
+                        default=DEFAULT_PORT,
                         help='port to run the server on.')
+    parser.add_argument('--hostname', metavar='hostname', type=str,
+                        default=DEFAULT_HOSTNAME,
+                        help='host to run the server on.')
+    parser.add_argument('-base_url', metavar='base_url', type=str,
+                        default=DEFAULT_BASE_URL,
+                        help='base url for server (default = /).')
     parser.add_argument('-env_path', metavar='env_path', type=str,
                         default=DEFAULT_ENV_PATH,
                         help='path to serialized session to reload.')
-    parser.add_argument('-logging_level', metavar='logger_level', default='INFO',
-                        help='logging level (default = INFO). Can take logging '
-                             'level name or int (example: 20)')
+    parser.add_argument('-logging_level', metavar='logger_level',
+                        default='INFO',
+                        help='logging level (default = INFO). Can take '
+                             'logging level name or int (example: 20)')
     parser.add_argument('-readonly', help='start in readonly mode',
                         action='store_true')
     parser.add_argument('-enable_login', default=False, action='store_true',
@@ -1135,6 +1336,13 @@ def main(print_func=None):
                         help='start the server with the new cookie, '
                              'available when -enable_login provided')
     FLAGS = parser.parse_args()
+
+    # Process base_url
+    base_url = FLAGS.base_url if FLAGS.base_url != DEFAULT_BASE_URL else ""
+    assert base_url == '' or base_url.startswith('/'), \
+        'base_url should start with /'
+    assert base_url == '' or not base_url.endswith('/'), \
+        'base_url should not end with / as it is appended automatically'
 
     try:
         logging_level = int(FLAGS.logging_level)
@@ -1164,10 +1372,15 @@ def main(print_func=None):
     else:
         user_credential = None
 
-    start_server(port=FLAGS.port, env_path=FLAGS.env_path, readonly=FLAGS.readonly,
+    start_server(port=FLAGS.port, hostname=FLAGS.hostname, base_url=base_url,
+                 env_path=FLAGS.env_path, readonly=FLAGS.readonly,
                  print_func=print_func, user_credential=user_credential)
 
 
-if __name__ == "__main__":
+def download_scripts_and_run():
     download_scripts()
     main()
+
+
+if __name__ == "__main__":
+    download_scripts_and_run()
