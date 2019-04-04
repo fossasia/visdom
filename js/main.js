@@ -51,6 +51,7 @@ const MARGIN = 10; // pixels
 
 const PANES = {
   image: ImagePane,
+  image_history: ImagePane,
   plot: PlotPane,
   text: TextPane,
   properties: PropertiesPane,
@@ -58,6 +59,7 @@ const PANES = {
 
 const PANE_SIZE = {
   image: [20, 20],
+  image_history: [20, 20],
   plot: [30, 24],
   text: [20, 20],
   properties: [20, 20],

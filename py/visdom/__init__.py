@@ -961,15 +961,20 @@ class Visdom(object):
                 'src': 'data:image/png;base64,' + b64encoded,
                 'caption': opts.get('caption'),
             },
-            'type': 'image',
+            'type': 'image_history' if opts.get('store_history') else 'image',
         }]
+
+        endpoint = 'events'
+        if opts.get('store_history'):
+            if win is not None and self.win_exists(win, env):
+                endpoint = 'update'
 
         return self._send({
             'data': data,
             'win': win,
             'eid': env,
             'opts': opts,
-        })
+        }, endpoint=endpoint)
 
     @pytorch_wrap
     def images(self, tensor, nrow=8, padding=2,
