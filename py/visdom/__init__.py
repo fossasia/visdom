@@ -1065,25 +1065,34 @@ class Visdom(object):
         opts['width'] = 330
         return self.text(text=audiodata, win=win, env=env, opts=opts)
 
-    def encode(self, tensor, fps):
+    def _encode(self, tensor, fps):
+        """This follows the [PyAV cookbook](http://docs.mikeboers.com/pyav/develop/cookbook/numpy.html#generating-video)"""
         import av # type: ignore
-        content = BytesIO()
 
+        # Float tensors are assumed to have a domain of [0, 1], for backward-compatability with OpenCV.
+        if np.issubdtype(tensor.dtype, np.floating):
+            tensor = (255*tensor)
+        tensor = tensor.astype(np.uint8).clip(0, 255)
+
+        # Use BGR for backward-compatability with OpenCV
+        pixelformats = {1: 'gray', 3: 'bgr24'}
+        pixelformat = pixelformats[tensor.shape[3]]
+
+        content = BytesIO()
         container = av.open(content, 'w', 'mp4')
 
         stream = container.add_stream('h264', rate=fps)
         stream.height = tensor.shape[1]
         stream.width = tensor.shape[2]
+        stream.pix_fmt = 'yuv420p'
 
-        #TODO: Support greyscale, support floats, swap to BGR
         for arr in tensor:
-            eightbit = (255*arr).astype(np.uint8).clip(0, 255)
-            frame = av.VideoFrame.from_ndarray(eightbit, format='rgb24')
-            for packet in stream.encode(frame):
-                container.mux(packet)
-
-        for packet in stream.encode():
-            container.mux(packet)
+            frame = av.VideoFrame.from_ndarray(arr, format=pixelformat)
+            container.mux(stream.encode(frame))
+        # Flushing the stream here causes a deprecation warning in ffmpeg
+        # https://ffmpeg.zeranoe.com/forum/viewtopic.php?t=3678
+        # It's old and benign and possibly only apparent in homebrew-installed ffmpeg?
+        container.mux(stream.encode())
 
         container.close()
         content = content.getvalue()
@@ -1095,7 +1104,10 @@ class Visdom(object):
         """
         This function plays a video. It takes as input the filename of the video
         `videofile` or a `LxHxWxC` or `LxCxHxW`-sized `tensor` containing all the frames of
-        the video as input, as specified in `dim`. The color channels must be in RGB order.
+        the video as input, as specified in `dim`. The color channels must be in BGR order.
+
+        Internally, video encoding is done with [PyAV](http://docs.mikeboers.com/pyav/develop/installation.html).
+        The import is deferred as it's a dependency most Visdom users won't encounter. 
         
         The function does not support any plot-specific `opts`. The following video `opts` are supported:
 
@@ -1123,7 +1135,7 @@ class Visdom(object):
             assert dim == 'LxHxWxC' or dim == 'LxCxHxW', 'dimension argument should be LxHxWxC or LxCxHxW'
             if dim == 'LxCxHxW':
                 tensor = tensor.transpose([0, 2, 3, 1])
-            bytestr, mimetype = self.encode(tensor, opts['fps'])
+            bytestr, mimetype = self._encode(tensor, opts['fps'])
 
         flags = ' '.join([k for k in ('autoplay', 'loop') if opts[k]])
 
