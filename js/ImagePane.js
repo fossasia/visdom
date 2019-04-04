@@ -168,7 +168,7 @@ class ImagePane extends React.Component {
     let type = this.props.type;
     let widgets = [];
 
-    if (type == 'image_history') {
+    if (type === 'image_history') {
       let selected = this.state.selected;
       if (this.props.show_slider) {
         widgets.push(
