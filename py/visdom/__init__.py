@@ -1065,12 +1065,37 @@ class Visdom(object):
         opts['width'] = 330
         return self.text(text=audiodata, win=win, env=env, opts=opts)
 
+    def encode(self, tensor, fps):
+        import av # type: ignore
+        content = BytesIO()
+
+        container = av.open(content, 'w', 'mp4')
+
+        stream = container.add_stream('h264', rate=fps)
+        stream.height = tensor.shape[1]
+        stream.width = tensor.shape[2]
+
+        #TODO: Support greyscale, support floats, swap to BGR
+        for arr in tensor:
+            eightbit = (255*arr).astype(np.uint8).clip(0, 255)
+            frame = av.VideoFrame.from_ndarray(eightbit, format='rgb24')
+            for packet in stream.encode(frame):
+                container.mux(packet)
+
+        for packet in stream.encode():
+            container.mux(packet)
+
+        container.close()
+        content = content.getvalue()
+
+        return content, 'mp4'
+
     @pytorch_wrap
     def video(self, tensor=None, dim='LxHxWxC', videofile=None, win=None, env=None, opts=None):
         """
         This function plays a video. It takes as input the filename of the video
         `videofile` or a `LxHxWxC` or `LxCxHxW`-sized `tensor` containing all the frames of
-        the video as input, as specified in `dim`. The color channels must be in BGR order.
+        the video as input, as specified in `dim`. The color channels must be in RGB order.
         
         The function does not support any plot-specific `opts`. The following video `opts` are supported:
 
@@ -1087,51 +1112,21 @@ class Visdom(object):
         assert tensor is not None or videofile is not None, \
             'should specify video tensor or file'
 
-        if tensor is not None:
-            import cv2 # type: ignore
-            import tempfile
+        if tensor is None:
+            extension = videofile.split(".")[-1].lower()
+            mimetypes = {'mp4': 'mp4', 'ogv': 'ogg', 'avi': 'avi', 'webm': 'webm'}
+            mimetype = mimetypes.get(extension)
+            assert mimetype is not None, 'unknown video type: %s' % extension
+            bytestr = loadfile(videofile)
+        else:
             assert tensor.ndim == 4, 'video should be in 4D tensor'
             assert dim == 'LxHxWxC' or dim == 'LxCxHxW', 'dimension argument should be LxHxWxC or LxCxHxW'
             if dim == 'LxCxHxW':
                 tensor = tensor.transpose([0, 2, 3, 1])
-            videofile = os.path.join(
-                tempfile.gettempdir(),
-                '%s.ogv' % next(tempfile._get_candidate_names()))
-            if cv2.__version__.startswith('2'):  # OpenCV 2
-                fourcc = cv2.cv.CV_FOURCC(
-                    chr(ord('T')),
-                    chr(ord('H')),
-                    chr(ord('E')),
-                    chr(ord('O'))
-                )
-            else:  # cv2.__version__.startswith(('3', '4')):  # OpenCV 3, 4
-                fourcc = cv2.VideoWriter_fourcc(
-                    chr(ord('T')),
-                    chr(ord('H')),
-                    chr(ord('E')),
-                    chr(ord('O'))
-                )
-            writer = cv2.VideoWriter(
-                videofile,
-                fourcc,
-                opts.get('fps'),
-                (tensor.shape[2], tensor.shape[1])
-            )
-            assert writer.isOpened(), 'video writer could not be opened'
-            for i in range(tensor.shape[0]):
-                # TODO mute opencv on this function call somehow
-                writer.write(tensor[i, :, :, :])
-            writer.release()
-            writer = None
-
-        extension = videofile.split(".")[-1].lower()
-        mimetypes = {'mp4': 'mp4', 'ogv': 'ogg', 'avi': 'avi', 'webm': 'webm'}
-        mimetype = mimetypes.get(extension)
-        assert mimetype is not None, 'unknown video type: %s' % extension
+            bytestr, mimetype = self.encode(tensor, opts['fps'])
 
         flags = ' '.join([k for k in ('autoplay', 'loop') if opts[k]])
 
-        bytestr = loadfile(videofile)
         videodata = """
             <video controls %s>
                 <source type="video/%s" src="data:video/%s;base64,%s">
