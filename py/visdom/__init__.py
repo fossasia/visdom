@@ -1076,7 +1076,7 @@ class Visdom(object):
         This function plays a video. It takes as input the filename of the video
         `videofile` or a `LxHxWxC` or `LxCxHxW`-sized `tensor` containing all the frames of
         the video as input, as specified in `dim`. The color channels must be in BGR order.
-        
+
         The function does not support any plot-specific `opts`. The following video `opts` are supported:
 
         - `opts.fps`: FPS for the video (`integer` > 0; default = 25)
@@ -1205,8 +1205,6 @@ class Visdom(object):
             if update == 'append':
                 if win is None or not self.win_exists(win, env):
                     update = None
-                else:
-                    update = 'append'
 
             # case when X is 1 dimensional and corresponding values on y-axis
             # are passed in parameter Y
@@ -1321,6 +1319,10 @@ class Visdom(object):
                     _data.update(trace_opts[trace_name])
 
                 data.append(_scrub_dict(_data))
+
+        if len(data) > 1:
+            assert name is None, \
+                'name should not be specified with multiple labels or lines'
 
         if opts:
             for marker_prop in ['markercolor']:
