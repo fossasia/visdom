@@ -67,7 +67,7 @@ class PlotPane extends React.Component {
       this.props.contentID,
       this.props.content.data,
       this.props.content.layout,
-      { showLink: true, linkText: ' ' }
+      { showLink: true, linkText: 'Edit' }
     );
   };
 
