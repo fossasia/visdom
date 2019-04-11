@@ -23,6 +23,7 @@ import math
 import os
 import time
 import traceback
+import uuid
 from os.path import expanduser
 from collections import OrderedDict, Mapping, Sequence
 from six import string_types
@@ -56,7 +57,7 @@ def check_auth(f):
 
 
 def get_rand_id():
-    return str(hex(int(time.time() * 10000000))[2:])
+    return str(uuid.uuid4())
 
 
 def ensure_dir_exists(path):
