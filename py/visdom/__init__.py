@@ -571,7 +571,9 @@ class Visdom(object):
         if not self.send:
             return msg, endpoint
 
-        if 'win' in msg and msg['win'] is None:
+        # For /close, win=None means closing all windows. So do not substitute
+        # in that case.
+        if 'win' in msg and msg['win'] is None and endpoint is not 'close':
             msg['win'] = 'window_' + get_rand_id()
 
         if not from_log:
