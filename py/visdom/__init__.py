@@ -961,15 +961,20 @@ class Visdom(object):
                 'src': 'data:image/png;base64,' + b64encoded,
                 'caption': opts.get('caption'),
             },
-            'type': 'image',
+            'type': 'image_history' if opts.get('store_history') else 'image',
         }]
+
+        endpoint = 'events'
+        if opts.get('store_history'):
+            if win is not None and self.win_exists(win, env):
+                endpoint = 'update'
 
         return self._send({
             'data': data,
             'win': win,
             'eid': env,
             'opts': opts,
-        })
+        }, endpoint=endpoint)
 
     @pytorch_wrap
     def images(self, tensor, nrow=8, padding=2,
@@ -1108,7 +1113,7 @@ class Visdom(object):
 
         Internally, video encoding is done with [PyAV](http://docs.mikeboers.com/pyav/develop/installation.html).
         The import is deferred as it's a dependency most Visdom users won't encounter. 
-        
+
         The function does not support any plot-specific `opts`. The following video `opts` are supported:
 
         - `opts.fps`: FPS for the video (`integer` > 0; default = 25)
@@ -1207,8 +1212,6 @@ class Visdom(object):
             if update == 'append':
                 if win is None or not self.win_exists(win, env):
                     update = None
-                else:
-                    update = 'append'
 
             # case when X is 1 dimensional and corresponding values on y-axis
             # are passed in parameter Y
@@ -1231,13 +1234,17 @@ class Visdom(object):
         if Y is not None:
             Y = np.ravel(Y)
             assert X.shape[0] == Y.shape[0], 'sizes of X and Y should match'
+            assert np.equal(np.mod(Y, 1), 0).all(), 'labels should be integers'
+            assert Y.min() >= 1, 'labels are assumed to be at least 1'
+            labels = np.unique(Y.astype(int, copy=False))
+            assert len(labels) == 1 or name is None, \
+                'name should not be specified with multiple labels or lines'
+            K = int(Y.max())  # largest label
         else:
             Y = np.ones(X.shape[0], dtype=int)
+            labels = np.ones(1, dtype=int)
+            K = 1  # largest label
 
-        assert np.equal(np.mod(Y, 1), 0).all(), 'labels should be integers'
-        assert Y.min() >= 1, 'labels are assumed to be between 1 and K'
-
-        K = int(Y.max())
         is3d = X.shape[1] == 3
 
         opts = {} if opts is None else opts
@@ -1280,12 +1287,12 @@ class Visdom(object):
         mc = opts.get('markercolor')
         lc = opts.get('linecolor')
 
-        for k in range(1, K + 1):
+        for k in labels:
             ind = np.equal(Y, k)
             if ind.any():
                 if 'legend' in opts:
                     trace_name = opts.get('legend')[k - 1]
-                elif K == 1 and name is not None:
+                elif len(labels) == 1 and name is not None:
                     trace_name = name
                 else:
                     trace_name = str(k)
