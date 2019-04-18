@@ -856,6 +856,11 @@ class ForkHandler(BaseHandler):
         logging.warn(f"prev_eid {prev_eid}")
         logging.warn(f"eid {eid}")
 
+        if prev_eid not in handler.state:
+            return handler.write('TODO: env doesn\'t exit')
+
+        logging.warn(json.dumps(handler.state[prev_eid]['reload']))
+
     @check_auth
     def post(self):
         args = tornado.escape.json_decode(
