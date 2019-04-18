@@ -853,13 +853,11 @@ class ForkHandler(BaseHandler):
         prev_eid = args.get('prev_eid')
         eid = args.get('eid')
 
-        logging.warn(f"prev_eid {prev_eid}")
-        logging.warn(f"eid {eid}")
-
         if prev_eid not in handler.state:
             return handler.write('TODO: env doesn\'t exit')
 
-        logging.warn(json.dumps(handler.state[prev_eid]['reload']))
+        handler.state[eid] = copy.deepcopy(handler.state[prev_eid])
+        handler.write('TODO: missing proper reply')
 
     @check_auth
     def post(self):
