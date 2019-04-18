@@ -115,6 +115,7 @@ tornado_settings = {
 
 def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
     env_ids = [i for i in eids if i in state]
+
     for env_id in env_ids:
         env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
         open(env_path_file, 'w').write(json.dumps(state[env_id]))
@@ -186,6 +187,7 @@ class Application(tornado.web.Application):
                 DeleteEnvHandler, {'app': self}),
             (r"%s/win_hash" % self.base_url, HashHandler, {'app': self}),
             (r"%s/env_state" % self.base_url, EnvStateHandler, {'app': self}),
+            (r"%s/fork" % self.base_url, ForkHandler, {'app': self}),
             (r"%s(.*)" % self.base_url, IndexHandler, {'app': self}),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)
@@ -840,6 +842,26 @@ class EnvStateHandler(BaseHandler):
         )
         self.wrap_func(self, args)
 
+class ForkHandler(BaseHandler):
+    def initialize(self, app):
+        self.app = app
+        self.state = app.state
+        self.login_enabled = app.login_enabled
+
+    @staticmethod
+    def wrap_func(handler, args):
+        prev_eid = args.get('prev_eid')
+        eid = args.get('eid')
+
+        logging.warn(f"prev_eid {prev_eid}")
+        logging.warn(f"eid {eid}")
+
+    @check_auth
+    def post(self):
+        args = tornado.escape.json_decode(
+            tornado.escape.to_basestring(self.request.body)
+        )
+        self.wrap_func(self, args)
 
 class HashHandler(BaseHandler):
     def initialize(self, app):

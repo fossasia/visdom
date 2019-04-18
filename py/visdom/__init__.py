@@ -626,6 +626,16 @@ class Visdom(object):
             'data': envs,
         }, 'save')
 
+    def fork(self, prevenv, env):
+        """This function allows the user to fork environments."""
+        assert isstr(prevenv), 'prevenv should be a string'
+        assert isstr(env), 'env should be a string'
+
+        return self._send(
+            msg={'prev_eid': prevenv, 'eid': env},
+            endpoint='fork'
+        )
+
     def get_window_data(self, win=None, env=None):
         """
         This function returns all the window data for a specified window in
