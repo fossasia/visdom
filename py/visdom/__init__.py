@@ -626,13 +626,13 @@ class Visdom(object):
             'data': envs,
         }, 'save')
 
-    def fork(self, prevenv, env):
+    def fork(self, prev_eid, eid):
         """This function allows the user to fork environments."""
         assert isstr(prevenv), 'prevenv should be a string'
         assert isstr(env), 'env should be a string'
 
         return self._send(
-            msg={'prev_eid': prevenv, 'eid': env},
+            msg={'prev_eid': prev_eid, 'eid': eid},
             endpoint='fork'
         )
 
