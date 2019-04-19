@@ -187,7 +187,7 @@ class Application(tornado.web.Application):
                 DeleteEnvHandler, {'app': self}),
             (r"%s/win_hash" % self.base_url, HashHandler, {'app': self}),
             (r"%s/env_state" % self.base_url, EnvStateHandler, {'app': self}),
-            (r"%s/fork" % self.base_url, ForkHandler, {'app': self}),
+            (r"%s/fork_env" % self.base_url, ForkEnvHandler, {'app': self}),
             (r"%s(.*)" % self.base_url, IndexHandler, {'app': self}),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)
@@ -845,7 +845,7 @@ class EnvStateHandler(BaseHandler):
         )
         self.wrap_func(self, args)
 
-class ForkHandler(BaseHandler):
+class ForkEnvHandler(BaseHandler):
     def initialize(self, app):
         self.app = app
         self.state = app.state
@@ -856,11 +856,10 @@ class ForkHandler(BaseHandler):
         prev_eid = args.get('prev_eid')
         eid = args.get('eid')
 
-        if prev_eid not in handler.state:
-            return handler.write('TODO: env doesn\'t exit')
+        assert prev_eid in handler.state, 'env to be forked doesn\'t exit'
 
         handler.state[eid] = copy.deepcopy(handler.state[prev_eid])
-        handler.write('TODO: missing proper reply')
+        handler.write(eid)
 
     @check_auth
     def post(self):

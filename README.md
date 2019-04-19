@@ -631,7 +631,7 @@ This function deletes a specified env entirely. It takes env id `eid` as input.
 > **Note**: `delete_env` is deletes all data for an environment and is IRREVERSIBLE. Do not use unless you absolutely want to remove an environment.
 
 
-#### vis.fork
+#### vis.fork_env
 
 This function forks an environment, similiar to the UI feature.
 
