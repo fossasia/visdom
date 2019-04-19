@@ -727,7 +727,7 @@ class App extends React.Component {
   sendLayoutItemState = ({ i, h, w, x, y, moved, static: staticBool }) => {
     this.sendSocketMessage({
       cmd: 'layout_item_update',
-      eid: i,
+      eid: this.state.envID,
       data: { i, h, w, x, y, moved, static: staticBool },
     });
   };
