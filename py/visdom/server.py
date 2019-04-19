@@ -362,6 +362,11 @@ class SocketHandler(BaseWebSocketHandler):
             environment = self.state[packet['eid']]
             packet['pane_data'] = environment['jsons'][packet['target']]
             send_to_sources(self, msg.get('data'))
+        elif cmd == 'layout_item_update':
+            eid = msg.get('eid')
+            logging.warn(json.dumps(self.state[eid]))
+            logging.warn(json.dumps(self.state[eid]['reload']))
+            #self.state[eid]['reload'] = msg.get('data')
 
     def on_close(self):
         if self in list(self.subs.values()):
