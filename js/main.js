@@ -724,11 +724,11 @@ class App extends React.Component {
    *
    * @param layout Layout to be sent to backend.
    */
-  sendLayoutItemState = ({ i, h, w, x, y, moved, static }) => {
+  sendLayoutItemState = ({ i, h, w, x, y, moved, static: staticBool }) => {
     this.sendSocketMessage({
       cmd: 'layout_item_update',
       eid: i,
-      data: { i, h, w, x, y, moved, static }
+      data: { i, h, w, x, y, moved, static: staticBool },
     });
   };
 
