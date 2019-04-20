@@ -853,12 +853,15 @@ class ForkEnvHandler(BaseHandler):
 
     @staticmethod
     def wrap_func(handler, args):
-        prev_eid = args.get('prev_eid')
-        eid = args.get('eid')
+        prev_eid = escape_eid(args.get('prev_eid'))
+        eid = escape_eid(args.get('eid'))
 
         assert prev_eid in handler.state, 'env to be forked doesn\'t exit'
 
         handler.state[eid] = copy.deepcopy(handler.state[prev_eid])
+        serialize_env(handler.state, [eid], env_path=handler.app.env_path)
+        broadcast_envs(handler)
+
         handler.write(eid)
 
     @check_auth

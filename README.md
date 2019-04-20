@@ -639,6 +639,8 @@ Arguments:
 - `prev_eid`: Environment ID that we want to fork.
 - `eid`: New Environment ID that will be created with the fork.
 
+> **Note**: `fork_env` an exception will occur if an env that doesn't exist is forked.
+
 #### vis.win_exists
 
 This function returns a bool indicating whether or not a window `win` exists on the server already. Returns None if something went wrong.
