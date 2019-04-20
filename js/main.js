@@ -728,6 +728,7 @@ class App extends React.Component {
     this.sendSocketMessage({
       cmd: 'layout_item_update',
       eid: this.state.envID,
+      win: i,
       data: { i, h, w, x, y, moved, static: staticBool },
     });
   };

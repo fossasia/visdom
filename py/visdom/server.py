@@ -364,7 +364,8 @@ class SocketHandler(BaseWebSocketHandler):
             send_to_sources(self, msg.get('data'))
         elif cmd == 'layout_item_update':
             eid = msg.get('eid')
-            self.state[eid]['reload'] = msg.get('data')
+            win = msg.get('win')
+            self.state[eid]['reload'][win] = msg.get('data')
 
     def on_close(self):
         if self in list(self.subs.values()):
@@ -849,6 +850,7 @@ class ForkEnvHandler(BaseHandler):
     def initialize(self, app):
         self.app = app
         self.state = app.state
+        self.subs = app.subs
         self.login_enabled = app.login_enabled
 
     @staticmethod
