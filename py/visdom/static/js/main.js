@@ -813,6 +813,21 @@
 	      });
 	    };
 
+	    _this.sendEmbeddingPop = function (data) {
+	      if (_this.state.focusedPaneID === null || _this.state.readonly) {
+	        return;
+	      }
+	      var finalData = {
+	        target: _this.state.focusedPaneID,
+	        eid: _this.state.envID
+	      };
+	      $.extend(finalData, data);
+	      _this.sendSocketMessage({
+	        cmd: 'pop_embeddings_pane',
+	        data: finalData
+	      });
+	    };
+
 	    _this.onWidthChange = function (width, cols) {
 	      _this.setState({
 	        cols: cols,
@@ -1690,7 +1705,12 @@
 	              isFocused: pane.id === _this6.state.focusedPaneID,
 	              w: panelayout.w,
 	              h: panelayout.h,
-	              appApi: { sendPaneMessage: _this6.sendPaneMessage }
+	              width: _this6.w2p(panelayout.w),
+	              height: _this6.h2p(panelayout.h) - 14,
+	              appApi: {
+	                sendPaneMessage: _this6.sendPaneMessage,
+	                sendEmbeddingPop: _this6.sendEmbeddingPop
+	              }
 	            }))
 	          );
 	        } catch (err) {
