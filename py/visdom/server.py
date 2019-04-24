@@ -357,8 +357,17 @@ class SocketHandler(BaseWebSocketHandler):
         elif cmd == 'forward_to_vis':
             packet = msg.get('data')
             environment = self.state[packet['eid']]
-            packet['pane_data'] = environment['jsons'][packet['target']]
+            if packet.get('pane_data') is not False:
+                packet['pane_data'] = environment['jsons'][packet['target']]
             send_to_sources(self, msg.get('data'))
+        elif cmd == 'pop_embeddings_pane':
+            packet = msg.get('data')
+            eid = self.state[packet['eid']]
+            win = packet['target']
+            p = self.state[eid]['jsons'][win]
+            p['content']['selected'] = None
+            p['content']['data'] = p['old_content'].pop()
+            broadcast(self, p, eid)
 
     def on_close(self):
         if self in list(self.subs.values()):
@@ -442,8 +451,14 @@ def window(args):
         'contentID': get_rand_id(),   # to detected updated windows
     }
 
-    if ptype in ['image', 'text', 'properties', 'embeddings']:
+    if ptype in ['image', 'text', 'properties']:
         p.update({'content': args['data'][0]['content'], 'type': ptype})
+    elif ptype in ['embeddings']:
+        p.update({
+            'content': args['data'][0]['content'],
+            'type': ptype,
+            'old_content': [],  # Used to cache previous to prevent recompute
+        })
     else:
         p['content'] = {'data': args['data'], 'layout': args['layout']}
         p['type'] = 'plot'
@@ -635,6 +650,18 @@ class UpdateHandler(BaseHandler):
             p['content'] += "<br>" + args['data'][0]['content']
             return p
 
+        if p['type'] == 'embeddings':
+            # TODO embeddings updates should be handled outside of the regular
+            # update flow, as update packets are easy to create manually and
+            # expensive to calculate otherwise
+            if args['data']['update_type'] == 'EntitySelected':
+                p['content']['selected'] = args['data']['selected']
+            elif args['data']['update_type'] == 'RegionSelected':
+                p['content']['selected'] = None
+                p['old_content'].push(p['content']['data'])
+                p['content']['data'] = args['data']['points']
+            return p
+
         pdata = p['content']['data']
 
         new_data = args.get('data')
@@ -705,7 +732,7 @@ class UpdateHandler(BaseHandler):
 
         p = handler.state[eid]['jsons'][args['win']]
 
-        if not (p['type'] == 'text' or
+        if not (p['type'] == 'text' or p['type'] == 'embeddings' or
                 p['content']['data'][0]['type'] in ['scatter', 'scattergl', 'custom']):
             handler.write('win is not scatter, custom, or text; was {}'.format(
                 p['content']['data'][0]['type']))

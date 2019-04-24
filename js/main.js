@@ -800,6 +800,21 @@ class App extends React.Component {
     });
   };
 
+  sendEmbeddingPop = data => {
+    if (this.state.focusedPaneID === null || this.state.readonly) {
+      return;
+    }
+    let finalData = {
+      target: this.state.focusedPaneID,
+      eid: this.state.envID,
+    };
+    $.extend(finalData, data);
+    this.sendSocketMessage({
+      cmd: 'pop_embeddings_pane',
+      data: finalData,
+    });
+  };
+
   exportLayoutsToServer(layoutLists) {
     // pushes layouts to the server
     let objForm = {};
@@ -1424,6 +1439,7 @@ class App extends React.Component {
             height={this.h2p(panelayout.h) - 14}
             appApi={{
               sendPaneMessage: this.sendPaneMessage,
+              sendEmbeddingPop: this.sendEmbeddingPop,
             }}
           />
         </div>

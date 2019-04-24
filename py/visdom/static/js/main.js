@@ -20313,7 +20313,7 @@
 /* 32 */
 /***/ (function(module, exports) {
 
-	/** @license React v16.8.4
+	/** @license React v16.8.6
 	 * react-is.production.min.js
 	 *
 	 * Copyright (c) Facebook, Inc. and its affiliates.
@@ -20334,7 +20334,7 @@
 /* 33 */
 /***/ (function(module, exports, __webpack_require__) {
 
-	/* WEBPACK VAR INJECTION */(function(process) {/** @license React v16.8.4
+	/* WEBPACK VAR INJECTION */(function(process) {/** @license React v16.8.6
 	 * react-is.development.js
 	 *
 	 * Copyright (c) Facebook, Inc. and its affiliates.
@@ -39684,7 +39684,7 @@
 		  };
 		}();
 
-		/*:: import type {ControlPosition, MouseTouchEvent} from './types';*/
+		/*:: import type {ControlPosition, PositionOffsetControlPosition, MouseTouchEvent} from './types';*/
 
 
 		var matchesSelectorFunc = '';
@@ -39790,19 +39790,26 @@
 		  return { x: x, y: y };
 		}
 
-		function createCSSTransform(_ref) /*: Object*/ {
-		  var x = _ref.x,
-		      y = _ref.y;
-
-		  // Replace unitless items with px
-		  return defineProperty({}, browserPrefixToKey('transform', browserPrefix), 'translate(' + x + 'px,' + y + 'px)');
+		function createCSSTransform(controlPos /*: ControlPosition*/, positionOffset /*: PositionOffsetControlPosition*/) /*: Object*/ {
+		  var translation = getTranslation(controlPos, positionOffset, 'px');
+		  return defineProperty({}, browserPrefixToKey('transform', browserPrefix), translation);
 		}
 
-		function createSVGTransform(_ref3) /*: string*/ {
-		  var x = _ref3.x,
-		      y = _ref3.y;
+		function createSVGTransform(controlPos /*: ControlPosition*/, positionOffset /*: PositionOffsetControlPosition*/) /*: string*/ {
+		  var translation = getTranslation(controlPos, positionOffset, '');
+		  return translation;
+		}
+		function getTranslation(_ref2, positionOffset /*: PositionOffsetControlPosition*/, unitSuffix /*: string*/) /*: string*/ {
+		  var x = _ref2.x,
+		      y = _ref2.y;
 
-		  return 'translate(' + x + ',' + y + ')';
+		  var translation = 'translate(' + x + unitSuffix + ',' + y + unitSuffix + ')';
+		  if (positionOffset) {
+		    var defaultX = '' + (typeof positionOffset.x === 'string' ? positionOffset.x : positionOffset.x + unitSuffix);
+		    var defaultY = '' + (typeof positionOffset.y === 'string' ? positionOffset.y : positionOffset.y + unitSuffix);
+		    translation = 'translate(' + defaultX + ', ' + defaultY + ')' + translation;
+		  }
+		  return translation;
 		}
 
 		function getTouch(e /*: MouseTouchEvent*/, identifier /*: number*/) /*: ?{clientX: number, clientY: number}*/ {
@@ -40057,6 +40064,7 @@
 		};*/
 		/*:: export type DraggableEventHandler = (e: MouseEvent, data: DraggableData) => void;*/
 		/*:: export type ControlPosition = {x: number, y: number};*/
+		/*:: export type PositionOffsetControlPosition = {x: number|string, y: number|string};*/
 
 
 		//
@@ -40458,6 +40466,7 @@
 		  defaultClassNameDragging: string,
 		  defaultClassNameDragged: string,
 		  defaultPosition: ControlPosition,
+		  positionOffset: PositionOffsetControlPosition,
 		  position: ControlPosition,
 		  scale: number
 		};*/
@@ -40631,13 +40640,13 @@
 
 		      // If this element was SVG, we use the `transform` attribute.
 		      if (this.state.isElementSVG) {
-		        svgTransform = createSVGTransform(transformOpts);
+		        svgTransform = createSVGTransform(transformOpts, this.props.positionOffset);
 		      } else {
 		        // Add a CSS transform to move the element around. This allows us to move the element around
 		        // without worrying about whether or not it is relatively or absolutely positioned.
 		        // If the item you are dragging already has a transform set, wrap it in a <span> so <Draggable>
 		        // has a clean slate.
-		        style = createCSSTransform(transformOpts);
+		        style = createCSSTransform(transformOpts, this.props.positionOffset);
 		      }
 
 		      var _props = this.props,
@@ -40742,6 +40751,10 @@
 		  defaultPosition: propTypes.shape({
 		    x: propTypes.number,
 		    y: propTypes.number
+		  }),
+		  positionOffset: propTypes.shape({
+		    x: propTypes.oneOfType([propTypes.number, propTypes.string]),
+		    y: propTypes.oneOfType([propTypes.number, propTypes.string])
 		  }),
 
 		  /**
@@ -44404,7 +44417,8 @@
 	          _this.props.appApi.sendPaneMessage({
 	            event_type: 'KeyPress',
 	            key: event.key,
-	            key_code: event.keyCode
+	            key_code: event.keyCode,
+	            pane_data: false // No need to send the full data for this
 	          });
 	          break;
 	      }
@@ -44414,7 +44428,14 @@
 	      // even if hovering over the unfocused view
 	      _this.props.appApi.sendPaneMessage({
 	        event_type: 'EntitySelected',
-	        entityId: e.name
+	        entityId: e.name,
+	        pane_data: false // No need to send the full data for this
+	      });
+	    }, _this.onRegionSelection = function (pointIdxs) {
+	      _this.props.appApi.sendPaneMessage({
+	        event_type: 'RegionSelected',
+	        selectedIdxs: pointIdxs,
+	        pane_data: false // No need to send the full data for this
 	      });
 	    }, _this.handleDownload = function () {
 	      var blob = new Blob([_this.props.content], { type: 'text/plain' });
@@ -44439,6 +44460,7 @@
 	  }, {
 	    key: 'render',
 	    value: function render() {
+	      console.log(this.props.content);
 	      return _react2.default.createElement(
 	        Pane,
 	        _extends({}, this.props, { handleDownload: this.handleDownload }),
@@ -44819,6 +44841,13 @@
 	            'strong',
 	            null,
 	            this.state.hovered.name
+	          ),
+	          _react2.default.createElement('br', null),
+	          _react2.default.createElement(
+	            'strong',
+	            null,
+	            'Label: ',
+	            this.state.hovered.label
 	          ),
 	          _react2.default.createElement('br', null),
 	          this.props.content.selected && _react2.default.createElement('div', {

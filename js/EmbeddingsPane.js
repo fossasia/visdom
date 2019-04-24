@@ -31,6 +31,7 @@ class EmbeddingsPane extends React.Component {
           event_type: 'KeyPress',
           key: event.key,
           key_code: event.keyCode,
+          pane_data: false, // No need to send the full data for this
         });
         break;
     }
@@ -43,6 +44,22 @@ class EmbeddingsPane extends React.Component {
     this.props.appApi.sendPaneMessage({
       event_type: 'EntitySelected',
       entityId: e.name,
+      pane_data: false, // No need to send the full data for this
+    });
+  };
+
+  onRegionSelection = pointIdxs => {
+    this.props.appApi.sendPaneMessage({
+      event_type: 'RegionSelected',
+      selectedIdxs: pointIdxs,
+      pane_data: false, // No need to send the full data for this
+    });
+  };
+
+  // Used to pop an embeddings drilldown off of the stack
+  onGoBack = () => {
+    this.props.appApi.sendEmbeddingPop({
+      pane_data: false, // No need to send the full data for this
     });
   };
 
@@ -401,6 +418,8 @@ class Scene extends React.Component {
             }}
           >
             <strong>{this.state.hovered.name}</strong>
+            <br />
+            <strong>Label: {this.state.hovered.label}</strong>
             <br />
             {this.props.content.selected && (
               <div
