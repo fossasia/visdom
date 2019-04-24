@@ -803,6 +803,21 @@
 	      });
 	    };
 
+	    _this.sendEmbeddingPop = function (data) {
+	      if (_this.state.focusedPaneID === null || _this.state.readonly) {
+	        return;
+	      }
+	      var finalData = {
+	        target: _this.state.focusedPaneID,
+	        eid: _this.state.envID
+	      };
+	      $.extend(finalData, data);
+	      _this.sendSocketMessage({
+	        cmd: 'pop_embeddings_pane',
+	        data: finalData
+	      });
+	    };
+
 	    _this.onWidthChange = function (width, cols) {
 	      _this.setState({
 	        cols: cols,
@@ -1675,7 +1690,8 @@
 	            width: _this6.w2p(panelayout.w),
 	            height: _this6.h2p(panelayout.h) - 14,
 	            appApi: {
-	              sendPaneMessage: _this6.sendPaneMessage
+	              sendPaneMessage: _this6.sendPaneMessage,
+	              sendEmbeddingPop: _this6.sendEmbeddingPop
 	            }
 	          }))
 	        );
@@ -44437,6 +44453,10 @@
 	        selectedIdxs: pointIdxs,
 	        pane_data: false // No need to send the full data for this
 	      });
+	    }, _this.onGoBack = function () {
+	      _this.props.appApi.sendEmbeddingPop({
+	        pane_data: false // No need to send the full data for this
+	      });
 	    }, _this.handleDownload = function () {
 	      var blob = new Blob([_this.props.content], { type: 'text/plain' });
 	      var url = window.URL.createObjectURL(blob);
@@ -44446,6 +44466,9 @@
 	      link.click();
 	    }, _temp), _possibleConstructorReturn(_this, _ret);
 	  }
+
+	  // Used to pop an embeddings drilldown off of the stack
+
 
 	  _createClass(EmbeddingsPane, [{
 	    key: 'componentDidMount',
@@ -44460,7 +44483,6 @@
 	  }, {
 	    key: 'render',
 	    value: function render() {
-	      console.log(this.props.content);
 	      return _react2.default.createElement(
 	        Pane,
 	        _extends({}, this.props, { handleDownload: this.handleDownload }),
