@@ -1037,6 +1037,12 @@ class Visdom(object):
 
         We assume that there are no more than 10 unique labels at the moment,
         in the future we can include a colormap in opts for other cases
+
+        If you want to provide a preview on hover for your data, you can supply
+        a getting function for data_getter and a data_type. At the moment the
+        only data_type supported is 'html', which means your data_getter takes
+        in an index into features that is currently selected and returns
+        the html for what you'd like to display.
         """
         opts = {} if opts is None else opts
         _title2str(opts)
