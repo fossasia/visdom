@@ -959,12 +959,13 @@ class Visdom(object):
             raise RuntimeError(
                 "Plotly must be installed to plot Plotly figures")
 
-    def _register_embeddings(self, features, labels, points, data, data_type, win, env, opts):
+    def _register_embeddings(self, features, labels, points, data_getter,
+                             data_type, win, env, opts):
         self.win_data[win] = {
             'features': features,
             'labels': labels,
             'points': points,
-            'data': data,
+            'data': data_getter,
             'data_type': data_type,
             'env': env,
             'opts': opts,
@@ -974,14 +975,23 @@ class Visdom(object):
             if event['event_type'] == 'EntitySelected':
                 # Hover events lead us to get the expected element and serve
                 # them via an append event
-                id = event["entityId"]
+                entity_id = event["entityId"]
+                id = event["idx"]
                 window = event["target"]
-                # display_data = data[int(id)] # TODO allow data to be a get function that takes in the data index
-                digits = ["http://cdn-ak.f.st-hatena.com/images/fotolife/y/y_uti/20140723/20140723024455.png", "https://cdn-ak.f.st-hatena.com/images/fotolife/e/edo1z/20180923/20180923000911.jpg", "https://cdn-ak.f.st-hatena.com/images/fotolife/k/kaeken/20161107/20161107013732.png", "https://www.groundai.com/media/arxiv_projects/476900/figures/x2_adv.png.265x230_q75_crop.jpg"]
-                display_data = random.choice(digits)
+                if data_getter is not None:
+                    if data_type == 'html':
+                        selected = {
+                            "html": data_getter(int(id))
+                        }
+                else:
+                    selected = {
+                        "html": "<div>No preview available</div>"
+                    }
+
+                selected['entityId'] = entity_id
                 send_data = {
                     "update_type": "EntitySelected",
-                    "selected": {"html": "<img src='"+display_data+"' />", "entityId": id}
+                    "selected": selected
                 }
                 self._send({
                     'data': send_data,
@@ -1004,11 +1014,11 @@ class Visdom(object):
                     "idx": i,
                 } for i, xy in zip(selection, Y)]
                 send_data = [{
-                    'update_type': 'lasso',
+                    'update_type': 'RegionSelected',
                     'points': points,
                 }]
             else:
-                return # Unsupported event
+                return  # Unsupported event
             self._send({
                 'data': send_data,
                 'win': window,
@@ -1018,7 +1028,7 @@ class Visdom(object):
 
         self.register_event_handler(embedding_event_handler, win)
 
-    def embeddings(self, features, labels, data=None, data_type=None,
+    def embeddings(self, features, labels, data_getter=None, data_type=None,
                    win=None, env=None, opts=None):
         """
         This function handles taking arbitrary features and compiling them into
@@ -1057,8 +1067,8 @@ class Visdom(object):
         # Register the handlers for managing this embeddings pane
         # TODO allow disabling this in a way that pushes onus for calculating
         # to the server or frontend client
-        self._register_embeddings(features, labels, points, data, data_type,
-                                  win, env, opts)
+        self._register_embeddings(features, labels, points, data_getter,
+                                  data_type, win, env, opts)
         return win
 
     @pytorch_wrap

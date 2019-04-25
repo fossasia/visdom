@@ -670,6 +670,7 @@ class UpdateHandler(BaseHandler):
                 p['content']['selected'] = None
                 p['old_content'].push(p['content']['data'])
                 p['content']['data'] = args['data']['points']
+            return p
         if p['type'] == 'image_history':
             utype = args['data'][0]['type']
             if utype == 'image_history':

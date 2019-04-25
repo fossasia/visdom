@@ -44533,6 +44533,7 @@
 	      _this.props.appApi.sendPaneMessage({
 	        event_type: 'EntitySelected',
 	        entityId: e.name,
+	        'idx': e.idx,
 	        pane_data: false // No need to send the full data for this
 	      });
 	    }, _this.onRegionSelection = function (pointIdxs) {
