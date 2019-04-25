@@ -94,6 +94,10 @@ logging.getLogger('urllib3').setLevel(logging.CRITICAL)
 logger = logging.getLogger(__name__)
 
 
+def get_rand_id():
+    return str(hex(int(time.time() * 10000000))[2:])
+
+
 def isstr(s):
     return isinstance(s, string_types)
 
@@ -277,6 +281,14 @@ def _dashCheck(dash, K):
 
 
 def _assert_opts(opts):
+    remove_nones = ['title']
+    for to_remove in remove_nones:
+        if to_remove in opts and opts[to_remove] is None:
+            logger.warn(
+                'None-incompatible opt {} was provided None value '
+                'and was thus ignored'.format(to_remove))
+            del opts[to_remove]
+
     if opts.get('color'):
         assert isstr(opts.get('color')), 'color should be a string'
 
@@ -380,7 +392,8 @@ class Visdom(object):
         log_to_filename=None,
         username=None,
         password=None,
-        proxies=None
+        proxies=None,
+        offline=False
     ):
         parsed_url = urlparse(server)
         if not parsed_url.scheme:
@@ -407,6 +420,7 @@ class Visdom(object):
         # Flag to indicate whether to raise errors or suppress them
         self.raise_exceptions = raise_exceptions
         self.log_to_filename = log_to_filename
+        self.offline = offline
         self._session = None
         self.proxies = proxies
         self.http_proxy_host = None
@@ -429,6 +443,15 @@ class Visdom(object):
         # storage for data associated with specific windows
         self.win_data = {}
 
+        # Early break for offline mode
+        if self.offline:
+            self.use_socket = False
+            assert self.log_to_filename is not None, (
+                'Must use a log_to_filename for offline visdom')
+
+            return  # No need for the rest of this setup in offline visdom
+
+        # Setup for online interactions
         self._send({
             'eid': env,
         }, endpoint='env/' + env)
@@ -461,7 +484,7 @@ class Visdom(object):
     def session(self):
         if self._session:
             return self._session
-        logging.warning("Setting up a new session...")
+        logger.warning("Setting up a new session...")
         sess = requests.Session()
         if self.proxies:
             sess.proxies.update(self.proxies)
@@ -471,10 +494,9 @@ class Visdom(object):
                 password=self.password))
             if resp.status_code != requests.codes.ok:
                 raise RuntimeError("Authentication failed")
-            logging.info('Authentication succeeded')
+            logger.info('Authentication succeeded')
         self._session = sess
         return sess
-
 
     def register_event_handler(self, handler, target):
         assert callable(handler), 'Event handler must be a function'
@@ -557,6 +579,15 @@ class Visdom(object):
         self.socket_thread.start()
 
     # Utils
+    def _log(self, msg, endpoint):
+        if self.log_to_filename is not None:
+            if endpoint in ['events', 'update']:
+                with open(self.log_to_filename, 'a+') as log_file:
+                    log_file.write(json.dumps([
+                        endpoint,
+                        msg,
+                    ]) + '\n')
+
     def _send(self, msg, endpoint='events', quiet=False, from_log=False):
         """
         This function sends specified JSON request to the Tornado server. This
@@ -570,22 +601,29 @@ class Visdom(object):
         if not self.send:
             return msg, endpoint
 
+        # For /close, win=None means closing all windows. So do not substitute
+        # in that case.
+        if 'win' in msg and msg['win'] is None and endpoint is not 'close':
+            msg['win'] = 'window_' + get_rand_id()
+
+        if not from_log:
+            self._log(msg, endpoint)
+
+        if self.offline:
+            # If offline, don't even try to post
+            return msg['win'] if 'win' in msg else True
+
         try:
             r = self.session.post(
-                "{0}:{1}{2}/{3}".format(self.server, self.port, self.base_url, endpoint),
+                "{0}:{1}{2}/{3}".format(self.server, self.port,
+                                        self.base_url, endpoint),
                 data=json.dumps(msg),
             )
-            if self.log_to_filename is not None and not from_log:
-                if endpoint in ['events', 'update']:
-                    if msg['win'] is None:
-                        msg['win'] = r.text
-                    with open(self.log_to_filename, 'a+') as log_file:
-                        log_file.write(json.dumps([
-                            endpoint,
-                            msg,
-                        ]) + '\n')
             return r.text
-        except requests.RequestException:
+        except (
+            requests.RequestException, requests.ConnectionError,
+            requests.Timeout
+        ):
             if self.raise_exceptions:
                 raise ConnectionError("Error connecting to Visdom server")
             else:
@@ -868,13 +906,17 @@ class Visdom(object):
 
         # show SVG:
         if 'height' not in opts:
-            height = height or re.search('height\="([0-9\.]*)pt"', svg)
+            height = height or re.search(r'height\="([0-9\.]*)pt"', svg)
             if height is not None:
-                opts['height'] = 1.4 * int(math.ceil(float(height.group(1))))
+                if not isstr(height):
+                    height = height.group(1)
+                opts['height'] = 1.4 * int(math.ceil(float(height)))
         if 'width' not in opts:
-            width = width or re.search('width\="([0-9\.]*)pt"', svg)
+            width = width or re.search(r'width\="([0-9\.]*)pt"', svg)
             if width is not None:
-                opts['width'] = 1.35 * int(math.ceil(float(width.group(1))))
+                if not isstr(width):
+                    width = width.group(1)
+                opts['width'] = 1.35 * int(math.ceil(float(width)))
         return self.svg(svgstr=svg, opts=opts, env=env, win=win)
 
     def plotlyplot(self, figure, win=None, env=None):
@@ -1053,15 +1095,20 @@ class Visdom(object):
                 'src': 'data:image/png;base64,' + b64encoded,
                 'caption': opts.get('caption'),
             },
-            'type': 'image',
+            'type': 'image_history' if opts.get('store_history') else 'image',
         }]
+
+        endpoint = 'events'
+        if opts.get('store_history'):
+            if win is not None and self.win_exists(win, env):
+                endpoint = 'update'
 
         return self._send({
             'data': data,
             'win': win,
             'eid': env,
             'opts': opts,
-        })
+        }, endpoint=endpoint)
 
     @pytorch_wrap
     def images(self, tensor, nrow=8, padding=2,
@@ -1135,7 +1182,9 @@ class Visdom(object):
         if tensor is not None:
             import scipy.io.wavfile # type: ignore
             import tempfile
-            audiofile = '/tmp/%s.wav' % next(tempfile._get_candidate_names())
+            audiofile = os.path.join(
+                tempfile.gettempdir(),
+                '%s.wav' % next(tempfile._get_candidate_names()))
             tensor = np.int16(tensor / np.max(np.abs(tensor)) * 32767)
             scipy.io.wavfile.write(audiofile, opts.get('sample_frequency'), tensor)
 
@@ -1145,7 +1194,7 @@ class Visdom(object):
         assert mimetype is not None, 'unknown audio type: %s' % extension
 
         bytestr = loadfile(audiofile)
-        videodata = """
+        audiodata = """
             <audio controls>
                 <source type="audio/%s" src="data:audio/%s;base64,%s">
                 Your browser does not support the audio tag.
@@ -1153,21 +1202,25 @@ class Visdom(object):
         """ % (mimetype, mimetype, base64.b64encode(bytestr).decode('utf-8'))
         opts['height'] = 80
         opts['width'] = 330
-        return self.text(text=videodata, win=win, env=env, opts=opts)
+        return self.text(text=audiodata, win=win, env=env, opts=opts)
 
     @pytorch_wrap
     def video(self, tensor=None, dim='LxHxWxC', videofile=None, win=None, env=None, opts=None):
         """
         This function plays a video. It takes as input the filename of the video
         `videofile` or a `LxHxWxC` or `LxCxHxW`-sized `tensor` containing all the frames of
-        the video as input, as specified in `dim`. The function does not support any plot-specific `opts`.
+        the video as input, as specified in `dim`. The color channels must be in BGR order.
 
-        The following `opts` are supported:
+        The function does not support any plot-specific `opts`. The following video `opts` are supported:
 
         - `opts.fps`: FPS for the video (`integer` > 0; default = 25)
+        - `opts.autoplay`: whether to autoplay the video when it's ready (`boolean`; default = `false`)
+        - `opts.loop`: whether to loop the video (`boolean`; default = `false`)
         """
         opts = {} if opts is None else opts
         opts['fps'] = opts.get('fps', 25)
+        opts['loop'] = opts.get('loop', False)
+        opts['autoplay'] = opts.get('autoplay', False)
         _title2str(opts)
         _assert_opts(opts)
         assert tensor is not None or videofile is not None, \
@@ -1180,7 +1233,9 @@ class Visdom(object):
             assert dim == 'LxHxWxC' or dim == 'LxCxHxW', 'dimension argument should be LxHxWxC or LxCxHxW'
             if dim == 'LxCxHxW':
                 tensor = tensor.transpose([0, 2, 3, 1])
-            videofile = '/tmp/%s.ogv' % next(tempfile._get_candidate_names())
+            videofile = os.path.join(
+                tempfile.gettempdir(),
+                '%s.ogv' % next(tempfile._get_candidate_names()))
             if cv2.__version__.startswith('2'):  # OpenCV 2
                 fourcc = cv2.cv.CV_FOURCC(
                     chr(ord('T')),
@@ -1188,7 +1243,7 @@ class Visdom(object):
                     chr(ord('E')),
                     chr(ord('O'))
                 )
-            elif cv2.__version__.startswith('3'):  # OpenCV 3
+            else:  # cv2.__version__.startswith(('3', '4')):  # OpenCV 3, 4
                 fourcc = cv2.VideoWriter_fourcc(
                     chr(ord('T')),
                     chr(ord('H')),
@@ -1213,13 +1268,15 @@ class Visdom(object):
         mimetype = mimetypes.get(extension)
         assert mimetype is not None, 'unknown video type: %s' % extension
 
+        flags = ' '.join([k for k in ('autoplay', 'loop') if opts[k]])
+
         bytestr = loadfile(videofile)
         videodata = """
-            <video controls>
+            <video controls %s>
                 <source type="video/%s" src="data:video/%s;base64,%s">
                 Your browser does not support the video tag.
             </video>
-        """ % (mimetype, mimetype, base64.b64encode(bytestr).decode('utf-8'))
+        """ % (flags, mimetype, mimetype, base64.b64encode(bytestr).decode('utf-8'))
         return self.text(text=videodata, win=win, env=env, opts=opts)
 
     def update_window_opts(self, win, opts, env=None):
@@ -1282,8 +1339,6 @@ class Visdom(object):
             if update == 'append':
                 if win is None or not self.win_exists(win, env):
                     update = None
-                else:
-                    update = 'append'
 
             # case when X is 1 dimensional and corresponding values on y-axis
             # are passed in parameter Y
@@ -1306,13 +1361,17 @@ class Visdom(object):
         if Y is not None:
             Y = np.ravel(Y)
             assert X.shape[0] == Y.shape[0], 'sizes of X and Y should match'
+            assert np.equal(np.mod(Y, 1), 0).all(), 'labels should be integers'
+            assert Y.min() >= 1, 'labels are assumed to be at least 1'
+            labels = np.unique(Y.astype(int, copy=False))
+            assert len(labels) == 1 or name is None, \
+                'name should not be specified with multiple labels or lines'
+            K = int(Y.max())  # largest label
         else:
             Y = np.ones(X.shape[0], dtype=int)
+            labels = np.ones(1, dtype=int)
+            K = 1  # largest label
 
-        assert np.equal(np.mod(Y, 1), 0).all(), 'labels should be integers'
-        assert Y.min() >= 1, 'labels are assumed to be between 1 and K'
-
-        K = int(Y.max())
         is3d = X.shape[1] == 3
 
         opts = {} if opts is None else opts
@@ -1355,12 +1414,12 @@ class Visdom(object):
         mc = opts.get('markercolor')
         lc = opts.get('linecolor')
 
-        for k in range(1, K + 1):
+        for k in labels:
             ind = np.equal(Y, k)
             if ind.any():
                 if 'legend' in opts:
                     trace_name = opts.get('legend')[k - 1]
-                elif K == 1 and name is not None:
+                elif len(labels) == 1 and name is not None:
                     trace_name = name
                 else:
                     trace_name = str(k)
@@ -1473,7 +1532,7 @@ class Visdom(object):
             X = np.linspace(0, 1, Y.shape[0])
 
         if Y.ndim == 2 and Y.shape[1] == 1:
-                Y = Y.reshape(Y.shape[0])
+                Y = Y.reshape(1, Y.shape[0])
                 X = X.reshape(X.shape[0])
 
         if Y.ndim == 2 and X.ndim == 1:

@@ -14,9 +14,8 @@ import argparse
 import numpy as np
 import math
 import os.path
-import getpass
 import time
-from sys import platform as _platform
+import tempfile
 from six.moves import urllib
 
 
@@ -77,28 +76,37 @@ try:
         for n in range(256):
             video[n, :, :, :].fill(n)
         viz.video(tensor=video)
+    except BaseException:
+        print('Skipped video tensor example')
 
+    try:
         # video demo:
         # download video from http://media.w3.org/2010/05/sintel/trailer.ogv
         video_url = 'http://media.w3.org/2010/05/sintel/trailer.ogv'
-        # linux
-        if _platform == "linux" or _platform == "linux2":
-            videofile = '/home/%s/trailer.ogv' % getpass.getuser()
-        # MAC OS X
-        elif _platform == "darwin":
-            videofile = '/Users/%s/trailer.ogv' % getpass.getuser()
-        # download video
+        videofile = os.path.join(tempfile.gettempdir(), 'trailer.ogv')
         urllib.request.urlretrieve(video_url, videofile)
 
         if os.path.isfile(videofile):
-            viz.video(videofile=videofile)
+            viz.video(videofile=videofile, opts={'width': 864, 'height': 480})
     except BaseException:
-        print('Skipped video example')
+        print('Skipped video file example')
 
     # image demo
     viz.image(
         np.random.rand(3, 512, 256),
         opts=dict(title='Random!', caption='How random.'),
+    )
+
+    # image history demo
+    viz.image(
+        np.random.rand(3, 512, 256),
+        win='image_history',
+        opts=dict(caption='First random', store_history=True, title='Pick your random!'),
+    )
+    viz.image(
+        np.random.rand(3, 512, 256),
+        win='image_history',
+        opts=dict(caption='Second random!', store_history=True),
     )
 
     # grid of images
@@ -507,13 +515,7 @@ try:
     # download from http://www.externalharddrive.com/waves/animal/dolphin.wav
     try:
         audio_url = 'http://www.externalharddrive.com/waves/animal/dolphin.wav'
-        # linux
-        if _platform == "linux" or _platform == "linux2":
-            audiofile = '/home/%s/dolphin.wav' % getpass.getuser()
-        # MAC OS X
-        elif _platform == "darwin":
-            audiofile = '/Users/%s/dolphin.wav' % getpass.getuser()
-        # download audio
+        audiofile = os.path.join(tempfile.gettempdir(), 'dolphin.wav')
         urllib.request.urlretrieve(audio_url, audiofile)
 
         if os.path.isfile(audiofile):

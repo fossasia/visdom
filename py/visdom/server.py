@@ -23,6 +23,7 @@ import math
 import os
 import time
 import traceback
+import uuid
 from os.path import expanduser
 from collections import OrderedDict, Mapping, Sequence
 from six import string_types
@@ -56,7 +57,7 @@ def check_auth(f):
 
 
 def get_rand_id():
-    return str(hex(int(time.time() * 10000000))[2:])
+    return str(uuid.uuid4())
 
 
 def ensure_dir_exists(path):
@@ -392,6 +393,9 @@ class BaseHandler(tornado.web.RequestHandler):
 
     def write_error(self, status_code, **kwargs):
         logging.error("ERROR: %s: %s" % (status_code, kwargs))
+        if "exc_info" in kwargs:
+            logging.info('Traceback: {}'.format(
+                traceback.format_exception(*kwargs["exc_info"])))
         if self.settings.get("debug") and "exc_info" in kwargs:
             logging.error("rendering error page")
             import traceback
@@ -451,7 +455,14 @@ def window(args):
         'contentID': get_rand_id(),   # to detected updated windows
     }
 
-    if ptype in ['image', 'text', 'properties']:
+    if ptype == 'image_history':
+        p.update({
+            'content': [args['data'][0]['content']],
+            'selected': 0,
+            'type': ptype,
+            'show_slider': opts.get('show_slider', True)
+        })
+    elif ptype in ['image', 'text', 'properties']:
         p.update({'content': args['data'][0]['content'], 'type': ptype})
     elif ptype in ['embeddings']:
         p.update({
@@ -649,7 +660,6 @@ class UpdateHandler(BaseHandler):
         if p['type'] == 'text':
             p['content'] += "<br>" + args['data'][0]['content']
             return p
-
         if p['type'] == 'embeddings':
             # TODO embeddings updates should be handled outside of the regular
             # update flow, as update packets are easy to create manually and
@@ -660,6 +670,18 @@ class UpdateHandler(BaseHandler):
                 p['content']['selected'] = None
                 p['old_content'].push(p['content']['data'])
                 p['content']['data'] = args['data']['points']
+        if p['type'] == 'image_history':
+            utype = args['data'][0]['type']
+            if utype == 'image_history':
+                p['content'].append(args['data'][0]['content'])
+                p['selected'] = len(p['content']) - 1
+            elif utype == 'image_update_selected':
+                # TODO implement python client function for this
+                # Bound the update to within the dims of the array
+                selected = args['data']
+                selected_not_neg = max(0, selected)
+                selected_exists = min(len(p['content'])-1, selected_not_neg)
+                p['selected'] = selected_exists
             return p
 
         pdata = p['content']['data']
@@ -732,10 +754,13 @@ class UpdateHandler(BaseHandler):
 
         p = handler.state[eid]['jsons'][args['win']]
 
-        if not (p['type'] == 'text' or p['type'] == 'embeddings' or
-                p['content']['data'][0]['type'] in ['scatter', 'scattergl', 'custom']):
-            handler.write('win is not scatter, custom, or text; was {}'.format(
-                p['content']['data'][0]['type']))
+        if not (p['type'] == 'text' or p['type'] == 'image_history' or
+                p['type'] == 'embeddings' or
+                p['content']['data'][0]['type'] in
+                ['scatter', 'scattergl', 'custom']):
+            handler.write(
+                'win is not scatter, custom, image_history, embeddings, or '
+                'text; was {}'.format(p['content']['data'][0]['type']))
             return
 
         p, diff_packet = UpdateHandler.update_packet(p, args)
@@ -1047,6 +1072,7 @@ class EnvHandler(BaseHandler):
             if eid not in self.state:
                 self.state[eid] = {'jsons': {}, 'reload': {}}
                 broadcast_envs(self)
+
 
 class CompareHandler(BaseHandler):
     def initialize(self, app):

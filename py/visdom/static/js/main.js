@@ -142,6 +142,7 @@
 
 	var PANES = {
 	  image: ImagePane,
+	  image_history: ImagePane,
 	  plot: PlotPane,
 	  text: TextPane,
 	  properties: PropertiesPane,
@@ -150,6 +151,7 @@
 
 	var PANE_SIZE = {
 	  image: [20, 20],
+	  image_history: [20, 20],
 	  plot: [30, 24],
 	  text: [20, 20],
 	  embeddings: [20, 20],
@@ -1668,33 +1670,52 @@
 
 	      var panes = Object.keys(this.state.panes).map(function (id) {
 	        var pane = _this6.state.panes[id];
-	        var Comp = PANES[pane.type];
-	        if (!Comp) {
-	          console.error('unrecognized pane type: ', pane);
-	          return null;
+
+	        try {
+	          var Comp = PANES[pane.type];
+	          if (!Comp) {
+	            throw new Error('unrecognized pane type: ' + pane);
+	          }
+	          var panelayout = getLayoutItem(_this6.state.layout, id);
+	          var filter = _this6.getValidFilter(_this6.state.filter);
+	          var isVisible = pane.title.match(filter);
+	          return _react2.default.createElement(
+	            'div',
+	            { key: pane.id, className: isVisible ? '' : 'hidden-window' },
+	            _react2.default.createElement(Comp, _extends({}, pane, {
+	              key: pane.id,
+	              onClose: _this6.closePane,
+	              onFocus: _this6.focusPane,
+	              onInflate: _this6.onInflate,
+	              isFocused: pane.id === _this6.state.focusedPaneID,
+	              w: panelayout.w,
+	              h: panelayout.h,
+	              width: _this6.w2p(panelayout.w),
+	              height: _this6.h2p(panelayout.h) - 14,
+	              appApi: {
+	                sendPaneMessage: _this6.sendPaneMessage,
+	                sendEmbeddingPop: _this6.sendEmbeddingPop
+	              }
+	            }))
+	          );
+	        } catch (err) {
+	          return _react2.default.createElement(
+	            'div',
+	            { key: pane.id },
+	            _react2.default.createElement(TextPane, {
+	              content: 'Error: ' + (err.message || JSON.stringify(err, Object.getOwnPropertyNames(err))),
+	              id: pane.id,
+	              key: pane.id,
+	              onClose: _this6.closePane,
+	              onFocus: _this6.focusPane,
+	              onInflate: _this6.onInflate,
+	              isFocused: pane.id === _this6.state.focusedPaneID,
+	              w: 300,
+	              h: 300,
+	              appApi: { sendPaneMessage: _this6.sendPaneMessage }
+	            })
+	          );
 	        }
-	        var panelayout = getLayoutItem(_this6.state.layout, id);
-	        var filter = _this6.getValidFilter(_this6.state.filter);
-	        var isVisible = pane.title.match(filter);
-	        return _react2.default.createElement(
-	          'div',
-	          { key: pane.id, className: isVisible ? '' : 'hidden-window' },
-	          _react2.default.createElement(Comp, _extends({}, pane, {
-	            key: pane.id,
-	            onClose: _this6.closePane,
-	            onFocus: _this6.focusPane,
-	            onInflate: _this6.onInflate,
-	            isFocused: pane.id === _this6.state.focusedPaneID,
-	            w: panelayout.w,
-	            h: panelayout.h,
-	            width: _this6.w2p(panelayout.w),
-	            height: _this6.h2p(panelayout.h) - 14,
-	            appApi: {
-	              sendPaneMessage: _this6.sendPaneMessage,
-	              sendEmbeddingPop: _this6.sendEmbeddingPop
-	            }
-	          }))
-	        );
 	      });
 
 	      var envModal = this.renderEnvModal();
@@ -43871,6 +43892,11 @@
 	          'div',
 	          { className: 'content' },
 	          this.props.children
+	        ),
+	        _react2.default.createElement(
+	          'div',
+	          { className: 'widgets' },
+	          this.props.widgets
 	        )
 	      );
 	    }
@@ -44041,8 +44067,13 @@
 	      scale: 1,
 	      tx: 0,
 	      ty: 0,
+	      selected: _this.props.selected,
 	      mouse_location: { x: 0, y: 0, visibility: 'hidden' }
-	    }, _this.drag_start_x = null, _this.drag_start_y = null, _this.onEvent = function (event) {
+	    }, _this.drag_start_x = null, _this.drag_start_y = null, _this.componentWillReceiveProps = function (nextProps) {
+	      if (nextProps.selected !== _this.props.selected) {
+	        _this.setState({ selected: nextProps.selected });
+	      }
+	    }, _this.onEvent = function (event) {
 	      if (!_this.props.isFocused) {
 	        return;
 	      }
@@ -44144,6 +44175,12 @@
 	        tx: 0,
 	        ty: 0
 	      });
+	    }, _this.updateSlider = function (evt) {
+	      // TODO add history update events here! need to send these to the client
+	      // with sendPaneMessage
+	      _this.setState({
+	        selected: evt.target.value
+	      });
 	    }, _temp), _possibleConstructorReturn(_this, _ret);
 	  }
 
@@ -44163,11 +44200,60 @@
 	      var _this2 = this;
 
 	      var content = this.props.content;
+	      var type = this.props.type;
+	      var widgets = [];
+
+	      if (type === 'image_history') {
+	        var selected = this.state.selected;
+	        if (this.props.show_slider) {
+	          widgets.push(_react2.default.createElement(
+	            'div',
+	            { className: 'widget' },
+	            _react2.default.createElement(
+	              'div',
+	              { style: { display: 'flex' } },
+	              _react2.default.createElement(
+	                'span',
+	                null,
+	                'Selected:\xA0\xA0'
+	              ),
+	              _react2.default.createElement('input', {
+	                type: 'range',
+	                min: '0',
+	                max: content.length - 1,
+	                value: this.state.selected,
+	                onInput: this.updateSlider.bind(this)
+	              }),
+	              _react2.default.createElement(
+	                'span',
+	                null,
+	                '\xA0\xA0',
+	                this.state.selected,
+	                '\xA0\xA0'
+	              )
+	            )
+	          ));
+	        }
+	        content = content[selected];
+	      }
+
+	      if (content.caption) {
+	        widgets.splice(0, 0, _react2.default.createElement(
+	          'span',
+	          { className: 'widget' },
+	          content.caption
+	        ));
+	      }
+
+	      // TODO use this widget_height somehow to adjust window height!!!
+	      var widget_height = 30 * widgets.length - 10;
+
 	      var divstyle = {
 	        left: this.state.tx,
 	        top: this.state.ty,
 	        position: 'absolute'
 	      };
+
 	      return _react2.default.createElement(
 	        Pane,
 	        _extends({}, this.props, {
@@ -44177,8 +44263,10 @@
 	          handleMouseMove: this.handleMouseOver.bind(this),
 	          ref: function ref(_ref2) {
 	            return _this2._paneRef = _ref2;
-	          }
+	          },
+	          widgets: widgets
 	        }),
+	        '>',
 	        _react2.default.createElement(
 	          'div',
 	          { style: divstyle },
@@ -44260,7 +44348,7 @@
 	    }
 
 	    return _ret = (_temp = (_this = _possibleConstructorReturn(this, (_ref = PlotPane.__proto__ || Object.getPrototypeOf(PlotPane)).call.apply(_ref, [this].concat(args))), _this), _this._paneRef = null, _this._plotlyRef = null, _this._width = null, _this._height = null, _this.newPlot = function () {
-	      Plotly.newPlot(_this.props.contentID, _this.props.content.data, _this.props.content.layout, { showLink: true, linkText: ' ' });
+	      Plotly.newPlot(_this.props.contentID, _this.props.content.data, _this.props.content.layout, { showLink: true, linkText: 'Edit' });
 	    }, _this.handleDownload = function () {
 	      Plotly.downloadImage(_this._plotlyRef, {
 	        format: 'svg',

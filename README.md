@@ -248,6 +248,7 @@ The python visdom client takes a few options:
 - `username`: username to use for authentication, if server started with `-enable_login` (default: `None`)
 - `password`: password to use for authentication, if server started with `-enable_login` (default: `None`)
 - `proxies`: Dictionary mapping protocol to the URL of the proxy (e.g. {`http`: `foo.bar:3128`}) to be used on each Request. (default: `None`)
+- `offline`: Flag to run visdom in offline mode, where all requests are logged to file rather than to the server. Requires `log_to_filename` is set. In offline mode, all visdom commands that don't create or update plots will simply return `True`. (default: `False`)
 
 Other options are either currently unused (endpoint, ipv6) or used for internal functionality (send allows the visdom server to replicate events for the lua client).
 
@@ -316,8 +317,9 @@ that contains the image.
 
 The following `opts` are supported:
 
-- `opts.jpgquality`: JPG quality (`number` 0-100; default = 100)
-- `opts.caption`: Caption for the image
+- `jpgquality`: JPG quality (`number` 0-100; default = 100)
+- `caption`: Caption for the image
+- `store_history`: Keep all images stored to the same window and attach a slider to the bottom that will let you select the image to view. You must always provide this opt when sending new images to an image with history.
 
 > **Note** You can use alt on an image pane to view the x/y coordinates of the cursor. You can also ctrl-scroll to zoom, alt scroll to pan vertically, and alt-shift scroll to pan horizontally. Double click inside the pane to restore the image to default.
 

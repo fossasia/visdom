@@ -52,6 +52,7 @@ const MARGIN = 10; // pixels
 
 const PANES = {
   image: ImagePane,
+  image_history: ImagePane,
   plot: PlotPane,
   text: TextPane,
   properties: PropertiesPane,
@@ -60,6 +61,7 @@ const PANES = {
 
 const PANE_SIZE = {
   image: [20, 20],
+  image_history: [20, 20],
   plot: [30, 24],
   text: [20, 20],
   embeddings: [20, 20],
@@ -1416,34 +1418,57 @@ class App extends React.Component {
   render() {
     let panes = Object.keys(this.state.panes).map(id => {
       let pane = this.state.panes[id];
-      let Comp = PANES[pane.type];
-      if (!Comp) {
-        console.error('unrecognized pane type: ', pane);
-        return null;
+
+      try {
+        let Comp = PANES[pane.type];
+        if (!Comp) {
+          throw new Error('unrecognized pane type: ' + pane);
+        }
+        let panelayout = getLayoutItem(this.state.layout, id);
+        let filter = this.getValidFilter(this.state.filter);
+        let isVisible = pane.title.match(filter);
+        return (
+          <div key={pane.id} className={isVisible ? '' : 'hidden-window'}>
+            <Comp
+              {...pane}
+              key={pane.id}
+              onClose={this.closePane}
+              onFocus={this.focusPane}
+              onInflate={this.onInflate}
+              isFocused={pane.id === this.state.focusedPaneID}
+              w={panelayout.w}
+              h={panelayout.h}
+              width={this.w2p(panelayout.w)}
+              height={this.h2p(panelayout.h) - 14}
+              appApi={{
+                sendPaneMessage: this.sendPaneMessage,
+                sendEmbeddingPop: this.sendEmbeddingPop,
+              }}
+            />
+          </div>
+        );
+      } catch (err) {
+        return (
+          <div key={pane.id}>
+            <TextPane
+              content={
+                'Error: ' +
+                (err.message ||
+                  JSON.stringify(err, Object.getOwnPropertyNames(err)))
+              }
+              id={pane.id}
+              key={pane.id}
+              onClose={this.closePane}
+              onFocus={this.focusPane}
+              onInflate={this.onInflate}
+              isFocused={pane.id === this.state.focusedPaneID}
+              w={300}
+              h={300}
+              appApi={{ sendPaneMessage: this.sendPaneMessage }}
+            />
+          </div>
+        );
       }
-      let panelayout = getLayoutItem(this.state.layout, id);
-      let filter = this.getValidFilter(this.state.filter);
-      let isVisible = pane.title.match(filter);
-      return (
-        <div key={pane.id} className={isVisible ? '' : 'hidden-window'}>
-          <Comp
-            {...pane}
-            key={pane.id}
-            onClose={this.closePane}
-            onFocus={this.focusPane}
-            onInflate={this.onInflate}
-            isFocused={pane.id === this.state.focusedPaneID}
-            w={panelayout.w}
-            h={panelayout.h}
-            width={this.w2p(panelayout.w)}
-            height={this.h2p(panelayout.h) - 14}
-            appApi={{
-              sendPaneMessage: this.sendPaneMessage,
-              sendEmbeddingPop: this.sendEmbeddingPop,
-            }}
-          />
-        </div>
-      );
     });
 
     let envModal = this.renderEnvModal();
