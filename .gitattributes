@@ -1,2 +1,2 @@
-py/visdom/static/js/main.js binary external
-example/data/* binary external
+py/visdom/static/js/main.js linguist-generated=true
+example/data/* linguist-vendored
