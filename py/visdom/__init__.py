@@ -16,6 +16,7 @@ import threading
 import websocket  # type: ignore
 import json
 import hashlib
+import collections
 import math
 import re
 import base64
@@ -85,9 +86,17 @@ def isndarray(n):
     return isinstance(n, (np.ndarray))
 
 
+# Only works on (possibly nested) lists of numbers
+# TODO: Create our own JSONEncoder that automatically does this.
+#       Maybe we can port plotly's over:
+#       https://github.com/plotly/plotly.py/blob/81629273ff6d7a30257a42572ed0e4e6ad436009/_plotly_utils/utils.py#L16
+# TODO: Also, in appropriate places, we need to change many numpy calls to use
+#       nan-aware ones, e.g., `X.max` => `np.nanmax(X)`.
 def nan2none(l):
     for idx, val in enumerate(l):
-        if math.isnan(val):
+        if isinstance(val, collections.abc.Sequence):
+            l[idx] = nan2none(l[idx])
+        elif isnum(val) and math.isnan(val):
             l[idx] = None
     return l
 
@@ -1442,12 +1451,14 @@ class Visdom(object):
         - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
         - `opts.columnnames`: `table` containing x-axis labels
         - `opts.rownames`: `table` containing y-axis labels
+        - `opts.nancolor`: if not None, color for plotting nan
+                           (`string`; default = `None`)
         """
 
         assert X.ndim == 2, 'data should be two-dimensional'
         opts = {} if opts is None else opts
-        opts['xmin'] = opts.get('xmin', np.asscalar(X.min()))
-        opts['xmax'] = opts.get('xmax', np.asscalar(X.max()))
+        opts['xmin'] = opts.get('xmin', np.asscalar(np.nanmin(X)))
+        opts['xmax'] = opts.get('xmax', np.asscalar(np.nanmax(X)))
         opts['colormap'] = opts.get('colormap', 'Viridis')
         _title2str(opts)
         _assert_opts(opts)
@@ -1461,7 +1472,7 @@ class Visdom(object):
                 'number of row names should match number of rows in X'
 
         data = [{
-            'z': X.tolist(),
+            'z': nan2none(X.tolist()),
             'x': opts.get('columnnames'),
             'y': opts.get('rownames'),
             'zmin': opts.get('xmin'),
@@ -1469,6 +1480,20 @@ class Visdom(object):
             'type': 'heatmap',
             'colorscale': opts.get('colormap'),
         }]
+
+        nancolor = opts.get('nancolor')
+        if nancolor is not None:
+            # nan is plotted as transparent, so we just plot another trace as
+            # background, before plotting real data.
+            nantrace = {
+                'z': np.zeros_like(X).tolist(),
+                'x': data[0]['x'],
+                'y': data[0]['y'],
+                'type': 'heatmap',
+                'showscale': False,
+                'colorscale': [[0, nancolor], [1, nancolor]],
+            }
+            data.insert(0, nantrace)
 
         return self._send({
             'data': data,
