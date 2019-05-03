@@ -964,12 +964,19 @@ class Visdom(object):
         img = np.transpose(img, (1, 2, 0))
         im = Image.fromarray(img)
         buf = BytesIO()
-        im.save(buf, format='PNG')
+        image_type = 'png'
+        imsave_args = {}
+        if 'jpgquality' in opts:
+            image_type = 'jpeg'
+            imsave_args['quality'] = opts['jpgquality']
+
+        im.save(buf, format=image_type.upper(), **imsave_args)
+
         b64encoded = b64.b64encode(buf.getvalue()).decode('utf-8')
 
         data = [{
             'content': {
-                'src': 'data:image/png;base64,' + b64encoded,
+                'src': 'data:image/' + image_type + ';base64,' + b64encoded,
                 'caption': opts.get('caption'),
             },
             'type': 'image_history' if opts.get('store_history') else 'image',

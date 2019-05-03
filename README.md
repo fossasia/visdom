@@ -317,7 +317,7 @@ that contains the image.
 
 The following `opts` are supported:
 
-- `jpgquality`: JPG quality (`number` 0-100; default = 100)
+- `jpgquality`: JPG quality (`number` 0-100). If defined image will be saved as JPG to reduce file size. If not defined image will be saved as PNG.
 - `caption`: Caption for the image
 - `store_history`: Keep all images stored to the same window and attach a slider to the bottom that will let you select the image to view. You must always provide this opt when sending new images to an image with history.
 
@@ -332,7 +332,7 @@ The following arguments and `opts` are supported:
 
 - `nrow`: Number of images in a row
 - `padding`: Padding around the image, equal padding around all 4 sides
-- `opts.jpgquality`: JPG quality (`number` 0-100; default = 100)
+- `opts.jpgquality`: JPG quality (`number` 0-100). If defined image will be saved as JPG to reduce file size. If not defined image will be saved as PNG.
 - `opts.caption`: Caption for the image
 
 #### vis.text
