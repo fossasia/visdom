@@ -1451,6 +1451,8 @@ class Visdom(object):
         - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
         - `opts.columnnames`: `table` containing x-axis labels
         - `opts.rownames`: `table` containing y-axis labels
+        - `opts.nancolor`: if not None, color for plotting nan
+                           (`string`; default = `None`)
         """
 
         assert X.ndim == 2, 'data should be two-dimensional'
@@ -1478,6 +1480,20 @@ class Visdom(object):
             'type': 'heatmap',
             'colorscale': opts.get('colormap'),
         }]
+
+        nancolor = opts.get('nancolor')
+        if nancolor is not None:
+            # nan is plotted as transparent, so we just plot another trace as
+            # background, before plotting real data.
+            nantrace = {
+                'z': np.zeros_like(X).tolist(),
+                'x': data[0]['x'],
+                'y': data[0]['y'],
+                'type': 'heatmap',
+                'showscale': False,
+                'colorscale': [[0, nancolor], [1, nancolor]],
+            }
+            data.insert(0, nantrace)
 
         return self._send({
             'data': data,

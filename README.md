@@ -66,7 +66,7 @@ Right now three callback events are supported:
     - `key_code` - The javascript event keycode for the pressed key (no modifiers)
 3. `PropertyUpdate` - Triggers when a property is updated in Property pane
     - `propertyId` - Position in properties list
-    - `value` - New property value    
+    - `value` - New property value
 
 ### Environments
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34618198-fc63976c-f20b-11e7-9c0d-060132fdb37e.png" width="300" /></p>
@@ -500,7 +500,8 @@ The following `opts` are supported:
 - `opts.xmax`       : clip maximum value (`number`; default = `X:max()`)
 - `opts.columnnames`: `table` containing x-axis labels
 - `opts.rownames`   : `table` containing y-axis labels
-- `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
+- `opts.layoutopts` : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
+- `opts.nancolor`   : color for plotting `NaN`s. If this is `None`, `NaN`s will be plotted as transparent. (`string`; default = `None`)
 
 #### vis.bar
 This function draws a regular, stacked, or grouped bar plot. It takes as
