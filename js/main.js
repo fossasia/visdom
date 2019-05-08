@@ -607,6 +607,7 @@ class App extends React.Component {
     });
     this.focusPane(layoutItem.i);
     this.updateLayout(layout);
+    this.sendLayoutItemState(layoutItem);
   };
 
   movePane = (layout, oldLayoutItem, layoutItem) => {
@@ -716,6 +717,20 @@ class App extends React.Component {
     // TODO this is very non-conventional react, someday it shall be fixed but
     // for now it's important to fix relayout grossness
     this.state.layout = layout;
+  };
+
+  /**
+   * Send layout item state to backend to update backend state.
+   *
+   * @param layout Layout to be sent to backend.
+   */
+  sendLayoutItemState = ({ i, h, w, x, y, moved, static: staticBool }) => {
+    this.sendSocketMessage({
+      cmd: 'layout_item_update',
+      eid: this.state.envID,
+      win: i,
+      data: { i, h, w, x, y, moved, static: staticBool },
+    });
   };
 
   updateToLayout = layoutID => {

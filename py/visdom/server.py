@@ -115,6 +115,7 @@ tornado_settings = {
 
 def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
     env_ids = [i for i in eids if i in state]
+
     for env_id in env_ids:
         env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
         open(env_path_file, 'w').write(json.dumps(state[env_id]))
@@ -186,6 +187,7 @@ class Application(tornado.web.Application):
                 DeleteEnvHandler, {'app': self}),
             (r"%s/win_hash" % self.base_url, HashHandler, {'app': self}),
             (r"%s/env_state" % self.base_url, EnvStateHandler, {'app': self}),
+            (r"%s/fork_env" % self.base_url, ForkEnvHandler, {'app': self}),
             (r"%s(.*)" % self.base_url, IndexHandler, {'app': self}),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)
@@ -360,6 +362,10 @@ class SocketHandler(BaseWebSocketHandler):
             environment = self.state[packet['eid']]
             packet['pane_data'] = environment['jsons'][packet['target']]
             send_to_sources(self, msg.get('data'))
+        elif cmd == 'layout_item_update':
+            eid = msg.get('eid')
+            win = msg.get('win')
+            self.state[eid]['reload'][win] = msg.get('data')
 
     def on_close(self):
         if self in list(self.subs.values()):
@@ -840,6 +846,32 @@ class EnvStateHandler(BaseHandler):
         )
         self.wrap_func(self, args)
 
+class ForkEnvHandler(BaseHandler):
+    def initialize(self, app):
+        self.app = app
+        self.state = app.state
+        self.subs = app.subs
+        self.login_enabled = app.login_enabled
+
+    @staticmethod
+    def wrap_func(handler, args):
+        prev_eid = escape_eid(args.get('prev_eid'))
+        eid = escape_eid(args.get('eid'))
+
+        assert prev_eid in handler.state, 'env to be forked doesn\'t exit'
+
+        handler.state[eid] = copy.deepcopy(handler.state[prev_eid])
+        serialize_env(handler.state, [eid], env_path=handler.app.env_path)
+        broadcast_envs(handler)
+
+        handler.write(eid)
+
+    @check_auth
+    def post(self):
+        args = tornado.escape.json_decode(
+            tornado.escape.to_basestring(self.request.body)
+        )
+        self.wrap_func(self, args)
 
 class HashHandler(BaseHandler):
     def initialize(self, app):
