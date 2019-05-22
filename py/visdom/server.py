@@ -731,7 +731,14 @@ class UpdateHandler(BaseHandler):
         eid = extract_eid(args)
 
         if args['win'] not in handler.state[eid]['jsons']:
-            handler.write('win does not exist')
+            # Append to a window that doesn't exist attempts to create
+            # that window
+            append = args.get('append')
+            if append:
+                p = window(args)
+                register_window(handler, p, eid)
+            else:
+                handler.write('win does not exist')
             return
 
         p = handler.state[eid]['jsons'][args['win']]
@@ -846,6 +853,7 @@ class EnvStateHandler(BaseHandler):
         )
         self.wrap_func(self, args)
 
+
 class ForkEnvHandler(BaseHandler):
     def initialize(self, app):
         self.app = app
@@ -872,6 +880,7 @@ class ForkEnvHandler(BaseHandler):
             tornado.escape.to_basestring(self.request.body)
         )
         self.wrap_func(self, args)
+
 
 class HashHandler(BaseHandler):
     def initialize(self, app):
