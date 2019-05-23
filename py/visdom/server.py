@@ -53,6 +53,7 @@ COMPACT_SEPARATORS = (',', ':')
 
 def check_auth(f):
     def _check_auth(self, *args, **kwargs):
+        self.last_access = time.time()
         if self.login_enabled and not self.current_user:
             self.set_status(400)
             return
@@ -143,6 +144,7 @@ class Application(tornado.web.Application):
         self.readonly = readonly
         self.user_credential = user_credential
         self.login_enabled = False
+        self.last_access = time.time()
 
         if user_credential:
             self.login_enabled = True
@@ -196,6 +198,12 @@ class Application(tornado.web.Application):
         ]
         super(Application, self).__init__(handlers, **tornado_settings)
 
+    def get_last_access(self):
+        if len(self.subs) > 0:
+            # update the last access time to now, as someone
+            # is currently connected to the server
+            self.last_access = time.time()
+        return self.last_access
 
 def broadcast_envs(handler, target_subs=None):
     if target_subs is None:
