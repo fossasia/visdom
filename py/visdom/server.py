@@ -25,7 +25,11 @@ import time
 import traceback
 import uuid
 from os.path import expanduser
-from collections import OrderedDict, Mapping, Sequence
+from collections import OrderedDict
+try:
+    from collections.abc import Mapping, Sequence
+except ImportError:
+    from collections import Mapping, Sequence
 from six import string_types
 
 import visdom
