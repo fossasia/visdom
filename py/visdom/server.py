@@ -135,10 +135,11 @@ class Application(tornado.web.Application):
     def __init__(self, port=DEFAULT_PORT, base_url='',
                  env_path=DEFAULT_ENV_PATH, readonly=False,
                  user_credential=None):
-        self.state = {}
+        self.env_path = env_path
+        self.state = self.load_state()
+        self.layouts = self.load_layouts()
         self.subs = {}
         self.sources = {}
-        self.env_path = env_path
         self.port = port
         self.base_url = base_url
         self.readonly = readonly
@@ -150,29 +151,6 @@ class Application(tornado.web.Application):
             self.login_enabled = True
             tornado_settings["cookie_secret"] = \
                 open(DEFAULT_ENV_PATH + "COOKIE_SECRET", "r").read()
-
-        # reload state
-        ensure_dir_exists(env_path)
-        env_jsons = [i for i in os.listdir(env_path) if '.json' in i]
-
-        for env_json in env_jsons:
-            env_path_file = os.path.join(env_path, env_json)
-            try:
-                env_data = \
-                    tornado.escape.json_decode(open(env_path_file, 'r').read())
-            except Exception as e:
-                logging.warn(
-                    "Failed loading environment json: {} - {}".format(
-                        env_path_file, repr(e)))
-                continue
-
-            eid = env_json.replace('.json', '')
-            self.state[eid] = {'jsons': env_data['jsons'],
-                               'reload': env_data['reload']}
-
-        if 'main' not in self.state and 'main.json' not in env_jsons:
-            self.state['main'] = {'jsons': {}, 'reload': {}}
-            serialize_env(self.state, ['main'], env_path=self.env_path)
 
         tornado_settings['static_url_prefix'] = self.base_url + "/static/"
         handlers = [
@@ -204,6 +182,48 @@ class Application(tornado.web.Application):
             # is currently connected to the server
             self.last_access = time.time()
         return self.last_access
+
+    def save_layouts(self):
+        layout_filepath = os.path.join(self.env_path, 'view', LAYOUT_FILE)
+        with open(layout_filepath, 'w') as fn:
+            fn.write(self.layouts)
+
+    def load_layouts(self):
+        layout_filepath = os.path.join(self.env_path, 'view', LAYOUT_FILE)
+        ensure_dir_exists(layout_filepath)
+        if os.path.isfile(layout_filepath):
+            with open(layout_filepath, 'r') as fn:
+                return fn.read()
+        else:
+            return ""
+
+    def load_state(self):
+        state = {}
+        env_path = self.env_path
+        ensure_dir_exists(env_path)
+        env_jsons = [i for i in os.listdir(env_path) if '.json' in i]
+
+        for env_json in env_jsons:
+            env_path_file = os.path.join(env_path, env_json)
+            try:
+                env_data = \
+                    tornado.escape.json_decode(open(env_path_file, 'r').read())
+            except Exception as e:
+                logging.warn(
+                    "Failed loading environment json: {} - {}".format(
+                        env_path_file, repr(e)))
+                continue
+
+            eid = env_json.replace('.json', '')
+            state[eid] = {'jsons': env_data['jsons'],
+                               'reload': env_data['reload']}
+
+        if 'main' not in state and 'main.json' not in env_jsons:
+            state['main'] = {'jsons': {}, 'reload': {}}
+            serialize_env(state, ['main'], env_path=self.env_path)
+
+        return state
+
 
 def broadcast_envs(handler, target_subs=None):
     if target_subs is None:
@@ -277,7 +297,7 @@ class SocketHandler(BaseWebSocketHandler):
     def initialize(self, app):
         self.port = app.port
         self.env_path = app.env_path
-        self.layouts = self.load_layouts()
+        self.app = app
         self.state = app.state
         self.subs = app.subs
         self.sources = app.sources
@@ -293,22 +313,8 @@ class SocketHandler(BaseWebSocketHandler):
             target_subs = self.subs.values()
         for sub in target_subs:
             sub.write_message(json.dumps(
-                {'command': 'layout_update', 'data': self.layouts}
+                {'command': 'layout_update', 'data': self.app.layouts}
             ))
-
-    def save_layouts(self):
-        layout_filepath = os.path.join(self.env_path, 'view', LAYOUT_FILE)
-        with open(layout_filepath, 'w') as fn:
-            fn.write(self.layouts)
-
-    def load_layouts(self):
-        layout_filepath = os.path.join(self.env_path, 'view', LAYOUT_FILE)
-        ensure_dir_exists(layout_filepath)
-        if os.path.isfile(layout_filepath):
-            with open(layout_filepath, 'r') as fn:
-                return fn.read()
-        else:
-            return ""
 
     def open(self):
         if self.login_enabled and not self.current_user:
@@ -366,8 +372,8 @@ class SocketHandler(BaseWebSocketHandler):
                 broadcast_envs(self)
         elif cmd == 'save_layouts':
             if 'data' in msg:
-                self.layouts = msg.get('data')
-                self.save_layouts()
+                self.app.layouts = msg.get('data')
+                self.app.save_layouts()
                 self.broadcast_layouts()
         elif cmd == 'forward_to_vis':
             packet = msg.get('data')
