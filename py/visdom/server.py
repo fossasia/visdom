@@ -123,7 +123,8 @@ def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
 
     for env_id in env_ids:
         env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
-        open(env_path_file, 'w').write(json.dumps(state[env_id]))
+        with open(env_path_file, 'w') as fn:
+            fn.write(json.dumps(state[env_id]))
     return env_ids
 
 
@@ -149,8 +150,8 @@ class Application(tornado.web.Application):
 
         if user_credential:
             self.login_enabled = True
-            tornado_settings["cookie_secret"] = \
-                open(DEFAULT_ENV_PATH + "COOKIE_SECRET", "r").read()
+            with open(DEFAULT_ENV_PATH + "COOKIE_SECRET", "r") as fn:
+                tornado_settings["cookie_secret"] = fn.read()
 
         tornado_settings['static_url_prefix'] = self.base_url + "/static/"
         handlers = [
@@ -206,8 +207,8 @@ class Application(tornado.web.Application):
         for env_json in env_jsons:
             env_path_file = os.path.join(env_path, env_json)
             try:
-                env_data = \
-                    tornado.escape.json_decode(open(env_path_file, 'r').read())
+                with open(env_path_file, 'r') as fn:
+                    env_data = tornado.escape.json_decode(fn.read())
             except Exception as e:
                 logging.warn(
                     "Failed loading environment json: {} - {}".format(
@@ -923,8 +924,9 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
     else:
         p = os.path.join(env_path, eid.strip(), '.json')
         if os.path.exists(p):
-            env = tornado.escape.json_decode(open(p, 'r').read())
-            state[eid] = env
+            with open(p, 'r') as fn:
+                env = tornado.escape.json_decode(fn.read())
+                state[eid] = env
 
     if 'reload' in env:
         socket.write_message(
@@ -957,9 +959,10 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         else:
             p = os.path.join(env_path, eid.strip(), '.json')
             if os.path.exists(p):
-                env = tornado.escape.json_decode(open(p, 'r').read())
-                state[eid] = env
-                envs[eid] = env
+                with open(p, 'r') as fn:
+                    env = tornado.escape.json_decode(fn.read())
+                    state[eid] = env
+                    envs[eid] = env
 
     res = copy.deepcopy(envs[list(envs.keys())[0]])
     name2Wid = {res['jsons'][wid].get('title', None): wid + '_compare'
