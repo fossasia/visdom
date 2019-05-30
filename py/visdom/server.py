@@ -193,7 +193,7 @@ class Application(tornado.web.Application):
         super(Application, self).__init__(handlers, **tornado_settings)
 
     def get_last_access(self):
-        if len(self.subs) > 0:
+        if len(self.subs) > 0 or len(self.sources) > 0:
             # update the last access time to now, as someone
             # is currently connected to the server
             self.last_access = time.time()
