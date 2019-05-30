@@ -1290,8 +1290,10 @@ def download_scripts(proxies=None, install_dir=None):
         '%sjquery@3.1.1/dist/jquery.min.js' % b: 'jquery.min.js',
         '%sbootstrap@3.3.7/dist/js/bootstrap.min.js' % b: 'bootstrap.min.js',
         '%sreact@16.2.0/umd/react.production.min.js' % b: 'react-react.min.js',
-        '%sreact-dom@16.2.0/umd/react-dom.production.min.js' % b: 'react-dom.min.js',  # noqa
-        '%sreact-modal@3.1.10/dist/react-modal.min.js' % b: 'react-modal.min.js',  # noqa
+        '%sreact-dom@16.2.0/umd/react-dom.production.min.js' % b:
+            'react-dom.min.js',
+        '%sreact-modal@3.1.10/dist/react-modal.min.js' % b:
+            'react-modal.min.js',
         'https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_SVG':  # noqa
             'mathjax-MathJax.js',
         # here is another url in case the cdn breaks down again.
@@ -1301,13 +1303,16 @@ def download_scripts(proxies=None, install_dir=None):
         '%ssjcl@1.0.7/sjcl.js' % b: 'sjcl.js',
 
         # - css
-        '%sreact-resizable@1.4.6/css/styles.css' % b: 'react-resizable-styles.css',  # noqa
-        '%sreact-grid-layout@0.16.3/css/styles.css' % b: 'react-grid-layout-styles.css',  # noqa
+        '%sreact-resizable@1.4.6/css/styles.css' % b:
+            'react-resizable-styles.css',
+        '%sreact-grid-layout@0.16.3/css/styles.css' % b:
+            'react-grid-layout-styles.css',
         '%scss/bootstrap.min.css' % bb: 'bootstrap.min.css',
 
         # - fonts
         '%sclassnames@2.2.5' % b: 'classnames',
-        '%slayout-bin-packer@1.4.0/dist/layout-bin-packer.js' % b: 'layout_bin_packer',
+        '%slayout-bin-packer@1.4.0/dist/layout-bin-packer.js' % b:
+            'layout_bin_packer.js',
         '%sfonts/glyphicons-halflings-regular.eot' % bb:
             'glyphicons-halflings-regular.eot',
         '%sfonts/glyphicons-halflings-regular.woff2' % bb:
