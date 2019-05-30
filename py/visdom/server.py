@@ -24,6 +24,7 @@ import os
 import time
 import traceback
 import uuid
+import warnings
 from os.path import expanduser
 from collections import OrderedDict
 try:
@@ -49,6 +50,20 @@ DEFAULT_BASE_URL = "/"
 
 here = os.path.abspath(os.path.dirname(__file__))
 COMPACT_SEPARATORS = (',', ':')
+
+_seen_warnings = set()
+
+
+def warn_once(msg, warningtype=None):
+    """
+    Raise a warning, but only once.
+    :param str msg: Message to display
+    :param Warning warningtype: Type of warning, e.g. DeprecationWarning
+    """
+    global _seen_warnings
+    if msg not in _seen_warnings:
+        _seen_warnings.add(msg)
+        warnings.warn(msg, warningtype, stacklevel=2)
 
 
 def check_auth(f):
@@ -120,11 +135,11 @@ tornado_settings = {
 
 def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
     env_ids = [i for i in eids if i in state]
-
-    for env_id in env_ids:
-        env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
-        with open(env_path_file, 'w') as fn:
-            fn.write(json.dumps(state[env_id]))
+    if env_path is not None:
+        for env_id in env_ids:
+            env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
+            with open(env_path_file, 'w') as fn:
+                fn.write(json.dumps(state[env_id]))
     return env_ids
 
 
@@ -185,11 +200,23 @@ class Application(tornado.web.Application):
         return self.last_access
 
     def save_layouts(self):
+        if self.env_path is None:
+            warn_once(
+                'Saving and loading to disk has no effect when running with '
+                'env_path=None.'
+            )
+            return
         layout_filepath = os.path.join(self.env_path, 'view', LAYOUT_FILE)
         with open(layout_filepath, 'w') as fn:
             fn.write(self.layouts)
 
     def load_layouts(self):
+        if self.env_path is None:
+            warn_once(
+                'Saving and loading to disk has no effect when running with '
+                'env_path=None.'
+            )
+            return ""
         layout_filepath = os.path.join(self.env_path, 'view', LAYOUT_FILE)
         ensure_dir_exists(layout_filepath)
         if os.path.isfile(layout_filepath):
@@ -201,6 +228,12 @@ class Application(tornado.web.Application):
     def load_state(self):
         state = {}
         env_path = self.env_path
+        if env_path is None:
+            warn_once(
+                'Saving and loading to disk has no effect when running with '
+                'env_path=None.'
+            )
+            return {'main': {'jsons': {}, 'reload': {}}}
         ensure_dir_exists(env_path)
         env_jsons = [i for i in os.listdir(env_path) if '.json' in i]
 
@@ -368,8 +401,12 @@ class SocketHandler(BaseWebSocketHandler):
             if 'eid' in msg:
                 logging.info('closing environment {}'.format(msg['eid']))
                 del self.state[msg['eid']]
-                p = os.path.join(self.env_path, "{0}.json".format(msg['eid']))
-                os.remove(p)
+                if self.env_path is not None:
+                    p = os.path.join(
+                        self.env_path,
+                        "{0}.json".format(msg['eid'])
+                    )
+                    os.remove(p)
                 broadcast_envs(self)
         elif cmd == 'save_layouts':
             if 'data' in msg:
@@ -834,8 +871,9 @@ class DeleteEnvHandler(BaseHandler):
         eid = extract_eid(args)
         if eid is not None:
             del handler.state[eid]
-            p = os.path.join(handler.env_path, "{0}.json".format(eid))
-            os.remove(p)
+            if handler.env_path is not None:
+                p = os.path.join(handler.env_path, "{0}.json".format(eid))
+                os.remove(p)
             broadcast_envs(handler)
 
     @check_auth
@@ -921,7 +959,7 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
     env = {}
     if eid in state:
         env = state.get(eid)
-    else:
+    elif env_path is not None:
         p = os.path.join(env_path, eid.strip(), '.json')
         if os.path.exists(p):
             with open(p, 'r') as fn:
@@ -943,8 +981,11 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
 
 
 def gather_envs(state, env_path=DEFAULT_ENV_PATH):
-    items = [i.replace('.json', '') for i in os.listdir(env_path)
-             if '.json' in i]
+    if env_path is not None:
+        items = [i.replace('.json', '') for i in os.listdir(env_path)
+                 if '.json' in i]
+    else:
+        items = []
     return sorted(list(set(items + list(state.keys()))))
 
 
@@ -956,7 +997,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
     for eid in eids:
         if eid in state:
             envs[eid] = state.get(eid)
-        else:
+        elif env_path is not None:
             p = os.path.join(env_path, eid.strip(), '.json')
             if os.path.exists(p):
                 with open(p, 'r') as fn:
