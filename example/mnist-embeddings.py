@@ -15,8 +15,8 @@ from PIL import Image  # type: ignore
 import base64 as b64  # type: ignore
 from six import BytesIO
 
-features = np.loadtxt("examples/data/mnist2500_x.txt")
-labels = np.loadtxt("examples/data/mnist2500_labels.txt")
+features = np.loadtxt("example/data/mnist2500_X.txt")
+labels = np.loadtxt("example/data/mnist2500_labels.txt")
 vis = visdom.Visdom()
 
 image_datas = []
