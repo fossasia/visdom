@@ -15,6 +15,7 @@ import * as d3 from 'd3-zoom';
 import { select, event as currentEvent, mouse } from 'd3-selection';
 import debounce from 'debounce';
 import lasso from './lasso';
+import { polygonContains } from 'd3-polygon';
 
 class EmbeddingsPane extends React.Component {
   onEvent = e => {
@@ -86,7 +87,32 @@ class EmbeddingsPane extends React.Component {
       <Pane {...this.props} handleDownload={this.handleDownload}>
         <Scene
           key={this.props.height + '===' + this.props.width}
-          content={this.props.content}
+          // content={{ data: this.props.content.data.slice(0, 20) }}
+          content={{
+            data: [
+              {
+                group: 5,
+                idx: 0,
+                label: 5,
+                name: 'Entity 0',
+                position: [0.0, 0.0],
+              },
+              {
+                group: 5,
+                idx: 0,
+                label: 5,
+                name: 'Entity 1',
+                position: [1, 1],
+              },
+              {
+                group: 5,
+                idx: 0,
+                label: 5,
+                name: 'Entity -1',
+                position: [-1, -1],
+              },
+            ],
+          }}
           height={this.props.height}
           width={this.props.width}
           onSelect={this.onEntitySelection}
@@ -473,7 +499,12 @@ class Scene extends React.Component {
           </div>
         )}
         {this.state.selectMode && (
-          <LassoSelection width={this.props.width} height={this.props.height} />
+          <LassoSelection
+            width={this.props.width}
+            height={this.props.height}
+            points={this.props.content.data}
+            camera={this.camera}
+          />
         )}
         <div
           style={{
@@ -493,7 +524,41 @@ class Scene extends React.Component {
 class LassoSelection extends React.Component {
   componentDidMount() {
     var lassoInstance = lasso()
-      .on('end', null)
+      .on('end', polygon => {
+        this.props.camera.updateMatrixWorld();
+
+        const points = this.props.points.map(point => {
+          /* TEST */
+          var p = new THREE.Vector3(
+            point.position[0] * 2000,
+            point.position[1] * 2000,
+            0
+          );
+          var vector = p.project(this.props.camera);
+
+          vector.x = ((vector.x + 1) / 2) * this.props.width;
+          vector.y = (-(vector.y - 1) / 2) * this.props.height;
+          /* END TEST */
+
+          const [x, y] = point.position;
+          return {
+            ref: point,
+            old: point.position,
+            test: [vector.x, vector.y],
+            coords: [
+              x * this.props.width,
+              y * this.props.height,
+              // ((x + 1) * this.props.width) / 2,
+              // ((y + 1) * this.props.height) / 2,
+            ],
+          };
+        });
+        console.log(this.props.height, this.props.width, points, polygon);
+        const selected = points.filter(point =>
+          polygonContains(polygon, point.test)
+        );
+        console.log(selected);
+      })
       .on('start', null);
 
     select(this.interactionSvg).call(lassoInstance);
