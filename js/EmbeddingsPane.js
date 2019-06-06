@@ -14,6 +14,7 @@ import * as THREE from 'three';
 import * as d3 from 'd3-zoom';
 import { select, event as currentEvent, mouse } from 'd3-selection';
 import debounce from 'debounce';
+import lasso from './lasso';
 
 class EmbeddingsPane extends React.Component {
   onEvent = e => {
@@ -113,11 +114,9 @@ class Scene extends React.Component {
     if (nextProps.interactive !== this.props.interactive) {
       if (nextProps.interactive) {
         // set up handlers
-        console.log('setup');
         this.setUpMouseInteractions();
       } else {
         // remove handlers
-        console.log('remove');
         this.removeMouseInteractions();
       }
     }
@@ -188,7 +187,6 @@ class Scene extends React.Component {
 
         camera.position.set(0, 0, far);
       } else {
-        console.log(this.lastTransform);
         initial_transform = this.lastTransform;
 
         this.zoomHandler(this.lastTransform);
@@ -432,7 +430,22 @@ class Scene extends React.Component {
 
   render() {
     return (
-      <React.Fragment>
+      <div style={{ position: 'relative' }}>
+        <span
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            zIndex: 1,
+            cursor: 'pointer',
+          }}
+          onClick={e => {
+            e.preventDefault();
+            this.setState({ selectMode: !this.state.selectMode });
+          }}
+        >
+          Select
+        </span>
         {this.state.hovered && (
           <div
             style={{
@@ -459,6 +472,9 @@ class Scene extends React.Component {
             )}
           </div>
         )}
+        {this.state.selectMode && (
+          <LassoSelection width={this.props.width} height={this.props.height} />
+        )}
         <div
           style={{
             opacity: this.props.interactive ? 1 : 0.2,
@@ -469,7 +485,31 @@ class Scene extends React.Component {
             this.mount = mount;
           }}
         />
-      </React.Fragment>
+      </div>
+    );
+  }
+}
+
+class LassoSelection extends React.Component {
+  componentDidMount() {
+    var lassoInstance = lasso()
+      .on('end', null)
+      .on('start', null);
+
+    select(this.interactionSvg).call(lassoInstance);
+  }
+  render() {
+    return (
+      <svg
+        ref={mount => (this.interactionSvg = mount)}
+        style={{
+          width: this.props.width,
+          height: this.props.height,
+          position: 'absolute',
+          top: 0,
+          left: 0,
+        }}
+      />
     );
   }
 }
