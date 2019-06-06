@@ -107,23 +107,99 @@ class Scene extends React.Component {
     this.animate = this.animate.bind(this);
   }
 
-  // Random point in circle code from https://stackoverflow.com/questions/32642399/simplest-way-to-plot-points-randomly-inside-a-circle
-  randomPosition(radius) {
-    var pt_angle = Math.random() * 2 * Math.PI;
-    var pt_radius_sq = Math.random() * radius * radius;
-    var pt_x = Math.sqrt(pt_radius_sq) * Math.cos(pt_angle);
-    var pt_y = Math.sqrt(pt_radius_sq) * Math.sin(pt_angle);
-    return [pt_x, pt_y];
+  componentWillReceiveProps(nextProps) {
+    this.setState({ detailsLoading: false });
+
+    if (nextProps.interactive !== this.props.interactive) {
+      if (nextProps.interactive) {
+        // set up handlers
+        console.log('setup');
+        this.setUpMouseInteractions();
+      } else {
+        // remove handlers
+        console.log('remove');
+        this.removeMouseInteractions();
+      }
+    }
   }
 
-  componentWillReceiveProps(nextProps) {
-    if (
-      !this.props.content.selected ||
-      nextProps.content.selected.entityId !==
-        this.props.content.selected.entityId
-    ) {
-      this.setState({ detailsLoading: false });
-    }
+  removeMouseInteractions() {
+    const { renderer, zoom } = this;
+    let view = select(renderer.domElement);
+
+    view.on('mousemove', null);
+    view.on('mouseleave', null);
+    zoom.on('zoom', null);
+  }
+
+  setUpMouseInteractions() {
+    /* ----------------------------------------------------------- */
+    // hover stuff
+
+    const { renderer, scene, points, camera, circle_sprite, near, far } = this;
+
+    let view = select(renderer.domElement);
+
+    let raycaster = new THREE.Raycaster();
+    raycaster.params.Points.threshold = 30;
+    let hoverContainer = new THREE.Object3D();
+    scene.add(hoverContainer);
+
+    view.on('mousemove', () => {
+      if (!this.props.interactive) return;
+      let [mouseX, mouseY] = mouse(view.node());
+      let mouse_position = [mouseX, mouseY];
+      this.checkIntersects(
+        mouse_position,
+        points,
+        hoverContainer,
+        circle_sprite
+      );
+    });
+
+    view.on('mouseleave', () => {
+      this.removeHighlights(hoverContainer);
+    });
+
+    this.raycaster = raycaster;
+
+    /* ----------------------------------------------------------- */
+
+    let zoom = d3
+      .zoom()
+      .scaleExtent([this.getScaleFromZ(far), this.getScaleFromZ(near) - 1]);
+    zoom.on('zoom', () => {
+      if (!this.props.interactive) return;
+      let d3_transform = currentEvent.transform;
+      this.lastTransform = currentEvent.transform;
+      this.zoomHandler(d3_transform);
+    });
+    this.zoom = zoom;
+
+    let setUpZoom = () => {
+      view.call(zoom);
+      let initial_transform;
+
+      if (!this.lastTransform) {
+        let initial_scale = this.getScaleFromZ(far);
+        initial_transform = d3.zoomIdentity
+          .translate(this.props.width / 2, this.props.height / 2)
+          .scale(initial_scale);
+
+        camera.position.set(0, 0, far);
+      } else {
+        console.log(this.lastTransform);
+        initial_transform = this.lastTransform;
+
+        this.zoomHandler(this.lastTransform);
+      }
+
+      zoom.transform(view, initial_transform);
+    };
+    setUpZoom();
+    this.zoom = zoom;
+
+    /* ----------------------------------------------------------- */
   }
 
   componentDidMount() {
@@ -161,13 +237,10 @@ class Scene extends React.Component {
     let camera = new THREE.PerspectiveCamera(fov, width / height, near, far);
     camera.position.set(0, 0, far);
 
-    // TODO: Clean up temporary hack since content can either be:
-    // [... , ...] or { data: [... , ...], selected: ...}
-    let generated_points = (this.props.content.data || this.props.content).map(
-      p =>
-        Object.assign({}, p, {
-          position: [p.position[0] * radius, p.position[1] * radius],
-        })
+    let generated_points = this.props.content.data.map(p =>
+      Object.assign({}, p, {
+        position: [p.position[0] * radius, p.position[1] * radius],
+      })
     );
 
     let pointsGeometry = new THREE.Geometry();
@@ -209,58 +282,12 @@ class Scene extends React.Component {
     this.far = far;
 
     this.color_array = color_array;
+    this.points = points;
+    this.circle_sprite = circle_sprite;
     this.generated_points = generated_points;
     this.debouncedFn = debounce(fn => fn(), 300);
 
-    /* ----------------------------------------------------------- */
-    // hover stuff
-    let view = select(renderer.domElement);
-
-    let raycaster = new THREE.Raycaster();
-    raycaster.params.Points.threshold = 30;
-    let hoverContainer = new THREE.Object3D();
-    scene.add(hoverContainer);
-
-    view.on('mousemove', () => {
-      if (!this.props.interactive) return;
-      let [mouseX, mouseY] = mouse(view.node());
-      let mouse_position = [mouseX, mouseY];
-      this.checkIntersects(
-        mouse_position,
-        points,
-        hoverContainer,
-        circle_sprite
-      );
-    });
-
-    view.on('mouseleave', () => {
-      this.removeHighlights(hoverContainer);
-    });
-
-    this.raycaster = raycaster;
-
-    /* ----------------------------------------------------------- */
-
-    let zoom = d3
-      .zoom()
-      .scaleExtent([this.getScaleFromZ(far), this.getScaleFromZ(near) - 1])
-      .on('zoom', () => {
-        let d3_transform = currentEvent.transform;
-        this.zoomHandler(d3_transform);
-      });
-
-    let setUpZoom = () => {
-      view.call(zoom);
-      let initial_scale = this.getScaleFromZ(far);
-      var initial_transform = d3.zoomIdentity
-        .translate(this.props.width / 2, this.props.height / 2)
-        .scale(initial_scale);
-      zoom.transform(view, initial_transform);
-      camera.position.set(0, 0, far);
-    };
-    setUpZoom();
-
-    /* ----------------------------------------------------------- */
+    this.setUpMouseInteractions();
 
     this.mount.appendChild(this.renderer.domElement);
     this.start();
