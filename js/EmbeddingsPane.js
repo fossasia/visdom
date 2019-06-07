@@ -87,7 +87,7 @@ class EmbeddingsPane extends React.Component {
       <Pane {...this.props} handleDownload={this.handleDownload}>
         <Scene
           key={this.props.height + '===' + this.props.width}
-          content={{ data: this.props.content.data /*.slice(0, 20)*/ }}
+          content={this.props.content}
           height={this.props.height}
           width={this.props.width}
           onSelect={this.onEntitySelection}
@@ -446,7 +446,7 @@ class Scene extends React.Component {
             this.setState({ selectMode: !this.state.selectMode });
           }}
         >
-          Select
+          {this.state.selectMode ? 'Selecting...' : 'Select'}
         </span>
         {this.state.hovered && (
           <div
