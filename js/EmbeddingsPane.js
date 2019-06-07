@@ -87,35 +87,11 @@ class EmbeddingsPane extends React.Component {
       <Pane {...this.props} handleDownload={this.handleDownload}>
         <Scene
           key={this.props.height + '===' + this.props.width}
-          // content={{ data: this.props.content.data.slice(0, 20) }}
-          content={{
-            data: [
-              {
-                group: 5,
-                idx: 0,
-                label: 5,
-                name: 'Entity 0',
-                position: [0.0, 0.0],
-              },
-              {
-                group: 5,
-                idx: 0,
-                label: 5,
-                name: 'Entity 1',
-                position: [1, 1],
-              },
-              {
-                group: 5,
-                idx: 0,
-                label: 5,
-                name: 'Entity -1',
-                position: [-1, -1],
-              },
-            ],
-          }}
+          content={{ data: this.props.content.data /*.slice(0, 20)*/ }}
           height={this.props.height}
           width={this.props.width}
           onSelect={this.onEntitySelection}
+          onRegionSelection={this.onRegionSelection}
           interactive={this.props.isFocused}
         />
       </Pane>
@@ -504,6 +480,7 @@ class Scene extends React.Component {
             height={this.props.height}
             points={this.props.content.data}
             camera={this.camera}
+            onRegionSelection={this.props.onRegionSelection}
           />
         )}
         <div
@@ -553,11 +530,12 @@ class LassoSelection extends React.Component {
             ],
           };
         });
-        console.log(this.props.height, this.props.width, points, polygon);
+        // console.log(this.props.height, this.props.width, points, polygon);
         const selected = points.filter(point =>
           polygonContains(polygon, point.test)
         );
-        console.log(selected);
+        console.log(selected.map(pt => pt.ref.idx));
+        this.props.onRegionSelection(selected.map(pt => pt.ref.idx));
       })
       .on('start', null);
 
