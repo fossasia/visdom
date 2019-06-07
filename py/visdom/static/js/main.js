@@ -131,7 +131,7 @@
 	var PlotPane = __webpack_require__(224);
 	var EmbeddingsPane = __webpack_require__(225);
 
-	var WidthProvider = __webpack_require__(237).default;
+	var WidthProvider = __webpack_require__(238).default;
 
 	var GridLayout = WidthProvider(ReactGridLayout);
 	var sortLayout = ReactGridLayout.utils.sortLayoutItemsByRowCol;
@@ -20350,7 +20350,7 @@
 /* 32 */
 /***/ (function(module, exports) {
 
-	/** @license React v16.8.6
+	/** @license React v16.8.4
 	 * react-is.production.min.js
 	 *
 	 * Copyright (c) Facebook, Inc. and its affiliates.
@@ -20371,7 +20371,7 @@
 /* 33 */
 /***/ (function(module, exports, __webpack_require__) {
 
-	/* WEBPACK VAR INJECTION */(function(process) {/** @license React v16.8.6
+	/* WEBPACK VAR INJECTION */(function(process) {/** @license React v16.8.4
 	 * react-is.development.js
 	 *
 	 * Copyright (c) Facebook, Inc. and its affiliates.
@@ -39721,7 +39721,7 @@
 		  };
 		}();
 
-		/*:: import type {ControlPosition, PositionOffsetControlPosition, MouseTouchEvent} from './types';*/
+		/*:: import type {ControlPosition, MouseTouchEvent} from './types';*/
 
 
 		var matchesSelectorFunc = '';
@@ -39827,26 +39827,19 @@
 		  return { x: x, y: y };
 		}
 
-		function createCSSTransform(controlPos /*: ControlPosition*/, positionOffset /*: PositionOffsetControlPosition*/) /*: Object*/ {
-		  var translation = getTranslation(controlPos, positionOffset, 'px');
-		  return defineProperty({}, browserPrefixToKey('transform', browserPrefix), translation);
+		function createCSSTransform(_ref) /*: Object*/ {
+		  var x = _ref.x,
+		      y = _ref.y;
+
+		  // Replace unitless items with px
+		  return defineProperty({}, browserPrefixToKey('transform', browserPrefix), 'translate(' + x + 'px,' + y + 'px)');
 		}
 
-		function createSVGTransform(controlPos /*: ControlPosition*/, positionOffset /*: PositionOffsetControlPosition*/) /*: string*/ {
-		  var translation = getTranslation(controlPos, positionOffset, '');
-		  return translation;
-		}
-		function getTranslation(_ref2, positionOffset /*: PositionOffsetControlPosition*/, unitSuffix /*: string*/) /*: string*/ {
-		  var x = _ref2.x,
-		      y = _ref2.y;
+		function createSVGTransform(_ref3) /*: string*/ {
+		  var x = _ref3.x,
+		      y = _ref3.y;
 
-		  var translation = 'translate(' + x + unitSuffix + ',' + y + unitSuffix + ')';
-		  if (positionOffset) {
-		    var defaultX = '' + (typeof positionOffset.x === 'string' ? positionOffset.x : positionOffset.x + unitSuffix);
-		    var defaultY = '' + (typeof positionOffset.y === 'string' ? positionOffset.y : positionOffset.y + unitSuffix);
-		    translation = 'translate(' + defaultX + ', ' + defaultY + ')' + translation;
-		  }
-		  return translation;
+		  return 'translate(' + x + ',' + y + ')';
 		}
 
 		function getTouch(e /*: MouseTouchEvent*/, identifier /*: number*/) /*: ?{clientX: number, clientY: number}*/ {
@@ -40101,7 +40094,6 @@
 		};*/
 		/*:: export type DraggableEventHandler = (e: MouseEvent, data: DraggableData) => void;*/
 		/*:: export type ControlPosition = {x: number, y: number};*/
-		/*:: export type PositionOffsetControlPosition = {x: number|string, y: number|string};*/
 
 
 		//
@@ -40503,7 +40495,6 @@
 		  defaultClassNameDragging: string,
 		  defaultClassNameDragged: string,
 		  defaultPosition: ControlPosition,
-		  positionOffset: PositionOffsetControlPosition,
 		  position: ControlPosition,
 		  scale: number
 		};*/
@@ -40677,13 +40668,13 @@
 
 		      // If this element was SVG, we use the `transform` attribute.
 		      if (this.state.isElementSVG) {
-		        svgTransform = createSVGTransform(transformOpts, this.props.positionOffset);
+		        svgTransform = createSVGTransform(transformOpts);
 		      } else {
 		        // Add a CSS transform to move the element around. This allows us to move the element around
 		        // without worrying about whether or not it is relatively or absolutely positioned.
 		        // If the item you are dragging already has a transform set, wrap it in a <span> so <Draggable>
 		        // has a clean slate.
-		        style = createCSSTransform(transformOpts, this.props.positionOffset);
+		        style = createCSSTransform(transformOpts);
 		      }
 
 		      var _props = this.props,
@@ -40788,10 +40779,6 @@
 		  defaultPosition: propTypes.shape({
 		    x: propTypes.number,
 		    y: propTypes.number
-		  }),
-		  positionOffset: propTypes.shape({
-		    x: propTypes.oneOfType([propTypes.number, propTypes.string]),
-		    y: propTypes.oneOfType([propTypes.number, propTypes.string])
 		  }),
 
 		  /**
@@ -44472,6 +44459,12 @@
 
 	var _debounce2 = _interopRequireDefault(_debounce);
 
+	var _lasso = __webpack_require__(237);
+
+	var _lasso2 = _interopRequireDefault(_lasso);
+
+	var _d3Polygon = __webpack_require__(239);
+
 	function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj.default = obj; return newObj; } }
 
 	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
@@ -44533,7 +44526,7 @@
 	      _this.props.appApi.sendPaneMessage({
 	        event_type: 'EntitySelected',
 	        entityId: e.name,
-	        'idx': e.idx,
+	        idx: e.idx,
 	        pane_data: false // No need to send the full data for this
 	      });
 	    }, _this.onRegionSelection = function (pointIdxs) {
@@ -44581,6 +44574,7 @@
 	          height: this.props.height,
 	          width: this.props.width,
 	          onSelect: this.onEntitySelection,
+	          onRegionSelection: this.onRegionSelection,
 	          interactive: this.props.isFocused
 	        })
 	      );
@@ -44615,30 +44609,111 @@
 	    return _this2;
 	  }
 
-	  // Random point in circle code from https://stackoverflow.com/questions/32642399/simplest-way-to-plot-points-randomly-inside-a-circle
-
-
 	  _createClass(Scene, [{
-	    key: 'randomPosition',
-	    value: function randomPosition(radius) {
-	      var pt_angle = Math.random() * 2 * Math.PI;
-	      var pt_radius_sq = Math.random() * radius * radius;
-	      var pt_x = Math.sqrt(pt_radius_sq) * Math.cos(pt_angle);
-	      var pt_y = Math.sqrt(pt_radius_sq) * Math.sin(pt_angle);
-	      return [pt_x, pt_y];
-	    }
-	  }, {
 	    key: 'componentWillReceiveProps',
 	    value: function componentWillReceiveProps(nextProps) {
-	      if (!this.props.content.selected || nextProps.content.selected.entityId !== this.props.content.selected.entityId) {
-	        this.setState({ detailsLoading: false });
+	      this.setState({ detailsLoading: false });
+
+	      if (nextProps.interactive !== this.props.interactive) {
+	        if (nextProps.interactive) {
+	          // set up handlers
+	          this.setUpMouseInteractions();
+	        } else {
+	          // remove handlers
+	          this.removeMouseInteractions();
+	        }
 	      }
+	    }
+	  }, {
+	    key: 'removeMouseInteractions',
+	    value: function removeMouseInteractions() {
+	      var renderer = this.renderer,
+	          zoom = this.zoom;
+
+	      var view = (0, _d3Selection.select)(renderer.domElement);
+
+	      view.on('mousemove', null);
+	      view.on('mouseleave', null);
+	      zoom.on('zoom', null);
+	    }
+	  }, {
+	    key: 'setUpMouseInteractions',
+	    value: function setUpMouseInteractions() {
+	      var _this3 = this;
+
+	      /* ----------------------------------------------------------- */
+	      // hover stuff
+
+	      var renderer = this.renderer,
+	          scene = this.scene,
+	          points = this.points,
+	          camera = this.camera,
+	          circle_sprite = this.circle_sprite,
+	          near = this.near,
+	          far = this.far;
+
+
+	      var view = (0, _d3Selection.select)(renderer.domElement);
+
+	      var raycaster = new THREE.Raycaster();
+	      raycaster.params.Points.threshold = 30;
+	      var hoverContainer = new THREE.Object3D();
+	      scene.add(hoverContainer);
+
+	      view.on('mousemove', function () {
+	        if (!_this3.props.interactive) return;
+
+	        var _mouse = (0, _d3Selection.mouse)(view.node()),
+	            _mouse2 = _slicedToArray(_mouse, 2),
+	            mouseX = _mouse2[0],
+	            mouseY = _mouse2[1];
+
+	        var mouse_position = [mouseX, mouseY];
+	        _this3.checkIntersects(mouse_position, points, hoverContainer, circle_sprite);
+	      });
+
+	      view.on('mouseleave', function () {
+	        _this3.removeHighlights(hoverContainer);
+	      });
+
+	      this.raycaster = raycaster;
+
+	      /* ----------------------------------------------------------- */
+
+	      var zoom = d3.zoom().scaleExtent([this.getScaleFromZ(far), this.getScaleFromZ(near) - 1]);
+	      zoom.on('zoom', function () {
+	        if (!_this3.props.interactive) return;
+	        var d3_transform = _d3Selection.event.transform;
+	        _this3.lastTransform = _d3Selection.event.transform;
+	        _this3.zoomHandler(d3_transform);
+	      });
+	      this.zoom = zoom;
+
+	      var setUpZoom = function setUpZoom() {
+	        view.call(zoom);
+	        var initial_transform = void 0;
+
+	        if (!_this3.lastTransform) {
+	          var initial_scale = _this3.getScaleFromZ(far);
+	          initial_transform = d3.zoomIdentity.translate(_this3.props.width / 2, _this3.props.height / 2).scale(initial_scale);
+
+	          camera.position.set(0, 0, far);
+	        } else {
+	          initial_transform = _this3.lastTransform;
+
+	          _this3.zoomHandler(_this3.lastTransform);
+	        }
+
+	        zoom.transform(view, initial_transform);
+	      };
+	      setUpZoom();
+	      this.zoom = zoom;
+
+	      /* ----------------------------------------------------------- */
 	    }
 	  }, {
 	    key: 'componentDidMount',
 	    value: function componentDidMount() {
-	      var _this3 = this;
-
 	      // const width = this.mount.clientWidth;
 	      // const height = this.mount.clientHeight;
 
@@ -44660,9 +44735,7 @@
 	      var camera = new THREE.PerspectiveCamera(fov, width / height, near, far);
 	      camera.position.set(0, 0, far);
 
-	      // TODO: Clean up temporary hack since content can either be:
-	      // [... , ...] or { data: [... , ...], selected: ...}
-	      var generated_points = (this.props.content.data || this.props.content).map(function (p) {
+	      var generated_points = this.props.content.data.map(function (p) {
 	        return Object.assign({}, p, {
 	          position: [p.position[0] * radius, p.position[1] * radius]
 	        });
@@ -44729,55 +44802,14 @@
 	      this.far = far;
 
 	      this.color_array = color_array;
+	      this.points = points;
+	      this.circle_sprite = circle_sprite;
 	      this.generated_points = generated_points;
 	      this.debouncedFn = (0, _debounce2.default)(function (fn) {
 	        return fn();
 	      }, 300);
 
-	      /* ----------------------------------------------------------- */
-	      // hover stuff
-	      var view = (0, _d3Selection.select)(renderer.domElement);
-
-	      var raycaster = new THREE.Raycaster();
-	      raycaster.params.Points.threshold = 30;
-	      var hoverContainer = new THREE.Object3D();
-	      scene.add(hoverContainer);
-
-	      view.on('mousemove', function () {
-	        if (!_this3.props.interactive) return;
-
-	        var _mouse = (0, _d3Selection.mouse)(view.node()),
-	            _mouse2 = _slicedToArray(_mouse, 2),
-	            mouseX = _mouse2[0],
-	            mouseY = _mouse2[1];
-
-	        var mouse_position = [mouseX, mouseY];
-	        _this3.checkIntersects(mouse_position, points, hoverContainer, circle_sprite);
-	      });
-
-	      view.on('mouseleave', function () {
-	        _this3.removeHighlights(hoverContainer);
-	      });
-
-	      this.raycaster = raycaster;
-
-	      /* ----------------------------------------------------------- */
-
-	      var zoom = d3.zoom().scaleExtent([this.getScaleFromZ(far), this.getScaleFromZ(near) - 1]).on('zoom', function () {
-	        var d3_transform = _d3Selection.event.transform;
-	        _this3.zoomHandler(d3_transform);
-	      });
-
-	      var setUpZoom = function setUpZoom() {
-	        view.call(zoom);
-	        var initial_scale = _this3.getScaleFromZ(far);
-	        var initial_transform = d3.zoomIdentity.translate(_this3.props.width / 2, _this3.props.height / 2).scale(initial_scale);
-	        zoom.transform(view, initial_transform);
-	        camera.position.set(0, 0, far);
-	      };
-	      setUpZoom();
-
-	      /* ----------------------------------------------------------- */
+	      this.setUpMouseInteractions();
 
 	      this.mount.appendChild(this.renderer.domElement);
 	      this.start();
@@ -44933,8 +44965,25 @@
 	      var _this5 = this;
 
 	      return _react2.default.createElement(
-	        _react2.default.Fragment,
-	        null,
+	        'div',
+	        { style: { position: 'relative' } },
+	        _react2.default.createElement(
+	          'span',
+	          {
+	            style: {
+	              position: 'absolute',
+	              left: 0,
+	              top: 0,
+	              zIndex: 1,
+	              cursor: 'pointer'
+	            },
+	            onClick: function onClick(e) {
+	              e.preventDefault();
+	              _this5.setState({ selectMode: !_this5.state.selectMode });
+	            }
+	          },
+	          this.state.selectMode ? 'Selecting...' : 'Select'
+	        ),
 	        this.state.hovered && _react2.default.createElement(
 	          'div',
 	          {
@@ -44968,6 +45017,13 @@
 	            }
 	          })
 	        ),
+	        this.state.selectMode && _react2.default.createElement(LassoSelection, {
+	          width: this.props.width,
+	          height: this.props.height,
+	          points: this.props.content.data,
+	          camera: this.camera,
+	          onRegionSelection: this.props.onRegionSelection
+	        }),
 	        _react2.default.createElement('div', {
 	          style: {
 	            opacity: this.props.interactive ? 1 : 0.2,
@@ -44983,6 +45039,80 @@
 	  }]);
 
 	  return Scene;
+	}(_react2.default.Component);
+
+	var LassoSelection = function (_React$Component3) {
+	  _inherits(LassoSelection, _React$Component3);
+
+	  function LassoSelection() {
+	    _classCallCheck(this, LassoSelection);
+
+	    return _possibleConstructorReturn(this, (LassoSelection.__proto__ || Object.getPrototypeOf(LassoSelection)).apply(this, arguments));
+	  }
+
+	  _createClass(LassoSelection, [{
+	    key: 'componentDidMount',
+	    value: function componentDidMount() {
+	      var _this7 = this;
+
+	      var lassoInstance = (0, _lasso2.default)().on('end', function (polygon) {
+	        _this7.props.camera.updateMatrixWorld();
+
+	        var points = _this7.props.points.map(function (point) {
+	          /* TEST */
+	          var p = new THREE.Vector3(point.position[0] * 2000, point.position[1] * 2000, 0);
+	          var vector = p.project(_this7.props.camera);
+
+	          vector.x = (vector.x + 1) / 2 * _this7.props.width;
+	          vector.y = -(vector.y - 1) / 2 * _this7.props.height;
+	          /* END TEST */
+
+	          var _point$position = _slicedToArray(point.position, 2),
+	              x = _point$position[0],
+	              y = _point$position[1];
+
+	          return {
+	            ref: point,
+	            old: point.position,
+	            test: [vector.x, vector.y],
+	            coords: [x * _this7.props.width, y * _this7.props.height]
+	          };
+	        });
+	        // console.log(this.props.height, this.props.width, points, polygon);
+	        var selected = points.filter(function (point) {
+	          return (0, _d3Polygon.polygonContains)(polygon, point.test);
+	        });
+	        console.log(selected.map(function (pt) {
+	          return pt.ref.idx;
+	        }));
+	        _this7.props.onRegionSelection(selected.map(function (pt) {
+	          return pt.ref.idx;
+	        }));
+	      }).on('start', null);
+
+	      (0, _d3Selection.select)(this.interactionSvg).call(lassoInstance);
+	    }
+	  }, {
+	    key: 'render',
+	    value: function render() {
+	      var _this8 = this;
+
+	      return _react2.default.createElement('svg', {
+	        ref: function ref(mount) {
+	          return _this8.interactionSvg = mount;
+	        },
+	        style: {
+	          width: this.props.width,
+	          height: this.props.height,
+	          position: 'absolute',
+	          top: 0,
+	          left: 0
+	        }
+	      });
+	    }
+	  }]);
+
+	  return LassoSelection;
 	}(_react2.default.Component);
 
 	module.exports = EmbeddingsPane;
@@ -97692,6 +97822,124 @@
 	Object.defineProperty(exports, "__esModule", {
 	  value: true
 	});
+	exports.default = lasso;
+
+	var _d3Selection = __webpack_require__(228);
+
+	var d3 = _interopRequireWildcard(_d3Selection);
+
+	var _d3Dispatch = __webpack_require__(229);
+
+	var _d3Drag = __webpack_require__(230);
+
+	function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj.default = obj; return newObj; } }
+
+	function polygonToPath(polygon) {
+	  return 'M' + polygon.map(function (d) {
+	    return d.join(',');
+	  }).join('L');
+	}
+
+	function distance(pt1, pt2) {
+	  return Math.sqrt(Math.pow(pt2[0] - pt1[0], 2) + Math.pow(pt2[1] - pt1[1], 2));
+	}
+
+	function lasso() {
+	  var dispatch = (0, _d3Dispatch.dispatch)('start', 'end');
+
+	  // distance last point has to be to first point before
+	  // it auto closes when mouse is released
+	  var closeDistance = 75;
+
+	  function lasso(root) {
+	    // append a <g> with a rect
+	    var g = root.append('g').attr('class', 'lasso-group');
+	    var bbox = root.node().getBoundingClientRect();
+	    var area = g.append('rect').attr('width', bbox.width).attr('height', bbox.height).attr('fill', 'tomato').attr('opacity', 0);
+
+	    var drag = (0, _d3Drag.drag)().on('start', handleDragStart).on('drag', handleDrag).on('end', handleDragEnd);
+
+	    area.call(drag);
+
+	    var lassoPolygon;
+	    var lassoPath;
+	    var closePath;
+
+	    function handleDragStart() {
+	      lassoPolygon = [d3.mouse(this)];
+	      if (lassoPath) {
+	        lassoPath.remove();
+	      }
+
+	      lassoPath = g.append('path').attr('fill', '#0bb').attr('fill-opacity', 0.1).attr('stroke', '#0bb').attr('stroke-dasharray', '3, 3');
+
+	      closePath = g.append('line').attr('x2', lassoPolygon[0][0]).attr('y2', lassoPolygon[0][1]).attr('stroke', '#0bb').attr('stroke-dasharray', '3, 3').attr('opacity', 0);
+
+	      dispatch.call('start', lasso, lassoPolygon);
+	    }
+
+	    function handleDrag() {
+	      var point = d3.mouse(this);
+	      lassoPolygon.push(point);
+	      lassoPath.attr('d', polygonToPath(lassoPolygon));
+
+	      // indicate if we are within closing distance
+	      if (distance(lassoPolygon[0], lassoPolygon[lassoPolygon.length - 1]) < closeDistance) {
+	        closePath.attr('x1', point[0]).attr('y1', point[1]).attr('opacity', 1);
+	      } else {
+	        closePath.attr('opacity', 0);
+	      }
+	    }
+
+	    function handleDragEnd() {
+	      // remove the close path
+	      closePath.remove();
+	      closePath = null;
+
+	      // succesfully closed
+	      if (distance(lassoPolygon[0], lassoPolygon[lassoPolygon.length - 1]) < closeDistance) {
+	        lassoPath.attr('d', polygonToPath(lassoPolygon) + 'Z');
+	        dispatch.call('end', lasso, lassoPolygon);
+
+	        // otherwise cancel
+	      } else {
+	        lassoPath.remove();
+	        lassoPath = null;
+	        lassoPolygon = null;
+	      }
+	    }
+
+	    lasso.reset = function () {
+	      if (lassoPath) {
+	        lassoPath.remove();
+	        lassoPath = null;
+	      }
+
+	      lassoPolygon = null;
+	      if (closePath) {
+	        closePath.remove();
+	        closePath = null;
+	      }
+	    };
+	  }
+
+	  lasso.on = function (type, callback) {
+	    dispatch.on(type, callback);
+	    return lasso;
+	  };
+
+	  return lasso;
+	}
+
+/***/ }),
+/* 238 */
+/***/ (function(module, exports, __webpack_require__) {
+
+	'use strict';
+
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
 
 	var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
 
@@ -97787,6 +98035,162 @@
 	};
 
 	exports.default = Width;
+
+/***/ }),
+/* 239 */
+/***/ (function(module, exports, __webpack_require__) {
+
+	// https://d3js.org/d3-polygon/ v1.0.5 Copyright 2018 Mike Bostock
+	(function (global, factory) {
+	 true ? factory(exports) :
+	typeof define === 'function' && define.amd ? define(['exports'], factory) :
+	(factory((global.d3 = global.d3 || {})));
+	}(this, (function (exports) { 'use strict';
+
+	function area(polygon) {
+	  var i = -1,
+	      n = polygon.length,
+	      a,
+	      b = polygon[n - 1],
+	      area = 0;
+
+	  while (++i < n) {
+	    a = b;
+	    b = polygon[i];
+	    area += a[1] * b[0] - a[0] * b[1];
+	  }
+
+	  return area / 2;
+	}
+
+	function centroid(polygon) {
+	  var i = -1,
+	      n = polygon.length,
+	      x = 0,
+	      y = 0,
+	      a,
+	      b = polygon[n - 1],
+	      c,
+	      k = 0;
+
+	  while (++i < n) {
+	    a = b;
+	    b = polygon[i];
+	    k += c = a[0] * b[1] - b[0] * a[1];
+	    x += (a[0] + b[0]) * c;
+	    y += (a[1] + b[1]) * c;
+	  }
+
+	  return k *= 3, [x / k, y / k];
+	}
+
+	// Returns the 2D cross product of AB and AC vectors, i.e., the z-component of
+	// the 3D cross product in a quadrant I Cartesian coordinate system (+x is
+	// right, +y is up). Returns a positive value if ABC is counter-clockwise,
+	// negative if clockwise, and zero if the points are collinear.
+	function cross(a, b, c) {
+	  return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+	}
+
+	function lexicographicOrder(a, b) {
+	  return a[0] - b[0] || a[1] - b[1];
+	}
+
+	// Computes the upper convex hull per the monotone chain algorithm.
+	// Assumes points.length >= 3, is sorted by x, unique in y.
+	// Returns an array of indices into points in left-to-right order.
+	function computeUpperHullIndexes(points) {
+	  var n = points.length,
+	      indexes = [0, 1],
+	      size = 2;
+
+	  for (var i = 2; i < n; ++i) {
+	    while (size > 1 && cross(points[indexes[size - 2]], points[indexes[size - 1]], points[i]) <= 0) --size;
+	    indexes[size++] = i;
+	  }
+
+	  return indexes.slice(0, size); // remove popped points
+	}
+
+	function hull(points) {
+	  if ((n = points.length) < 3) return null;
+
+	  var i,
+	      n,
+	      sortedPoints = new Array(n),
+	      flippedPoints = new Array(n);
+
+	  for (i = 0; i < n; ++i) sortedPoints[i] = [+points[i][0], +points[i][1], i];
+	  sortedPoints.sort(lexicographicOrder);
+	  for (i = 0; i < n; ++i) flippedPoints[i] = [sortedPoints[i][0], -sortedPoints[i][1]];
+
+	  var upperIndexes = computeUpperHullIndexes(sortedPoints),
+	      lowerIndexes = computeUpperHullIndexes(flippedPoints);
+
+	  // Construct the hull polygon, removing possible duplicate endpoints.
+	  var skipLeft = lowerIndexes[0] === upperIndexes[0],
+	      skipRight = lowerIndexes[lowerIndexes.length - 1] === upperIndexes[upperIndexes.length - 1],
+	      hull = [];
+
+	  // Add upper hull in right-to-l order.
+	  // Then add lower hull in left-to-right order.
+	  for (i = upperIndexes.length - 1; i >= 0; --i) hull.push(points[sortedPoints[upperIndexes[i]][2]]);
+	  for (i = +skipLeft; i < lowerIndexes.length - skipRight; ++i) hull.push(points[sortedPoints[lowerIndexes[i]][2]]);
+
+	  return hull;
+	}
+
+	function contains(polygon, point) {
+	  var n = polygon.length,
+	      p = polygon[n - 1],
+	      x = point[0], y = point[1],
+	      x0 = p[0], y0 = p[1],
+	      x1, y1,
+	      inside = false;
+
+	  for (var i = 0; i < n; ++i) {
+	    p = polygon[i], x1 = p[0], y1 = p[1];
+	    if (((y1 > y) !== (y0 > y)) && (x < (x0 - x1) * (y - y1) / (y0 - y1) + x1)) inside = !inside;
+	    x0 = x1, y0 = y1;
+	  }
+
+	  return inside;
+	}
+
+	function length(polygon) {
+	  var i = -1,
+	      n = polygon.length,
+	      b = polygon[n - 1],
+	      xa,
+	      ya,
+	      xb = b[0],
+	      yb = b[1],
+	      perimeter = 0;
+
+	  while (++i < n) {
+	    xa = xb;
+	    ya = yb;
+	    b = polygon[i];
+	    xb = b[0];
+	    yb = b[1];
+	    xa -= xb;
+	    ya -= yb;
+	    perimeter += Math.sqrt(xa * xa + ya * ya);
+	  }
+
+	  return perimeter;
+	}
+
+	exports.polygonArea = area;
+	exports.polygonCentroid = centroid;
+	exports.polygonHull = hull;
+	exports.polygonContains = contains;
+	exports.polygonLength = length;
+
+	Object.defineProperty(exports, '__esModule', { value: true });
+
+	})));
+
 
 /***/ })
 /******/ ]);
