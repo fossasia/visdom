@@ -756,7 +756,7 @@ class CloseHandler(BaseHandler):
         win = args.get('win')
 
         keys = \
-            list(handler.state[eid]['jsons'].keys()) if win is None else [win]
+            list(handler.state[eid]['jsons'].keys()) if win is 'all' else [win]
         for win in keys:
             handler.state[eid]['jsons'].pop(win, None)
             broadcast(
@@ -1092,12 +1092,12 @@ class DataHandler(BaseHandler):
     def wrap_func(handler, args):
         eid = extract_eid(args)
 
-        if 'win' in args and args['win'] is not None:
+        if 'win' in args and args['win'] == 'all':
+            handler.write(json.dumps(handler.state[eid]['jsons']))
+        else:
             assert args['win'] in handler.state[eid]['jsons'], \
                 "Window {} doesn't exist in env {}".format(args['win'], eid)
             handler.write(json.dumps(handler.state[eid]['jsons'][args['win']]))
-        else:
-            handler.write(json.dumps(handler.state[eid]['jsons']))
 
     @check_auth
     def post(self):
