@@ -223,7 +223,7 @@ class Scene extends React.Component {
       '#ff7f00',
       '#6a3d9a',
       '#cab2d6',
-      '#ffff99',
+      '#cccc00',
     ];
     let circle_sprite = new THREE.TextureLoader().load(
       'https://fastforwardlabs.github.io/visualization_assets/circle-sprite.png'
@@ -268,7 +268,7 @@ class Scene extends React.Component {
 
     let scene = new THREE.Scene();
     scene.add(points);
-    scene.background = new THREE.Color(0xefefef);
+    scene.background = new THREE.Color(0xffffff);
 
     renderer.setSize(width, height);
     renderer.setPixelRatio(window.devicePixelRatio);
@@ -431,22 +431,70 @@ class Scene extends React.Component {
   }
 
   render() {
+    const buttonStyles = this.state.selectMode
+      ? {
+          backgroundColor: '#ccc',
+          border: '1px solid #888',
+          boxShadow: '0px 1px 2px rgba(0,0,0,0.1) inset',
+        }
+      : {
+          backgroundColor: '#eee',
+          border: '1px solid #bbb',
+          boxShadow: '0px 1px 2px rgba(0,0,0,0.1)',
+        };
+
     return (
       <div style={{ position: 'relative' }}>
         <span
           style={{
             position: 'absolute',
-            left: 0,
-            top: 0,
+            left: 5,
+            top: 5,
             zIndex: 1,
             cursor: 'pointer',
           }}
-          onClick={e => {
-            e.preventDefault();
-            this.setState({ selectMode: !this.state.selectMode });
-          }}
         >
-          {this.state.selectMode ? 'Selecting...' : 'Select'}
+          <div
+            style={Object.assign(
+              {
+                width: 24,
+                height: 24,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginRight: 7,
+              },
+              buttonStyles
+            )}
+            title="Selection mode"
+            onClick={e => {
+              e.preventDefault();
+              this.setState({ selectMode: !this.state.selectMode });
+            }}
+          >
+            <span
+              style={{
+                border: '1px dashed black',
+                width: 16,
+                height: 16,
+                display: 'inline-block',
+                borderRadius: 10,
+              }}
+            />
+          </div>
+
+          {this.state.selectMode ? (
+            <span
+              style={{
+                backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                padding: 2,
+                userSelect: 'none',
+              }}
+            >
+              Selection mode: Drag a selection around points to re-run
+              embeddings on
+            </span>
+          ) : null}
         </span>
         {this.state.hovered && (
           <div
