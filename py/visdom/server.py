@@ -1092,12 +1092,25 @@ class DataHandler(BaseHandler):
     def wrap_func(handler, args):
         eid = extract_eid(args)
 
-        if 'win' in args and args['win'] == 'all':
-            handler.write(json.dumps(handler.state[eid]['jsons']))
+        if 'data' in args:
+            # Load data from client
+            data = json.loads(args['data'])
+
+            if eid not in handler.state:
+                handler.state[eid] = {'jsons': {}, 'reload': {}}
+
+            if 'win' in args and args['win'] == 'all':
+                handler.state[eid]['jsons'] = data
+            else:
+                handler.state[eid]['jsons'][args['win']] = data
         else:
-            assert args['win'] in handler.state[eid]['jsons'], \
-                "Window {} doesn't exist in env {}".format(args['win'], eid)
-            handler.write(json.dumps(handler.state[eid]['jsons'][args['win']]))
+            # Dump data
+            if 'win' in args and args['win'] == 'all':
+                handler.write(json.dumps(handler.state[eid]['jsons']))
+            else:
+                assert args['win'] in handler.state[eid]['jsons'], \
+                    "Window {} doesn't exist in env {}".format(args['win'], eid)
+                handler.write(json.dumps(handler.state[eid]['jsons'][args['win']]))
 
     @check_auth
     def post(self):

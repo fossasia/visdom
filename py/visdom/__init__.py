@@ -627,7 +627,7 @@ class Visdom(object):
     def get_window_data(self, win='all', env=None):
         """
         This function returns all the window data for a specified window in
-        an environment. `Use win='all'` to get all the windows in the given
+        an environment. Use `win='all'` to get all the windows in the given
         environment. Env defaults to main
         """
 
@@ -635,6 +635,19 @@ class Visdom(object):
             msg={'win': win, 'eid': env},
             endpoint='win_data'
         )
+
+    def set_window_data(self, data, win='all', env=None):
+        """
+        This function sets all the window data for a specified window in
+        an environment. Use `win='all'` to set the data for all the windows in 
+        the given environment. Env defaults to main. `data` should be as returned
+        from `get_window_data`.
+        """
+        return self._send(
+            msg={'win': win, 'eid': env, 'data': data},
+            endpoint='win_data'
+        )
+
 
     def close(self, win='all', env=None):
         """
