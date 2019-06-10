@@ -44760,7 +44760,7 @@
 	      var width = this.props.width;
 	      var height = this.props.height;
 	      var radius = 2000;
-	      var color_array = ['#1f78b4', '#b2df8a', '#33a02c', '#fb9a99', '#e31a1c', '#fdbf6f', '#ff7f00', '#6a3d9a', '#cab2d6', '#ffff99'];
+	      var color_array = ['#1f78b4', '#b2df8a', '#33a02c', '#fb9a99', '#e31a1c', '#fdbf6f', '#ff7f00', '#6a3d9a', '#cab2d6', '#cccc00'];
 	      var circle_sprite = new THREE.TextureLoader().load('https://fastforwardlabs.github.io/visualization_assets/circle-sprite.png');
 
 	      var fov = 40;
@@ -44824,7 +44824,7 @@
 
 	      var scene = new THREE.Scene();
 	      scene.add(points);
-	      scene.background = new THREE.Color(0xefefef);
+	      scene.background = new THREE.Color(0xffffff);
 
 	      renderer.setSize(width, height);
 	      renderer.setPixelRatio(window.devicePixelRatio);
@@ -45000,6 +45000,16 @@
 	    value: function render() {
 	      var _this5 = this;
 
+	      var buttonStyles = this.state.selectMode ? {
+	        backgroundColor: '#ccc',
+	        border: '1px solid #888',
+	        boxShadow: '0px 1px 2px rgba(0,0,0,0.1) inset'
+	      } : {
+	        backgroundColor: '#eee',
+	        border: '1px solid #bbb',
+	        boxShadow: '0px 1px 2px rgba(0,0,0,0.1)'
+	      };
+
 	      return _react2.default.createElement(
 	        'div',
 	        { style: { position: 'relative' } },
@@ -45008,17 +45018,50 @@
 	          {
 	            style: {
 	              position: 'absolute',
-	              left: 0,
-	              top: 0,
+	              left: 5,
+	              top: 5,
 	              zIndex: 1,
 	              cursor: 'pointer'
-	            },
-	            onClick: function onClick(e) {
-	              e.preventDefault();
-	              _this5.setState({ selectMode: !_this5.state.selectMode });
 	            }
 	          },
-	          this.state.selectMode ? 'Selecting...' : 'Select'
+	          _react2.default.createElement(
+	            'div',
+	            {
+	              style: Object.assign({
+	                width: 24,
+	                height: 24,
+	                display: 'inline-flex',
+	                alignItems: 'center',
+	                justifyContent: 'center',
+	                marginRight: 7
+	              }, buttonStyles),
+	              title: 'Selection mode',
+	              onClick: function onClick(e) {
+	                e.preventDefault();
+	                _this5.setState({ selectMode: !_this5.state.selectMode });
+	              }
+	            },
+	            _react2.default.createElement('span', {
+	              style: {
+	                border: '1px dashed black',
+	                width: 16,
+	                height: 16,
+	                display: 'inline-block',
+	                borderRadius: 10
+	              }
+	            })
+	          ),
+	          this.state.selectMode ? _react2.default.createElement(
+	            'span',
+	            {
+	              style: {
+	                backgroundColor: 'rgba(255, 255, 255, 0.9)',
+	                padding: 2,
+	                userSelect: 'none'
+	              }
+	            },
+	            'Selection mode: Drag a selection around points to re-run embeddings on'
+	          ) : null
 	        ),
 	        this.state.hovered && _react2.default.createElement(
 	          'div',
@@ -97908,9 +97951,9 @@
 	        lassoPath.remove();
 	      }
 
-	      lassoPath = g.append('path').attr('fill', '#0bb').attr('fill-opacity', 0.1).attr('stroke', '#0bb').attr('stroke-dasharray', '3, 3');
+	      lassoPath = g.append('path').attr('fill', '#0bb').attr('fill-opacity', 0.2).attr('stroke', '#0bb').attr('stroke-width', '3px').attr('stroke-dasharray', '7, 4');
 
-	      closePath = g.append('line').attr('x2', lassoPolygon[0][0]).attr('y2', lassoPolygon[0][1]).attr('stroke', '#0bb').attr('stroke-dasharray', '3, 3').attr('opacity', 0);
+	      closePath = g.append('line').attr('x2', lassoPolygon[0][0]).attr('y2', lassoPolygon[0][1]).attr('stroke', '#0bb').attr('stroke-width', '3px').attr('stroke-dasharray', '7, 4').attr('opacity', 0);
 
 	      dispatch.call('start', lasso, lassoPolygon);
 	    }
