@@ -722,6 +722,19 @@ class UpdateHandler(BaseHandler):
         if p['type'] == 'text':
             p['content'] += "<br>" + args['data'][0]['content']
             return p
+        if p['type'] == 'embeddings':
+            # TODO embeddings updates should be handled outside of the regular
+            # update flow, as update packets are easy to create manually and
+            # expensive to calculate otherwise
+            if args['data']['update_type'] == 'EntitySelected':
+                p['content']['selected'] = args['data']['selected']
+            elif args['data']['update_type'] == 'RegionSelected':
+                p['content']['selected'] = None
+                print(len(p['content']['data']))
+                p['old_content'].append(p['content']['data'])
+                p['content']['data'] = args['data']['points']
+                print(len(p['content']['data']))
+            return p
         if p['type'] == 'image_history':
             utype = args['data'][0]['type']
             if utype == 'image_history':
@@ -734,17 +747,6 @@ class UpdateHandler(BaseHandler):
                 selected_not_neg = max(0, selected)
                 selected_exists = min(len(p['content'])-1, selected_not_neg)
                 p['selected'] = selected_exists
-        if p['type'] == 'embeddings':
-            # TODO embeddings updates should be handled outside of the regular
-            # update flow, as update packets are easy to create manually and
-            # expensive to calculate otherwise
-            if args['data']['update_type'] == 'EntitySelected':
-                p['content']['selected'] = args['data']['selected']
-            elif args['data']['update_type'] == 'RegionSelected':
-                p['content']['selected'] = None
-                p['old_content'].push(p['content']['data'])
-                p['content']['data'] = args['data']['points']
-            return p
 
         pdata = p['content']['data']
 
