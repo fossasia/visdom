@@ -668,8 +668,10 @@ class UpdateHandler(BaseHandler):
                 p['content']['selected'] = args['data']['selected']
             elif args['data']['update_type'] == 'RegionSelected':
                 p['content']['selected'] = None
-                p['old_content'].push(p['content']['data'])
+                print(len(p['content']['data']))
+                p['old_content'].append(p['content']['data'])
                 p['content']['data'] = args['data']['points']
+                print(len(p['content']['data']))
             return p
         if p['type'] == 'image_history':
             utype = args['data'][0]['type']

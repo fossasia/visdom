@@ -526,7 +526,15 @@ class Visdom(object):
             if 'target' in message:
                 for handler in list(
                         self.event_handlers.get(message['target'], [])):
-                    handler(message)
+                    try:
+                        handler(message)
+                    except Exception as e:
+                        logger.warn(
+                            'Visdom failed to handle a handler for {}: {}'
+                            ''.format(message, e)
+                        )
+                        import traceback
+                        traceback.print_exc()
 
         def on_error(ws, error):
             if hasattr(error, "errno") and  error.errno == errno.ECONNREFUSED:
@@ -972,12 +980,12 @@ class Visdom(object):
         }
 
         def embedding_event_handler(event):
+            window = event["target"]
             if event['event_type'] == 'EntitySelected':
                 # Hover events lead us to get the expected element and serve
                 # them via an append event
                 entity_id = event["entityId"]
                 id = event["idx"]
-                window = event["target"]
                 if data_getter is not None:
                     if data_type == 'html':
                         selected = {
@@ -1013,10 +1021,10 @@ class Visdom(object):
                     "label": labels[i],
                     "idx": i,
                 } for i, xy in zip(selection, Y)]
-                send_data = [{
+                send_data = {
                     'update_type': 'RegionSelected',
                     'points': points,
-                }]
+                }
             else:
                 return  # Unsupported event
             self._send({
