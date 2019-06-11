@@ -131,10 +131,14 @@
 	var PlotPane = __webpack_require__(224);
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 	var WidthProvider = __webpack_require__(239).default;
 =======
 	var WidthProvider = __webpack_require__(238).default;
 >>>>>>> Add updated js static bundle
+=======
+	var WidthProvider = __webpack_require__(239).default;
+>>>>>>> Add a back button to pop off of embedding stack
 
 	var GridLayout = WidthProvider(ReactGridLayout);
 	var sortLayout = ReactGridLayout.utils.sortLayoutItemsByRowCol;
@@ -44499,7 +44503,7 @@
 
 	var _lasso2 = _interopRequireDefault(_lasso);
 
-	var _d3Polygon = __webpack_require__(239);
+	var _d3Polygon = __webpack_require__(238);
 
 	function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj.default = obj; return newObj; } }
 
@@ -44605,12 +44609,13 @@
 	        Pane,
 	        _extends({}, this.props, { handleDownload: this.handleDownload }),
 	        _react2.default.createElement(Scene, {
-	          key: this.props.height + '===' + this.props.width,
+	          key: this.props.height + '===' + this.props.width + '===' + this.props.content.data.length,
 	          content: this.props.content,
 	          height: this.props.height,
 	          width: this.props.width,
 	          onSelect: this.onEntitySelection,
 	          onRegionSelection: this.onRegionSelection,
+	          onGoBack: this.onGoBack,
 	          interactive: this.props.isFocused
 	        })
 	      );
@@ -44658,6 +44663,12 @@
 	          // remove handlers
 	          this.removeMouseInteractions();
 	        }
+	      }
+
+	      console.log('received props');
+	      if (nextProps.content.data.length !== this.props.content.data.length) {
+	        this.stop();
+	        this.setUpScene();
 	      }
 	    }
 	  }, {
@@ -44750,6 +44761,12 @@
 	  }, {
 	    key: 'componentDidMount',
 	    value: function componentDidMount() {
+	      this.setUpScene();
+	    }
+	  }, {
+	    key: 'setUpScene',
+	    value: function setUpScene() {
+	      console.log('setting up the scene');
 	      // const width = this.mount.clientWidth;
 	      // const height = this.mount.clientHeight;
 
@@ -45024,6 +45041,25 @@
 	              cursor: 'pointer'
 	            }
 	          },
+	          _react2.default.createElement(
+	            'div',
+	            {
+	              style: Object.assign({
+	                width: 24,
+	                height: 24,
+	                display: 'inline-flex',
+	                alignItems: 'center',
+	                justifyContent: 'center',
+	                marginRight: 7
+	              }, buttonStyles),
+	              title: 'Selection mode',
+	              onClick: function onClick(e) {
+	                e.preventDefault();
+	                _this5.props.onGoBack();
+	              }
+	            },
+	            '\u2190'
+	          ),
 	          _react2.default.createElement(
 	            'div',
 	            {
@@ -98015,111 +98051,6 @@
 /* 238 */
 /***/ (function(module, exports, __webpack_require__) {
 
-	'use strict';
-
-	Object.defineProperty(exports, "__esModule", {
-	  value: true
-	});
-
-	var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
-
-	var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
-
-	var _react = __webpack_require__(2);
-
-	var _react2 = _interopRequireDefault(_react);
-
-	var _reactDom = __webpack_require__(13);
-
-	var _reactDom2 = _interopRequireDefault(_reactDom);
-
-	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-	function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
-
-	function _possibleConstructorReturn(self, call) { if (!self) { throw new ReferenceError("this hasn't been initialised - super() hasn't been called"); } return call && (typeof call === "object" || typeof call === "function") ? call : self; }
-
-	function _inherits(subClass, superClass) { if (typeof superClass !== "function" && superClass !== null) { throw new TypeError("Super expression must either be null or a function, not " + typeof superClass); } subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, enumerable: false, writable: true, configurable: true } }); if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass; } /**
-	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                * Copyright 2017-present, Facebook, Inc.
-	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                * All rights reserved.
-	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                *
-	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                * This source code is licensed under the license found in the
-	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                * LICENSE file in the root directory of this source tree.
-	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                *
-	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                */
-
-	var Width = function Width(ComposedComponent) {
-	  return function (_React$Component) {
-	    _inherits(Width, _React$Component);
-
-	    function Width() {
-	      var _ref;
-
-	      var _temp, _this, _ret;
-
-	      _classCallCheck(this, Width);
-
-	      for (var _len = arguments.length, args = Array(_len), _key = 0; _key < _len; _key++) {
-	        args[_key] = arguments[_key];
-	      }
-
-	      return _ret = (_temp = (_this = _possibleConstructorReturn(this, (_ref = Width.__proto__ || Object.getPrototypeOf(Width)).call.apply(_ref, [this].concat(args))), _this), _this.state = {
-	        width: 1280,
-	        cols: 100
-	      }, _this.mounted = false, _this.resizeTimer = null, _this.onWindowResizeStop = function () {
-	        if (!_this.mounted) return;
-
-	        var oldWidth = _this.state.width;
-	        /* eslint-disable-next-line react/no-find-dom-node */
-	        var node = _reactDom2.default.findDOMNode(_this);
-
-	        _this.setState({
-	          width: node.offsetWidth,
-	          cols: node.offsetWidth / oldWidth * _this.state.cols
-	        }, function () {
-	          _this.props.onWidthChange(_this.state.width, _this.state.cols);
-	        });
-	      }, _this.onWindowResize = function () {
-	        if (_this.resizeTimer) clearTimeout(_this.resizeTimer);
-	        _this.resizeTimer = setTimeout(_this.onWindowResizeStop, 200);
-	      }, _temp), _possibleConstructorReturn(_this, _ret);
-	    }
-
-	    _createClass(Width, [{
-	      key: 'componentDidMount',
-	      value: function componentDidMount() {
-	        this.mounted = true;
-
-	        window.addEventListener('resize', this.onWindowResize);
-	        this.onWindowResize();
-	      }
-	    }, {
-	      key: 'componentWillUnmount',
-	      value: function componentWillUnmount() {
-	        this.mounted = false;
-	        window.removeEventListener('resize', this.onWindowResize);
-	      }
-	    }, {
-	      key: 'render',
-	      value: function render() {
-	        if (this.props.measureBeforeMount && !this.mounted) {
-	          return _react2.default.createElement('div', { className: this.props.className, style: this.props.style });
-	        }
-
-	        return _react2.default.createElement(ComposedComponent, _extends({}, this.props, this.state));
-	      }
-	    }]);
-
-	    return Width;
-	  }(_react2.default.Component);
-	};
-
-	exports.default = Width;
-
-/***/ }),
-/* 239 */
-/***/ (function(module, exports, __webpack_require__) {
-
 	// https://d3js.org/d3-polygon/ v1.0.5 Copyright 2018 Mike Bostock
 	(function (global, factory) {
 	 true ? factory(exports) :
@@ -98271,6 +98202,111 @@
 
 	})));
 
+
+/***/ }),
+/* 239 */
+/***/ (function(module, exports, __webpack_require__) {
+
+	'use strict';
+
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+
+	var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+	var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
+
+	var _react = __webpack_require__(2);
+
+	var _react2 = _interopRequireDefault(_react);
+
+	var _reactDom = __webpack_require__(13);
+
+	var _reactDom2 = _interopRequireDefault(_reactDom);
+
+	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+	function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
+
+	function _possibleConstructorReturn(self, call) { if (!self) { throw new ReferenceError("this hasn't been initialised - super() hasn't been called"); } return call && (typeof call === "object" || typeof call === "function") ? call : self; }
+
+	function _inherits(subClass, superClass) { if (typeof superClass !== "function" && superClass !== null) { throw new TypeError("Super expression must either be null or a function, not " + typeof superClass); } subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, enumerable: false, writable: true, configurable: true } }); if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass; } /**
+	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                * Copyright 2017-present, Facebook, Inc.
+	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                * All rights reserved.
+	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                *
+	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                * This source code is licensed under the license found in the
+	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                * LICENSE file in the root directory of this source tree.
+	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                *
+	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                */
+
+	var Width = function Width(ComposedComponent) {
+	  return function (_React$Component) {
+	    _inherits(Width, _React$Component);
+
+	    function Width() {
+	      var _ref;
+
+	      var _temp, _this, _ret;
+
+	      _classCallCheck(this, Width);
+
+	      for (var _len = arguments.length, args = Array(_len), _key = 0; _key < _len; _key++) {
+	        args[_key] = arguments[_key];
+	      }
+
+	      return _ret = (_temp = (_this = _possibleConstructorReturn(this, (_ref = Width.__proto__ || Object.getPrototypeOf(Width)).call.apply(_ref, [this].concat(args))), _this), _this.state = {
+	        width: 1280,
+	        cols: 100
+	      }, _this.mounted = false, _this.resizeTimer = null, _this.onWindowResizeStop = function () {
+	        if (!_this.mounted) return;
+
+	        var oldWidth = _this.state.width;
+	        /* eslint-disable-next-line react/no-find-dom-node */
+	        var node = _reactDom2.default.findDOMNode(_this);
+
+	        _this.setState({
+	          width: node.offsetWidth,
+	          cols: node.offsetWidth / oldWidth * _this.state.cols
+	        }, function () {
+	          _this.props.onWidthChange(_this.state.width, _this.state.cols);
+	        });
+	      }, _this.onWindowResize = function () {
+	        if (_this.resizeTimer) clearTimeout(_this.resizeTimer);
+	        _this.resizeTimer = setTimeout(_this.onWindowResizeStop, 200);
+	      }, _temp), _possibleConstructorReturn(_this, _ret);
+	    }
+
+	    _createClass(Width, [{
+	      key: 'componentDidMount',
+	      value: function componentDidMount() {
+	        this.mounted = true;
+
+	        window.addEventListener('resize', this.onWindowResize);
+	        this.onWindowResize();
+	      }
+	    }, {
+	      key: 'componentWillUnmount',
+	      value: function componentWillUnmount() {
+	        this.mounted = false;
+	        window.removeEventListener('resize', this.onWindowResize);
+	      }
+	    }, {
+	      key: 'render',
+	      value: function render() {
+	        if (this.props.measureBeforeMount && !this.mounted) {
+	          return _react2.default.createElement('div', { className: this.props.className, style: this.props.style });
+	        }
+
+	        return _react2.default.createElement(ComposedComponent, _extends({}, this.props, this.state));
+	      }
+	    }]);
+
+	    return Width;
+	  }(_react2.default.Component);
+	};
+
+	exports.default = Width;
 
 /***/ })
 /******/ ]);

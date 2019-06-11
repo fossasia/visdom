@@ -86,12 +86,19 @@ class EmbeddingsPane extends React.Component {
     return (
       <Pane {...this.props} handleDownload={this.handleDownload}>
         <Scene
-          key={this.props.height + '===' + this.props.width}
+          key={
+            this.props.height +
+            '===' +
+            this.props.width +
+            '===' +
+            this.props.content.data.length
+          }
           content={this.props.content}
           height={this.props.height}
           width={this.props.width}
           onSelect={this.onEntitySelection}
           onRegionSelection={this.onRegionSelection}
+          onGoBack={this.onGoBack}
           interactive={this.props.isFocused}
         />
       </Pane>
@@ -121,6 +128,12 @@ class Scene extends React.Component {
         // remove handlers
         this.removeMouseInteractions();
       }
+    }
+
+    console.log('received props');
+    if (nextProps.content.data.length !== this.props.content.data.length) {
+      this.stop();
+      this.setUpScene();
     }
   }
 
@@ -203,6 +216,11 @@ class Scene extends React.Component {
   }
 
   componentDidMount() {
+    this.setUpScene();
+  }
+
+  setUpScene() {
+    console.log('setting up the scene');
     // const width = this.mount.clientWidth;
     // const height = this.mount.clientHeight;
 
@@ -454,6 +472,26 @@ class Scene extends React.Component {
             cursor: 'pointer',
           }}
         >
+          <div
+            style={Object.assign(
+              {
+                width: 24,
+                height: 24,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginRight: 7,
+              },
+              buttonStyles
+            )}
+            title="Selection mode"
+            onClick={e => {
+              e.preventDefault();
+              this.props.onGoBack();
+            }}
+          >
+            ←
+          </div>
           <div
             style={Object.assign(
               {
