@@ -368,6 +368,9 @@ class SocketHandler(BaseWebSocketHandler):
             p = self.state[eid]['jsons'][win]
             p['content']['selected'] = None
             p['content']['data'] = p['old_content'].pop()
+            if len(p['old_content']) == 0:
+                p['content']['has_previous'] = False
+            p['contentID'] = get_rand_id()
             broadcast(self, p, eid)
 
     def on_close(self):
@@ -470,6 +473,7 @@ def window(args):
             'type': ptype,
             'old_content': [],  # Used to cache previous to prevent recompute
         })
+        p['content']['has_previous'] = False
     else:
         p['content'] = {'data': args['data'], 'layout': args['layout']}
         p['type'] = 'plot'
@@ -670,6 +674,7 @@ class UpdateHandler(BaseHandler):
                 p['content']['selected'] = None
                 print(len(p['content']['data']))
                 p['old_content'].append(p['content']['data'])
+                p['content']['has_previous'] = True
                 p['content']['data'] = args['data']['points']
                 print(len(p['content']['data']))
             return p
