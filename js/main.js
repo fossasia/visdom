@@ -157,8 +157,17 @@ class App extends React.Component {
     return (w + MARGIN) / (colWidth + MARGIN);
   };
 
+  w2p = p => {
+    let colWidth = this.colWidth();
+    return p * (colWidth + MARGIN) - MARGIN;
+  };
+
   p2h = h => {
     return (h + MARGIN) / (ROW_HEIGHT + MARGIN);
+  };
+
+  h2p = p => {
+    return p * (ROW_HEIGHT + MARGIN) - MARGIN;
   };
 
   keyLS = key => {
