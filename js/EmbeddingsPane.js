@@ -17,6 +17,8 @@ import debounce from 'debounce';
 import lasso from './lasso';
 import { polygonContains } from 'd3-polygon';
 
+const SCALE_RADIUS = 2000;
+
 class EmbeddingsPane extends React.Component {
   onEvent = e => {
     if (!this.props.isFocused) {
@@ -230,7 +232,7 @@ class Scene extends React.Component {
 
     const width = this.props.width;
     const height = this.props.height;
-    let radius = 2000;
+    let radius = SCALE_RADIUS;
     let color_array = [
       '#1f78b4',
       '#b2df8a',
@@ -597,32 +599,24 @@ class LassoSelection extends React.Component {
         this.props.camera.updateMatrixWorld();
 
         const points = this.props.points.map(point => {
-          /* TEST */
           var p = new THREE.Vector3(
-            point.position[0] * 2000,
-            point.position[1] * 2000,
+            point.position[0] * SCALE_RADIUS,
+            point.position[1] * SCALE_RADIUS,
             0
           );
           var vector = p.project(this.props.camera);
 
           vector.x = ((vector.x + 1) / 2) * this.props.width;
           vector.y = (-(vector.y - 1) / 2) * this.props.height;
-          /* END TEST */
 
           const [x, y] = point.position;
           return {
             ref: point,
             old: point.position,
             test: [vector.x, vector.y],
-            coords: [
-              x * this.props.width,
-              y * this.props.height,
-              // ((x + 1) * this.props.width) / 2,
-              // ((y + 1) * this.props.height) / 2,
-            ],
+            coords: [x * this.props.width, y * this.props.height],
           };
         });
-        // console.log(this.props.height, this.props.width, points, polygon);
         const selected = points.filter(point =>
           polygonContains(polygon, point.test)
         );
