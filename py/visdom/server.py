@@ -53,6 +53,8 @@ COMPACT_SEPARATORS = (',', ':')
 
 _seen_warnings = set()
 
+MAX_SOCKET_WAIT = 15
+
 
 def warn_once(msg, warningtype=None):
     """
@@ -150,7 +152,7 @@ def serialize_all(state, env_path=DEFAULT_ENV_PATH):
 class Application(tornado.web.Application):
     def __init__(self, port=DEFAULT_PORT, base_url='',
                  env_path=DEFAULT_ENV_PATH, readonly=False,
-                 user_credential=None):
+                 user_credential=None, use_frontend_client_polling=False):
         self.env_path = env_path
         self.state = self.load_state()
         self.layouts = self.load_layouts()
@@ -162,6 +164,7 @@ class Application(tornado.web.Application):
         self.user_credential = user_credential
         self.login_enabled = False
         self.last_access = time.time()
+        self.wrap_socket = use_frontend_client_polling
 
         if user_credential:
             self.login_enabled = True
@@ -174,6 +177,7 @@ class Application(tornado.web.Application):
             (r"%s/update" % self.base_url, UpdateHandler, {'app': self}),
             (r"%s/close" % self.base_url, CloseHandler, {'app': self}),
             (r"%s/socket" % self.base_url, SocketHandler, {'app': self}),
+            (r"%s/socket_wrap" % self.base_url, SocketWrap, {'app': self}),
             (r"%s/vis_socket" % self.base_url,
                 VisSocketHandler, {'app': self}),
             (r"%s/env/(.*)" % self.base_url, EnvHandler, {'app': self}),
@@ -355,7 +359,7 @@ class SocketHandler(BaseWebSocketHandler):
             print("AUTH Failed in SocketHandler")
             self.close()
             return
-        self.sid = str(hex(int(time.time() * 10000000))[2:])
+        self.sid = get_rand_id()
         if self not in list(self.subs.values()):
             self.eid = 'main'
             self.subs[self.sid] = self
@@ -382,7 +386,7 @@ class SocketHandler(BaseWebSocketHandler):
                 logging.info('closing window {}'.format(msg['data']))
                 p_data = self.state[msg['eid']]['jsons'].pop(msg['data'], None)
                 event = {
-                    'event_type': 'Close',
+                    'event_type': 'close',
                     'target': msg['data'],
                     'eid': msg['eid'],
                     'pane_data': p_data,
@@ -426,6 +430,142 @@ class SocketHandler(BaseWebSocketHandler):
     def on_close(self):
         if self in list(self.subs.values()):
             self.subs.pop(self.sid, None)
+
+
+# TODO condense some of the functionality between this class and the
+# original SocketHandler class
+class ClientSocketWrapper():
+    """
+    Wraps all of the socket actions in regular request handling, thus
+    allowing all of the same information to be sent via a polling interface
+    """
+    def __init__(self, app):
+        self.port = app.port
+        self.env_path = app.env_path
+        self.app = app
+        self.state = app.state
+        self.subs = app.subs
+        self.sources = app.sources
+        self.readonly = app.readonly
+        self.login_enabled = app.login_enabled
+        self.messages = []
+        self.last_read_time = time.time()
+        self.open()
+        try:
+            if not self.app.socket_wrap_monitor.is_running():
+                self.app.socket_wrap_monitor.start()
+        except AttributeError:
+            self.app.socket_wrap_monitor = tornado.ioloop.PeriodicCallback(
+                self.socket_wrap_monitor_thread, 15000
+            )
+            self.app.socket_wrap_monitor.start()
+
+    def socket_wrap_monitor_thread(self):
+        if len(self.subs) > 0:
+            for sub in list(self.subs.values()):
+                if time.time() - sub.last_read_time > MAX_SOCKET_WAIT:
+                    sub.close()
+        else:
+            self.app.socket_wrap_monitor.stop()
+
+    def broadcast_layouts(self, target_subs=None):
+        if target_subs is None:
+            target_subs = self.subs.values()
+        for sub in target_subs:
+            sub.write_message(json.dumps(
+                {'command': 'layout_update', 'data': self.app.layouts}
+            ))
+
+    def open(self):
+        if self.login_enabled and not self.current_user:
+            print("AUTH Failed in SocketHandler")
+            self.close()
+            return
+        self.sid = get_rand_id()
+        if self not in list(self.subs.values()):
+            self.eid = 'main'
+            self.subs[self.sid] = self
+        logging.info('Mocking new socket: {}'.format(self.sid))
+
+        self.write_message(
+            json.dumps({'command': 'register', 'data': self.sid,
+                        'readonly': self.readonly}))
+        self.broadcast_layouts([self])
+        broadcast_envs(self, [self])
+
+    def on_message(self, message):
+        logging.info('from web client: {}'.format(message))
+        msg = tornado.escape.json_decode(tornado.escape.to_basestring(message))
+
+        cmd = msg.get('cmd')
+
+        if self.readonly:
+            return
+
+        if cmd == 'close':
+            if 'data' in msg and 'eid' in msg:
+                logging.info('closing window {}'.format(msg['data']))
+                p_data = self.state[msg['eid']]['jsons'].pop(msg['data'], None)
+                event = {
+                    'event_type': 'close',
+                    'target': msg['data'],
+                    'eid': msg['eid'],
+                    'pane_data': p_data,
+                }
+                send_to_sources(self, event)
+        elif cmd == 'save':
+            # save localStorage window metadata
+            if 'data' in msg and 'eid' in msg:
+                msg['eid'] = escape_eid(msg['eid'])
+                self.state[msg['eid']] = \
+                    copy.deepcopy(self.state[msg['prev_eid']])
+                self.state[msg['eid']]['reload'] = msg['data']
+                self.eid = msg['eid']
+                serialize_env(self.state, [self.eid], env_path=self.env_path)
+        elif cmd == 'delete_env':
+            if 'eid' in msg:
+                logging.info('closing environment {}'.format(msg['eid']))
+                del self.state[msg['eid']]
+                if self.env_path is not None:
+                    p = os.path.join(
+                        self.env_path,
+                        "{0}.json".format(msg['eid'])
+                    )
+                    os.remove(p)
+                broadcast_envs(self)
+        elif cmd == 'save_layouts':
+            if 'data' in msg:
+                self.app.layouts = msg.get('data')
+                self.app.save_layouts()
+                self.broadcast_layouts()
+        elif cmd == 'forward_to_vis':
+            packet = msg.get('data')
+            environment = self.state[packet['eid']]
+            packet['pane_data'] = environment['jsons'][packet['target']]
+            send_to_sources(self, msg.get('data'))
+        elif cmd == 'layout_item_update':
+            eid = msg.get('eid')
+            win = msg.get('win')
+            self.state[eid]['reload'][win] = msg.get('data')
+
+    def close(self):
+        if self in list(self.subs.values()):
+            self.subs.pop(self.sid, None)
+
+    def write_message(self, msg):
+        self.messages.append(msg)
+
+    def get_messages(self):
+        to_send = []
+        while len(self.messages) > 0:
+            message = self.messages.pop()
+            if type(message) is dict:
+                # Not all messages are being formatted the same way (JSON)
+                # TODO investigate
+                message = json.dumps(message)
+            to_send.append(message)
+        self.last_read_time = time.time()
+        return to_send
 
 
 class BaseHandler(tornado.web.RequestHandler):
@@ -864,6 +1004,53 @@ class CloseHandler(BaseHandler):
         self.wrap_func(self, args)
 
 
+class SocketWrap(BaseHandler):
+    def initialize(self, app):
+        self.state = app.state
+        self.subs = app.subs
+        self.sources = app.sources
+        self.port = app.port
+        self.env_path = app.env_path
+        self.login_enabled = app.login_enabled
+        self.app = app
+
+    @check_auth
+    def post(self):
+        """Either write a message to the socket, or query what's there"""
+        # TODO formalize failure reasons
+        args = tornado.escape.json_decode(
+            tornado.escape.to_basestring(self.request.body)
+        )
+        type = args.get('message_type')
+        sid = args.get('sid')
+        socket_wrap = self.subs.get(sid)
+        # ensure a wrapper still exists for this connection
+        if socket_wrap is None:
+            self.write(json.dumps({'success': False, 'reason': 'closed'}))
+            return
+
+        # handle the requests
+        if type == 'query':
+            messages = socket_wrap.get_messages()
+            self.write(json.dumps({
+                'success': True, 'messages': messages
+            }))
+        elif type == 'send':
+            msg = args.get('message')
+            if msg is None:
+                self.write(json.dumps({'success': False, 'reason': 'no msg'}))
+            else:
+                socket_wrap.on_message(msg)
+                self.write(json.dumps({'success': True}))
+        else:
+            self.write(json.dumps({'success': False, 'reason': 'invalid'}))
+
+    @check_auth
+    def get(self):
+        """Create a new socket wrapper for this requester, return the id"""
+        new_sub = ClientSocketWrapper(self.app)
+        self.write(json.dumps({'success': True, 'sid': new_sub.sid}))
+
 class DeleteEnvHandler(BaseHandler):
     def initialize(self, app):
         self.state = app.state
@@ -1123,6 +1310,7 @@ class EnvHandler(BaseHandler):
         self.port = app.port
         self.env_path = app.env_path
         self.login_enabled = app.login_enabled
+        self.wrap_socket = app.wrap_socket
 
     @check_auth
     def get(self, eid):
@@ -1132,7 +1320,8 @@ class EnvHandler(BaseHandler):
             'index.html',
             user=getpass.getuser(),
             items=items,
-            active_item=active
+            active_item=active,
+            wrap_socket=self.wrap_socket,
         )
 
     @check_auth
@@ -1159,6 +1348,7 @@ class CompareHandler(BaseHandler):
         self.sources = app.sources
         self.env_path = app.env_path
         self.login_enabled = app.login_enabled
+        self.wrap_socket = app.wrap_socket
 
     @check_auth
     def get(self, eids):
@@ -1171,7 +1361,8 @@ class CompareHandler(BaseHandler):
             'index.html',
             user=getpass.getuser(),
             items=items,
-            active_item=eids
+            active_item=eids,
+            wrap_socket=self.wrap_socket,
         )
 
     @check_auth
@@ -1243,6 +1434,7 @@ class IndexHandler(BaseHandler):
         self.login_enabled = app.login_enabled
         self.user_credential = app.user_credential
         self.base_url = app.base_url if app.base_url != '' else '/'
+        self.wrap_socket = app.wrap_socket
 
     def get(self, args, **kwargs):
         items = gather_envs(self.state, env_path=self.env_path)
@@ -1255,7 +1447,8 @@ class IndexHandler(BaseHandler):
                 'index.html',
                 user=getpass.getuser(),
                 items=items,
-                active_item=''
+                active_item='',
+                wrap_socket=self.wrap_socket,
             )
         elif self.login_enabled:
             self.render(
@@ -1402,10 +1595,12 @@ def download_scripts(proxies=None, install_dir=None):
 
 def start_server(port=DEFAULT_PORT, hostname=DEFAULT_HOSTNAME,
                  base_url=DEFAULT_BASE_URL, env_path=DEFAULT_ENV_PATH,
-                 readonly=False, print_func=None, user_credential=None):
+                 readonly=False, print_func=None, user_credential=None,
+                 use_frontend_client_polling=False):
     print("It's Alive!")
     app = Application(port=port, base_url=base_url, env_path=env_path,
-                      readonly=readonly, user_credential=user_credential)
+                      readonly=readonly, user_credential=user_credential,
+                      use_frontend_client_polling=use_frontend_client_polling)
     app.listen(port, max_buffer_size=1024 ** 3)
     logging.info("Application Started")
 
@@ -1419,6 +1614,8 @@ def start_server(port=DEFAULT_PORT, hostname=DEFAULT_HOSTNAME,
     else:
         print_func(port)
     ioloop.IOLoop.instance().start()
+    app.subs = []
+    app.sources = []
 
 
 def main(print_func=None):
@@ -1447,6 +1644,10 @@ def main(print_func=None):
                         action='store_true',
                         help='start the server with the new cookie, '
                              'available when -enable_login provided')
+    parser.add_argument('-use_frontend_client_polling', default=False,
+                        action='store_true',
+                        help='Have the frontend communicate via polling '
+                             'rather than over websockets.')
     FLAGS = parser.parse_args()
 
     # Process base_url
@@ -1486,7 +1687,8 @@ def main(print_func=None):
 
     start_server(port=FLAGS.port, hostname=FLAGS.hostname, base_url=base_url,
                  env_path=FLAGS.env_path, readonly=FLAGS.readonly,
-                 print_func=print_func, user_credential=user_credential)
+                 print_func=print_func, user_credential=user_credential,
+                 use_frontend_client_polling=FLAGS.use_frontend_client_polling)
 
 
 def download_scripts_and_run():
