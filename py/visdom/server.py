@@ -507,7 +507,7 @@ class ClientSocketWrapper():
                 logging.info('closing window {}'.format(msg['data']))
                 p_data = self.state[msg['eid']]['jsons'].pop(msg['data'], None)
                 event = {
-                    'event_type': 'Close',
+                    'event_type': 'close',
                     'target': msg['data'],
                     'eid': msg['eid'],
                     'pane_data': p_data,

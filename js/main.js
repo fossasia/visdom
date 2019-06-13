@@ -369,7 +369,7 @@ class App extends React.Component {
     if (this._socket) {
       return;
     }
-    if (USE_POLLING == 'True') {
+    if (USE_POLLING) {
       this.setupPolling();
       return;
     }

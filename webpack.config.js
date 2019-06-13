@@ -39,4 +39,5 @@ module.exports = {
       },
     ],
   },
+  plugins: [new webpack.BannerPlugin('@generated')],
 };
