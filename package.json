@@ -47,7 +47,8 @@
     "react-dom": "16.2.1",
     "react-grid-layout": "0.16.6",
     "react-modal": "^3.1.13",
-    "style-loader": "^0.20.1"
+    "style-loader": "^0.20.1",
+    "three": "^0.105.2"
   },
   "husky": {
     "hooks": {
