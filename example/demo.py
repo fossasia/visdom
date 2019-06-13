@@ -19,19 +19,8 @@ import tempfile
 from six.moves import urllib
 
 
-DEFAULT_PORT = 8097
-DEFAULT_HOSTNAME = "http://localhost"
-parser = argparse.ArgumentParser(description='Demo arguments')
-parser.add_argument('-port', metavar='port', type=int, default=DEFAULT_PORT,
-                    help='port the visdom server is running on.')
-parser.add_argument('-server', metavar='server', type=str,
-                    default=DEFAULT_HOSTNAME,
-                    help='Server address of the target to run the demo on.')
-FLAGS = parser.parse_args()
-
-try:
-    viz = Visdom(port=FLAGS.port, server=FLAGS.server)
-
+def run_demo(viz):
+    global input
     assert viz.check_connection(timeout_seconds=3), \
         'No connection could be formed quickly'
 
@@ -534,12 +523,28 @@ try:
     except NameError:
         pass
     input('Waiting for callbacks, press enter to quit.')
-except BaseException as e:
-    print(
-        "The visdom experienced an exception while running: {}\n"
-        "The demo displays up-to-date functionality with the GitHub version, "
-        "which may not yet be pushed to pip. Please upgrade using "
-        "`pip install -e .` or `easy_install .`\n"
-        "If this does not resolve the problem, please open an issue on "
-        "our GitHub.".format(repr(e))
-    )
+
+
+if __name__ == '__main__':
+    DEFAULT_PORT = 8097
+    DEFAULT_HOSTNAME = "http://localhost"
+    parser = argparse.ArgumentParser(description='Demo arguments')
+    parser.add_argument('-port', metavar='port', type=int, default=DEFAULT_PORT,
+                        help='port the visdom server is running on.')
+    parser.add_argument('-server', metavar='server', type=str,
+                        default=DEFAULT_HOSTNAME,
+                        help='Server address of the target to run the demo on.')
+    FLAGS = parser.parse_args()
+
+    try:
+        viz = Visdom(port=FLAGS.port, server=FLAGS.server)
+        run_demo(viz)
+    except Exception as e:
+        print(
+            "The visdom experienced an exception while running: {}\n"
+            "The demo displays up-to-date functionality with the GitHub "
+            "version, which may not yet be pushed to pip. Please upgrade "
+            "using `pip install -e .` or `easy_install .`\n"
+            "If this does not resolve the problem, please open an issue on "
+            "our GitHub.".format(repr(e))
+        )
