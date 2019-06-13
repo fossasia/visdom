@@ -45041,7 +45041,8 @@
 	              left: 5,
 	              top: 5,
 	              zIndex: 1,
-	              cursor: 'pointer'
+	              cursor: 'pointer',
+	              display: 'flex'
 	            }
 	          },
 	          this.props.content.has_previous ? _react2.default.createElement(
