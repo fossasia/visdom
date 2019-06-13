@@ -129,16 +129,9 @@
 	var TextPane = __webpack_require__(222);
 	var ImagePane = __webpack_require__(223);
 	var PlotPane = __webpack_require__(224);
+	var EmbeddingsPane = __webpack_require__(226);
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-	var WidthProvider = __webpack_require__(239).default;
-=======
-	var WidthProvider = __webpack_require__(238).default;
->>>>>>> Add updated js static bundle
-=======
-	var WidthProvider = __webpack_require__(239).default;
->>>>>>> Add a back button to pop off of embedding stack
+	var WidthProvider = __webpack_require__(225).default;
 
 	var GridLayout = WidthProvider(ReactGridLayout);
 	var sortLayout = ReactGridLayout.utils.sortLayoutItemsByRowCol;
@@ -254,8 +247,17 @@
 	      return (w + MARGIN) / (colWidth + MARGIN);
 	    };
 
+	    _this.w2p = function (p) {
+	      var colWidth = _this.colWidth();
+	      return p * (colWidth + MARGIN) - MARGIN;
+	    };
+
 	    _this.p2h = function (h) {
 	      return (h + MARGIN) / (ROW_HEIGHT + MARGIN);
+	    };
+
+	    _this.h2p = function (p) {
+	      return p * (ROW_HEIGHT + MARGIN) - MARGIN;
 	    };
 
 	    _this.keyLS = function (key) {
@@ -44449,24 +44451,112 @@
 	module.exports = PlotPane;
 
 /***/ }),
-<<<<<<< HEAD
-/* 225 */,
-/* 226 */,
-/* 227 */,
-/* 228 */,
-/* 229 */,
-/* 230 */,
-/* 231 */,
-/* 232 */,
-/* 233 */,
-/* 234 */,
-/* 235 */,
-/* 236 */,
-/* 237 */,
-/* 238 */,
-/* 239 */
-=======
 /* 225 */
+/***/ (function(module, exports, __webpack_require__) {
+
+	'use strict';
+
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+
+	var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+	var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
+
+	var _react = __webpack_require__(2);
+
+	var _react2 = _interopRequireDefault(_react);
+
+	var _reactDom = __webpack_require__(13);
+
+	var _reactDom2 = _interopRequireDefault(_reactDom);
+
+	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+	function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
+
+	function _possibleConstructorReturn(self, call) { if (!self) { throw new ReferenceError("this hasn't been initialised - super() hasn't been called"); } return call && (typeof call === "object" || typeof call === "function") ? call : self; }
+
+	function _inherits(subClass, superClass) { if (typeof superClass !== "function" && superClass !== null) { throw new TypeError("Super expression must either be null or a function, not " + typeof superClass); } subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, enumerable: false, writable: true, configurable: true } }); if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass; } /**
+	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                * Copyright 2017-present, Facebook, Inc.
+	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                * All rights reserved.
+	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                *
+	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                * This source code is licensed under the license found in the
+	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                * LICENSE file in the root directory of this source tree.
+	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                *
+	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                */
+
+	var Width = function Width(ComposedComponent) {
+	  return function (_React$Component) {
+	    _inherits(Width, _React$Component);
+
+	    function Width() {
+	      var _ref;
+
+	      var _temp, _this, _ret;
+
+	      _classCallCheck(this, Width);
+
+	      for (var _len = arguments.length, args = Array(_len), _key = 0; _key < _len; _key++) {
+	        args[_key] = arguments[_key];
+	      }
+
+	      return _ret = (_temp = (_this = _possibleConstructorReturn(this, (_ref = Width.__proto__ || Object.getPrototypeOf(Width)).call.apply(_ref, [this].concat(args))), _this), _this.state = {
+	        width: 1280,
+	        cols: 100
+	      }, _this.mounted = false, _this.resizeTimer = null, _this.onWindowResizeStop = function () {
+	        if (!_this.mounted) return;
+
+	        var oldWidth = _this.state.width;
+	        /* eslint-disable-next-line react/no-find-dom-node */
+	        var node = _reactDom2.default.findDOMNode(_this);
+
+	        _this.setState({
+	          width: node.offsetWidth,
+	          cols: node.offsetWidth / oldWidth * _this.state.cols
+	        }, function () {
+	          _this.props.onWidthChange(_this.state.width, _this.state.cols);
+	        });
+	      }, _this.onWindowResize = function () {
+	        if (_this.resizeTimer) clearTimeout(_this.resizeTimer);
+	        _this.resizeTimer = setTimeout(_this.onWindowResizeStop, 200);
+	      }, _temp), _possibleConstructorReturn(_this, _ret);
+	    }
+
+	    _createClass(Width, [{
+	      key: 'componentDidMount',
+	      value: function componentDidMount() {
+	        this.mounted = true;
+
+	        window.addEventListener('resize', this.onWindowResize);
+	        this.onWindowResize();
+	      }
+	    }, {
+	      key: 'componentWillUnmount',
+	      value: function componentWillUnmount() {
+	        this.mounted = false;
+	        window.removeEventListener('resize', this.onWindowResize);
+	      }
+	    }, {
+	      key: 'render',
+	      value: function render() {
+	        if (this.props.measureBeforeMount && !this.mounted) {
+	          return _react2.default.createElement('div', { className: this.props.className, style: this.props.style });
+	        }
+
+	        return _react2.default.createElement(ComposedComponent, _extends({}, this.props, this.state));
+	      }
+	    }]);
+
+	    return Width;
+	  }(_react2.default.Component);
+	};
+
+	exports.default = Width;
+
+/***/ }),
+/* 226 */
 /***/ (function(module, exports, __webpack_require__) {
 
 	'use strict';
@@ -44485,25 +44575,25 @@
 
 	var _EventSystem2 = _interopRequireDefault(_EventSystem);
 
-	var _three = __webpack_require__(226);
+	var _three = __webpack_require__(227);
 
 	var THREE = _interopRequireWildcard(_three);
 
-	var _d3Zoom = __webpack_require__(227);
+	var _d3Zoom = __webpack_require__(228);
 
 	var d3 = _interopRequireWildcard(_d3Zoom);
 
-	var _d3Selection = __webpack_require__(228);
+	var _d3Selection = __webpack_require__(229);
 
-	var _debounce = __webpack_require__(236);
+	var _debounce = __webpack_require__(237);
 
 	var _debounce2 = _interopRequireDefault(_debounce);
 
-	var _lasso = __webpack_require__(237);
+	var _lasso = __webpack_require__(238);
 
 	var _lasso2 = _interopRequireDefault(_lasso);
 
-	var _d3Polygon = __webpack_require__(238);
+	var _d3Polygon = __webpack_require__(239);
 
 	function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj.default = obj; return newObj; } }
 
@@ -45237,7 +45327,7 @@
 	module.exports = EmbeddingsPane;
 
 /***/ }),
-/* 226 */
+/* 227 */
 /***/ (function(module, exports, __webpack_require__) {
 
 	(function (global, factory) {
@@ -93602,12 +93692,12 @@
 
 
 /***/ }),
-/* 227 */
+/* 228 */
 /***/ (function(module, exports, __webpack_require__) {
 
 	// https://d3js.org/d3-zoom/ v1.7.3 Copyright 2018 Mike Bostock
 	(function (global, factory) {
-	 true ? factory(exports, __webpack_require__(228), __webpack_require__(229), __webpack_require__(230), __webpack_require__(231), __webpack_require__(233)) :
+	 true ? factory(exports, __webpack_require__(229), __webpack_require__(230), __webpack_require__(231), __webpack_require__(232), __webpack_require__(234)) :
 	typeof define === 'function' && define.amd ? define(['exports', 'd3-selection', 'd3-dispatch', 'd3-drag', 'd3-interpolate', 'd3-transition'], factory) :
 	(factory((global.d3 = global.d3 || {}),global.d3,global.d3,global.d3,global.d3,global.d3));
 	}(this, (function (exports,d3Selection,d3Dispatch,d3Drag,d3Interpolate,d3Transition) { 'use strict';
@@ -94110,7 +94200,7 @@
 
 
 /***/ }),
-/* 228 */
+/* 229 */
 /***/ (function(module, exports, __webpack_require__) {
 
 	// https://d3js.org/d3-selection/ v1.4.0 Copyright 2019 Mike Bostock
@@ -95103,7 +95193,7 @@
 
 
 /***/ }),
-/* 229 */
+/* 230 */
 /***/ (function(module, exports, __webpack_require__) {
 
 	// https://d3js.org/d3-dispatch/ v1.0.5 Copyright 2018 Mike Bostock
@@ -95204,12 +95294,12 @@
 
 
 /***/ }),
-/* 230 */
+/* 231 */
 /***/ (function(module, exports, __webpack_require__) {
 
 	// https://d3js.org/d3-drag/ v1.2.3 Copyright 2018 Mike Bostock
 	(function (global, factory) {
-	 true ? factory(exports, __webpack_require__(228), __webpack_require__(229)) :
+	 true ? factory(exports, __webpack_require__(229), __webpack_require__(230)) :
 	typeof define === 'function' && define.amd ? define(['exports', 'd3-selection', 'd3-dispatch'], factory) :
 	(factory((global.d3 = global.d3 || {}),global.d3,global.d3));
 	}(this, (function (exports,d3Selection,d3Dispatch) { 'use strict';
@@ -95444,12 +95534,12 @@
 
 
 /***/ }),
-/* 231 */
+/* 232 */
 /***/ (function(module, exports, __webpack_require__) {
 
 	// https://d3js.org/d3-interpolate/ v1.3.2 Copyright 2018 Mike Bostock
 	(function (global, factory) {
-	 true ? factory(exports, __webpack_require__(232)) :
+	 true ? factory(exports, __webpack_require__(233)) :
 	typeof define === 'function' && define.amd ? define(['exports', 'd3-color'], factory) :
 	(factory((global.d3 = global.d3 || {}),global.d3));
 	}(this, (function (exports,d3Color) { 'use strict';
@@ -96022,7 +96112,7 @@
 
 
 /***/ }),
-/* 232 */
+/* 233 */
 /***/ (function(module, exports, __webpack_require__) {
 
 	// https://d3js.org/d3-color/ v1.2.3 Copyright 2018 Mike Bostock
@@ -96577,12 +96667,12 @@
 
 
 /***/ }),
-/* 233 */
+/* 234 */
 /***/ (function(module, exports, __webpack_require__) {
 
 	// https://d3js.org/d3-transition/ v1.2.0 Copyright 2019 Mike Bostock
 	(function (global, factory) {
-	 true ? factory(exports, __webpack_require__(229), __webpack_require__(234), __webpack_require__(232), __webpack_require__(231), __webpack_require__(228), __webpack_require__(235)) :
+	 true ? factory(exports, __webpack_require__(230), __webpack_require__(235), __webpack_require__(233), __webpack_require__(232), __webpack_require__(229), __webpack_require__(236)) :
 	typeof define === 'function' && define.amd ? define(['exports', 'd3-dispatch', 'd3-timer', 'd3-color', 'd3-interpolate', 'd3-selection', 'd3-ease'], factory) :
 	(factory((global.d3 = global.d3 || {}),global.d3,global.d3,global.d3,global.d3,global.d3,global.d3));
 	}(this, (function (exports,d3Dispatch,d3Timer,d3Color,d3Interpolate,d3Selection,d3Ease) { 'use strict';
@@ -97437,7 +97527,7 @@
 
 
 /***/ }),
-/* 234 */
+/* 235 */
 /***/ (function(module, exports, __webpack_require__) {
 
 	// https://d3js.org/d3-timer/ v1.0.9 Copyright 2018 Mike Bostock
@@ -97592,7 +97682,7 @@
 
 
 /***/ }),
-/* 235 */
+/* 236 */
 /***/ (function(module, exports, __webpack_require__) {
 
 	// https://d3js.org/d3-ease/ v1.0.5 Copyright 2018 Mike Bostock
@@ -97857,7 +97947,7 @@
 
 
 /***/ }),
-/* 236 */
+/* 237 */
 /***/ (function(module, exports) {
 
 	/**
@@ -97933,8 +98023,7 @@
 
 
 /***/ }),
-/* 237 */
->>>>>>> Add updated js static bundle
+/* 238 */
 /***/ (function(module, exports, __webpack_require__) {
 
 	'use strict';
@@ -97944,13 +98033,13 @@
 	});
 	exports.default = lasso;
 
-	var _d3Selection = __webpack_require__(228);
+	var _d3Selection = __webpack_require__(229);
 
 	var d3 = _interopRequireWildcard(_d3Selection);
 
-	var _d3Dispatch = __webpack_require__(229);
+	var _d3Dispatch = __webpack_require__(230);
 
-	var _d3Drag = __webpack_require__(230);
+	var _d3Drag = __webpack_require__(231);
 
 	function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj.default = obj; return newObj; } }
 
@@ -98052,7 +98141,7 @@
 	}
 
 /***/ }),
-/* 238 */
+/* 239 */
 /***/ (function(module, exports, __webpack_require__) {
 
 	// https://d3js.org/d3-polygon/ v1.0.5 Copyright 2018 Mike Bostock
@@ -98206,111 +98295,6 @@
 
 	})));
 
-
-/***/ }),
-/* 239 */
-/***/ (function(module, exports, __webpack_require__) {
-
-	'use strict';
-
-	Object.defineProperty(exports, "__esModule", {
-	  value: true
-	});
-
-	var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
-
-	var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
-
-	var _react = __webpack_require__(2);
-
-	var _react2 = _interopRequireDefault(_react);
-
-	var _reactDom = __webpack_require__(13);
-
-	var _reactDom2 = _interopRequireDefault(_reactDom);
-
-	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-	function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
-
-	function _possibleConstructorReturn(self, call) { if (!self) { throw new ReferenceError("this hasn't been initialised - super() hasn't been called"); } return call && (typeof call === "object" || typeof call === "function") ? call : self; }
-
-	function _inherits(subClass, superClass) { if (typeof superClass !== "function" && superClass !== null) { throw new TypeError("Super expression must either be null or a function, not " + typeof superClass); } subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, enumerable: false, writable: true, configurable: true } }); if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass; } /**
-	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                * Copyright 2017-present, Facebook, Inc.
-	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                * All rights reserved.
-	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                *
-	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                * This source code is licensed under the license found in the
-	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                * LICENSE file in the root directory of this source tree.
-	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                *
-	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                */
-
-	var Width = function Width(ComposedComponent) {
-	  return function (_React$Component) {
-	    _inherits(Width, _React$Component);
-
-	    function Width() {
-	      var _ref;
-
-	      var _temp, _this, _ret;
-
-	      _classCallCheck(this, Width);
-
-	      for (var _len = arguments.length, args = Array(_len), _key = 0; _key < _len; _key++) {
-	        args[_key] = arguments[_key];
-	      }
-
-	      return _ret = (_temp = (_this = _possibleConstructorReturn(this, (_ref = Width.__proto__ || Object.getPrototypeOf(Width)).call.apply(_ref, [this].concat(args))), _this), _this.state = {
-	        width: 1280,
-	        cols: 100
-	      }, _this.mounted = false, _this.resizeTimer = null, _this.onWindowResizeStop = function () {
-	        if (!_this.mounted) return;
-
-	        var oldWidth = _this.state.width;
-	        /* eslint-disable-next-line react/no-find-dom-node */
-	        var node = _reactDom2.default.findDOMNode(_this);
-
-	        _this.setState({
-	          width: node.offsetWidth,
-	          cols: node.offsetWidth / oldWidth * _this.state.cols
-	        }, function () {
-	          _this.props.onWidthChange(_this.state.width, _this.state.cols);
-	        });
-	      }, _this.onWindowResize = function () {
-	        if (_this.resizeTimer) clearTimeout(_this.resizeTimer);
-	        _this.resizeTimer = setTimeout(_this.onWindowResizeStop, 200);
-	      }, _temp), _possibleConstructorReturn(_this, _ret);
-	    }
-
-	    _createClass(Width, [{
-	      key: 'componentDidMount',
-	      value: function componentDidMount() {
-	        this.mounted = true;
-
-	        window.addEventListener('resize', this.onWindowResize);
-	        this.onWindowResize();
-	      }
-	    }, {
-	      key: 'componentWillUnmount',
-	      value: function componentWillUnmount() {
-	        this.mounted = false;
-	        window.removeEventListener('resize', this.onWindowResize);
-	      }
-	    }, {
-	      key: 'render',
-	      value: function render() {
-	        if (this.props.measureBeforeMount && !this.mounted) {
-	          return _react2.default.createElement('div', { className: this.props.className, style: this.props.style });
-	        }
-
-	        return _react2.default.createElement(ComposedComponent, _extends({}, this.props, this.state));
-	      }
-	    }]);
-
-	    return Width;
-	  }(_react2.default.Component);
-	};
-
-	exports.default = Width;
 
 /***/ })
 /******/ ]);
