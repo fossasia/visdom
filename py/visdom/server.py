@@ -1433,6 +1433,7 @@ class IndexHandler(BaseHandler):
         self.env_path = app.env_path
         self.login_enabled = app.login_enabled
         self.user_credential = app.user_credential
+        self.base_url = app.base_url if app.base_url != '' else '/'
         self.wrap_socket = app.wrap_socket
 
     def get(self, args, **kwargs):
@@ -1454,7 +1455,8 @@ class IndexHandler(BaseHandler):
                 'login.html',
                 user=getpass.getuser(),
                 items=items,
-                active_item=''
+                active_item='',
+                base_url=self.base_url
             )
 
     def post(self, arg, **kwargs):
