@@ -12,3 +12,6 @@ py/visdom/static/js/*.min.js
 py/visdom/static/js/mathjax-MathJax.js
 py/visdom/static/js/sjcl.js
 py/visdom/static/version.built
+__pycache__/
+py/visdom/static/js/layout_bin_packer.js
+py/visdom/extra_deps/**/*

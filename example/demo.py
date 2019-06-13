@@ -97,6 +97,12 @@ try:
         opts=dict(title='Random!', caption='How random.'),
     )
 
+    # image demo save as jpg
+    viz.image(
+        np.random.rand(3, 512, 256),
+        opts=dict(title='Random image as jpg!', caption='How random as jpg.', jpgquality=50),
+    )
+
     # image history demo
     viz.image(
         np.random.rand(3, 512, 256),

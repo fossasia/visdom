@@ -24,8 +24,13 @@ import os
 import time
 import traceback
 import uuid
+import warnings
 from os.path import expanduser
-from collections import OrderedDict, Mapping, Sequence
+from collections import OrderedDict
+try:
+    from collections.abc import Mapping, Sequence
+except ImportError:
+    from collections import Mapping, Sequence
 from six import string_types
 
 import visdom
@@ -46,9 +51,24 @@ DEFAULT_BASE_URL = "/"
 here = os.path.abspath(os.path.dirname(__file__))
 COMPACT_SEPARATORS = (',', ':')
 
+_seen_warnings = set()
+
+
+def warn_once(msg, warningtype=None):
+    """
+    Raise a warning, but only once.
+    :param str msg: Message to display
+    :param Warning warningtype: Type of warning, e.g. DeprecationWarning
+    """
+    global _seen_warnings
+    if msg not in _seen_warnings:
+        _seen_warnings.add(msg)
+        warnings.warn(msg, warningtype, stacklevel=2)
+
 
 def check_auth(f):
     def _check_auth(self, *args, **kwargs):
+        self.last_access = time.time()
         if self.login_enabled and not self.current_user:
             self.set_status(400)
             return
@@ -115,9 +135,11 @@ tornado_settings = {
 
 def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
     env_ids = [i for i in eids if i in state]
-    for env_id in env_ids:
-        env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
-        open(env_path_file, 'w').write(json.dumps(state[env_id]))
+    if env_path is not None:
+        for env_id in env_ids:
+            env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
+            with open(env_path_file, 'w') as fn:
+                fn.write(json.dumps(state[env_id]))
     return env_ids
 
 
@@ -129,45 +151,25 @@ class Application(tornado.web.Application):
     def __init__(self, port=DEFAULT_PORT, base_url='',
                  env_path=DEFAULT_ENV_PATH, readonly=False,
                  user_credential=None):
-        self.state = {}
+        self.env_path = env_path
+        self.state = self.load_state()
+        self.layouts = self.load_layouts()
         self.subs = {}
         self.sources = {}
-        self.env_path = env_path
         self.port = port
         self.base_url = base_url
         self.readonly = readonly
         self.user_credential = user_credential
         self.login_enabled = False
+        self.last_access = time.time()
 
         if user_credential:
             self.login_enabled = True
-            tornado_settings["cookie_secret"] = \
-                open(DEFAULT_ENV_PATH + "COOKIE_SECRET", "r").read()
-
-        # reload state
-        ensure_dir_exists(env_path)
-        env_jsons = [i for i in os.listdir(env_path) if '.json' in i]
-
-        for env_json in env_jsons:
-            env_path_file = os.path.join(env_path, env_json)
-            try:
-                env_data = \
-                    tornado.escape.json_decode(open(env_path_file, 'r').read())
-            except Exception as e:
-                logging.warn(
-                    "Failed loading environment json: {} - {}".format(
-                        env_path_file, repr(e)))
-                continue
-
-            eid = env_json.replace('.json', '')
-            self.state[eid] = {'jsons': env_data['jsons'],
-                               'reload': env_data['reload']}
-
-        if 'main' not in self.state and 'main.json' not in env_jsons:
-            self.state['main'] = {'jsons': {}, 'reload': {}}
-            serialize_env(self.state, ['main'], env_path=self.env_path)
+            with open(DEFAULT_ENV_PATH + "COOKIE_SECRET", "r") as fn:
+                tornado_settings["cookie_secret"] = fn.read()
 
         tornado_settings['static_url_prefix'] = self.base_url + "/static/"
+        tornado_settings['debug'] = True
         handlers = [
             (r"%s/events" % self.base_url, PostHandler, {'app': self}),
             (r"%s/update" % self.base_url, UpdateHandler, {'app': self}),
@@ -186,9 +188,76 @@ class Application(tornado.web.Application):
                 DeleteEnvHandler, {'app': self}),
             (r"%s/win_hash" % self.base_url, HashHandler, {'app': self}),
             (r"%s/env_state" % self.base_url, EnvStateHandler, {'app': self}),
+            (r"%s/fork_env" % self.base_url, ForkEnvHandler, {'app': self}),
             (r"%s(.*)" % self.base_url, IndexHandler, {'app': self}),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)
+
+    def get_last_access(self):
+        if len(self.subs) > 0 or len(self.sources) > 0:
+            # update the last access time to now, as someone
+            # is currently connected to the server
+            self.last_access = time.time()
+        return self.last_access
+
+    def save_layouts(self):
+        if self.env_path is None:
+            warn_once(
+                'Saving and loading to disk has no effect when running with '
+                'env_path=None.'
+            )
+            return
+        layout_filepath = os.path.join(self.env_path, 'view', LAYOUT_FILE)
+        with open(layout_filepath, 'w') as fn:
+            fn.write(self.layouts)
+
+    def load_layouts(self):
+        if self.env_path is None:
+            warn_once(
+                'Saving and loading to disk has no effect when running with '
+                'env_path=None.'
+            )
+            return ""
+        layout_filepath = os.path.join(self.env_path, 'view', LAYOUT_FILE)
+        ensure_dir_exists(layout_filepath)
+        if os.path.isfile(layout_filepath):
+            with open(layout_filepath, 'r') as fn:
+                return fn.read()
+        else:
+            return ""
+
+    def load_state(self):
+        state = {}
+        env_path = self.env_path
+        if env_path is None:
+            warn_once(
+                'Saving and loading to disk has no effect when running with '
+                'env_path=None.'
+            )
+            return {'main': {'jsons': {}, 'reload': {}}}
+        ensure_dir_exists(env_path)
+        env_jsons = [i for i in os.listdir(env_path) if '.json' in i]
+
+        for env_json in env_jsons:
+            env_path_file = os.path.join(env_path, env_json)
+            try:
+                with open(env_path_file, 'r') as fn:
+                    env_data = tornado.escape.json_decode(fn.read())
+            except Exception as e:
+                logging.warn(
+                    "Failed loading environment json: {} - {}".format(
+                        env_path_file, repr(e)))
+                continue
+
+            eid = env_json.replace('.json', '')
+            state[eid] = {'jsons': env_data['jsons'],
+                               'reload': env_data['reload']}
+
+        if 'main' not in state and 'main.json' not in env_jsons:
+            state['main'] = {'jsons': {}, 'reload': {}}
+            serialize_env(state, ['main'], env_path=self.env_path)
+
+        return state
 
 
 def broadcast_envs(handler, target_subs=None):
@@ -263,7 +332,7 @@ class SocketHandler(BaseWebSocketHandler):
     def initialize(self, app):
         self.port = app.port
         self.env_path = app.env_path
-        self.layouts = self.load_layouts()
+        self.app = app
         self.state = app.state
         self.subs = app.subs
         self.sources = app.sources
@@ -279,22 +348,8 @@ class SocketHandler(BaseWebSocketHandler):
             target_subs = self.subs.values()
         for sub in target_subs:
             sub.write_message(json.dumps(
-                {'command': 'layout_update', 'data': self.layouts}
+                {'command': 'layout_update', 'data': self.app.layouts}
             ))
-
-    def save_layouts(self):
-        layout_filepath = os.path.join(self.env_path, 'view', LAYOUT_FILE)
-        with open(layout_filepath, 'w') as fn:
-            fn.write(self.layouts)
-
-    def load_layouts(self):
-        layout_filepath = os.path.join(self.env_path, 'view', LAYOUT_FILE)
-        ensure_dir_exists(layout_filepath)
-        if os.path.isfile(layout_filepath):
-            with open(layout_filepath, 'r') as fn:
-                return fn.read()
-        else:
-            return ""
 
     def open(self):
         if self.login_enabled and not self.current_user:
@@ -347,13 +402,17 @@ class SocketHandler(BaseWebSocketHandler):
             if 'eid' in msg:
                 logging.info('closing environment {}'.format(msg['eid']))
                 del self.state[msg['eid']]
-                p = os.path.join(self.env_path, "{0}.json".format(msg['eid']))
-                os.remove(p)
+                if self.env_path is not None:
+                    p = os.path.join(
+                        self.env_path,
+                        "{0}.json".format(msg['eid'])
+                    )
+                    os.remove(p)
                 broadcast_envs(self)
         elif cmd == 'save_layouts':
             if 'data' in msg:
-                self.layouts = msg.get('data')
-                self.save_layouts()
+                self.app.layouts = msg.get('data')
+                self.app.save_layouts()
                 self.broadcast_layouts()
         elif cmd == 'forward_to_vis':
             packet = msg.get('data')
@@ -361,9 +420,13 @@ class SocketHandler(BaseWebSocketHandler):
             if packet.get('pane_data') is not False:
                 packet['pane_data'] = environment['jsons'][packet['target']]
             send_to_sources(self, msg.get('data'))
+        elif cmd == 'layout_item_update':
+            eid = msg.get('eid')
+            win = msg.get('win')
+            self.state[eid]['reload'][win] = msg.get('data')
         elif cmd == 'pop_embeddings_pane':
             packet = msg.get('data')
-            eid = self.state[packet['eid']]
+            eid = packet['eid']
             win = packet['target']
             p = self.state[eid]['jsons'][win]
             p['content']['selected'] = None
@@ -690,7 +753,6 @@ class UpdateHandler(BaseHandler):
                 selected_not_neg = max(0, selected)
                 selected_exists = min(len(p['content'])-1, selected_not_neg)
                 p['selected'] = selected_exists
-            return p
 
         pdata = p['content']['data']
 
@@ -757,18 +819,24 @@ class UpdateHandler(BaseHandler):
         eid = extract_eid(args)
 
         if args['win'] not in handler.state[eid]['jsons']:
-            handler.write('win does not exist')
+            # Append to a window that doesn't exist attempts to create
+            # that window
+            append = args.get('append')
+            if append:
+                p = window(args)
+                register_window(handler, p, eid)
+            else:
+                handler.write('win does not exist')
             return
 
         p = handler.state[eid]['jsons'][args['win']]
 
-        if not (p['type'] == 'text' or p['type'] == 'image_history' or
-                p['type'] == 'embeddings' or
+        if not (p['type'] == 'text' or p['type'] == 'image_history' or p['type'] == 'embeddings' or
                 p['content']['data'][0]['type'] in
                 ['scatter', 'scattergl', 'custom']):
             handler.write(
-                'win is not scatter, custom, image_history, embeddings, or '
-                'text; was {}'.format(p['content']['data'][0]['type']))
+                'win is not scatter, custom, image_history, embeddings, or text; '
+                'was {}'.format(p['content']['data'][0]['type']))
             return
 
         p, diff_packet = UpdateHandler.update_packet(p, args)
@@ -842,8 +910,9 @@ class DeleteEnvHandler(BaseHandler):
         eid = extract_eid(args)
         if eid is not None:
             del handler.state[eid]
-            p = os.path.join(handler.env_path, "{0}.json".format(eid))
-            os.remove(p)
+            if handler.env_path is not None:
+                p = os.path.join(handler.env_path, "{0}.json".format(eid))
+                os.remove(p)
             broadcast_envs(handler)
 
     @check_auth
@@ -865,6 +934,34 @@ class EnvStateHandler(BaseHandler):
         # TODO if an env is provided return the state of that env
         all_eids = list(handler.state.keys())
         handler.write(json.dumps(all_eids))
+
+    @check_auth
+    def post(self):
+        args = tornado.escape.json_decode(
+            tornado.escape.to_basestring(self.request.body)
+        )
+        self.wrap_func(self, args)
+
+
+class ForkEnvHandler(BaseHandler):
+    def initialize(self, app):
+        self.app = app
+        self.state = app.state
+        self.subs = app.subs
+        self.login_enabled = app.login_enabled
+
+    @staticmethod
+    def wrap_func(handler, args):
+        prev_eid = escape_eid(args.get('prev_eid'))
+        eid = escape_eid(args.get('eid'))
+
+        assert prev_eid in handler.state, 'env to be forked doesn\'t exit'
+
+        handler.state[eid] = copy.deepcopy(handler.state[prev_eid])
+        serialize_env(handler.state, [eid], env_path=handler.app.env_path)
+        broadcast_envs(handler)
+
+        handler.write(eid)
 
     @check_auth
     def post(self):
@@ -903,11 +1000,12 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
     env = {}
     if eid in state:
         env = state.get(eid)
-    else:
+    elif env_path is not None:
         p = os.path.join(env_path, eid.strip(), '.json')
         if os.path.exists(p):
-            env = tornado.escape.json_decode(open(p, 'r').read())
-            state[eid] = env
+            with open(p, 'r') as fn:
+                env = tornado.escape.json_decode(fn.read())
+                state[eid] = env
 
     if 'reload' in env:
         socket.write_message(
@@ -924,8 +1022,11 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
 
 
 def gather_envs(state, env_path=DEFAULT_ENV_PATH):
-    items = [i.replace('.json', '') for i in os.listdir(env_path)
-             if '.json' in i]
+    if env_path is not None:
+        items = [i.replace('.json', '') for i in os.listdir(env_path)
+                 if '.json' in i]
+    else:
+        items = []
     return sorted(list(set(items + list(state.keys()))))
 
 
@@ -937,12 +1038,13 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
     for eid in eids:
         if eid in state:
             envs[eid] = state.get(eid)
-        else:
+        elif env_path is not None:
             p = os.path.join(env_path, eid.strip(), '.json')
             if os.path.exists(p):
-                env = tornado.escape.json_decode(open(p, 'r').read())
-                state[eid] = env
-                envs[eid] = env
+                with open(p, 'r') as fn:
+                    env = tornado.escape.json_decode(fn.read())
+                    state[eid] = env
+                    envs[eid] = env
 
     res = copy.deepcopy(envs[list(envs.keys())[0]])
     name2Wid = {res['jsons'][wid].get('title', None): wid + '_compare'
@@ -1172,6 +1274,7 @@ class IndexHandler(BaseHandler):
         self.env_path = app.env_path
         self.login_enabled = app.login_enabled
         self.user_credential = app.user_credential
+        self.base_url = app.base_url if app.base_url != '' else '/'
 
     def get(self, args, **kwargs):
         items = gather_envs(self.state, env_path=self.env_path)
@@ -1191,7 +1294,8 @@ class IndexHandler(BaseHandler):
                 'login.html',
                 user=getpass.getuser(),
                 items=items,
-                active_item=''
+                active_item='',
+                base_url=self.base_url
             )
 
     def post(self, arg, **kwargs):
@@ -1229,8 +1333,10 @@ def download_scripts(proxies=None, install_dir=None):
         '%sjquery@3.1.1/dist/jquery.min.js' % b: 'jquery.min.js',
         '%sbootstrap@3.3.7/dist/js/bootstrap.min.js' % b: 'bootstrap.min.js',
         '%sreact@16.2.0/umd/react.production.min.js' % b: 'react-react.min.js',
-        '%sreact-dom@16.2.0/umd/react-dom.production.min.js' % b: 'react-dom.min.js',  # noqa
-        '%sreact-modal@3.1.10/dist/react-modal.min.js' % b: 'react-modal.min.js',  # noqa
+        '%sreact-dom@16.2.0/umd/react-dom.production.min.js' % b:
+            'react-dom.min.js',
+        '%sreact-modal@3.1.10/dist/react-modal.min.js' % b:
+            'react-modal.min.js',
         'https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_SVG':  # noqa
             'mathjax-MathJax.js',
         # here is another url in case the cdn breaks down again.
@@ -1240,13 +1346,16 @@ def download_scripts(proxies=None, install_dir=None):
         '%ssjcl@1.0.7/sjcl.js' % b: 'sjcl.js',
 
         # - css
-        '%sreact-resizable@1.4.6/css/styles.css' % b: 'react-resizable-styles.css',  # noqa
-        '%sreact-grid-layout@0.16.3/css/styles.css' % b: 'react-grid-layout-styles.css',  # noqa
+        '%sreact-resizable@1.4.6/css/styles.css' % b:
+            'react-resizable-styles.css',
+        '%sreact-grid-layout@0.16.3/css/styles.css' % b:
+            'react-grid-layout-styles.css',
         '%scss/bootstrap.min.css' % bb: 'bootstrap.min.css',
 
         # - fonts
         '%sclassnames@2.2.5' % b: 'classnames',
-        '%slayout-bin-packer@1.4.0/dist/layout-bin-packer.js' % b: 'layout_bin_packer',
+        '%slayout-bin-packer@1.4.0/dist/layout-bin-packer.js' % b:
+            'layout_bin_packer.js',
         '%sfonts/glyphicons-halflings-regular.eot' % bb:
             'glyphicons-halflings-regular.eot',
         '%sfonts/glyphicons-halflings-regular.woff2' % bb:

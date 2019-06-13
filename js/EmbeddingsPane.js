@@ -17,6 +17,8 @@ import debounce from 'debounce';
 import lasso from './lasso';
 import { polygonContains } from 'd3-polygon';
 
+const SCALE_RADIUS = 2000;
+
 class EmbeddingsPane extends React.Component {
   onEvent = e => {
     if (!this.props.isFocused) {
@@ -86,12 +88,19 @@ class EmbeddingsPane extends React.Component {
     return (
       <Pane {...this.props} handleDownload={this.handleDownload}>
         <Scene
-          key={this.props.height + '===' + this.props.width}
+          key={
+            this.props.height +
+            '===' +
+            this.props.width +
+            '===' +
+            this.props.content.data.length
+          }
           content={this.props.content}
           height={this.props.height}
           width={this.props.width}
           onSelect={this.onEntitySelection}
           onRegionSelection={this.onRegionSelection}
+          onGoBack={this.onGoBack}
           interactive={this.props.isFocused}
         />
       </Pane>
@@ -121,6 +130,12 @@ class Scene extends React.Component {
         // remove handlers
         this.removeMouseInteractions();
       }
+    }
+
+    console.log('received props');
+    if (nextProps.content.data.length !== this.props.content.data.length) {
+      this.stop();
+      this.setUpScene();
     }
   }
 
@@ -203,6 +218,11 @@ class Scene extends React.Component {
   }
 
   componentDidMount() {
+    this.setUpScene();
+  }
+
+  setUpScene() {
+    console.log('setting up the scene');
     // const width = this.mount.clientWidth;
     // const height = this.mount.clientHeight;
 
@@ -212,7 +232,7 @@ class Scene extends React.Component {
 
     const width = this.props.width;
     const height = this.props.height;
-    let radius = 2000;
+    let radius = SCALE_RADIUS;
     let color_array = [
       '#1f78b4',
       '#b2df8a',
@@ -431,17 +451,20 @@ class Scene extends React.Component {
   }
 
   render() {
+    const selectedStyles = {
+      backgroundColor: '#ccc',
+      border: '1px solid #888',
+      boxShadow: '0px 1px 2px rgba(0,0,0,0.1) inset',
+    };
+    const unselectedStyles = {
+      backgroundColor: '#eee',
+      border: '1px solid #bbb',
+      boxShadow: '0px 1px 2px rgba(0,0,0,0.1)',
+    };
+
     const buttonStyles = this.state.selectMode
-      ? {
-          backgroundColor: '#ccc',
-          border: '1px solid #888',
-          boxShadow: '0px 1px 2px rgba(0,0,0,0.1) inset',
-        }
-      : {
-          backgroundColor: '#eee',
-          border: '1px solid #bbb',
-          boxShadow: '0px 1px 2px rgba(0,0,0,0.1)',
-        };
+      ? selectedStyles
+      : unselectedStyles;
 
     return (
       <div style={{ position: 'relative' }}>
@@ -452,8 +475,31 @@ class Scene extends React.Component {
             top: 5,
             zIndex: 1,
             cursor: 'pointer',
+            display: 'flex',
           }}
         >
+          {this.props.content.has_previous ? (
+            <div
+              style={Object.assign(
+                {
+                  width: 24,
+                  height: 24,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginRight: 7,
+                },
+                unselectedStyles
+              )}
+              title="Selection mode"
+              onClick={e => {
+                e.preventDefault();
+                this.props.onGoBack();
+              }}
+            >
+              ←
+            </div>
+          ) : null}
           <div
             style={Object.assign(
               {
@@ -553,32 +599,24 @@ class LassoSelection extends React.Component {
         this.props.camera.updateMatrixWorld();
 
         const points = this.props.points.map(point => {
-          /* TEST */
           var p = new THREE.Vector3(
-            point.position[0] * 2000,
-            point.position[1] * 2000,
+            point.position[0] * SCALE_RADIUS,
+            point.position[1] * SCALE_RADIUS,
             0
           );
           var vector = p.project(this.props.camera);
 
           vector.x = ((vector.x + 1) / 2) * this.props.width;
           vector.y = (-(vector.y - 1) / 2) * this.props.height;
-          /* END TEST */
 
           const [x, y] = point.position;
           return {
             ref: point,
             old: point.position,
             test: [vector.x, vector.y],
-            coords: [
-              x * this.props.width,
-              y * this.props.height,
-              // ((x + 1) * this.props.width) / 2,
-              // ((y + 1) * this.props.height) / 2,
-            ],
+            coords: [x * this.props.width, y * this.props.height],
           };
         });
-        // console.log(this.props.height, this.props.width, points, polygon);
         const selected = points.filter(point =>
           polygonContains(polygon, point.test)
         );
