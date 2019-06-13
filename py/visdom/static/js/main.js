@@ -45017,15 +45017,18 @@
 	    value: function render() {
 	      var _this5 = this;
 
-	      var buttonStyles = this.state.selectMode ? {
+	      var selectedStyles = {
 	        backgroundColor: '#ccc',
 	        border: '1px solid #888',
 	        boxShadow: '0px 1px 2px rgba(0,0,0,0.1) inset'
-	      } : {
+	      };
+	      var unselectedStyles = {
 	        backgroundColor: '#eee',
 	        border: '1px solid #bbb',
 	        boxShadow: '0px 1px 2px rgba(0,0,0,0.1)'
 	      };
+
+	      var buttonStyles = this.state.selectMode ? selectedStyles : unselectedStyles;
 
 	      return _react2.default.createElement(
 	        'div',
@@ -45041,7 +45044,7 @@
 	              cursor: 'pointer'
 	            }
 	          },
-	          _react2.default.createElement(
+	          this.props.content.has_previous ? _react2.default.createElement(
 	            'div',
 	            {
 	              style: Object.assign({
@@ -45051,7 +45054,7 @@
 	                alignItems: 'center',
 	                justifyContent: 'center',
 	                marginRight: 7
-	              }, buttonStyles),
+	              }, unselectedStyles),
 	              title: 'Selection mode',
 	              onClick: function onClick(e) {
 	                e.preventDefault();
@@ -45059,7 +45062,7 @@
 	              }
 	            },
 	            '\u2190'
-	          ),
+	          ) : null,
 	          _react2.default.createElement(
 	            'div',
 	            {

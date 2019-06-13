@@ -169,6 +169,7 @@ class Application(tornado.web.Application):
                 tornado_settings["cookie_secret"] = fn.read()
 
         tornado_settings['static_url_prefix'] = self.base_url + "/static/"
+        tornado_settings['debug'] = True
         handlers = [
             (r"%s/events" % self.base_url, PostHandler, {'app': self}),
             (r"%s/update" % self.base_url, UpdateHandler, {'app': self}),
@@ -425,7 +426,7 @@ class SocketHandler(BaseWebSocketHandler):
             self.state[eid]['reload'][win] = msg.get('data')
         elif cmd == 'pop_embeddings_pane':
             packet = msg.get('data')
-            eid = self.state[packet['eid']]
+            eid = packet['eid']
             win = packet['target']
             p = self.state[eid]['jsons'][win]
             p['content']['selected'] = None

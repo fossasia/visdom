@@ -449,17 +449,20 @@ class Scene extends React.Component {
   }
 
   render() {
+    const selectedStyles = {
+      backgroundColor: '#ccc',
+      border: '1px solid #888',
+      boxShadow: '0px 1px 2px rgba(0,0,0,0.1) inset',
+    };
+    const unselectedStyles = {
+      backgroundColor: '#eee',
+      border: '1px solid #bbb',
+      boxShadow: '0px 1px 2px rgba(0,0,0,0.1)',
+    };
+
     const buttonStyles = this.state.selectMode
-      ? {
-          backgroundColor: '#ccc',
-          border: '1px solid #888',
-          boxShadow: '0px 1px 2px rgba(0,0,0,0.1) inset',
-        }
-      : {
-          backgroundColor: '#eee',
-          border: '1px solid #bbb',
-          boxShadow: '0px 1px 2px rgba(0,0,0,0.1)',
-        };
+      ? selectedStyles
+      : unselectedStyles;
 
     return (
       <div style={{ position: 'relative' }}>
@@ -472,26 +475,28 @@ class Scene extends React.Component {
             cursor: 'pointer',
           }}
         >
-          <div
-            style={Object.assign(
-              {
-                width: 24,
-                height: 24,
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginRight: 7,
-              },
-              buttonStyles
-            )}
-            title="Selection mode"
-            onClick={e => {
-              e.preventDefault();
-              this.props.onGoBack();
-            }}
-          >
-            ←
-          </div>
+          {this.props.content.has_previous ? (
+            <div
+              style={Object.assign(
+                {
+                  width: 24,
+                  height: 24,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginRight: 7,
+                },
+                unselectedStyles
+              )}
+              title="Selection mode"
+              onClick={e => {
+                e.preventDefault();
+                this.props.onGoBack();
+              }}
+            >
+              ←
+            </div>
+          ) : null}
           <div
             style={Object.assign(
               {
