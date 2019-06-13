@@ -39,6 +39,7 @@ const PropertiesPane = require('./PropertiesPane');
 const TextPane = require('./TextPane');
 const ImagePane = require('./ImagePane');
 const PlotPane = require('./PlotPane');
+const EmbeddingsPane = require('./EmbeddingsPane');
 
 const WidthProvider = require('./Width').default;
 
