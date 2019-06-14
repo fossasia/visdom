@@ -1084,6 +1084,7 @@ class SaveHandler(BaseHandler):
 class DataHandler(BaseHandler):
     def initialize(self, app):
         self.state = app.state
+        self.subs = app.subs
         self.port = app.port
         self.env_path = app.env_path
         self.login_enabled = app.login_enabled
@@ -1104,7 +1105,7 @@ class DataHandler(BaseHandler):
             else:
                 handler.state[eid]['jsons'][args['win']] = data
 
-            broadcast_envs(self)
+            broadcast_envs(handler)
         else:
             # Dump data to client
             if 'win' in args and args['win'] is None:

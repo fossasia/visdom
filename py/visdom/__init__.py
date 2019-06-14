@@ -650,7 +650,7 @@ class Visdom(object):
         """
         return self._send(
             msg={'win': win, 'eid': env, 'data': data},
-            endpoint='win_data'
+            endpoint='win_data',
             create=False,
         )
 
@@ -662,7 +662,7 @@ class Visdom(object):
 
         return self._send(
             msg={'win': win, 'eid': env},
-            endpoint='close'
+            endpoint='close',
             create=False,
         )
 
