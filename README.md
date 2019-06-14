@@ -426,7 +426,7 @@ The function accepts the following arguments:
 
 We currently assume that there are no more than 10 unique labels, in the future we hope to provide a colormap in opts for other cases.
 
-If you want to provide a preview on hover for your data, you can supply a getting function for data_getter and a data_type. At the moment the only data_type supported is 'html', which means your data_getter takes in an index into features that is currently selected and returns the html for what you'd like to display.
+From the UI you can also draw a lasso around a subset of features. This will rerun the t-SNE visualization on the selected subset.
 
 #### vis.save
 This function saves the `envs` that are alive on the visdom server. It takes input a list (in python) or table (in lua) of env ids to be saved.
