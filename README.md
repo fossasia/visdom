@@ -414,7 +414,7 @@ This function draws a Plotly `Figure` object. It does not explicitly take option
 
 > **Note** You must have the `plotly` Python package installed to use this function. It can typically be installed by running `pip install plotly`.
 
-#### vis.embeddings(features, labels, data_getter=fn, data_type=str)
+#### vis.embeddings
 
 This function visualizes a collection of features using the [Barnes-Hut t-SNE algorithm](https://github.com/lvdmaaten/bhtsne).
 
