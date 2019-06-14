@@ -756,7 +756,7 @@ class CloseHandler(BaseHandler):
         win = args.get('win')
 
         keys = \
-            list(handler.state[eid]['jsons'].keys()) if win is 'all' else [win]
+            list(handler.state[eid]['jsons'].keys()) if win is None else [win]
         for win in keys:
             handler.state[eid]['jsons'].pop(win, None)
             broadcast(
@@ -1099,13 +1099,13 @@ class DataHandler(BaseHandler):
             if eid not in handler.state:
                 handler.state[eid] = {'jsons': {}, 'reload': {}}
 
-            if 'win' in args and args['win'] == 'all':
+            if 'win' in args and args['win'] is None:
                 handler.state[eid]['jsons'] = data
             else:
                 handler.state[eid]['jsons'][args['win']] = data
         else:
             # Dump data
-            if 'win' in args and args['win'] == 'all':
+            if 'win' in args and args['win'] is None:
                 handler.write(json.dumps(handler.state[eid]['jsons']))
             else:
                 assert args['win'] in handler.state[eid]['jsons'], \

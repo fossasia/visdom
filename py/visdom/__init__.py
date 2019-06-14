@@ -558,12 +558,16 @@ class Visdom(object):
                         msg,
                     ]) + '\n')
 
-    def _send(self, msg, endpoint='events', quiet=False, from_log=False):
+    def _send(self, msg, endpoint='events', quiet=False, from_log=False, create=True):
         """
         This function sends specified JSON request to the Tornado server. This
         function should generally not be called by the user, unless you want to
         build the required JSON yourself. `endpoint` specifies the destination
         Tornado server endpoint for the request.
+
+        If `create=True`, then if `win=None` in the message a new window will be 
+        created with a random name. If `create=False`, `win=None` indicates the
+        operation should be applied to all windows.
         """
         if msg.get('eid', None) is None:
             msg['eid'] = self.env
@@ -571,7 +575,7 @@ class Visdom(object):
         if not self.send:
             return msg, endpoint
 
-        if 'win' in msg and msg['win'] is None:
+        if 'win' in msg and msg['win'] is None and create:
             msg['win'] = 'window_' + get_rand_id()
 
         if not from_log:
@@ -624,40 +628,42 @@ class Visdom(object):
             'data': envs,
         }, 'save')
 
-    def get_window_data(self, win='all', env=None):
+    def get_window_data(self, win=None, env=None):
         """
         This function returns all the window data for a specified window in
-        an environment. Use `win='all'` to get all the windows in the given
+        an environment. Use `win=None` to get all the windows in the given
         environment. Env defaults to main
         """
 
         return self._send(
             msg={'win': win, 'eid': env},
-            endpoint='win_data'
+            endpoint='win_data',
+            create=False,
         )
 
-    def set_window_data(self, data, win='all', env=None):
+    def set_window_data(self, data, win=None, env=None):
         """
         This function sets all the window data for a specified window in
-        an environment. Use `win='all'` to set the data for all the windows in 
+        an environment. Use `win=None` to set the data for all the windows in 
         the given environment. Env defaults to main. `data` should be as returned
         from `get_window_data`.
         """
         return self._send(
             msg={'win': win, 'eid': env, 'data': data},
             endpoint='win_data'
+            create=False,
         )
 
-
-    def close(self, win='all', env=None):
+    def close(self, win=None, env=None):
         """
         This function closes a specific window.
-        Use `win='all'` to close all windows in an env.
+        Use `win=None` to close all windows in an env.
         """
 
         return self._send(
             msg={'win': win, 'eid': env},
             endpoint='close'
+            create=False,
         )
 
     def delete_env(self, env):
