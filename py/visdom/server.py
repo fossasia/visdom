@@ -1103,8 +1103,10 @@ class DataHandler(BaseHandler):
                 handler.state[eid]['jsons'] = data
             else:
                 handler.state[eid]['jsons'][args['win']] = data
+
+            broadcast_envs(self)
         else:
-            # Dump data
+            # Dump data to client
             if 'win' in args and args['win'] is None:
                 handler.write(json.dumps(handler.state[eid]['jsons']))
             else:
