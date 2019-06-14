@@ -416,12 +416,12 @@ This function draws a Plotly `Figure` object. It does not explicitly take option
 
 #### vis.embeddings(features, labels, data_getter=fn, data_type=str)
 
-This function visualizes a collection of entities using the [Barnes-Hut t-SNE algorithm](https://github.com/lvdmaaten/bhtsne).
+This function visualizes a collection of features using the [Barnes-Hut t-SNE algorithm](https://github.com/lvdmaaten/bhtsne).
 
 The function accepts the following arguments:
-- `features`: an array of tensors
-- `labels`: an array of corresponding labels for the tensors provided for `features`
-- `data_getter=fn`: (optional) a function that takes as a parameter an index into the features array and returns a summary representation of the tensor. If this is set, `data_type` must be set.
+- `features`: a list of tensors
+- `labels`: a list of corresponding labels for the tensors provided for `features`
+- `data_getter=fn`: (optional) a function that takes as a parameter an index into the features array and returns a summary representation of the tensor. If this is set, `data_type` must also be set.
 - `data_type=str`: (optional) currently the only acceptable value here is `"html"`
 
 We currently assume that there are no more than 10 unique labels, in the future we hope to provide a colormap in opts for other cases.
