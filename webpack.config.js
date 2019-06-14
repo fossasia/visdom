@@ -14,6 +14,10 @@ module.exports = {
   output: {
     filename: 'py/visdom/static/js/main.js',
   },
+  node: {
+    net: 'empty',
+    dns: 'empty',
+  },
   module: {
     loaders: [
       {
@@ -28,6 +32,10 @@ module.exports = {
       {
         test: /\.css$/,
         loaders: ['style', 'css'],
+      },
+      {
+        test: /\.json$/,
+        loader: 'json-loader',
       },
     ],
   },

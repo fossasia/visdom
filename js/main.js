@@ -46,6 +46,8 @@ const GridLayout = WidthProvider(ReactGridLayout);
 const sortLayout = ReactGridLayout.utils.sortLayoutItemsByRowCol;
 const getLayoutItem = ReactGridLayout.utils.getLayoutItem;
 
+import 'fetch';
+
 const ROW_HEIGHT = 5; // pixels
 const MARGIN = 10; // pixels
 
@@ -77,6 +79,7 @@ const MODAL_STYLE = {
 };
 
 const DEFAULT_LAYOUT = 'current';
+const POLLING_INTERVAL = 500;
 
 var use_env = null;
 var use_envs = null;
@@ -93,6 +96,101 @@ if (ACTIVE_ENV !== '') {
 } else {
   use_env = localStorage.getItem('envID') || 'main';
   use_envs = JSON.parse(localStorage.getItem('envIDs')) || ['main'];
+}
+
+function postData(url = ``, data = {}) {
+  return fetch(url, {
+    method: 'POST',
+    mode: 'cors',
+    cache: 'no-cache',
+    credentials: 'same-origin',
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+    },
+    redirect: 'follow',
+    referrer: 'no-referrer',
+    body: JSON.stringify(data),
+  });
+}
+
+class Poller {
+  /**
+   * Wrapper around what would regularly be socket communications, but handled
+   * through a POST-based polling loop
+   */
+  constructor(app) {
+    this.app = app;
+    var url = window.location;
+    this.target =
+      url.protocol + '//' + url.host + app.correctPathname() + 'socket_wrap';
+    this.handleMessage = app._handleMessage;
+    fetch(this.target)
+      .then(res => {
+        return res.json();
+      })
+      .then(data => {
+        this.finishSetup(data.sid);
+      });
+  }
+
+  finishSetup = sid => {
+    this.sid = sid;
+    this.poller_id = window.setInterval(() => this.poll(), POLLING_INTERVAL);
+    this.app.setState({
+      connected: true,
+    });
+  };
+
+  close = () => {
+    this.app.setState({ connected: false }, () => {
+      this.app._socket = null;
+    });
+    window.clearInterval(this.poller_id);
+  };
+
+  send = msg => {
+    // Post a messge containing the desired command
+    postData(this.target, { message_type: 'send', sid: this.sid, message: msg })
+      .then(res => res.json())
+      .then(
+        result => {
+          if (!result.success) {
+            this.close();
+          } else {
+            this.poll(); // Get a response right now if there is one
+          }
+        },
+        error => {
+          console.log(error);
+          this.close();
+        }
+      );
+  };
+
+  poll = () => {
+    // Post message to query possible socket messages
+    postData(this.target, { message_type: 'query', sid: this.sid })
+      .then(res => res.json())
+      .then(
+        result => {
+          if (!result.success) {
+            this.close();
+          } else {
+            let messages = result.messages;
+            messages.forEach(msg => {
+              // Must re-encode message as handle message expects json
+              // in this particular format from sockets
+              // TODO Could refactor message parsing out elsewhere.
+              this.handleMessage({ data: msg });
+            });
+          }
+        },
+        error => {
+          console.log(error);
+          this.close();
+        }
+      );
+  };
 }
 
 // TODO: Move some of this to smaller components and/or use something like redux
@@ -263,8 +361,16 @@ class App extends React.Component {
     }
   };
 
+  setupPolling = () => {
+    this._socket = new Poller(this);
+  };
+
   connect = () => {
     if (this._socket) {
+      return;
+    }
+    if (USE_POLLING) {
+      this.setupPolling();
       return;
     }
     var url = window.location;
