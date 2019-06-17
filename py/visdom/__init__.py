@@ -50,7 +50,7 @@ try:
     import visdom.extra_deps.bhtsne.bhtsne as bhtsne
 
     def do_tsne(X):
-        Y = bhtsne.run_bh_tsne(X, initial_dims=X.shape[1])
+        Y = bhtsne.run_bh_tsne(X, initial_dims=X.shape[1], verbose=True)
         xmin, xmax = min(Y[:, 0]), max(Y[:, 0])
         ymin, ymax = min(Y[:, 1]), max(Y[:, 1])
         normx = ((Y[:, 0] - xmin) / (xmax - xmin))*2-1
