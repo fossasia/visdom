@@ -44596,7 +44596,21 @@
 	      return _react2.default.createElement(
 	        Pane,
 	        _extends({}, this.props, { handleDownload: this.handleDownload }),
-	        _react2.default.createElement(Scene, {
+	        this.props.content.isLoading ? _react2.default.createElement(
+	          'div',
+	          {
+	            style: {
+	              width: this.props.width + 'px',
+	              height: this.props.height + 'px',
+	              display: 'flex',
+	              justifyContent: 'center',
+	              alignItems: 'center',
+	              textAlign: 'center',
+	              padding: '5px 10px'
+	            }
+	          },
+	          'Generating embeddings visualization...'
+	        ) : _react2.default.createElement(Scene, {
 	          key: this.props.height + '===' + this.props.width + '===' + this.props.content.data.length,
 	          content: this.props.content,
 	          height: this.props.height,

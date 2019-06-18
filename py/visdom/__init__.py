@@ -1073,6 +1073,17 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
+        loading_message = {
+            'content': {'isLoading': True},
+            'type': 'embeddings',
+        }
+        win = self._send({
+            'data': [loading_message],
+            'win': win,
+            'eid': env,
+            'opts': opts,
+        }, endpoint='events')
+
         Y = do_tsne(features)
 
         label_set = list(set(labels))

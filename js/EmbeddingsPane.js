@@ -87,22 +87,38 @@ class EmbeddingsPane extends React.Component {
   render() {
     return (
       <Pane {...this.props} handleDownload={this.handleDownload}>
-        <Scene
-          key={
-            this.props.height +
-            '===' +
-            this.props.width +
-            '===' +
-            this.props.content.data.length
-          }
-          content={this.props.content}
-          height={this.props.height}
-          width={this.props.width}
-          onSelect={this.onEntitySelection}
-          onRegionSelection={this.onRegionSelection}
-          onGoBack={this.onGoBack}
-          interactive={this.props.isFocused}
-        />
+        {this.props.content.isLoading ? (
+          <div
+            style={{
+              width: this.props.width + 'px',
+              height: this.props.height + 'px',
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              textAlign: 'center',
+              padding: '5px 10px',
+            }}
+          >
+            Generating embeddings visualization...
+          </div>
+        ) : (
+          <Scene
+            key={
+              this.props.height +
+              '===' +
+              this.props.width +
+              '===' +
+              this.props.content.data.length
+            }
+            content={this.props.content}
+            height={this.props.height}
+            width={this.props.width}
+            onSelect={this.onEntitySelection}
+            onRegionSelection={this.onRegionSelection}
+            onGoBack={this.onGoBack}
+            interactive={this.props.isFocused}
+          />
+        )}
       </Pane>
     );
   }
