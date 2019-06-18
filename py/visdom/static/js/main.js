@@ -45176,7 +45176,8 @@
 	    value: function componentDidMount() {
 	      var _this7 = this;
 
-	      var lassoInstance = (0, _lasso2.default)().on('end', function (polygon) {
+	      var lassoInstance = (0, _lasso2.default)();
+	      lassoInstance.on('end', function (polygon) {
 	        _this7.props.camera.updateMatrixWorld();
 
 	        var points = _this7.props.points.map(function (point) {
@@ -45203,6 +45204,10 @@
 	        console.log(selected.map(function (pt) {
 	          return pt.ref.idx;
 	        }));
+	        if (selected.length <= 21) {
+	          lassoInstance.reset();
+	          return;
+	        }
 	        _this7.props.onRegionSelection(selected.map(function (pt) {
 	          return pt.ref.idx;
 	        }));

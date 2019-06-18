@@ -610,7 +610,8 @@ class Scene extends React.Component {
 
 class LassoSelection extends React.Component {
   componentDidMount() {
-    var lassoInstance = lasso()
+    var lassoInstance = lasso();
+    lassoInstance
       .on('end', polygon => {
         this.props.camera.updateMatrixWorld();
 
@@ -637,6 +638,10 @@ class LassoSelection extends React.Component {
           polygonContains(polygon, point.test)
         );
         console.log(selected.map(pt => pt.ref.idx));
+        if (selected.length <= 21) {
+          lassoInstance.reset();
+          return;
+        }
         this.props.onRegionSelection(selected.map(pt => pt.ref.idx));
       })
       .on('start', null);
