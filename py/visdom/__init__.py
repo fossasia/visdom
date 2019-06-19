@@ -468,7 +468,7 @@ class Visdom(object):
         if self.proxies:
             sess.proxies.update(self.proxies)
         if self.username:
-            resp = sess.post("%s:%s" % (self.server, self.port), json=dict(
+            resp = sess.post("%s:%s%s" % (self.server, self.port, self.base_url), json=dict(
                 username=self.username,
                 password=self.password))
             if resp.status_code != requests.codes.ok:

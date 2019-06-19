@@ -534,10 +534,23 @@ if __name__ == '__main__':
     parser.add_argument('-server', metavar='server', type=str,
                         default=DEFAULT_HOSTNAME,
                         help='Server address of the target to run the demo on.')
+    parser.add_argument('-base_url', metavar='base_url', type=str,
+                    default='/',
+                    help='Base Url.')
+    parser.add_argument('-username', metavar='username', type=str,
+                    default='',
+                    help='username.')
+    parser.add_argument('-password', metavar='password', type=str,
+                    default='',
+                    help='password.')
+    parser.add_argument('-use_incoming_socket', metavar='use_incoming_socket', type=bool,
+                    default=True,
+                    help='use_incoming_socket.')
     FLAGS = parser.parse_args()
 
     try:
-        viz = Visdom(port=FLAGS.port, server=FLAGS.server)
+        viz = Visdom(port=FLAGS.port, server=FLAGS.server, base_url=FLAGS.base_url, username=FLAGS.username, password=FLAGS.password, \
+                use_incoming_socket=FLAGS.use_incoming_socket)
         run_demo(viz)
     except Exception as e:
         print(
