@@ -518,6 +518,13 @@ def run_demo(viz):
     except BaseException:
         print('Skipped audio example')
 
+    # get/set state
+    import json
+    window = viz.text('test one')
+    data = json.loads(viz.get_window_data())
+    data[window]['content'] = 'test two'
+    viz.set_window_data(json.dumps(data))
+
     try:
         input = raw_input  # for Python 2 compatibility
     except NameError:
