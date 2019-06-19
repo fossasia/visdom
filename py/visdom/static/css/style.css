@@ -129,6 +129,13 @@ button {
   overflow: hidden;
 }
 
+.widgets {
+  position: absolute;
+  bottom: 0;
+  background-color: #fff;
+  width: 99.5%;
+}
+
 .grip {
   position: absolute;
   bottom: 0;
@@ -141,9 +148,10 @@ button {
   align: right;
 }
 
-.caption {
+.widget {
   overflow-y: hidden;
   word-wrap: break-word;
+  margin-bottom: 10px;
 }
 
 .content-image {

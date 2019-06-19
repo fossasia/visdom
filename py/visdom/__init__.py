@@ -16,6 +16,7 @@ import threading
 import websocket  # type: ignore
 import json
 import hashlib
+import collections
 import math
 import re
 import base64
@@ -85,9 +86,17 @@ def isndarray(n):
     return isinstance(n, (np.ndarray))
 
 
+# Only works on (possibly nested) lists of numbers
+# TODO: Create our own JSONEncoder that automatically does this.
+#       Maybe we can port plotly's over:
+#       https://github.com/plotly/plotly.py/blob/81629273ff6d7a30257a42572ed0e4e6ad436009/_plotly_utils/utils.py#L16
+# TODO: Also, in appropriate places, we need to change many numpy calls to use
+#       nan-aware ones, e.g., `X.max` => `np.nanmax(X)`.
 def nan2none(l):
     for idx, val in enumerate(l):
-        if math.isnan(val):
+        if isinstance(val, collections.abc.Sequence):
+            l[idx] = nan2none(l[idx])
+        elif isnum(val) and math.isnan(val):
             l[idx] = None
     return l
 
@@ -628,6 +637,16 @@ class Visdom(object):
             'data': envs,
         }, 'save')
 
+    def fork_env(self, prev_eid, eid):
+        """This function allows the user to fork environments."""
+        assert isstr(prev_eid), 'prev_eid should be a string'
+        assert isstr(eid), 'eid should be a string'
+
+        return self._send(
+            msg={'prev_eid': prev_eid, 'eid': eid},
+            endpoint='fork_env'
+        )
+
     def get_window_data(self, win=None, env=None):
         """
         This function returns all the window data for a specified window in
@@ -972,23 +991,35 @@ class Visdom(object):
         img = np.transpose(img, (1, 2, 0))
         im = Image.fromarray(img)
         buf = BytesIO()
-        im.save(buf, format='PNG')
+        image_type = 'png'
+        imsave_args = {}
+        if 'jpgquality' in opts:
+            image_type = 'jpeg'
+            imsave_args['quality'] = opts['jpgquality']
+
+        im.save(buf, format=image_type.upper(), **imsave_args)
+
         b64encoded = b64.b64encode(buf.getvalue()).decode('utf-8')
 
         data = [{
             'content': {
-                'src': 'data:image/png;base64,' + b64encoded,
+                'src': 'data:image/' + image_type + ';base64,' + b64encoded,
                 'caption': opts.get('caption'),
             },
-            'type': 'image',
+            'type': 'image_history' if opts.get('store_history') else 'image',
         }]
+
+        endpoint = 'events'
+        if opts.get('store_history'):
+            if win is not None and self.win_exists(win, env):
+                endpoint = 'update'
 
         return self._send({
             'data': data,
             'win': win,
             'eid': env,
             'opts': opts,
-        })
+        }, endpoint=endpoint)
 
     @pytorch_wrap
     def images(self, tensor, nrow=8, padding=2,
@@ -1090,7 +1121,7 @@ class Visdom(object):
         This function plays a video. It takes as input the filename of the video
         `videofile` or a `LxHxWxC` or `LxCxHxW`-sized `tensor` containing all the frames of
         the video as input, as specified in `dim`. The color channels must be in BGR order.
-        
+
         The function does not support any plot-specific `opts`. The following video `opts` are supported:
 
         - `opts.fps`: FPS for the video (`integer` > 0; default = 25)
@@ -1217,10 +1248,12 @@ class Visdom(object):
             assert win is not None, 'Must define a window to update'
 
             if update == 'append':
-                if win is None or not self.win_exists(win, env):
+                if win is None:
                     update = None
-                else:
-                    update = 'append'
+                elif not self.offline:
+                    exists = self.win_exists(win, env)
+                    if exists is False:
+                        update = None
 
             # case when X is 1 dimensional and corresponding values on y-axis
             # are passed in parameter Y
@@ -1243,13 +1276,17 @@ class Visdom(object):
         if Y is not None:
             Y = np.ravel(Y)
             assert X.shape[0] == Y.shape[0], 'sizes of X and Y should match'
+            assert np.equal(np.mod(Y, 1), 0).all(), 'labels should be integers'
+            assert Y.min() >= 1, 'labels are assumed to be at least 1'
+            labels = np.unique(Y.astype(int, copy=False))
+            assert len(labels) == 1 or name is None, \
+                'name should not be specified with multiple labels or lines'
+            K = int(Y.max())  # largest label
         else:
             Y = np.ones(X.shape[0], dtype=int)
+            labels = np.ones(1, dtype=int)
+            K = 1  # largest label
 
-        assert np.equal(np.mod(Y, 1), 0).all(), 'labels should be integers'
-        assert Y.min() >= 1, 'labels are assumed to be between 1 and K'
-
-        K = int(Y.max())
         is3d = X.shape[1] == 3
 
         opts = {} if opts is None else opts
@@ -1292,12 +1329,12 @@ class Visdom(object):
         mc = opts.get('markercolor')
         lc = opts.get('linecolor')
 
-        for k in range(1, K + 1):
+        for k in labels:
             ind = np.equal(Y, k)
             if ind.any():
                 if 'legend' in opts:
                     trace_name = opts.get('legend')[k - 1]
-                elif K == 1 and name is not None:
+                elif len(labels) == 1 and name is not None:
                     trace_name = name
                 else:
                     trace_name = str(k)
@@ -1452,12 +1489,14 @@ class Visdom(object):
         - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
         - `opts.columnnames`: `table` containing x-axis labels
         - `opts.rownames`: `table` containing y-axis labels
+        - `opts.nancolor`: if not None, color for plotting nan
+                           (`string`; default = `None`)
         """
 
         assert X.ndim == 2, 'data should be two-dimensional'
         opts = {} if opts is None else opts
-        opts['xmin'] = opts.get('xmin', np.asscalar(X.min()))
-        opts['xmax'] = opts.get('xmax', np.asscalar(X.max()))
+        opts['xmin'] = opts.get('xmin', np.asscalar(np.nanmin(X)))
+        opts['xmax'] = opts.get('xmax', np.asscalar(np.nanmax(X)))
         opts['colormap'] = opts.get('colormap', 'Viridis')
         _title2str(opts)
         _assert_opts(opts)
@@ -1471,7 +1510,7 @@ class Visdom(object):
                 'number of row names should match number of rows in X'
 
         data = [{
-            'z': X.tolist(),
+            'z': nan2none(X.tolist()),
             'x': opts.get('columnnames'),
             'y': opts.get('rownames'),
             'zmin': opts.get('xmin'),
@@ -1479,6 +1518,20 @@ class Visdom(object):
             'type': 'heatmap',
             'colorscale': opts.get('colormap'),
         }]
+
+        nancolor = opts.get('nancolor')
+        if nancolor is not None:
+            # nan is plotted as transparent, so we just plot another trace as
+            # background, before plotting real data.
+            nantrace = {
+                'z': np.zeros_like(X).tolist(),
+                'x': data[0]['x'],
+                'y': data[0]['y'],
+                'type': 'heatmap',
+                'showscale': False,
+                'colorscale': [[0, nancolor], [1, nancolor]],
+            }
+            data.insert(0, nantrace)
 
         return self._send({
             'data': data,

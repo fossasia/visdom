@@ -66,7 +66,7 @@ Right now three callback events are supported:
     - `key_code` - The javascript event keycode for the pressed key (no modifiers)
 3. `PropertyUpdate` - Triggers when a property is updated in Property pane
     - `propertyId` - Position in properties list
-    - `value` - New property value    
+    - `value` - New property value
 
 ### Environments
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34618198-fc63976c-f20b-11e7-9c0d-060132fdb37e.png" width="300" /></p>
@@ -317,8 +317,9 @@ that contains the image.
 
 The following `opts` are supported:
 
-- `opts.jpgquality`: JPG quality (`number` 0-100; default = 100)
-- `opts.caption`: Caption for the image
+- `jpgquality`: JPG quality (`number` 0-100). If defined image will be saved as JPG to reduce file size. If not defined image will be saved as PNG.
+- `caption`: Caption for the image
+- `store_history`: Keep all images stored to the same window and attach a slider to the bottom that will let you select the image to view. You must always provide this opt when sending new images to an image with history.
 
 > **Note** You can use alt on an image pane to view the x/y coordinates of the cursor. You can also ctrl-scroll to zoom, alt scroll to pan vertically, and alt-shift scroll to pan horizontally. Double click inside the pane to restore the image to default.
 
@@ -331,7 +332,7 @@ The following arguments and `opts` are supported:
 
 - `nrow`: Number of images in a row
 - `padding`: Padding around the image, equal padding around all 4 sides
-- `opts.jpgquality`: JPG quality (`number` 0-100; default = 100)
+- `opts.jpgquality`: JPG quality (`number` 0-100). If defined image will be saved as JPG to reduce file size. If not defined image will be saved as PNG.
 - `opts.caption`: Caption for the image
 
 #### vis.text
@@ -499,7 +500,8 @@ The following `opts` are supported:
 - `opts.xmax`       : clip maximum value (`number`; default = `X:max()`)
 - `opts.columnnames`: `table` containing x-axis labels
 - `opts.rownames`   : `table` containing y-axis labels
-- `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
+- `opts.layoutopts` : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
+- `opts.nancolor`   : color for plotting `NaN`s. If this is `None`, `NaN`s will be plotted as transparent. (`string`; default = `None`)
 
 #### vis.bar
 This function draws a regular, stacked, or grouped bar plot. It takes as
@@ -629,6 +631,16 @@ This function deletes a specified env entirely. It takes env id `eid` as input.
 
 > **Note**: `delete_env` is deletes all data for an environment and is IRREVERSIBLE. Do not use unless you absolutely want to remove an environment.
 
+
+#### vis.fork_env
+
+This function forks an environment, similiar to the UI feature.
+
+Arguments:
+- `prev_eid`: Environment ID that we want to fork.
+- `eid`: New Environment ID that will be created with the fork.
+
+> **Note**: `fork_env` an exception will occur if an env that doesn't exist is forked.
 
 #### vis.win_exists
 
