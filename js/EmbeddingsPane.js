@@ -132,7 +132,7 @@ class Scene extends React.Component {
     this.animate = this.animate.bind(this);
   }
 
-  componentWillReceiveProps(nextProps) {
+  UNSAFE_componentWillReceiveProps(nextProps) {
     this.setState({ detailsLoading: false });
 
     if (nextProps.interactive !== this.props.interactive) {
