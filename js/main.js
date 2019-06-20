@@ -1442,6 +1442,9 @@ class App extends React.Component {
         let panelayout = getLayoutItem(this.state.layout, id);
         let filter = this.getValidFilter(this.state.filter);
         let isVisible = pane.title.match(filter);
+
+        const PANE_TITLE_BAR_HEIGHT = 14;
+
         return (
           <div key={pane.id} className={isVisible ? '' : 'hidden-window'}>
             <Comp
@@ -1454,7 +1457,7 @@ class App extends React.Component {
               w={panelayout.w}
               h={panelayout.h}
               width={this.w2p(panelayout.w)}
-              height={this.h2p(panelayout.h) - 14}
+              height={this.h2p(panelayout.h) - PANE_TITLE_BAR_HEIGHT}
               appApi={{
                 sendPaneMessage: this.sendPaneMessage,
                 sendEmbeddingPop: this.sendEmbeddingPop,

@@ -1704,6 +1704,9 @@
 	          var panelayout = getLayoutItem(_this6.state.layout, id);
 	          var filter = _this6.getValidFilter(_this6.state.filter);
 	          var isVisible = pane.title.match(filter);
+
+	          var PANE_TITLE_BAR_HEIGHT = 14;
+
 	          return _react2.default.createElement(
 	            'div',
 	            { key: pane.id, className: isVisible ? '' : 'hidden-window' },
@@ -1716,7 +1719,7 @@
 	              w: panelayout.w,
 	              h: panelayout.h,
 	              width: _this6.w2p(panelayout.w),
-	              height: _this6.h2p(panelayout.h) - 14,
+	              height: _this6.h2p(panelayout.h) - PANE_TITLE_BAR_HEIGHT,
 	              appApi: {
 	                sendPaneMessage: _this6.sendPaneMessage,
 	                sendEmbeddingPop: _this6.sendEmbeddingPop
@@ -44548,9 +44551,6 @@
 	          break;
 	      }
 	    }, _this.onEntitySelection = function (e) {
-	      // TODO: [FIX] There's a bug when two embeddings view are opened,
-	      // only the focused one will have its tooltip values updated,
-	      // even if hovering over the unfocused view
 	      _this.props.appApi.sendPaneMessage({
 	        event_type: 'EntitySelected',
 	        entityId: e.name,
@@ -44667,7 +44667,6 @@
 	        }
 	      }
 
-	      console.log('received props');
 	      if (nextProps.content.data.length !== this.props.content.data.length) {
 	        this.stop();
 	        this.setUpScene();
@@ -44691,7 +44690,7 @@
 	      var _this3 = this;
 
 	      /* ----------------------------------------------------------- */
-	      // hover stuff
+	      // setup hover
 
 	      var renderer = this.renderer,
 	          scene = this.scene,
@@ -44768,10 +44767,6 @@
 	  }, {
 	    key: 'setUpScene',
 	    value: function setUpScene() {
-	      console.log('setting up the scene');
-	      // const width = this.mount.clientWidth;
-	      // const height = this.mount.clientHeight;
-
 	      // References:
 	      // https://blog.fastforwardlabs.com/2017/10/04/using-three-js-for-2d-data-visualization.html
 	      // https://codepen.io/WebSeed/pen/MEBoRq
@@ -44907,13 +44902,6 @@
 	    value: function toRadians(angle) {
 	      return angle * (Math.PI / 180);
 	    }
-
-	    /* end utility methods */
-
-	    // start hover interaction stuff
-
-	    // Hover and tooltip interaction
-
 	  }, {
 	    key: 'mouseToThree',
 	    value: function mouseToThree(mouseX, mouseY) {
@@ -44958,7 +44946,6 @@
 	  }, {
 	    key: 'sortIntersectsByDistanceToRay',
 	    value: function sortIntersectsByDistanceToRay(intersects) {
-	      // return _.sortBy(intersects, 'distanceToRay');
 	      return [].concat(_toConsumableArray(intersects)).sort(function (a, b) {
 	        return a.distanceToRay - b.distanceToRay;
 	      });
@@ -44988,9 +44975,6 @@
 	    value: function removeHighlights(hoverContainer) {
 	      hoverContainer.remove.apply(hoverContainer, _toConsumableArray(hoverContainer.children));
 	    }
-
-	    // end hover interaction stuff
-
 	  }, {
 	    key: 'start',
 	    value: function start() {
@@ -45201,7 +45185,7 @@
 	        var selected = points.filter(function (point) {
 	          return (0, _d3Polygon.polygonContains)(polygon, point.test);
 	        });
-	        console.log(selected.map(function (pt) {
+	        console.log('Entities selected:', selected.map(function (pt) {
 	          return pt.ref.idx;
 	        }));
 	        if (selected.length <= 21) {

@@ -42,9 +42,6 @@ class EmbeddingsPane extends React.Component {
   };
 
   onEntitySelection = e => {
-    // TODO: [FIX] There's a bug when two embeddings view are opened,
-    // only the focused one will have its tooltip values updated,
-    // even if hovering over the unfocused view
     this.props.appApi.sendPaneMessage({
       event_type: 'EntitySelected',
       entityId: e.name,
@@ -148,7 +145,6 @@ class Scene extends React.Component {
       }
     }
 
-    console.log('received props');
     if (nextProps.content.data.length !== this.props.content.data.length) {
       this.stop();
       this.setUpScene();
@@ -166,7 +162,7 @@ class Scene extends React.Component {
 
   setUpMouseInteractions() {
     /* ----------------------------------------------------------- */
-    // hover stuff
+    // setup hover
 
     const { renderer, scene, points, camera, circle_sprite, near, far } = this;
 
@@ -238,10 +234,6 @@ class Scene extends React.Component {
   }
 
   setUpScene() {
-    console.log('setting up the scene');
-    // const width = this.mount.clientWidth;
-    // const height = this.mount.clientHeight;
-
     // References:
     // https://blog.fastforwardlabs.com/2017/10/04/using-three-js-for-2d-data-visualization.html
     // https://codepen.io/WebSeed/pen/MEBoRq
@@ -370,12 +362,6 @@ class Scene extends React.Component {
     return angle * (Math.PI / 180);
   }
 
-  /* end utility methods */
-
-  // start hover interaction stuff
-
-  // Hover and tooltip interaction
-
   mouseToThree(mouseX, mouseY) {
     return new THREE.Vector3(
       (mouseX / this.props.width) * 2 - 1,
@@ -416,7 +402,6 @@ class Scene extends React.Component {
   }
 
   sortIntersectsByDistanceToRay(intersects) {
-    // return _.sortBy(intersects, 'distanceToRay');
     return [...intersects].sort((a, b) => a.distanceToRay - b.distanceToRay);
   }
 
@@ -444,8 +429,6 @@ class Scene extends React.Component {
   removeHighlights(hoverContainer) {
     hoverContainer.remove(...hoverContainer.children);
   }
-
-  // end hover interaction stuff
 
   start() {
     if (!this.frameId) {
@@ -637,7 +620,7 @@ class LassoSelection extends React.Component {
         const selected = points.filter(point =>
           polygonContains(polygon, point.test)
         );
-        console.log(selected.map(pt => pt.ref.idx));
+        console.log('Entities selected:', selected.map(pt => pt.ref.idx));
         if (selected.length <= 21) {
           lassoInstance.reset();
           return;
