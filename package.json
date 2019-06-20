@@ -24,7 +24,7 @@
   },
   "scripts": {
     "dev": "webpack --watch --progress --colors",
-    "build": "webpack",
+    "build": "webpack -p",
     "buckbuild": "$_ ./node_modules/webpack/bin/webpack.js -p",
     "lint": "eslint js/."
   },
