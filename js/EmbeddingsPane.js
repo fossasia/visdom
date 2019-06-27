@@ -500,7 +500,7 @@ class Scene extends React.Component {
                 this.props.onGoBack();
               }}
             >
-              ←
+              {'\u2190'}
             </div>
           ) : null}
           <div

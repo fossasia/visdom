@@ -96,7 +96,7 @@ export default function lasso() {
       closePath.remove();
       closePath = null;
 
-      // succesfully closed
+      // successfully closed
       if (
         distance(lassoPolygon[0], lassoPolygon[lassoPolygon.length - 1]) <
         closeDistance

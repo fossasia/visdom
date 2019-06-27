@@ -831,8 +831,9 @@ class UpdateHandler(BaseHandler):
 
         p = handler.state[eid]['jsons'][args['win']]
 
-        if not (p['type'] == 'text' or p['type'] == 'image_history' or p['type'] == 'embeddings' or
-                p['content']['data'][0]['type'] in
+        if not (p['type'] == 'text' or p['type'] == 'image_history'
+                or p['type'] == 'embeddings'
+                or p['content']['data'][0]['type'] in
                 ['scatter', 'scattergl', 'custom']):
             handler.write(
                 'win is not scatter, custom, image_history, embeddings, or text; '

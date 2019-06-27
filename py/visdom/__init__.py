@@ -35,7 +35,6 @@ import warnings
 import time
 import errno
 import io
-import random
 from functools import wraps
 
 try:
@@ -52,14 +51,18 @@ try:
     def do_tsne(X):
         num_entities = len(X)
 
-        # the number of entities provided must be at least 3x the perplexity 
+        # the number of entities provided must be at least 3x the perplexity
         perplexity = 50 if num_entities >= 150 else \
             num_entities // 3 if num_entities >= 21 else 7
-        Y = bhtsne.run_bh_tsne(X, initial_dims=X.shape[1], perplexity=perplexity, verbose=True)
+        Y = bhtsne.run_bh_tsne(X,
+            initial_dims=X.shape[1],
+            perplexity=perplexity,
+            verbose=True
+        )
         xmin, xmax = min(Y[:, 0]), max(Y[:, 0])
         ymin, ymax = min(Y[:, 1]), max(Y[:, 1])
-        normx = ((Y[:, 0] - xmin) / (xmax - xmin))*2-1
-        normy = ((Y[:, 1] - ymin) / (ymax - ymin))*2-1
+        normx = ((Y[:, 0] - xmin) / (xmax - xmin)) * 2 - 1
+        normy = ((Y[:, 1] - ymin) / (ymax - ymin)) * 2 - 1
         normY = list(zip(normx, normy))
         return normY
 except ImportError:

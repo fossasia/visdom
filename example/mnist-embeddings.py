@@ -19,8 +19,11 @@ import sys
 try:
     features = np.loadtxt("example/data/mnist2500_X.txt")
     labels = np.loadtxt("example/data/mnist2500_labels.txt")
-except:
-    print("Unable to find files mmist2500_X.txt and mnist2500_labels.txt in the example/data/ directory. Please download from https://github.com/lvdmaaten/lvdmaaten.github.io/blob/master/tsne/code/tsne_python.zip")
+except OSError:
+    print("Unable to find files mmist2500_X.txt and mnist2500_labels.txt "
+          "in the example/data/ directory. Please download from "
+          "https://github.com/lvdmaaten/lvdmaaten.github.io/"
+          "blob/master/tsne/code/tsne_python.zip")
     sys.exit()
 
 vis = visdom.Visdom()
@@ -39,7 +42,7 @@ for feat in features:
 def get_mnist_for_index(id):
     image_data = image_datas[id]
     display_data = 'data:image/png;base64,' + image_data
-    return "<img src='"+display_data+"' />"
+    return "<img src='" + display_data + "' />"
 
 
 vis.embeddings(features, labels, data_getter=get_mnist_for_index, data_type='html')
