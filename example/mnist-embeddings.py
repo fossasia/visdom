@@ -14,9 +14,15 @@ import numpy as np
 from PIL import Image  # type: ignore
 import base64 as b64  # type: ignore
 from six import BytesIO
+import sys
 
-features = np.loadtxt("example/data/mnist2500_X.txt")
-labels = np.loadtxt("example/data/mnist2500_labels.txt")
+try:
+    features = np.loadtxt("example/data/mnist2500_X.txt")
+    labels = np.loadtxt("example/data/mnist2500_labels.txt")
+except:
+    print("Unable to find files mmist2500_X.txt and mnist2500_labels.txt in the example/data/ directory. Please download from https://github.com/lvdmaaten/lvdmaaten.github.io/blob/master/tsne/code/tsne_python.zip")
+    sys.exit()
+
 vis = visdom.Visdom()
 
 image_datas = []
