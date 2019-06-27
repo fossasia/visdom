@@ -39,6 +39,7 @@ const PropertiesPane = require('./PropertiesPane');
 const TextPane = require('./TextPane');
 const ImagePane = require('./ImagePane');
 const PlotPane = require('./PlotPane');
+const EmbeddingsPane = require('./EmbeddingsPane');
 
 const WidthProvider = require('./Width').default;
 
@@ -57,6 +58,7 @@ const PANES = {
   plot: PlotPane,
   text: TextPane,
   properties: PropertiesPane,
+  embeddings: EmbeddingsPane,
 };
 
 const PANE_SIZE = {
@@ -64,6 +66,7 @@ const PANE_SIZE = {
   image_history: [20, 20],
   plot: [30, 24],
   text: [20, 20],
+  embeddings: [20, 20],
   properties: [20, 20],
 };
 
@@ -253,8 +256,17 @@ class App extends React.Component {
     return (w + MARGIN) / (colWidth + MARGIN);
   };
 
+  w2p = p => {
+    let colWidth = this.colWidth();
+    return p * (colWidth + MARGIN) - MARGIN;
+  };
+
   p2h = h => {
     return (h + MARGIN) / (ROW_HEIGHT + MARGIN);
+  };
+
+  h2p = p => {
+    return p * (ROW_HEIGHT + MARGIN) - MARGIN;
   };
 
   keyLS = key => {
@@ -911,6 +923,21 @@ class App extends React.Component {
     });
   };
 
+  sendEmbeddingPop = data => {
+    if (this.state.focusedPaneID === null || this.state.readonly) {
+      return;
+    }
+    let finalData = {
+      target: this.state.focusedPaneID,
+      eid: this.state.envID,
+    };
+    $.extend(finalData, data);
+    this.sendSocketMessage({
+      cmd: 'pop_embeddings_pane',
+      data: finalData,
+    });
+  };
+
   exportLayoutsToServer(layoutLists) {
     // pushes layouts to the server
     let objForm = {};
@@ -1521,6 +1548,9 @@ class App extends React.Component {
         let panelayout = getLayoutItem(this.state.layout, id);
         let filter = this.getValidFilter(this.state.filter);
         let isVisible = pane.title.match(filter);
+
+        const PANE_TITLE_BAR_HEIGHT = 14;
+
         return (
           <div key={pane.id} className={isVisible ? '' : 'hidden-window'}>
             <Comp
@@ -1532,7 +1562,12 @@ class App extends React.Component {
               isFocused={pane.id === this.state.focusedPaneID}
               w={panelayout.w}
               h={panelayout.h}
-              appApi={{ sendPaneMessage: this.sendPaneMessage }}
+              width={this.w2p(panelayout.w)}
+              height={this.h2p(panelayout.h) - PANE_TITLE_BAR_HEIGHT}
+              appApi={{
+                sendPaneMessage: this.sendPaneMessage,
+                sendEmbeddingPop: this.sendEmbeddingPop,
+              }}
             />
           </div>
         );

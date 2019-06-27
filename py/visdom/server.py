@@ -172,6 +172,7 @@ class Application(tornado.web.Application):
                 tornado_settings["cookie_secret"] = fn.read()
 
         tornado_settings['static_url_prefix'] = self.base_url + "/static/"
+        tornado_settings['debug'] = True
         handlers = [
             (r"%s/events" % self.base_url, PostHandler, {'app': self}),
             (r"%s/update" % self.base_url, UpdateHandler, {'app': self}),
@@ -420,12 +421,24 @@ class SocketHandler(BaseWebSocketHandler):
         elif cmd == 'forward_to_vis':
             packet = msg.get('data')
             environment = self.state[packet['eid']]
-            packet['pane_data'] = environment['jsons'][packet['target']]
+            if packet.get('pane_data') is not False:
+                packet['pane_data'] = environment['jsons'][packet['target']]
             send_to_sources(self, msg.get('data'))
         elif cmd == 'layout_item_update':
             eid = msg.get('eid')
             win = msg.get('win')
             self.state[eid]['reload'][win] = msg.get('data')
+        elif cmd == 'pop_embeddings_pane':
+            packet = msg.get('data')
+            eid = packet['eid']
+            win = packet['target']
+            p = self.state[eid]['jsons'][win]
+            p['content']['selected'] = None
+            p['content']['data'] = p['old_content'].pop()
+            if len(p['old_content']) == 0:
+                p['content']['has_previous'] = False
+            p['contentID'] = get_rand_id()
+            broadcast(self, p, eid)
 
     def on_close(self):
         if self in list(self.subs.values()):
@@ -657,6 +670,13 @@ def window(args):
         })
     elif ptype in ['image', 'text', 'properties']:
         p.update({'content': args['data'][0]['content'], 'type': ptype})
+    elif ptype in ['embeddings']:
+        p.update({
+            'content': args['data'][0]['content'],
+            'type': ptype,
+            'old_content': [],  # Used to cache previous to prevent recompute
+        })
+        p['content']['has_previous'] = False
     else:
         p['content'] = {'data': args['data'], 'layout': args['layout']}
         p['type'] = 'plot'
@@ -847,7 +867,20 @@ class UpdateHandler(BaseHandler):
         if p['type'] == 'text':
             p['content'] += "<br>" + args['data'][0]['content']
             return p
-
+        if p['type'] == 'embeddings':
+            # TODO embeddings updates should be handled outside of the regular
+            # update flow, as update packets are easy to create manually and
+            # expensive to calculate otherwise
+            if args['data']['update_type'] == 'EntitySelected':
+                p['content']['selected'] = args['data']['selected']
+            elif args['data']['update_type'] == 'RegionSelected':
+                p['content']['selected'] = None
+                print(len(p['content']['data']))
+                p['old_content'].append(p['content']['data'])
+                p['content']['has_previous'] = True
+                p['content']['data'] = args['data']['points']
+                print(len(p['content']['data']))
+            return p
         if p['type'] == 'image_history':
             utype = args['data'][0]['type']
             if utype == 'image_history':
@@ -860,7 +893,6 @@ class UpdateHandler(BaseHandler):
                 selected_not_neg = max(0, selected)
                 selected_exists = min(len(p['content'])-1, selected_not_neg)
                 p['selected'] = selected_exists
-            return p
 
         pdata = p['content']['data']
 
@@ -939,11 +971,12 @@ class UpdateHandler(BaseHandler):
 
         p = handler.state[eid]['jsons'][args['win']]
 
-        if not (p['type'] == 'text' or p['type'] == 'image_history' or
-                p['content']['data'][0]['type'] in
+        if not (p['type'] == 'text' or p['type'] == 'image_history'
+                or p['type'] == 'embeddings'
+                or p['content']['data'][0]['type'] in
                 ['scatter', 'scattergl', 'custom']):
             handler.write(
-                'win is not scatter, custom, image_history, or text; '
+                'win is not scatter, custom, image_history, embeddings, or text; '
                 'was {}'.format(p['content']['data'][0]['type']))
             return
 

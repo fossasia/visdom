@@ -414,6 +414,20 @@ This function draws a Plotly `Figure` object. It does not explicitly take option
 
 > **Note** You must have the `plotly` Python package installed to use this function. It can typically be installed by running `pip install plotly`.
 
+#### vis.embeddings
+
+This function visualizes a collection of features using the [Barnes-Hut t-SNE algorithm](https://github.com/lvdmaaten/bhtsne).
+
+The function accepts the following arguments:
+- `features`: a list of tensors
+- `labels`: a list of corresponding labels for the tensors provided for `features`
+- `data_getter=fn`: (optional) a function that takes as a parameter an index into the features array and returns a summary representation of the tensor. If this is set, `data_type` must also be set.
+- `data_type=str`: (optional) currently the only acceptable value here is `"html"`
+
+We currently assume that there are no more than 10 unique labels, in the future we hope to provide a colormap in opts for other cases.
+
+From the UI you can also draw a lasso around a subset of features. This will rerun the t-SNE visualization on the selected subset.
+
 #### vis.save
 This function saves the `envs` that are alive on the visdom server. It takes input a list (in python) or table (in lua) of env ids to be saved.
 

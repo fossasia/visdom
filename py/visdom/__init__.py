@@ -43,6 +43,36 @@ try:
 except ImportError:
     BS4_AVAILABLE = False
 
+try:
+    # TODO try to import https://github.com/CannyLab/tsne-cuda first? will be
+    # faster but requires more setup
+    import visdom.extra_deps.bhtsne.bhtsne as bhtsne
+
+    def do_tsne(X):
+        num_entities = len(X)
+
+        # the number of entities provided must be at least 3x the perplexity
+        perplexity = 50 if num_entities >= 150 else \
+            num_entities // 3 if num_entities >= 21 else 7
+        Y = bhtsne.run_bh_tsne(X, initial_dims=X.shape[1], perplexity=perplexity,
+                                verbose=True)
+        xmin, xmax = min(Y[:, 0]), max(Y[:, 0])
+        ymin, ymax = min(Y[:, 1]), max(Y[:, 1])
+        normx = ((Y[:, 0] - xmin) / (xmax - xmin)) * 2 - 1
+        normy = ((Y[:, 1] - ymin) / (ymax - ymin)) * 2 - 1
+        normY = list(zip(normx, normy))
+        return normY
+except ImportError:
+    def do_tsne(X):
+        raise Exception(
+            "In order to use the embeddings feature, you'll "
+            "need to install a backend to support the calculation. "
+            "Currently we support the bhtsne implementation at "
+            "https://github.com/lvdmaaten/bhtsne/, and you can install "
+            "this by cloning it into the /py/visdom/extra_deps/ directory "
+            "and running the installation steps as listed on that github "
+            "in the created /py/visdom/extra_deps/bhtsne directory."
+        )
 
 here = os.path.abspath(os.path.dirname(__file__))
 
@@ -424,13 +454,16 @@ class Visdom(object):
             assert password, 'no password given for authentication'
             self.password = hashlib.sha256(password.encode("utf-8")).hexdigest()
 
+        self.win_data = {}
         if self.offline:
             self.use_socket = False
             assert self.log_to_filename is not None, (
                 'Must use a log_to_filename for offline visdom')
 
             return  # No need for the rest of this setup in offline visdom
+        # storage for data associated with specific windows
 
+        # Setup for online interactions
         self._send({
             'eid': env,
         }, endpoint='env/' + env)
@@ -505,7 +538,15 @@ class Visdom(object):
             if 'target' in message:
                 for handler in list(
                         self.event_handlers.get(message['target'], [])):
-                    handler(message)
+                    try:
+                        handler(message)
+                    except Exception as e:
+                        logger.warn(
+                            'Visdom failed to handle a handler for {}: {}'
+                            ''.format(message, e)
+                        )
+                        import traceback
+                        traceback.print_exc()
 
         def on_error(ws, error):
             if hasattr(error, "errno") and  error.errno == errno.ECONNREFUSED:
@@ -574,7 +615,7 @@ class Visdom(object):
         build the required JSON yourself. `endpoint` specifies the destination
         Tornado server endpoint for the request.
 
-        If `create=True`, then if `win=None` in the message a new window will be 
+        If `create=True`, then if `win=None` in the message a new window will be
         created with a random name. If `create=False`, `win=None` indicates the
         operation should be applied to all windows.
         """
@@ -663,7 +704,7 @@ class Visdom(object):
     def set_window_data(self, data, win=None, env=None):
         """
         This function sets all the window data for a specified window in
-        an environment. Use `win=None` to set the data for all the windows in 
+        an environment. Use `win=None` to set the data for all the windows in
         the given environment. Env defaults to main. `data` should be as returned
         from `get_window_data`.
         """
@@ -964,6 +1005,135 @@ class Visdom(object):
         except ImportError:
             raise RuntimeError(
                 "Plotly must be installed to plot Plotly figures")
+
+    def _register_embeddings(self, features, labels, points, data_getter,
+                             data_type, win, env, opts):
+        self.win_data[win] = {
+            'features': features,
+            'labels': labels,
+            'points': points,
+            'data': data_getter,
+            'data_type': data_type,
+            'env': env,
+            'opts': opts,
+        }
+
+        def embedding_event_handler(event):
+            window = event["target"]
+            if event['event_type'] == 'EntitySelected':
+                # Hover events lead us to get the expected element and serve
+                # them via an append event
+                entity_id = event["entityId"]
+                id = event["idx"]
+                if data_getter is not None:
+                    if data_type == 'html':
+                        selected = {
+                            "html": data_getter(int(id))
+                        }
+                else:
+                    selected = {
+                        "html": "<div>No preview available</div>"
+                    }
+
+                selected['entityId'] = entity_id
+                send_data = {
+                    "update_type": "EntitySelected",
+                    "selected": selected
+                }
+                self._send({
+                    'data': send_data,
+                    'win': window,
+                    'eid': env,
+                    'opts': opts,
+                }, endpoint='update')
+            elif event['event_type'] == 'RegionSelected':
+                # lasso events give us a subset of the data to re-run tsne on
+                # so we generate
+                selection = event["selectedIdxs"]
+                sub_features = np.take(features, selection, axis=0)
+                Y = do_tsne(sub_features)
+                label_set = list(set(labels))
+                points = [{
+                    "group": int(label_set.index(labels[i])),
+                    "name": "Entity {}".format(i),
+                    "position": xy,
+                    "label": labels[i],
+                    "idx": i,
+                } for i, xy in zip(selection, Y)]
+                send_data = {
+                    'update_type': 'RegionSelected',
+                    'points': points,
+                }
+            else:
+                return  # Unsupported event
+            self._send({
+                'data': send_data,
+                'win': window,
+                'eid': env,
+                'opts': opts,
+            }, endpoint='update')
+
+        self.register_event_handler(embedding_event_handler, win)
+
+    def embeddings(self, features, labels, data_getter=None, data_type=None,
+                   win=None, env=None, opts=None):
+        """
+        This function handles taking arbitrary features and compiling them into
+        a set of embeddings. It then leverages the _register_embeddings to
+        actually run the visualization.
+
+        We assume that there are no more than 10 unique labels at the moment,
+        in the future we can include a colormap in opts for other cases
+
+        If you want to provide a preview on hover for your data, you can supply
+        a getting function for data_getter and a data_type. At the moment the
+        only data_type supported is 'html', which means your data_getter takes
+        in an index into features that is currently selected and returns
+        the html for what you'd like to display.
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        loading_message = {
+            'content': {'isLoading': True},
+            'type': 'embeddings',
+        }
+        win = self._send({
+            'data': [loading_message],
+            'win': win,
+            'eid': env,
+            'opts': opts,
+        }, endpoint='events')
+
+        Y = do_tsne(features)
+
+        label_set = list(set(labels))
+        points = [{
+            "group": int(label_set.index(labels[i])),
+            "name": "Entity {}".format(i),
+            "label": labels[i],
+            "position": xy,
+            "idx": i,
+        } for i, xy in enumerate(Y)]
+        send_data = [{
+            'content': {'data': points},
+            'type': 'embeddings',
+        }]
+
+        win = self._send({
+            'data': send_data,
+            'win': win,
+            'eid': env,
+            'opts': opts,
+        }, endpoint='events')
+
+        # Register the handlers for managing this embeddings pane
+        # TODO allow disabling this in a way that pushes onus for calculating
+        # to the server or frontend client
+        self._register_embeddings(features, labels, points, data_getter,
+                                  data_type, win, env, opts)
+        return win
 
     @pytorch_wrap
     def image(self, img, win=None, env=None, opts=None):
