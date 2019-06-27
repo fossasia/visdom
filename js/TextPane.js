@@ -35,7 +35,7 @@ class TextPane extends React.Component {
   componentDidMount() {
     EventSystem.subscribe('global.event', this.onEvent);
   }
-  UNSAFE_componentWillMount() {
+  componentWillUnmount() {
     EventSystem.unsubscribe('global.event', this.onEvent);
   }
 

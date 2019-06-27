@@ -55,7 +55,7 @@ class ImagePane extends React.Component {
     EventSystem.subscribe('global.event', this.onEvent);
   }
 
-  UNSAFE_componentWillMount() {
+  componentWillUnmount() {
     EventSystem.unsubscribe('global.event', this.onEvent);
   }
 

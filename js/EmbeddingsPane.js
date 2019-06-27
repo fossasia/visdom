@@ -68,7 +68,7 @@ class EmbeddingsPane extends React.Component {
   componentDidMount() {
     EventSystem.subscribe('global.event', this.onEvent);
   }
-  UNSAFE_componentWillMount() {
+  componentWillUnmount() {
     EventSystem.unsubscribe('global.event', this.onEvent);
   }
 
@@ -134,11 +134,13 @@ class Scene extends React.Component {
     this.animate = this.animate.bind(this);
   }
 
-  UNSAFE_componentWillReceiveProps(nextProps) {
-    this.setState({ detailsLoading: false });
+  componentDidUpdate(prevProps) {
+    if (this.state.detailsLoading !== false) {
+      this.setState({ detailsLoading: false });
+    }
 
-    if (nextProps.interactive !== this.props.interactive) {
-      if (nextProps.interactive) {
+    if (this.props.interactive !== prevProps.interactive) {
+      if (this.props.interactive) {
         // set up handlers
         this.setUpMouseInteractions();
       } else {
@@ -147,7 +149,7 @@ class Scene extends React.Component {
       }
     }
 
-    if (nextProps.content.data.length !== this.props.content.data.length) {
+    if (this.props.content.data.length !== prevProps.content.data.length) {
       this.stop();
       this.setUpScene();
     }

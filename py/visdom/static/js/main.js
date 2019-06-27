@@ -44005,8 +44005,8 @@
 	      _EventSystem2.default.subscribe('global.event', this.onEvent);
 	    }
 	  }, {
-	    key: 'UNSAFE_componentWillMount',
-	    value: function UNSAFE_componentWillMount() {
+	    key: 'componentWillUnmount',
+	    value: function componentWillUnmount() {
 	      _EventSystem2.default.unsubscribe('global.event', this.onEvent);
 	    }
 	  }, {
@@ -44205,8 +44205,8 @@
 	      _EventSystem2.default.subscribe('global.event', this.onEvent);
 	    }
 	  }, {
-	    key: 'UNSAFE_componentWillMount',
-	    value: function UNSAFE_componentWillMount() {
+	    key: 'componentWillUnmount',
+	    value: function componentWillUnmount() {
 	      _EventSystem2.default.unsubscribe('global.event', this.onEvent);
 	    }
 	  }, {
@@ -44588,8 +44588,8 @@
 	      _EventSystem2.default.subscribe('global.event', this.onEvent);
 	    }
 	  }, {
-	    key: 'UNSAFE_componentWillMount',
-	    value: function UNSAFE_componentWillMount() {
+	    key: 'componentWillUnmount',
+	    value: function componentWillUnmount() {
 	      _EventSystem2.default.unsubscribe('global.event', this.onEvent);
 	    }
 	  }, {
@@ -44655,12 +44655,14 @@
 	  }
 
 	  _createClass(Scene, [{
-	    key: 'UNSAFE_componentWillReceiveProps',
-	    value: function UNSAFE_componentWillReceiveProps(nextProps) {
-	      this.setState({ detailsLoading: false });
+	    key: 'componentDidUpdate',
+	    value: function componentDidUpdate(prevProps) {
+	      if (this.state.detailsLoading !== false) {
+	        this.setState({ detailsLoading: false });
+	      }
 
-	      if (nextProps.interactive !== this.props.interactive) {
-	        if (nextProps.interactive) {
+	      if (this.props.interactive !== prevProps.interactive) {
+	        if (this.props.interactive) {
 	          // set up handlers
 	          this.setUpMouseInteractions();
 	        } else {
@@ -44669,7 +44671,7 @@
 	        }
 	      }
 
-	      if (nextProps.content.data.length !== this.props.content.data.length) {
+	      if (this.props.content.data.length !== prevProps.content.data.length) {
 	        this.stop();
 	        this.setUpScene();
 	      }
