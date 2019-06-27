@@ -73,10 +73,12 @@ class EmbeddingsPane extends React.Component {
   }
 
   handleDownload = () => {
-    var blob = new Blob([this.props.content], { type: 'text/plain' });
+    var blob = new Blob([JSON.stringify(this.props.content.data)], {
+      type: 'text/plain',
+    });
     var url = window.URL.createObjectURL(blob);
     var link = document.createElement('a');
-    link.download = 'visdom_text.txt';
+    link.download = 'visdom_tsne_data.txt';
     link.href = url;
     link.click();
   };
