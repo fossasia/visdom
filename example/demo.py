@@ -81,9 +81,22 @@ def run_demo(viz):
         print('Skipped video file example')
 
     # image demo
-    viz.image(
+    img_callback_win = viz.image(
         np.random.rand(3, 512, 256),
-        opts=dict(title='Random!', caption='How random.'),
+        opts=dict(title='Random!', caption='Click me!'),
+    )
+
+    img_coord_text = [viz.text("Coords: ")]  # wrap in a list to pass by a pointer
+    def img_click_callback(event, img_coord_text):
+        if event['event_type'] != 'Click':
+            return
+
+        coords = "x: {}, y: {}; ".format(event['image_coord']['x'], event['image_coord']['y'])
+        img_coord_text[0] = viz.text(coords, win=img_coord_text[0], append=True)
+
+    viz.register_event_handler(
+        lambda event: img_click_callback(event, img_coord_text),
+        img_callback_win,
     )
 
     # image demo save as jpg

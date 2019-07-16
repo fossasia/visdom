@@ -1642,6 +1642,7 @@ class App extends React.Component {
           tabIndex="-1"
           className="no-focus"
           onBlur={this.blurPane}
+          onClick={this.publishEvent}
           onKeyUp={this.publishEvent}
           onKeyDown={this.publishEvent}
           onKeyPress={this.publishEvent}
