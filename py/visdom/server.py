@@ -208,7 +208,8 @@ class Application(tornado.web.Application):
         if self.env_path is None:
             warn_once(
                 'Saving and loading to disk has no effect when running with '
-                'env_path=None.'
+                'env_path=None.',
+                RuntimeWarning
             )
             return
         layout_filepath = os.path.join(self.env_path, 'view', LAYOUT_FILE)
@@ -219,7 +220,8 @@ class Application(tornado.web.Application):
         if self.env_path is None:
             warn_once(
                 'Saving and loading to disk has no effect when running with '
-                'env_path=None.'
+                'env_path=None.',
+                RuntimeWarning
             )
             return ""
         layout_filepath = os.path.join(self.env_path, 'view', LAYOUT_FILE)
@@ -236,7 +238,8 @@ class Application(tornado.web.Application):
         if env_path is None:
             warn_once(
                 'Saving and loading to disk has no effect when running with '
-                'env_path=None.'
+                'env_path=None.',
+                RuntimeWarning
             )
             return {'main': {'jsons': {}, 'reload': {}}}
         ensure_dir_exists(env_path)

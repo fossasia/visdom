@@ -16,7 +16,7 @@ import threading
 import websocket  # type: ignore
 import json
 import hashlib
-import collections
+import collections.abc
 import math
 import re
 import base64
