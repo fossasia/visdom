@@ -181,6 +181,8 @@ class Application(tornado.web.Application):
             (r"%s/socket_wrap" % self.base_url, SocketWrap, {'app': self}),
             (r"%s/vis_socket" % self.base_url,
                 VisSocketHandler, {'app': self}),
+            (r"%s/vis_socket_wrap" % self.base_url,
+                VisSocketWrap, {'app': self}),
             (r"%s/env/(.*)" % self.base_url, EnvHandler, {'app': self}),
             (r"%s/compare/(.*)" % self.base_url,
                 CompareHandler, {'app': self}),
@@ -335,6 +337,82 @@ class VisSocketHandler(BaseWebSocketHandler):
             self.sources.pop(self.sid, None)
 
 
+class VisSocketWrapper():
+    def __init__(self, app):
+        self.state = app.state
+        self.subs = app.subs
+        self.sources = app.sources
+        self.port = app.port
+        self.env_path = app.env_path
+        self.login_enabled = app.login_enabled
+        self.app = app
+        self.messages = []
+        self.last_read_time = time.time()
+        self.open()
+        try:
+            if not self.app.socket_wrap_monitor.is_running():
+                self.app.socket_wrap_monitor.start()
+        except AttributeError:
+            self.app.socket_wrap_monitor = tornado.ioloop.PeriodicCallback(
+                self.socket_wrap_monitor_thread, 15000
+            )
+            self.app.socket_wrap_monitor.start()
+
+    # TODO refactor the two socket wrappers into a wrapper class
+    def socket_wrap_monitor_thread(self):
+        if len(self.subs) > 0 or len(self.sources) > 0:
+            for sub in list(self.subs.values()):
+                if time.time() - sub.last_read_time > MAX_SOCKET_WAIT:
+                    sub.close()
+            for sub in list(self.sources.values()):
+                if time.time() - sub.last_read_time > MAX_SOCKET_WAIT:
+                    sub.close()
+        else:
+            self.app.socket_wrap_monitor.stop()
+
+    def open(self):
+        if self.login_enabled and not self.current_user:
+            print("AUTH Failed in SocketHandler")
+            self.close()
+            return
+        self.sid = get_rand_id()
+        if self not in list(self.sources.values()):
+            self.eid = 'main'
+            self.sources[self.sid] = self
+        logging.info('Mocking visdom socket: {}'.format(self.sid))
+
+        self.write_message(
+            json.dumps({'command': 'alive', 'data': 'vis_alive'}))
+
+    def on_message(self, message):
+        logging.info('from visdom client: {}'.format(message))
+        msg = tornado.escape.json_decode(tornado.escape.to_basestring(message))
+
+        cmd = msg.get('cmd')
+        if cmd == 'echo':
+            for sub in self.sources.values():
+                sub.write_message(json.dumps(msg))
+
+    def close(self):
+        if self in list(self.sources.values()):
+            self.sources.pop(self.sid, None)
+
+    def write_message(self, msg):
+        self.messages.append(msg)
+
+    def get_messages(self):
+        to_send = []
+        while len(self.messages) > 0:
+            message = self.messages.pop()
+            if type(message) is dict:
+                # Not all messages are being formatted the same way (JSON)
+                # TODO investigate
+                message = json.dumps(message)
+            to_send.append(message)
+        self.last_read_time = time.time()
+        return to_send
+
+
 class SocketHandler(BaseWebSocketHandler):
     def initialize(self, app):
         self.port = app.port
@@ -477,8 +555,12 @@ class ClientSocketWrapper():
             self.app.socket_wrap_monitor.start()
 
     def socket_wrap_monitor_thread(self):
-        if len(self.subs) > 0:
+        # TODO mark wrapped subs and sources separately
+        if len(self.subs) > 0 or len(self.sources) > 0:
             for sub in list(self.subs.values()):
+                if time.time() - sub.last_read_time > MAX_SOCKET_WAIT:
+                    sub.close()
+            for sub in list(self.sources.values()):
                 if time.time() - sub.last_read_time > MAX_SOCKET_WAIT:
                     sub.close()
         else:
@@ -607,7 +689,6 @@ class BaseHandler(tornado.web.RequestHandler):
                 traceback.format_exception(*kwargs["exc_info"])))
         if self.settings.get("debug") and "exc_info" in kwargs:
             logging.error("rendering error page")
-            import traceback
             exc_info = kwargs["exc_info"]
             # exc_info is a tuple consisting of:
             # 1. The class of the Exception
@@ -1086,6 +1167,56 @@ class SocketWrap(BaseHandler):
         """Create a new socket wrapper for this requester, return the id"""
         new_sub = ClientSocketWrapper(self.app)
         self.write(json.dumps({'success': True, 'sid': new_sub.sid}))
+
+
+# TODO refactor socket wrappers to one class
+class VisSocketWrap(BaseHandler):
+    def initialize(self, app):
+        self.state = app.state
+        self.subs = app.subs
+        self.sources = app.sources
+        self.port = app.port
+        self.env_path = app.env_path
+        self.login_enabled = app.login_enabled
+        self.app = app
+
+    @check_auth
+    def post(self):
+        """Either write a message to the socket, or query what's there"""
+        # TODO formalize failure reasons
+        args = tornado.escape.json_decode(
+            tornado.escape.to_basestring(self.request.body)
+        )
+        type = args.get('message_type')
+        sid = args.get('sid')
+
+        if sid is None:
+            new_sub = VisSocketWrapper(self.app)
+            self.write(json.dumps({'success': True, 'sid': new_sub.sid}))
+            return
+
+        socket_wrap = self.sources.get(sid)
+        # ensure a wrapper still exists for this connection
+        if socket_wrap is None:
+            self.write(json.dumps({'success': False, 'reason': 'closed'}))
+            return
+
+        # handle the requests
+        if type == 'query':
+            messages = socket_wrap.get_messages()
+            self.write(json.dumps({
+                'success': True, 'messages': messages
+            }))
+        elif type == 'send':
+            msg = args.get('message')
+            if msg is None:
+                self.write(json.dumps({'success': False, 'reason': 'no msg'}))
+            else:
+                socket_wrap.on_message(msg)
+                self.write(json.dumps({'success': True}))
+        else:
+            self.write(json.dumps({'success': False, 'reason': 'invalid'}))
+
 
 class DeleteEnvHandler(BaseHandler):
     def initialize(self, app):

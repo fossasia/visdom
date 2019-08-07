@@ -16,7 +16,10 @@ import threading
 import websocket  # type: ignore
 import json
 import hashlib
-import collections.abc
+try:
+    from collections.abc import Sequence
+except ImportError:
+    from collections import Sequence
 import math
 import re
 import base64
@@ -124,7 +127,7 @@ def isndarray(n):
 #       nan-aware ones, e.g., `X.max` => `np.nanmax(X)`.
 def nan2none(l):
     for idx, val in enumerate(l):
-        if isinstance(val, collections.abc.Sequence):
+        if isinstance(val, Sequence):
             l[idx] = nan2none(l[idx])
         elif isnum(val) and math.isnan(val):
             l[idx] = None
@@ -407,7 +410,8 @@ class Visdom(object):
         username=None,
         password=None,
         proxies=None,
-        offline=False
+        offline=False,
+        use_polling=False,
     ):
         parsed_url = urlparse(server)
         if not parsed_url.scheme:
@@ -430,7 +434,7 @@ class Visdom(object):
         self.event_handlers = {}  # Haven't registered any events
         self.socket_alive = False
         self.socket_connection_achieved = False
-        self.use_socket = use_incoming_socket
+        self.use_socket = use_incoming_socket or use_polling
         # Flag to indicate whether to raise errors or suppress them
         self.raise_exceptions = raise_exceptions
         self.log_to_filename = log_to_filename
@@ -471,6 +475,8 @@ class Visdom(object):
         # when talking to a server, get a backchannel
         if send and use_incoming_socket:
             self.setup_socket()
+        elif send and use_polling:
+            self.setup_polling()
         elif send and not use_incoming_socket:
             logger.warn(
                 'Without the incoming socket you cannot receive events from '
@@ -521,7 +527,59 @@ class Visdom(object):
     def clear_event_handlers(self, target):
         self.event_handlers[target] = []
 
-    def setup_socket(self):
+    def setup_polling(self):
+        # TODO merge with setup_socket?
+        # Setup socket to server
+        def on_message(message):
+            message = json.loads(message)
+            if 'command' in message:
+                # Handle server commands
+                if message['command'] == 'alive':
+                    if 'data' in message and message['data'] == 'vis_alive':
+                        logger.info('Visdom successfully connected to server')
+                        self.socket_alive = True
+                        self.socket_connection_achieved = True
+                    else:
+                        logger.warn('Visdom server failed handshake, may not '
+                                    'be properly connected')
+            if 'target' in message:
+                for handler in list(
+                        self.event_handlers.get(message['target'], [])):
+                    handler(message)
+
+        def on_close(ws):
+            self.socket_alive = False
+
+        def run_socket(*args):
+            # open a socket
+            resp_json = self._handle_post(
+                "{0}:{1}{2}/vis_socket_wrap".format(self.server, self.port,
+                                                    self.base_url),
+                data=json.dumps({'message_type': 'init'}),
+            )
+            resp = json.loads(resp_json)
+            self.vis_sid = resp['sid']
+            while self.use_socket:
+                resp_json = self._handle_post(
+                    "{0}:{1}{2}/vis_socket_wrap".format(self.server, self.port,
+                                                        self.base_url),
+                    data=json.dumps(
+                        {'message_type': 'query', 'sid': self.vis_sid}
+                    ),
+                )
+                resp = json.loads(resp_json)
+                for msg in resp['messages']:
+                    on_message(msg)
+                time.sleep(0.1)
+
+        # Start listening thread
+        self.socket_thread = threading.Thread(
+            target=run_socket,
+            name='Visdom-Socket-Thread'
+        )
+        self.socket_thread.start()
+
+    def setup_socket(self, polling=False):
         # Setup socket to server
         def on_message(ws, message):
             message = json.loads(message)
@@ -608,6 +666,17 @@ class Visdom(object):
                         msg,
                     ]) + '\n')
 
+    def _handle_post(self, url, data=None):
+        """
+        This function has the responsibility of sending the request to the
+        formatted endpoint. Classes that want to wrap the visdom functionality
+        but use other methodologies may override either this or _send
+        """
+        if data is None:
+            data = {}
+        r = self.session.post(url, data=data)
+        return r.text
+
     def _send(self, msg, endpoint='events', quiet=False, from_log=False, create=True):
         """
         This function sends specified JSON request to the Tornado server. This
@@ -636,12 +705,11 @@ class Visdom(object):
             return msg['win'] if 'win' in msg else True
 
         try:
-            r = self.session.post(
+            return self._handle_post(
                 "{0}:{1}{2}/{3}".format(self.server, self.port,
                                         self.base_url, endpoint),
                 data=json.dumps(msg),
             )
-            return r.text
         except (
             requests.RequestException, requests.ConnectionError,
             requests.Timeout
