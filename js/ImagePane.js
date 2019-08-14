@@ -37,6 +37,15 @@ class ImagePane extends React.Component {
     if (nextProps.selected !== this.props.selected) {
       this.setState({ selected: nextProps.selected });
     }
+    if (
+      (nextProps.width != this.props.width ||
+        nextProps.height != this.props.height) &&
+      Math.abs(this.state.scale - 1) > Number.EPSILON
+    ) {
+      // Reset the image settings when the user resizes the window. Avoid
+      // constantly resetting the zoom level when user has not zoomed.
+      this.handleReset();
+    }
   };
 
   onEvent = event => {
@@ -171,6 +180,16 @@ class ImagePane extends React.Component {
     });
   };
 
+  // Find the height that preserves the aspect ratio given 'scaledWidth'
+  computeHFromW = scaledWidth => {
+    return Math.ceil((this._natHeight / this._natWidth) * scaledWidth);
+  };
+
+  // Find the width that preserves the aspect ratio given 'scaledHeight'
+  computeWFromH = scaledHeight => {
+    return Math.ceil((this._natWidth / this._natHeight) * scaledHeight);
+  };
+
   render() {
     let content = this.props.content;
     let type = this.props.type;
@@ -225,14 +244,29 @@ class ImagePane extends React.Component {
     if (this._natHeight === null || this._natWidth === null) {
       // Do nothing, don't change the width/height
     } else if (candidateWidth >= candidateHeight) {
-      candidateWidth = Math.ceil(
-        (this._natWidth / this._natHeight) * candidateHeight
-      );
+      // If the width exceeds the height, then we use the height as the limiting
+      // factor
+      let newWidth = this.computeWFromH(candidateHeight);
+      // If the new width would exceed the window boundaries, we need to
+      // instead use the window width as the limiting factor
+      if (newWidth > candidateWidth) {
+        candidateHeight = this.computeHFromW(candidateWidth);
+        imageContainerStyle.alignItems = 'column';
+      } else {
+        candidateWidth = newWidth;
+      }
     } else if (candidateWidth < candidateHeight) {
-      imageContainerStyle.alignItems = 'column';
-      candidateHeight = Math.ceil(
-        (this._natHeight / this._natWidth) * candidateWidth
-      );
+      // If the height exceeds the width, then we use the width as the limiting
+      // factor
+      let newHeight = this.computeHFromW(candidateWidth);
+      // If the new height would exceed the window boundaries, we need to
+      // instead use the window height as the limiting factor
+      if (newHeight > candidateHeight) {
+        candidateWidth = this.computeWFromH(candidateHeight);
+      } else {
+        imageContainerStyle.alignItems = 'column';
+        candidateHeight = newHeight;
+      }
     }
 
     // During initial render cycle,
