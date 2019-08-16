@@ -195,6 +195,17 @@ The following options can be provided to the server:
 8. `-force_new_cookie` : Flag to reset the secure cookie used by the server, invalidating current login cookies.
 Requires `-enable_login`.
 
+When `-enable_login` flag is provided, the server asks user to input credentials using terminal prompt. Alternatevily,
+you can setup `VISDOM_USE_ENV_CREDENTIALS` env variable, and then provide your username and password via
+`VISDOM_USERNAME` and `VISDOM_PASSWORD` env variables without manually interacting with the terminal. This setup
+is useful in case if you would like to launch `visdom` server from bash script, or from Jupyter notebook.
+```bash
+VISDOM_USERNAME=username
+VISDOM_PASSWORD=password
+VISDOM_USE_ENV_CREDENTIALS=1 visdom -enable_login
+```
+You can also use `VISDOM_COOKIE` variable to provide cookies value if the cookie file wasn't generated, or the 
+flag `-force_new_cookie` was set.
 
 #### Python example
 ```python
