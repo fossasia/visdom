@@ -1892,13 +1892,14 @@ def main(print_func=None):
         if need_to_set_cookie:
             if use_env:
                 cookie_var = 'VISDOM_COOKIE'
-                env_cookie = os.environ(cookie_var)
+                env_cookie = os.environ.get(cookie_var)
                 if env_cookie is None:
                     print(
                         'The cookie file is not found. Please setup {0} env '
                         'variable to provide a cookie value, or unset {1} env '
-                        'variable to input credentials and cookie via command'
+                        'variable to input credentials and cookie via command '
                         'line prompt.'.format(cookie_var, enable_env_login))
+                    sys.exit(1)
             else:
                 env_cookie = None
             set_cookie(env_cookie)
