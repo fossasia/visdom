@@ -21,6 +21,7 @@ import jsonpatch
 import logging
 import math
 import os
+import sys
 import time
 import traceback
 import uuid
@@ -1853,8 +1854,28 @@ def main(print_func=None):
     logging.getLogger().setLevel(logging_level)
 
     if FLAGS.enable_login:
-        username = input("Please input your username: ")
-        password = getpass.getpass(prompt="Please input your password: ")
+        enable_env_login = 'VISDOM_USE_ENV_CREDENTIALS'
+        use_env = os.environ.get(enable_env_login, False)
+        if use_env:
+            username_var = 'VISDOM_USERNAME'
+            password_var = 'VISDOM_PASSWORD'
+            username = os.environ.get(username_var)
+            password = os.environ.get(password_var)
+            if not (username and password):
+                print(
+                    "*** Warning ***\n"
+                    "You have set the {0} env variable but probably "
+                    "forgot to setup up one (or both) {{ {1}, {2} }} "
+                    "variables.\nYou should setup these variables with "
+                    "proper username and password to enable logging. Try to "
+                    "setup the variables, or unset {0} to input credentials "
+                    "via CLI instead.\n"
+                    .format(enable_env_login, username_var, password_var))
+                sys.exit(1)
+
+        else:
+            username = input("Please input your username: ")
+            password = getpass.getpass(prompt="Please input your password: ")
 
         user_credential = {
             "username": username,
