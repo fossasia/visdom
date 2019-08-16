@@ -9,12 +9,20 @@
 
 import React from 'react';
 import EventSystem from './EventSystem';
+
 const Pane = require('./Pane');
+
+const DEFAULT_HEIGHT = 400;
+const DEFAULT_WIDTH = 300;
 
 class ImagePane extends React.Component {
   _paneRef = null;
+  _imgRef = null;
+  _natHeight = null;
+  _natWidth = null;
 
   state = {
+    lastModTime: 0,
     scale: 1,
     tx: 0,
     ty: 0,
@@ -28,6 +36,15 @@ class ImagePane extends React.Component {
   componentWillReceiveProps = nextProps => {
     if (nextProps.selected !== this.props.selected) {
       this.setState({ selected: nextProps.selected });
+    }
+    if (
+      (nextProps.width != this.props.width ||
+        nextProps.height != this.props.height) &&
+      Math.abs(this.state.scale - 1) > Number.EPSILON
+    ) {
+      // Reset the image settings when the user resizes the window. Avoid
+      // constantly resetting the zoom level when user has not zoomed.
+      this.handleReset();
     }
   };
 
@@ -163,6 +180,16 @@ class ImagePane extends React.Component {
     });
   };
 
+  // Find the height that preserves the aspect ratio given 'scaledWidth'
+  computeHFromW = scaledWidth => {
+    return Math.ceil((this._natHeight / this._natWidth) * scaledWidth);
+  };
+
+  // Find the width that preserves the aspect ratio given 'scaledHeight'
+  computeWFromH = scaledHeight => {
+    return Math.ceil((this._natWidth / this._natHeight) * scaledHeight);
+  };
+
   render() {
     let content = this.props.content;
     let type = this.props.type;
@@ -203,6 +230,58 @@ class ImagePane extends React.Component {
       position: 'absolute',
     };
 
+    let candidateWidth = Math.ceil(1 + this.props.width * this.state.scale);
+    let candidateHeight = Math.ceil(1 + this.props.height * this.state.scale);
+
+    let imageContainerStyle = {
+      alignItems: 'row',
+      display: 'flex',
+      height: isNaN(candidateHeight) ? DEFAULT_HEIGHT : candidateHeight,
+      justifyContent: 'center',
+      width: isNaN(candidateWidth) ? DEFAULT_WIDTH : candidateWidth,
+    };
+
+    if (this._natHeight === null || this._natWidth === null) {
+      // Do nothing, don't change the width/height
+    } else if (candidateWidth >= candidateHeight) {
+      // If the width exceeds the height, then we use the height as the limiting
+      // factor
+      let newWidth = this.computeWFromH(candidateHeight);
+      // If the new width would exceed the window boundaries, we need to
+      // instead use the window width as the limiting factor
+      if (newWidth > candidateWidth) {
+        candidateHeight = this.computeHFromW(candidateWidth);
+        imageContainerStyle.alignItems = 'column';
+      } else {
+        candidateWidth = newWidth;
+      }
+    } else if (candidateWidth < candidateHeight) {
+      // If the height exceeds the width, then we use the width as the limiting
+      // factor
+      let newHeight = this.computeHFromW(candidateWidth);
+      // If the new height would exceed the window boundaries, we need to
+      // instead use the window height as the limiting factor
+      if (newHeight > candidateHeight) {
+        candidateWidth = this.computeWFromH(candidateHeight);
+      } else {
+        imageContainerStyle.alignItems = 'column';
+        candidateHeight = newHeight;
+      }
+    }
+
+    // During initial render cycle,
+    // Math.ceil(1 + this.props.height/width * this.state.scale) may be NaN.
+    // Set a default value here to avoid warnings, which will be updated on the
+    // next render
+
+    if (isNaN(candidateHeight)) {
+      candidateHeight = DEFAULT_HEIGHT;
+    }
+
+    if (isNaN(candidateWidth)) {
+      candidateWidth = DEFAULT_WIDTH;
+    }
+
     return (
       <Pane
         {...this.props}
@@ -215,15 +294,26 @@ class ImagePane extends React.Component {
       >
         >
         <div style={divstyle}>
-          <img
-            className="content-image cssTransforms"
-            src={content.src}
-            width={Math.ceil(1 + this.props.width * this.state.scale) + 'px'}
-            height={Math.ceil(1 + this.props.height * this.state.scale) + 'px'}
-            onDoubleClick={this.handleReset.bind(this)}
-            onDragStart={this.handleDragStart.bind(this)}
-            onDragOver={this.handleDragOver.bind(this)}
-          />
+          <div style={imageContainerStyle}>
+            <img
+              className="content-image cssTransforms"
+              src={content.src}
+              ref={ref => (this._imgRef = ref)}
+              onLoad={() => {
+                if (this._natHeight === null) {
+                  this._natHeight = this._imgRef.naturalHeight;
+                }
+                if (this._natWidth === null) {
+                  this._natWidth = this._imgRef.naturalWidth;
+                }
+              }}
+              width={candidateWidth + 'px'}
+              height={candidateHeight + 'px'}
+              onDoubleClick={this.handleReset.bind(this)}
+              onDragStart={this.handleDragStart.bind(this)}
+              onDragOver={this.handleDragOver.bind(this)}
+            />
+          </div>
         </div>
         <p className="caption">{content.caption}</p>
         <span
