@@ -21,6 +21,7 @@ import jsonpatch
 import logging
 import math
 import os
+import sys
 import time
 import traceback
 import uuid
@@ -114,9 +115,12 @@ def extract_eid(args):
     return escape_eid(eid)
 
 
-def set_cookie():
+def set_cookie(value=None):
     """Create cookie secret key for authentication"""
-    cookie_secret = input("Please input your cookie secret key here: ")
+    if value is not None:
+        cookie_secret = value
+    else:
+        cookie_secret = input("Please input your cookie secret key here: ")
     with open(DEFAULT_ENV_PATH + "COOKIE_SECRET", "w") as cookie_file:
         cookie_file.write(cookie_secret)
 
@@ -1853,18 +1857,53 @@ def main(print_func=None):
     logging.getLogger().setLevel(logging_level)
 
     if FLAGS.enable_login:
-        username = input("Please input your username: ")
-        password = getpass.getpass(prompt="Please input your password: ")
+        enable_env_login = 'VISDOM_USE_ENV_CREDENTIALS'
+        use_env = os.environ.get(enable_env_login, False)
+        if use_env:
+            username_var = 'VISDOM_USERNAME'
+            password_var = 'VISDOM_PASSWORD'
+            username = os.environ.get(username_var)
+            password = os.environ.get(password_var)
+            if not (username and password):
+                print(
+                    '*** Warning ***\n'
+                    'You have set the {0} env variable but probably '
+                    'forgot to setup one (or both) {{ {1}, {2} }} '
+                    'variables.\nYou should setup these variables with '
+                    'proper username and password to enable logging. Try to '
+                    'setup the variables, or unset {0} to input credentials '
+                    'via command line prompt instead.\n'
+                    .format(enable_env_login, username_var, password_var))
+                sys.exit(1)
+
+        else:
+            username = input("Please input your username: ")
+            password = getpass.getpass(prompt="Please input your password: ")
 
         user_credential = {
             "username": username,
             "password": hash_password(hash_password(password))
         }
 
-        if not os.path.isfile(DEFAULT_ENV_PATH + "COOKIE_SECRET"):
-            set_cookie()
-        elif FLAGS.force_new_cookie:
-            set_cookie()
+        need_to_set_cookie = (
+            not os.path.isfile(DEFAULT_ENV_PATH + "COOKIE_SECRET")
+            or FLAGS.force_new_cookie)
+
+        if need_to_set_cookie:
+            if use_env:
+                cookie_var = 'VISDOM_COOKIE'
+                env_cookie = os.environ.get(cookie_var)
+                if env_cookie is None:
+                    print(
+                        'The cookie file is not found. Please setup {0} env '
+                        'variable to provide a cookie value, or unset {1} env '
+                        'variable to input credentials and cookie via command '
+                        'line prompt.'.format(cookie_var, enable_env_login))
+                    sys.exit(1)
+            else:
+                env_cookie = None
+            set_cookie(env_cookie)
+
     else:
         user_credential = None
 
