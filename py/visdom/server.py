@@ -948,6 +948,7 @@ class UpdateHandler(BaseHandler):
                 selected_not_neg = max(0, selected)
                 selected_exists = min(len(p['content'])-1, selected_not_neg)
                 p['selected'] = selected_exists
+            return p
 
         pdata = p['content']['data']
 
