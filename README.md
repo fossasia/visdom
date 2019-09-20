@@ -142,7 +142,7 @@ Using the view dropdown it is possible to select previously saved views, restori
 
 ## Setup
 
-Requires Python 2.7/3 (and optionally Torch7)
+Requires Python 3 (and optionally Torch7)
 
 ```bash
 # Install Python server and client from pip
@@ -204,7 +204,7 @@ VISDOM_USERNAME=username
 VISDOM_PASSWORD=password
 VISDOM_USE_ENV_CREDENTIALS=1 visdom -enable_login
 ```
-You can also use `VISDOM_COOKIE` variable to provide cookies value if the cookie file wasn't generated, or the 
+You can also use `VISDOM_COOKIE` variable to provide cookies value if the cookie file wasn't generated, or the
 flag `-force_new_cookie` was set.
 
 #### Python example
