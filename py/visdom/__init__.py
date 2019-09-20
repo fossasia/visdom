@@ -1,13 +1,10 @@
+#!/usr/bin/env python3
+
 # Copyright 2017-present, Facebook, Inc.
 # All rights reserved.
 #
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
-
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
 import os.path
 import requests
@@ -17,8 +14,10 @@ import websocket  # type: ignore
 import json
 import hashlib
 try:
+    # for after python 3.8
     from collections.abc import Sequence
 except ImportError:
+    # for python 3.7 and below
     from collections import Sequence
 import math
 import re
@@ -27,17 +26,12 @@ import numpy as np  # type: ignore
 from PIL import Image  # type: ignore
 import base64 as b64  # type: ignore
 import numbers
-import six
-from six import string_types
-from six import BytesIO
-from six.moves import urllib
-from six.moves.urllib.parse import urlparse
-from six.moves.urllib.parse import urlunparse
+from urllib.parse import urlparse, urlunparse
 import logging
 import warnings
 import time
 import errno
-import io
+from io import BytesIO, StringIO
 from functools import wraps
 
 try:
@@ -45,6 +39,9 @@ try:
     BS4_AVAILABLE = True
 except ImportError:
     BS4_AVAILABLE = False
+
+import sys
+assert sys.version_info[0] < 3, 'To use visdom with python 2, downgrade to v0.1.8.9'
 
 try:
     # TODO try to import https://github.com/CannyLab/tsne-cuda first? will be
@@ -90,14 +87,6 @@ try:
 except BaseException:
     from . import torchfile
 
-try:
-    raise ConnectionError()
-except NameError:  # python 2 doesn't have ConnectionError
-    class ConnectionError(Exception):
-        pass
-except ConnectionError:
-    pass
-
 logging.getLogger('requests').setLevel(logging.CRITICAL)
 logging.getLogger('urllib3').setLevel(logging.CRITICAL)
 logger = logging.getLogger(__name__)
@@ -108,7 +97,7 @@ def get_rand_id():
 
 
 def isstr(s):
-    return isinstance(s, string_types)
+    return isinstance(s, (str,))
 
 
 def isnum(n):
@@ -623,7 +612,7 @@ class Visdom(object):
             self.socket_alive = False
 
         def run_socket(*args):
-            host_scheme = urllib.parse.urlparse(self.server).scheme
+            host_scheme = urlparse(self.server).scheme
             if host_scheme == "https":
                 ws_scheme = "wss"
             else:
@@ -691,6 +680,7 @@ class Visdom(object):
         if msg.get('eid', None) is None:
             msg['eid'] = self.env
 
+        # TODO investigate send use cases, then deprecate
         if not self.send:
             return msg, endpoint
 
@@ -998,7 +988,7 @@ class Visdom(object):
         _assert_opts(opts)
 
         # write plot to SVG buffer:
-        buffer = io.StringIO()
+        buffer = StringIO()
         plot.savefig(buffer, format='svg')
         buffer.seek(0)
         svg = buffer.read()
@@ -1011,7 +1001,7 @@ class Visdom(object):
                 try:
                     soup = bs4.BeautifulSoup(svg, 'xml')
                 except bs4.FeatureNotFound as e:
-                    six.raise_from(ImportError("No module named 'lxml'"), e)
+                    raise ImportError("No module named 'lxml'") from e
                 height = soup.svg.attrs.pop('height', None)
                 width = soup.svg.attrs.pop('width', None)
                 svg = str(soup)
