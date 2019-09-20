@@ -86,11 +86,6 @@ except Exception:
     __version__ = 'no_version_file'
 
 try:
-    import torchfile  # type: ignore
-except BaseException:
-    from . import torchfile
-
-try:
     raise ConnectionError()
 except NameError:  # python 2 doesn't have ConnectionError
     class ConnectionError(Exception):
@@ -132,19 +127,6 @@ def nan2none(l):
         elif isnum(val) and math.isnan(val):
             l[idx] = None
     return l
-
-
-def from_t7(t, b64=False):
-    if b64:
-        t = base64.b64decode(t)
-
-    with open('/dev/shm/t7', 'wb') as ff:
-        ff.write(t)
-        ff.close()
-
-    sf = open('/dev/shm/t7', 'rb')
-
-    return torchfile.T7Reader(sf).read_obj()
 
 
 def loadfile(filename):
