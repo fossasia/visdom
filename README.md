@@ -3,7 +3,7 @@
 
 ![visdom_big](https://lh3.googleusercontent.com/-bqH9UXCw-BE/WL2UsdrrbAI/AAAAAAAAnYc/emrxwCmnrW4_CLTyyUttB0SYRJ-i4CCiQCLcB/s0/Screen+Shot+2017-03-06+at+10.51.02+AM.png"visdom_big")
 
-A flexible tool for creating, organizing, and sharing visualizations of live, rich data. Supports Torch and Numpy.
+A flexible tool for creating, organizing, and sharing visualizations of live, rich data. Supports Python.
 
 * [Overview](#overview)
 * [Concepts](#concepts)
@@ -140,16 +140,12 @@ Using the view dropdown it is possible to select previously saved views, restori
 
 ## Setup
 
-Requires Python 2.7/3 (and optionally Torch7)
+Requires Python 2.7/3
 
 ```bash
 # Install Python server and client from pip
 # (STABLE VERSION, NOT ALL CURRENT FEATURES ARE SUPPORTED)
 pip install visdom
-
-# Install Torch client
-# (STABLE VERSION, NOT ALL CURRENT FEATURES ARE SUPPORTED)
-luarocks install visdom
 
 ```
 
@@ -158,9 +154,6 @@ luarocks install visdom
 pip install -e .
 # If the above runs into issues, you can try the below
 easy_install .
-
-# Install Torch client from source (from th directory)
-luarocks make
 
 ```
 
@@ -174,7 +167,7 @@ Start the server (probably in a  `screen` or `tmux`) from the command line:
 
 Visdom now can be accessed by going to `http://localhost:8097` in your browser, or your own host address if specified.
 
-> The `visdom` command is equivalent to running `python -m visdom.server`. 
+> The `visdom` command is equivalent to running `python -m visdom.server`.
 
 >If the above does not work, try using an SSH tunnel to your server by adding the following line to your local  `~/.ssh/config`:
 ```LocalForward 127.0.0.1:8097 127.0.0.1:8097```.
@@ -200,29 +193,10 @@ vis.text('Hello, world!')
 vis.image(np.ones((3, 10, 10)))
 ```
 
-#### Torch example
-```lua
-require 'image'
-vis = require 'visdom'()
-vis:text{text = 'Hello, world!'}
-vis:image{img = image.fabio()}
-```
-
-Some users have reported issues when connecting Lua clients to the Visdom server.
-A potential work-around may be to switch off IPv6:
-```
-vis = require 'visdom'()
-vis.ipv6 = false  -- switches off IPv6
-vis:text{text = 'Hello, world!'}
-```
-
-
 ### Demos
 
 ```bash
 python example/demo.py
-th example/demo1.lua
-th example/demo2.lua
 ```
 
 
@@ -240,7 +214,7 @@ The python visdom client takes a few options:
 - `http_proxy_host`: host to proxy your incoming socket through (default: `None`)
 - `http_proxy_port`: port to proxy your incoming socket through (default: `None`)
 
-Other options are either currently unused (endpoint, ipv6) or used for internal functionality (send allows the visdom server to replicate events for the lua client).
+Other options are either currently unused (endpoint, ipv6) or used for internal functionality.
 
 ### Basics
 Visdom offers the following basic visualization functions:
@@ -394,12 +368,12 @@ packages installed to use this option.
 
 #### vis.plotlyplot
 
-This function draws a Plotly `Figure` object. It does not explicitly take options as it assumes you have already explicitly configured the figure's `layout`. 
+This function draws a Plotly `Figure` object. It does not explicitly take options as it assumes you have already explicitly configured the figure's `layout`.
 
-> **Note** You must have the `plotly` Python package installed to use this function. It can typically be installed by running `pip install plotly`. 
+> **Note** You must have the `plotly` Python package installed to use this function. It can typically be installed by running `pip install plotly`.
 
 #### vis.save
-This function saves the `envs` that are alive on the visdom server. It takes input a list (in python) or table (in lua) of env ids to be saved.
+This function saves the `envs` that are alive on the visdom server. It takes input a list of env ids to be saved.
 
 ### Plotting
 Further details on the wrapped plotting functions are given below.
@@ -637,6 +611,9 @@ Arguments:
 - [ ] Command line tool for easy systematic plotting from live logs.
 - [ ] Filtering through windows with regex by title (or meta field)
 - [ ] Compiling react by python server at runtime
+
+## Note on Lua Torch Support
+Support for Lua Torch was deprecated following `v0.1.8.4`. If you'd like to use torch support, you'll need to download that release. You can follow the usage instructions there, but it is no longer officially supported.
 
 ## Contributing
 See guidelines for contributing [here.](./CONTRIBUTING.md)

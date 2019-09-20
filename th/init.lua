@@ -29,6 +29,10 @@ M.__init = argcheck{
       visualization server that wraps plot.ly to show scalable, high-quality
       visualizations in the browser.
 
+      Note: The lua Torch client for visdom was deprecated after visdom
+      v0.1.8.4, so if you'd like to use visdom for torch, you'll have to
+      download that specific tag of visdom from the github.
+
       The server can be started with the `server.py` script. The server defaults
       to port 8097. When the server is running on `domain.com:8097`, then visit
       that web address in your browser to see the visualization desktop.
