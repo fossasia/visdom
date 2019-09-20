@@ -43,7 +43,6 @@ requirements = [
     'pyzmq',
     'six',
     'jsonpatch',
-    'torchfile',
     'websocket-client',
 ]
 pillow_req = 'pillow-simd' if get_dist('pillow-simd') is not None else 'pillow'
