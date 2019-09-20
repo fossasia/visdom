@@ -41,7 +41,7 @@ except ImportError:
     BS4_AVAILABLE = False
 
 import sys
-assert sys.version_info[0] < 3, 'To use visdom with python 2, downgrade to v0.1.8.9'
+assert sys.version_info[0] >= 3, 'To use visdom with python 2, downgrade to v0.1.8.9'
 
 try:
     # TODO try to import https://github.com/CannyLab/tsne-cuda first? will be

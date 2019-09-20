@@ -54,7 +54,7 @@ _seen_warnings = set()
 
 MAX_SOCKET_WAIT = 15
 
-assert sys.version_info[0] < 3, 'To use visdom with python 2, downgrade to v0.1.8.9'
+assert sys.version_info[0] >= 3, 'To use visdom with python 2, downgrade to v0.1.8.9'
 
 
 def warn_once(msg, warningtype=None):
