@@ -13,30 +13,69 @@ import os.path
 import requests
 import traceback
 import threading
-import websocket # type: ignore
+import websocket  # type: ignore
 import json
+import hashlib
+try:
+    from collections.abc import Sequence
+except ImportError:
+    from collections import Sequence
 import math
 import re
 import base64
-import numpy as np # type: ignore
-from PIL import Image # type: ignore
-import base64 as b64 # type: ignore
+import numpy as np  # type: ignore
+from PIL import Image  # type: ignore
+import base64 as b64  # type: ignore
 import numbers
 import six
 from six import string_types
 from six import BytesIO
+from six.moves import urllib
+from six.moves.urllib.parse import urlparse
+from six.moves.urllib.parse import urlunparse
 import logging
 import warnings
 import time
 import errno
 import io
 from functools import wraps
+
 try:
-    import bs4 # type: ignore
+    import bs4  # type: ignore
     BS4_AVAILABLE = True
 except ImportError:
     BS4_AVAILABLE = False
 
+try:
+    # TODO try to import https://github.com/CannyLab/tsne-cuda first? will be
+    # faster but requires more setup
+    import visdom.extra_deps.bhtsne.bhtsne as bhtsne
+
+    def do_tsne(X):
+        num_entities = len(X)
+
+        # the number of entities provided must be at least 3x the perplexity
+        perplexity = 50 if num_entities >= 150 else \
+            num_entities // 3 if num_entities >= 21 else 7
+        Y = bhtsne.run_bh_tsne(X, initial_dims=X.shape[1], perplexity=perplexity,
+                                verbose=True)
+        xmin, xmax = min(Y[:, 0]), max(Y[:, 0])
+        ymin, ymax = min(Y[:, 1]), max(Y[:, 1])
+        normx = ((Y[:, 0] - xmin) / (xmax - xmin)) * 2 - 1
+        normy = ((Y[:, 1] - ymin) / (ymax - ymin)) * 2 - 1
+        normY = list(zip(normx, normy))
+        return normY
+except ImportError:
+    def do_tsne(X):
+        raise Exception(
+            "In order to use the embeddings feature, you'll "
+            "need to install a backend to support the calculation. "
+            "Currently we support the bhtsne implementation at "
+            "https://github.com/lvdmaaten/bhtsne/, and you can install "
+            "this by cloning it into the /py/visdom/extra_deps/ directory "
+            "and running the installation steps as listed on that github "
+            "in the created /py/visdom/extra_deps/bhtsne directory."
+        )
 
 here = os.path.abspath(os.path.dirname(__file__))
 
@@ -47,7 +86,7 @@ except Exception:
     __version__ = 'no_version_file'
 
 try:
-    import torchfile # type: ignore
+    import torchfile  # type: ignore
 except BaseException:
     from . import torchfile
 
@@ -64,6 +103,10 @@ logging.getLogger('urllib3').setLevel(logging.CRITICAL)
 logger = logging.getLogger(__name__)
 
 
+def get_rand_id():
+    return str(hex(int(time.time() * 10000000))[2:])
+
+
 def isstr(s):
     return isinstance(s, string_types)
 
@@ -76,9 +119,17 @@ def isndarray(n):
     return isinstance(n, (np.ndarray))
 
 
+# Only works on (possibly nested) lists of numbers
+# TODO: Create our own JSONEncoder that automatically does this.
+#       Maybe we can port plotly's over:
+#       https://github.com/plotly/plotly.py/blob/81629273ff6d7a30257a42572ed0e4e6ad436009/_plotly_utils/utils.py#L16
+# TODO: Also, in appropriate places, we need to change many numpy calls to use
+#       nan-aware ones, e.g., `X.max` => `np.nanmax(X)`.
 def nan2none(l):
     for idx, val in enumerate(l):
-        if math.isnan(val):
+        if isinstance(val, Sequence):
+            l[idx] = nan2none(l[idx])
+        elif isnum(val) and math.isnan(val):
             l[idx] = None
     return l
 
@@ -109,7 +160,7 @@ def _title2str(opts):
     if opts.get('title'):
         if isnum(opts.get('title')):
             title = str(opts.get('title'))
-            logger.warn('Numerical title %s has been casted to a string' % \
+            logger.warn('Numerical title %s has been casted to a string' %
                         title)
             opts['title'] = title
             return opts
@@ -144,22 +195,47 @@ def _axisformat(xy, opts):
         }
 
 
+def _axisformat3d(xyz, opts):
+    fields = ['type', 'label', 'tickmin', 'tickmax', 'tickvals', 'ticklabels',
+              'tick', 'tickfont']
+    if any(opts.get(xyz + i) for i in fields):
+        has_ticks = (opts.get(xyz + 'tickmin') and opts.get(xyz + 'tickmax')) \
+            is not None
+        has_step = has_ticks and opts.get(xyz + 'tickstep') is not None
+        return {
+            'type': opts.get(xyz + 'type'),
+            'title': opts.get(xyz + 'label'),
+            'range': [opts.get(xyz + 'tickmin'),
+                      opts.get(xyz + 'tickmax')] if has_ticks else None,
+            'tickvals': opts.get(xyz + 'tickvals'),
+            'ticktext': opts.get(xyz + 'ticklabels'),
+            'nticks': ((opts.get(xyz + 'tickmax') - opts.get(xyz + 'tickmin'))/
+                       opts.get(xyz + 'tickstep')) if has_step else None,
+            'tickfont': opts.get(xyz + 'tickfont'),
+        }
+
+
 def _opts2layout(opts, is3d=False):
     layout = {
         'showlegend': opts.get('showlegend', 'legend' in opts),
         'title': opts.get('title'),
-        'xaxis': _axisformat('x', opts),
-        'yaxis': _axisformat('y', opts),
         'margin': {
-            'l': opts.get('marginleft', 60),
+            'l': opts.get('marginleft', 0 if is3d else 60),
             'r': opts.get('marginright', 60),
-            't': opts.get('margintop', 60),
-            'b': opts.get('marginbottom', 60),
+            't': opts.get('margintop', 20 if is3d else 60),
+            'b': opts.get('marginbottom', 0 if is3d else 60),
         }
     }
 
     if is3d:
-        layout['zaxis'] = _axisformat('z', opts)
+        layout['scene'] = {
+            'xaxis': _axisformat3d('x', opts),
+            'yaxis': _axisformat3d('y', opts),
+            'zaxis': _axisformat3d('z', opts),
+        }
+    else:
+        layout['xaxis'] = _axisformat('x', opts)
+        layout['yaxis'] = _axisformat('y', opts)
 
     if opts.get('stacked'):
         layout['barmode'] = 'stack' if opts.get('stacked') else 'group'
@@ -203,7 +279,33 @@ def _markerColorCheck(mc, X, Y, L):
     return ret
 
 
+def _lineColorCheck(lc, K):
+    assert isndarray(lc), 'lc should be a numpy ndarray'
+    assert lc.shape[0] == K, 'lc should be same shape as K'
+
+    assert (lc >= 0).all(), 'line colors have to be >= 0'
+    assert (lc <= 255).all(), 'line colors have to be <= 255'
+    assert (lc == np.floor(lc)).all(), 'line colors are assumed to be ints'
+
+    return ['#%02x%02x%02x' % (i[0], i[1], i[2]) for i in lc]
+
+
+def _dashCheck(dash, K):
+    assert isndarray(dash), 'dash should be a numpy ndarray'
+    assert dash.shape[0] == K, 'dash should be same shape as K'
+
+    return dash
+
+
 def _assert_opts(opts):
+    remove_nones = ['title']
+    for to_remove in remove_nones:
+        if to_remove in opts and opts[to_remove] is None:
+            logger.warn(
+                'None-incompatible opt {} was provided None value '
+                'and was thus ignored'.format(to_remove))
+            del opts[to_remove]
+
     if opts.get('color'):
         assert isstr(opts.get('color')), 'color should be a string'
 
@@ -259,7 +361,9 @@ except (ImportError, AttributeError):
     pass
 
 
-def _torch_to_numpy(a):
+def _to_numpy(a):
+    if isinstance(a, list):
+        return np.array(a)
     if len(torch_types) > 0:
         if isinstance(a, torch.autograd.Variable):
             # For PyTorch < 0.4 comptability.
@@ -280,8 +384,8 @@ def _torch_to_numpy(a):
 def pytorch_wrap(f):
     @wraps(f)
     def wrapped_f(*args, **kwargs):
-        args = (_torch_to_numpy(arg) for arg in args)
-        kwargs = {k: _torch_to_numpy(v) for (k, v) in kwargs.items()}
+        args = (_to_numpy(arg) for arg in args)
+        kwargs = {k: _to_numpy(v) for (k, v) in kwargs.items()}
         return f(*args, **kwargs)
 
     return wrapped_f
@@ -294,6 +398,7 @@ class Visdom(object):
         server='http://localhost',
         endpoint='events',
         port=8097,
+        base_url='/',
         ipv6=True,
         http_proxy_host=None,
         http_proxy_port=None,
@@ -302,23 +407,67 @@ class Visdom(object):
         raise_exceptions=None,
         use_incoming_socket=True,
         log_to_filename=None,
+        username=None,
+        password=None,
+        proxies=None,
+        offline=False,
+        use_polling=False,
     ):
-        self.server_base_name = server[server.index("//") + 2:]
-        self.server = server
+        parsed_url = urlparse(server)
+        if not parsed_url.scheme:
+            parsed_url = urlparse('http://{}'.format(server))
+        self.server_base_name = parsed_url.netloc
+        self.server = urlunparse((parsed_url.scheme,
+                                  parsed_url.netloc,'','','',''))
         self.endpoint = endpoint
         self.port = port
+        # preprocess base_url
+        self.base_url = base_url if base_url != "/" else ""
+        assert self.base_url == '' or self.base_url.startswith('/'), \
+            'base_url should start with /'
+        assert self.base_url == '' or not self.base_url.endswith('/'), \
+            'base_url should not end with / as it is appended automatically'
+
         self.ipv6 = ipv6
-        self.http_proxy_host = http_proxy_host
-        self.http_proxy_port = http_proxy_port
         self.env = env              # default env
         self.send = send
         self.event_handlers = {}  # Haven't registered any events
         self.socket_alive = False
-        self.use_socket = use_incoming_socket
+        self.socket_connection_achieved = False
+        self.use_socket = use_incoming_socket or use_polling
         # Flag to indicate whether to raise errors or suppress them
         self.raise_exceptions = raise_exceptions
         self.log_to_filename = log_to_filename
+        self.offline = offline
+        self._session = None
+        self.proxies = proxies
+        self.http_proxy_host = None
+        self.http_proxy_port = None
+        if proxies is not None and 'http' in proxies:
+            self.http_proxy_host, self.http_proxy_port = proxies['http'].split(":")
 
+        if http_proxy_host is not None or http_proxy_port is not None:
+            warnings.warn(
+                "HTTP Proxy Port and Host args Deprecated. "
+                "Please use proxies arg.", DeprecationWarning)
+            self.http_proxy_host = http_proxy_host
+            self.http_proxy_port = http_proxy_port
+
+        self.username = username
+        if self.username:
+            assert password, 'no password given for authentication'
+            self.password = hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+        self.win_data = {}
+        if self.offline:
+            self.use_socket = False
+            assert self.log_to_filename is not None, (
+                'Must use a log_to_filename for offline visdom')
+
+            return  # No need for the rest of this setup in offline visdom
+        # storage for data associated with specific windows
+
+        # Setup for online interactions
         self._send({
             'eid': env,
         }, endpoint='env/' + env)
@@ -326,6 +475,8 @@ class Visdom(object):
         # when talking to a server, get a backchannel
         if send and use_incoming_socket:
             self.setup_socket()
+        elif send and use_polling:
+            self.setup_polling()
         elif send and not use_incoming_socket:
             logger.warn(
                 'Without the incoming socket you cannot receive events from '
@@ -347,6 +498,24 @@ class Visdom(object):
                 'this request to timeout.'
             )
 
+    @property
+    def session(self):
+        if self._session:
+            return self._session
+        logger.warning("Setting up a new session...")
+        sess = requests.Session()
+        if self.proxies:
+            sess.proxies.update(self.proxies)
+        if self.username:
+            resp = sess.post("%s:%s%s" % (self.server, self.port, self.base_url), json=dict(
+                username=self.username,
+                password=self.password))
+            if resp.status_code != requests.codes.ok:
+                raise RuntimeError("Authentication failed")
+            logger.info('Authentication succeeded')
+        self._session = sess
+        return sess
+
     def register_event_handler(self, handler, target):
         assert callable(handler), 'Event handler must be a function'
         assert self.use_socket, 'Must be using the incoming socket to '\
@@ -358,7 +527,59 @@ class Visdom(object):
     def clear_event_handlers(self, target):
         self.event_handlers[target] = []
 
-    def setup_socket(self):
+    def setup_polling(self):
+        # TODO merge with setup_socket?
+        # Setup socket to server
+        def on_message(message):
+            message = json.loads(message)
+            if 'command' in message:
+                # Handle server commands
+                if message['command'] == 'alive':
+                    if 'data' in message and message['data'] == 'vis_alive':
+                        logger.info('Visdom successfully connected to server')
+                        self.socket_alive = True
+                        self.socket_connection_achieved = True
+                    else:
+                        logger.warn('Visdom server failed handshake, may not '
+                                    'be properly connected')
+            if 'target' in message:
+                for handler in list(
+                        self.event_handlers.get(message['target'], [])):
+                    handler(message)
+
+        def on_close(ws):
+            self.socket_alive = False
+
+        def run_socket(*args):
+            # open a socket
+            resp_json = self._handle_post(
+                "{0}:{1}{2}/vis_socket_wrap".format(self.server, self.port,
+                                                    self.base_url),
+                data=json.dumps({'message_type': 'init'}),
+            )
+            resp = json.loads(resp_json)
+            self.vis_sid = resp['sid']
+            while self.use_socket:
+                resp_json = self._handle_post(
+                    "{0}:{1}{2}/vis_socket_wrap".format(self.server, self.port,
+                                                        self.base_url),
+                    data=json.dumps(
+                        {'message_type': 'query', 'sid': self.vis_sid}
+                    ),
+                )
+                resp = json.loads(resp_json)
+                for msg in resp['messages']:
+                    on_message(msg)
+                time.sleep(0.1)
+
+        # Start listening thread
+        self.socket_thread = threading.Thread(
+            target=run_socket,
+            name='Visdom-Socket-Thread'
+        )
+        self.socket_thread.start()
+
+    def setup_socket(self, polling=False):
         # Setup socket to server
         def on_message(ws, message):
             message = json.loads(message)
@@ -368,39 +589,63 @@ class Visdom(object):
                     if 'data' in message and message['data'] == 'vis_alive':
                         logger.info('Visdom successfully connected to server')
                         self.socket_alive = True
+                        self.socket_connection_achieved = True
                     else:
                         logger.warn('Visdom server failed handshake, may not '
                                     'be properly connected')
             if 'target' in message:
-                for handler in self.event_handlers.get(message['target'], []):
-                    handler(message)
+                for handler in list(
+                        self.event_handlers.get(message['target'], [])):
+                    try:
+                        handler(message)
+                    except Exception as e:
+                        logger.warn(
+                            'Visdom failed to handle a handler for {}: {}'
+                            ''.format(message, e)
+                        )
+                        import traceback
+                        traceback.print_exc()
 
         def on_error(ws, error):
-            if error.errno == errno.ECONNREFUSED:
-                logger.info("Socket refused connection, running socketless")
-                ws.close()
-                self.use_socket = False
-            else:
-                logger.error(error)
+            if hasattr(error, "errno") and  error.errno == errno.ECONNREFUSED:
+                if not self.socket_connection_achieved:
+                    #
+                    # Visdom will stop trying to use the socket only if it
+                    # never succeeded in acquiring it.
+                    #
+                    logger.info(
+                        "Socket refused connection, running socketless")
+                    self.use_socket = False
+            logger.error(error)
+            ws.close()
 
         def on_close(ws):
             self.socket_alive = False
 
         def run_socket(*args):
+            host_scheme = urllib.parse.urlparse(self.server).scheme
+            if host_scheme == "https":
+                ws_scheme = "wss"
+            else:
+                ws_scheme = "ws"
             while self.use_socket:
                 try:
-                    sock_addr = "ws://{}:{}/vis_socket".format(
-                        self.server_base_name, self.port)
+                    sock_addr = "{}://{}:{}{}/vis_socket".format(
+                        ws_scheme, self.server_base_name, self.port, self.base_url)
                     ws = websocket.WebSocketApp(
                         sock_addr,
                         on_message=on_message,
                         on_error=on_error,
-                        on_close=on_close
+                        on_close=on_close,
+                        header={'Cookie: user_password=' + self.session.cookies.get('user_password', '')}
                     )
                     ws.run_forever(http_proxy_host=self.http_proxy_host,
-                                   http_proxy_port=self.http_proxy_port)
+                                   http_proxy_port=self.http_proxy_port,
+                                   ping_timeout=100.0)
+                    ws.close()
                 except Exception as e:
-                    logger.error('Socket had error {}, attempting restart'.format(e))
+                    logger.error(
+                        'Socket had error {}, attempting restart'.format(e))
                 time.sleep(3)
 
         # Start listening thread
@@ -412,12 +657,36 @@ class Visdom(object):
         self.socket_thread.start()
 
     # Utils
-    def _send(self, msg, endpoint='events', quiet=False, from_log=False):
+    def _log(self, msg, endpoint):
+        if self.log_to_filename is not None:
+            if endpoint in ['events', 'update']:
+                with open(self.log_to_filename, 'a+') as log_file:
+                    log_file.write(json.dumps([
+                        endpoint,
+                        msg,
+                    ]) + '\n')
+
+    def _handle_post(self, url, data=None):
+        """
+        This function has the responsibility of sending the request to the
+        formatted endpoint. Classes that want to wrap the visdom functionality
+        but use other methodologies may override either this or _send
+        """
+        if data is None:
+            data = {}
+        r = self.session.post(url, data=data)
+        return r.text
+
+    def _send(self, msg, endpoint='events', quiet=False, from_log=False, create=True):
         """
         This function sends specified JSON request to the Tornado server. This
         function should generally not be called by the user, unless you want to
         build the required JSON yourself. `endpoint` specifies the destination
         Tornado server endpoint for the request.
+
+        If `create=True`, then if `win=None` in the message a new window will be
+        created with a random name. If `create=False`, `win=None` indicates the
+        operation should be applied to all windows.
         """
         if msg.get('eid', None) is None:
             msg['eid'] = self.env
@@ -425,22 +694,26 @@ class Visdom(object):
         if not self.send:
             return msg, endpoint
 
+        if 'win' in msg and msg['win'] is None and create:
+            msg['win'] = 'window_' + get_rand_id()
+
+        if not from_log:
+            self._log(msg, endpoint)
+
+        if self.offline:
+            # If offline, don't even try to post
+            return msg['win'] if 'win' in msg else True
+
         try:
-            r = requests.post(
-                "{0}:{1}/{2}".format(self.server, self.port, endpoint),
+            return self._handle_post(
+                "{0}:{1}{2}/{3}".format(self.server, self.port,
+                                        self.base_url, endpoint),
                 data=json.dumps(msg),
             )
-            if self.log_to_filename is not None and not from_log:
-                if endpoint in ['events', 'update']:
-                    if msg['win'] is None:
-                        msg['win'] = r.text
-                    with open(self.log_to_filename, 'a+') as log_file:
-                        log_file.write(json.dumps([
-                            endpoint,
-                            msg,
-                        ]) + '\n')
-            return r.text
-        except BaseException:
+        except (
+            requests.RequestException, requests.ConnectionError,
+            requests.Timeout
+        ):
             if self.raise_exceptions:
                 raise ConnectionError("Error connecting to Visdom server")
             else:
@@ -473,16 +746,40 @@ class Visdom(object):
             'data': envs,
         }, 'save')
 
+    def fork_env(self, prev_eid, eid):
+        """This function allows the user to fork environments."""
+        assert isstr(prev_eid), 'prev_eid should be a string'
+        assert isstr(eid), 'eid should be a string'
+
+        return self._send(
+            msg={'prev_eid': prev_eid, 'eid': eid},
+            endpoint='fork_env'
+        )
+
     def get_window_data(self, win=None, env=None):
         """
         This function returns all the window data for a specified window in
-        an environment. Use win=None to get all the windows in the given
+        an environment. Use `win=None` to get all the windows in the given
         environment. Env defaults to main
         """
 
         return self._send(
             msg={'win': win, 'eid': env},
-            endpoint='win_data'
+            endpoint='win_data',
+            create=False,
+        )
+
+    def set_window_data(self, data, win=None, env=None):
+        """
+        This function sets all the window data for a specified window in
+        an environment. Use `win=None` to set the data for all the windows in
+        the given environment. Env defaults to main. `data` should be as returned
+        from `get_window_data`.
+        """
+        return self._send(
+            msg={'win': win, 'eid': env, 'data': data},
+            endpoint='win_data',
+            create=False,
         )
 
     def close(self, win=None, env=None):
@@ -493,7 +790,8 @@ class Visdom(object):
 
         return self._send(
             msg={'win': win, 'eid': env},
-            endpoint='close'
+            endpoint='close',
+            create=False,
         )
 
     def delete_env(self, env):
@@ -516,6 +814,13 @@ class Visdom(object):
             'eid': env,
         }, endpoint='win_exists', quiet=True)
 
+    def get_env_list(self):
+        """
+        This function returns a list of all of the env names that are currently
+        in the server.
+        """
+        return json.loads(self._send({}, endpoint='env_state', quiet=True))
+
     def win_exists(self, win, env=None):
         """
         This function returns a bool indicating whether
@@ -535,13 +840,56 @@ class Visdom(object):
         else:
             return None
 
-    def check_connection(self):
+    def _win_hash_wrap(self, win, env=None):
+        """
+        This function returns a hash of the contents of
+        the window if the window exists.
+        Return None otherwise.
+        """
+        assert win is not None
+
+        return self._send({
+            'win': win,
+            'env': env,
+        }, endpoint='win_hash', quiet=True)
+
+    def win_hash(self, win, env=None):
+        """
+        This function returns md5 hash of the contents
+        of a window if it exists on the server.
+        Returns None, otherwise
+        """
+        try:
+            e = self._win_hash_wrap(win, env)
+        except ConnectionError:
+            print("Error connecting to Visdom server!")
+            return None
+
+        if re.match(r"([a-fA-F\d]{32})", e):
+            return e
+
+        return None
+
+    def _has_connection(self):
         """
         This function returns a bool indicating whether or
         not the server is connected.
         """
         return (self.win_exists('') is not None) and \
             (self.socket_alive or not self.use_socket)
+
+    def check_connection(self, timeout_seconds=0):
+        """
+        This function returns a bool indicating whether or
+        not the server is connected within some timeout. It waits for
+        timeout_seconds before determining if the server responds.
+        """
+        while not self._has_connection() and timeout_seconds > 0:
+            time.sleep(0.1)
+            timeout_seconds -= 0.1
+            print('waiting')
+
+        return self._has_connection()
 
     def replay_log(self, log_filename):
         """
@@ -622,9 +970,9 @@ class Visdom(object):
     @pytorch_wrap
     def svg(self, svgstr=None, svgfile=None, win=None, env=None, opts=None):
         """
-        This function draws an SVG object. It takes as input an SVG string or the
-        name of an SVG file. The function does not support any plot-specific
-        `opts`.
+        This function draws an SVG object. It takes as input an SVG string or
+        the name of an SVG file. The function does not support any
+        plot-specific `opts`.
         """
         opts = {} if opts is None else opts
         _title2str(opts)
@@ -673,34 +1021,187 @@ class Visdom(object):
 
         # show SVG:
         if 'height' not in opts:
-            height = height or re.search('height\="([0-9\.]*)pt"', svg)
+            height = height or re.search(r'height\="([0-9\.]*)pt"', svg)
             if height is not None:
-                opts['height'] = 1.4 * int(math.ceil(float(height.group(1))))
+                if not isstr(height):
+                    height = height.group(1)
+                opts['height'] = 1.4 * int(math.ceil(float(height)))
         if 'width' not in opts:
-            width = width or re.search('width\="([0-9\.]*)pt"', svg)
+            width = width or re.search(r'width\="([0-9\.]*)pt"', svg)
             if width is not None:
-                opts['width'] = 1.35 * int(math.ceil(float(width.group(1))))
+                if not isstr(width):
+                    width = width.group(1)
+                opts['width'] = 1.35 * int(math.ceil(float(width)))
         return self.svg(svgstr=svg, opts=opts, env=env, win=win)
 
     def plotlyplot(self, figure, win=None, env=None):
         """
-        This function draws a Plotly 'Figure' object. It does not explicitly take options as it assumes you have already explicitly configured the figure's layout.
+        This function draws a Plotly 'Figure' object. It does not explicitly
+        take options as it assumes you have already explicitly configured the
+        figure's layout.
 
-        Note: You must have the 'plotly' Python package installed to use this function.
+        Note: You must have the 'plotly' Python package installed to use
+        this function.
         """
         try:
             import plotly
-            # We do a round-trip of JSON encoding and decoding to make use of the Plotly JSON Encoder.
-            # The JSON encoder deals with converting numpy arrays to Python lists and several other edge cases.
-            figure_dict = json.loads(json.dumps(figure, cls=plotly.utils.PlotlyJSONEncoder))
+            # We do a round-trip of JSON encoding and decoding to make use of
+            # the Plotly JSON Encoder. The JSON encoder deals with converting
+            # numpy arrays to Python lists and several other edge cases.
+            figure_dict = json.loads(
+                json.dumps(figure, cls=plotly.utils.PlotlyJSONEncoder))
+
+            # If opts title is not added, the title is not added to the top right of the window.
+            # We add the paramater to opts manually if it exists.
+            opts = dict()
+            if 'title' in figure_dict['layout']:
+                title_prop = figure_dict['layout']['title']
+
+                # The title is now officially under a 'text' subproperty. Previously, the property
+                # itself could also directly reference the title.
+                # Although this latter behavior is now deprecated, we support both possibilities.
+                # Docs reference: https://plot.ly/python/reference/#layout-title-text
+                opts['title'] = title_prop['text'] if 'text' in title_prop else title_prop
+
             return self._send({
                 'data': figure_dict['data'],
                 'layout': figure_dict['layout'],
                 'win': win,
-                'eid': env
+                'eid': env,
+                'opts': opts
             })
         except ImportError:
-            raise RuntimeError("Plotly must be installed to plot Plotly figures")
+            raise RuntimeError(
+                "Plotly must be installed to plot Plotly figures")
+
+    def _register_embeddings(self, features, labels, points, data_getter,
+                             data_type, win, env, opts):
+        self.win_data[win] = {
+            'features': features,
+            'labels': labels,
+            'points': points,
+            'data': data_getter,
+            'data_type': data_type,
+            'env': env,
+            'opts': opts,
+        }
+
+        def embedding_event_handler(event):
+            window = event["target"]
+            if event['event_type'] == 'EntitySelected':
+                # Hover events lead us to get the expected element and serve
+                # them via an append event
+                entity_id = event["entityId"]
+                id = event["idx"]
+                if data_getter is not None:
+                    if data_type == 'html':
+                        selected = {
+                            "html": data_getter(int(id))
+                        }
+                else:
+                    selected = {
+                        "html": "<div>No preview available</div>"
+                    }
+
+                selected['entityId'] = entity_id
+                send_data = {
+                    "update_type": "EntitySelected",
+                    "selected": selected
+                }
+                self._send({
+                    'data': send_data,
+                    'win': window,
+                    'eid': env,
+                    'opts': opts,
+                }, endpoint='update')
+            elif event['event_type'] == 'RegionSelected':
+                # lasso events give us a subset of the data to re-run tsne on
+                # so we generate
+                selection = event["selectedIdxs"]
+                sub_features = np.take(features, selection, axis=0)
+                Y = do_tsne(sub_features)
+                label_set = list(set(labels))
+                points = [{
+                    "group": int(label_set.index(labels[i])),
+                    "name": "Entity {}".format(i),
+                    "position": xy,
+                    "label": labels[i],
+                    "idx": i,
+                } for i, xy in zip(selection, Y)]
+                send_data = {
+                    'update_type': 'RegionSelected',
+                    'points': points,
+                }
+            else:
+                return  # Unsupported event
+            self._send({
+                'data': send_data,
+                'win': window,
+                'eid': env,
+                'opts': opts,
+            }, endpoint='update')
+
+        self.register_event_handler(embedding_event_handler, win)
+
+    def embeddings(self, features, labels, data_getter=None, data_type=None,
+                   win=None, env=None, opts=None):
+        """
+        This function handles taking arbitrary features and compiling them into
+        a set of embeddings. It then leverages the _register_embeddings to
+        actually run the visualization.
+
+        We assume that there are no more than 10 unique labels at the moment,
+        in the future we can include a colormap in opts for other cases
+
+        If you want to provide a preview on hover for your data, you can supply
+        a getting function for data_getter and a data_type. At the moment the
+        only data_type supported is 'html', which means your data_getter takes
+        in an index into features that is currently selected and returns
+        the html for what you'd like to display.
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        loading_message = {
+            'content': {'isLoading': True},
+            'type': 'embeddings',
+        }
+        win = self._send({
+            'data': [loading_message],
+            'win': win,
+            'eid': env,
+            'opts': opts,
+        }, endpoint='events')
+
+        Y = do_tsne(features)
+
+        label_set = list(set(labels))
+        points = [{
+            "group": int(label_set.index(labels[i])),
+            "name": "Entity {}".format(i),
+            "label": labels[i],
+            "position": xy,
+            "idx": i,
+        } for i, xy in enumerate(Y)]
+        send_data = [{
+            'content': {'data': points},
+            'type': 'embeddings',
+        }]
+
+        win = self._send({
+            'data': send_data,
+            'win': win,
+            'eid': env,
+            'opts': opts,
+        }, endpoint='events')
+
+        # Register the handlers for managing this embeddings pane
+        # TODO allow disabling this in a way that pushes onus for calculating
+        # to the server or frontend client
+        self._register_embeddings(features, labels, points, data_getter,
+                                  data_type, win, env, opts)
+        return win
 
     @pytorch_wrap
     def image(self, img, win=None, env=None, opts=None):
@@ -728,23 +1229,35 @@ class Visdom(object):
         img = np.transpose(img, (1, 2, 0))
         im = Image.fromarray(img)
         buf = BytesIO()
-        im.save(buf, format='PNG')
+        image_type = 'png'
+        imsave_args = {}
+        if 'jpgquality' in opts:
+            image_type = 'jpeg'
+            imsave_args['quality'] = opts['jpgquality']
+
+        im.save(buf, format=image_type.upper(), **imsave_args)
+
         b64encoded = b64.b64encode(buf.getvalue()).decode('utf-8')
 
         data = [{
             'content': {
-                'src': 'data:image/png;base64,' + b64encoded,
+                'src': 'data:image/' + image_type + ';base64,' + b64encoded,
                 'caption': opts.get('caption'),
             },
-            'type': 'image',
+            'type': 'image_history' if opts.get('store_history') else 'image',
         }]
+
+        endpoint = 'events'
+        if opts.get('store_history'):
+            if win is not None and self.win_exists(win, env):
+                endpoint = 'update'
 
         return self._send({
             'data': data,
             'win': win,
             'eid': env,
             'opts': opts,
-        })
+        }, endpoint=endpoint)
 
     @pytorch_wrap
     def images(self, tensor, nrow=8, padding=2,
@@ -818,7 +1331,9 @@ class Visdom(object):
         if tensor is not None:
             import scipy.io.wavfile # type: ignore
             import tempfile
-            audiofile = '/tmp/%s.wav' % next(tempfile._get_candidate_names())
+            audiofile = os.path.join(
+                tempfile.gettempdir(),
+                '%s.wav' % next(tempfile._get_candidate_names()))
             tensor = np.int16(tensor / np.max(np.abs(tensor)) * 32767)
             scipy.io.wavfile.write(audiofile, opts.get('sample_frequency'), tensor)
 
@@ -828,7 +1343,7 @@ class Visdom(object):
         assert mimetype is not None, 'unknown audio type: %s' % extension
 
         bytestr = loadfile(audiofile)
-        videodata = """
+        audiodata = """
             <audio controls>
                 <source type="audio/%s" src="data:audio/%s;base64,%s">
                 Your browser does not support the audio tag.
@@ -836,21 +1351,25 @@ class Visdom(object):
         """ % (mimetype, mimetype, base64.b64encode(bytestr).decode('utf-8'))
         opts['height'] = 80
         opts['width'] = 330
-        return self.text(text=videodata, win=win, env=env, opts=opts)
+        return self.text(text=audiodata, win=win, env=env, opts=opts)
 
     @pytorch_wrap
-    def video(self, tensor=None, videofile=None, win=None, env=None, opts=None):
+    def video(self, tensor=None, dim='LxHxWxC', videofile=None, win=None, env=None, opts=None):
         """
         This function plays a video. It takes as input the filename of the video
-        `videofile` or a `LxHxWxC`-sized `tensor` containing all the frames of
-        the video as input. The function does not support any plot-specific `opts`.
+        `videofile` or a `LxHxWxC` or `LxCxHxW`-sized `tensor` containing all the frames of
+        the video as input, as specified in `dim`. The color channels must be in BGR order.
 
-        The following `opts` are supported:
+        The function does not support any plot-specific `opts`. The following video `opts` are supported:
 
         - `opts.fps`: FPS for the video (`integer` > 0; default = 25)
+        - `opts.autoplay`: whether to autoplay the video when it's ready (`boolean`; default = `false`)
+        - `opts.loop`: whether to loop the video (`boolean`; default = `false`)
         """
         opts = {} if opts is None else opts
         opts['fps'] = opts.get('fps', 25)
+        opts['loop'] = opts.get('loop', False)
+        opts['autoplay'] = opts.get('autoplay', False)
         _title2str(opts)
         _assert_opts(opts)
         assert tensor is not None or videofile is not None, \
@@ -860,7 +1379,12 @@ class Visdom(object):
             import cv2 # type: ignore
             import tempfile
             assert tensor.ndim == 4, 'video should be in 4D tensor'
-            videofile = '/tmp/%s.ogv' % next(tempfile._get_candidate_names())
+            assert dim == 'LxHxWxC' or dim == 'LxCxHxW', 'dimension argument should be LxHxWxC or LxCxHxW'
+            if dim == 'LxCxHxW':
+                tensor = tensor.transpose([0, 2, 3, 1])
+            videofile = os.path.join(
+                tempfile.gettempdir(),
+                '%s.ogv' % next(tempfile._get_candidate_names()))
             if cv2.__version__.startswith('2'):  # OpenCV 2
                 fourcc = cv2.cv.CV_FOURCC(
                     chr(ord('T')),
@@ -868,7 +1392,7 @@ class Visdom(object):
                     chr(ord('E')),
                     chr(ord('O'))
                 )
-            elif cv2.__version__.startswith('3'):  # OpenCV 3
+            else:  # cv2.__version__.startswith(('3', '4')):  # OpenCV 3, 4
                 fourcc = cv2.VideoWriter_fourcc(
                     chr(ord('T')),
                     chr(ord('H')),
@@ -893,13 +1417,15 @@ class Visdom(object):
         mimetype = mimetypes.get(extension)
         assert mimetype is not None, 'unknown video type: %s' % extension
 
+        flags = ' '.join([k for k in ('autoplay', 'loop') if opts[k]])
+
         bytestr = loadfile(videofile)
         videodata = """
-            <video controls>
+            <video controls %s>
                 <source type="video/%s" src="data:video/%s;base64,%s">
                 Your browser does not support the video tag.
             </video>
-        """ % (mimetype, mimetype, base64.b64encode(bytestr).decode('utf-8'))
+        """ % (flags, mimetype, mimetype, base64.b64encode(bytestr).decode('utf-8'))
         return self.text(text=videodata, win=win, env=env, opts=opts)
 
     def update_window_opts(self, win, opts, env=None):
@@ -930,12 +1456,15 @@ class Visdom(object):
         delete the trace that is specified in `name`. If updating a single
         trace, use `name` to specify the name of the trace to be updated.
         Update data that is all NaN is ignored (can be used for masking update).
+        Using `update='append'` will create a plot if it doesn't exist
+        and append to the existing plot otherwise.
 
         The following `opts` are supported:
 
         - `opts.markersymbol`: marker symbol (`string`; default = `'dot'`)
         - `opts.markersize`  : marker size (`number`; default = `'10'`)
         - `opts.markercolor` : marker color (`np.array`; default = `None`)
+        - `opts.dash`        : dash type (`np.array`; default = 'solid'`)
         - `opts.textlabels`  : text label for each point (`list`: default = `None`)
         - `opts.legend`      : `list` containing legend names
         """
@@ -954,7 +1483,15 @@ class Visdom(object):
             return self._send(data_to_send, endpoint='update')
 
         elif update is not None:
-            assert win is not None
+            assert win is not None, 'Must define a window to update'
+
+            if update == 'append':
+                if win is None:
+                    update = None
+                elif not self.offline:
+                    exists = self.win_exists(win, env)
+                    if exists is False:
+                        update = None
 
             # case when X is 1 dimensional and corresponding values on y-axis
             # are passed in parameter Y
@@ -975,16 +1512,19 @@ class Visdom(object):
         assert X.shape[1] == 2 or X.shape[1] == 3, 'X should have 2 or 3 cols'
 
         if Y is not None:
-            Y = np.squeeze(Y)
-            assert Y.ndim == 1, 'Y should be one-dimensional'
+            Y = np.ravel(Y)
             assert X.shape[0] == Y.shape[0], 'sizes of X and Y should match'
+            assert np.equal(np.mod(Y, 1), 0).all(), 'labels should be integers'
+            assert Y.min() >= 1, 'labels are assumed to be at least 1'
+            labels = np.unique(Y.astype(int, copy=False))
+            assert len(labels) == 1 or name is None, \
+                'name should not be specified with multiple labels or lines'
+            K = int(Y.max())  # largest label
         else:
             Y = np.ones(X.shape[0], dtype=int)
+            labels = np.ones(1, dtype=int)
+            K = 1  # largest label
 
-        assert np.equal(np.mod(Y, 1), 0).all(), 'labels should be integers'
-        assert Y.min() == 1, 'labels are assumed to be between 1 and K'
-
-        K = int(Y.max())
         is3d = X.shape[1] == 3
 
         opts = {} if opts is None else opts
@@ -999,9 +1539,17 @@ class Visdom(object):
             opts['markercolor'] = _markerColorCheck(
                 opts['markercolor'], X, Y, K)
 
+        if opts.get('linecolor') is not None:
+            opts['linecolor'] = _lineColorCheck(
+                opts['linecolor'], K)
+
+        if opts.get('dash') is not None:
+            opts['dash'] = _dashCheck(
+                opts['dash'], K)
+
         L = opts.get('textlabels')
         if L is not None:
-            L = np.squeeze(L)
+            L = np.ravel(L)
             assert len(L) == X.shape[0], \
                 'textlabels and X should have same shape'
 
@@ -1009,35 +1557,46 @@ class Visdom(object):
         _assert_opts(opts)
 
         if opts.get('legend'):
-            assert type(opts['legend']) == list and len(opts['legend']) == K
+            assert type(opts['legend']) == list and K <= len(opts['legend']), \
+                'largest label should not be greater than size of the ' \
+                'legends table'
 
         data = []
         trace_opts = opts.get('traceopts', {'plotly': {}})['plotly']
-        for k in range(1, K + 1):
+        dash = opts.get('dash')
+        mc = opts.get('markercolor')
+        lc = opts.get('linecolor')
+
+        for k in labels:
             ind = np.equal(Y, k)
             if ind.any():
-                mc = opts.get('markercolor')
                 if 'legend' in opts:
                     trace_name = opts.get('legend')[k - 1]
-                elif K == 1 and name is not None:
+                elif len(labels) == 1 and name is not None:
                     trace_name = name
                 else:
                     trace_name = str(k)
+                use_gl = opts.get('webgl', False)
                 _data = {
                     'x': nan2none(X.take(0, 1)[ind].tolist()),
                     'y': nan2none(X.take(1, 1)[ind].tolist()),
                     'name': trace_name,
-                    'type': 'scatter3d' if is3d else 'scatter',
+                    'type': 'scatter3d' if is3d else (
+                        'scattergl' if use_gl else 'scatter'),
                     'mode': opts.get('mode'),
                     'text': L[ind].tolist() if L is not None else None,
                     'textposition': 'right',
+                    'line': {
+                        'dash': dash[k-1] if dash is not None else None,
+                        'color': lc[k-1] if lc is not None else None,
+                    },
                     'marker': {
                         'size': opts.get('markersize'),
                         'symbol': opts.get('markersymbol'),
                         'color': mc[k] if mc is not None else None,
                         'line': {
                             'color': '#000000',
-                            'width': 0.5
+                            'width': 0.5,
                         }
                     }
                 }
@@ -1056,12 +1615,20 @@ class Visdom(object):
             for marker_prop in ['markercolor']:
                 if marker_prop in opts:
                     del opts[marker_prop]
+            for line_prop in ['linecolor']:
+                if line_prop in opts:
+                    del opts[line_prop]
+            for dash in ['dash']:
+                if dash in opts:
+                    del opts[dash]
 
+        # Only send updates to the layout on the first plot, future updates
+        # need to use `update_window_opts`
         data_to_send = {
             'data': data,
             'win': win,
             'eid': env,
-            'layout': _opts2layout(opts, is3d),
+            'layout': _opts2layout(opts, is3d) if update is None else {},
             'opts': opts,
         }
         endpoint = 'events'
@@ -1087,6 +1654,8 @@ class Visdom(object):
         delete the trace that is specified in `name`. If updating a
         single trace, use `name` to specify the name of the trace to be updated.
         Update data that is all NaN is ignored (can be used for masking update).
+        Using `update='append'` will create a plot if it doesn't exist
+        and append to the existing plot otherwise.
 
         The following `opts` are supported:
 
@@ -1094,6 +1663,8 @@ class Visdom(object):
         - `opts.markers`     : show markers (`boolean`; default = `false`)
         - `opts.markersymbol`: marker symbol (`string`; default = `'dot'`)
         - `opts.markersize`  : marker size (`number`; default = `'10'`)
+        - `opts.linecolor`   : line colors (`np.array`; default = None)
+        - `opts.dash`        : line dash type (`np.array`; default = None)
         - `opts.legend`      : `list` containing legend names
 
         If `update` is specified, the figure will be updated without
@@ -1114,7 +1685,7 @@ class Visdom(object):
             X = np.linspace(0, 1, Y.shape[0])
 
         if Y.ndim == 2 and Y.shape[1] == 1:
-                Y = Y.reshape(Y.shape[0])
+                Y = Y.reshape(1, Y.shape[0])
                 X = X.reshape(X.shape[0])
 
         if Y.ndim == 2 and X.ndim == 1:
@@ -1156,12 +1727,14 @@ class Visdom(object):
         - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
         - `opts.columnnames`: `list` containing x-axis labels
         - `opts.rownames`: `list` containing y-axis labels
+        - `opts.nancolor`: if not None, color for plotting nan
+                           (`string`; default = `None`)
         """
 
         assert X.ndim == 2, 'data should be two-dimensional'
         opts = {} if opts is None else opts
-        opts['xmin'] = opts.get('xmin', np.asscalar(X.min()))
-        opts['xmax'] = opts.get('xmax', np.asscalar(X.max()))
+        opts['xmin'] = opts.get('xmin', np.asscalar(np.nanmin(X)))
+        opts['xmax'] = opts.get('xmax', np.asscalar(np.nanmax(X)))
         opts['colormap'] = opts.get('colormap', 'Viridis')
         _title2str(opts)
         _assert_opts(opts)
@@ -1175,7 +1748,7 @@ class Visdom(object):
                 'number of row names should match number of rows in X'
 
         data = [{
-            'z': X.tolist(),
+            'z': nan2none(X.tolist()),
             'x': opts.get('columnnames'),
             'y': opts.get('rownames'),
             'zmin': opts.get('xmin'),
@@ -1183,6 +1756,20 @@ class Visdom(object):
             'type': 'heatmap',
             'colorscale': opts.get('colormap'),
         }]
+
+        nancolor = opts.get('nancolor')
+        if nancolor is not None:
+            # nan is plotted as transparent, so we just plot another trace as
+            # background, before plotting real data.
+            nantrace = {
+                'z': np.zeros_like(X).tolist(),
+                'x': data[0]['x'],
+                'y': data[0]['y'],
+                'type': 'heatmap',
+                'showscale': False,
+                'colorscale': [[0, nancolor], [1, nancolor]],
+            }
+            data.insert(0, nantrace)
 
         return self._send({
             'data': data,
@@ -1353,8 +1940,8 @@ class Visdom(object):
         assert X.ndim == 2, 'X should be two-dimensional'
 
         opts = {} if opts is None else opts
-        opts['xmin'] = opts.get('xmin', X.min())
-        opts['xmax'] = opts.get('xmax', X.max())
+        opts['xmin'] = float(opts.get('xmin', X.min()))
+        opts['xmax'] = float(opts.get('xmax', X.max()))
         opts['colormap'] = opts.get('colormap', 'Viridis')
         _title2str(opts)
         _assert_opts(opts)
@@ -1408,7 +1995,7 @@ class Visdom(object):
 
     @pytorch_wrap
     def quiver(self, X, Y, gridX=None, gridY=None,
-                            win=None, env=None, opts=None):
+               win=None, env=None, opts=None):
         """
         This function draws a quiver plot in which the direction and length of the
         arrows is determined by the `NxM` tensors `X` and `Y`. Two optional `NxM`
@@ -1429,9 +2016,11 @@ class Visdom(object):
         # make sure we have a grid:
         N, M = X.shape[0], X.shape[1]
         if gridX is None:
-            gridX = np.broadcast_to(np.expand_dims(np.arange(0, N), axis=1), (N, M))
+            gridX = np.broadcast_to(
+                np.expand_dims(np.arange(0, N), axis=1), (N, M))
         if gridY is None:
-            gridY = np.broadcast_to(np.expand_dims(np.arange(0, M), axis=0), (N, M))
+            gridY = np.broadcast_to(
+                np.expand_dims(np.arange(0, M), axis=0), (N, M))
         assert gridX.shape == X.shape, 'X and gridX should have the same size'
         assert gridY.shape == Y.shape, 'Y and gridY should have the same size'
 
@@ -1516,7 +2105,7 @@ class Visdom(object):
             Y = Y[:, None]
         assert Y.shape[0] == X.shape[0], 'number of rows in X and Y must match'
         assert Y.shape[1] == 1 or Y.shape[1] == X.shape[1], \
-                'Y should be a single column or the same number of columns as X'
+            'Y should be a single column or the same number of columns as X'
 
         if Y.shape[1] < X.shape[1]:
             Y = np.tile(Y, (1, X.shape[1]))

@@ -8,45 +8,45 @@
  */
 
 class EventSystem {
-    constructor() {
-        this.queue = {};
+  constructor() {
+    this.queue = {};
+  }
+
+  publish(event, data) {
+    let queue = this.queue[event];
+
+    if (typeof queue === 'undefined') {
+      return false;
     }
 
-    publish(event, data) {
-        let queue = this.queue[event];
+    queue.forEach(cb => cb(data));
 
-        if (typeof queue === 'undefined') {
-            return false;
-        }
+    return true;
+  }
 
-        queue.forEach((cb) => cb(data));
-
-        return true;
+  subscribe(event, callback) {
+    if (typeof this.queue[event] === 'undefined') {
+      this.queue[event] = [];
     }
 
-    subscribe(event, callback) {
-        if (typeof this.queue[event] === 'undefined') {
-            this.queue[event] = [];
-        }
+    this.queue[event].push(callback);
+  }
 
-        this.queue[event].push(callback);
+  //  the callback parameter is optional. Without it the whole event will be
+  // removed, instead of just one subscibtion. Fine for simple implementation
+  unsubscribe(event, callback) {
+    let queue = this.queue;
+
+    if (typeof queue[event] !== 'undefined') {
+      if (typeof callback === 'undefined') {
+        delete queue[event];
+      } else {
+        this.queue[event] = queue[event].filter(function(sub) {
+          return sub !== callback;
+        });
+      }
     }
-
-    //  the callback parameter is optional. Without it the whole event will be
-    // removed, instead of just one subscibtion. Fine for simple implementation
-    unsubscribe(event, callback) {
-        let queue = this.queue;
-
-        if (typeof queue[event] !== 'undefined') {
-            if (typeof callback === 'undefined') {
-                delete queue[event];
-            } else {
-                this.queue[event] = queue[event].filter(function(sub) {
-                    return sub !== callback;
-                })
-            }
-        }
-    }
+  }
 }
 
 module.exports = new EventSystem();

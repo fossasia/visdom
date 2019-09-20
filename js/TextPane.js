@@ -7,57 +7,55 @@
  *
  */
 
-import EventSystem from "./EventSystem";
+import React from 'react';
+import EventSystem from './EventSystem';
 const Pane = require('./Pane');
 
 class TextPane extends React.Component {
+  onEvent = e => {
+    if (!this.props.isFocused) {
+      return;
+    }
 
-  onEvent = (e) => {
-      if( !this.props.isFocused ) {
-          return;
-      }
-
-      switch(e.type) {
-          case 'keydown':
-          case 'keypress':
-              e.preventDefault();
-              break;
-          case 'keyup':
-              this.props.appApi.sendPaneMessage(
-                  {
-                      event_type: 'KeyPress',
-                      key: event.key,
-                      key_code: event.keyCode,
-                  }
-              );
-              break;
-      }
+    switch (e.type) {
+      case 'keydown':
+      case 'keypress':
+        e.preventDefault();
+        break;
+      case 'keyup':
+        this.props.appApi.sendPaneMessage({
+          event_type: 'KeyPress',
+          key: e.key,
+          key_code: e.keyCode,
+        });
+        break;
+    }
   };
 
   componentDidMount() {
-      EventSystem.subscribe('global.event', this.onEvent)
+    EventSystem.subscribe('global.event', this.onEvent);
   }
-  componentWillMount() {
-      EventSystem.unsubscribe('global.event', this.onEvent)
+  componentWillUnmount() {
+    EventSystem.unsubscribe('global.event', this.onEvent);
   }
 
   handleDownload = () => {
-    var blob = new Blob([this.props.content], {type:"text/plain"});
+    var blob = new Blob([this.props.content], { type: 'text/plain' });
     var url = window.URL.createObjectURL(blob);
-    var link = document.createElement("a");
+    var link = document.createElement('a');
     link.download = 'visdom_text.txt';
     link.href = url;
     link.click();
-  }
+  };
 
   render() {
     return (
       <Pane {...this.props} handleDownload={this.handleDownload}>
-        <div className="content-text"><div
-          dangerouslySetInnerHTML={{__html: this.props.content}}>
-        </div></div>
+        <div className="content-text">
+          <div dangerouslySetInnerHTML={{ __html: this.props.content }} />
+        </div>
       </Pane>
-    )
+    );
   }
 }
 

@@ -125,6 +125,16 @@ button {
 .content {
   width: 100%;
   height: calc( 100% - 14px );
+  position: absolute;
+  overflow: hidden;
+  left: 0;
+}
+
+.widgets {
+  position: absolute;
+  bottom: 0;
+  background-color: #fff;
+  width: 99.5%;
 }
 
 .grip {
@@ -139,15 +149,28 @@ button {
   align: right;
 }
 
-.caption {
+.widget {
   overflow-y: hidden;
   word-wrap: break-word;
+  margin-bottom: 10px;
 }
 
 .content-image {
   image-rendering: pixelated;
   background-color: white;
   margin: auto auto;
+  display: block;
+}
+
+.mouse_image_location{
+  background: white;
+  position: absolute;
+  left: 0;
+  bottom: 1px;
+  display: none;
+}
+
+.content:hover .mouse_image_location{
   display: block;
 }
 

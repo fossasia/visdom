@@ -66,7 +66,7 @@ Right now three callback events are supported:
     - `key_code` - The javascript event keycode for the pressed key (no modifiers)
 3. `PropertyUpdate` - Triggers when a property is updated in Property pane
     - `propertyId` - Position in properties list
-    - `value` - New property value    
+    - `value` - New property value
 
 ### Environments
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34618198-fc63976c-f20b-11e7-9c0d-060132fdb37e.png" width="300" /></p>
@@ -85,6 +85,8 @@ From the main page it is possible to toggle between different environments using
 #### Comparing Environments
 
 From the main page it is possible to compare different environments using the environment selector. Selecting multiple environments in the check box will query the server for the plots with the same titles in all environments and plot them in a single plot. An additional compare legend pane is created with a number corresponding to each selected environment. Individual plots are updated with legends corresponding to "x_name" where `x` is a number corresponding with the compare legend pane and `name` is the original name in the legend.
+
+> **Note**: The compare envs view is not robust to high throughput data, as the server is responsible for generating the compared content. Do not compare an environment that is receiving a high quantity of updates on any plot, as every update will request regenerating the comparison. If you need to compare two plots that are receiving high quantities of data, have them share the same window on a singular env.
 
 #### Clearing Environments
 You can use the eraser button to remove all of the current contents of an environment. This closes the plot windows for that environment but keeps the empty environment for new plots.
@@ -150,7 +152,7 @@ pip install visdom
 ```
 
 ```bash
-# Install python from source
+# Install visdom from source
 pip install -e .
 # If the above runs into issues, you can try the below
 easy_install .
@@ -177,12 +179,26 @@ Visdom now can be accessed by going to `http://localhost:8097` in your browser, 
 The following options can be provided to the server:
 
 1. `-port` : The port to run the server on.
-2. `-env_path` : The path to the serialized session to reload.
-3. `-logging_level` : Logging level (default = INFO). Accepts both standard text and numeric logging values.
-4. `-readonly` : Flag to start server in readonly mode.
-5. `-enable_login` : Flag to setup authentication for the sever, requiring a username and password to login.
-6. `-force_new_cookie` : Flag to reset the secure cookie used by the server, invalidating current login cookies. Requires `-enable_login`.
+2. `-hostname` : The hostname to run the server on.
+3. `-base_url` : The base server url (default = /).
+4. `-env_path` : The path to the serialized session to reload.
+5. `-logging_level` : Logging level (default = INFO). Accepts both standard text and numeric logging values.
+6. `-readonly` : Flag to start server in readonly mode.
+7. `-enable_login` : Flag to setup authentication for the sever, requiring a username and password to login.
+8. `-force_new_cookie` : Flag to reset the secure cookie used by the server, invalidating current login cookies.
+Requires `-enable_login`.
 
+When `-enable_login` flag is provided, the server asks user to input credentials using terminal prompt. Alternatevily,
+you can setup `VISDOM_USE_ENV_CREDENTIALS` env variable, and then provide your username and password via
+`VISDOM_USERNAME` and `VISDOM_PASSWORD` env variables without manually interacting with the terminal. This setup
+is useful in case if you would like to launch `visdom` server from bash script, or from Jupyter notebook.
+```bash
+VISDOM_USERNAME=username
+VISDOM_PASSWORD=password
+VISDOM_USE_ENV_CREDENTIALS=1 visdom -enable_login
+```
+You can also use `VISDOM_COOKIE` variable to provide cookies value if the cookie file wasn't generated, or the
+flag `-force_new_cookie` was set.
 
 #### Python example
 ```python
@@ -207,12 +223,17 @@ For a quick introduction into the capabilities of `visdom`, have a look at the `
 The python visdom client takes a few options:
 - `server`: the hostname of your visdom server (default: `'http://localhost'`)
 - `port`: the port for your visdom server (default: `8097`)
+- `base_url`: the base visdom server url (default: `/`)
 - `env`: Default environment to plot to when no `env` is provided (default: `main`)
 - `raise_exceptions`: Raise exceptions upon failure rather than printing them (default: `True` (soon))
 - `log_to_filename`: If not none, log all plotting and updating events to the given file (append mode) so that they can be replayed later using `replay_log` (default: `None`)
 - `use_incoming_socket`: enable use of the socket for receiving events from the web client, allowing user to register callbacks (default: `True`)
-- `http_proxy_host`: host to proxy your incoming socket through (default: `None`)
-- `http_proxy_port`: port to proxy your incoming socket through (default: `None`)
+- `http_proxy_host`: Deprecated. Use Proxies argument for complete proxy support.
+- `http_proxy_port`: Deprecated. Use Proxies argument for complete proxy support.
+- `username`: username to use for authentication, if server started with `-enable_login` (default: `None`)
+- `password`: password to use for authentication, if server started with `-enable_login` (default: `None`)
+- `proxies`: Dictionary mapping protocol to the URL of the proxy (e.g. {`http`: `foo.bar:3128`}) to be used on each Request. (default: `None`)
+- `offline`: Flag to run visdom in offline mode, where all requests are logged to file rather than to the server. Requires `log_to_filename` is set. In offline mode, all visdom commands that don't create or update plots will simply return `True`. (default: `False`)
 
 Other options are either currently unused (endpoint, ipv6) or used for internal functionality.
 
@@ -263,6 +284,8 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 - [`vis.close`](#visclose)    : close a window by id
 - [`vis.delete_env`](#visdelete_env) : delete an environment by env_id
 - [`vis.win_exists`](#viswin_exists) : check if a window already exists by id
+- [`vis.get_env_list`](#visget_env_list) : get a list of all of the environments on your server
+- [`vis.win_hash`](#viswin_hash): get md5 hash of window's contents
 - [`vis.get_window_data`](#visget_window_data): get current data for a window
 - [`vis.check_connection`](#vischeck_connection): check if the server is connected
 - [`vis.replay_log`](#visreplay_log): replay the actions from the provided log file
@@ -279,8 +302,12 @@ that contains the image.
 
 The following `opts` are supported:
 
-- `opts.jpgquality`: JPG quality (`number` 0-100; default = 100)
-- `opts.caption`: Caption for the image
+- `jpgquality`: JPG quality (`number` 0-100). If defined image will be saved as JPG to reduce file size. If not defined image will be saved as PNG.
+- `caption`: Caption for the image
+- `store_history`: Keep all images stored to the same window and attach a slider to the bottom that will let you select the image to view. You must always provide this opt when sending new images to an image with history.
+
+> **Note** You can use alt on an image pane to view the x/y coordinates of the cursor. You can also ctrl-scroll to zoom, alt scroll to pan vertically, and alt-shift scroll to pan horizontally. Double click inside the pane to restore the image to default.
+
 
 #### vis.images
 
@@ -290,7 +317,7 @@ The following arguments and `opts` are supported:
 
 - `nrow`: Number of images in a row
 - `padding`: Padding around the image, equal padding around all 4 sides
-- `opts.jpgquality`: JPG quality (`number` 0-100; default = 100)
+- `opts.jpgquality`: JPG quality (`number` 0-100). If defined image will be saved as JPG to reduce file size. If not defined image will be saved as PNG.
 - `opts.caption`: Caption for the image
 
 #### vis.text
@@ -372,6 +399,20 @@ This function draws a Plotly `Figure` object. It does not explicitly take option
 
 > **Note** You must have the `plotly` Python package installed to use this function. It can typically be installed by running `pip install plotly`.
 
+#### vis.embeddings
+
+This function visualizes a collection of features using the [Barnes-Hut t-SNE algorithm](https://github.com/lvdmaaten/bhtsne).
+
+The function accepts the following arguments:
+- `features`: a list of tensors
+- `labels`: a list of corresponding labels for the tensors provided for `features`
+- `data_getter=fn`: (optional) a function that takes as a parameter an index into the features array and returns a summary representation of the tensor. If this is set, `data_type` must also be set.
+- `data_type=str`: (optional) currently the only acceptable value here is `"html"`
+
+We currently assume that there are no more than 10 unique labels, in the future we hope to provide a colormap in opts for other cases.
+
+From the UI you can also draw a lasso around a subset of features. This will rerun the t-SNE visualization on the selected subset.
+
 #### vis.save
 This function saves the `envs` that are alive on the visdom server. It takes input a list of env ids to be saved.
 
@@ -388,7 +429,10 @@ scatter plot. An optional `N` tensor `Y` containing discrete labels that
 range between `1` and `K` can be specified as well -- the labels will be
 reflected in the colors of the markers.
 
-`update` can be used to efficiently update the data of an existing plot. Use 'append' to append data, 'replace' to use new data, or 'remove' to remove the trace specified by `name`. If updating a single trace, use `name` to specify the name of the trace to be updated. Update data that is all NaN is ignored (can be used for masking update).
+`update` can be used to efficiently update the data of an existing plot. Use `'append'` to append data, `'replace'` to use new data, or `'remove'` to remove the trace specified by `name`.
+Using `update='append'` will create a plot if it doesn't exist and append to the existing plot otherwise.
+If updating a single trace, use `name` to specify the name of the trace to be updated. Update data that is all NaN is ignored (can be used for masking update).
+
 
 The following `opts` are supported:
 
@@ -399,6 +443,7 @@ The following `opts` are supported:
 - `opts.textlabels`  : text label for each point (`list`: default = `None`)
 - `opts.layoutopts`  : dict of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 - `opts.traceopts`   : dict mapping trace names or indices to dicts of additional options that the graph backend accepts. For example `traceopts = {'plotly': {'myTrace': {'mode': 'markers'}}}`.
+- `opts.webgl`       : use WebGL for plotting (`boolean`; default = `false`). It is faster if a plot contains too many points. Use sparingly as browsers won't allow more than a couple of WebGL contexts on a single page.
 
 `opts.markercolor` is a Tensor with Integer values. The tensor can be of size `N` or `N x 3` or `K` or `K x 3`.
 
@@ -422,9 +467,12 @@ The following `opts` are supported:
 - `opts.markers`     : show markers (`boolean`; default = `false`)
 - `opts.markersymbol`: marker symbol (`string`; default = `'dot'`)
 - `opts.markersize`  : marker size (`number`; default = `'10'`)
+- `opts.linecolor`   : line colors (`np.array`; default = None)
+- `opts.dash`        : line dash type for each line (`np.array`; default = 'solid'), one of `solid`, `dash`, `dashdot` or `dash`, size should match number of lines being drawn
 - `opts.legend`      : `table` containing legend names
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 - `opts.traceopts`   : `dict` mapping trace names or indices to `dict`s of additional options that plot.ly accepts for a trace.
+- `opts.webgl`       : use WebGL for plotting (`boolean`; default = `false`). It is faster if a plot contains too many points. Use sparingly as browsers won't allow more than a couple of WebGL contexts on a single page.
 
 
 #### vis.stem
@@ -451,7 +499,8 @@ The following `opts` are supported:
 - `opts.xmax`       : clip maximum value (`number`; default = `X:max()`)
 - `opts.columnnames`: `table` containing x-axis labels
 - `opts.rownames`   : `table` containing y-axis labels
-- `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
+- `opts.layoutopts` : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
+- `opts.nancolor`   : color for plotting `NaN`s. If this is `None`, `NaN`s will be plotted as transparent. (`string`; default = `None`)
 
 #### vis.bar
 This function draws a regular, stacked, or grouped bar plot. It takes as
@@ -582,12 +631,34 @@ This function deletes a specified env entirely. It takes env id `eid` as input.
 > **Note**: `delete_env` is deletes all data for an environment and is IRREVERSIBLE. Do not use unless you absolutely want to remove an environment.
 
 
+#### vis.fork_env
+
+This function forks an environment, similiar to the UI feature.
+
+Arguments:
+- `prev_eid`: Environment ID that we want to fork.
+- `eid`: New Environment ID that will be created with the fork.
+
+> **Note**: `fork_env` an exception will occur if an env that doesn't exist is forked.
+
 #### vis.win_exists
 
 This function returns a bool indicating whether or not a window `win` exists on the server already. Returns None if something went wrong.
 
 Optional arguments:
 - `env`: Environment to search for the window in. Default is `None`.
+
+#### vis.get_env_list
+
+This function returns a list of all of the environments on the server at the time of calling. It takes no arguments.
+
+#### vis.win_hash
+
+This function returns md5 hash of the contents of a window `win` if it exists on the server. Returns None otherwise.
+
+Optional arguments:
+- `env` : Environment to search for the window in. Default is `None`.
+
 
 #### vis.get_window_data
 This function returns the window data for the given window. Returns data for all windows in an env if win is None.
@@ -598,7 +669,7 @@ Arguments:
 
 #### vis.check_connection
 
-This function returns a bool indicating whether or not the server is connected.
+This function returns a bool indicating whether or not the server is connected. It accepts an optional argument `timeout_seconds` for a number of seconds to wait for the server to come up.
 
 #### vis.replay_log
 This function takes the contents of a visdom log and replays them to the current server to restore a state or handle any missing entries.
@@ -606,11 +677,8 @@ This function takes the contents of a visdom log and replays them to the current
 Arguments:
 - `log_filename`: log file to replay the contents of.
 
-## To Do
-
-- [ ] Command line tool for easy systematic plotting from live logs.
-- [ ] Filtering through windows with regex by title (or meta field)
-- [ ] Compiling react by python server at runtime
+## License
+visdom is Creative Commons Attribution-NonCommercial 4.0 International Public licensed, as found in the LICENSE file.
 
 ## Note on Lua Torch Support
 Support for Lua Torch was deprecated following `v0.1.8.4`. If you'd like to use torch support, you'll need to download that release. You can follow the usage instructions there, but it is no longer officially supported.

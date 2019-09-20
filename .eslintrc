@@ -1,0 +1,30 @@
+{
+  "extends": ["eslint:recommended", "plugin:react/recommended", "prettier"],
+  "plugins": ["ignore-generated-and-nolint"],
+  "parser": "babel-eslint",
+  "env": {
+    "browser": true,
+    "es6": true,
+    "commonjs": true
+  },
+  "rules": {
+    "react/prop-types": 0,
+    "no-console": "warn",
+    "max-len": [
+      "error",
+      {
+        "code": 80,
+        "ignoreUrls": true,
+        "ignoreStrings": true
+      }
+    ]
+  },
+  "settings": {
+    "react": {
+      "version": "detect"
+    }
+  },
+  "globals": {
+    "Plotly": "readonly"
+  }
+}

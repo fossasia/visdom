@@ -1,4 +1,11 @@
+# Copyright 2017-present, Facebook, Inc.
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
 import os
+from io import open
 from setuptools import setup
 from pkg_resources import get_distribution, DistributionNotFound
 
@@ -26,7 +33,7 @@ here = os.path.abspath(os.path.dirname(__file__))
 with open(os.path.join(here, 'py/visdom/VERSION')) as version_file:
     version = version_file.read().strip()
 
-readme = open('README.md').read()
+readme = open('README.md', 'rt', encoding='utf8').read()
 
 requirements = [
     'numpy>=1.8',
@@ -35,6 +42,7 @@ requirements = [
     'tornado',
     'pyzmq',
     'six',
+    'jsonpatch',
     'torchfile',
     'websocket-client',
 ]

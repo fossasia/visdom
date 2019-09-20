@@ -1,9 +1,22 @@
+/**
+ * Copyright 2017-present, Facebook, Inc.
+ * All rights reserved.
+ *
+ * This source code is licensed under the license found in the
+ * LICENSE file in the root directory of this source tree.
+ *
+ */
+
+var webpack = require('webpack');
+
 module.exports = {
-  entry: [
-    './js/main.js',
-  ],
+  entry: ['./js/main.js'],
   output: {
-    filename: 'py/visdom/static/js/main.js'
+    filename: 'py/visdom/static/js/main.js',
+  },
+  node: {
+    net: 'empty',
+    dns: 'empty',
   },
   module: {
     loaders: [
@@ -12,19 +25,19 @@ module.exports = {
         exclude: /(node_modules|bower_components)/,
         loader: 'babel-loader',
         query: {
-          presets: [
-            'es2015',
-            'react',
-          ],
-          plugins: [
-            'transform-class-properties',
-          ],
-        }
+          presets: ['es2015', 'react'],
+          plugins: ['transform-class-properties'],
+        },
       },
       {
         test: /\.css$/,
-        loaders: [ 'style', 'css' ]
-      }
-    ]
+        loaders: ['style', 'css'],
+      },
+      {
+        test: /\.json$/,
+        loader: 'json-loader',
+      },
+    ],
   },
-}
+  plugins: [new webpack.BannerPlugin('@generated')],
+};

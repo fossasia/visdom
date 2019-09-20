@@ -10,23 +10,19 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from visdom import Visdom
+import argparse
 import numpy as np
 import math
 import os.path
-import getpass
 import time
-from sys import platform as _platform
+import tempfile
 from six.moves import urllib
 
 
-try:
-    viz = Visdom()
-
-    startup_sec = 1
-    while not viz.check_connection() and startup_sec > 0:
-        time.sleep(0.1)
-        startup_sec -= 0.1
-    assert viz.check_connection(), 'No connection could be formed quickly'
+def run_demo(viz):
+    global input
+    assert viz.check_connection(timeout_seconds=3), \
+        'No connection could be formed quickly'
 
     textwindow = viz.text('Hello World!')
 
@@ -69,28 +65,43 @@ try:
         for n in range(256):
             video[n, :, :, :].fill(n)
         viz.video(tensor=video)
+    except BaseException:
+        print('Skipped video tensor example')
 
+    try:
         # video demo:
         # download video from http://media.w3.org/2010/05/sintel/trailer.ogv
         video_url = 'http://media.w3.org/2010/05/sintel/trailer.ogv'
-        # linux
-        if _platform == "linux" or _platform == "linux2":
-            videofile = '/home/%s/trailer.ogv' % getpass.getuser()
-        # MAC OS X
-        elif _platform == "darwin":
-            videofile = '/Users/%s/trailer.ogv' % getpass.getuser()
-        # download video
+        videofile = os.path.join(tempfile.gettempdir(), 'trailer.ogv')
         urllib.request.urlretrieve(video_url, videofile)
 
         if os.path.isfile(videofile):
-            viz.video(videofile=videofile)
+            viz.video(videofile=videofile, opts={'width': 864, 'height': 480})
     except BaseException:
-        print('Skipped video example')
+        print('Skipped video file example')
 
     # image demo
     viz.image(
         np.random.rand(3, 512, 256),
         opts=dict(title='Random!', caption='How random.'),
+    )
+
+    # image demo save as jpg
+    viz.image(
+        np.random.rand(3, 512, 256),
+        opts=dict(title='Random image as jpg!', caption='How random as jpg.', jpgquality=50),
+    )
+
+    # image history demo
+    viz.image(
+        np.random.rand(3, 512, 256),
+        win='image_history',
+        opts=dict(caption='First random', store_history=True, title='Pick your random!'),
+    )
+    viz.image(
+        np.random.rand(3, 512, 256),
+        win='image_history',
+        opts=dict(caption='Second random!', store_history=True),
     )
 
     # grid of images
@@ -130,12 +141,23 @@ try:
         ),
     )
 
+    # 3d scatterplot with custom labels and ranges
     viz.scatter(
         X=np.random.rand(100, 3),
         Y=(Y + 1.5).astype(int),
         opts=dict(
             legend=['Men', 'Women'],
             markersize=5,
+            xtickmin=0,
+            xtickmax=2,
+            xlabel='Arbitrary',
+            xtickvals=[0, 0.75, 1.6, 2],
+            ytickmin=0,
+            ytickmax=2,
+            ytickstep=0.5,
+            ztickmin=0,
+            ztickmax=1,
+            ztickstep=0.5,
         )
     )
 
@@ -245,6 +267,15 @@ try:
         opts=dict(markers=False),
     )
 
+    # line using WebGL
+    webgl_num_points = 200000
+    webgl_x = np.linspace(-1, 0, webgl_num_points)
+    webgl_y = webgl_x**3
+    viz.line(X=webgl_x, Y=webgl_y,
+             opts=dict(title='{} points using WebGL'.format(webgl_num_points), webgl=True),
+             win="WebGL demo")
+
+
     # line updates
     win = viz.line(
         X=np.column_stack((np.arange(0, 10), np.arange(0, 10))),
@@ -280,6 +311,50 @@ try:
         update='insert'
     )
     viz.line(X=None, Y=None, win=win, name='delete this', update='remove')
+
+    viz.line(
+        X=webgl_x+1.,
+        Y=(webgl_x+1.)**3,
+        win="WebGL demo",
+        update='append',
+        opts=dict(title='{} points using WebGL'.format(webgl_num_points*2), webgl=True)
+    )
+
+    win = viz.line(
+        X=np.column_stack((
+            np.arange(0, 10),
+            np.arange(0, 10),
+            np.arange(0, 10),
+        )),
+        Y=np.column_stack((
+            np.linspace(5, 10, 10),
+            np.linspace(5, 10, 10) + 5,
+            np.linspace(5, 10, 10) + 10,
+        )),
+        opts={
+            'dash': np.array(['solid', 'dash', 'dashdot']),
+            'linecolor': np.array([
+                [0, 191, 255],
+                [0, 191, 255],
+                [255, 0, 0],
+            ]),
+            'title': 'Different line dash types'
+        }
+    )
+
+    viz.line(
+        X=np.arange(0, 10),
+        Y=np.linspace(5, 10, 10) + 15,
+        win=win,
+        name='4',
+        update='insert',
+        opts={
+            'linecolor': np.array([
+                [255, 0, 0],
+            ]),
+            'dash': np.array(['dot']),
+        }
+    )
 
     Y = np.linspace(0, 4, 200)
     win = viz.line(
@@ -381,7 +456,6 @@ try:
         update='append',
         win=win)
 
-
     # mesh plot
     x = [0, 0, 1, 1, 0, 0, 1, 1]
     y = [0, 1, 1, 0, 0, 1, 1, 0]
@@ -436,13 +510,7 @@ try:
     # download from http://www.externalharddrive.com/waves/animal/dolphin.wav
     try:
         audio_url = 'http://www.externalharddrive.com/waves/animal/dolphin.wav'
-        # linux
-        if _platform == "linux" or _platform == "linux2":
-            audiofile = '/home/%s/dolphin.wav' % getpass.getuser()
-        # MAC OS X
-        elif _platform == "darwin":
-            audiofile = '/Users/%s/dolphin.wav' % getpass.getuser()
-        # download audio
+        audiofile = os.path.join(tempfile.gettempdir(), 'dolphin.wav')
         urllib.request.urlretrieve(audio_url, audiofile)
 
         if os.path.isfile(audiofile):
@@ -450,17 +518,53 @@ try:
     except BaseException:
         print('Skipped audio example')
 
+    # get/set state
+    import json
+    window = viz.text('test one')
+    data = json.loads(viz.get_window_data())
+    data[window]['content'] = 'test two'
+    viz.set_window_data(json.dumps(data))
+
     try:
         input = raw_input  # for Python 2 compatibility
     except NameError:
         pass
     input('Waiting for callbacks, press enter to quit.')
-except BaseException as e:
-    print(
-        "The visdom experienced an exception while running: {}\n"
-        "The demo displays up-to-date functionality with the GitHub version, "
-        "which may not yet be pushed to pip. Please upgrade using "
-        "`pip install -e .` or `easy_install .`\n"
-        "If this does not resolve the problem, please open an issue on "
-        "our GitHub.".format(repr(e))
-    )
+
+
+if __name__ == '__main__':
+    DEFAULT_PORT = 8097
+    DEFAULT_HOSTNAME = "http://localhost"
+    parser = argparse.ArgumentParser(description='Demo arguments')
+    parser.add_argument('-port', metavar='port', type=int, default=DEFAULT_PORT,
+                        help='port the visdom server is running on.')
+    parser.add_argument('-server', metavar='server', type=str,
+                        default=DEFAULT_HOSTNAME,
+                        help='Server address of the target to run the demo on.')
+    parser.add_argument('-base_url', metavar='base_url', type=str,
+                    default='/',
+                    help='Base Url.')
+    parser.add_argument('-username', metavar='username', type=str,
+                    default='',
+                    help='username.')
+    parser.add_argument('-password', metavar='password', type=str,
+                    default='',
+                    help='password.')
+    parser.add_argument('-use_incoming_socket', metavar='use_incoming_socket', type=bool,
+                    default=True,
+                    help='use_incoming_socket.')
+    FLAGS = parser.parse_args()
+
+    try:
+        viz = Visdom(port=FLAGS.port, server=FLAGS.server, base_url=FLAGS.base_url, username=FLAGS.username, password=FLAGS.password, \
+                use_incoming_socket=FLAGS.use_incoming_socket)
+        run_demo(viz)
+    except Exception as e:
+        print(
+            "The visdom experienced an exception while running: {}\n"
+            "The demo displays up-to-date functionality with the GitHub "
+            "version, which may not yet be pushed to pip. Please upgrade "
+            "using `pip install -e .` or `easy_install .`\n"
+            "If this does not resolve the problem, please open an issue on "
+            "our GitHub.".format(repr(e))
+        )

@@ -1,3 +1,9 @@
+# Copyright 2017-present, Facebook, Inc.
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
 from typing import Optional, List, Any, Union, Mapping, overload, Text
 
 ### Type aliases for commonly-used types.
@@ -9,7 +15,7 @@ _OptStr = Optional[Text]  # For optional string parameters, like 'window' and 'e
 
 # No widely-deployed stubs exist at the moment for torch or numpy. When they are available, the correct type of the tensor-like inputs
 # to the plotting commands should be
-# Tensor = Union[torch.Tensor, numpy.ndarray]
+# Tensor = Union[torch.Tensor, numpy.ndarray, List]
 # For now, we fall back to 'Any'.
 Tensor = Any
 
@@ -25,6 +31,7 @@ class Visdom:
         server: Text = ...,
         endpoint: Text = ...,
         port: int = ...,
+        base_url: Text = ...,
         ipv6: bool = ...,
         http_proxy_host: _OptStr = ...,
         http_proxy_port: Optional[int] = ...,
@@ -54,6 +61,7 @@ class Visdom:
     @overload
     def svg(self, svgfile: _OptStr = ..., win: _OptStr = ..., env: _OptStr = ..., ops: _OptOps = ...) -> _SendReturn: ...
     def matplot(self, plot: Any, opts: _OptOps = ..., env: _OptStr = ..., win: _OptStr = ...) -> _SendReturn: ...
+    def plotlyplot(self, figure: Any, win: _OptStr = ..., env: _OptStr = ...) -> _SendReturn: ...
     def image(self, img: Tensor, win: _OptStr = ..., env: _OptStr = ..., opts: _OptOps = ...) -> _SendReturn: ...
     def images(
         self,
@@ -88,6 +96,7 @@ class Visdom:
         env: _OptStr = ...,
         update: _OptStr = ...,
         name: _OptStr = ...,
+        opts: _OptOpts = ...
     ) -> _SendReturn: ...
     def line(
         self,
@@ -97,6 +106,7 @@ class Visdom:
         env: _OptStr = ...,
         update: _OptStr = ...,
         name: _OptStr = ...,
+        opts: _OptOps = ...
     ) -> _SendReturn: ...
     def grid(
         self,
