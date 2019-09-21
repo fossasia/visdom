@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 # Copyright 2017-present, Facebook, Inc.
 # All rights reserved.
 #
@@ -5,11 +7,6 @@
 # LICENSE file in the root directory of this source tree.
 
 """Server"""
-
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
 import argparse
 import copy
@@ -29,10 +26,11 @@ import warnings
 from os.path import expanduser
 from collections import OrderedDict
 try:
+    # for after python 3.8
     from collections.abc import Mapping, Sequence
 except ImportError:
+    # for python 3.7 and below
     from collections import Mapping, Sequence
-from six import string_types
 
 import visdom
 from zmq.eventloop import ioloop
@@ -55,6 +53,8 @@ COMPACT_SEPARATORS = (',', ':')
 _seen_warnings = set()
 
 MAX_SOCKET_WAIT = 15
+
+assert sys.version_info[0] >= 3, 'To use visdom with python 2, downgrade to v0.1.8.9'
 
 
 def warn_once(msg, warningtype=None):
@@ -912,7 +912,7 @@ def recursive_order(node):
     elif isinstance(node, Sequence):
         if isinstance(node, (bytes,)):
             return node
-        elif isinstance(node, string_types):
+        elif isinstance(node, (str,)):
             return node
         else:
             return [recursive_order(item) for item in node]
@@ -981,6 +981,7 @@ class UpdateHandler(BaseHandler):
                 selected_not_neg = max(0, selected)
                 selected_exists = min(len(p['content'])-1, selected_not_neg)
                 p['selected'] = selected_exists
+            return p
 
         pdata = p['content']['data']
 
@@ -1729,8 +1730,8 @@ def download_scripts(proxies=None, install_dir=None):
             os.makedirs(directory)
 
     # set up proxy handler:
-    from six.moves.urllib import request
-    from six.moves.urllib.error import HTTPError, URLError
+    from urllib import request
+    from urllib.error import HTTPError, URLError
     handler = request.ProxyHandler(proxies) if proxies is not None \
         else request.BaseHandler()
     opener = request.build_opener(handler)

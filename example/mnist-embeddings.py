@@ -1,19 +1,16 @@
+#!/usr/bin/env python3
+
 # Copyright 2017-present, Facebook, Inc.
 # All rights reserved.
 #
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import visdom
 import numpy as np
 from PIL import Image  # type: ignore
 import base64 as b64  # type: ignore
-from six import BytesIO
+from io import BytesIO
 import sys
 
 try:
