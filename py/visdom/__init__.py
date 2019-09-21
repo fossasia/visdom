@@ -339,8 +339,8 @@ def _to_numpy(a):
         if isinstance(a, torch.autograd.Variable):
             # For PyTorch < 0.4 comptability.
             warnings.warn(
-                "Support for versions of PyTorch less than 0.4 is deprecated and "
-                "will eventually be removed.", DeprecationWarning)
+                "Support for versions of PyTorch less than 0.4 is deprecated "
+                "and will eventually be removed.", DeprecationWarning)
             a = a.data
     for kind in torch_types:
         if isinstance(a, kind):
