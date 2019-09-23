@@ -60,12 +60,13 @@ def check_auth(f):
     Wrapper for server access methods to ensure that the access
     is authorized.
     """
-    def _check_auth(app, *args, **kwargs):
-        app.last_access = time.time()
-        if app.login_enabled and not app.current_user:
-            app.set_status(400)
+    def _check_auth(handler, *args, **kwargs):
+        # TODO this should call a shared method of the handler
+        handler.last_access = time.time()
+        if handler.login_enabled and not handler.current_user:
+            handler.set_status(400)
             return
-        f(app, *args, **kwargs)
+        f(handler, *args, **kwargs)
     return _check_auth
 
 def set_cookie(value=None):
