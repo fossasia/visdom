@@ -6,6 +6,8 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+from visdom.utils.shared_utils import get_new_window_id
+from visdom import server
 import os.path
 import requests
 import traceback
