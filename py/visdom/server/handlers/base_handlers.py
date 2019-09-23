@@ -6,50 +6,24 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""Server"""
+"""
+Contain the basic web request handlers that all other handlers derive from
+"""
 
-from visdom.utils.shared_utils import (
-    warn_once,
-    get_rand_id,
-    get_new_window_id,
-    ensure_dir_exists,
-)
-import argparse
-import copy
-import getpass
-import hashlib
-import inspect
-import json
-import jsonpatch
 import logging
-import math
-import os
-import sys
-import time
 import traceback
-from collections import OrderedDict
-try:
-    # for after python 3.8
-    from collections.abc import Mapping, Sequence
-except ImportError:
-    # for python 3.7 and below
-    from collections import Mapping, Sequence
 
-# from zmq.eventloop import ioloop
-# ioloop.install()  # Needs to happen before any tornado imports!
+import tornado.web
+import tornado.websocket
 
-import tornado.ioloop     # noqa E402: gotta install ioloop first
-import tornado.web        # noqa E402: gotta install ioloop first
-import tornado.websocket  # noqa E402: gotta install ioloop first
-import tornado.escape     # noqa E402: gotta install ioloop first
-
-LAYOUT_FILE = 'layouts.json'
-
-COMPACT_SEPARATORS = (',', ':')
-
-MAX_SOCKET_WAIT = 15
 
 class BaseWebSocketHandler(tornado.websocket.WebSocketHandler):
+    """
+    Implements any required overriden functionality from the basic tornado
+    websocket handler. Also contains some shared logic for all WebSocketHandler
+    classes.
+    """
+
     def get_current_user(self):
         """
         This method determines the self.current_user
@@ -63,6 +37,11 @@ class BaseWebSocketHandler(tornado.websocket.WebSocketHandler):
 
 
 class BaseHandler(tornado.web.RequestHandler):
+    """
+    Implements any required overriden functionality from the basic tornado
+    request handlers, and contains any convenient shared logic helpers.
+    """
+
     def __init__(self, *request, **kwargs):
         self.include_host = False
         super(BaseHandler, self).__init__(*request, **kwargs)
@@ -97,6 +76,7 @@ class BaseHandler(tornado.web.RequestHandler):
                     'request': self.request.__dict__
                 }
 
+                # TODO make an error.html page
                 self.render("error.html", **params)
                 logging.error("rendering complete")
             except Exception as e:
