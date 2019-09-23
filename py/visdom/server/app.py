@@ -18,7 +18,8 @@ from visdom.utils.server_utils import (
 )
 
 # TODO replace this next
-from visdom.server.handlers.all_handlers import *
+from visdom.server.handlers.socket_handlers import *
+from visdom.server.handlers.web_handlers import *
 
 import copy
 import hashlib

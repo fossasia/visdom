@@ -6,6 +6,10 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+"""
+Provides simple entrypoints to set up and run the main visdom server.
+"""
+
 from visdom.server.app import Application
 from visdom.server.defaults import (
     DEFAULT_BASE_URL,
