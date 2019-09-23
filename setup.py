@@ -42,7 +42,7 @@ requirements = [
     'scipy',
     'requests',
     'tornado',
-    'pyzmq',
+    # 'pyzmq',
     'six',
     'jsonpatch',
     'websocket-client',
