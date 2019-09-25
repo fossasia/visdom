@@ -32,7 +32,6 @@ except ImportError:
     # for python 3.7 and below
     from collections import Mapping, Sequence
 
-import visdom
 from zmq.eventloop import ioloop
 ioloop.install()  # Needs to happen before any tornado imports!
 
@@ -804,18 +803,6 @@ def register_window(self, p, eid):
     self.write(p['id'])
 
 
-def unpack_lua(req_args):
-    if req_args['is_table']:
-        if isinstance(req_args['val'], dict):
-            return {k: unpack_lua(v) for (k, v) in req_args['val'].items()}
-        else:
-            return [unpack_lua(v) for v in req_args['val']]
-    elif req_args['is_tensor']:
-        return visdom.from_t7(req_args['val'], b64=True)
-    else:
-        return req_args['val']
-
-
 class PostHandler(BaseHandler):
     def initialize(self, app):
         self.state = app.state
@@ -824,9 +811,6 @@ class PostHandler(BaseHandler):
         self.port = app.port
         self.env_path = app.env_path
         self.login_enabled = app.login_enabled
-        self.vis = visdom.Visdom(
-            port=self.port, send=False, use_incoming_socket=False
-        )
         self.handlers = {
             'update': UpdateHandler,
             'save': SaveHandler,
@@ -835,19 +819,6 @@ class PostHandler(BaseHandler):
             'delete_env': DeleteEnvHandler,
         }
 
-    def func(self, req):
-        args, kwargs = req['args'], req.get('kwargs', {})
-
-        args = (unpack_lua(a) for a in args)
-
-        for k in kwargs:
-            v = kwargs[k]
-            kwargs[k] = unpack_lua(v)
-
-        func = getattr(self.vis, req['func'])
-
-        return func(*args, **kwargs)
-
     @check_auth
     def post(self):
         req = tornado.escape.json_decode(
@@ -855,16 +826,12 @@ class PostHandler(BaseHandler):
         )
 
         if req.get('func') is not None:
-            try:
-                req, endpoint = self.func(req)
-                if (endpoint != 'events'):
-                    # Process the request using the proper handler
-                    self.handlers[endpoint].wrap_func(self, req)
-                    return
-            except Exception:
-                # get traceback and send it back
-                print(traceback.format_exc())
-                return self.write(traceback.format_exc())
+            raise Exception(
+                'Support for Lua Torch was deprecated following `v0.1.8.4`. '
+                "If you'd like to use torch support, you'll need to download "
+                "that release. You can follow the usage instructions there, "
+                "but it is no longer officially supported."
+            )
 
         eid = extract_eid(req)
         p = window(req)

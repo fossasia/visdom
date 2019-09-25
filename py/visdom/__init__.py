@@ -82,11 +82,6 @@ try:
 except Exception:
     __version__ = 'no_version_file'
 
-try:
-    import torchfile  # type: ignore
-except BaseException:
-    from . import torchfile
-
 logging.getLogger('requests').setLevel(logging.CRITICAL)
 logging.getLogger('urllib3').setLevel(logging.CRITICAL)
 logger = logging.getLogger(__name__)
@@ -121,19 +116,6 @@ def nan2none(l):
         elif isnum(val) and math.isnan(val):
             l[idx] = None
     return l
-
-
-def from_t7(t, b64=False):
-    if b64:
-        t = base64.b64decode(t)
-
-    with open('/dev/shm/t7', 'wb') as ff:
-        ff.write(t)
-        ff.close()
-
-    sf = open('/dev/shm/t7', 'rb')
-
-    return torchfile.T7Reader(sf).read_obj()
 
 
 def loadfile(filename):
@@ -316,11 +298,11 @@ def _assert_opts(opts):
 
     if opts.get('columnnames'):
         assert isinstance(opts.get('columnnames'), list), \
-            'columnnames should be a table with column names'
+            'columnnames should be a list with column names'
 
     if opts.get('rownames'):
         assert isinstance(opts.get('rownames'), list), \
-            'rownames should be a table with row names'
+            'rownames should be a list with row names'
 
     if opts.get('jpgquality'):
         assert isnum(opts.get('jpgquality')), \
@@ -357,8 +339,8 @@ def _to_numpy(a):
         if isinstance(a, torch.autograd.Variable):
             # For PyTorch < 0.4 comptability.
             warnings.warn(
-                "Support for versions of PyTorch less than 0.4 is deprecated and "
-                "will eventually be removed.", DeprecationWarning)
+                "Support for versions of PyTorch less than 0.4 is deprecated "
+                "and will eventually be removed.", DeprecationWarning)
             a = a.data
     for kind in torch_types:
         if isinstance(a, kind):
@@ -725,7 +707,7 @@ class Visdom(object):
     def save(self, envs):
         """
         This function allows the user to save envs that are alive on the
-        Tornado server. The envs can be specified as a table (list) of env ids.
+        Tornado server. The envs can be specified as a list of env ids.
         """
         assert isinstance(envs, list), 'envs should be a list'
         if len(envs) > 0:
@@ -1343,17 +1325,69 @@ class Visdom(object):
         opts['width'] = 330
         return self.text(text=audiodata, win=win, env=env, opts=opts)
 
+    def _encode(self, tensor, fps):
+        """
+        This follows the [PyAV cookbook]
+        (http://docs.mikeboers.com/pyav/develop/cookbook/numpy.html#generating-video)
+        """
+        import av  # type: ignore
+
+        # Float tensors are assumed to have a domain of [0, 1], for
+        # backward-compatibility with OpenCV.
+        if np.issubdtype(tensor.dtype, np.floating):
+            tensor = (255 * tensor)
+        tensor = tensor.astype(np.uint8).clip(0, 255)
+
+        # Use BGR for backward-compatibility with OpenCV
+        pixelformats = {1: 'gray', 3: 'bgr24'}
+        pixelformat = pixelformats[tensor.shape[3]]
+
+        content = BytesIO()
+        container = av.open(content, 'w', 'mp4')
+
+        stream = container.add_stream('h264', rate=fps)
+        stream.height = tensor.shape[1]
+        stream.width = tensor.shape[2]
+        stream.pix_fmt = 'yuv420p'
+
+        for arr in tensor:
+            frame = av.VideoFrame.from_ndarray(arr, format=pixelformat)
+            container.mux(stream.encode(frame))
+        # Flushing the stream here causes a deprecation warning in ffmpeg
+        # https://ffmpeg.zeranoe.com/forum/viewtopic.php?t=3678
+        # It's old and benign and possibly only apparent in homebrew-installed ffmpeg?
+        container.mux(stream.encode())
+
+        container.close()
+        content = content.getvalue()
+
+        return content, 'mp4'
+
     @pytorch_wrap
-    def video(self, tensor=None, dim='LxHxWxC', videofile=None, win=None, env=None, opts=None):
+    def video(
+        self,
+        tensor=None,
+        dim='LxHxWxC',
+        videofile=None,
+        win=None,
+        env=None,
+        opts=None
+    ):
         """
         This function plays a video. It takes as input the filename of the video
-        `videofile` or a `LxHxWxC` or `LxCxHxW`-sized `tensor` containing all the frames of
-        the video as input, as specified in `dim`. The color channels must be in BGR order.
+        `videofile` or a `LxHxWxC` or `LxCxHxW`-sized `tensor` containing all
+        the frames of the video as input, as specified in `dim`. The color
+        channels must be in BGR order.
 
-        The function does not support any plot-specific `opts`. The following video `opts` are supported:
+        Internally, video encoding is done with [PyAV]
+        (http://docs.mikeboers.com/pyav/develop/installation.html).
+        The import is deferred as it's a dependency most Visdom users won't encounter.
+
+        The function does not support any plot-specific `opts`. The following
+        video `opts` are supported:
 
         - `opts.fps`: FPS for the video (`integer` > 0; default = 25)
-        - `opts.autoplay`: whether to autoplay the video when it's ready (`boolean`; default = `false`)
+        - `opts.autoplay`: whether to autoplay the video when ready (`boolean`; default = `false`)
         - `opts.loop`: whether to loop the video (`boolean`; default = `false`)
         """
         opts = {} if opts is None else opts
@@ -1365,51 +1399,21 @@ class Visdom(object):
         assert tensor is not None or videofile is not None, \
             'should specify video tensor or file'
 
-        if tensor is not None:
-            import cv2 # type: ignore
-            import tempfile
+        if tensor is None:
+            extension = videofile.split(".")[-1].lower()
+            mimetypes = {'mp4': 'mp4', 'ogv': 'ogg', 'avi': 'avi', 'webm': 'webm'}
+            mimetype = mimetypes.get(extension)
+            assert mimetype is not None, 'unknown video type: %s' % extension
+            bytestr = loadfile(videofile)
+        else:
             assert tensor.ndim == 4, 'video should be in 4D tensor'
             assert dim == 'LxHxWxC' or dim == 'LxCxHxW', 'dimension argument should be LxHxWxC or LxCxHxW'
             if dim == 'LxCxHxW':
                 tensor = tensor.transpose([0, 2, 3, 1])
-            videofile = os.path.join(
-                tempfile.gettempdir(),
-                '%s.ogv' % next(tempfile._get_candidate_names()))
-            if cv2.__version__.startswith('2'):  # OpenCV 2
-                fourcc = cv2.cv.CV_FOURCC(
-                    chr(ord('T')),
-                    chr(ord('H')),
-                    chr(ord('E')),
-                    chr(ord('O'))
-                )
-            else:  # cv2.__version__.startswith(('3', '4')):  # OpenCV 3, 4
-                fourcc = cv2.VideoWriter_fourcc(
-                    chr(ord('T')),
-                    chr(ord('H')),
-                    chr(ord('E')),
-                    chr(ord('O'))
-                )
-            writer = cv2.VideoWriter(
-                videofile,
-                fourcc,
-                opts.get('fps'),
-                (tensor.shape[2], tensor.shape[1])
-            )
-            assert writer.isOpened(), 'video writer could not be opened'
-            for i in range(tensor.shape[0]):
-                # TODO mute opencv on this function call somehow
-                writer.write(tensor[i, :, :, :])
-            writer.release()
-            writer = None
-
-        extension = videofile.split(".")[-1].lower()
-        mimetypes = {'mp4': 'mp4', 'ogv': 'ogg', 'avi': 'avi', 'webm': 'webm'}
-        mimetype = mimetypes.get(extension)
-        assert mimetype is not None, 'unknown video type: %s' % extension
+            bytestr, mimetype = self._encode(tensor, opts['fps'])
 
         flags = ' '.join([k for k in ('autoplay', 'loop') if opts[k]])
 
-        bytestr = loadfile(videofile)
         videodata = """
             <video controls %s>
                 <source type="video/%s" src="data:video/%s;base64,%s">
@@ -1456,7 +1460,7 @@ class Visdom(object):
         - `opts.markercolor` : marker color (`np.array`; default = `None`)
         - `opts.dash`        : dash type (`np.array`; default = 'solid'`)
         - `opts.textlabels`  : text label for each point (`list`: default = `None`)
-        - `opts.legend`      : `table` containing legend names
+        - `opts.legend`      : `list` containing legend names
         """
         if update == 'remove':
             assert win is not None
@@ -1655,7 +1659,7 @@ class Visdom(object):
         - `opts.markersize`  : marker size (`number`; default = `'10'`)
         - `opts.linecolor`   : line colors (`np.array`; default = None)
         - `opts.dash`        : line dash type (`np.array`; default = None)
-        - `opts.legend`      : `table` containing legend names
+        - `opts.legend`      : `list` containing legend names
 
         If `update` is specified, the figure will be updated without
         creating a new plot -- this can be used for efficient updating.
@@ -1715,8 +1719,8 @@ class Visdom(object):
         - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
         - `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
         - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
-        - `opts.columnnames`: `table` containing x-axis labels
-        - `opts.rownames`: `table` containing y-axis labels
+        - `opts.columnnames`: `list` containing x-axis labels
+        - `opts.rownames`: `list` containing y-axis labels
         - `opts.nancolor`: if not None, color for plotting nan
                            (`string`; default = `None`)
         """
@@ -1781,9 +1785,9 @@ class Visdom(object):
 
         The following plot-specific `opts` are currently supported:
 
-        - `opts.rownames`: `table` containing x-axis labels
+            - `opts.rownames`: `list` containing x-axis labels
         - `opts.stacked` : stack multiple columns in `X`
-        - `opts.legend`  : `table` containing legend labels
+            - `opts.legend`  : `list` containing legend labels
         """
         X = np.squeeze(X)
         assert X.ndim == 1 or X.ndim == 2, 'X should be one or two-dimensional'
@@ -2081,7 +2085,7 @@ class Visdom(object):
         The following `opts` are supported:
 
         - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
-        - `opts.legend`  : `table` containing legend names
+        - `opts.legend`  : `list` containing legend names
         """
 
         X = np.squeeze(X)
@@ -2124,7 +2128,7 @@ class Visdom(object):
 
         The following `opts` are supported:
 
-        - `opts.legend`: `table` containing legend names
+        - `opts.legend`: `list` containing legend names
         """
 
         X = np.squeeze(X)
