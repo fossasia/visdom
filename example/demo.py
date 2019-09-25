@@ -74,8 +74,8 @@ def run_demo(viz):
 
         if os.path.isfile(videofile):
             viz.video(videofile=videofile, opts={'width': 864, 'height': 480})
-    except BaseException:
-        print('Skipped video file example')
+    except BaseException as e:
+        print('Skipped video file example', e)
 
     # image demo
     img_callback_win = viz.image(
