@@ -82,11 +82,6 @@ try:
 except Exception:
     __version__ = 'no_version_file'
 
-try:
-    import torchfile  # type: ignore
-except BaseException:
-    from . import torchfile
-
 logging.getLogger('requests').setLevel(logging.CRITICAL)
 logging.getLogger('urllib3').setLevel(logging.CRITICAL)
 logger = logging.getLogger(__name__)
@@ -121,19 +116,6 @@ def nan2none(l):
         elif isnum(val) and math.isnan(val):
             l[idx] = None
     return l
-
-
-def from_t7(t, b64=False):
-    if b64:
-        t = base64.b64decode(t)
-
-    with open('/dev/shm/t7', 'wb') as ff:
-        ff.write(t)
-        ff.close()
-
-    sf = open('/dev/shm/t7', 'rb')
-
-    return torchfile.T7Reader(sf).read_obj()
 
 
 def loadfile(filename):
@@ -316,11 +298,11 @@ def _assert_opts(opts):
 
     if opts.get('columnnames'):
         assert isinstance(opts.get('columnnames'), list), \
-            'columnnames should be a table with column names'
+            'columnnames should be a list with column names'
 
     if opts.get('rownames'):
         assert isinstance(opts.get('rownames'), list), \
-            'rownames should be a table with row names'
+            'rownames should be a list with row names'
 
     if opts.get('jpgquality'):
         assert isnum(opts.get('jpgquality')), \
@@ -357,8 +339,8 @@ def _to_numpy(a):
         if isinstance(a, torch.autograd.Variable):
             # For PyTorch < 0.4 comptability.
             warnings.warn(
-                "Support for versions of PyTorch less than 0.4 is deprecated and "
-                "will eventually be removed.", DeprecationWarning)
+                "Support for versions of PyTorch less than 0.4 is deprecated "
+                "and will eventually be removed.", DeprecationWarning)
             a = a.data
     for kind in torch_types:
         if isinstance(a, kind):
@@ -725,7 +707,7 @@ class Visdom(object):
     def save(self, envs):
         """
         This function allows the user to save envs that are alive on the
-        Tornado server. The envs can be specified as a table (list) of env ids.
+        Tornado server. The envs can be specified as a list of env ids.
         """
         assert isinstance(envs, list), 'envs should be a list'
         if len(envs) > 0:
@@ -1456,7 +1438,7 @@ class Visdom(object):
         - `opts.markercolor` : marker color (`np.array`; default = `None`)
         - `opts.dash`        : dash type (`np.array`; default = 'solid'`)
         - `opts.textlabels`  : text label for each point (`list`: default = `None`)
-        - `opts.legend`      : `table` containing legend names
+        - `opts.legend`      : `list` containing legend names
         """
         if update == 'remove':
             assert win is not None
@@ -1655,7 +1637,7 @@ class Visdom(object):
         - `opts.markersize`  : marker size (`number`; default = `'10'`)
         - `opts.linecolor`   : line colors (`np.array`; default = None)
         - `opts.dash`        : line dash type (`np.array`; default = None)
-        - `opts.legend`      : `table` containing legend names
+        - `opts.legend`      : `list` containing legend names
 
         If `update` is specified, the figure will be updated without
         creating a new plot -- this can be used for efficient updating.
@@ -1715,8 +1697,8 @@ class Visdom(object):
         - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
         - `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
         - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
-        - `opts.columnnames`: `table` containing x-axis labels
-        - `opts.rownames`: `table` containing y-axis labels
+        - `opts.columnnames`: `list` containing x-axis labels
+        - `opts.rownames`: `list` containing y-axis labels
         - `opts.nancolor`: if not None, color for plotting nan
                            (`string`; default = `None`)
         """
@@ -1781,9 +1763,9 @@ class Visdom(object):
 
         The following plot-specific `opts` are currently supported:
 
-        - `opts.rownames`: `table` containing x-axis labels
+            - `opts.rownames`: `list` containing x-axis labels
         - `opts.stacked` : stack multiple columns in `X`
-        - `opts.legend`  : `table` containing legend labels
+            - `opts.legend`  : `list` containing legend labels
         """
         X = np.squeeze(X)
         assert X.ndim == 1 or X.ndim == 2, 'X should be one or two-dimensional'
@@ -2081,7 +2063,7 @@ class Visdom(object):
         The following `opts` are supported:
 
         - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
-        - `opts.legend`  : `table` containing legend names
+        - `opts.legend`  : `list` containing legend names
         """
 
         X = np.squeeze(X)
@@ -2124,7 +2106,7 @@ class Visdom(object):
 
         The following `opts` are supported:
 
-        - `opts.legend`: `table` containing legend names
+        - `opts.legend`: `list` containing legend names
         """
 
         X = np.squeeze(X)
