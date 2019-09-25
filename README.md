@@ -39,7 +39,7 @@ Visdom has a simple set of features that can be composed for various use-cases.
 <p align="center"><img align="center" src="https://lh3.googleusercontent.com/-kLnogsg9RCs/WLx34PEsGWI/AAAAAAAAnSs/7t_62pbfmfoEBnkcbKTXIqz0WM8pQJHVQCLcB/s0/Screen+Shot+2017-03-05+at+3.34.43+PM.png" width="500" /></p>
 
 
-The UI begins as a blank slate -- you can populate it with plots, images, and text. These appear in windows that you can drag, drop, resize, and destroy. The windows live in `envs` and the state of `envs` is stored across sessions. You can download the content of windows -- including your plots in `svg`.
+The UI begins as a blank slate – you can populate it with plots, images, and text. These appear in windows that you can drag, drop, resize, and destroy. The windows live in `envs` and the state of `envs` is stored across sessions. You can download the content of windows – including your plots in `svg`.
 
 
 
@@ -58,7 +58,7 @@ You can subscribe a window to events by adding a function to the event handlers 
 
 Additional parameters are defined below.
 
-Right now three callback events are supported:
+Right now the following callback events are supported:
 
 1. `Close` - Triggers when a window is closed. Returns a dict with only the aforementioned fields.
 2. `KeyPress` - Triggers when a key is pressed. Contains additional parameters:
@@ -67,6 +67,8 @@ Right now three callback events are supported:
 3. `PropertyUpdate` - Triggers when a property is updated in Property pane
     - `propertyId` - Position in properties list
     - `value` - New property value
+4. `Click` - Triggers when Image pane is clicked on, has a parameter:
+    - `image_coord` - dictionary with the fields `x` and `y` for the click coordinates in the coordinate frame of the possibly zoomed/panned image (*not* the enclosing pane).
 
 ### Environments
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34618198-fc63976c-f20b-11e7-9c0d-060132fdb37e.png" width="300" /></p>
