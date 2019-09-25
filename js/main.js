@@ -35,6 +35,8 @@ var md5 = require('md5');
 var jsonpatch = require('fast-json-patch');
 var stringify = require('json-stable-stringify');
 
+import ReactResizeDetector from 'react-resize-detector';
+
 const PropertiesPane = require('./PropertiesPane');
 const TextPane = require('./TextPane');
 const ImagePane = require('./ImagePane');
@@ -1553,22 +1555,24 @@ class App extends React.Component {
 
         return (
           <div key={pane.id} className={isVisible ? '' : 'hidden-window'}>
-            <Comp
-              {...pane}
-              key={pane.id}
-              onClose={this.closePane}
-              onFocus={this.focusPane}
-              onInflate={this.onInflate}
-              isFocused={pane.id === this.state.focusedPaneID}
-              w={panelayout.w}
-              h={panelayout.h}
-              width={this.w2p(panelayout.w)}
-              height={this.h2p(panelayout.h) - PANE_TITLE_BAR_HEIGHT}
-              appApi={{
-                sendPaneMessage: this.sendPaneMessage,
-                sendEmbeddingPop: this.sendEmbeddingPop,
-              }}
-            />
+            <ReactResizeDetector handleWidth handleHeight>
+              <Comp
+                {...pane}
+                key={pane.id}
+                onClose={this.closePane}
+                onFocus={this.focusPane}
+                onInflate={this.onInflate}
+                isFocused={pane.id === this.state.focusedPaneID}
+                w={panelayout.w}
+                h={panelayout.h}
+                width={this.w2p(panelayout.w)}
+                height={this.h2p(panelayout.h) - PANE_TITLE_BAR_HEIGHT}
+                appApi={{
+                  sendPaneMessage: this.sendPaneMessage,
+                  sendEmbeddingPop: this.sendEmbeddingPop,
+                }}
+              />
+            </ReactResizeDetector>
           </div>
         );
       } catch (err) {

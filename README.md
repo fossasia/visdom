@@ -3,7 +3,7 @@
 
 ![visdom_big](https://lh3.googleusercontent.com/-bqH9UXCw-BE/WL2UsdrrbAI/AAAAAAAAnYc/emrxwCmnrW4_CLTyyUttB0SYRJ-i4CCiQCLcB/s0/Screen+Shot+2017-03-06+at+10.51.02+AM.png"visdom_big")
 
-A flexible tool for creating, organizing, and sharing visualizations of live, rich data. Supports Torch and Numpy.
+A flexible tool for creating, organizing, and sharing visualizations of live, rich data. Supports Python.
 
 * [Overview](#overview)
 * [Concepts](#concepts)
@@ -144,16 +144,12 @@ Using the view dropdown it is possible to select previously saved views, restori
 
 ## Setup
 
-Requires Python 2.7/3 (and optionally Torch7)
+Requires Python 3
 
 ```bash
 # Install Python server and client from pip
 # (STABLE VERSION, NOT ALL CURRENT FEATURES ARE SUPPORTED)
 pip install visdom
-
-# Install Torch client
-# (STABLE VERSION, NOT ALL CURRENT FEATURES ARE SUPPORTED)
-luarocks install visdom
 
 ```
 
@@ -162,9 +158,6 @@ luarocks install visdom
 pip install -e .
 # If the above runs into issues, you can try the below
 easy_install .
-
-# Install Torch client from source (from th directory)
-luarocks make
 
 ```
 
@@ -197,6 +190,17 @@ The following options can be provided to the server:
 8. `-force_new_cookie` : Flag to reset the secure cookie used by the server, invalidating current login cookies.
 Requires `-enable_login`.
 
+When `-enable_login` flag is provided, the server asks user to input credentials using terminal prompt. Alternatevily,
+you can setup `VISDOM_USE_ENV_CREDENTIALS` env variable, and then provide your username and password via
+`VISDOM_USERNAME` and `VISDOM_PASSWORD` env variables without manually interacting with the terminal. This setup
+is useful in case if you would like to launch `visdom` server from bash script, or from Jupyter notebook.
+```bash
+VISDOM_USERNAME=username
+VISDOM_PASSWORD=password
+VISDOM_USE_ENV_CREDENTIALS=1 visdom -enable_login
+```
+You can also use `VISDOM_COOKIE` variable to provide cookies value if the cookie file wasn't generated, or the
+flag `-force_new_cookie` was set.
 
 #### Python example
 ```python
@@ -207,29 +211,10 @@ vis.text('Hello, world!')
 vis.image(np.ones((3, 10, 10)))
 ```
 
-#### Torch example
-```lua
-require 'image'
-vis = require 'visdom'()
-vis:text{text = 'Hello, world!'}
-vis:image{img = image.fabio()}
-```
-
-Some users have reported issues when connecting Lua clients to the Visdom server.
-A potential work-around may be to switch off IPv6:
-```
-vis = require 'visdom'()
-vis.ipv6 = false  -- switches off IPv6
-vis:text{text = 'Hello, world!'}
-```
-
-
 ### Demos
 
 ```bash
 python example/demo.py
-th example/demo1.lua
-th example/demo2.lua
 ```
 
 
@@ -252,7 +237,7 @@ The python visdom client takes a few options:
 - `proxies`: Dictionary mapping protocol to the URL of the proxy (e.g. {`http`: `foo.bar:3128`}) to be used on each Request. (default: `None`)
 - `offline`: Flag to run visdom in offline mode, where all requests are logged to file rather than to the server. Requires `log_to_filename` is set. In offline mode, all visdom commands that don't create or update plots will simply return `True`. (default: `False`)
 
-Other options are either currently unused (endpoint, ipv6) or used for internal functionality (send allows the visdom server to replicate events for the lua client).
+Other options are either currently unused (endpoint, ipv6) or used for internal functionality.
 
 ### Basics
 Visdom offers the following basic visualization functions:
@@ -431,7 +416,7 @@ We currently assume that there are no more than 10 unique labels, in the future 
 From the UI you can also draw a lasso around a subset of features. This will rerun the t-SNE visualization on the selected subset.
 
 #### vis.save
-This function saves the `envs` that are alive on the visdom server. It takes input a list (in python) or table (in lua) of env ids to be saved.
+This function saves the `envs` that are alive on the visdom server. It takes input a list of env ids to be saved.
 
 ### Plotting
 Further details on the wrapped plotting functions are given below.
@@ -696,6 +681,9 @@ Arguments:
 
 ## License
 visdom is Creative Commons Attribution-NonCommercial 4.0 International Public licensed, as found in the LICENSE file.
+
+## Note on Lua Torch Support
+Support for Lua Torch was deprecated following `v0.1.8.4`. If you'd like to use torch support, you'll need to download that release. You can follow the usage instructions there, but it is no longer officially supported.
 
 ## Contributing
 See guidelines for contributing [here.](./CONTRIBUTING.md)

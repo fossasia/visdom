@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 # Copyright 2017-present, Facebook, Inc.
 # All rights reserved.
 #
@@ -5,11 +7,6 @@
 # LICENSE file in the root directory of this source tree.
 
 """Server"""
-
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
 import argparse
 import copy
@@ -21,6 +18,7 @@ import jsonpatch
 import logging
 import math
 import os
+import sys
 import time
 import traceback
 import uuid
@@ -28,12 +26,12 @@ import warnings
 from os.path import expanduser
 from collections import OrderedDict
 try:
+    # for after python 3.8
     from collections.abc import Mapping, Sequence
 except ImportError:
+    # for python 3.7 and below
     from collections import Mapping, Sequence
-from six import string_types
 
-import visdom
 from zmq.eventloop import ioloop
 ioloop.install()  # Needs to happen before any tornado imports!
 
@@ -54,6 +52,8 @@ COMPACT_SEPARATORS = (',', ':')
 _seen_warnings = set()
 
 MAX_SOCKET_WAIT = 15
+
+assert sys.version_info[0] >= 3, 'To use visdom with python 2, downgrade to v0.1.8.9'
 
 
 def warn_once(msg, warningtype=None):
@@ -114,9 +114,12 @@ def extract_eid(args):
     return escape_eid(eid)
 
 
-def set_cookie():
+def set_cookie(value=None):
     """Create cookie secret key for authentication"""
-    cookie_secret = input("Please input your cookie secret key here: ")
+    if value is not None:
+        cookie_secret = value
+    else:
+        cookie_secret = input("Please input your cookie secret key here: ")
     with open(DEFAULT_ENV_PATH + "COOKIE_SECRET", "w") as cookie_file:
         cookie_file.write(cookie_secret)
 
@@ -181,6 +184,8 @@ class Application(tornado.web.Application):
             (r"%s/socket_wrap" % self.base_url, SocketWrap, {'app': self}),
             (r"%s/vis_socket" % self.base_url,
                 VisSocketHandler, {'app': self}),
+            (r"%s/vis_socket_wrap" % self.base_url,
+                VisSocketWrap, {'app': self}),
             (r"%s/env/(.*)" % self.base_url, EnvHandler, {'app': self}),
             (r"%s/compare/(.*)" % self.base_url,
                 CompareHandler, {'app': self}),
@@ -208,7 +213,8 @@ class Application(tornado.web.Application):
         if self.env_path is None:
             warn_once(
                 'Saving and loading to disk has no effect when running with '
-                'env_path=None.'
+                'env_path=None.',
+                RuntimeWarning
             )
             return
         layout_filepath = os.path.join(self.env_path, 'view', LAYOUT_FILE)
@@ -219,7 +225,8 @@ class Application(tornado.web.Application):
         if self.env_path is None:
             warn_once(
                 'Saving and loading to disk has no effect when running with '
-                'env_path=None.'
+                'env_path=None.',
+                RuntimeWarning
             )
             return ""
         layout_filepath = os.path.join(self.env_path, 'view', LAYOUT_FILE)
@@ -236,7 +243,8 @@ class Application(tornado.web.Application):
         if env_path is None:
             warn_once(
                 'Saving and loading to disk has no effect when running with '
-                'env_path=None.'
+                'env_path=None.',
+                RuntimeWarning
             )
             return {'main': {'jsons': {}, 'reload': {}}}
         ensure_dir_exists(env_path)
@@ -330,6 +338,82 @@ class VisSocketHandler(BaseWebSocketHandler):
     def on_close(self):
         if self in list(self.sources.values()):
             self.sources.pop(self.sid, None)
+
+
+class VisSocketWrapper():
+    def __init__(self, app):
+        self.state = app.state
+        self.subs = app.subs
+        self.sources = app.sources
+        self.port = app.port
+        self.env_path = app.env_path
+        self.login_enabled = app.login_enabled
+        self.app = app
+        self.messages = []
+        self.last_read_time = time.time()
+        self.open()
+        try:
+            if not self.app.socket_wrap_monitor.is_running():
+                self.app.socket_wrap_monitor.start()
+        except AttributeError:
+            self.app.socket_wrap_monitor = tornado.ioloop.PeriodicCallback(
+                self.socket_wrap_monitor_thread, 15000
+            )
+            self.app.socket_wrap_monitor.start()
+
+    # TODO refactor the two socket wrappers into a wrapper class
+    def socket_wrap_monitor_thread(self):
+        if len(self.subs) > 0 or len(self.sources) > 0:
+            for sub in list(self.subs.values()):
+                if time.time() - sub.last_read_time > MAX_SOCKET_WAIT:
+                    sub.close()
+            for sub in list(self.sources.values()):
+                if time.time() - sub.last_read_time > MAX_SOCKET_WAIT:
+                    sub.close()
+        else:
+            self.app.socket_wrap_monitor.stop()
+
+    def open(self):
+        if self.login_enabled and not self.current_user:
+            print("AUTH Failed in SocketHandler")
+            self.close()
+            return
+        self.sid = get_rand_id()
+        if self not in list(self.sources.values()):
+            self.eid = 'main'
+            self.sources[self.sid] = self
+        logging.info('Mocking visdom socket: {}'.format(self.sid))
+
+        self.write_message(
+            json.dumps({'command': 'alive', 'data': 'vis_alive'}))
+
+    def on_message(self, message):
+        logging.info('from visdom client: {}'.format(message))
+        msg = tornado.escape.json_decode(tornado.escape.to_basestring(message))
+
+        cmd = msg.get('cmd')
+        if cmd == 'echo':
+            for sub in self.sources.values():
+                sub.write_message(json.dumps(msg))
+
+    def close(self):
+        if self in list(self.sources.values()):
+            self.sources.pop(self.sid, None)
+
+    def write_message(self, msg):
+        self.messages.append(msg)
+
+    def get_messages(self):
+        to_send = []
+        while len(self.messages) > 0:
+            message = self.messages.pop()
+            if type(message) is dict:
+                # Not all messages are being formatted the same way (JSON)
+                # TODO investigate
+                message = json.dumps(message)
+            to_send.append(message)
+        self.last_read_time = time.time()
+        return to_send
 
 
 class SocketHandler(BaseWebSocketHandler):
@@ -474,8 +558,12 @@ class ClientSocketWrapper():
             self.app.socket_wrap_monitor.start()
 
     def socket_wrap_monitor_thread(self):
-        if len(self.subs) > 0:
+        # TODO mark wrapped subs and sources separately
+        if len(self.subs) > 0 or len(self.sources) > 0:
             for sub in list(self.subs.values()):
+                if time.time() - sub.last_read_time > MAX_SOCKET_WAIT:
+                    sub.close()
+            for sub in list(self.sources.values()):
                 if time.time() - sub.last_read_time > MAX_SOCKET_WAIT:
                     sub.close()
         else:
@@ -604,7 +692,6 @@ class BaseHandler(tornado.web.RequestHandler):
                 traceback.format_exception(*kwargs["exc_info"])))
         if self.settings.get("debug") and "exc_info" in kwargs:
             logging.error("rendering error page")
-            import traceback
             exc_info = kwargs["exc_info"]
             # exc_info is a tuple consisting of:
             # 1. The class of the Exception
@@ -716,18 +803,6 @@ def register_window(self, p, eid):
     self.write(p['id'])
 
 
-def unpack_lua(req_args):
-    if req_args['is_table']:
-        if isinstance(req_args['val'], dict):
-            return {k: unpack_lua(v) for (k, v) in req_args['val'].items()}
-        else:
-            return [unpack_lua(v) for v in req_args['val']]
-    elif req_args['is_tensor']:
-        return visdom.from_t7(req_args['val'], b64=True)
-    else:
-        return req_args['val']
-
-
 class PostHandler(BaseHandler):
     def initialize(self, app):
         self.state = app.state
@@ -736,9 +811,6 @@ class PostHandler(BaseHandler):
         self.port = app.port
         self.env_path = app.env_path
         self.login_enabled = app.login_enabled
-        self.vis = visdom.Visdom(
-            port=self.port, send=False, use_incoming_socket=False
-        )
         self.handlers = {
             'update': UpdateHandler,
             'save': SaveHandler,
@@ -747,19 +819,6 @@ class PostHandler(BaseHandler):
             'delete_env': DeleteEnvHandler,
         }
 
-    def func(self, req):
-        args, kwargs = req['args'], req.get('kwargs', {})
-
-        args = (unpack_lua(a) for a in args)
-
-        for k in kwargs:
-            v = kwargs[k]
-            kwargs[k] = unpack_lua(v)
-
-        func = getattr(self.vis, req['func'])
-
-        return func(*args, **kwargs)
-
     @check_auth
     def post(self):
         req = tornado.escape.json_decode(
@@ -767,16 +826,12 @@ class PostHandler(BaseHandler):
         )
 
         if req.get('func') is not None:
-            try:
-                req, endpoint = self.func(req)
-                if (endpoint != 'events'):
-                    # Process the request using the proper handler
-                    self.handlers[endpoint].wrap_func(self, req)
-                    return
-            except Exception:
-                # get traceback and send it back
-                print(traceback.format_exc())
-                return self.write(traceback.format_exc())
+            raise Exception(
+                'Support for Lua Torch was deprecated following `v0.1.8.4`. '
+                "If you'd like to use torch support, you'll need to download "
+                "that release. You can follow the usage instructions there, "
+                "but it is no longer officially supported."
+            )
 
         eid = extract_eid(req)
         p = window(req)
@@ -824,7 +879,7 @@ def recursive_order(node):
     elif isinstance(node, Sequence):
         if isinstance(node, (bytes,)):
             return node
-        elif isinstance(node, string_types):
+        elif isinstance(node, (str,)):
             return node
         else:
             return [recursive_order(item) for item in node]
@@ -893,6 +948,7 @@ class UpdateHandler(BaseHandler):
                 selected_not_neg = max(0, selected)
                 selected_exists = min(len(p['content'])-1, selected_not_neg)
                 p['selected'] = selected_exists
+            return p
 
         pdata = p['content']['data']
 
@@ -1083,6 +1139,56 @@ class SocketWrap(BaseHandler):
         """Create a new socket wrapper for this requester, return the id"""
         new_sub = ClientSocketWrapper(self.app)
         self.write(json.dumps({'success': True, 'sid': new_sub.sid}))
+
+
+# TODO refactor socket wrappers to one class
+class VisSocketWrap(BaseHandler):
+    def initialize(self, app):
+        self.state = app.state
+        self.subs = app.subs
+        self.sources = app.sources
+        self.port = app.port
+        self.env_path = app.env_path
+        self.login_enabled = app.login_enabled
+        self.app = app
+
+    @check_auth
+    def post(self):
+        """Either write a message to the socket, or query what's there"""
+        # TODO formalize failure reasons
+        args = tornado.escape.json_decode(
+            tornado.escape.to_basestring(self.request.body)
+        )
+        type = args.get('message_type')
+        sid = args.get('sid')
+
+        if sid is None:
+            new_sub = VisSocketWrapper(self.app)
+            self.write(json.dumps({'success': True, 'sid': new_sub.sid}))
+            return
+
+        socket_wrap = self.sources.get(sid)
+        # ensure a wrapper still exists for this connection
+        if socket_wrap is None:
+            self.write(json.dumps({'success': False, 'reason': 'closed'}))
+            return
+
+        # handle the requests
+        if type == 'query':
+            messages = socket_wrap.get_messages()
+            self.write(json.dumps({
+                'success': True, 'messages': messages
+            }))
+        elif type == 'send':
+            msg = args.get('message')
+            if msg is None:
+                self.write(json.dumps({'success': False, 'reason': 'no msg'}))
+            else:
+                socket_wrap.on_message(msg)
+                self.write(json.dumps({'success': True}))
+        else:
+            self.write(json.dumps({'success': False, 'reason': 'invalid'}))
+
 
 class DeleteEnvHandler(BaseHandler):
     def initialize(self, app):
@@ -1591,8 +1697,8 @@ def download_scripts(proxies=None, install_dir=None):
             os.makedirs(directory)
 
     # set up proxy handler:
-    from six.moves.urllib import request
-    from six.moves.urllib.error import HTTPError, URLError
+    from urllib import request
+    from urllib.error import HTTPError, URLError
     handler = request.ProxyHandler(proxies) if proxies is not None \
         else request.BaseHandler()
     opener = request.build_opener(handler)
@@ -1719,18 +1825,53 @@ def main(print_func=None):
     logging.getLogger().setLevel(logging_level)
 
     if FLAGS.enable_login:
-        username = input("Please input your username: ")
-        password = getpass.getpass(prompt="Please input your password: ")
+        enable_env_login = 'VISDOM_USE_ENV_CREDENTIALS'
+        use_env = os.environ.get(enable_env_login, False)
+        if use_env:
+            username_var = 'VISDOM_USERNAME'
+            password_var = 'VISDOM_PASSWORD'
+            username = os.environ.get(username_var)
+            password = os.environ.get(password_var)
+            if not (username and password):
+                print(
+                    '*** Warning ***\n'
+                    'You have set the {0} env variable but probably '
+                    'forgot to setup one (or both) {{ {1}, {2} }} '
+                    'variables.\nYou should setup these variables with '
+                    'proper username and password to enable logging. Try to '
+                    'setup the variables, or unset {0} to input credentials '
+                    'via command line prompt instead.\n'
+                    .format(enable_env_login, username_var, password_var))
+                sys.exit(1)
+
+        else:
+            username = input("Please input your username: ")
+            password = getpass.getpass(prompt="Please input your password: ")
 
         user_credential = {
             "username": username,
             "password": hash_password(hash_password(password))
         }
 
-        if not os.path.isfile(DEFAULT_ENV_PATH + "COOKIE_SECRET"):
-            set_cookie()
-        elif FLAGS.force_new_cookie:
-            set_cookie()
+        need_to_set_cookie = (
+            not os.path.isfile(DEFAULT_ENV_PATH + "COOKIE_SECRET")
+            or FLAGS.force_new_cookie)
+
+        if need_to_set_cookie:
+            if use_env:
+                cookie_var = 'VISDOM_COOKIE'
+                env_cookie = os.environ.get(cookie_var)
+                if env_cookie is None:
+                    print(
+                        'The cookie file is not found. Please setup {0} env '
+                        'variable to provide a cookie value, or unset {1} env '
+                        'variable to input credentials and cookie via command '
+                        'line prompt.'.format(cookie_var, enable_env_login))
+                    sys.exit(1)
+            else:
+                env_cookie = None
+            set_cookie(env_cookie)
+
     else:
         user_credential = None
 

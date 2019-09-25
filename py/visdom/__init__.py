@@ -1,13 +1,10 @@
+#!/usr/bin/env python3
+
 # Copyright 2017-present, Facebook, Inc.
 # All rights reserved.
 #
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
-
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
 import os.path
 import requests
@@ -16,7 +13,12 @@ import threading
 import websocket  # type: ignore
 import json
 import hashlib
-import collections
+try:
+    # for after python 3.8
+    from collections.abc import Sequence
+except ImportError:
+    # for python 3.7 and below
+    from collections import Sequence
 import math
 import re
 import base64
@@ -24,17 +26,12 @@ import numpy as np  # type: ignore
 from PIL import Image  # type: ignore
 import base64 as b64  # type: ignore
 import numbers
-import six
-from six import string_types
-from six import BytesIO
-from six.moves import urllib
-from six.moves.urllib.parse import urlparse
-from six.moves.urllib.parse import urlunparse
+from urllib.parse import urlparse, urlunparse
 import logging
 import warnings
 import time
 import errno
-import io
+from io import BytesIO, StringIO
 from functools import wraps
 
 try:
@@ -42,6 +39,9 @@ try:
     BS4_AVAILABLE = True
 except ImportError:
     BS4_AVAILABLE = False
+
+import sys
+assert sys.version_info[0] >= 3, 'To use visdom with python 2, downgrade to v0.1.8.9'
 
 try:
     # TODO try to import https://github.com/CannyLab/tsne-cuda first? will be
@@ -82,19 +82,6 @@ try:
 except Exception:
     __version__ = 'no_version_file'
 
-try:
-    import torchfile  # type: ignore
-except BaseException:
-    from . import torchfile
-
-try:
-    raise ConnectionError()
-except NameError:  # python 2 doesn't have ConnectionError
-    class ConnectionError(Exception):
-        pass
-except ConnectionError:
-    pass
-
 logging.getLogger('requests').setLevel(logging.CRITICAL)
 logging.getLogger('urllib3').setLevel(logging.CRITICAL)
 logger = logging.getLogger(__name__)
@@ -105,7 +92,7 @@ def get_rand_id():
 
 
 def isstr(s):
-    return isinstance(s, string_types)
+    return isinstance(s, (str,))
 
 
 def isnum(n):
@@ -124,24 +111,11 @@ def isndarray(n):
 #       nan-aware ones, e.g., `X.max` => `np.nanmax(X)`.
 def nan2none(l):
     for idx, val in enumerate(l):
-        if isinstance(val, collections.abc.Sequence):
+        if isinstance(val, Sequence):
             l[idx] = nan2none(l[idx])
         elif isnum(val) and math.isnan(val):
             l[idx] = None
     return l
-
-
-def from_t7(t, b64=False):
-    if b64:
-        t = base64.b64decode(t)
-
-    with open('/dev/shm/t7', 'wb') as ff:
-        ff.write(t)
-        ff.close()
-
-    sf = open('/dev/shm/t7', 'rb')
-
-    return torchfile.T7Reader(sf).read_obj()
 
 
 def loadfile(filename):
@@ -324,11 +298,11 @@ def _assert_opts(opts):
 
     if opts.get('columnnames'):
         assert isinstance(opts.get('columnnames'), list), \
-            'columnnames should be a table with column names'
+            'columnnames should be a list with column names'
 
     if opts.get('rownames'):
         assert isinstance(opts.get('rownames'), list), \
-            'rownames should be a table with row names'
+            'rownames should be a list with row names'
 
     if opts.get('jpgquality'):
         assert isnum(opts.get('jpgquality')), \
@@ -365,8 +339,8 @@ def _to_numpy(a):
         if isinstance(a, torch.autograd.Variable):
             # For PyTorch < 0.4 comptability.
             warnings.warn(
-                "Support for versions of PyTorch less than 0.4 is deprecated and "
-                "will eventually be removed.", DeprecationWarning)
+                "Support for versions of PyTorch less than 0.4 is deprecated "
+                "and will eventually be removed.", DeprecationWarning)
             a = a.data
     for kind in torch_types:
         if isinstance(a, kind):
@@ -407,7 +381,8 @@ class Visdom(object):
         username=None,
         password=None,
         proxies=None,
-        offline=False
+        offline=False,
+        use_polling=False,
     ):
         parsed_url = urlparse(server)
         if not parsed_url.scheme:
@@ -430,7 +405,7 @@ class Visdom(object):
         self.event_handlers = {}  # Haven't registered any events
         self.socket_alive = False
         self.socket_connection_achieved = False
-        self.use_socket = use_incoming_socket
+        self.use_socket = use_incoming_socket or use_polling
         # Flag to indicate whether to raise errors or suppress them
         self.raise_exceptions = raise_exceptions
         self.log_to_filename = log_to_filename
@@ -471,6 +446,8 @@ class Visdom(object):
         # when talking to a server, get a backchannel
         if send and use_incoming_socket:
             self.setup_socket()
+        elif send and use_polling:
+            self.setup_polling()
         elif send and not use_incoming_socket:
             logger.warn(
                 'Without the incoming socket you cannot receive events from '
@@ -521,7 +498,59 @@ class Visdom(object):
     def clear_event_handlers(self, target):
         self.event_handlers[target] = []
 
-    def setup_socket(self):
+    def setup_polling(self):
+        # TODO merge with setup_socket?
+        # Setup socket to server
+        def on_message(message):
+            message = json.loads(message)
+            if 'command' in message:
+                # Handle server commands
+                if message['command'] == 'alive':
+                    if 'data' in message and message['data'] == 'vis_alive':
+                        logger.info('Visdom successfully connected to server')
+                        self.socket_alive = True
+                        self.socket_connection_achieved = True
+                    else:
+                        logger.warn('Visdom server failed handshake, may not '
+                                    'be properly connected')
+            if 'target' in message:
+                for handler in list(
+                        self.event_handlers.get(message['target'], [])):
+                    handler(message)
+
+        def on_close(ws):
+            self.socket_alive = False
+
+        def run_socket(*args):
+            # open a socket
+            resp_json = self._handle_post(
+                "{0}:{1}{2}/vis_socket_wrap".format(self.server, self.port,
+                                                    self.base_url),
+                data=json.dumps({'message_type': 'init'}),
+            )
+            resp = json.loads(resp_json)
+            self.vis_sid = resp['sid']
+            while self.use_socket:
+                resp_json = self._handle_post(
+                    "{0}:{1}{2}/vis_socket_wrap".format(self.server, self.port,
+                                                        self.base_url),
+                    data=json.dumps(
+                        {'message_type': 'query', 'sid': self.vis_sid}
+                    ),
+                )
+                resp = json.loads(resp_json)
+                for msg in resp['messages']:
+                    on_message(msg)
+                time.sleep(0.1)
+
+        # Start listening thread
+        self.socket_thread = threading.Thread(
+            target=run_socket,
+            name='Visdom-Socket-Thread'
+        )
+        self.socket_thread.start()
+
+    def setup_socket(self, polling=False):
         # Setup socket to server
         def on_message(ws, message):
             message = json.loads(message)
@@ -565,7 +594,7 @@ class Visdom(object):
             self.socket_alive = False
 
         def run_socket(*args):
-            host_scheme = urllib.parse.urlparse(self.server).scheme
+            host_scheme = urlparse(self.server).scheme
             if host_scheme == "https":
                 ws_scheme = "wss"
             else:
@@ -608,6 +637,17 @@ class Visdom(object):
                         msg,
                     ]) + '\n')
 
+    def _handle_post(self, url, data=None):
+        """
+        This function has the responsibility of sending the request to the
+        formatted endpoint. Classes that want to wrap the visdom functionality
+        but use other methodologies may override either this or _send
+        """
+        if data is None:
+            data = {}
+        r = self.session.post(url, data=data)
+        return r.text
+
     def _send(self, msg, endpoint='events', quiet=False, from_log=False, create=True):
         """
         This function sends specified JSON request to the Tornado server. This
@@ -622,6 +662,7 @@ class Visdom(object):
         if msg.get('eid', None) is None:
             msg['eid'] = self.env
 
+        # TODO investigate send use cases, then deprecate
         if not self.send:
             return msg, endpoint
 
@@ -636,12 +677,11 @@ class Visdom(object):
             return msg['win'] if 'win' in msg else True
 
         try:
-            r = self.session.post(
+            return self._handle_post(
                 "{0}:{1}{2}/{3}".format(self.server, self.port,
                                         self.base_url, endpoint),
                 data=json.dumps(msg),
             )
-            return r.text
         except (
             requests.RequestException, requests.ConnectionError,
             requests.Timeout
@@ -667,7 +707,7 @@ class Visdom(object):
     def save(self, envs):
         """
         This function allows the user to save envs that are alive on the
-        Tornado server. The envs can be specified as a table (list) of env ids.
+        Tornado server. The envs can be specified as a list of env ids.
         """
         assert isinstance(envs, list), 'envs should be a list'
         if len(envs) > 0:
@@ -930,7 +970,7 @@ class Visdom(object):
         _assert_opts(opts)
 
         # write plot to SVG buffer:
-        buffer = io.StringIO()
+        buffer = StringIO()
         plot.savefig(buffer, format='svg')
         buffer.seek(0)
         svg = buffer.read()
@@ -943,7 +983,7 @@ class Visdom(object):
                 try:
                     soup = bs4.BeautifulSoup(svg, 'xml')
                 except bs4.FeatureNotFound as e:
-                    six.raise_from(ImportError("No module named 'lxml'"), e)
+                    raise ImportError("No module named 'lxml'") from e
                 height = soup.svg.attrs.pop('height', None)
                 width = soup.svg.attrs.pop('width', None)
                 svg = str(soup)
@@ -1398,7 +1438,7 @@ class Visdom(object):
         - `opts.markercolor` : marker color (`np.array`; default = `None`)
         - `opts.dash`        : dash type (`np.array`; default = 'solid'`)
         - `opts.textlabels`  : text label for each point (`list`: default = `None`)
-        - `opts.legend`      : `table` containing legend names
+        - `opts.legend`      : `list` containing legend names
         """
         if update == 'remove':
             assert win is not None
@@ -1597,7 +1637,7 @@ class Visdom(object):
         - `opts.markersize`  : marker size (`number`; default = `'10'`)
         - `opts.linecolor`   : line colors (`np.array`; default = None)
         - `opts.dash`        : line dash type (`np.array`; default = None)
-        - `opts.legend`      : `table` containing legend names
+        - `opts.legend`      : `list` containing legend names
 
         If `update` is specified, the figure will be updated without
         creating a new plot -- this can be used for efficient updating.
@@ -1657,8 +1697,8 @@ class Visdom(object):
         - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
         - `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
         - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
-        - `opts.columnnames`: `table` containing x-axis labels
-        - `opts.rownames`: `table` containing y-axis labels
+        - `opts.columnnames`: `list` containing x-axis labels
+        - `opts.rownames`: `list` containing y-axis labels
         - `opts.nancolor`: if not None, color for plotting nan
                            (`string`; default = `None`)
         """
@@ -1723,9 +1763,9 @@ class Visdom(object):
 
         The following plot-specific `opts` are currently supported:
 
-        - `opts.rownames`: `table` containing x-axis labels
+            - `opts.rownames`: `list` containing x-axis labels
         - `opts.stacked` : stack multiple columns in `X`
-        - `opts.legend`  : `table` containing legend labels
+            - `opts.legend`  : `list` containing legend labels
         """
         X = np.squeeze(X)
         assert X.ndim == 1 or X.ndim == 2, 'X should be one or two-dimensional'
@@ -2023,7 +2063,7 @@ class Visdom(object):
         The following `opts` are supported:
 
         - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
-        - `opts.legend`  : `table` containing legend names
+        - `opts.legend`  : `list` containing legend names
         """
 
         X = np.squeeze(X)
@@ -2066,7 +2106,7 @@ class Visdom(object):
 
         The following `opts` are supported:
 
-        - `opts.legend`: `table` containing legend names
+        - `opts.legend`: `list` containing legend names
         """
 
         X = np.squeeze(X)
