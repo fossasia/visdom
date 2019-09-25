@@ -19,23 +19,19 @@ module.exports = {
     dns: 'empty',
   },
   module: {
-    loaders: [
+    rules: [
       {
         test: /\.js$/,
         exclude: /(node_modules|bower_components)/,
         loader: 'babel-loader',
-        query: {
+        options: {
           presets: ['es2015', 'react'],
           plugins: ['transform-class-properties'],
         },
       },
       {
         test: /\.css$/,
-        loaders: ['style', 'css'],
-      },
-      {
-        test: /\.json$/,
-        loader: 'json-loader',
+        loaders: ['style-loader', 'css-loader'],
       },
     ],
   },
