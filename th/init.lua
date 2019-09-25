@@ -8,6 +8,11 @@ LICENSE file in the root directory of this source tree.
 
 ]]--
 
+-- @lint-ignore-every LUA_EXTERN_CHECK
+-- @lint-ignore-every LUA_LUAJIT
+-- we no longer support this file, and it exists for legacy purposes and for
+-- people to  get the warning to download the last supported version.
+
 -- dependencies:
 require 'torch'
 require 'image'
