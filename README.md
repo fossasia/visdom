@@ -438,14 +438,15 @@ If updating a single trace, use `name` to specify the name of the trace to be up
 
 The following `opts` are supported:
 
-- `opts.markersymbol`: marker symbol (`string`; default = `'dot'`)
-- `opts.markersize`  : marker size (`number`; default = `'10'`)
-- `opts.markercolor` : color per marker. (`torch.*Tensor`; default = `nil`)
-- `opts.legend`      : `table` containing legend names
-- `opts.textlabels`  : text label for each point (`list`: default = `None`)
-- `opts.layoutopts`  : dict of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
-- `opts.traceopts`   : dict mapping trace names or indices to dicts of additional options that the graph backend accepts. For example `traceopts = {'plotly': {'myTrace': {'mode': 'markers'}}}`.
-- `opts.webgl`       : use WebGL for plotting (`boolean`; default = `false`). It is faster if a plot contains too many points. Use sparingly as browsers won't allow more than a couple of WebGL contexts on a single page.
+- `opts.markersymbol`     : marker symbol (`string`; default = `'dot'`)
+- `opts.markersize`       : marker size (`number`; default = `'10'`)
+- `opts.markercolor`      : color per marker. (`torch.*Tensor`; default = `nil`)
+- `opts.markerborderwidth`: marker border line width (`float`; default = 0.5)
+- `opts.legend`           : `table` containing legend names
+- `opts.textlabels`       : text label for each point (`list`: default = `None`)
+- `opts.layoutopts`       : dict of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
+- `opts.traceopts`        : dict mapping trace names or indices to dicts of additional options that the graph backend accepts. For example `traceopts = {'plotly': {'myTrace': {'mode': 'markers'}}}`.
+- `opts.webgl`            : use WebGL for plotting (`boolean`; default = `false`). It is faster if a plot contains too many points. Use sparingly as browsers won't allow more than a couple of WebGL contexts on a single page.
 
 `opts.markercolor` is a Tensor with Integer values. The tensor can be of size `N` or `N x 3` or `K` or `K x 3`.
 

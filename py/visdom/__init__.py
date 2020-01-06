@@ -296,6 +296,11 @@ def _assert_opts(opts):
             and opts.get('markersize') > 0, \
             'marker size should be a positive number'
 
+    if opts.get('markerborderwidth'):
+        assert isnum(opts.get('markerborderwidth')) \
+            and opts.get('markerborderwidth') >= 0, \
+            'marker border width should be a nonnegative number'
+
     if opts.get('columnnames'):
         assert isinstance(opts.get('columnnames'), list), \
             'columnnames should be a list with column names'
@@ -1456,12 +1461,13 @@ class Visdom(object):
 
         The following `opts` are supported:
 
-        - `opts.markersymbol`: marker symbol (`string`; default = `'dot'`)
-        - `opts.markersize`  : marker size (`number`; default = `'10'`)
-        - `opts.markercolor` : marker color (`np.array`; default = `None`)
-        - `opts.dash`        : dash type (`np.array`; default = 'solid'`)
-        - `opts.textlabels`  : text label for each point (`list`: default = `None`)
-        - `opts.legend`      : `list` containing legend names
+        - `opts.markersymbol`     : marker symbol (`string`; default = `'dot'`)
+        - `opts.markersize`       : marker size (`number`; default = `'10'`)
+        - `opts.markercolor`      : marker color (`np.array`; default = `None`)
+        - `opts.markerborderwidth`: marker border line width (`float`; default = 0.5)
+        - `opts.dash`             : dash type (`np.array`; default = 'solid'`)
+        - `opts.textlabels`       : text label for each point (`list`: default = `None`)
+        - `opts.legend`           : `list` containing legend names
         """
         if update == 'remove':
             assert win is not None
@@ -1529,6 +1535,7 @@ class Visdom(object):
             opts['mode'] = opts.get('mode', 'markers+text')
         opts['markersymbol'] = opts.get('markersymbol', 'dot')
         opts['markersize'] = opts.get('markersize', 10)
+        opts['markerborderwidth'] = opts.get('markerborderwidth', 0.5)
 
         if opts.get('markercolor') is not None:
             opts['markercolor'] = _markerColorCheck(
@@ -1591,7 +1598,7 @@ class Visdom(object):
                         'color': mc[k] if mc is not None else None,
                         'line': {
                             'color': '#000000',
-                            'width': 0.5,
+                            'width': opts.get('markerborderwidth'),
                         }
                     }
                 }

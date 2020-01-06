@@ -189,6 +189,7 @@ def run_demo(viz):
         opts=dict(
             markersize=10,
             markercolor=np.floor(np.random.random((2, 3)) * 255),
+            markerborderwidth=0,
         ),
     )
 
