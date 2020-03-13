@@ -1265,7 +1265,7 @@ class Visdom(object):
         height = int(tensor.shape[2] + 2 * padding)
         width = int(tensor.shape[3] + 2 * padding)
 
-        grid = np.ones([3, height * ymaps, width * xmaps])
+        grid = np.ones([tensor.shape[1], height * ymaps, width * xmaps])
         k = 0
         for y in range(ymaps):
             for x in range(xmaps):
