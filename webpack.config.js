@@ -8,26 +8,32 @@
  */
 
 var webpack = require('webpack');
+var path = require('path');
 
 module.exports = {
   entry: ['./js/main.js'],
   output: {
+    path: path.join(__dirname, './'),
     filename: 'py/visdom/static/js/main.js',
   },
+  node: {
+    net: 'empty',
+    dns: 'empty',
+  },
   module: {
-    loaders: [
+    rules: [
       {
         test: /\.js$/,
         exclude: /(node_modules|bower_components)/,
         loader: 'babel-loader',
-        query: {
+        options: {
           presets: ['es2015', 'react'],
           plugins: ['transform-class-properties'],
         },
       },
       {
         test: /\.css$/,
-        loaders: ['style', 'css'],
+        loaders: ['style-loader', 'css-loader'],
       },
     ],
   },

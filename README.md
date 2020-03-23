@@ -3,7 +3,7 @@
 
 ![visdom_big](https://lh3.googleusercontent.com/-bqH9UXCw-BE/WL2UsdrrbAI/AAAAAAAAnYc/emrxwCmnrW4_CLTyyUttB0SYRJ-i4CCiQCLcB/s0/Screen+Shot+2017-03-06+at+10.51.02+AM.png"visdom_big")
 
-A flexible tool for creating, organizing, and sharing visualizations of live, rich data. Supports Torch and Numpy.
+A flexible tool for creating, organizing, and sharing visualizations of live, rich data. Supports Python.
 
 * [Overview](#overview)
 * [Concepts](#concepts)
@@ -39,7 +39,7 @@ Visdom has a simple set of features that can be composed for various use-cases.
 <p align="center"><img align="center" src="https://lh3.googleusercontent.com/-kLnogsg9RCs/WLx34PEsGWI/AAAAAAAAnSs/7t_62pbfmfoEBnkcbKTXIqz0WM8pQJHVQCLcB/s0/Screen+Shot+2017-03-05+at+3.34.43+PM.png" width="500" /></p>
 
 
-The UI begins as a blank slate -- you can populate it with plots, images, and text. These appear in windows that you can drag, drop, resize, and destroy. The windows live in `envs` and the state of `envs` is stored across sessions. You can download the content of windows -- including your plots in `svg`.
+The UI begins as a blank slate – you can populate it with plots, images, and text. These appear in windows that you can drag, drop, resize, and destroy. The windows live in `envs` and the state of `envs` is stored across sessions. You can download the content of windows – including your plots in `svg`.
 
 
 
@@ -58,7 +58,7 @@ You can subscribe a window to events by adding a function to the event handlers 
 
 Additional parameters are defined below.
 
-Right now three callback events are supported:
+Right now the following callback events are supported:
 
 1. `Close` - Triggers when a window is closed. Returns a dict with only the aforementioned fields.
 2. `KeyPress` - Triggers when a key is pressed. Contains additional parameters:
@@ -66,7 +66,9 @@ Right now three callback events are supported:
     - `key_code` - The javascript event keycode for the pressed key (no modifiers)
 3. `PropertyUpdate` - Triggers when a property is updated in Property pane
     - `propertyId` - Position in properties list
-    - `value` - New property value    
+    - `value` - New property value
+4. `Click` - Triggers when Image pane is clicked on, has a parameter:
+    - `image_coord` - dictionary with the fields `x` and `y` for the click coordinates in the coordinate frame of the possibly zoomed/panned image (*not* the enclosing pane).
 
 ### Environments
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34618198-fc63976c-f20b-11e7-9c0d-060132fdb37e.png" width="300" /></p>
@@ -142,16 +144,12 @@ Using the view dropdown it is possible to select previously saved views, restori
 
 ## Setup
 
-Requires Python 2.7/3 (and optionally Torch7)
+Requires Python 3
 
 ```bash
 # Install Python server and client from pip
 # (STABLE VERSION, NOT ALL CURRENT FEATURES ARE SUPPORTED)
 pip install visdom
-
-# Install Torch client
-# (STABLE VERSION, NOT ALL CURRENT FEATURES ARE SUPPORTED)
-luarocks install visdom
 
 ```
 
@@ -160,9 +158,6 @@ luarocks install visdom
 pip install -e .
 # If the above runs into issues, you can try the below
 easy_install .
-
-# Install Torch client from source (from th directory)
-luarocks make
 
 ```
 
@@ -195,6 +190,17 @@ The following options can be provided to the server:
 8. `-force_new_cookie` : Flag to reset the secure cookie used by the server, invalidating current login cookies.
 Requires `-enable_login`.
 
+When `-enable_login` flag is provided, the server asks user to input credentials using terminal prompt. Alternatively,
+you can setup `VISDOM_USE_ENV_CREDENTIALS` env variable, and then provide your username and password via
+`VISDOM_USERNAME` and `VISDOM_PASSWORD` env variables without manually interacting with the terminal. This setup
+is useful in case if you would like to launch `visdom` server from bash script, or from Jupyter notebook.
+```bash
+VISDOM_USERNAME=username
+VISDOM_PASSWORD=password
+VISDOM_USE_ENV_CREDENTIALS=1 visdom -enable_login
+```
+You can also use `VISDOM_COOKIE` variable to provide cookies value if the cookie file wasn't generated, or the
+flag `-force_new_cookie` was set.
 
 #### Python example
 ```python
@@ -205,29 +211,10 @@ vis.text('Hello, world!')
 vis.image(np.ones((3, 10, 10)))
 ```
 
-#### Torch example
-```lua
-require 'image'
-vis = require 'visdom'()
-vis:text{text = 'Hello, world!'}
-vis:image{img = image.fabio()}
-```
-
-Some users have reported issues when connecting Lua clients to the Visdom server.
-A potential work-around may be to switch off IPv6:
-```
-vis = require 'visdom'()
-vis.ipv6 = false  -- switches off IPv6
-vis:text{text = 'Hello, world!'}
-```
-
-
 ### Demos
 
 ```bash
 python example/demo.py
-th example/demo1.lua
-th example/demo2.lua
 ```
 
 
@@ -248,8 +235,9 @@ The python visdom client takes a few options:
 - `username`: username to use for authentication, if server started with `-enable_login` (default: `None`)
 - `password`: password to use for authentication, if server started with `-enable_login` (default: `None`)
 - `proxies`: Dictionary mapping protocol to the URL of the proxy (e.g. {`http`: `foo.bar:3128`}) to be used on each Request. (default: `None`)
+- `offline`: Flag to run visdom in offline mode, where all requests are logged to file rather than to the server. Requires `log_to_filename` is set. In offline mode, all visdom commands that don't create or update plots will simply return `True`. (default: `False`)
 
-Other options are either currently unused (endpoint, ipv6) or used for internal functionality (send allows the visdom server to replicate events for the lua client).
+Other options are either currently unused (endpoint, ipv6) or used for internal functionality.
 
 ### Basics
 Visdom offers the following basic visualization functions:
@@ -316,8 +304,9 @@ that contains the image.
 
 The following `opts` are supported:
 
-- `opts.jpgquality`: JPG quality (`number` 0-100; default = 100)
-- `opts.caption`: Caption for the image
+- `jpgquality`: JPG quality (`number` 0-100). If defined image will be saved as JPG to reduce file size. If not defined image will be saved as PNG.
+- `caption`: Caption for the image
+- `store_history`: Keep all images stored to the same window and attach a slider to the bottom that will let you select the image to view. You must always provide this opt when sending new images to an image with history.
 
 > **Note** You can use alt on an image pane to view the x/y coordinates of the cursor. You can also ctrl-scroll to zoom, alt scroll to pan vertically, and alt-shift scroll to pan horizontally. Double click inside the pane to restore the image to default.
 
@@ -330,7 +319,7 @@ The following arguments and `opts` are supported:
 
 - `nrow`: Number of images in a row
 - `padding`: Padding around the image, equal padding around all 4 sides
-- `opts.jpgquality`: JPG quality (`number` 0-100; default = 100)
+- `opts.jpgquality`: JPG quality (`number` 0-100). If defined image will be saved as JPG to reduce file size. If not defined image will be saved as PNG.
 - `opts.caption`: Caption for the image
 
 #### vis.text
@@ -412,8 +401,22 @@ This function draws a Plotly `Figure` object. It does not explicitly take option
 
 > **Note** You must have the `plotly` Python package installed to use this function. It can typically be installed by running `pip install plotly`.
 
+#### vis.embeddings
+
+This function visualizes a collection of features using the [Barnes-Hut t-SNE algorithm](https://github.com/lvdmaaten/bhtsne).
+
+The function accepts the following arguments:
+- `features`: a list of tensors
+- `labels`: a list of corresponding labels for the tensors provided for `features`
+- `data_getter=fn`: (optional) a function that takes as a parameter an index into the features array and returns a summary representation of the tensor. If this is set, `data_type` must also be set.
+- `data_type=str`: (optional) currently the only acceptable value here is `"html"`
+
+We currently assume that there are no more than 10 unique labels, in the future we hope to provide a colormap in opts for other cases.
+
+From the UI you can also draw a lasso around a subset of features. This will rerun the t-SNE visualization on the selected subset.
+
 #### vis.save
-This function saves the `envs` that are alive on the visdom server. It takes input a list (in python) or table (in lua) of env ids to be saved.
+This function saves the `envs` that are alive on the visdom server. It takes input a list of env ids to be saved.
 
 ### Plotting
 Further details on the wrapped plotting functions are given below.
@@ -435,14 +438,15 @@ If updating a single trace, use `name` to specify the name of the trace to be up
 
 The following `opts` are supported:
 
-- `opts.markersymbol`: marker symbol (`string`; default = `'dot'`)
-- `opts.markersize`  : marker size (`number`; default = `'10'`)
-- `opts.markercolor` : color per marker. (`torch.*Tensor`; default = `nil`)
-- `opts.legend`      : `table` containing legend names
-- `opts.textlabels`  : text label for each point (`list`: default = `None`)
-- `opts.layoutopts`  : dict of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
-- `opts.traceopts`   : dict mapping trace names or indices to dicts of additional options that the graph backend accepts. For example `traceopts = {'plotly': {'myTrace': {'mode': 'markers'}}}`.
-- `opts.webgl`       : use WebGL for plotting (`boolean`; default = `false`). It is faster if a plot contains too many points. Use sparingly as browsers won't allow more than a couple of WebGL contexts on a single page.
+- `opts.markersymbol`     : marker symbol (`string`; default = `'dot'`)
+- `opts.markersize`       : marker size (`number`; default = `'10'`)
+- `opts.markercolor`      : color per marker. (`torch.*Tensor`; default = `nil`)
+- `opts.markerborderwidth`: marker border line width (`float`; default = 0.5)
+- `opts.legend`           : `table` containing legend names
+- `opts.textlabels`       : text label for each point (`list`: default = `None`)
+- `opts.layoutopts`       : dict of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
+- `opts.traceopts`        : dict mapping trace names or indices to dicts of additional options that the graph backend accepts. For example `traceopts = {'plotly': {'myTrace': {'mode': 'markers'}}}`.
+- `opts.webgl`            : use WebGL for plotting (`boolean`; default = `false`). It is faster if a plot contains too many points. Use sparingly as browsers won't allow more than a couple of WebGL contexts on a single page.
 
 `opts.markercolor` is a Tensor with Integer values. The tensor can be of size `N` or `N x 3` or `K` or `K x 3`.
 
@@ -498,7 +502,8 @@ The following `opts` are supported:
 - `opts.xmax`       : clip maximum value (`number`; default = `X:max()`)
 - `opts.columnnames`: `table` containing x-axis labels
 - `opts.rownames`   : `table` containing y-axis labels
-- `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
+- `opts.layoutopts` : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
+- `opts.nancolor`   : color for plotting `NaN`s. If this is `None`, `NaN`s will be plotted as transparent. (`string`; default = `None`)
 
 #### vis.bar
 This function draws a regular, stacked, or grouped bar plot. It takes as
@@ -629,6 +634,16 @@ This function deletes a specified env entirely. It takes env id `eid` as input.
 > **Note**: `delete_env` is deletes all data for an environment and is IRREVERSIBLE. Do not use unless you absolutely want to remove an environment.
 
 
+#### vis.fork_env
+
+This function forks an environment, similiar to the UI feature.
+
+Arguments:
+- `prev_eid`: Environment ID that we want to fork.
+- `eid`: New Environment ID that will be created with the fork.
+
+> **Note**: `fork_env` an exception will occur if an env that doesn't exist is forked.
+
 #### vis.win_exists
 
 This function returns a bool indicating whether or not a window `win` exists on the server already. Returns None if something went wrong.
@@ -667,6 +682,9 @@ Arguments:
 
 ## License
 visdom is Creative Commons Attribution-NonCommercial 4.0 International Public licensed, as found in the LICENSE file.
+
+## Note on Lua Torch Support
+Support for Lua Torch was deprecated following `v0.1.8.4`. If you'd like to use torch support, you'll need to download that release. You can follow the usage instructions there, but it is no longer officially supported.
 
 ## Contributing
 See guidelines for contributing [here.](./CONTRIBUTING.md)

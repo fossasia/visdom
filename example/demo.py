@@ -1,38 +1,23 @@
+#!/usr/bin/env python3
+
 # Copyright 2017-present, Facebook, Inc.
 # All rights reserved.
 #
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 from visdom import Visdom
 import argparse
 import numpy as np
 import math
 import os.path
-import getpass
 import time
-from sys import platform as _platform
-from six.moves import urllib
+import tempfile
+import urllib
 
 
-DEFAULT_PORT = 8097
-DEFAULT_HOSTNAME = "http://localhost"
-parser = argparse.ArgumentParser(description='Demo arguments')
-parser.add_argument('-port', metavar='port', type=int, default=DEFAULT_PORT,
-                    help='port the visdom server is running on.')
-parser.add_argument('-server', metavar='server', type=str,
-                    default=DEFAULT_HOSTNAME,
-                    help='Server address of the target to run the demo on.')
-FLAGS = parser.parse_args()
-
-try:
-    viz = Visdom(port=FLAGS.port, server=FLAGS.server)
-
+def run_demo(viz):
+    global input
     assert viz.check_connection(timeout_seconds=3), \
         'No connection could be formed quickly'
 
@@ -77,28 +62,57 @@ try:
         for n in range(256):
             video[n, :, :, :].fill(n)
         viz.video(tensor=video)
+    except BaseException:
+        print('Skipped video tensor example')
 
+    try:
         # video demo:
         # download video from http://media.w3.org/2010/05/sintel/trailer.ogv
         video_url = 'http://media.w3.org/2010/05/sintel/trailer.ogv'
-        # linux
-        if _platform == "linux" or _platform == "linux2":
-            videofile = '/home/%s/trailer.ogv' % getpass.getuser()
-        # MAC OS X
-        elif _platform == "darwin":
-            videofile = '/Users/%s/trailer.ogv' % getpass.getuser()
-        # download video
+        videofile = os.path.join(tempfile.gettempdir(), 'trailer.ogv')
         urllib.request.urlretrieve(video_url, videofile)
 
         if os.path.isfile(videofile):
-            viz.video(videofile=videofile)
-    except BaseException:
-        print('Skipped video example')
+            viz.video(videofile=videofile, opts={'width': 864, 'height': 480})
+    except BaseException as e:
+        print('Skipped video file example', e)
 
     # image demo
+    img_callback_win = viz.image(
+        np.random.rand(3, 512, 256),
+        opts={'title': 'Random!', 'caption': 'Click me!'},
+    )
+
+    img_coord_text = viz.text("Coords: ")
+
+    def img_click_callback(event):
+        nonlocal img_coord_text
+        if event['event_type'] != 'Click':
+            return
+
+        coords = "x: {}, y: {};".format(
+            event['image_coord']['x'], event['image_coord']['y']
+        )
+        img_coord_text = viz.text(coords, win=img_coord_text, append=True)
+
+    viz.register_event_handler(img_click_callback, img_callback_win)
+
+    # image demo save as jpg
     viz.image(
         np.random.rand(3, 512, 256),
-        opts=dict(title='Random!', caption='How random.'),
+        opts=dict(title='Random image as jpg!', caption='How random as jpg.', jpgquality=50),
+    )
+
+    # image history demo
+    viz.image(
+        np.random.rand(3, 512, 256),
+        win='image_history',
+        opts=dict(caption='First random', store_history=True, title='Pick your random!'),
+    )
+    viz.image(
+        np.random.rand(3, 512, 256),
+        win='image_history',
+        opts=dict(caption='Second random!', store_history=True),
     )
 
     # grid of images
@@ -175,6 +189,7 @@ try:
         opts=dict(
             markersize=10,
             markercolor=np.floor(np.random.random((2, 3)) * 255),
+            markerborderwidth=0,
         ),
     )
 
@@ -507,13 +522,7 @@ try:
     # download from http://www.externalharddrive.com/waves/animal/dolphin.wav
     try:
         audio_url = 'http://www.externalharddrive.com/waves/animal/dolphin.wav'
-        # linux
-        if _platform == "linux" or _platform == "linux2":
-            audiofile = '/home/%s/dolphin.wav' % getpass.getuser()
-        # MAC OS X
-        elif _platform == "darwin":
-            audiofile = '/Users/%s/dolphin.wav' % getpass.getuser()
-        # download audio
+        audiofile = os.path.join(tempfile.gettempdir(), 'dolphin.wav')
         urllib.request.urlretrieve(audio_url, audiofile)
 
         if os.path.isfile(audiofile):
@@ -521,17 +530,53 @@ try:
     except BaseException:
         print('Skipped audio example')
 
+    # get/set state
+    import json
+    window = viz.text('test one')
+    data = json.loads(viz.get_window_data())
+    data[window]['content'] = 'test two'
+    viz.set_window_data(json.dumps(data))
+
     try:
         input = raw_input  # for Python 2 compatibility
     except NameError:
         pass
     input('Waiting for callbacks, press enter to quit.')
-except BaseException as e:
-    print(
-        "The visdom experienced an exception while running: {}\n"
-        "The demo displays up-to-date functionality with the GitHub version, "
-        "which may not yet be pushed to pip. Please upgrade using "
-        "`pip install -e .` or `easy_install .`\n"
-        "If this does not resolve the problem, please open an issue on "
-        "our GitHub.".format(repr(e))
-    )
+
+
+if __name__ == '__main__':
+    DEFAULT_PORT = 8097
+    DEFAULT_HOSTNAME = "http://localhost"
+    parser = argparse.ArgumentParser(description='Demo arguments')
+    parser.add_argument('-port', metavar='port', type=int, default=DEFAULT_PORT,
+                        help='port the visdom server is running on.')
+    parser.add_argument('-server', metavar='server', type=str,
+                        default=DEFAULT_HOSTNAME,
+                        help='Server address of the target to run the demo on.')
+    parser.add_argument('-base_url', metavar='base_url', type=str,
+                    default='/',
+                    help='Base Url.')
+    parser.add_argument('-username', metavar='username', type=str,
+                    default='',
+                    help='username.')
+    parser.add_argument('-password', metavar='password', type=str,
+                    default='',
+                    help='password.')
+    parser.add_argument('-use_incoming_socket', metavar='use_incoming_socket', type=bool,
+                    default=True,
+                    help='use_incoming_socket.')
+    FLAGS = parser.parse_args()
+
+    try:
+        viz = Visdom(port=FLAGS.port, server=FLAGS.server, base_url=FLAGS.base_url, username=FLAGS.username, password=FLAGS.password, \
+                use_incoming_socket=FLAGS.use_incoming_socket)
+        run_demo(viz)
+    except Exception as e:
+        print(
+            "The visdom experienced an exception while running: {}\n"
+            "The demo displays up-to-date functionality with the GitHub "
+            "version, which may not yet be pushed to pip. Please upgrade "
+            "using `pip install -e .` or `easy_install .`\n"
+            "If this does not resolve the problem, please open an issue on "
+            "our GitHub.".format(repr(e))
+        )

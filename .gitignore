@@ -6,8 +6,12 @@ dist/
 visdom*.tgz
 visdom.egg-info/
 setup.cfg
-py/static/fonts/
-py/static/css/
-py/static/js/*.min.js
-py/static/js/mathjax-MathJax.js
-py/static/version.built
+py/visdom/static/fonts/
+py/visdom/static/css/
+py/visdom/static/js/*.min.js
+py/visdom/static/js/mathjax-MathJax.js
+py/visdom/static/js/sjcl.js
+py/visdom/static/version.built
+__pycache__/
+py/visdom/static/js/layout_bin_packer.js
+py/visdom/extra_deps/**/*

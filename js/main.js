@@ -35,10 +35,13 @@ var md5 = require('md5');
 var jsonpatch = require('fast-json-patch');
 var stringify = require('json-stable-stringify');
 
+import ReactResizeDetector from 'react-resize-detector';
+
 const PropertiesPane = require('./PropertiesPane');
 const TextPane = require('./TextPane');
 const ImagePane = require('./ImagePane');
 const PlotPane = require('./PlotPane');
+const EmbeddingsPane = require('./EmbeddingsPane');
 
 const WidthProvider = require('./Width').default;
 
@@ -46,20 +49,26 @@ const GridLayout = WidthProvider(ReactGridLayout);
 const sortLayout = ReactGridLayout.utils.sortLayoutItemsByRowCol;
 const getLayoutItem = ReactGridLayout.utils.getLayoutItem;
 
+import 'fetch';
+
 const ROW_HEIGHT = 5; // pixels
 const MARGIN = 10; // pixels
 
 const PANES = {
   image: ImagePane,
+  image_history: ImagePane,
   plot: PlotPane,
   text: TextPane,
   properties: PropertiesPane,
+  embeddings: EmbeddingsPane,
 };
 
 const PANE_SIZE = {
   image: [20, 20],
+  image_history: [20, 20],
   plot: [30, 24],
   text: [20, 20],
+  embeddings: [20, 20],
   properties: [20, 20],
 };
 
@@ -75,6 +84,7 @@ const MODAL_STYLE = {
 };
 
 const DEFAULT_LAYOUT = 'current';
+const POLLING_INTERVAL = 500;
 
 var use_env = null;
 var use_envs = null;
@@ -91,6 +101,101 @@ if (ACTIVE_ENV !== '') {
 } else {
   use_env = localStorage.getItem('envID') || 'main';
   use_envs = JSON.parse(localStorage.getItem('envIDs')) || ['main'];
+}
+
+function postData(url = ``, data = {}) {
+  return fetch(url, {
+    method: 'POST',
+    mode: 'cors',
+    cache: 'no-cache',
+    credentials: 'same-origin',
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+    },
+    redirect: 'follow',
+    referrer: 'no-referrer',
+    body: JSON.stringify(data),
+  });
+}
+
+class Poller {
+  /**
+   * Wrapper around what would regularly be socket communications, but handled
+   * through a POST-based polling loop
+   */
+  constructor(app) {
+    this.app = app;
+    var url = window.location;
+    this.target =
+      url.protocol + '//' + url.host + app.correctPathname() + 'socket_wrap';
+    this.handleMessage = app._handleMessage;
+    fetch(this.target)
+      .then(res => {
+        return res.json();
+      })
+      .then(data => {
+        this.finishSetup(data.sid);
+      });
+  }
+
+  finishSetup = sid => {
+    this.sid = sid;
+    this.poller_id = window.setInterval(() => this.poll(), POLLING_INTERVAL);
+    this.app.setState({
+      connected: true,
+    });
+  };
+
+  close = () => {
+    this.app.setState({ connected: false }, () => {
+      this.app._socket = null;
+    });
+    window.clearInterval(this.poller_id);
+  };
+
+  send = msg => {
+    // Post a messge containing the desired command
+    postData(this.target, { message_type: 'send', sid: this.sid, message: msg })
+      .then(res => res.json())
+      .then(
+        result => {
+          if (!result.success) {
+            this.close();
+          } else {
+            this.poll(); // Get a response right now if there is one
+          }
+        },
+        error => {
+          console.log(error);
+          this.close();
+        }
+      );
+  };
+
+  poll = () => {
+    // Post message to query possible socket messages
+    postData(this.target, { message_type: 'query', sid: this.sid })
+      .then(res => res.json())
+      .then(
+        result => {
+          if (!result.success) {
+            this.close();
+          } else {
+            let messages = result.messages;
+            messages.forEach(msg => {
+              // Must re-encode message as handle message expects json
+              // in this particular format from sockets
+              // TODO Could refactor message parsing out elsewhere.
+              this.handleMessage({ data: msg });
+            });
+          }
+        },
+        error => {
+          console.log(error);
+          this.close();
+        }
+      );
+  };
 }
 
 // TODO: Move some of this to smaller components and/or use something like redux
@@ -153,8 +258,17 @@ class App extends React.Component {
     return (w + MARGIN) / (colWidth + MARGIN);
   };
 
+  w2p = p => {
+    let colWidth = this.colWidth();
+    return p * (colWidth + MARGIN) - MARGIN;
+  };
+
   p2h = h => {
     return (h + MARGIN) / (ROW_HEIGHT + MARGIN);
+  };
+
+  h2p = p => {
+    return p * (ROW_HEIGHT + MARGIN) - MARGIN;
   };
 
   keyLS = key => {
@@ -261,8 +375,16 @@ class App extends React.Component {
     }
   };
 
+  setupPolling = () => {
+    this._socket = new Poller(this);
+  };
+
   connect = () => {
     if (this._socket) {
+      return;
+    }
+    if (USE_POLLING) {
+      this.setupPolling();
       return;
     }
     var url = window.location;
@@ -605,6 +727,7 @@ class App extends React.Component {
     });
     this.focusPane(layoutItem.i);
     this.updateLayout(layout);
+    this.sendLayoutItemState(layoutItem);
   };
 
   movePane = (layout, oldLayoutItem, layoutItem) => {
@@ -716,6 +839,20 @@ class App extends React.Component {
     this.state.layout = layout;
   };
 
+  /**
+   * Send layout item state to backend to update backend state.
+   *
+   * @param layout Layout to be sent to backend.
+   */
+  sendLayoutItemState = ({ i, h, w, x, y, moved, static: staticBool }) => {
+    this.sendSocketMessage({
+      cmd: 'layout_item_update',
+      eid: this.state.envID,
+      win: i,
+      data: { i, h, w, x, y, moved, static: staticBool },
+    });
+  };
+
   updateToLayout = layoutID => {
     this.setState({
       layoutID: layoutID,
@@ -784,6 +921,21 @@ class App extends React.Component {
     $.extend(finalData, data);
     this.sendSocketMessage({
       cmd: 'forward_to_vis',
+      data: finalData,
+    });
+  };
+
+  sendEmbeddingPop = data => {
+    if (this.state.focusedPaneID === null || this.state.readonly) {
+      return;
+    }
+    let finalData = {
+      target: this.state.focusedPaneID,
+      eid: this.state.envID,
+    };
+    $.extend(finalData, data);
+    this.sendSocketMessage({
+      cmd: 'pop_embeddings_pane',
       data: finalData,
     });
   };
@@ -1398,19 +1550,29 @@ class App extends React.Component {
         let panelayout = getLayoutItem(this.state.layout, id);
         let filter = this.getValidFilter(this.state.filter);
         let isVisible = pane.title.match(filter);
+
+        const PANE_TITLE_BAR_HEIGHT = 14;
+
         return (
           <div key={pane.id} className={isVisible ? '' : 'hidden-window'}>
-            <Comp
-              {...pane}
-              key={pane.id}
-              onClose={this.closePane}
-              onFocus={this.focusPane}
-              onInflate={this.onInflate}
-              isFocused={pane.id === this.state.focusedPaneID}
-              w={panelayout.w}
-              h={panelayout.h}
-              appApi={{ sendPaneMessage: this.sendPaneMessage }}
-            />
+            <ReactResizeDetector handleWidth handleHeight>
+              <Comp
+                {...pane}
+                key={pane.id}
+                onClose={this.closePane}
+                onFocus={this.focusPane}
+                onInflate={this.onInflate}
+                isFocused={pane.id === this.state.focusedPaneID}
+                w={panelayout.w}
+                h={panelayout.h}
+                width={this.w2p(panelayout.w)}
+                height={this.h2p(panelayout.h) - PANE_TITLE_BAR_HEIGHT}
+                appApi={{
+                  sendPaneMessage: this.sendPaneMessage,
+                  sendEmbeddingPop: this.sendEmbeddingPop,
+                }}
+              />
+            </ReactResizeDetector>
           </div>
         );
       } catch (err) {
@@ -1484,6 +1646,7 @@ class App extends React.Component {
           tabIndex="-1"
           className="no-focus"
           onBlur={this.blurPane}
+          onClick={this.publishEvent}
           onKeyUp={this.publishEvent}
           onKeyDown={this.publishEvent}
           onKeyPress={this.publishEvent}

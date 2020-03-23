@@ -25,8 +25,8 @@ class TextPane extends React.Component {
       case 'keyup':
         this.props.appApi.sendPaneMessage({
           event_type: 'KeyPress',
-          key: event.key,
-          key_code: event.keyCode,
+          key: e.key,
+          key_code: e.keyCode,
         });
         break;
     }
@@ -35,7 +35,7 @@ class TextPane extends React.Component {
   componentDidMount() {
     EventSystem.subscribe('global.event', this.onEvent);
   }
-  UNSAFE_componentWillMount() {
+  componentWillUnmount() {
     EventSystem.unsubscribe('global.event', this.onEvent);
   }
 

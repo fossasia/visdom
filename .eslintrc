@@ -9,6 +9,7 @@
   },
   "rules": {
     "react/prop-types": 0,
+    "no-console": "warn",
     "max-len": [
       "error",
       {
@@ -24,6 +25,6 @@
     }
   },
   "globals": {
-    "Plotly": "readable"
+    "Plotly": "readonly"
   }
 }
