@@ -1003,12 +1003,14 @@ class Visdom(object):
             if height is not None:
                 if not isstr(height):
                     height = height.group(1)
+                height = height.replace("pt","00")
                 opts['height'] = 1.4 * int(math.ceil(float(height)))
         if 'width' not in opts:
             width = width or re.search(r'width\="([0-9\.]*)pt"', svg)
             if width is not None:
                 if not isstr(width):
                     width = width.group(1)
+                width = width.replace("pt","00")
                 opts['width'] = 1.35 * int(math.ceil(float(width)))
         return self.svg(svgstr=svg, opts=opts, env=env, win=win)
 
