@@ -585,6 +585,34 @@ The following `opts` are supported:
 - `opts.opacity`: opacity of polygons (`number` between 0 and 1)
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 
+#### vis.double_yaxis_Lines
+This function will create a line plot using plotly with different Y-Axis.
+
+`X`  = A numpy array of the range.
+
+`Y1` = A numpy array of the same count as X.
+
+`Y2` = A numpy array of the same count as X.
+
+Here are the `opts` options:
+
+- `opts.height` : Height of the plot
+- `opts.width` :  Width of the plot
+- `opts.nameY1` : Axis name for Y1 plot
+- `opts.nameY2` : Axis name for Y2 plot
+- `opts.title` :  Title of the plot
+- `opts.color_title_Y2` :  Color of the axis Title
+- `opts.color_tick_Y2` :  Color of the axis Ticks
+- `opts.side` :  side on which the tick has to be placed. Has values 'right' or `left`.
+- `opts.showlegend` :  Display legends (boolean values)
+- `opts.top` :  Set the top margin of the plot
+- `opts.bottom` :  Set the bottom margin of the plot
+- `opts.right` :  Set the right margin of the plot
+- `opts.left` :  Set the left margin of the plot   
+
+This is the image of the output:  
+<p align="center"><img align="center" src="https://user-images.githubusercontent.com/33365560/77657483-61399880-6f9b-11ea-8e1e-c9815013da85.png" width="400" /></p>
+
 ### Customizing plots
 
 The plotting functions take an optional `opts` table as input that can be used to change (generic or plot-specific) properties of the plots. All input arguments are specified in a single table; the input arguments are matches based on the keys they have in the input table.
