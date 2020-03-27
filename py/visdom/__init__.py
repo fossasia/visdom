@@ -2209,3 +2209,75 @@ class Visdom(object):
             'layout': _opts2layout(opts),
             'opts': opts,
         })
+    @pytorch_wrap
+    def double_yaxis_lines(self,X=None,Y1=None,Y2=None,opts=None,win=None,env=None):
+        '''
+        This function will create a line plot using plotly with different Y-Axis.
+        `X`  = A numpy array of the range.
+        `Y1` = A numpy array of the same count as X.
+        `Y2` = A numpy array of the same count as X.
+        Here are the `opts` options:
+        - `opts.height` : Height of the plot
+        - `opts.width` :  Width of the plot
+        - `opts.nameY1` : Axis name for Y1 plot
+        - `opts.nameY2` : Axis name for Y2 plot
+        - `opts.title` :  Title of the plot
+        - `opts.color_title_Y2` :  Color of the axis Title
+        - `opts.color_tick_Y2` :  Color of the axis Ticks
+        - `opts.side` :  side on which the tick has to be placed. Has values 'right' or `left`.
+        - `opts.showlegend` :  Display legends (boolean values)
+        - `opts.top` :  Set the top margin of the plot
+        - `opts.bottom` :  Set the bottom margin of the plot
+        - `opts.right` :  Set the right margin of the plot
+        - `opts.left` :  Set the left margin of the plot   
+        '''
+        X = np.asarray(X)
+        Y1 = np.asarray(Y1)
+        Y2 = np.asarray(Y2)
+        assert X is not None,'X Cannot be None'
+        assert Y1 is not None,'Y1 Cannot be None'
+        assert Y2 is not None,'Y2 Cannot be None'
+        assert X.shape == Y1.shape,'values of X and Y1 are not in proper shape'
+        assert X.shape == Y2.shape,'values of X and Y2 are not in proper shape'
+        if opts == None:
+            opts={}
+            opts['height'] = 300
+            opts['width'] = 500
+        X = [float(value) for value in X]
+        Y1 = [float(value) for value in Y1]
+        Y2 = [float(value) for value in Y2]
+        trace1 = dict(
+          x= X,
+          y= Y1,
+          name= opts.get('nameY1','Y1 axis'),
+          type= 'scatter'
+        )
+        trace2 = dict(
+          x= X,
+          y= Y2,
+          yaxis= 'y2',
+          name= opts.get('nameY2','Y2 axis'),
+          type= 'scatter'
+        )
+        data = [trace1,trace2]
+        layout = dict(
+          title= opts.get('title','Example Double Y axis'),
+          yaxis= dict(title= trace1['name']),
+          yaxis2= dict(
+            title = trace2['name'],
+            titlefont= dict(color= opts.get('color_title_Y2','rgb(148, 103, 0189)')),
+            tickfont= dict(color= opts.get('color_tick_Y2','rgb(148, 103, 189)')),
+            overlaying= 'y',
+            side= opts.get('side','right')
+          ),
+          showlegend=opts.get('showlegend',True),
+          margin= dict(b= opts.get('bottom',60), r= opts.get('right',60), t= opts.get('top',60), l= opts.get('left',60))
+        )
+        if 'height' not in opts:
+            opts['height'] = 300
+        if 'width' not in opts:
+            opts['width'] = 500
+        if env == None:
+            env = self.env
+        datasend = dict(win=win,eid=env,data=data,layout=layout,opts=opts)
+        return self._send(datasend,'events')
