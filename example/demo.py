@@ -482,7 +482,7 @@ def run_demo(viz):
     # double y axis plot
     viz = visdom.Visdom()
     X = np.arange(20)
-    Y1=np.random.randinAt(0,20,20)
+    Y1=np.random.randint(0,20,20)
     Y2=np.random.randint(0,20,20)
     viz.double_yaxis_lines(X,Y1,Y2)
 
