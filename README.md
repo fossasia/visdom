@@ -588,21 +588,21 @@ The following `opts` are supported:
 #### vis.double_yaxis_lines
 This function will create a line plot using plotly with different Y-Axis.
 
-`X`  = A numpy array of the range.
+`x`  = A numpy array of the range.
 
-`Y1` = A numpy array of the same count as X.
+`y1` = A numpy array of the same count as `x`.
 
-`Y2` = A numpy array of the same count as X.
+`y2` = A numpy array of the same count as `x`.
 
-Here are the `opts` options:
+The following `opts` are supported:
 
 - `opts.height` : Height of the plot
 - `opts.width` :  Width of the plot
-- `opts.nameY1` : Axis name for Y1 plot
-- `opts.nameY2` : Axis name for Y2 plot
+- `opts.name_y1` : Axis name for y1 plot
+- `opts.name_y2` : Axis name for y2 plot
 - `opts.title` :  Title of the plot
-- `opts.color_title_Y2` :  Color of the axis Title
-- `opts.color_tick_Y2` :  Color of the axis Ticks
+- `opts.color_title_y2` :  Color of the axis Title
+- `opts.color_tick_y2` :  Color of the axis Ticks
 - `opts.side` :  side on which the tick has to be placed. Has values 'right' or `left`.
 - `opts.showlegend` :  Display legends (boolean values)
 - `opts.top` :  Set the top margin of the plot
