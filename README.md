@@ -605,7 +605,7 @@ The following `opts` are supported:
 - `opts.color_tick_y1`  :  Color of the Y1 axis Ticks
 - `opts.color_title_y2` :  Color of the Y2 axis Title
 - `opts.color_tick_y2`  :  Color of the Y2 axis Ticks
-- `opts.side` :  side on which the tick has to be placed. Has values 'right' or `left`.
+- `opts.side` :  side on which the Y2 tick has to be placed. Has values 'right' or `left`.
 - `opts.showlegend` :  Display legends (boolean values)
 - `opts.top` :  Set the top margin of the plot
 - `opts.bottom` :  Set the bottom margin of the plot
