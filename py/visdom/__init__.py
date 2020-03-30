@@ -2212,7 +2212,7 @@ class Visdom(object):
 
     
     @pytorch_wrap
-    def double_yaxis_lines(self,X=None,Y1=None,Y2=None,opts=None,win=None,env=None):
+    def double_yaxis_lines(self, X=None, Y1=None, Y2=None, opts=None, win=None, env=None):
         '''
         This function will create a line plot using plotly with different Y-Axis.
         
@@ -2260,52 +2260,52 @@ class Visdom(object):
         trace1 = {
                   'x': X,
                   'y': Y1,
-                  'name': opts.get('name_y1','Y1 axis'),
-                  'type': 'scatter'
+                  'name': opts.get('name_y1', 'Y1 axis'),
+                  'type': 'scatter',
                  }
                  
         trace2 = {
                   'x': X,
                   'y': Y2,
                   'yaxis': 'y2',
-                  'name': opts.get('name_y2','Y2 axis'),
-                  'type': 'scatter'
+                  'name': opts.get('name_y2', 'Y2 axis'),
+                  'type': 'scatter',
                  }
                  
-        data = [trace1,trace2]
+        data = [trace1, trace2]
         
         layout = {
-                  'title': opts.get('title','Example Double Y axis'),
+                  'title': opts.get('title', 'Example Double Y axis'),
                   
                   'yaxis': {
                                 'title': trace1['name'],
                                 'titlefont': {
-                                                'color': opts.get('color_title_y1','black')
+                                                'color': opts.get('color_title_y1', 'black')
                                              },
                                 'tickfont': {
-                                                'color': opts.get('color_tick_y1','black')
+                                                'color': opts.get('color_tick_y1', 'black')
                                             },
                            },
                   
                   'yaxis2': {
                                 'title': trace2['name'],
                                 'titlefont': {
-                                                'color': opts.get('color_title_y2','rgb(148, 103, 0189)')
+                                                'color': opts.get('color_title_y2', 'rgb(148, 103, 0189)')
                                              },
                                 'tickfont': {
-                                                'color': opts.get('color_tick_y2','rgb(148, 103, 189)')
+                                                'color': opts.get('color_tick_y2', 'rgb(148, 103, 189)')
                                             },
                                 'overlaying': 'y',
-                                'side': opts.get('side','right'),
+                                'side': opts.get('side', 'right'),
                             },
                   
-                  'showlegend': opts.get('showlegend',True),
+                  'showlegend': opts.get('showlegend', True),
                   
                   'margin': {
-                                'b': opts.get('bottom',60), 
-                                'r': opts.get('right',60), 
-                                't': opts.get('top',60), 
-                                'l': opts.get('left',60)
+                                'b': opts.get('bottom', 60), 
+                                'r': opts.get('right', 60), 
+                                't': opts.get('top', 60), 
+                                'l': opts.get('left', 60)
                             }
                 }
         if 'height' not in opts:
@@ -2321,4 +2321,4 @@ class Visdom(object):
                     'layout':layout,
                     'opts':  opts,
                    }
-        return self._send(datasend,'events')
+        return self._send(datasend, 'events')
