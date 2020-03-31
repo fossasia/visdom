@@ -2275,39 +2275,35 @@ class Visdom(object):
         data = [trace1, trace2]
         
         layout = {
-                  'title': opts.get('title', 'Example Double Y axis'),
-                  
-                  'yaxis': {
-                                'title': trace1['name'],
-                                'titlefont': {
-                                                'color': opts.get('color_title_y1', 'black')
-                                             },
-                                'tickfont': {
-                                                'color': opts.get('color_tick_y1', 'black')
-                                            },
-                           },
-                  
-                  'yaxis2': {
-                                'title': trace2['name'],
-                                'titlefont': {
-                                                'color': opts.get('color_title_y2', 'rgb(148, 103, 0189)')
-                                             },
-                                'tickfont': {
-                                                'color': opts.get('color_tick_y2', 'rgb(148, 103, 189)')
-                                            },
-                                'overlaying': 'y',
-                                'side': opts.get('side', 'right'),
-                            },
-                  
-                  'showlegend': opts.get('showlegend', True),
-                  
-                  'margin': {
-                                'b': opts.get('bottom', 60), 
-                                'r': opts.get('right', 60), 
-                                't': opts.get('top', 60), 
-                                'l': opts.get('left', 60)
-                            }
-                }
+          'title': opts.get('title', 'Example Double Y axis'),
+          'yaxis': {
+            'title': trace1['name'],
+            'titlefont': {
+              'color': opts.get('color_title_y1', 'black')
+            },
+            'tickfont': {
+              'color': opts.get('color_tick_y1', 'black')
+            },
+          },
+          'yaxis2': {
+            'title': trace2['name'],
+            'titlefont': {
+              'color': opts.get('color_title_y2', 'rgb(148, 103, 0189)')
+            },
+            'tickfont': {
+              'color': opts.get('color_tick_y2', 'rgb(148, 103, 189)')
+            },
+            'overlaying': 'y',
+            'side': opts.get('side', 'right'),
+          },
+          'showlegend': opts.get('showlegend', True),
+          'margin': {
+            'b': opts.get('bottom', 60),
+            'r': opts.get('right', 60),
+            't': opts.get('top', 60),
+            'l': opts.get('left', 60)
+          }
+        }
         if 'height' not in opts:
             opts['height'] = 300
         if 'width' not in opts:
