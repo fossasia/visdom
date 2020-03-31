@@ -2210,7 +2210,6 @@ class Visdom(object):
             'opts': opts,
         })
 
-    
     @pytorch_wrap
     def double_yaxis_lines(self, X=None, Y1=None, Y2=None, opts=None, win=None, env=None):
         '''
@@ -2239,38 +2238,36 @@ class Visdom(object):
         - `opts.bottom` :  Set the bottom margin of the plot
         - `opts.right` :  Set the right margin of the plot
         - `opts.left` :  Set the left margin of the plot   
-        
         '''
-        
         X = np.asarray(X)
         Y1 = np.asarray(Y1)
         Y2 = np.asarray(Y2)
-        assert X is not None,'X Cannot be None'
-        assert Y1 is not None,'Y1 Cannot be None'
-        assert Y2 is not None,'Y2 Cannot be None'
-        assert X.shape == Y1.shape,'values of X and Y1 are not in proper shape'
-        assert X.shape == Y2.shape,'values of X and Y2 are not in proper shape'
+        assert X is not None, 'X Cannot be None'
+        assert Y1 is not None, 'Y1 Cannot be None'
+        assert Y2 is not None, 'Y2 Cannot be None'
+        assert X.shape == Y1.shape, 'values of X and Y1 are not in proper shape'
+        assert X.shape == Y2.shape, 'values of X and Y2 are not in proper shape'
         if opts == None:
-            opts={}
+            opts = {}
             opts['height'] = 300
             opts['width'] = 500
         X  = [float(value) for value in X]
         Y1 = [float(value) for value in Y1]
         Y2 = [float(value) for value in Y2]
         trace1 = {
-                  'x': X,
-                  'y': Y1,
-                  'name': opts.get('name_y1', 'Y1 axis'),
-                  'type': 'scatter',
-                 }
+            'x': X,
+            'y': Y1,
+            'name': opts.get('name_y1', 'Y1 axis'),
+            'type': 'scatter',
+        }
                  
         trace2 = {
-                  'x': X,
-                  'y': Y2,
-                  'yaxis': 'y2',
-                  'name': opts.get('name_y2', 'Y2 axis'),
-                  'type': 'scatter',
-                 }
+            'x': X,
+            'y': Y2,
+            'yaxis': 'y2',
+            'name': opts.get('name_y2', 'Y2 axis'),
+            'type': 'scatter',
+        }
                  
         data = [trace1, trace2]
         
@@ -2302,7 +2299,7 @@ class Visdom(object):
             'r': opts.get('right', 60),
             't': opts.get('top', 60),
             'l': opts.get('left', 60)
-          }
+          },
         }
         if 'height' not in opts:
             opts['height'] = 300
@@ -2311,10 +2308,10 @@ class Visdom(object):
         if env == None:
             env = self.env
         datasend = {
-                    'win':   win,
-                    'eid':   env,
-                    'data':  data,
-                    'layout':layout,
-                    'opts':  opts,
-                   }
+            'win': win,
+            'eid': env,
+            'data': data,
+            'layout':layout,
+            'opts': opts,
+        }
         return self._send(datasend, 'events')
