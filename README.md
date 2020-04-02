@@ -266,6 +266,7 @@ The following API is currently supported:
 - [`vis.contour`](#viscontour)  : contour plots
 - [`vis.quiver`](#visquiver)   : quiver plots
 - [`vis.mesh`](#vismesh)     : mesh plots
+- [`vis.dual_axis_lines`](#visdual_axis_lines)     : double y axis line plots
 
 ### Generic Plots
 Note that the server API adheres to the Plotly convention of `data` and `layout` objects, such that you can produce your own arbitrary `Plotly` visualizations:
@@ -585,7 +586,7 @@ The following `opts` are supported:
 - `opts.opacity`: opacity of polygons (`number` between 0 and 1)
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 
-#### vis.double_yaxis_lines
+#### vis.dual_axis_lines
 This function will create a line plot using plotly with different Y-Axis.
 
 `X`  = A numpy array of the range.
