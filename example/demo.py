@@ -480,10 +480,9 @@ def run_demo(viz):
     viz.mesh(X=X, Y=Y, opts=dict(opacity=0.5))
 
     # double y axis plot
-    viz = visdom.Visdom()
     X = np.arange(20)
-    Y1=np.random.randint(0, 20, 20)
-    Y2=np.random.randint(0, 20, 20)
+    Y1 = np.random.randint(0, 20, 20)
+    Y2 = np.random.randint(0, 20, 20)
     viz.dual_axis_lines(X, Y1, Y2)
 
     # SVG plotting
