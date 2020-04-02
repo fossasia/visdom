@@ -2211,7 +2211,7 @@ class Visdom(object):
         })
 
     @pytorch_wrap
-    def double_yaxis_lines(self, X=None, Y1=None, Y2=None, opts=None, win=None, env=None):
+    def dual_axis_lines(self, X=None, Y1=None, Y2=None, opts=None, win=None, env=None):
         '''
         This function will create a line plot using plotly with different Y-Axis.
         
