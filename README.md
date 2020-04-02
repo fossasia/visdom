@@ -266,6 +266,7 @@ The following API is currently supported:
 - [`vis.contour`](#viscontour)  : contour plots
 - [`vis.quiver`](#visquiver)   : quiver plots
 - [`vis.mesh`](#vismesh)     : mesh plots
+- [`vis.dual_axis_lines`](#visdual_axis_lines)     : double y axis line plots
 
 ### Generic Plots
 Note that the server API adheres to the Plotly convention of `data` and `layout` objects, such that you can produce your own arbitrary `Plotly` visualizations:
@@ -584,6 +585,36 @@ The following `opts` are supported:
 - `opts.color`: color (`string`)
 - `opts.opacity`: opacity of polygons (`number` between 0 and 1)
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
+
+#### vis.dual_axis_lines
+This function will create a line plot using plotly with different Y-Axis.
+
+`X`  = A numpy array of the range.
+
+`Y1` = A numpy array of the same count as `X`.
+
+`Y2` = A numpy array of the same count as `X`.
+
+The following `opts` are supported:
+
+- `opts.height` : Height of the plot
+- `opts.width` :  Width of the plot
+- `opts.name_y1` : Axis name for Y1 plot
+- `opts.name_y2` : Axis name for Y2 plot
+- `opts.title` :  Title of the plot
+- `opts.color_title_y1` :  Color of the Y1 axis Title
+- `opts.color_tick_y1`  :  Color of the Y1 axis Ticks
+- `opts.color_title_y2` :  Color of the Y2 axis Title
+- `opts.color_tick_y2`  :  Color of the Y2 axis Ticks
+- `opts.side` :  side on which the Y2 tick has to be placed. Has values 'right' or `left`.
+- `opts.showlegend` :  Display legends (boolean values)
+- `opts.top` :  Set the top margin of the plot
+- `opts.bottom` :  Set the bottom margin of the plot
+- `opts.right` :  Set the right margin of the plot
+- `opts.left` :  Set the left margin of the plot   
+
+This is the image of the output:  
+<p align="center"><img align="center" src="https://user-images.githubusercontent.com/33365560/77659609-4c123900-6f9e-11ea-9954-b73fbda24a29.gif" width="400" /></p>
 
 ### Customizing plots
 
