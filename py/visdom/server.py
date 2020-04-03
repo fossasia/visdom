@@ -1653,8 +1653,8 @@ def download_scripts(proxies=None, install_dir=None):
             'react-dom.min.js',
         '%sreact-modal@3.1.10/dist/react-modal.min.js' % b:
             'react-modal.min.js',
-        'https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_SVG':  # noqa
-            'mathjax-MathJax.js',
+        #'https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_SVG':  # noqa
+            #'mathjax-MathJax.js',
         # here is another url in case the cdn breaks down again.
         # https://raw.githubusercontent.com/plotly/plotly.js/master/dist/plotly.min.js
         'https://cdn.plot.ly/plotly-latest.min.js': 'plotly-plotly.min.js',
@@ -1742,6 +1742,12 @@ def download_scripts(proxies=None, install_dir=None):
             except URLError as exc:
                 logging.error('Error {} while downloading {}'.format(
                     exc.reason, key))
+
+    filename = '%s/static/%s/%s' % (install_dir, "js", "MathJax.js")
+    if not os.path.exists(filename):
+        mathjax_js = requests.get("https://raw.githubusercontent.com/mathjax/MathJax/master/es5/tex-mml-svg.js")#("https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_SVG")
+        with open(filename,"w") as file:
+            file.write(mathjax_js.text)
 
     if not is_built:
         with open(built_path, 'w+') as build_file:
