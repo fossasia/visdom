@@ -1658,6 +1658,7 @@ def download_scripts(proxies=None, install_dir=None):
         'https://cdn.plot.ly/plotly-latest.min.js': 'plotly-plotly.min.js',
         # Stanford Javascript Crypto Library for Password Hashing
         '%ssjcl@1.0.7/sjcl.js' % b: 'sjcl.js',
+        '%slayout-bin-packer@1.4.0/dist/layout-bin-packer.js.map' % b: 'layout-bin-packer.js.map',
 
         # - css
         '%sreact-resizable@1.4.6/css/styles.css' % b:
@@ -1718,7 +1719,7 @@ def download_scripts(proxies=None, install_dir=None):
     for (key, val) in ext_files.items():
 
         # set subdirectory:
-        if val.endswith('.js'):
+        if val.endswith('.js') or val.endswith('.js.map'):
             sub_dir = 'js'
         elif val.endswith('.css'):
             sub_dir = 'css'
