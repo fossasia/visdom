@@ -493,11 +493,11 @@ def run_demo(viz):
         name=r'$\alpha_{1c} = 352 \pm 11 \text{ km s}^{-1}$',
         update='append',
         opts={
-            'showlegend':True,
-            'title':"Demo Latex in Visdom",
-            'xlabel':r'$\sqrt{(n_\text{c}(t|{T_\text{early}}))}$',
-            'ylabel':r'$d, r \text{ (solar radius)}$',
-        }
+            'showlegend': True,
+            'title': "Demo Latex in Visdom",
+            'xlabel': r'$\sqrt{(n_\text{c}(t|{T_\text{early}}))}$',
+            'ylabel': r'$d, r \text{ (solar radius)}$',
+        },
     )
     viz.line(
         X=[1, 2, 3, 4],
