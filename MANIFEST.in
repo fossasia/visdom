@@ -2,6 +2,6 @@ include README.md
 include py/visdom/VERSION
 include py/visdom/py.typed
 include py/visdom/*.pyi
-recursive-include py/visdom/static *
+recursive-include py/visdom/static/*
 recursive-exclude * __pycache__
 recursive-exclude * *.py[co]
