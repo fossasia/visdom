@@ -1760,7 +1760,7 @@ def download_scripts(proxies=None, install_dir=None):
     
     for path in mathjax_path:
         filename=path.split("/")[-1].split("?")[0]
-        extracted_directory=os.path.join(mathjax_dir_path,"\\".join(path.split('/')[:-1]))
+        extracted_directory=os.path.join(mathjax_dir_path,*path.split('/')[:-1])
         if not os.path.exists(extracted_directory):
             os.makedirs(extracted_directory)
         if not os.path.exists(os.path.join(extracted_directory,filename)):
