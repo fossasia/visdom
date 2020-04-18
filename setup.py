@@ -42,7 +42,7 @@ requirements = [
     'scipy',
     'requests',
     'tornado',
-    'pyzmq',
+    # 'pyzmq',
     'six',
     'jsonpatch',
     'websocket-client',
@@ -59,6 +59,7 @@ setup(
     url='https://github.com/facebookresearch/visdom',
     description='A tool for visualizing live, rich data for Torch and Numpy',
     long_description=readme,
+    long_description_content_type="text/markdown",
     license='CC-BY-NC-4.0',
 
     # Package info
