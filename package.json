@@ -40,7 +40,7 @@
     "debounce": "^1.2.0",
     "fast-json-patch": "^2.2.1",
     "fetch": "^1.1.0",
-    "jquery": "^3.4.0",
+    "jquery": "^3.5.0",
     "js-yaml": "^3.13.1",
     "json-stable-stringify": "^1.0.1",
     "md5": "^2.2.1",
