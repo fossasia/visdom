@@ -1653,13 +1653,12 @@ def download_scripts(proxies=None, install_dir=None):
             'react-dom.min.js',
         '%sreact-modal@3.1.10/dist/react-modal.min.js' % b:
             'react-modal.min.js',
-        'https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_SVG':  # noqa
-            'mathjax-MathJax.js',
         # here is another url in case the cdn breaks down again.
         # https://raw.githubusercontent.com/plotly/plotly.js/master/dist/plotly.min.js
         'https://cdn.plot.ly/plotly-latest.min.js': 'plotly-plotly.min.js',
         # Stanford Javascript Crypto Library for Password Hashing
         '%ssjcl@1.0.7/sjcl.js' % b: 'sjcl.js',
+        '%slayout-bin-packer@1.4.0/dist/layout-bin-packer.js.map' % b: 'layout-bin-packer.js.map',
 
         # - css
         '%sreact-resizable@1.4.6/css/styles.css' % b:
@@ -1720,7 +1719,7 @@ def download_scripts(proxies=None, install_dir=None):
     for (key, val) in ext_files.items():
 
         # set subdirectory:
-        if val.endswith('.js'):
+        if val.endswith('.js') or val.endswith('.js.map'):
             sub_dir = 'js'
         elif val.endswith('.css'):
             sub_dir = 'css'
@@ -1742,6 +1741,32 @@ def download_scripts(proxies=None, install_dir=None):
             except URLError as exc:
                 logging.error('Error {} while downloading {}'.format(
                     exc.reason, key))
+
+    # Download MathJax Js Files
+    import requests
+    cdnjs_url = 'https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.5/'
+    mathjax_dir = os.path.join(*cdnjs_url.split('/')[-3:])
+    mathjax_path = [
+        'config/Safe.js?V=2.7.5',
+        'config/TeX-AMS-MML_HTMLorMML.js?V=2.7.5',
+        'extensions/Safe.js?V=2.7.5',
+        'jax/output/SVG/fonts/TeX/fontdata.js?V=2.7.5',
+        'jax/output/SVG/jax.js?V=2.7.5',
+        'jax/output/SVG/fonts/TeX/Size1/Regular/Main.js?V=2.7.5',
+        'jax/output/SVG/config.js?V=2.7.5',
+        'MathJax.js?config=TeX-AMS-MML_HTMLorMML%2CSafe.js&#038;ver=4.1',
+    ]
+    mathjax_dir_path = '%s/static/%s/%s' % (install_dir, 'js', mathjax_dir)
+
+    for path in mathjax_path:
+        filename = path.split("/")[-1].split("?")[0]
+        extracted_directory = os.path.join(mathjax_dir_path, *path.split('/')[:-1])
+        if not os.path.exists(extracted_directory):
+            os.makedirs(extracted_directory)
+        if not os.path.exists(os.path.join(extracted_directory, filename)):
+            js_file = requests.get(cdnjs_url + path)
+            with open(os.path.join(extracted_directory, filename), "wb+") as file:
+                file.write(js_file.content)
 
     if not is_built:
         with open(built_path, 'w+') as build_file:
@@ -1814,7 +1839,7 @@ def main(print_func=None):
 
     try:
         logging_level = int(FLAGS.logging_level)
-    except (ValueError,):
+    except ValueError:
         try:
             logging_level = logging._checkLevel(FLAGS.logging_level)
         except ValueError:

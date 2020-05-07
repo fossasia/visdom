@@ -485,6 +485,28 @@ def run_demo(viz):
     Y2 = np.random.randint(0, 20, 20)
     viz.dual_axis_lines(X, Y1, Y2)
 
+    # Example for Latex Support
+    viz.line(
+        X=[1, 2, 3, 4],
+        Y=[1, 4, 9, 16],
+        win="latex_support",
+        name=r'$\alpha_{1c} = 352 \pm 11 \text{ km s}^{-1}$',
+        update='append',
+        opts={
+            'showlegend': True,
+            'title': "Demo Latex in Visdom",
+            'xlabel': r'$\sqrt{(n_\text{c}(t|{T_\text{early}}))}$',
+            'ylabel': r'$d, r \text{ (solar radius)}$',
+        },
+    )
+    viz.line(
+        X=[1, 2, 3, 4],
+        Y=[0.5, 2, 4.5, 8],
+        win="latex_support",
+        name=r'$\beta_{1c} = 25 \pm 11 \text{ km s}^{-1}$',
+        update='append',
+    )
+
     # SVG plotting
     svgstr = """
     <svg height="300" width="300">
