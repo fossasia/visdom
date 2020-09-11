@@ -578,10 +578,6 @@ class ClientSocketWrapper():
             ))
 
     def open(self):
-        if self.login_enabled and not self.current_user:
-            print("AUTH Failed in SocketHandler")
-            self.close()
-            return
         self.sid = get_rand_id()
         if self not in list(self.subs.values()):
             self.eid = 'main'
