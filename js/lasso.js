@@ -1,3 +1,12 @@
+/**
+ * Copyright 2017-present, The Visdom Authors
+ * All rights reserved.
+ *
+ * This source code is licensed under the license found in the
+ * LICENSE file in the root directory of this source tree.
+ *
+ */
+
 import * as d3 from 'd3-selection';
 import { dispatch as d3dispatch } from 'd3-dispatch';
 import { drag as d3drag } from 'd3-drag';
