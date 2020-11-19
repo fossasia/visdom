@@ -11,7 +11,7 @@ description = {
       A tool for visualizing live, rich data for Torch and Numpy.
    ]],
    homepage = "https://github.com/facebookresearch/visdom",
-   license = "Creative Commons Attribution-NonCommercial 4.0 International Public License"
+   license = "Apache 2.0"
 }
 
 dependencies = {
