@@ -712,7 +712,7 @@ Arguments:
 - `log_filename`: log file to replay the contents of.
 
 ## License
-visdom is Creative Commons Attribution-NonCommercial 4.0 International Public licensed, as found in the LICENSE file.
+visdom is Apache 2.0 licensed, as found in the LICENSE file.
 
 ## Note on Lua Torch Support
 Support for Lua Torch was deprecated following `v0.1.8.4`. If you'd like to use torch support, you'll need to download that release. You can follow the usage instructions there, but it is no longer officially supported.
