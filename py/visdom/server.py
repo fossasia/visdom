@@ -407,7 +407,7 @@ class VisSocketWrapper():
         to_send = []
         while len(self.messages) > 0:
             message = self.messages.pop()
-            if type(message) is dict:
+            if isinstance(message, dict):
                 # Not all messages are being formatted the same way (JSON)
                 # TODO investigate
                 message = json.dumps(message)
@@ -656,7 +656,7 @@ class ClientSocketWrapper():
         to_send = []
         while len(self.messages) > 0:
             message = self.messages.pop()
-            if type(message) is dict:
+            if isinstance(message, dict):
                 # Not all messages are being formatted the same way (JSON)
                 # TODO investigate
                 message = json.dumps(message)
@@ -769,7 +769,7 @@ def window(args):
 
 def broadcast(self, msg, eid):
     for s in self.subs:
-        if type(self.subs[s].eid) is list:
+        if isinstance(self.subs[s].eid, dict):
             if eid in self.subs[s].eid:
                 self.subs[s].write_message(msg)
         else:
