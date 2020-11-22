@@ -140,7 +140,7 @@ def _title2str(opts):
 
 
 def _scrub_dict(d):
-    if type(d) is dict:
+    if isinstance(d, dict):
         return {k: _scrub_dict(v) for k, v in list(d.items())
                 if v is not None and _scrub_dict(v) is not None}
     else:
@@ -1561,9 +1561,10 @@ class Visdom(object):
         _assert_opts(opts)
 
         if opts.get('legend'):
-            assert type(opts['legend']) == list and K <= len(opts['legend']), \
-                'largest label should not be greater than size of the ' \
-                'legends table'
+            assert isinstance(opts['legend'], (tuple, list)) \
+                   and K <= len(opts['legend']), \
+                   'largest label should not be greater than size of ' \
+                   'the legends table'
 
         data = []
         trace_opts = opts.get('traceopts', {'plotly': {}})['plotly']
