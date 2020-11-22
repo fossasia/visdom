@@ -1469,7 +1469,7 @@ class Visdom(object):
         - `opts.markerborderwidth`: marker border line width (`float`; default = 0.5)
         - `opts.dash`             : dash type (`np.array`; default = 'solid'`)
         - `opts.textlabels`       : text label for each point (`list`: default = `None`)
-        - `opts.legend`           : `list` containing legend names
+        - `opts.legend`           : `list` or `tuple` containing legend names
         """
         if update == 'remove':
             assert win is not None
@@ -1670,7 +1670,7 @@ class Visdom(object):
         - `opts.markersize`  : marker size (`number`; default = `'10'`)
         - `opts.linecolor`   : line colors (`np.array`; default = None)
         - `opts.dash`        : line dash type (`np.array`; default = None)
-        - `opts.legend`      : `list` containing legend names
+        - `opts.legend`      : `list` or `tuple` containing legend names
 
         If `update` is specified, the figure will be updated without
         creating a new plot -- this can be used for efficient updating.
