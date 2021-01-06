@@ -107,7 +107,7 @@ yarn run build   # build js
 ```
 
 #### npm
-You can find instructions for installing `npm` [here](https://github.com/npm/npm).
+You can find instructions for installing `npm` [here](https://github.com/npm/cli).
 ```bash
 cd /path/to/visdom
 npm install       # install node dependencies
