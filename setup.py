@@ -1,4 +1,6 @@
-# Copyright 2017-present, Facebook, Inc.
+#!/usr/bin/env python3
+
+# Copyright 2017-present, The Visdom Authors
 # All rights reserved.
 #
 # This source code is licensed under the license found in the
@@ -43,7 +45,6 @@ requirements = [
     'pyzmq',
     'six',
     'jsonpatch',
-    'torchfile',
     'websocket-client',
 ]
 pillow_req = 'pillow-simd' if get_dist('pillow-simd') is not None else 'pillow'
@@ -58,7 +59,7 @@ setup(
     url='https://github.com/facebookresearch/visdom',
     description='A tool for visualizing live, rich data for Torch and Numpy',
     long_description=readme,
-    license='CC-BY-NC-4.0',
+    license='Apache-2.0',
 
     # Package info
     packages=['visdom'],

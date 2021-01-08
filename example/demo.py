@@ -1,13 +1,10 @@
-# Copyright 2017-present, Facebook, Inc.
+#!/usr/bin/env python3
+
+# Copyright 2017-present, The Visdom Authors
 # All rights reserved.
 #
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
-
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
 from visdom import Visdom
 import argparse
@@ -16,22 +13,11 @@ import math
 import os.path
 import time
 import tempfile
-from six.moves import urllib
+import urllib
 
 
-DEFAULT_PORT = 8097
-DEFAULT_HOSTNAME = "http://localhost"
-parser = argparse.ArgumentParser(description='Demo arguments')
-parser.add_argument('-port', metavar='port', type=int, default=DEFAULT_PORT,
-                    help='port the visdom server is running on.')
-parser.add_argument('-server', metavar='server', type=str,
-                    default=DEFAULT_HOSTNAME,
-                    help='Server address of the target to run the demo on.')
-FLAGS = parser.parse_args()
-
-try:
-    viz = Visdom(port=FLAGS.port, server=FLAGS.server)
-
+def run_demo(viz):
+    global input
     assert viz.check_connection(timeout_seconds=3), \
         'No connection could be formed quickly'
 
@@ -88,14 +74,28 @@ try:
 
         if os.path.isfile(videofile):
             viz.video(videofile=videofile, opts={'width': 864, 'height': 480})
-    except BaseException:
-        print('Skipped video file example')
+    except BaseException as e:
+        print('Skipped video file example', e)
 
     # image demo
-    viz.image(
+    img_callback_win = viz.image(
         np.random.rand(3, 512, 256),
-        opts=dict(title='Random!', caption='How random.'),
+        opts={'title': 'Random!', 'caption': 'Click me!'},
     )
+
+    img_coord_text = viz.text("Coords: ")
+
+    def img_click_callback(event):
+        nonlocal img_coord_text
+        if event['event_type'] != 'Click':
+            return
+
+        coords = "x: {}, y: {};".format(
+            event['image_coord']['x'], event['image_coord']['y']
+        )
+        img_coord_text = viz.text(coords, win=img_coord_text, append=True)
+
+    viz.register_event_handler(img_click_callback, img_callback_win)
 
     # image demo save as jpg
     viz.image(
@@ -189,6 +189,7 @@ try:
         opts=dict(
             markersize=10,
             markercolor=np.floor(np.random.random((2, 3)) * 255),
+            markerborderwidth=0,
         ),
     )
 
@@ -478,6 +479,34 @@ try:
     Y = np.c_[i, j, k]
     viz.mesh(X=X, Y=Y, opts=dict(opacity=0.5))
 
+    # double y axis plot
+    X = np.arange(20)
+    Y1 = np.random.randint(0, 20, 20)
+    Y2 = np.random.randint(0, 20, 20)
+    viz.dual_axis_lines(X, Y1, Y2)
+
+    # Example for Latex Support
+    viz.line(
+        X=[1, 2, 3, 4],
+        Y=[1, 4, 9, 16],
+        win="latex_support",
+        name=r'$\alpha_{1c} = 352 \pm 11 \text{ km s}^{-1}$',
+        update='append',
+        opts={
+            'showlegend': True,
+            'title': "Demo Latex in Visdom",
+            'xlabel': r'$\sqrt{(n_\text{c}(t|{T_\text{early}}))}$',
+            'ylabel': r'$d, r \text{ (solar radius)}$',
+        },
+    )
+    viz.line(
+        X=[1, 2, 3, 4],
+        Y=[0.5, 2, 4.5, 8],
+        win="latex_support",
+        name=r'$\beta_{1c} = 25 \pm 11 \text{ km s}^{-1}$',
+        update='append',
+    )
+
     # SVG plotting
     svgstr = """
     <svg height="300" width="300">
@@ -529,17 +558,53 @@ try:
     except BaseException:
         print('Skipped audio example')
 
+    # get/set state
+    import json
+    window = viz.text('test one')
+    data = json.loads(viz.get_window_data())
+    data[window]['content'] = 'test two'
+    viz.set_window_data(json.dumps(data))
+
     try:
         input = raw_input  # for Python 2 compatibility
     except NameError:
         pass
     input('Waiting for callbacks, press enter to quit.')
-except BaseException as e:
-    print(
-        "The visdom experienced an exception while running: {}\n"
-        "The demo displays up-to-date functionality with the GitHub version, "
-        "which may not yet be pushed to pip. Please upgrade using "
-        "`pip install -e .` or `easy_install .`\n"
-        "If this does not resolve the problem, please open an issue on "
-        "our GitHub.".format(repr(e))
-    )
+
+
+if __name__ == '__main__':
+    DEFAULT_PORT = 8097
+    DEFAULT_HOSTNAME = "http://localhost"
+    parser = argparse.ArgumentParser(description='Demo arguments')
+    parser.add_argument('-port', metavar='port', type=int, default=DEFAULT_PORT,
+                        help='port the visdom server is running on.')
+    parser.add_argument('-server', metavar='server', type=str,
+                        default=DEFAULT_HOSTNAME,
+                        help='Server address of the target to run the demo on.')
+    parser.add_argument('-base_url', metavar='base_url', type=str,
+                    default='/',
+                    help='Base Url.')
+    parser.add_argument('-username', metavar='username', type=str,
+                    default='',
+                    help='username.')
+    parser.add_argument('-password', metavar='password', type=str,
+                    default='',
+                    help='password.')
+    parser.add_argument('-use_incoming_socket', metavar='use_incoming_socket', type=bool,
+                    default=True,
+                    help='use_incoming_socket.')
+    FLAGS = parser.parse_args()
+
+    try:
+        viz = Visdom(port=FLAGS.port, server=FLAGS.server, base_url=FLAGS.base_url, username=FLAGS.username, password=FLAGS.password, \
+                use_incoming_socket=FLAGS.use_incoming_socket)
+        run_demo(viz)
+    except Exception as e:
+        print(
+            "The visdom experienced an exception while running: {}\n"
+            "The demo displays up-to-date functionality with the GitHub "
+            "version, which may not yet be pushed to pip. Please upgrade "
+            "using `pip install -e .` or `easy_install .`\n"
+            "If this does not resolve the problem, please open an issue on "
+            "our GitHub.".format(repr(e))
+        )

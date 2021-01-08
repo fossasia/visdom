@@ -1,12 +1,17 @@
 --[[
 
-Copyright 2017-present, Facebook, Inc.
+Copyright 2017-present, The Visdom Authors
 All rights reserved.
 
 This source code is licensed under the license found in the
 LICENSE file in the root directory of this source tree.
 
 ]]--
+
+-- @lint-ignore-every LUA_EXTERN_CHECK
+-- @lint-ignore-every LUA_LUAJIT
+-- we no longer support this file, and it exists for legacy purposes and for
+-- people to  get the warning to download the last supported version.
 
 -- dependencies:
 require 'torch'
@@ -28,6 +33,10 @@ M.__init = argcheck{
       The `visdom` package implements a Torch client for `visdom`, a
       visualization server that wraps plot.ly to show scalable, high-quality
       visualizations in the browser.
+
+      Note: The lua Torch client for visdom was deprecated after visdom
+      v0.1.8.4, so if you'd like to use visdom for torch, you'll have to
+      download that specific tag of visdom from the github.
 
       The server can be started with the `server.py` script. The server defaults
       to port 8097. When the server is running on `domain.com:8097`, then visit
