@@ -1688,11 +1688,7 @@ class Visdom(object):
             assert X.ndim == 1 or X.ndim == 2, 'X should have 1 or 2 dim'
         else:
             X = np.linspace(0, 1, Y.shape[0])
-
-        if Y.ndim == 2 and Y.shape[1] == 1:
-                Y = Y.reshape(1, Y.shape[0])
-                X = X.reshape(X.shape[0])
-
+     
         if Y.ndim == 2 and X.ndim == 1:
             X = np.tile(X, (Y.shape[1], 1)).transpose()
 
