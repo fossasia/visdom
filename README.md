@@ -1,7 +1,7 @@
 
 # **Visdom**
 
-![visdom_big](https://lh3.googleusercontent.com/-bqH9UXCw-BE/WL2UsdrrbAI/AAAAAAAAnYc/emrxwCmnrW4_CLTyyUttB0SYRJ-i4CCiQCLcB/s0/Screen+Shot+2017-03-06+at+10.51.02+AM.png"visdom_big")
+![visdom_big](docs/images/visdom.png "visdom_big")
 
 A flexible tool for creating, organizing, and sharing visualizations of live, rich data. Supports Python.
 
@@ -22,11 +22,11 @@ Visdom aims to facilitate visualization of (remote) data with an emphasis on sup
 
 Broadcast visualizations of plots, images, and text for yourself and your collaborators.
 
-<p align="center"><img src="https://thumbs.gfycat.com/SlipperySecondhandGemsbuck-size_restricted.gif" width="500" /></p>
+<p align="center"><img src="docs/images/plots.gif" width="500" /></p>
 
 Organize your visualization space programmatically or through the UI to create dashboards for live data, inspect results of experiments, or debug experimental code.
 
-<p align="center"><img align="center" src="https://lh3.googleusercontent.com/-IHexvZ-FMtk/WLTXBgQlijI/AAAAAAAAm_s/514LM8R1XFgyNKPVMf4tNwYluZsHsC63wCLcB/s0/Screen+Shot+2017-02-27+at+3.15.27+PM.png" width="500" /></p>
+<p align="center"><img align="center" src="docs/images/organize.png" width="500" /></p>
 
 
 
@@ -36,7 +36,7 @@ Organize your visualization space programmatically or through the UI to create d
 Visdom has a simple set of features that can be composed for various use-cases.
 
 ### Windows
-<p align="center"><img align="center" src="https://lh3.googleusercontent.com/-kLnogsg9RCs/WLx34PEsGWI/AAAAAAAAnSs/7t_62pbfmfoEBnkcbKTXIqz0WM8pQJHVQCLcB/s0/Screen+Shot+2017-03-05+at+3.34.43+PM.png" width="500" /></p>
+<p align="center"><img align="center" src="docs/images/windows.png" width="500" /></p>
 
 
 The UI begins as a blank slate – you can populate it with plots, images, and text. These appear in windows that you can drag, drop, resize, and destroy. The windows live in `envs` and the state of `envs` is stored across sessions. You can download the content of windows – including your plots in `svg`.
@@ -71,7 +71,7 @@ Right now the following callback events are supported:
     - `image_coord` - dictionary with the fields `x` and `y` for the click coordinates in the coordinate frame of the possibly zoomed/panned image (*not* the enclosing pane).
 
 ### Environments
-<p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34618198-fc63976c-f20b-11e7-9c0d-060132fdb37e.png" width="300" /></p>
+<p align="center"><img align="center" src="docs/images/environment.png" width="300" /></p>
 
 You can partition your visualization space with `envs`. By default, every user will have an env called `main`. New envs can be created in the UI or programmatically. The state of envs is chronically saved. Environments are able to keep entirely different pools of plots.
 
@@ -80,7 +80,7 @@ You can access a specific env via url: `http://localhost.com:8097/env/main`. If 
 Environments are automatically hierarchically organized by the first `_`.
 
 #### Selecting Environments
-<p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34618242-261d55d4-f20c-11e7-820d-c16731248b26.png" width="300" /></p>
+<p align="center"><img align="center" src="docs/images/selecting_env.png" width="300" /></p>
 
 From the main page it is possible to toggle between different environments using the environment selector. Selecting a new environment will query the server for the plots that exist in that environment. The environment selector allows for searching and filtering for the new enironment.
 
@@ -94,7 +94,7 @@ From the main page it is possible to compare different environments using the en
 You can use the eraser button to remove all of the current contents of an environment. This closes the plot windows for that environment but keeps the empty environment for new plots.
 
 #### Managing Environments
-<p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34618262-3bb635c8-f20c-11e7-9370-9facfde0cfb7.png" width="400" /></p>
+<p align="center"><img align="center" src="docs/images/managing_env.png" width="400" /></p>
 
 Pressing the folder icon opens a dialog that allows you to fork or force save the current environment, or delete any of your existing environments. Use of this feature is fully described in the **State** section.
 
@@ -104,7 +104,7 @@ Pressing the folder icon opens a dialog that allows you to fork or force save th
 ### State
 Once you've created a few visualizations, state is maintained. The server automatically caches your visualizations -- if you reload the page, your visualizations reappear.
 
-<p align="center"><img align="center" src="https://lh3.googleusercontent.com/-ZKeFJfMe5S4/WLXebiNgFwI/AAAAAAAAnFI/AH2cGsf40hEWbH6UeclYQcZPS0YZbcayQCLcB/s0/env_fork_2.gif" width="400" /></p>
+<p align="center"><img align="center" src="docs/images/state.gif" width="400" /></p>
 
 * **Save:** You can manually do so with the `save` button. This will serialize the env's state (to disk, in JSON), including window positions. You can save an `env` programmatically.
 <br/>This is helpful for more sophisticated visualizations in which configuration is meaningful, e.g. a data-rich demo, a model training dashboard, or systematic experimentation. This also makes them easy to share and reuse.
@@ -117,13 +117,13 @@ Once you've created a few visualizations, state is maintained. The server automa
 ### Filter
 You can use the `filter` to dynamically sift through windows present in an env -- just provide a regular expression with which to match titles of window you want to show. This can be helpful in use cases involving an env with many windows e.g. when systematically checking experimental results.
 
-<p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34618118-b86cb138-f20b-11e7-834d-b7d7039313f0.png" width="300" /></p>
+<p align="center"><img align="center" src="docs/images/filter.png" width="300" /></p>
 
 > **Note**: If you have saved your current view, the view will be restored after clearing the filter.
-> <p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34849912-f0693f30-f6f1-11e7-90b6-2a39f83280e8.gif" width="500" /></p>
+> <p align="center"><img align="center" src="docs/images/filter_gif.gif" width="500" /></p>
 
 ### Views
-<p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34618173-e2546f40-f20b-11e7-9969-16267891fb53.png" width="300" /></p>
+<p align="center"><img align="center" src="docs/images/views.png" width="300" /></p>
 
 It is possible to manage the views simply by dragging the tops of windows around, however additional features exist to keep views organized and save common views. View management can be useful for saving and switching between multiple common organizations of your windows.
 
@@ -138,7 +138,7 @@ Using the repack icon (9 boxes), visdom will attempt to pack your windows in a w
 > **Note**: Due to the reliance on row/column ordering and `ReactGridLayout` the final layout might be slightly different than what might be expected. We're working on improving that experience or providing alternatives that give more fine-tuned control.
 
 #### Reloading Views
-<p align="center"><img align="center" src="https://user-images.githubusercontent.com/1276867/34621042-9c6c05f6-f215-11e7-92c7-60afe2bf7e1e.gif" width="600" /></p>
+<p align="center"><img align="center" src="docs/images/reloading_views.gif" width="600" /></p>
 
 Using the view dropdown it is possible to select previously saved views, restoring the locations and sizes of all of the windows within the current environment to the places they were when that view was saved last.
 
@@ -295,7 +295,7 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 
 
 ## Details
-![visdom_big](https://lh3.googleusercontent.com/-bqH9UXCw-BE/WL2UsdrrbAI/AAAAAAAAnYc/emrxwCmnrW4_CLTyyUttB0SYRJ-i4CCiQCLcB/s0/Screen+Shot+2017-03-06+at+10.51.02+AM.png"visdom_big")
+![visdom_big](docs/images/visdom.png "visdom_big")
 
 ### Basics
 
@@ -614,7 +614,7 @@ The following `opts` are supported:
 - `opts.left` :  Set the left margin of the plot   
 
 This is the image of the output:  
-<p align="center"><img align="center" src="https://user-images.githubusercontent.com/33365560/77659609-4c123900-6f9e-11ea-9954-b73fbda24a29.gif" width="400" /></p>
+<p align="center"><img align="center" src="docs/images/output.gif" width="400" /></p>
 
 ### Customizing plots
 
