@@ -1,0 +1,22 @@
+name: "Issue Scripts"
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  assign-check:
+    runs-on: ubuntu-latest
+
+    if: contains(github.event.comment.body, 'please assign') || contains(github.event.comment.body, 'assign me')
+    steps:
+      - uses: actions/github-script@v3
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            await github.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: "We don't assign issues to external contributors. Please comment that you're working on the issue after checking that no one else is, and then send a pull request for it. Thank You!"
+            })
