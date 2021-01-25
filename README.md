@@ -18,7 +18,9 @@ A flexible tool for creating, organizing, and sharing visualizations of live, ri
 
 Visdom aims to facilitate visualization of (remote) data with an emphasis on supporting scientific experimentation.
 
-<p align="center"><img src="https://lh3.googleusercontent.com/-h3HuvbU2V0SfgqgXGiK3LPghE5vqvS0pzpObS0YgG_LABMFk62JCa3KVu_2NV_4LJKaAa5-tg=s0" width="500"  /></p>
+<p align="center"><img src="https://i.ibb.co/r7XK1ZG/readme.png" alt="readme" 
+
+border="0" width="500"  /></p>
 
 Broadcast visualizations of plots, images, and text for yourself and your collaborators.
 
