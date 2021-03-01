@@ -53,7 +53,7 @@
     "react-modal": "^3.10.1",
     "react-resize-detector": "^4.2.1",
     "style-loader": "^0.20.1",
-    "three": "^0.105.2"
+    "three": "^0.125.0"
   },
   "husky": {
     "hooks": {
