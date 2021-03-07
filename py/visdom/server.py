@@ -16,7 +16,6 @@ import inspect
 import json
 import jsonpatch
 import logging
-import math
 import os
 import sys
 import time
@@ -25,6 +24,7 @@ import uuid
 import warnings
 from os.path import expanduser
 from collections import OrderedDict
+from math import isnan
 try:
     # for after python 3.8
     from collections.abc import Mapping, Sequence
@@ -981,7 +981,7 @@ class UpdateHandler(BaseHandler):
 
         # Update traces
         for n, idx in enumerate(idxs):
-            if all(math.isnan(i) or i is None for i in new_data[n]['x']):
+            if all(isnan(i) or i is None for i in new_data[n]['x']):
                 continue
             # handle data for plotting
             for axis in ['x', 'y']:

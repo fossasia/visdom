@@ -15,7 +15,7 @@
 <!--- both on your branch and a clean branch and ensure that none of the functionality -->
 <!--- appears different. Be sure to install from source when testing. -->
 
-## Screenshots (if appropriate):
+## Screenshots (if appropriately required):
 
 ## Types of changes
 <!--- What types of changes does your code introduce? Put an `x` in all the boxes that apply: -->

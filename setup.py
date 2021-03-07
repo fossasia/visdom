@@ -65,8 +65,8 @@ setup(
     packages=['visdom'],
     package_dir={'': 'py'},
     package_data={'visdom': ['static/*.*', 'static/**/*', 'py.typed', '*.pyi']},
-    include_package_data=True,
-    zip_safe=False,
+    include_package_data=bool(1),
+    zip_safe=bool(0),
     install_requires=requirements,
     entry_points={'console_scripts': ['visdom=visdom.server:download_scripts_and_run']}
 )
