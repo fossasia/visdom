@@ -753,6 +753,15 @@ def window(args):
         })
     elif ptype in ['image', 'text', 'properties']:
         p.update({'content': args['data'][0]['content'], 'type': ptype})
+    elif ptype == 'network':
+        p.update({
+            'content': args['data'][0]['content'] , 
+            'type': ptype,
+            'showEdgeLabels' : opts.get("showEdgeLabels", False),
+            'showVertexLabels' : opts.get("showVertexLabels", True),
+            'labels': opts.get("labels", "default"),
+            'Gtype': opts.get("type", "gph"),
+        })
     elif ptype in ['embeddings']:
         p.update({
             'content': args['data'][0]['content'],
@@ -831,7 +840,10 @@ class PostHandler(BaseHandler):
 
         eid = extract_eid(req)
         p = window(req)
-
+        print(eid)
+        print(p)
+        print()
+        print()
         register_window(self, p, eid)
 
 
@@ -1655,6 +1667,9 @@ def download_scripts(proxies=None, install_dir=None):
         # Stanford Javascript Crypto Library for Password Hashing
         '%ssjcl@1.0.7/sjcl.js' % b: 'sjcl.js',
         '%slayout-bin-packer@1.4.0/dist/layout-bin-packer.js.map' % b: 'layout-bin-packer.js.map',
+        'http://d3js.org/d3.v3.min.js' : 'd3.v3.min.js',
+        'https://d3js.org/d3-selection-multi.v1.js' : 'd3-selection-multi.v1.js',
+        '%ssave-svg-as-png@1.4.17/lib/saveSvgAsPng.js' % b: 'saveSvgAsPng.js',
 
         # - css
         '%sreact-resizable@1.4.6/css/styles.css' % b:
