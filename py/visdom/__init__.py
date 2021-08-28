@@ -2321,36 +2321,29 @@ class Visdom(object):
 
     @pytorch_wrap
     def graph(self, graphDict, opts=None, env=None, win=None):
-        """
-        This function draws interactive network graphs. It takes in an Graph Dictionary for types of Graphs,
+        """This function draws interactive network graphs. It takes in an Graph Dictionary for types of Graphs,
         Graph ("gph"), Directed Graph ("dgph"), Weighted Graph ("wgph") and Directed Weighted Graph ("dwgph").
         where nodes are defined by numbers from (0 to n-1) where n is the number of nodes.
-        Input examples : 
-        "gph" -> graphDict -> {"0" : [{"value " : 1}, ...], "0" : [{"value" : 1}, ...] , ...}
-        "dgph" -> graphDict -> {"A" : [{"value" :2}, ...], "B" : [{"value" :3}, ...] , ...} 
-        "wgph" -> graphDict -> {"A" : [{"value" : 2, "weight" :3} ...], "B" : [{"value" : 3, "weight" :3},  ...] , ...} 
-        "dwgph" -> graphDict -> {"A" : [{"value" : 2, "weight" :3} ...], "B" : [{"value" : 3, "weight" :3},  ...] , ...} 
 
-
-        opts defined are :-> 
-        type : type of graph ["gph", "dgph", "wgph", "dwgph"]
-
-        height : height of the Pane.
-
-        width : width of the Pane.
-
-        showEdgeLabels : boolean, (default = False) if True it shows edge labels.
-
-        showVertexLabels : boolean, (default = True) if True it shows edge labels.
-
-        labels : str, (default : "default") 
-            if "default"
-                 labels will be a string concatenation of nodes ["A-B"] in case of ("gph", "wgph")
-
-            if "custom" 
-                labels will be the the custom label provided. Therefore 'label' field is compulsory in
-                each dict.   
-        """
+        Args:
+            graphDict (dict, required):
+                "gph" -> graphDict -> {"0" : [{"value " : 1}, ...], "1" : [{"value" : 1}, ...] , ...}
+                "dgph" -> graphDict -> {"0" : [{"value" : 1}, ...], "1" : [{"value" :3}, ...] , ...} 
+                "wgph" -> graphDict -> {"0" : [{"value" : 1, "weight" :3} ...], "2" : [{"value" : 3, "weight" :3},  ...] , ...} 
+                "dwgph" -> graphDict -> {"0" : [{"value" : 1, "weight" :3} ...], "2" : [{"value" : 3, "weight" :3},  ...] , ...}. 
+            opts (dict, optional): 
+                type : type of graph ["gph", "dgph", "wgph", "dwgph"]
+                height : height of the Pane.
+                width : width of the Pane.
+                showEdgeLabels : boolean, (default = False) if True it shows edge labels.
+                showVertexLabels : boolean, (default = True) if True it shows edge labels.
+                labels : str, (default : "default") 
+                    if "default"
+                        labels will be a string concatenation of nodes ["A-B"] in case of ("gph", "wgph")
+                    if "custom" 
+                        labels will be the the custom label provided. Therefore 'label' field is compulsory in
+                        each dict.
+        """        
         try:
             from cerberus import Validator
         except:
