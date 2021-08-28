@@ -840,10 +840,6 @@ class PostHandler(BaseHandler):
 
         eid = extract_eid(req)
         p = window(req)
-        print(eid)
-        print(p)
-        print()
-        print()
         register_window(self, p, eid)
 
 
