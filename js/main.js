@@ -42,7 +42,7 @@ const TextPane = require('./TextPane');
 const ImagePane = require('./ImagePane');
 const PlotPane = require('./PlotPane');
 const EmbeddingsPane = require('./EmbeddingsPane');
-
+const NetworkPane = require('./NetworkPane');
 const WidthProvider = require('./Width').default;
 
 const GridLayout = WidthProvider(ReactGridLayout);
@@ -61,6 +61,7 @@ const PANES = {
   text: TextPane,
   properties: PropertiesPane,
   embeddings: EmbeddingsPane,
+  network: NetworkPane,
 };
 
 const PANE_SIZE = {
@@ -70,6 +71,7 @@ const PANE_SIZE = {
   text: [20, 20],
   embeddings: [20, 20],
   properties: [20, 20],
+  network: [20, 20],
 };
 
 const MODAL_STYLE = {
@@ -1550,7 +1552,6 @@ class App extends React.Component {
         let panelayout = getLayoutItem(this.state.layout, id);
         let filter = this.getValidFilter(this.state.filter);
         let isVisible = pane.title.match(filter);
-
         const PANE_TITLE_BAR_HEIGHT = 14;
 
         return (
