@@ -1,0 +1,12 @@
+/* Network CSS for d3 components */
+
+.node text textPath {
+    stroke: #000;
+    stroke-width: px;
+    pointer-events: none;
+    font: 8px sans-serif;
+  }
+  .link {
+    stroke: #999;
+    stroke-opacity: 0.6;
+  }
