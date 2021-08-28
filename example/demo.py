@@ -571,6 +571,15 @@ def run_demo(viz):
         pass
     input('Waiting for callbacks, press enter to quit.')
 
+    # plot network graph
+    GraphDicts = {
+        0 : [{'value': 1, 'label': 'A'}, {'value': 2, 'label': 'B'}], 
+        1 : [{'value':3, 'label': 'C'},{'value':4, 'label': 'D'},{'value': 5, 'label': 'E'}], 
+        4 : [{'value': 5, 'label': 'F'}]
+    }
+
+    viz.graph(GraphDicts, opts={'type' : "wgph", 'showEdgeLabels': True, 'showVertexLabels': True, "labels": "custom"})
+
 
 if __name__ == '__main__':
     DEFAULT_PORT = 8097
