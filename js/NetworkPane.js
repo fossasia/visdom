@@ -1,5 +1,4 @@
 import React from 'react';
-import EventSystem from './EventSystem';
 
 const Pane = require('./Pane');
 
@@ -9,49 +8,6 @@ class NetworkPane extends React.Component {
   _width = null;
   _height = null;
 
-  state = {
-    lastModTime: 0,
-    scale: 1,
-    tx: 0,
-    ty: 0,
-    selected: this.props.selected,
-    mouse_location: { x: 0, y: 0, visibility: 'hidden' },
-  };
-
-  onEvent = event => {
-    if (!this.props.isFocused) {
-      return;
-    }
-
-    switch (event.type) {
-      case 'keydown':
-      case 'keypress':
-        event.preventDefault();
-        break;
-      case 'keyup':
-        this.props.appApi.sendPaneMessage({
-          event_type: 'KeyPress',
-          key: event.key,
-          key_code: event.keyCode,
-        });
-        break;
-      case 'click':
-        this.props.appApi.sendPaneMessage({
-          event_type: 'Click',
-          image_coord: this.state.mouse_location,
-        });
-        break;
-    }
-  };
-
-  componentDidMount() {
-    EventSystem.subscribe('global.event', this.onEvent);
-  }
-
-  componentWillUnmount() {
-    EventSystem.unsubscribe('global.event', this.onEvent);
-  }
-
   handleDownload = () => {
     var link = document.createElement('a');
     link.download = `${this.props.title || 'visdom_image'}.jpg`;
@@ -59,7 +15,7 @@ class NetworkPane extends React.Component {
     link.click();
   };
 
-  CreateNetwork = graph1 => {
+  CreateNetwork = graph => {
     var width = 500,
       height = 500;
     var color = d3.scale.category10();
@@ -98,13 +54,13 @@ class NetworkPane extends React.Component {
     }
 
     force
-      .nodes(graph1.nodes)
-      .links(graph1.links)
+      .nodes(graph.nodes)
+      .links(graph.links)
       .start();
 
     var link = svg
       .selectAll('.link')
-      .data(graph1.links)
+      .data(graph.links)
       .enter()
       .append('line')
       .attr('class', 'link')
@@ -116,7 +72,7 @@ class NetworkPane extends React.Component {
 
     var edgepaths = svg
       .selectAll('.edgepath')
-      .data(graph1.links)
+      .data(graph.links)
       .enter()
       .append('path')
       .attrs({
@@ -131,7 +87,7 @@ class NetworkPane extends React.Component {
 
     var edgelabels = svg
       .selectAll('.edgelabel')
-      .data(graph1.links)
+      .data(graph.links)
       .enter()
       .append('text')
       .style('pointer-events', 'none')
@@ -166,7 +122,7 @@ class NetworkPane extends React.Component {
 
     var node = svg
       .selectAll('.node')
-      .data(graph1.nodes)
+      .data(graph.nodes)
       .enter()
       .append('g')
       .attr('class', 'node')
