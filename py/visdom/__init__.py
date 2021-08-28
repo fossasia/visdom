@@ -55,7 +55,7 @@ try:
         perplexity = 50 if num_entities >= 150 else \
             num_entities // 3 if num_entities >= 21 else 7
         Y = bhtsne.run_bh_tsne(X, initial_dims=X.shape[1], perplexity=perplexity,
-                                verbose=True)
+                               verbose=True)
         xmin, xmax = min(Y[:, 0]), max(Y[:, 0])
         ymin, ymax = min(Y[:, 1]), max(Y[:, 1])
         normx = ((Y[:, 0] - xmin) / (xmax - xmin)) * 2 - 1
@@ -180,7 +180,7 @@ def _axisformat3d(xyz, opts):
                       opts.get(xyz + 'tickmax')] if has_ticks else None,
             'tickvals': opts.get(xyz + 'tickvals'),
             'ticktext': opts.get(xyz + 'ticklabels'),
-            'nticks': ((opts.get(xyz + 'tickmax') - opts.get(xyz + 'tickmin'))/
+            'nticks': ((opts.get(xyz + 'tickmax') - opts.get(xyz + 'tickmin')) /
                        opts.get(xyz + 'tickstep')) if has_step else None,
             'tickfont': opts.get(xyz + 'tickfont'),
         }
@@ -394,7 +394,7 @@ class Visdom(object):
             parsed_url = urlparse('http://{}'.format(server))
         self.server_base_name = parsed_url.netloc
         self.server = urlunparse((parsed_url.scheme,
-                                  parsed_url.netloc,'','','',''))
+                                  parsed_url.netloc, '', '', '', ''))
         self.endpoint = endpoint
         self.port = port
         # preprocess base_url
@@ -420,7 +420,8 @@ class Visdom(object):
         self.http_proxy_host = None
         self.http_proxy_port = None
         if proxies is not None and 'http' in proxies:
-            self.http_proxy_host, self.http_proxy_port = proxies['http'].split(":")
+            self.http_proxy_host, self.http_proxy_port = proxies['http'].split(
+                ":")
 
         if http_proxy_host is not None or http_proxy_port is not None:
             warnings.warn(
@@ -432,7 +433,8 @@ class Visdom(object):
         self.username = username
         if self.username:
             assert password, 'no password given for authentication'
-            self.password = hashlib.sha256(password.encode("utf-8")).hexdigest()
+            self.password = hashlib.sha256(
+                password.encode("utf-8")).hexdigest()
 
         self.win_data = {}
         if self.offline:
@@ -583,7 +585,7 @@ class Visdom(object):
                         traceback.print_exc()
 
         def on_error(ws, error):
-            if hasattr(error, "errno") and  error.errno == errno.ECONNREFUSED:
+            if hasattr(error, "errno") and error.errno == errno.ECONNREFUSED:
                 if not self.socket_connection_achieved:
                     #
                     # Visdom will stop trying to use the socket only if it
@@ -613,7 +615,8 @@ class Visdom(object):
                         on_message=on_message,
                         on_error=on_error,
                         on_close=on_close,
-                        header={'Cookie: user_password=' + self.session.cookies.get('user_password', '')}
+                        header={'Cookie: user_password=' +
+                                self.session.cookies.get('user_password', '')}
                     )
                     ws.run_forever(http_proxy_host=self.http_proxy_host,
                                    http_proxy_port=self.http_proxy_port,
@@ -1003,14 +1006,14 @@ class Visdom(object):
             if height is not None:
                 if not isstr(height):
                     height = height.group(1)
-                height = height.replace("pt","00")
+                height = height.replace("pt", "00")
                 opts['height'] = 1.4 * int(math.ceil(float(height)))
         if 'width' not in opts:
             width = width or re.search(r'width\="([0-9\.]*)pt"', svg)
             if width is not None:
                 if not isstr(width):
                     width = width.group(1)
-                width = width.replace("pt","00")
+                width = width.replace("pt", "00")
                 opts['width'] = 1.35 * int(math.ceil(float(width)))
         return self.svg(svgstr=svg, opts=opts, env=env, win=win)
 
@@ -1309,13 +1312,14 @@ class Visdom(object):
                 'tensor should be 1D vector or 2D matrix with 2 columns'
 
         if tensor is not None:
-            import scipy.io.wavfile # type: ignore
+            import scipy.io.wavfile  # type: ignore
             import tempfile
             audiofile = os.path.join(
                 tempfile.gettempdir(),
                 '%s.wav' % next(tempfile._get_candidate_names()))
             tensor = np.int16(tensor / np.max(np.abs(tensor)) * 32767)
-            scipy.io.wavfile.write(audiofile, opts.get('sample_frequency'), tensor)
+            scipy.io.wavfile.write(
+                audiofile, opts.get('sample_frequency'), tensor)
 
         extension = audiofile.split('.')[-1].lower()
         mimetypes = {'wav': 'wav', 'mp3': 'mp3', 'ogg': 'ogg', 'flac': 'flac'}
@@ -1409,7 +1413,8 @@ class Visdom(object):
 
         if tensor is None:
             extension = videofile.split(".")[-1].lower()
-            mimetypes = {'mp4': 'mp4', 'ogv': 'ogg', 'avi': 'avi', 'webm': 'webm'}
+            mimetypes = {'mp4': 'mp4', 'ogv': 'ogg',
+                         'avi': 'avi', 'webm': 'webm'}
             mimetype = mimetypes.get(extension)
             assert mimetype is not None, 'unknown video type: %s' % extension
             bytestr = loadfile(videofile)
@@ -1562,9 +1567,9 @@ class Visdom(object):
 
         if opts.get('legend'):
             assert isinstance(opts['legend'], (tuple, list)) \
-                   and K <= len(opts['legend']), \
-                   'largest label should not be greater than size of ' \
-                   'the legends table'
+                and K <= len(opts['legend']), \
+                'largest label should not be greater than size of ' \
+                'the legends table'
 
         data = []
         trace_opts = opts.get('traceopts', {'plotly': {}})['plotly']
@@ -1688,7 +1693,7 @@ class Visdom(object):
             assert X.ndim == 1 or X.ndim == 2, 'X should have 1 or 2 dim'
         else:
             X = np.linspace(0, 1, Y.shape[0])
-     
+
         if Y.ndim == 2 and X.ndim == 1:
             X = np.tile(X, (Y.shape[1], 1)).transpose()
 
@@ -1705,7 +1710,8 @@ class Visdom(object):
         if Y.ndim == 1:
             linedata = np.column_stack((X, Y))
         else:
-            linedata = np.column_stack((X.ravel(order='F'), Y.ravel(order='F')))
+            linedata = np.column_stack(
+                (X.ravel(order='F'), Y.ravel(order='F')))
 
         labels = None
         if Y.ndim == 2:
@@ -2312,3 +2318,122 @@ class Visdom(object):
             'opts': opts,
         }
         return self._send(datasend, 'events')
+
+    @pytorch_wrap
+    def graph(self, graphDict, opts=None, env=None, win=None):
+        """
+        This function draws interactive network graphs. It takes in an Graph Dictionary for types of Graphs,
+        Graph ("gph"), Directed Graph ("dgph"), Weighted Graph ("wgph") and Directed Weighted Graph ("dwgph").
+        where nodes are defined by numbers from (0 to n-1) where n is the number of nodes.
+        Input examples : 
+        "gph" -> graphDict -> {"0" : [{"value " : 1}, ...], "0" : [{"value" : 1}, ...] , ...}
+        "dgph" -> graphDict -> {"A" : [{"value" :2}, ...], "B" : [{"value" :3}, ...] , ...} 
+        "wgph" -> graphDict -> {"A" : [{"value" : 2, "weight" :3} ...], "B" : [{"value" : 3, "weight" :3},  ...] , ...} 
+        "dwgph" -> graphDict -> {"A" : [{"value" : 2, "weight" :3} ...], "B" : [{"value" : 3, "weight" :3},  ...] , ...} 
+
+
+        opts defined are :-> 
+        type : type of graph ["gph", "dgph", "wgph", "dwgph"]
+
+        height : height of the Pane.
+
+        width : width of the Pane.
+
+        showEdgeLabels : boolean, (default = False) if True it shows edge labels.
+
+        showVertexLabels : boolean, (default = True) if True it shows edge labels.
+
+        labels : str, (default : "default") 
+            if "default"
+                 labels will be a string concatenation of nodes ["A-B"] in case of ("gph", "wgph")
+
+            if "custom" 
+                labels will be the the custom label provided. Therefore 'label' field is compulsory in
+                each dict.   
+        """
+        try:
+            from cerberus import Validator
+        except:
+            raise RuntimeError(
+                "Cerebus must be installed to plot Graph figures")
+
+        # Raise error if type not among one of the types
+        assert opts.get("type", "gph") in [
+            "gph", "dgph", "wgph", "dwgph"],\
+            "Invalid graph type {}, should be one of ['gph', 'dgph', 'wgph', 'dwgph']".format(
+                opts.get("type"))
+
+        # Raise error if labels is other than custom and default
+        assert opts.get("labels", "default") in ["default", "custom"],\
+            "Invalid labels: {}, labels should be one of ['default', 'custom']".format(
+                opts.get("labels"))
+
+        # validation of user input Dict
+        schema_for_graph = {
+            "value": {'type': 'integer', 'required': True},
+            "weight": {'type': 'integer', "required": True if opts.get('type', "gph") in ["wgph", "dwgph"] else False},
+            "label": {'type': 'string', "required": True if opts.get('labels', "default") == "custom" else False}
+        }
+        v = Validator(schema_for_graph)
+        for key, value in graphDict.items():
+            for val in value:
+                if not v.validate(val):
+                    raise RuntimeError(v.errors)
+
+        # Creating Data in defined format
+        links = []
+        for key, value in graphDict.items():
+            for v in value:
+                link = {}
+                link["source"] = key
+                link["target"] = v["value"]
+                link["weight"] = v.get("weight", 0)
+                if opts.get("labels") == "custom":
+                    link["label"] = v["label"]
+                elif opts.get("labels") == "default":
+                    if opts.get("type", "gph") in ["dwgph", "wgph"]:
+                        link["label"] = v["weight"]
+                    else:
+                        link["label"] = str(key) + "-" + str(v["value"])
+                links.append(link)
+
+        nodes = []
+        visited = set()
+        for link in links:
+            if link["source"] not in visited:
+                node = {"name": str(link["source"])}
+                nodes.append(node)
+                visited.add(link["source"])
+            if link["target"] not in visited:
+                node = {"name": str(link["target"])}
+                nodes.append(node)
+                visited.add(link["target"])
+
+        for i in range(len(visited)):
+            if i not in visited:
+                raise RuntimeError(
+                    "Graph you provided should contain nodes from 0 to n-1, but {} was missing.".format(i))
+
+        GData = {
+            "nodes": nodes,
+            "links": links
+        }
+
+        jsonstring = json.dumps(GData)
+        GData = json.loads(jsonstring)
+
+        opts['height'] = opts.get('height', 500)
+        opts['width'] = opts.get('width', 500)
+
+        data = [{
+            'content': GData,
+            'type': 'network'
+        }]
+        endpoint = 'events'
+
+        return self._send({
+            'data': data,
+            'win': win,
+            'eid': env,
+            'opts': opts
+        }, endpoint=endpoint)
