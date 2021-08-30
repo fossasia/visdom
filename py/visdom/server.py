@@ -1772,12 +1772,15 @@ def download_scripts(proxies=None, install_dir=None):
 def start_server(port=DEFAULT_PORT, hostname=DEFAULT_HOSTNAME,
                  base_url=DEFAULT_BASE_URL, env_path=DEFAULT_ENV_PATH,
                  readonly=False, print_func=None, user_credential=None,
-                 use_frontend_client_polling=False):
+                 use_frontend_client_polling=False, bind_local=False):
     print("It's Alive!")
     app = Application(port=port, base_url=base_url, env_path=env_path,
                       readonly=readonly, user_credential=user_credential,
                       use_frontend_client_polling=use_frontend_client_polling)
-    app.listen(port, max_buffer_size=1024 ** 3)
+    if bind_local:
+        app.listen(port, max_buffer_size=1024 ** 3, address='127.0.0.1')
+    else:
+        app.listen(port, max_buffer_size=1024 ** 3)
     logging.info("Application Started")
 
     if "HOSTNAME" in os.environ and hostname == DEFAULT_HOSTNAME:
@@ -1824,6 +1827,10 @@ def main(print_func=None):
                         action='store_true',
                         help='Have the frontend communicate via polling '
                              'rather than over websockets.')
+    parser.add_argument('-bind_local', default=False,
+                        action='store_true',
+                        help='Make server only accessible only from '
+                             'localhost.')
     FLAGS = parser.parse_args()
 
     # Process base_url
@@ -1899,7 +1906,8 @@ def main(print_func=None):
     start_server(port=FLAGS.port, hostname=FLAGS.hostname, base_url=base_url,
                  env_path=FLAGS.env_path, readonly=FLAGS.readonly,
                  print_func=print_func, user_credential=user_credential,
-                 use_frontend_client_polling=FLAGS.use_frontend_client_polling)
+                 use_frontend_client_polling=FLAGS.use_frontend_client_polling,
+                 bind_local=FLAGS.bind_local)
 
 
 def download_scripts_and_run():
