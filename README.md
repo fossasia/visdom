@@ -187,6 +187,7 @@ The following options can be provided to the server:
 7. `-enable_login` : Flag to setup authentication for the sever, requiring a username and password to login.
 8. `-force_new_cookie` : Flag to reset the secure cookie used by the server, invalidating current login cookies.
 Requires `-enable_login`.
+9. `-bind_local` : Flag to make the server accessible only from localhost.
 
 When `-enable_login` flag is provided, the server asks user to input credentials using terminal prompt. Alternatively,
 you can setup `VISDOM_USE_ENV_CREDENTIALS` env variable, and then provide your username and password via
