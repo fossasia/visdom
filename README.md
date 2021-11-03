@@ -617,7 +617,9 @@ This is the image of the output:
 
 ### Customizing plots
 
-The plotting functions take an optional `opts` table as input that can be used to change (generic or plot-specific) properties of the plots. All input arguments are specified in a single table; the input arguments are matches based on the keys they have in the input table.
+The plotting functions take an optional `opts` table as input that can be used to change (generic or plot-specific) properties of the plots. 
+
+All input arguments are specified in a single table; the input arguments are matches based on the keys they have in the input table.
 
 The following `opts` are generic in the sense that they are the same for all visualizations (except `plot.image`, `plot.text`, `plot.video`, and `plot.audio`):
 
@@ -648,6 +650,14 @@ The following `opts` are generic in the sense that they are the same for all vis
 - `opts.margintop`   : top margin (in pixels)
 - `opts.marginbottom`: bottom margin (in pixels)
 
+`opts` are passed as dictionary in python scripts.You can pass `opts` like:
+
+    opts=dict(title="my title", xlabel="x axis",ylabel="y axis")
+
+OR
+
+    opts={"title":"my title", "xlabel":"x axis","ylabel":"y axis"}
+    
 The other options are visualization-specific, and are described in the
 documentation of the functions.
 
