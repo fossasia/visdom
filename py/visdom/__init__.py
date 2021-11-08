@@ -2142,29 +2142,22 @@ class Visdom(object):
 
         assert len(parents.tolist())==len(labels.tolist()), "length of parents and labels should be equal"
         
-        if(values!=None):
+        data_dict=[{
+                'labels': labels.tolist(),
+                "parents":parents.tolist(),
+                "outsidetextfont":{"size":font_size,"color":font_color},
+                "leaf":{"opacity":opacity},
+                "marker":{"line":{"width":line_width}},
+                'type': 'sunburst',
+                }]
+        if values is not None:
             values = np.squeeze(values)
             assert values.ndim == 1, 'values should be one-dimensional'
             assert len(parents.tolist())==len(values.tolist()), "length of values should be equal to lenght of labels and parents"
-            data = [{
-                'values': values.tolist(),
-                'labels': labels.tolist(),
-                "parents":parents.tolist(),
-                "outsidetextfont":{"size":font_size,"color":font_color},
-                "leaf":{"opacity":opacity},
-                "marker":{"line":{"width":line_width}},
-                'type': 'sunburst',
-            }]
-        
-        else:
-            data = [{
-                'labels': labels.tolist(),
-                "parents":parents.tolist(),
-                "outsidetextfont":{"size":font_size,"color":font_color},
-                "leaf":{"opacity":opacity},
-                "marker":{"line":{"width":line_width}},
-                'type': 'sunburst',
-            }]            
+
+            data_dict[0]['values']=values.tolist()
+
+        data=data_dict          
         return self._send({
             'data': data,
             'win': win,
