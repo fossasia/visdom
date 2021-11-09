@@ -454,6 +454,21 @@ The following `opts` are supported:
 - Tensor of size `N x 3`: Red, Green and Blue intensities per data point. 0,0,0 = black, 255,255,255 = white
 - Tensor of size `K` and `K x 3`: Instead of having a unique color per data point, the same color is shared for all points of a particular label.
 
+#### vis.sunburst
+This function draws a sunburst chart. It takes two inputs: `parents` and `labels` array.
+values from `parents` array is used as parents object, like it define above which sector 
+should the this sector shown. values from `labels` array is used to define sector's label 
+or you can say name. keep in mind that lenght of array `parents` and `labels` should be 
+equal. There is a third array that you can pass to which is `value`, it is use to show 
+a value on hovering over a sector, it is optional argument, but if you are passing it then
+keep in mind lenght of `values` should be equal to `parents` or `labels`.
+
+Following `opts` are currently supported:
+- `opts.font_size`    : define font size of label (`int`)
+- `opts.font_color`    : define font color of label (`string`)
+- `opts.opacity`    : define opacity of chart (`float`)
+- `opts.line_width`    : define distance between two sectors and sector to its parents (`int`)
+
 
 #### vis.line
 This function draws a line plot. It takes as input an `N` or `NxM` tensor
