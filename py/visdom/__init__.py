@@ -405,7 +405,8 @@ class Visdom(object):
             'base_url should not end with / as it is appended automatically'
 
         self.ipv6 = ipv6
-        self.env = env              # default env
+        self.env = env      
+        self.env_list={f'{env}'}      # default env
         self.send = send
         self.event_handlers = {}  # Haven't registered any events
         self.socket_alive = False
@@ -664,8 +665,13 @@ class Visdom(object):
         created with a random name. If `create=False`, `win=None` indicates the
         operation should be applied to all windows.
         """
+
         if msg.get('eid', None) is None:
             msg['eid'] = self.env
+            self.env_list.add(self.env)
+
+        if msg.get('eid', None) is not None:
+            self.env_list.add(msg['eid'])
 
         # TODO investigate send use cases, then deprecate
         if not self.send:
@@ -792,11 +798,17 @@ class Visdom(object):
         }, endpoint='win_exists', quiet=True)
 
     def get_env_list(self):
+
         """
         This function returns a list of all of the env names that are currently
         in the server.
         """
-        return json.loads(self._send({}, endpoint='env_state', quiet=True))
+        if self.offline:        
+            return list(self.env_list)
+
+        else:
+            return json.loads(self._send({}, endpoint='env_state', quiet=True))
+
 
     def win_exists(self, win, env=None):
         """
@@ -1444,8 +1456,7 @@ class Visdom(object):
         return self._send(data_to_send, endpoint='update')
 
     @pytorch_wrap
-    def scatter(self, X, Y=None, win=None, env=None, opts=None, update=None,
-                name=None):
+    def scatter(self, X, Y=None, win=None, env=None, opts=None, update=None,name=None):
         """
         This function draws a 2D or 3D scatter plot. It takes in an `Nx2` or
         `Nx3` tensor `X` that specifies the locations of the `N` points in the
@@ -1491,7 +1502,9 @@ class Visdom(object):
             if update == 'append':
                 if win is None:
                     update = None
+
                 elif not self.offline:
+
                     exists = self.win_exists(win, env)
                     if exists is False:
                         update = None
