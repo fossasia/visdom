@@ -665,7 +665,6 @@ class Visdom(object):
         created with a random name. If `create=False`, `win=None` indicates the
         operation should be applied to all windows.
         """
-
         if msg.get('eid', None) is None:
             msg['eid'] = self.env
             self.env_list.add(self.env)
@@ -798,17 +797,14 @@ class Visdom(object):
         }, endpoint='win_exists', quiet=True)
 
     def get_env_list(self):
-
         """
         This function returns a list of all of the env names that are currently
         in the server.
         """
         if self.offline:        
             return list(self.env_list)
-
         else:
             return json.loads(self._send({}, endpoint='env_state', quiet=True))
-
 
     def win_exists(self, win, env=None):
         """
@@ -1502,13 +1498,10 @@ class Visdom(object):
             if update == 'append':
                 if win is None:
                     update = None
-
                 elif not self.offline:
-
                     exists = self.win_exists(win, env)
                     if exists is False:
                         update = None
-
             # case when X is 1 dimensional and corresponding values on y-axis
             # are passed in parameter Y
             if name:
