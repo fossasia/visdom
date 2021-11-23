@@ -405,7 +405,8 @@ class Visdom(object):
             'base_url should not end with / as it is appended automatically'
 
         self.ipv6 = ipv6
-        self.env = env              # default env
+        self.env = env      
+        self.env_list={f'{env}'}      # default env
         self.send = send
         self.event_handlers = {}  # Haven't registered any events
         self.socket_alive = False
@@ -669,6 +670,10 @@ class Visdom(object):
         """
         if msg.get('eid', None) is None:
             msg['eid'] = self.env
+            self.env_list.add(self.env)
+
+        if msg.get('eid', None) is not None:
+            self.env_list.add(msg['eid'])
 
         # TODO investigate send use cases, then deprecate
         if not self.send:
@@ -799,7 +804,10 @@ class Visdom(object):
         This function returns a list of all of the env names that are currently
         in the server.
         """
-        return json.loads(self._send({}, endpoint='env_state', quiet=True))
+        if self.offline:        
+            return list(self.env_list)
+        else:
+            return json.loads(self._send({}, endpoint='env_state', quiet=True))
 
     def win_exists(self, win, env=None):
         """
@@ -1449,8 +1457,7 @@ class Visdom(object):
         return self._send(data_to_send, endpoint='update')
 
     @pytorch_wrap
-    def scatter(self, X, Y=None, win=None, env=None, opts=None, update=None,
-                name=None):
+    def scatter(self, X, Y=None, win=None, env=None, opts=None, update=None,name=None):
         """
         This function draws a 2D or 3D scatter plot. It takes in an `Nx2` or
         `Nx3` tensor `X` that specifies the locations of the `N` points in the
@@ -1500,7 +1507,6 @@ class Visdom(object):
                     exists = self.win_exists(win, env)
                     if exists is False:
                         update = None
-
             # case when X is 1 dimensional and corresponding values on y-axis
             # are passed in parameter Y
             if name:
@@ -2133,6 +2139,45 @@ class Visdom(object):
         _assert_opts(opts)
 
         return self.scatter(X=data, Y=labels, opts=opts, win=win, env=env)
+
+
+    @pytorch_wrap
+    def sunburst(self, labels, parents, values=None, win=None, env=None, opts=None):
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        font_size=opts.get("size")
+        font_color=opts.get("font_color")
+        opacity=opts.get("opacity")
+        line_width=opts.get("marker_width")
+
+        assert len(parents.tolist())==len(labels.tolist()), "length of parents and labels should be equal"
+        
+        data_dict=[{
+                'labels': labels.tolist(),
+                "parents":parents.tolist(),
+                "outsidetextfont":{"size":font_size,"color":font_color},
+                "leaf":{"opacity":opacity},
+                "marker":{"line":{"width":line_width}},
+                'type': 'sunburst',
+                }]
+        if values is not None:
+            values = np.squeeze(values)
+            assert values.ndim == 1, 'values should be one-dimensional'
+            assert len(parents.tolist())==len(values.tolist()), "length of values should be equal to lenght of labels and parents"
+
+            data_dict[0]['values']=values.tolist()
+
+        data=data_dict          
+        return self._send({
+            'data': data,
+            'win': win,
+            'eid': env,
+            'layout': _opts2layout(opts),
+            'opts': opts,
+        })
+
 
     @pytorch_wrap
     def pie(self, X, win=None, env=None, opts=None):

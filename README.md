@@ -187,6 +187,7 @@ The following options can be provided to the server:
 7. `-enable_login` : Flag to setup authentication for the sever, requiring a username and password to login.
 8. `-force_new_cookie` : Flag to reset the secure cookie used by the server, invalidating current login cookies.
 Requires `-enable_login`.
+9. `-bind_local` : Flag to make the server accessible only from localhost.
 
 When `-enable_login` flag is provided, the server asks user to input credentials using terminal prompt. Alternatively,
 you can setup `VISDOM_USE_ENV_CREDENTIALS` env variable, and then provide your username and password via
@@ -453,6 +454,21 @@ The following `opts` are supported:
 - Tensor of size `N x 3`: Red, Green and Blue intensities per data point. 0,0,0 = black, 255,255,255 = white
 - Tensor of size `K` and `K x 3`: Instead of having a unique color per data point, the same color is shared for all points of a particular label.
 
+#### vis.sunburst
+This function draws a sunburst chart. It takes two inputs: `parents` and `labels` array.
+values from `parents` array is used as parents object, like it define above which sector 
+should the this sector shown. values from `labels` array is used to define sector's label 
+or you can say name. keep in mind that lenght of array `parents` and `labels` should be 
+equal. There is a third array that you can pass to which is `value`, it is use to show 
+a value on hovering over a sector, it is optional argument, but if you are passing it then
+keep in mind lenght of `values` should be equal to `parents` or `labels`.
+
+Following `opts` are currently supported:
+- `opts.font_size`    : define font size of label (`int`)
+- `opts.font_color`    : define font color of label (`string`)
+- `opts.opacity`    : define opacity of chart (`float`)
+- `opts.line_width`    : define distance between two sectors and sector to its parents (`int`)
+
 
 #### vis.line
 This function draws a line plot. It takes as input an `N` or `NxM` tensor
@@ -616,7 +632,9 @@ This is the image of the output:
 
 ### Customizing plots
 
-The plotting functions take an optional `opts` table as input that can be used to change (generic or plot-specific) properties of the plots. All input arguments are specified in a single table; the input arguments are matches based on the keys they have in the input table.
+The plotting functions take an optional `opts` table as input that can be used to change (generic or plot-specific) properties of the plots. 
+
+All input arguments are specified in a single table; the input arguments are matches based on the keys they have in the input table.
 
 The following `opts` are generic in the sense that they are the same for all visualizations (except `plot.image`, `plot.text`, `plot.video`, and `plot.audio`):
 
@@ -647,6 +665,14 @@ The following `opts` are generic in the sense that they are the same for all vis
 - `opts.margintop`   : top margin (in pixels)
 - `opts.marginbottom`: bottom margin (in pixels)
 
+`opts` are passed as dictionary in python scripts.You can pass `opts` like:
+
+    opts=dict(title="my title", xlabel="x axis",ylabel="y axis")
+
+OR
+
+    opts={"title":"my title", "xlabel":"x axis","ylabel":"y axis"}
+    
 The other options are visualization-specific, and are described in the
 documentation of the functions.
 
