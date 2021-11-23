@@ -2357,3 +2357,89 @@ class Visdom(object):
             'opts': opts,
         }
         return self._send(datasend, 'events')
+
+
+    @pytorch_wrap
+    def graph(self, edges, edgeLabels = None, nodeLabels = None, opts=dict(), env=None, win=None):
+        """
+        This function draws interactive network graphs. It takes list of edges as one of the arguments.
+        The user can also provide custom edge Labels and node Labels in edgeLabels and nodeLabels respectively.
+        Along with that we have different parameters in opts for making it more user friendly. 
+
+        Args:
+            edges : list, required
+                A list of graph edges in one of the following formats (source, destination)
+            edgeLabels : list, optional
+                list of custom edge-labels. length should be equal to that of "edges"
+            nodeLabels : list, optional
+                list of custom node-labels. length should be equal to number of nodes and sequence must be in ascending order.
+            opts : dict, optional
+                * `directed` : directed (True) or undirected (False) graph; False by default
+                * `showVertexLabels` : boolean , if True displays vertex labels else hides the label; "True" by default
+                * `showEdgeLabels` :  boolean , if True displays edge labels else hides the label; "False" by default
+                * `scheme` : {"same", "different"} nodes with "same" or "diffent" colors; "same" by default
+                * `height` : height of the Pane
+                * `width` : width of the Pane
+        """
+        try:
+            import networkx as nx
+        except:
+            raise RuntimeError(
+                "networkx must be installed to plot Graph figures")
+        
+        G = nx.Graph()
+        G.add_edges_from(edges)
+        node_data = list(G.nodes())
+        link_data = list(G.edges())
+        node_data.sort()
+        if edgeLabels is not None:
+            assert len(edgeLabels) == len(link_data), \
+            "shape of edgeLabels does not match with the shape of links provided {len1} != {len2}".format(len1 = len(edgeLabels), len2 = len(link_data)
+            )
+
+
+        if nodeLabels is not None:
+            assert len(nodeLabels) == len(node_data),\
+            "length of nodeLabels does not match with the length of nodes {len1} != {len2}".format(len1 = len(nodeLabels), len2 = len(node_data))
+        
+        for i in range(len(node_data)):
+            if i != node_data[i]:
+                raise RuntimeError("The nodes should be numbered from 0 to n-1 for n nodes! {} node is missing!".format(i))
+
+        opts['directed'] = opts.get('directed', False)
+        opts['showVertexLabels'] = opts.get('showVertexLabels', False)
+        opts['showEdgeLabels'] = opts.get('showEdgeLabels', False)
+        opts['height'] = opts.get('height', 500)
+        opts['width'] = opts.get('width', 500)
+        opts["scheme"] = opts.get('scheme', 'same')
+
+        nodes = []
+        edges = []
+
+        for i in range(len(link_data)):
+            edge = {}
+            edge["source"] = int(link_data[i][0])
+            edge["target"] = int(link_data[i][1])
+            edge["label"] = str(edgeLabels[i]) if edgeLabels is not None else str(link_data[i][0])+"-"+str(link_data[i][1])
+            edges.append(edge)
+        
+        for i in range(len(node_data)):
+            node = {}
+            node["name"] = int(node_data[i])
+            node["label"] = str(nodeLabels[i]) if nodeLabels is not None else str(node_data[i])
+            if opts['scheme'] == 'different':
+                node["club"] = int(i)
+            nodes.append(node)
+       
+
+        data = [{
+            'content': {"nodes": nodes, "edges": edges},
+            'type': 'network'
+        }]
+
+        return self._send({
+            'data': data,
+            'win': win,
+            'eid': env,
+            'opts': opts
+        }, endpoint='events')
