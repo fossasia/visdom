@@ -42,6 +42,7 @@ const TextPane = require('./TextPane');
 const ImagePane = require('./ImagePane');
 const PlotPane = require('./PlotPane');
 const EmbeddingsPane = require('./EmbeddingsPane');
+const NetworkPane = require('./NetworkPane');
 
 const WidthProvider = require('./Width').default;
 
@@ -61,6 +62,7 @@ const PANES = {
   text: TextPane,
   properties: PropertiesPane,
   embeddings: EmbeddingsPane,
+  network: NetworkPane,
 };
 
 const PANE_SIZE = {
@@ -70,6 +72,7 @@ const PANE_SIZE = {
   text: [20, 20],
   embeddings: [20, 20],
   properties: [20, 20],
+  network: [20, 20],
 };
 
 const MODAL_STYLE = {
@@ -1553,6 +1556,9 @@ class App extends React.Component {
 
         const PANE_TITLE_BAR_HEIGHT = 14;
 
+        var _height = Math.round(this.h2p(panelayout.h));
+        var _width = Math.round(this.w2p(panelayout.w));
+
         return (
           <div key={pane.id} className={isVisible ? '' : 'hidden-window'}>
             <ReactResizeDetector handleWidth handleHeight>
@@ -1567,6 +1573,8 @@ class App extends React.Component {
                 h={panelayout.h}
                 width={this.w2p(panelayout.w)}
                 height={this.h2p(panelayout.h) - PANE_TITLE_BAR_HEIGHT}
+                _width={_width}
+                _height={_height - PANE_TITLE_BAR_HEIGHT}
                 appApi={{
                   sendPaneMessage: this.sendPaneMessage,
                   sendEmbeddingPop: this.sendEmbeddingPop,
