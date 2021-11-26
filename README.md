@@ -630,6 +630,23 @@ The following `opts` are supported:
 This is the image of the output:  
 <p align="center"><img align="center" src="docs/images/output.gif" width="400" /></p>
 
+
+### Network Graph
+
+This function draws a graph, in which the nodes and edges are taken from a 2-D matrix of size [,2] where each row contains a source and destination node value. The numeric value used to define nodes should be strictly between (0 to n-1), where n is the number of nodes. 
+ 
+There are two optional arguments :
+- `edgeLabels` : list of custom edge labels. If not provided each edge gets a label, "source-destination", eg "1-2", size should be equal to size of input "edges". Optional.
+- `nodeLabels` : list of custom node labels. If not provided each node gets a label same as the numeric value defined in the "edges". size should be equal to number of nodes present. Optional.
+
+The following opts are supported:
+- `opts.height` : Height of the plot. Default : 500
+- `opts.width` : Width of the plot. Default : 500
+- `opts.directed` : whether the plot should have a arrow or not. Default : false
+- `opts.showVertexLabels` : Whether to show vertex labels. Default : true
+- `opts.showEdgeLabels` : Whether to show edge labels. Default : false
+- `opts.scheme` : Whether all nodes shoud have "same" color or "different". Default : "same"
+
 ### Customizing plots
 
 The plotting functions take an optional `opts` table as input that can be used to change (generic or plot-specific) properties of the plots. 
