@@ -1663,8 +1663,10 @@ def download_scripts(proxies=None, install_dir=None):
         # Stanford Javascript Crypto Library for Password Hashing
         '%ssjcl@1.0.7/sjcl.js' % b: 'sjcl.js',
         '%slayout-bin-packer@1.4.0/dist/layout-bin-packer.js.map' % b: 'layout-bin-packer.js.map',
+        # d3 Libraries for plotting d3 graphs!
         'http://d3js.org/d3.v3.min.js' : 'd3.v3.min.js',
         'https://d3js.org/d3-selection-multi.v1.js' : 'd3-selection-multi.v1.js',
+        # Library to download the svg to png
         '%ssave-svg-as-png@1.4.17/lib/saveSvgAsPng.js' % b: 'saveSvgAsPng.js',
 
         # - css
@@ -1783,7 +1785,7 @@ def download_scripts(proxies=None, install_dir=None):
 def start_server(port=DEFAULT_PORT, hostname=DEFAULT_HOSTNAME,
                  base_url=DEFAULT_BASE_URL, env_path=DEFAULT_ENV_PATH,
                  readonly=False, print_func=None, user_credential=None,
-                  use_frontend_client_polling=False, bind_local=False):
+                 use_frontend_client_polling=False, bind_local=False):
     print("It's Alive!")
     app = Application(port=port, base_url=base_url, env_path=env_path,
                       readonly=readonly, user_credential=user_credential,
