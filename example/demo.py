@@ -559,13 +559,11 @@ def run_demo(viz):
         print('Skipped audio example')
         
     # plot network graph
-
-    edges = [(0,1),(0,2),(1,3),(1,4),(1,5),(4,5)]
+    edges = [(0,1,10),(0,2,20),(1,3,30),(1,4,40),(1,5,50),(4,5,60)]
     edgeLabels = [ "A", "B", "C", "D", "E", "F"]    # in the order of edges
     nodeLabels = ["Orange", "Mango", "Apple", "Grapes", "Papaya","kiwi"]
     
     viz.graph(edges, edgeLabels, nodeLabels, opts = {"showEdgeLabels" : True, "showVertexLabels" : True, "scheme" : "different", "directed" : False})
-
 
     # get/set state
     import json
@@ -579,8 +577,7 @@ def run_demo(viz):
     except NameError:
         pass
     input('Waiting for callbacks, press enter to quit.')
-
-    
+ 
 if __name__ == '__main__':
     DEFAULT_PORT = 8097
     DEFAULT_HOSTNAME = "http://localhost"
