@@ -1024,6 +1024,78 @@ class UpdateHandler(BaseHandler):
                 del pdata[idx]
             return p
 
+        # update heatmap
+        if len(idxs) == 1 and pdata[idxs[0]]['type'] == 'heatmap':
+            plot = pdata[idxs[0]]
+            new_data = new_data[0]
+            dz = new_data["z"]
+            updateDir = args["updateDir"]
+
+
+            # first check if operation is valid
+            if updateDir != "replace":
+                del new_data["z"]
+
+                if updateDir in ["appendRow", "prependRow"]:
+                    checkdir = "y" 
+                    if len(plot["z"][0]) != len(dz[0]):
+                        logging.error("ERROR: There is a mismatch between the number of columns in existing plot ('%i') and new data ('%i')." % (len(plot["z"]), len(dz)))
+                        return p
+                else:
+                    checkdir = "x" 
+                    if len(plot["z"]) != len(dz):
+                        logging.error("ERROR: There is a mismatch between the number of rows in existing plot ('%i') and new data ('%i')." % (len(plot["z"]), len(dz)))
+                        return p
+                updateNames = False
+                if plot[checkdir] is not None and new_data[checkdir] is not None:
+                    updateNames = True
+                    if plot[checkdir] is not None and any(label in plot[checkdir] for label in new_data[checkdir]):
+                        logging.error("ERROR: The new column names appear already in the plot. Please make sure to specify unique column names.")
+                        return p
+                elif plot[checkdir] is not None:
+                    logging.error("ERROR: The column names have been specified in plot, however the requested update does not specify column names.")
+                    return p
+                elif new_data[checkdir] is not None:
+                    logging.error("ERROR: The column names have been specified for update, however the plot to update does not specify column names.")
+                    return p
+
+            # append according to direction
+            if updateDir == "appendRow":
+                plot["z"] += dz
+                if updateNames:
+                    plot["y"] += new_data["y"]
+
+            elif updateDir == "prependRow":
+                plot["z"] = dz + plot["z"]
+                if updateNames:
+                    plot["y"] = new_data["y"] + plot["y"]
+
+            elif updateDir == "appendColumn":
+                for i, dzi in enumerate(dz):
+                    plot["z"][i] += dzi
+                if updateNames:
+                    plot["x"] += new_data["x"]
+
+            elif updateDir == "prependColumn":
+                for i, dzi in enumerate(dz):
+                    plot["z"][i] = dzi + plot["z"][i]
+                if updateNames:
+                    plot["x"] = new_data["x"] + plot["x"]
+
+            # update opts
+            # note: if we are appending, we do not want to modify the labels, as they have already been altered above
+            if append:
+                if "x" in new_data:
+                    del new_data["x"]
+                if "y" in new_data:
+                    del new_data["y"]
+            for k in new_data:
+                if new_data[k] is not None or not append:
+                    plot[k] = new_data[k]
+
+            return p
+
+
         # inject new trace
         if len(idxs) == 0:
             idx = len(pdata)
@@ -1083,9 +1155,9 @@ class UpdateHandler(BaseHandler):
         if not (p['type'] == 'text' or p['type'] == 'image_history'
                 or p['type'] == 'embeddings'
                 or p['content']['data'][0]['type'] in
-                ['scatter', 'scattergl', 'custom']):
+                ['scatter', 'scattergl', 'custom', 'heatmap']):
             handler.write(
-                'win is not scatter, custom, image_history, embeddings, or text; '
+                'win is not scatter, heatmap, custom, image_history, embeddings, or text; '
                 'was {}'.format(p['content']['data'][0]['type']))
             return
 
