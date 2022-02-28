@@ -97,7 +97,7 @@ You can use the eraser button to remove all of the current contents of an enviro
 Pressing the folder icon opens a dialog that allows you to fork or force save the current environment, or delete any of your existing environments. Use of this feature is fully described in the **State** section.
 
 >**Env Files:**
->Your envs are loaded at initialization of the server, by default from `$HOME/.visdom/`. Custom paths can be passed as a cmd-line argument. Envs are removed by using the delete button or by deleting the corresponding `.json` file from the env dir.
+>Your envs are loaded upon request by the user, by default from `$HOME/.visdom/`. Custom paths can be passed as a cmd-line argument. Envs are removed by using the delete button or by deleting the corresponding `.json` file from the env dir. In case you want the server to pre-load all files into cache, use the flag `-eager_data_loading`.
 
 ### State
 Once you've created a few visualizations, state is maintained. The server automatically caches your visualizations -- if you reload the page, your visualizations reappear.
