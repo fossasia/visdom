@@ -25,6 +25,7 @@ import uuid
 import warnings
 from os.path import expanduser
 from collections import OrderedDict
+from collections.abc import Mapping
 try:
     # for after python 3.8
     from collections.abc import Mapping, Sequence
@@ -129,6 +130,46 @@ def hash_password(password):
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
+
+
+class LazyEnvData(Mapping):
+    def __init__(self, env_path_file):
+        self._env_path_file = env_path_file
+        self._raw_dict = None
+
+    def lazy_load_data(self):
+        if self._raw_dict is not None:
+            return
+
+        try:
+            with open(self._env_path_file, 'r') as fn:
+                env_data = tornado.escape.json_decode(fn.read())
+        except Exception as e:
+            raise ValueError(
+                "Failed loading environment json: {} - {}".format(
+                    self._env_path_file, repr(e)))
+        self._raw_dict = {
+                'jsons': env_data['jsons'],
+                'reload': env_data['reload']
+        }
+
+    def __getitem__(self, key):
+        self.lazy_load_data()
+        return self._raw_dict.__getitem__(key)
+
+    def __setitem__(self, key, value):
+        self.lazy_load_data()
+        return self._raw_dict.__setitem__(key, value)
+
+    def __iter__(self):
+        self.lazy_load_data()
+        return iter(self._raw_dict)
+
+    def __len__(self):
+        self.lazy_load_data()
+        return len(self._raw_dict)
+
+
 tornado_settings = {
     "autoescape": None,
     "debug": "/dbg/" in __file__,
@@ -144,7 +185,10 @@ def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
         for env_id in env_ids:
             env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
             with open(env_path_file, 'w') as fn:
-                fn.write(json.dumps(state[env_id]))
+                if isinstance(state[env_id], LazyEnvData):
+                    fn.write(json.dumps(state[env_id]._raw_dict))
+                else:
+                    fn.write(json.dumps(state[env_id]))
     return env_ids
 
 
@@ -155,7 +199,9 @@ def serialize_all(state, env_path=DEFAULT_ENV_PATH):
 class Application(tornado.web.Application):
     def __init__(self, port=DEFAULT_PORT, base_url='',
                  env_path=DEFAULT_ENV_PATH, readonly=False,
-                 user_credential=None, use_frontend_client_polling=False):
+                 user_credential=None, use_frontend_client_polling=False,
+                 eager_data_loading=False):
+        self.eager_data_loading = eager_data_loading
         self.env_path = env_path
         self.state = self.load_state()
         self.layouts = self.load_layouts()
@@ -249,21 +295,24 @@ class Application(tornado.web.Application):
             return {'main': {'jsons': {}, 'reload': {}}}
         ensure_dir_exists(env_path)
         env_jsons = [i for i in os.listdir(env_path) if '.json' in i]
-
         for env_json in env_jsons:
-            env_path_file = os.path.join(env_path, env_json)
-            try:
-                with open(env_path_file, 'r') as fn:
-                    env_data = tornado.escape.json_decode(fn.read())
-            except Exception as e:
-                logging.warn(
-                    "Failed loading environment json: {} - {}".format(
-                        env_path_file, repr(e)))
-                continue
-
             eid = env_json.replace('.json', '')
-            state[eid] = {'jsons': env_data['jsons'],
-                               'reload': env_data['reload']}
+            env_path_file = os.path.join(env_path, env_json)
+
+            if self.eager_data_loading:
+                try:
+                    with open(env_path_file, 'r') as fn:
+                        env_data = tornado.escape.json_decode(fn.read())
+                except Exception as e:
+                    logging.warn(
+                        "Failed loading environment json: {} - {}".format(
+                            env_path_file, repr(e)))
+                    continue
+
+                state[eid] = {'jsons': env_data['jsons'],
+                        'reload': env_data['reload']}
+            else:
+                state[eid] = LazyEnvData(env_path_file)
 
         if 'main' not in state and 'main.json' not in env_jsons:
             state['main'] = {'jsons': {}, 'reload': {}}
@@ -1785,11 +1834,13 @@ def download_scripts(proxies=None, install_dir=None):
 def start_server(port=DEFAULT_PORT, hostname=DEFAULT_HOSTNAME,
                  base_url=DEFAULT_BASE_URL, env_path=DEFAULT_ENV_PATH,
                  readonly=False, print_func=None, user_credential=None,
-                 use_frontend_client_polling=False, bind_local=False):
+                 use_frontend_client_polling=False, bind_local=False,
+                 eager_data_loading=False):
     print("It's Alive!")
     app = Application(port=port, base_url=base_url, env_path=env_path,
                       readonly=readonly, user_credential=user_credential,
-                      use_frontend_client_polling=use_frontend_client_polling)
+                      use_frontend_client_polling=use_frontend_client_polling,
+                      eager_data_loading=eager_data_loading)
     if bind_local:
         app.listen(port, max_buffer_size=1024 ** 3, address='127.0.0.1')
     else:
@@ -1844,6 +1895,9 @@ def main(print_func=None):
                         action='store_true',
                         help='Make server only accessible only from '
                              'localhost.')
+    parser.add_argument('-eager_data_loading', default=False,
+                        action='store_true',
+                        help='Load data from filesystem when starting server (and not lazily upon first request).')
     FLAGS = parser.parse_args()
 
     # Process base_url
@@ -1920,7 +1974,8 @@ def main(print_func=None):
                  env_path=FLAGS.env_path, readonly=FLAGS.readonly,
                  print_func=print_func, user_credential=user_credential,
                  use_frontend_client_polling=FLAGS.use_frontend_client_polling,
-                 bind_local=FLAGS.bind_local)
+                 bind_local=FLAGS.bind_local,
+                 eager_data_loading=FLAGS.eager_data_loading)
 
 def download_scripts_and_run():
     download_scripts()
