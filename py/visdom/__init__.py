@@ -1727,6 +1727,15 @@ class Visdom(object):
         This function draws a heatmap. It takes as input an `NxM` tensor `X`
         that specifies the value at each location in the heatmap.
 
+        `update` can be used to efficiently update the data of an existing plot
+        saved to a window given by `win`. Use the value 'appendRow' to append
+        data row-wise, 'appendRow' to append data row-wise, 'appendColumn' to
+        append data column-wise, 'prependRow' to prepend data row-wise,
+        'prependColumn' to append data column-wise, 'replace' to use new data,
+        and 'remove' to delete the plot. Using `update=appendRow` or
+        `update='appendColumn'` will create a plot if it doesn't exist and
+        append to the existing plot otherwise.
+
         The following `opts` are supported:
 
         - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
