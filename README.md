@@ -511,6 +511,8 @@ The following `opts` are supported:
 This function draws a heatmap. It takes as input an `NxM` tensor `X` that
 specifies the value at each location in the heatmap.
 
+`update` can be used to efficiently update the data of an existing plot. Use 'appendRow' to append data row-wise, 'appendColumn' to append data column-wise, 'prependRow' to prepend data row-wise, 'prependColumn' to prepend data column-wise, 'replace' to use new data, or 'remove' to remove the plot specified by `win`.
+
 The following `opts` are supported:
 
 - `opts.colormap`   : colormap (`string`; default = `'Viridis'`)
