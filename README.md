@@ -188,6 +188,7 @@ The following options can be provided to the server:
 8. `-force_new_cookie` : Flag to reset the secure cookie used by the server, invalidating current login cookies.
 Requires `-enable_login`.
 9. `-bind_local` : Flag to make the server accessible only from localhost.
+10. `-eager_data_loading` : By default visdom loads environments lazily upon user request. Setting this flag lets visdom pre-fetch all environments upon startup.
 
 When `-enable_login` flag is provided, the server asks user to input credentials using terminal prompt. Alternatively,
 you can setup `VISDOM_USE_ENV_CREDENTIALS` env variable, and then provide your username and password via
