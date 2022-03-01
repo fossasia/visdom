@@ -1722,7 +1722,7 @@ class Visdom(object):
                             update=update, name=name)
 
     @pytorch_wrap
-    def heatmap(self, X, win=None, env=None, opts=None):
+    def heatmap(self, X, win=None, env=None, update=None, opts=None):
         """
         This function draws a heatmap. It takes as input an `NxM` tensor `X`
         that specifies the value at each location in the heatmap.
@@ -1737,11 +1737,24 @@ class Visdom(object):
         - `opts.nancolor`: if not None, color for plotting nan
                            (`string`; default = `None`)
         """
+        validUpdateValues = [None, 'reset', 'remove', 'appendRow', 'appendColumn', 'prependRow', 'prependColumn']
+        assert update in validUpdateValues,\
+                "update needs to take one of the following values: %s" % ", ".join(\
+                "'%s'" % str(s) if s is not None else "None" for s in validUpdateValues)
+        is_appending = update in validUpdateValues[3:]
+
+        if update == 'remove':
+            assert win is not None
+            data_to_send = {
+                'data': [],
+                'delete': True,
+                'win': win,
+                'eid': env,
+            }
+            return self._send(data_to_send, endpoint='update')
 
         assert X.ndim == 2, 'data should be two-dimensional'
         opts = {} if opts is None else opts
-        opts['xmin'] = opts.get('xmin', np.nanmin(X).item())
-        opts['xmax'] = opts.get('xmax', np.nanmax(X).item())
         opts['colormap'] = opts.get('colormap', 'Viridis')
         _title2str(opts)
         _assert_opts(opts)
@@ -1778,13 +1791,24 @@ class Visdom(object):
             }
             data.insert(0, nantrace)
 
-        return self._send({
+        # Only send updates to the layout on the first plot, future updates
+        # need to use `update_window_opts`
+        endpoint = 'events'
+        data_to_send = {
             'data': data,
             'win': win,
             'eid': env,
-            'layout': _opts2layout(opts),
+            'layout': _opts2layout(opts) if update is None else {},
             'opts': opts,
-        })
+        }
+        endpoint = 'events'
+        if update:
+            data_to_send['append'] = is_appending
+            data_to_send['updateDir'] = update
+            endpoint = 'update'
+
+        return self._send(data_to_send, endpoint=endpoint)
+
 
     @pytorch_wrap
     def bar(self, X, Y=None, win=None, env=None, opts=None):
