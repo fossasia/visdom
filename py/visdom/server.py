@@ -1024,6 +1024,11 @@ class UpdateHandler(BaseHandler):
                 del pdata[idx]
             return p
 
+        # add new heatmap data if plot has been deleted previously
+        if len(idxs) == 0 and new_data[0]['type'] == 'heatmap':
+            pdata.append(new_data[0])
+            return p
+
         # update heatmap
         if len(idxs) == 1 and pdata[idxs[0]]['type'] == 'heatmap':
             plot = pdata[idxs[0]]
@@ -1154,11 +1159,11 @@ class UpdateHandler(BaseHandler):
 
         if not (p['type'] == 'text' or p['type'] == 'image_history'
                 or p['type'] == 'embeddings'
-                or p['content']['data'][0]['type'] in
-                ['scatter', 'scattergl', 'custom', 'heatmap']):
+                or (len(p['content']['data']) == 0 or p['content']['data'][0]['type'] in
+                ['scatter', 'scattergl', 'custom', 'heatmap'])):
             handler.write(
                 'win is not scatter, heatmap, custom, image_history, embeddings, or text; '
-                'was {}'.format(p['content']['data'][0]['type']))
+                'was {}'.format(p['content']['data'][0]['type'] if len(p['content']['data']) > 0 else "empty"))
             return
 
         p, diff_packet = UpdateHandler.update_packet(p, args)
