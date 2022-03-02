@@ -251,13 +251,61 @@ def run_demo(viz):
     viz.histogram(X=np.random.rand(10000), opts=dict(numbins=20))
 
     # heatmap
-    viz.heatmap(
-        X=np.outer(np.arange(1, 6), np.arange(1, 11)),
-        opts=dict(
-            columnnames=['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'],
-            rownames=['y1', 'y2', 'y3', 'y4', 'y5'],
-            colormap='Electric',
+    for withnames in [True, False]:
+        columnnames = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'] if withnames else None
+        rownames = ['y1', 'y2', 'y3', 'y4', 'y5'] if withnames else None
+        win = viz.heatmap(
+            X=np.outer(np.arange(1, 6), np.arange(1, 11)),
+            opts=dict(
+                columnnames=columnnames,
+                rownames=rownames,
+            )
         )
+        viz.heatmap(
+            X=np.outer(np.arange(6, 9), np.arange(1, 11)),
+            win=win,
+            update='appendRow',
+            opts=dict(
+                rownames=['y6', 'y7', 'y8'] if withnames else None
+            )
+        )
+        viz.heatmap(
+            X=np.outer(np.arange(1, 9), np.arange(11, 14)),
+            win=win,
+            update='appendColumn',
+            opts=dict(
+                columnnames=['c1', 'c2', 'c3'] if withnames else None,
+                colormap='Rainbow'
+            )
+        )
+        viz.heatmap(
+            X=np.outer(np.arange(-1, 1), np.arange(1, 14)),
+            win=win,
+            update='prependRow',
+            opts=dict(
+                rownames=['y-', 'y0'] if withnames else None,
+            )
+        )
+        viz.heatmap(
+            X=np.outer(np.arange(-1, 9), np.arange(-5, 1)),
+            win=win,
+            update='prependColumn',
+            opts=dict(
+                columnnames=['c4', 'c5', 'c6', 'c7', 'c8', 'c9'] if withnames else None,
+                colormap='Electric'
+            )
+        )
+
+    win = viz.heatmap(
+        X=None,
+        win=win,
+        update="remove"
+    )
+
+    win = viz.heatmap(
+        X=10*np.outer(np.arange(1, 20), np.arange(1, 25)),
+        win=win,
+        update="replace"
     )
 
     # contour
