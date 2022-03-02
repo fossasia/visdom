@@ -21,7 +21,8 @@
     "prettier": "1.19.1",
     "react-select": "^2.4.4",
     "webpack": "^4.41.0",
-    "webpack-cli": "^3.3.9"
+    "webpack-cli": "^3.3.9",
+    "webpack-merge": "^5.8.0"
   },
   "scripts": {
     "dev": "webpack --watch --progress --colors",
