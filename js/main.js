@@ -375,6 +375,9 @@ class App extends React.Component {
       if (newPane.height)
         currLayout.h = Math.ceil(this.p2h(newPane.height + 14));
       if (newPane.content && newPane.content.caption) currLayout.h += 1;
+      this.state.consistent_pane_copy[newPane.id] = JSON.parse(
+        JSON.stringify(newPane)
+      ); //Deep Copy
     }
   };
 
