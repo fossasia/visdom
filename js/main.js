@@ -246,6 +246,7 @@ class App extends React.Component {
   constructor() {
     super();
     this.updateDimensions = this.updateDimensions.bind(this);
+    this.resize_click_happened = false;
   }
 
   colWidth = () => {
@@ -728,12 +729,39 @@ class App extends React.Component {
   };
 
   resizePane = (layout, oldLayoutItem, layoutItem) => {
+    // register a double click on the resize handle to reset the window size
+    if (
+      this.resize_click_happened &&
+      layoutItem.w == oldLayoutItem.w &&
+      layoutItem.h == oldLayoutItem.h
+    ) {
+      let pane = this.state.consistent_pane_copy[layoutItem.i];
+
+      // resets to default layout (same as during pane creation)
+      layoutItem.w = pane.width
+        ? pane.p2w(pane.width)
+        : PANE_SIZE[pane.type][0];
+      layoutItem.h = pane.height
+        ? pane.p2w(pane.height + 14)
+        : PANE_SIZE[pane.type][1];
+    }
+
+    // update layout according to user interaction
     this.setState({
       layoutID: DEFAULT_LAYOUT,
     });
     this.focusPane(layoutItem.i);
     this.updateLayout(layout);
     this.sendLayoutItemState(layoutItem);
+
+    // register a double click in this function
+    this.resize_click_happened = true;
+    setTimeout(
+      function() {
+        this.resize_click_happened = false;
+      }.bind(this),
+      400
+    );
   };
 
   movePane = (layout, oldLayoutItem, layoutItem) => {
