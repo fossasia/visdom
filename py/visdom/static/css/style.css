@@ -112,6 +112,10 @@ button {
    border-color:transparent;
 }
 
+button > span.glyphicon {
+    color: grey;
+}
+
 .btn:focus,.btn:active {
    outline: none !important;
 }
@@ -251,4 +255,22 @@ doesn't override our desire to make them non-interactable */
 
 .content-properties {
     background-color: #ffffff;
+}
+
+.attachedWindow {
+
+    /* span the whole pane with some margin */
+    position:absolute;
+    top: 21px;
+    left: 14px;
+    right: 10px;
+    bottom: 0;
+
+    overflow-y: scroll;
+    background: rgba(255,255,255,0.8);
+    border: none;
+}
+
+button[title="properties"].active > .glyphicon {
+    color: red;
 }
