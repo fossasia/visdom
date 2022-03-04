@@ -8,11 +8,19 @@
  */
 
 import React from 'react';
+const AbstractPropertiesList = require('./AbstractPropertiesList');
 var classNames = require('classnames');
 
 class Pane extends React.Component {
   _windowRef = null;
   _barRef = null;
+
+  constructor(props) {
+    super(props);
+    this.state = {
+      propertyListShown: false,
+    };
+  }
 
   close = () => {
     this.props.onClose(this.props.id);
@@ -26,6 +34,10 @@ class Pane extends React.Component {
     if (this.props.handleDownload) {
       this.props.handleDownload();
     }
+  };
+
+  togglePropertyList = () => {
+    this.setState(state => ({ propertyListShown: !state.propertyListShown }));
   };
 
   reset = () => {
@@ -66,7 +78,7 @@ class Pane extends React.Component {
     };
   };
 
-  shouldComponentUpdate(nextProps) {
+  shouldComponentUpdate(nextProps, nextState) {
     if (this.props.contentID !== nextProps.contentID) {
       return true;
     } else if (this.props.h !== nextProps.h || this.props.w !== nextProps.w) {
@@ -74,6 +86,8 @@ class Pane extends React.Component {
     } else if (this.props.children !== nextProps.children) {
       return true;
     } else if (this.props.isFocused !== nextProps.isFocused) {
+      return true;
+    } else if (this.state.propertyListShown !== nextState.propertyListShown) {
       return true;
     }
 
@@ -114,12 +128,108 @@ class Pane extends React.Component {
           >
             &#10226;
           </button>
+          {this.props.enablePropertyList &&
+            this.props.content &&
+            typeof this.props.content == 'object' &&
+            this.props.content.data && (
+              <button
+                title="properties"
+                onClick={this.togglePropertyList}
+                className={
+                  this.state.propertyListShown
+                    ? 'pull-right active'
+                    : 'pull-right'
+                }
+              >
+                <span className="glyphicon glyphicon-tags" />
+              </button>
+            )}
           <div>{this.props.title}</div>
         </div>
         <div className="content">{this.props.children}</div>
         <div className="widgets">{this.props.widgets}</div>
+        {this.state.propertyListShown && (
+          <div className="attachedWindow">
+            {this.props.content.data.map((data, dataId) => [
+              <b>Data[{dataId}] Properties</b>,
+              <PropertyList
+                keylist={'data[' + dataId + ']'}
+                content={data}
+                title={'Data[' + dataId + ']'}
+              />,
+              <hr />,
+            ])}
+            <b>Layout Properties</b>
+            <PropertyList
+              keylist="layout"
+              content={this.props.content.layout}
+              title="Layout"
+            />
+          </div>
+        )}
       </div>
     );
+  }
+}
+
+class PropertyList extends AbstractPropertiesList {
+  _windowRef = null;
+  _barRef = null;
+
+  // updates the property of the window dynamically
+  // note: this.props refers in this content to the Components directly responsible
+  //       to the key, e.g. Text object from AbstractPropertiesList
+  updateValue = (key, value) => {
+    this.props.content[key] = value;
+  };
+
+  render() {
+    // create for each element of props.content a representation in the PropertyList
+    let props = Object.entries(this.props.content).map(([key_local, value]) => {
+      // append key for multi-level objects
+      var keylist = this.props.keylist
+        ? Array.isArray(this.props.keylist)
+          ? this.props.keylist.concat([key_local])
+          : [this.props.keylist, key_local]
+        : [key_local];
+      var key_string =
+        keylist.length > 1 ? keylist.slice(1).join('.') : keylist[0];
+
+      // map value type to property type
+      if (typeof value == 'number') var type = 'number';
+      else if (typeof value == 'boolean') var type = 'checkbox';
+      else if (typeof value == 'string') var type = 'text';
+      else if (Array.isArray(value)) return [];
+      else if (value && typeof value === 'object')
+        return <PropertyList content={value} keylist={keylist} />;
+      else return [];
+
+      // list new property as part of a table
+      return (
+        <tr key={key_string}>
+          <td className="table-properties-name">{key_string}</td>
+          <td className="table-properties-value">
+            {this.renderPropertyValue(
+              {
+                name: key_string,
+                type: type,
+                value: value,
+              },
+              key_local
+            )}
+          </td>
+        </tr>
+      );
+    });
+
+    // only first PropertyList in recursion should create a table-tag
+    if (!Array.isArray(this.props.keylist))
+      return (
+        <table className="table table-bordered table-condensed table-properties">
+          {props}
+        </table>
+      );
+    else return props;
   }
 }
 
