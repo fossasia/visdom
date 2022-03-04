@@ -88,6 +88,7 @@ class PlotPane extends React.Component {
         {...this.props}
         handleDownload={this.handleDownload}
         ref={ref => (this._paneRef = ref)}
+        enablePropertyList
       >
         <div
           id={this.props.contentID}
