@@ -86,10 +86,9 @@ def get_rand_id():
 def ensure_dir_exists(path):
     """Make sure the parent dir exists for path so we can write a file."""
     try:
-        os.makedirs(os.path.dirname(path))
+        os.makedirs(os.path.dirname(os.path.abspath(path)))
     except OSError as e1:
         assert e1.errno == 17  # errno.EEXIST
-        pass
 
 
 def get_path(filename):
