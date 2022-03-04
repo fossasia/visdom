@@ -68,6 +68,12 @@ Right now the following callback events are supported:
 4. `Click` - Triggers when Image pane is clicked on, has a parameter:
     - `image_coord` - dictionary with the fields `x` and `y` for the click coordinates in the coordinate frame of the possibly zoomed/panned image (*not* the enclosing pane).
 
+##### Plot Parameters
+Use the top-right *edit*-Button to inspect all parameters used for plot in the respective window.  
+The visdom client supports dynamic change of plot parameters as well. Just change one of the listed parameters, the plot will be altered on-the-fly.  
+Click the button again to close the property list.
+<p align="center"><img align="center" src="https://user-images.githubusercontent.com/19650074/156751970-0915757d-8bf0-4a6d-a510-1d34a918e47a.gif" width="400" /></p>
+
 ### Environments
 <p align="center"><img align="center" src="docs/images/environment.png" width="300" /></p>
 
