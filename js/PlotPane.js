@@ -63,12 +63,39 @@ class PlotPane extends React.Component {
   }
 
   newPlot = () => {
-    Plotly.newPlot(
-      this.props.contentID,
-      this.props.content.data,
-      this.props.content.layout,
-      { showLink: true, linkText: 'Edit' }
-    );
+    // determine data based on window (compare) settings
+    if (
+      !this.props.has_compare ||
+      (this.props.compare_view_mode && this.props.compare_view_mode == 'select')
+    )
+      var content = this.props.content;
+    // merge mode (for scatter plots)
+    else {
+      var layout = this.props.compare_content[0].layout;
+      layout.showlegend = true;
+
+      // first merge list of data-lists into flat data-list
+      var data = this.props.compare_content
+        .map(function(content) {
+          return content.data;
+        })
+        .flat();
+
+      // use the modified compare_name as labels
+      data.forEach(function(val) {
+        val.name = val.compare_name;
+      });
+
+      var content = {
+        layout: layout,
+        data: data,
+      };
+    }
+
+    Plotly.newPlot(this.props.contentID, content.data, content.layout, {
+      showLink: true,
+      linkText: 'Edit',
+    });
   };
 
   handleDownload = () => {
@@ -83,11 +110,14 @@ class PlotPane extends React.Component {
   };
 
   render() {
+    let widgets = [];
+
     return (
       <Pane
         {...this.props}
         handleDownload={this.handleDownload}
         ref={ref => (this._paneRef = ref)}
+        widgets={widgets}
       >
         <div
           id={this.props.contentID}
