@@ -23,6 +23,7 @@ import time
 import traceback
 import uuid
 import warnings
+import platform
 from os.path import expanduser
 from collections import OrderedDict
 from collections.abc import Mapping
@@ -204,6 +205,7 @@ class Application(tornado.web.Application):
         self.env_path = env_path
         self.state = self.load_state()
         self.layouts = self.load_layouts()
+        self.user_settings = self.load_user_settings()
         self.subs = {}
         self.sources = {}
         self.port = port
@@ -243,6 +245,7 @@ class Application(tornado.web.Application):
             (r"%s/win_hash" % self.base_url, HashHandler, {'app': self}),
             (r"%s/env_state" % self.base_url, EnvStateHandler, {'app': self}),
             (r"%s/fork_env" % self.base_url, ForkEnvHandler, {'app': self}),
+            (r"%s/user/(.*)" % self.base_url, UserSettingsHandler, {'app': self}),
             (r"%s(.*)" % self.base_url, IndexHandler, {'app': self}),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)
@@ -318,6 +321,36 @@ class Application(tornado.web.Application):
             serialize_env(state, ['main'], env_path=self.env_path)
 
         return state
+
+    def load_user_settings(self):
+        settings = {}
+
+        """Determines & uses the platform-specific root directory for user configurations."""
+        if platform.system() == "Windows":
+            base_dir = os.getenv('APPDATA')
+        elif platform.system() == "Darwin": # osx
+            base_dir = os.path.expanduser('~/Library/Preferences')
+        else:
+            base_dir = os.getenv('XDG_CONFIG_HOME', os.path.expanduser('~/.config'))
+        config_dir = os.path.join(base_dir, "visdom")
+
+        # initialize user style
+        user_css = ""
+        logging.error("initializing")
+        home_style_path = os.path.join(config_dir, "style.css")
+        if os.path.exists(home_style_path):
+            with open(home_style_path, "r") as f:
+                user_css += "\n" + f.read()
+        project_style_path = os.path.join(self.env_path, "style.css")
+        if os.path.exists(project_style_path):
+            with open(project_style_path, "r") as f:
+                user_css += "\n" + f.read()
+
+        settings['config_dir'] = config_dir
+        settings['user_css'] = user_css
+
+        return settings
+
 
 
 def broadcast_envs(handler, target_subs=None):
@@ -1753,6 +1786,17 @@ class IndexHandler(BaseHandler):
             self.set_secure_cookie("user_password", username + password)
         else:
             self.set_status(400)
+
+
+class UserSettingsHandler(BaseHandler):
+    def initialize(self, app):
+        self.user_settings = app.user_settings
+
+    def get(self, path):
+        if path == "style.css":
+            self.set_status(200)
+            self.set_header("Content-type", "text/css")
+            self.write(self.user_settings['user_css'])
 
 
 class ErrorHandler(BaseHandler):
