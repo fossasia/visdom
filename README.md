@@ -755,6 +755,15 @@ This function takes the contents of a visdom log and replays them to the current
 Arguments:
 - `log_filename`: log file to replay the contents of.
 
+## Customizing Visdom
+The user config directory for visdom is
+- `~/.config/visdom` for Linux
+- `~/Library/Preferences/visdom` for OSX
+- `%APPDATA%/visdom` for Windows
+
+By placing a `style.css` in you user config directory, visdom will serve the customized css file along with the default style-file.
+In addition, it is also possible to create a project-specific file; just place the file `style.css` in your `env_path`.
+
 ## License
 visdom is Apache 2.0 licensed, as found in the LICENSE file.
 
