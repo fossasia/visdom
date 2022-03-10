@@ -178,7 +178,7 @@ class PropertyList extends AbstractPropertiesList {
 
   // updates the property of the window dynamically
   // note: this.props refers in this content to the Components directly responsible
-  //       to the key, e.g. Text object from AbstractPropertiesList
+  //       to the key, e.g. EditablePropertyText object from AbstractPropertiesList
   updateValue = (key, value) => {
     this.props.content[key] = value;
   };

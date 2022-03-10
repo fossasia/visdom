@@ -23,7 +23,7 @@ class MyRef {
   };
 }
 
-class Text extends React.Component {
+class EditablePropertyText extends React.Component {
   constructor(props) {
     super(props);
     this.textInput = new MyRef();
@@ -102,14 +102,14 @@ class AbstractPropertiesList extends React.Component {
     switch (prop.type) {
       case 'text':
         return (
-          <Text
+          <EditablePropertyText
             value={prop.value}
             submitHandler={value => this.updateValue(propId, value)}
           />
         );
       case 'number':
         return (
-          <Text
+          <EditablePropertyText
             value={prop.value}
             submitHandler={value => this.updateValue(propId, value)}
             validateHandler={value => value.match(/^[0-9]*([.][0-9]*)?$/i)}
