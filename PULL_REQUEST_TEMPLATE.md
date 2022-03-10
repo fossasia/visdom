@@ -29,4 +29,3 @@
 - [ ] My code follows the code style of this project.
 - [ ] My change requires a change to the documentation.
 - [ ] I have updated the documentation accordingly.
-- [ ] For JavaScript changes, I have re-generated the minified JavaScript code.
