@@ -94,9 +94,15 @@ We actively welcome your pull requests.
 8. If you haven't already, complete the Contributor License Agreement ("CLA").
 
 ## Contributing to the UI
-The UI is built with [React](https://facebook.github.io/react/). This means that `js/` needs to be compiled. This can be done with `yarn` or `npm`.
-To clarify an inconsistency, Panes in the UI are the containers for the
+The UI is built with [React](https://facebook.github.io/react/). For testing,
+this means that `js/` needs to be compiled. This can be done with `yarn` or
+`npm`. To clarify an inconsistency, Panes in the UI are the containers for the
 'windows' referred to by the Python and Lua APIs.
+For the Pull-Request, please let the Github-Action "Update Static JS Files" compile
+the file to ensure a consistent build. The Github-Action is triggered for
+changed JS files on any branch that you create. It automatically builds and
+then commits the resulting `main.js` and `main.js.map` files to the respective
+branch.
 
 #### yarn
 You can find instructions for install `yarn` [here](https://yarnpkg.com/lang/en/docs/install/).
