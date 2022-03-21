@@ -1,0 +1,54 @@
+name: Deploy to PyPI
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+        - 'py/visdom/VERSION'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    name: "Deploy to PyPI"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Get git-tags
+        run: |
+          git fetch --prune --unshallow --tags
+          git tag --list
+      - name: Retrieve version
+        run: |
+          echo "::set-output name=TAG_NAME::$(cat py/visdom/VERSION)"
+          echo "::set-output name=TAG_EXISTS::$(git tag | grep v$(cat py/visdom/VERSION) | wc -l)"
+        id: version
+      - name: Show version
+        run: |
+          echo "Version name: ${{ steps.version.outputs.TAG_NAME }}"
+          echo "Existing Matching Tags: ${{ steps.version.outputs.TAG_EXISTS }}"
+      - name: Create Release
+        if: ${{ steps.version.outputs.TAG_EXISTS == '0' }}
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ steps.version.outputs.TAG_NAME }}
+          release_name: "Release ${{ steps.version.outputs.TAG_NAME }}"
+      - name: Set up Python
+        if: ${{ steps.version.outputs.TAG_EXISTS == '0' }}
+        uses: actions/setup-python@v1
+        with:
+            python-version: '3.x'
+      - name: Install dependencies
+        if: ${{ steps.version.outputs.TAG_EXISTS == '0' }}
+        run: python setup.py sdist
+      - name: Publish a Python distribution to PyPI
+        if: ${{ steps.version.outputs.TAG_EXISTS == '0' }}
+        uses: pypa/gh-action-pypi-publish@master
+        with:
+            user: __token__
+            password: ${{ secrets.pypi_password }}
+
+# Guide: https://help.github.com/en/actions/language-and-framework-guides/using-python-with-github-actions
