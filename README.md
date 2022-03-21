@@ -486,6 +486,10 @@ lines will share the same x-axis values) or have the same size as `Y`.
 
 `update` can be used to efficiently update the data of an existing plot. Use 'append' to append data, 'replace' to use new data, or 'remove' to remove the trace specified by `name`. If updating a single trace, use `name` to specify the name of the trace to be updated. Update data that is all NaN is ignored (can be used for masking update).
 
+**Smoothing**: Line plots can be smoothened using [Savitzky-Golay filtering](https://en.wikipedia.org/wiki/Savitzky%E2%80%93Golay_filter). This feature can be enabled by clicking the `~`-symbol in the top right corner of a window that contains a line plot.
+
+![Demo of interactive smoothing.](https://user-images.githubusercontent.com/19650074/159366736-1f5d8099-0ea5-4a3b-af17-49d3e24cb32c.gif)
+
 The following `opts` are supported:
 
 - `opts.fillarea`    : fill area below line (`boolean`)
