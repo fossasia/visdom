@@ -105,6 +105,34 @@ class Pane extends React.Component {
       focus: this.props.isFocused,
     });
 
+    let barwidgets = [];
+
+    if (
+      this.props.enablePropertyList &&
+      this.props.content &&
+      typeof this.props.content == 'object' &&
+      this.props.content.data
+    ) {
+      barwidgets.push(
+        <button
+          key="properties-widget-button"
+          title="properties"
+          onClick={this.togglePropertyList}
+          className={
+            this.state.propertyListShown ? 'pull-right active' : 'pull-right'
+          }
+        >
+          <span className="glyphicon glyphicon-tags" />
+        </button>
+      );
+    }
+
+    if (this.props.barwidgets) {
+      if (Array.isArray(this.props.barwidgets))
+        barwidgets = barwidgets.concat(this.props.barwidgets);
+      else barwidgets.push(this.props.barwidgets);
+    }
+
     return (
       <div
         className={windowClassNames}
@@ -128,22 +156,7 @@ class Pane extends React.Component {
           >
             &#10226;
           </button>
-          {this.props.enablePropertyList &&
-            this.props.content &&
-            typeof this.props.content == 'object' &&
-            this.props.content.data && (
-              <button
-                title="properties"
-                onClick={this.togglePropertyList}
-                className={
-                  this.state.propertyListShown
-                    ? 'pull-right active'
-                    : 'pull-right'
-                }
-              >
-                <span className="glyphicon glyphicon-tags" />
-              </button>
-            )}
+          {barwidgets}
           <div>{this.props.title}</div>
         </div>
         <div className="content">{this.props.children}</div>
