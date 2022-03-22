@@ -1572,9 +1572,16 @@ class App extends React.Component {
     );
   }
 
+  updateCompareViewSelection(evt) {
+    this.compare_selection_i = evt.target.value;
+  }
+
   render() {
     let panes = Object.keys(this.state.panes).map(id => {
       let pane = this.state.panes[id];
+      if (pane.has_compare && pane.compare_content) {
+        pane.content = pane.compare_content[pane.compare_selection_i];
+      }
 
       try {
         let Comp = PANES[pane.type];
@@ -1610,6 +1617,9 @@ class App extends React.Component {
                   sendPaneMessage: this.sendPaneMessage,
                   sendEmbeddingPop: this.sendEmbeddingPop,
                 }}
+                updateCompareViewSelection={this.updateCompareViewSelection.bind(
+                  pane
+                )}
               />
             </ReactResizeDetector>
           </div>

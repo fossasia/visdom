@@ -1488,92 +1488,110 @@ def gather_envs(state, env_path=DEFAULT_ENV_PATH):
 
 def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
     logging.info('comparing envs')
-    eidNums = {e: str(i) for i, e in enumerate(eids)}
-    env = {}
-    envs = {}
+
+    # queries from eids-list
+    # - envs: a list of all (eid -> env) pairs. (directly loads envs if not yet loaded)
+    # - res: a single env containing all windows with titles
+    # - title2Win: a dict of all (title -> win) pairs
+    # note: In case multiple windows share the same title, any window
+    #   could be used. we use the first occurence as a compare view
+    envs, res, title2Win = [], {'jsons': {}, 'reload': {}}, {}
     for eid in eids:
+
         if eid in state:
-            envs[eid] = state.get(eid)
+            env = state.get(eid)
         elif env_path is not None:
             p = os.path.join(env_path, eid.strip(), '.json')
             if os.path.exists(p):
                 with open(p, 'r') as fn:
                     env = tornado.escape.json_decode(fn.read())
                     state[eid] = env
-                    envs[eid] = env
+            else:
+                continue
 
-    res = copy.deepcopy(envs[list(envs.keys())[0]])
-    name2Wid = {res['jsons'][wid].get('title', None): wid + '_compare'
-                for wid in res.get('jsons', {})
-                if 'title' in res['jsons'][wid]}
-    for wid in list(res['jsons'].keys()):
-        res['jsons'][wid + '_compare'] = res['jsons'][wid]
-        res['jsons'][wid] = None
-        res['jsons'].pop(wid)
+        envs.append(env)
+        for winId, win in env['jsons'].items():
+            if "title" in win and win["title"] and win["title"] not in title2Win:
+                comparewinId = winId + "_compare"
+                title2Win[win["title"]] = comparewinId
+                res['jsons'][comparewinId] = copy.deepcopy(env['jsons'][winId])
+                if isinstance(res['jsons'][comparewinId]['content'], dict):
+                    res['jsons'][comparewinId]['content']["data"] = []
+                else:
+                    res['jsons'][comparewinId]['content'] = ""
+                res['jsons'][comparewinId]["compare_content"] = []
+                res['jsons'][comparewinId]["compare_selection_i"] = 0
+                res['jsons'][comparewinId]['has_compare'] = True
+                res['jsons'][comparewinId]['compare_view_mode'] = "select"
+                res['jsons'][comparewinId]['compare_content_info'] = []
+                res['jsons'][comparewinId]['contentID'] = get_rand_id()
+    logging.error("compare")
 
-    for ix, eid in enumerate(envs.keys()):
-        env = envs[eid]
+    # TODO: next, merge 
+    tableRows = []
+    for eidNum, env in enumerate(envs):
+
+        perEnvTitleCount = {}
         for wid in env.get('jsons', {}).keys():
             win = env['jsons'][wid]
-            if win.get('type', None) != 'plot':
-                continue
             if 'content' not in win:
                 continue
-            if 'title' not in win:
-                continue
-            title = win['title']
-            if title not in name2Wid or title == '':
+            if 'title' not in win or not win["title"]:
                 continue
 
-            destWid = name2Wid[title]
-            destWidJson = res['jsons'][destWid]
-            # Combine plots with the same window title. If plot data source was
-            # labeled "name" in the legend, rename to "envId_legend" where
-            # envId is enumeration of the selected environments (not the long
-            # environment id string). This makes plot lines more readable.
-            if ix == 0:
-                if 'name' not in destWidJson['content']['data'][0]:
-                    continue  # Skip windows with unnamed data
-                destWidJson['has_compare'] = False
-                destWidJson['content']['layout']['showlegend'] = True
-                destWidJson['contentID'] = get_rand_id()
-                for dataIdx, data in enumerate(destWidJson['content']['data']):
-                    if 'name' not in data:
-                        break  # stop working with this plot, not right format
-                    destWidJson['content']['data'][dataIdx]['name'] = \
-                        '{}_{}'.format(eidNums[eid], data['name'])
+            # set up the window to show compare data in
+            title = win["title"]
+            content_copy = copy.deepcopy(win['content'])
+            destwin = res['jsons'][title2Win[title]]
+            if title not in perEnvTitleCount:
+                perEnvTitleCount[title] = 0
             else:
-                if 'name' not in destWidJson['content']['data'][0]:
-                    continue  # Skip windows with unnamed data
-                # has_compare will be set to True only if the window title is
-                # shared by at least 2 envs.
-                destWidJson['has_compare'] = True
-                for _dataIdx, data in enumerate(win['content']['data']):
-                    data = copy.deepcopy(data)
-                    if 'name' not in data:
-                        destWidJson['has_compare'] = False
-                        break  # stop working with this plot, not right format
-                    data['name'] = '{}_{}'.format(eidNums[eid], data['name'])
-                    destWidJson['content']['data'].append(data)
+                perEnvTitleCount[title] += 1
+            destwin['compare_content_info'].append({
+                "envId": eidNum,
+                "plot_name": str(eidNum)+"_"+str(perEnvTitleCount[title]),
+                "content_i": len(destwin['compare_content']),
+            })
+            destwin['compare_content'].append(content_copy)
 
-    # Make sure that only plots that are shared by at least two envs are shown.
-    # Check has_compare flag
-    for destWid in list(res['jsons'].keys()):
-        if ('has_compare' not in res['jsons'][destWid]) or \
-                (not res['jsons'][destWid]['has_compare']):
-            del res['jsons'][destWid]
+            # If plot data source was labeled "name" in the legend, rename to
+            # "envId_legend" where envId is enumeration of the selected
+            # environments (not the long environment id string). This makes plot
+            # lines more readable.
+            if isinstance(content_copy, dict) and "data" in content_copy:
+                for _dataIdx, data in enumerate(content_copy["data"]):
+                    if 'name' in data:
+                        data['compare_name'] = '{}_{}'.format(eidNum, data['name'])
 
-    # create legend mapping environment names to environment numbers so one can
-    # look it up for the new legend
-    tableRows = ["<tr> <td> {} </td> <td> {} </td> </tr>".format(v, eidNums[v])
-                 for v in eidNums]
+        # create legend mapping environment names to environment numbers so one can
+        # look it up for the new legend
+        tableRows.append("<tr> <td> {} </td> <td> {} </td> </tr>".format(eids[eidNum], eidNum))
+
+    # in case all plot types in a window are line plot, we can use merge-mode
+    for win in res['jsons'].values():
+        all_scatter = True
+        if isinstance(win['content'], dict) and 'layout' in win['content']:
+            for content_list in win['compare_content']:
+                for data in content_list["data"]:
+                    if data['type'] != 'scatter':
+                        all_scatter = False
+                        break
+                if not all_scatter:
+                    break
+            if all_scatter:
+                win['content']['layout']['showlegend'] = True
+                win['compare_view_mode'] = 'merge'
+        else:
+            if isinstance(win['content'], dict) and 'layout' in win['content'] and 'margin' in win['content']['layout']:
+                win['content']['layout']['margin']['b'] += 20
 
     tbl = """"<style>
     table, th, td {{
         border: 1px solid black;
     }}
     </style>
-    <table> {} </table>""".format(' '.join(tableRows))
+    <table> {} </table>
+    """.format(' '.join(tableRows))
 
     res['jsons']['window_compare_legend'] = {
         "command": "window",
@@ -1589,10 +1607,11 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         "i": 1,
         "has_compare": True,
     }
-    if 'reload' in res:
-        socket.write_message(
-            json.dumps({'command': 'reload', 'data': res['reload']})
-        )
+    # TODO needed?
+    # if 'reload' in res:
+    #     socket.write_message(
+    #         json.dumps({'command': 'reload', 'data': res['reload']})
+    #     )
 
     jsons = list(res.get('jsons', {}).values())
     windows = sorted(jsons, key=lambda k: ('i' not in k, k.get('i', None)))

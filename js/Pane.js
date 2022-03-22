@@ -66,6 +66,8 @@ class Pane extends React.Component {
     };
   };
 
+  updateCompareViewSelection = value => {};
+
   shouldComponentUpdate(nextProps) {
     if (this.props.contentID !== nextProps.contentID) {
       return true;
@@ -81,6 +83,8 @@ class Pane extends React.Component {
   }
 
   render() {
+    let widgets = [].concat(this.props.widgets);
+
     let windowClassNames = classNames({
       window: true,
       focus: this.props.isFocused,
@@ -90,6 +94,27 @@ class Pane extends React.Component {
       bar: true,
       focus: this.props.isFocused,
     });
+
+    // compare view selection
+    if (
+      this.props.has_compare &&
+      this.props.compare_content_info &&
+      this.props.compare_view_mode != 'merge'
+    ) {
+      var select = this.props.compare_selection_i;
+      widgets.push(
+        <div key="compare_selection" className="widget compare_selection">
+          <span>Selected Env</span>
+          <select onChange={this.props.updateCompareViewSelection}>
+            {this.props.compare_content_info.map((info, id) => (
+              <option key={id} value={info.content_i}>
+                {info.plot_name}
+              </option>
+            ))}
+          </select>
+        </div>
+      );
+    }
 
     return (
       <div
@@ -117,7 +142,7 @@ class Pane extends React.Component {
           <div>{this.props.title}</div>
         </div>
         <div className="content">{this.props.children}</div>
-        <div className="widgets">{this.props.widgets}</div>
+        <div className="widgets">{widgets}</div>
       </div>
     );
   }

@@ -252,3 +252,12 @@ doesn't override our desire to make them non-interactable */
 .content-properties {
     background-color: #ffffff;
 }
+
+.widget.compare_selection {
+    color: #333;
+    font-size: 11px;
+}
+
+.widget.compare_selection > span, .widget.compare_selection > select {
+    margin: 0 5px;
+}
