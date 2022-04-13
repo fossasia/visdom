@@ -15,7 +15,7 @@ class NetworkPane extends React.Component {
     link.click();
   };
 
-  CreateNetwork = graph => {
+  CreateNetwork = (graph) => {
     var width = this.props._width,
       height = this.props._height;
     var color = d3.scale.category10();
@@ -58,10 +58,7 @@ class NetworkPane extends React.Component {
         .style('stroke', 'none');
     }
 
-    force
-      .nodes(graph.nodes)
-      .links(graph.edges)
-      .start();
+    force.nodes(graph.nodes).links(graph.edges).start();
 
     var link = svg
       .selectAll('.link')
@@ -71,7 +68,7 @@ class NetworkPane extends React.Component {
       .attr('class', 'link')
       .attr('marker-end', 'url(#arrowhead)');
 
-    link.append('title').text(function(d) {
+    link.append('title').text(function (d) {
       return d.type;
     });
 
@@ -84,7 +81,7 @@ class NetworkPane extends React.Component {
         class: 'edgepath',
         'fill-opacity': 0,
         'stroke-opacity': 0,
-        id: function(d, i) {
+        id: function (d, i) {
           return 'edgepath' + i;
         },
       })
@@ -98,7 +95,7 @@ class NetworkPane extends React.Component {
       .style('pointer-events', 'none')
       .attrs({
         class: 'edgelabel',
-        id: function(d, i) {
+        id: function (d, i) {
           return 'edgelabel' + i;
         },
         'font-size': 10,
@@ -111,7 +108,7 @@ class NetworkPane extends React.Component {
         .style('text-anchor', 'middle')
         .style('pointer-events', 'none')
         .attr('startOffset', '50%')
-        .text(d => d.label);
+        .text((d) => d.label);
     }
 
     var node = svg
@@ -121,42 +118,42 @@ class NetworkPane extends React.Component {
       .append('g')
       .attr('class', 'node')
       .attr('r', 10) // radius
-      .style('fill', function(d) {
+      .style('fill', function (d) {
         return color(d.club);
       })
       .call(force.drag);
 
     node.append('circle').attr('r', 10);
 
-    node.append('title').text(d => d.name);
+    node.append('title').text((d) => d.name);
     if (this.props.showVertexLabels) {
       node
         .append('text')
         .attr('dx', 12)
         .attr('dy', '.35em')
-        .text(d => d.label);
+        .text((d) => d.label);
     }
 
-    force.on('tick', function() {
+    force.on('tick', function () {
       link
-        .attr('x1', function(d) {
+        .attr('x1', function (d) {
           return d.source.x;
         })
-        .attr('y1', function(d) {
+        .attr('y1', function (d) {
           return d.source.y;
         })
-        .attr('x2', function(d) {
+        .attr('x2', function (d) {
           return d.target.x;
         })
-        .attr('y2', function(d) {
+        .attr('y2', function (d) {
           return d.target.y;
         });
 
-      node.attr('transform', function(d) {
+      node.attr('transform', function (d) {
         return 'translate(' + d.x + ',' + d.y + ')';
       });
 
-      edgepaths.attr('d', function(d) {
+      edgepaths.attr('d', function (d) {
         return (
           'M ' +
           d.source.x +
@@ -169,7 +166,7 @@ class NetworkPane extends React.Component {
         );
       });
 
-      edgelabels.attr('transform', function(d) {
+      edgelabels.attr('transform', function (d) {
         if (d.target.x < d.source.x) {
           var bbox = this.getBBox();
 
@@ -199,13 +196,13 @@ class NetworkPane extends React.Component {
       <Pane
         {...this.props}
         handleDownload={this.handleDownload}
-        ref={ref => (this._paneRef = ref)}
+        ref={(ref) => (this._paneRef = ref)}
       >
         <div
           id="Network_Div"
           style={{ height: '100%', width: '100%', flex: 1 }}
           className="Network_Div"
-          ref={ref => (this._networkRef = ref)}
+          ref={(ref) => (this._networkRef = ref)}
         />
       </Pane>
     );

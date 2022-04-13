@@ -37,7 +37,7 @@ class Pane extends React.Component {
   };
 
   togglePropertyList = () => {
-    this.setState(state => ({ propertyListShown: !state.propertyListShown }));
+    this.setState((state) => ({ propertyListShown: !state.propertyListShown }));
   };
 
   reset = () => {
@@ -46,13 +46,13 @@ class Pane extends React.Component {
     }
   };
 
-  zoom = ev => {
+  zoom = (ev) => {
     if (this.props.handleZoom) {
       this.props.handleZoom(ev);
     }
   };
 
-  over = ev => {
+  over = (ev) => {
     if (this.props.handleMouseMove) {
       this.props.handleMouseMove(ev);
     }
@@ -140,9 +140,9 @@ class Pane extends React.Component {
         onDoubleClick={this.reset}
         onWheel={this.zoom}
         onMouseMove={this.over}
-        ref={ref => (this._windowRef = ref)}
+        ref={(ref) => (this._windowRef = ref)}
       >
-        <div className={barClassNames} ref={ref => (this._barRef = ref)}>
+        <div className={barClassNames} ref={(ref) => (this._barRef = ref)}>
           <button title="close" onClick={this.close}>
             X
           </button>

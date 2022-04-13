@@ -18,7 +18,7 @@ class MyRef {
     return this._ref;
   }
 
-  setRef = ref => {
+  setRef = (ref) => {
     this._ref = ref;
   };
 }
@@ -34,7 +34,7 @@ class EditablePropertyText extends React.Component {
     };
   }
 
-  handleChange = event => {
+  handleChange = (event) => {
     let newValue = event.target.value;
     if (this.props.validateHandler && !this.props.validateHandler(newValue)) {
       event.preventDefault();
@@ -45,7 +45,7 @@ class EditablePropertyText extends React.Component {
     }
   };
 
-  handleKeyPress = event => {
+  handleKeyPress = (event) => {
     if (event.key === 'Enter') {
       let ref = this.textInput.getRef();
       if (ref) ref.blur(); // Blur invokes submit
@@ -104,15 +104,15 @@ class AbstractPropertiesList extends React.Component {
         return (
           <EditablePropertyText
             value={prop.value}
-            submitHandler={value => this.updateValue(propId, value)}
+            submitHandler={(value) => this.updateValue(propId, value)}
           />
         );
       case 'number':
         return (
           <EditablePropertyText
             value={prop.value}
-            submitHandler={value => this.updateValue(propId, value)}
-            validateHandler={value => value.match(/^[0-9]*([.][0-9]*)?$/i)}
+            submitHandler={(value) => this.updateValue(propId, value)}
+            validateHandler={(value) => value.match(/^[0-9]*([.][0-9]*)?$/i)}
           />
         );
       case 'button':
@@ -139,7 +139,7 @@ class AbstractPropertiesList extends React.Component {
         return (
           <select
             className="form-control"
-            onChange={event => this.updateValue(propId, event.target.value)}
+            onChange={(event) => this.updateValue(propId, event.target.value)}
             value={prop.value}
           >
             {prop.values.map((name, id) => (

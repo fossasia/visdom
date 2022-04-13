@@ -20,7 +20,7 @@ import { polygonContains } from 'd3-polygon';
 const SCALE_RADIUS = 2000;
 
 class EmbeddingsPane extends React.Component {
-  onEvent = e => {
+  onEvent = (e) => {
     if (!this.props.isFocused) {
       return;
     }
@@ -41,7 +41,7 @@ class EmbeddingsPane extends React.Component {
     }
   };
 
-  onEntitySelection = e => {
+  onEntitySelection = (e) => {
     this.props.appApi.sendPaneMessage({
       event_type: 'EntitySelected',
       entityId: e.name,
@@ -50,7 +50,7 @@ class EmbeddingsPane extends React.Component {
     });
   };
 
-  onRegionSelection = pointIdxs => {
+  onRegionSelection = (pointIdxs) => {
     this.props.appApi.sendPaneMessage({
       event_type: 'RegionSelected',
       selectedIdxs: pointIdxs,
@@ -269,7 +269,7 @@ class Scene extends React.Component {
     let camera = new THREE.PerspectiveCamera(fov, width / height, near, far);
     camera.position.set(0, 0, far);
 
-    let generated_points = this.props.content.data.map(p =>
+    let generated_points = this.props.content.data.map((p) =>
       Object.assign({}, p, {
         position: [p.position[0] * radius, p.position[1] * radius],
       })
@@ -317,7 +317,7 @@ class Scene extends React.Component {
     this.points = points;
     this.circle_sprite = circle_sprite;
     this.generated_points = generated_points;
-    this.debouncedFn = debounce(fn => fn(), 300);
+    this.debouncedFn = debounce((fn) => fn(), 300);
 
     this.setUpMouseInteractions();
 
@@ -334,7 +334,7 @@ class Scene extends React.Component {
   }
 
   /* utility methods */
-  zoomHandler = d3_transform => {
+  zoomHandler = (d3_transform) => {
     let scale = d3_transform.k;
     let x = -(d3_transform.x - this.props.width / 2) / scale;
     let y = (d3_transform.y - this.props.height / 2) / scale;
@@ -495,7 +495,7 @@ class Scene extends React.Component {
                 unselectedStyles
               )}
               title="Selection mode"
-              onClick={e => {
+              onClick={(e) => {
                 e.preventDefault();
                 this.props.onGoBack();
               }}
@@ -516,7 +516,7 @@ class Scene extends React.Component {
               buttonStyles
             )}
             title="Selection mode"
-            onClick={e => {
+            onClick={(e) => {
               e.preventDefault();
               this.setState({ selectMode: !this.state.selectMode });
             }}
@@ -586,7 +586,7 @@ class Scene extends React.Component {
             width: this.props.width + 'px',
             height: this.props.height + 'px',
           }}
-          ref={mount => {
+          ref={(mount) => {
             this.mount = mount;
           }}
         />
@@ -599,10 +599,10 @@ class LassoSelection extends React.Component {
   componentDidMount() {
     var lassoInstance = lasso();
     lassoInstance
-      .on('end', polygon => {
+      .on('end', (polygon) => {
         this.props.camera.updateMatrixWorld();
 
-        const points = this.props.points.map(point => {
+        const points = this.props.points.map((point) => {
           var p = new THREE.Vector3(
             point.position[0] * SCALE_RADIUS,
             point.position[1] * SCALE_RADIUS,
@@ -621,15 +621,18 @@ class LassoSelection extends React.Component {
             coords: [x * this.props.width, y * this.props.height],
           };
         });
-        const selected = points.filter(point =>
+        const selected = points.filter((point) =>
           polygonContains(polygon, point.test)
         );
-        console.log('Entities selected:', selected.map(pt => pt.ref.idx));
+        console.log(
+          'Entities selected:',
+          selected.map((pt) => pt.ref.idx)
+        );
         if (selected.length <= 21) {
           lassoInstance.reset();
           return;
         }
-        this.props.onRegionSelection(selected.map(pt => pt.ref.idx));
+        this.props.onRegionSelection(selected.map((pt) => pt.ref.idx));
       })
       .on('start', null);
 
@@ -638,7 +641,7 @@ class LassoSelection extends React.Component {
   render() {
     return (
       <svg
-        ref={mount => (this.interactionSvg = mount)}
+        ref={(mount) => (this.interactionSvg = mount)}
         style={{
           width: this.props.width,
           height: this.props.height,
