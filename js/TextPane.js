@@ -12,7 +12,7 @@ import EventSystem from './EventSystem';
 const Pane = require('./Pane');
 
 class TextPane extends React.Component {
-  onEvent = e => {
+  onEvent = (e) => {
     if (!this.props.isFocused) {
       return;
     }
