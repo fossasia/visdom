@@ -133,15 +133,15 @@ class Poller {
       url.protocol + '//' + url.host + app.correctPathname() + 'socket_wrap';
     this.handleMessage = app._handleMessage;
     fetch(this.target)
-      .then(res => {
+      .then((res) => {
         return res.json();
       })
-      .then(data => {
+      .then((data) => {
         this.finishSetup(data.sid);
       });
   }
 
-  finishSetup = sid => {
+  finishSetup = (sid) => {
     this.sid = sid;
     this.poller_id = window.setInterval(() => this.poll(), POLLING_INTERVAL);
     this.app.setState({
@@ -156,19 +156,19 @@ class Poller {
     window.clearInterval(this.poller_id);
   };
 
-  send = msg => {
+  send = (msg) => {
     // Post a messge containing the desired command
     postData(this.target, { message_type: 'send', sid: this.sid, message: msg })
-      .then(res => res.json())
+      .then((res) => res.json())
       .then(
-        result => {
+        (result) => {
           if (!result.success) {
             this.close();
           } else {
             this.poll(); // Get a response right now if there is one
           }
         },
-        error => {
+        (error) => {
           console.log(error);
           this.close();
         }
@@ -178,14 +178,14 @@ class Poller {
   poll = () => {
     // Post message to query possible socket messages
     postData(this.target, { message_type: 'query', sid: this.sid })
-      .then(res => res.json())
+      .then((res) => res.json())
       .then(
-        result => {
+        (result) => {
           if (!result.success) {
             this.close();
           } else {
             let messages = result.messages;
-            messages.forEach(msg => {
+            messages.forEach((msg) => {
               // Must re-encode message as handle message expects json
               // in this particular format from sockets
               // TODO Could refactor message parsing out elsewhere.
@@ -193,7 +193,7 @@ class Poller {
             });
           }
         },
-        error => {
+        (error) => {
           console.log(error);
           this.close();
         }
@@ -256,31 +256,31 @@ class App extends React.Component {
     );
   };
 
-  p2w = w => {
+  p2w = (w) => {
     // translate pixels -> RGL grid coordinates
     let colWidth = this.colWidth();
     return (w + MARGIN) / (colWidth + MARGIN);
   };
 
-  w2p = p => {
+  w2p = (p) => {
     let colWidth = this.colWidth();
     return p * (colWidth + MARGIN) - MARGIN;
   };
 
-  p2h = h => {
+  p2h = (h) => {
     return (h + MARGIN) / (ROW_HEIGHT + MARGIN);
   };
 
-  h2p = p => {
+  h2p = (p) => {
     return p * (ROW_HEIGHT + MARGIN) - MARGIN;
   };
 
-  keyLS = key => {
+  keyLS = (key) => {
     // append env to pane id for localStorage key
     return this.state.envID + '_' + key;
   };
 
-  getValidFilter = filter => {
+  getValidFilter = (filter) => {
     // Ensure the regex filter is valid
     try {
       'test_string'.match(filter);
@@ -303,7 +303,7 @@ class App extends React.Component {
     return pathname;
   };
 
-  addPaneBatched = pane => {
+  addPaneBatched = (pane) => {
     if (!this._timeoutID) {
       this._timeoutID = setTimeout(this.processBatchedPanes, 100);
     }
@@ -314,7 +314,7 @@ class App extends React.Component {
     let newPanes = Object.assign({}, this.state.panes);
     let newLayout = this.state.layout.slice();
 
-    this._pendingPanes.forEach(pane => {
+    this._pendingPanes.forEach((pane) => {
       this.processPane(pane, newPanes, newLayout);
     });
 
@@ -414,7 +414,7 @@ class App extends React.Component {
     };
 
     socket.onerror = socket.onclose = () => {
-      this.setState({ connected: false }, function() {
+      this.setState({ connected: false }, function () {
         this._socket = null;
       });
     };
@@ -426,8 +426,10 @@ class App extends React.Component {
     if (cmd.win in this.state.consistent_pane_copy) {
       // Apply patch and check hash. Re-fetch if final window doesn't match hash
       let windowContent = this.state.consistent_pane_copy[cmd.win];
-      let finalWindow = jsonpatch.applyPatch(windowContent, cmd.content)
-        .newDocument;
+      let finalWindow = jsonpatch.applyPatch(
+        windowContent,
+        cmd.content
+      ).newDocument;
       let hashed = md5(stringify(finalWindow));
       if (hashed === cmd.finalHash) {
         this.state.consistent_pane_copy[cmd.win] = finalWindow;
@@ -450,7 +452,7 @@ class App extends React.Component {
     }
   };
 
-  _handleMessage = evt => {
+  _handleMessage = (evt) => {
     var cmd = JSON.parse(evt.data);
     switch (cmd.command) {
       case 'register':
@@ -562,7 +564,7 @@ class App extends React.Component {
       let focusedPaneID = this.state.focusedPaneID;
       // Make sure we remove the pane from our layout.
       let newLayout = this.state.layout.filter(
-        paneLayout => paneLayout.i !== paneID
+        (paneLayout) => paneLayout.i !== paneID
       );
 
       this.setState(
@@ -583,7 +585,7 @@ class App extends React.Component {
     if (this.state.readonly) {
       return;
     }
-    Object.keys(this.state.panes).map(paneID => {
+    Object.keys(this.state.panes).map((paneID) => {
       this.closePane(paneID, false, false);
     });
     this.rebin();
@@ -614,7 +616,7 @@ class App extends React.Component {
     }
   };
 
-  selectEnv = selectedNodes => {
+  selectEnv = (selectedNodes) => {
     var isSameEnv = selectedNodes.length == this.state.envIDs.length;
     if (isSameEnv) {
       for (var i = 0; i < selectedNodes.length; i++) {
@@ -641,7 +643,7 @@ class App extends React.Component {
     this.postForEnv(selectedNodes);
   };
 
-  postForEnv = envIDs => {
+  postForEnv = (envIDs) => {
     // This kicks off a new stream of events from the socket so there's nothing
     // to handle here. We might want to surface the error state.
     if (envIDs.length == 1) {
@@ -679,7 +681,7 @@ class App extends React.Component {
     let env = this._envFieldRef.value;
 
     let payload = {};
-    Object.keys(this.state.panes).map(paneID => {
+    Object.keys(this.state.panes).map((paneID) => {
       payload[paneID] = JSON.parse(localStorage.getItem(this.keyLS(paneID)));
     });
 
@@ -722,7 +724,7 @@ class App extends React.Component {
     );
   };
 
-  blurPane = e => {
+  blurPane = (e) => {
     this.setState({
       focusedPaneID: null,
     });
@@ -757,7 +759,7 @@ class App extends React.Component {
     // register a double click in this function
     this.resize_click_happened = true;
     setTimeout(
-      function() {
+      function () {
         this.resize_click_happened = false;
       }.bind(this),
       400
@@ -771,7 +773,7 @@ class App extends React.Component {
     this.updateLayout(layout);
   };
 
-  rebin = layout => {
+  rebin = (layout) => {
     layout = layout ? layout : this.state.layout;
     let layoutID = this.state.layoutID;
     if (layoutID !== DEFAULT_LAYOUT) {
@@ -807,7 +809,7 @@ class App extends React.Component {
     }
   }
 
-  relayout = pack => {
+  relayout = (pack) => {
     let layout = this.rebin();
 
     let sorted = sortLayout(layout);
@@ -818,7 +820,7 @@ class App extends React.Component {
     let envLayoutList = this.getCurrLayoutList();
     let layoutMap = envLayoutList.get(this.state.layoutID);
     // Sort out things that were filtered away
-    sorted = sorted.sort(function(a, b) {
+    sorted = sorted.sort(function (a, b) {
       let diff =
         (newPanes[a.i].title.match(filter) != null) -
         (newPanes[b.i].title.match(filter) != null);
@@ -862,8 +864,8 @@ class App extends React.Component {
     }
   };
 
-  updateLayout = layout => {
-    this.setState({ layout: layout }, newState => {
+  updateLayout = (layout) => {
+    this.setState({ layout: layout }, (newState) => {
       this.state.layout.map((playout, idx) => {
         localStorage.setItem(this.keyLS(playout.i), JSON.stringify(playout));
       });
@@ -887,7 +889,7 @@ class App extends React.Component {
     });
   };
 
-  updateToLayout = layoutID => {
+  updateToLayout = (layoutID) => {
     this.setState({
       layoutID: layoutID,
     });
@@ -931,7 +933,7 @@ class App extends React.Component {
     });
   }
 
-  publishEvent = event => {
+  publishEvent = (event) => {
     EventSystem.publish('global.event', event);
   };
 
@@ -944,7 +946,7 @@ class App extends React.Component {
    *
    * @param data Data to be sent to backend.
    */
-  sendPaneMessage = data => {
+  sendPaneMessage = (data) => {
     if (this.state.focusedPaneID === null || this.state.readonly) {
       return;
     }
@@ -959,7 +961,7 @@ class App extends React.Component {
     });
   };
 
-  sendEmbeddingPop = data => {
+  sendEmbeddingPop = (data) => {
     if (this.state.focusedPaneID === null || this.state.readonly) {
       return;
     }
@@ -1092,7 +1094,7 @@ class App extends React.Component {
     );
   };
 
-  generateWindowHash = windowId => {
+  generateWindowHash = (windowId) => {
     let windowContent = this.state.panes[windowId];
 
     /*Convert JSON data to string with a space of 2. This detail is important.
@@ -1101,7 +1103,7 @@ class App extends React.Component {
     return md5(content_string);
   };
 
-  getWindowHash = windowId => {
+  getWindowHash = (windowId) => {
     let url = 'http://' + window.location.host + '/win_hash';
 
     let body = {
@@ -1157,13 +1159,13 @@ class App extends React.Component {
           <input
             className="form-control"
             type="text"
-            onChange={ev => {
+            onChange={(ev) => {
               this.setState({
                 saveText: ev.target.value,
               });
             }}
             value={this.state.saveText}
-            ref={ref => (this._envFieldRef = ref)}
+            ref={(ref) => (this._envFieldRef = ref)}
           />
           <button
             className="btn btn-default"
@@ -1188,14 +1190,14 @@ class App extends React.Component {
           <select
             className="form-control"
             disabled={!this.state.connected}
-            onChange={ev => {
+            onChange={(ev) => {
               this.setState({
                 modifyID: ev.target.value,
               });
             }}
             value={this.state.modifyID}
           >
-            {this.state.envList.map(env => {
+            {this.state.envList.map((env) => {
               return (
                 <option key={env} value={env}>
                   {env}
@@ -1236,7 +1238,7 @@ class App extends React.Component {
           <input
             className="form-control"
             type="text"
-            onChange={ev => {
+            onChange={(ev) => {
               this.setState({
                 saveText: ev.target.value,
               });
@@ -1262,14 +1264,14 @@ class App extends React.Component {
           <select
             className="form-control"
             disabled={!this.state.connected}
-            onChange={ev => {
+            onChange={(ev) => {
               this.setState({
                 modifyID: ev.target.value,
               });
             }}
             value={this.state.modifyID}
           >
-            {Array.from(this.getCurrLayoutList().keys()).map(view => {
+            {Array.from(this.getCurrLayoutList().keys()).map((view) => {
               return (
                 <option key={view} value={view}>
                   {view}
@@ -1324,7 +1326,7 @@ class App extends React.Component {
     slist.sort();
     var roots = Array.from(
       new Set(
-        slist.map(x => {
+        slist.map((x) => {
           return x.split('_')[0];
         })
       )
@@ -1343,7 +1345,7 @@ class App extends React.Component {
       };
     });
 
-    env_options2 = env_options2.filter(x => x != null);
+    env_options2 = env_options2.filter((x) => x != null);
 
     env_options2 = env_options2.concat(
       roots.map((x, idx) => {
@@ -1441,20 +1443,22 @@ class App extends React.Component {
   }
 
   renderViewControls() {
-    let view_options = Array.from(this.getCurrLayoutList().keys()).map(view => {
-      let check_space = '';
-      if (view == this.state.layoutID) {
-        check_space = <span>&nbsp;&#10003;</span>;
+    let view_options = Array.from(this.getCurrLayoutList().keys()).map(
+      (view) => {
+        let check_space = '';
+        if (view == this.state.layoutID) {
+          check_space = <span>&nbsp;&#10003;</span>;
+        }
+        return (
+          <li key={view}>
+            <a href="#" onClick={this.updateToLayout.bind(this, view)}>
+              {view}
+              {check_space}
+            </a>
+          </li>
+        );
       }
-      return (
-        <li key={view}>
-          <a href="#" onClick={this.updateToLayout.bind(this, view)}>
-            {view}
-            {check_space}
-          </a>
-        </li>
-      );
-    });
+    );
     return (
       <span>
         <span>View&nbsp;</span>
@@ -1482,7 +1486,7 @@ class App extends React.Component {
             title="Repack"
             data-placement="bottom"
             className="btn btn-default"
-            onClick={ev => {
+            onClick={(ev) => {
               this.relayout();
               this.relayout();
             }}
@@ -1501,7 +1505,7 @@ class App extends React.Component {
                 !this.state.readonly
               )
             }
-            onClick={ev => {
+            onClick={(ev) => {
               this.openViewModal();
             }}
           >
@@ -1520,13 +1524,13 @@ class App extends React.Component {
           className="form-control"
           data-cy="filter"
           placeholder="Filter text"
-          onChange={ev => {
+          onChange={(ev) => {
             this.setState(
               {
                 filter: ev.target.value,
               },
               () => {
-                Object.keys(this.state.panes).map(paneID => {
+                Object.keys(this.state.panes).map((paneID) => {
                   this.focusPane(paneID);
                 });
               }
@@ -1547,13 +1551,13 @@ class App extends React.Component {
             data-placement="bottom"
             type="button"
             className="btn btn-default"
-            onClick={ev => {
+            onClick={(ev) => {
               this.setState(
                 {
                   filter: '',
                 },
                 () => {
-                  Object.keys(this.state.panes).map(paneID => {
+                  Object.keys(this.state.panes).map((paneID) => {
                     this.focusPane(paneID);
                   });
                 }
@@ -1574,7 +1578,7 @@ class App extends React.Component {
   }
 
   render() {
-    let panes = Object.keys(this.state.panes).map(id => {
+    let panes = Object.keys(this.state.panes).map((id) => {
       let pane = this.state.panes[id];
 
       try {
@@ -1718,7 +1722,7 @@ function load() {
 
 document.addEventListener('DOMContentLoaded', load);
 
-$(document).ready(function() {
+$(document).ready(function () {
   $('[data-toggle="tooltip"]').tooltip({
     container: 'body',
     delay: {

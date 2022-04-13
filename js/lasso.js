@@ -15,7 +15,7 @@ function polygonToPath(polygon) {
   return (
     'M' +
     polygon
-      .map(function(d) {
+      .map(function (d) {
         return d.join(',');
       })
       .join('L')
@@ -91,10 +91,7 @@ export default function lasso() {
         distance(lassoPolygon[0], lassoPolygon[lassoPolygon.length - 1]) <
         closeDistance
       ) {
-        closePath
-          .attr('x1', point[0])
-          .attr('y1', point[1])
-          .attr('opacity', 1);
+        closePath.attr('x1', point[0]).attr('y1', point[1]).attr('opacity', 1);
       } else {
         closePath.attr('opacity', 0);
       }
@@ -121,7 +118,7 @@ export default function lasso() {
       }
     }
 
-    lasso.reset = function() {
+    lasso.reset = function () {
       if (lassoPath) {
         lassoPath.remove();
         lassoPath = null;
@@ -135,7 +132,7 @@ export default function lasso() {
     };
   }
 
-  lasso.on = function(type, callback) {
+  lasso.on = function (type, callback) {
     dispatch.on(type, callback);
     return lasso;
   };

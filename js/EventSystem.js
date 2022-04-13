@@ -19,7 +19,7 @@ class EventSystem {
       return false;
     }
 
-    queue.forEach(cb => cb(data));
+    queue.forEach((cb) => cb(data));
 
     return true;
   }
@@ -41,7 +41,7 @@ class EventSystem {
       if (typeof callback === 'undefined') {
         delete queue[event];
       } else {
-        this.queue[event] = queue[event].filter(function(sub) {
+        this.queue[event] = queue[event].filter(function (sub) {
           return sub !== callback;
         });
       }

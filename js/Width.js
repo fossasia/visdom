@@ -10,7 +10,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom';
 
-const Width = ComposedComponent =>
+const Width = (ComposedComponent) =>
   class Width extends React.Component {
     state = {
       width: 1280,

@@ -33,7 +33,7 @@ class ImagePane extends React.Component {
   drag_start_x = null;
   drag_start_y = null;
 
-  componentWillReceiveProps = nextProps => {
+  componentWillReceiveProps = (nextProps) => {
     if (nextProps.selected !== this.props.selected) {
       this.setState({ selected: nextProps.selected });
     }
@@ -48,7 +48,7 @@ class ImagePane extends React.Component {
     }
   };
 
-  onEvent = event => {
+  onEvent = (event) => {
     if (!this.props.isFocused) {
       return;
     }
@@ -89,7 +89,7 @@ class ImagePane extends React.Component {
     link.click();
   };
 
-  handleZoom = ev => {
+  handleZoom = (ev) => {
     if (ev.altKey) {
       //var direction = natural.checked ? -1 : 1;
       let direction = -1;
@@ -138,12 +138,12 @@ class ImagePane extends React.Component {
     }
   };
 
-  handleDragStart = ev => {
+  handleDragStart = (ev) => {
     this.drag_start_x = ev.screenX;
     this.drag_start_y = ev.screenY;
   };
 
-  handleDragOver = ev => {
+  handleDragOver = (ev) => {
     this.setState({
       tx: this.state.tx + ev.screenX - this.drag_start_x,
       ty: this.state.ty + ev.screenY - this.drag_start_y,
@@ -152,7 +152,7 @@ class ImagePane extends React.Component {
     this.drag_start_y = ev.screenY;
   };
 
-  handleMouseOver = ev => {
+  handleMouseOver = (ev) => {
     // get the x and y offset of the pane
     var rect = this._paneRef._windowRef.children[1].getBoundingClientRect();
     // Compute the coords of the mouse relative to the top left of the pane
@@ -178,7 +178,7 @@ class ImagePane extends React.Component {
     });
   };
 
-  updateSlider = evt => {
+  updateSlider = (evt) => {
     // TODO add history update events here! need to send these to the client
     // with sendPaneMessage
     this.setState({
@@ -187,12 +187,12 @@ class ImagePane extends React.Component {
   };
 
   // Find the height that preserves the aspect ratio given 'scaledWidth'
-  computeHFromW = scaledWidth => {
+  computeHFromW = (scaledWidth) => {
     return Math.ceil((this._natHeight / this._natWidth) * scaledWidth);
   };
 
   // Find the width that preserves the aspect ratio given 'scaledHeight'
-  computeWFromH = scaledHeight => {
+  computeWFromH = (scaledHeight) => {
     return Math.ceil((this._natWidth / this._natHeight) * scaledHeight);
   };
 
@@ -295,7 +295,7 @@ class ImagePane extends React.Component {
         handleReset={this.handleReset.bind(this)}
         handleZoom={this.handleZoom.bind(this)}
         handleMouseMove={this.handleMouseOver.bind(this)}
-        ref={ref => (this._paneRef = ref)}
+        ref={(ref) => (this._paneRef = ref)}
         widgets={widgets}
       >
         <div style={divstyle}>
@@ -303,7 +303,7 @@ class ImagePane extends React.Component {
             <img
               className="content-image cssTransforms"
               src={content.src}
-              ref={ref => (this._imgRef = ref)}
+              ref={(ref) => (this._imgRef = ref)}
               onLoad={() => {
                 if (this._natHeight === null) {
                   this._natHeight = this._imgRef.naturalHeight;

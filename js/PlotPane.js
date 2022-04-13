@@ -27,11 +27,13 @@ class PlotPane extends React.Component {
   }
 
   toggleSmoothWidget = () => {
-    this.setState(state => ({ smoothWidgetActive: !state.smoothWidgetActive }));
+    this.setState((state) => ({
+      smoothWidgetActive: !state.smoothWidgetActive,
+    }));
   };
 
-  updateSmoothSlider = value => {
-    this.setState(state => ({ smoothvalue: value }));
+  updateSmoothSlider = (value) => {
+    this.setState((state) => ({ smoothvalue: value }));
   };
 
   componentDidMount() {
@@ -92,7 +94,7 @@ class PlotPane extends React.Component {
     var smooth_data = [];
     if (this.state.smoothWidgetActive) {
       smooth_data = data
-        .filter(d => d['type'] == 'scatter' && d['mode'] == 'lines')
+        .filter((d) => d['type'] == 'scatter' && d['mode'] == 'lines')
         .map((d, dataId) => {
           var smooth_d = JSON.parse(JSON.stringify(d));
           var windowSize = 2 * this.state.smoothvalue + 1;
@@ -134,7 +136,7 @@ class PlotPane extends React.Component {
       }
     } else
       this.props.content.data
-        .filter(data => data['type'] == 'scatter' && data['mode'] == 'lines')
+        .filter((data) => data['type'] == 'scatter' && data['mode'] == 'lines')
         .map((d, dataId) => {
           d.opacity = 1.0;
         });
@@ -189,7 +191,7 @@ class PlotPane extends React.Component {
                 min="1"
                 max={this.state.maxsmoothvalue}
                 value={this.state.smoothvalue}
-                onInput={ev => this.updateSmoothSlider(ev.target.value)}
+                onInput={(ev) => this.updateSmoothSlider(ev.target.value)}
               />
               <span>&nbsp;&nbsp;{this.state.selected}&nbsp;&nbsp;</span>
             </div>
@@ -202,7 +204,7 @@ class PlotPane extends React.Component {
       <Pane
         {...this.props}
         handleDownload={this.handleDownload}
-        ref={ref => (this._paneRef = ref)}
+        ref={(ref) => (this._paneRef = ref)}
         barwidgets={[smooth_widget_button]}
         widgets={[smooth_widget]}
         enablePropertyList
@@ -211,7 +213,7 @@ class PlotPane extends React.Component {
           id={this.props.contentID}
           style={{ height: '100%', width: '100%' }}
           className="plotly-graph-div"
-          ref={ref => (this._plotlyRef = ref)}
+          ref={(ref) => (this._plotlyRef = ref)}
         />
       </Pane>
     );
