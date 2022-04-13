@@ -1,1 +1,3 @@
 py/visdom/static/**/*
+build/lib/visdom/static/**/*
+*.md
