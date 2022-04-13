@@ -1,7 +1,20 @@
 {
-  "extends": ["eslint:recommended", "plugin:react/recommended", "prettier"],
-  "plugins": ["ignore-generated-and-nolint", "cypress"],
-  "parser": "babel-eslint",
+  "extends": [
+    "eslint:recommended",
+    "plugin:react/recommended",
+    "plugin:jsx-a11y/recommended",
+    "prettier"
+  ],
+  "plugins": ["react", "jsx-a11y", "ignore-generated-and-nolint", "cypress"],
+  "parser": "@babel/eslint-parser",
+  "parserOptions": {
+      "requireConfigFile": false,
+      "ecmaVersion": "latest",
+      "sourceType": "module",
+      "ecmaFeatures": {
+          "jsx": true
+      }
+  },
   "env": {
     "browser": true,
     "es6": true,
