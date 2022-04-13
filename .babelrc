@@ -1,0 +1,6 @@
+{
+    "sourceType": "unambiguous",
+    "presets": [
+        "@babel/preset-react"
+    ]
+}
