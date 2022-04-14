@@ -1746,7 +1746,7 @@ class Visdom(object):
         - `opts.nancolor`: if not None, color for plotting nan
                            (`string`; default = `None`)
         """
-        validUpdateValues = [None, 'reset', 'remove', 'appendRow', 'appendColumn', 'prependRow', 'prependColumn']
+        validUpdateValues = [None, 'replace', 'remove', 'appendRow', 'appendColumn', 'prependRow', 'prependColumn']
         assert update in validUpdateValues,\
                 "update needs to take one of the following values: %s" % ", ".join(\
                 "'%s'" % str(s) if s is not None else "None" for s in validUpdateValues)
