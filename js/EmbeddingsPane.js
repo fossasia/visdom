@@ -9,7 +9,7 @@
 
 import React from 'react';
 import EventSystem from './EventSystem';
-const Pane = require('./Pane');
+import Pane from './Pane';
 import * as THREE from 'three';
 import * as d3 from 'd3-zoom';
 import { select, event as currentEvent, mouse } from 'd3-selection';
@@ -654,4 +654,4 @@ class LassoSelection extends React.Component {
   }
 }
 
-module.exports = EmbeddingsPane;
+export default EmbeddingsPane;

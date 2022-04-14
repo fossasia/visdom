@@ -8,7 +8,7 @@
  */
 
 import React from 'react';
-const AbstractPropertiesList = require('./AbstractPropertiesList');
+import AbstractPropertiesList from './AbstractPropertiesList';
 var classNames = require('classnames');
 
 class Pane extends React.Component {
@@ -246,4 +246,4 @@ class PropertyList extends AbstractPropertiesList {
   }
 }
 
-module.exports = Pane;
+export default Pane;
