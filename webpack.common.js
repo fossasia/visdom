@@ -16,9 +16,17 @@ module.exports = {
     path: path.join(__dirname, './'),
     filename: 'py/visdom/static/js/main.js',
   },
-  node: {
-    net: 'empty',
-    dns: 'empty',
+  resolve: {
+    fallback: {
+      net: false,
+      dns: false,
+      stream: require.resolve('stream-browserify'),
+      zlib: require.resolve('browserify-zlib'),
+      util: require.resolve('util'),
+      https: require.resolve('https-browserify'),
+      http: require.resolve('stream-http'),
+      fetch: require.resolve('whatwg-fetch'),
+    },
   },
   module: {
     rules: [
@@ -33,9 +41,14 @@ module.exports = {
       },
       {
         test: /\.css$/,
-        loaders: ['style-loader', 'css-loader'],
+        use: ['style-loader', 'css-loader'],
       },
     ],
   },
-  plugins: [new webpack.BannerPlugin('@generated')],
+  plugins: [
+    new webpack.BannerPlugin('@generated'),
+    // new webpack.ProvidePlugin({
+    //   Buffer: ['buffer', 'Buffer']
+    // })
+  ],
 };
