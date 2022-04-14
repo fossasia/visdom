@@ -9,8 +9,7 @@
 
 import React from 'react';
 import EventSystem from './EventSystem';
-
-const Pane = require('./Pane');
+import Pane from './Pane';
 
 const DEFAULT_HEIGHT = 400;
 const DEFAULT_WIDTH = 300;
@@ -332,4 +331,4 @@ class ImagePane extends React.Component {
   }
 }
 
-module.exports = ImagePane;
+export default ImagePane;

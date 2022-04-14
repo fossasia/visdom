@@ -49,4 +49,4 @@ class EventSystem {
   }
 }
 
-module.exports = new EventSystem();
+export default new EventSystem();

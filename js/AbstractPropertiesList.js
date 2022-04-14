@@ -153,4 +153,4 @@ class AbstractPropertiesList extends React.Component {
   };
 }
 
-module.exports = AbstractPropertiesList;
+export default AbstractPropertiesList;

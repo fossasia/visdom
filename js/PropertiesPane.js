@@ -8,8 +8,8 @@
  */
 
 import React from 'react';
-const AbstractPropertiesList = require('./AbstractPropertiesList');
-const Pane = require('./Pane');
+import AbstractPropertiesList from './AbstractPropertiesList';
+import Pane from './Pane';
 
 class PropertiesPane extends AbstractPropertiesList {
   updateValue = (propId, value) => {
@@ -53,4 +53,4 @@ class PropertiesPane extends AbstractPropertiesList {
   }
 }
 
-module.exports = PropertiesPane;
+export default PropertiesPane;
