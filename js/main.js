@@ -37,14 +37,13 @@ var stringify = require('json-stable-stringify');
 
 import ReactResizeDetector from 'react-resize-detector';
 
-const PropertiesPane = require('./PropertiesPane');
-const TextPane = require('./TextPane');
-const ImagePane = require('./ImagePane');
-const PlotPane = require('./PlotPane');
-const EmbeddingsPane = require('./EmbeddingsPane');
-const NetworkPane = require('./NetworkPane');
-
-const WidthProvider = require('./Width').default;
+import PropertiesPane from './PropertiesPane';
+import TextPane from './TextPane';
+import ImagePane from './ImagePane';
+import PlotPane from './PlotPane';
+import EmbeddingsPane from './EmbeddingsPane';
+import NetworkPane from './NetworkPane';
+import WidthProvider from './Width';
 
 const GridLayout = WidthProvider(ReactGridLayout);
 const sortLayout = ReactGridLayout.utils.sortLayoutItemsByRowCol;

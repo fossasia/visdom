@@ -9,7 +9,7 @@
 
 import React from 'react';
 import EventSystem from './EventSystem';
-const Pane = require('./Pane');
+import Pane from './Pane';
 
 class TextPane extends React.Component {
   onEvent = (e) => {
@@ -59,4 +59,4 @@ class TextPane extends React.Component {
   }
 }
 
-module.exports = TextPane;
+export default TextPane;

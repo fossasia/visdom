@@ -8,7 +8,7 @@
  */
 
 import React from 'react';
-const Pane = require('./Pane');
+import Pane from './Pane';
 const { sgg } = require('ml-savitzky-golay-generalized');
 
 class PlotPane extends React.Component {
@@ -220,4 +220,4 @@ class PlotPane extends React.Component {
   }
 }
 
-module.exports = PlotPane;
+export default PlotPane;

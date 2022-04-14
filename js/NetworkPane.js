@@ -1,6 +1,5 @@
 import React from 'react';
-
-const Pane = require('./Pane');
+import Pane from './Pane';
 
 class NetworkPane extends React.Component {
   _paneRef = null;
@@ -209,4 +208,4 @@ class NetworkPane extends React.Component {
   }
 }
 
-module.exports = NetworkPane;
+export default NetworkPane;
