@@ -1,6 +1,6 @@
 {
   "extends": ["eslint:recommended", "plugin:react/recommended", "prettier"],
-  "plugins": ["ignore-generated-and-nolint"],
+  "plugins": ["ignore-generated-and-nolint", "cypress"],
   "parser": "babel-eslint",
   "env": {
     "browser": true,
