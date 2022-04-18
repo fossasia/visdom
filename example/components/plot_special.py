@@ -1,16 +1,17 @@
 import numpy as np
 
 # boxplot
-def plot_special_boxplot(viz, env):
+def plot_special_boxplot(viz, env, args):
     X = np.random.rand(100, 2)
     X[:, 1] += 2
     viz.boxplot(
         X=X,
-        opts=dict(legend=['Men', 'Women'])
+        opts=dict(legend=['Men', 'Women']),
+        env=env
     )
 
 # quiver plot
-def plot_special_quiver(viz, env):
+def plot_special_quiver(viz, env, args):
     X = np.arange(0, 2.1, .2)
     Y = np.arange(0, 2.1, .2)
     X = np.broadcast_to(np.expand_dims(X, axis=1), (len(X), len(X)))
@@ -21,10 +22,11 @@ def plot_special_quiver(viz, env):
         X=U,
         Y=V,
         opts=dict(normalize=0.9),
+        env=env
     )
 
 # mesh plot
-def plot_special_mesh(viz, env):
+def plot_special_mesh(viz, env, args):
     x = [0, 0, 1, 1, 0, 0, 1, 1]
     y = [0, 1, 1, 0, 0, 1, 1, 0]
     z = [0, 0, 0, 0, 1, 1, 1, 1]
@@ -33,14 +35,14 @@ def plot_special_mesh(viz, env):
     j = [3, 4, 1, 2, 5, 6, 5, 2, 0, 1, 6, 3]
     k = [0, 7, 2, 3, 6, 7, 1, 1, 5, 5, 7, 6]
     Y = np.c_[i, j, k]
-    viz.mesh(X=X, Y=Y, opts=dict(opacity=0.5))
+    viz.mesh(X=X, Y=Y, opts=dict(opacity=0.5), env=env)
 
 # plot network graph
-def plot_special_graph(viz, env):
+def plot_special_graph(viz, env, args):
     edges = [(0,1,10),(0,2,20),(1,3,30),(1,4,40),(1,5,50),(4,5,60)]
     edgeLabels = [ "A", "B", "C", "D", "E", "F"]    # in the order of edges
     nodeLabels = ["Orange", "Mango", "Apple", "Grapes", "Papaya","kiwi"]
     
-    viz.graph(edges, edgeLabels, nodeLabels, opts = {"showEdgeLabels" : True, "showVertexLabels" : True, "scheme" : "different", "directed" : False})
+    viz.graph(edges, edgeLabels, nodeLabels, opts = {"showEdgeLabels" : True, "showVertexLabels" : True, "scheme" : "different", "directed" : False}, env=env)
 
 

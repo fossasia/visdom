@@ -1,6 +1,6 @@
 import numpy as np
 
-def plot_scatter_basic(viz, env):
+def plot_scatter_basic(viz, env, args):
     Y = np.random.rand(100)
     return viz.scatter(
         X=np.random.rand(100, 2),
@@ -15,10 +15,11 @@ def plot_scatter_basic(viz, env):
             ytickstep=0.5,
             markersymbol='cross-thin-open',
         ),
+        env=env
     )
 
-def plot_scatter_update_opts(viz, env):
-    old_scatter = plot_scatter_basic(viz, env)
+def plot_scatter_update_opts(viz, env, args):
+    old_scatter = plot_scatter_basic(viz, env, args)
     viz.update_window_opts(
         win=old_scatter,
         opts=dict(
@@ -31,10 +32,11 @@ def plot_scatter_update_opts(viz, env):
             ytickstep=0.5,
             markersymbol='cross-thin-open',
         ),
+        env=env
     )
 
 # scatter plot example with various type of updates
-def plot_scatter_append(viz, env):
+def plot_scatter_append(viz, env, args):
     colors = np.random.randint(0, 255, (2, 3,))
     win = viz.scatter(
         X=np.random.rand(255, 2),
@@ -44,6 +46,7 @@ def plot_scatter_append(viz, env):
             markercolor=colors,
             legend=['1', '2']
         ),
+        env=env
     )
 
     viz.scatter(
@@ -56,6 +59,7 @@ def plot_scatter_append(viz, env):
         ),
         name='1',
         update='append',
+        env=env,
         win=win)
 
     viz.scatter(
@@ -66,12 +70,13 @@ def plot_scatter_append(viz, env):
             markercolor=colors,
         ),
         update='append',
+        env=env,
         win=win)
 
 
 
 # 3d scatterplot with custom labels and ranges
-def plot_scatter_3d(viz, env):
+def plot_scatter_3d(viz, env, args):
     Y = np.random.rand(100)
     viz.scatter(
         X=np.random.rand(100, 3),
@@ -89,11 +94,12 @@ def plot_scatter_3d(viz, env):
             ztickmin=0,
             ztickmax=1,
             ztickstep=0.5,
-        )
+        ),
+        env=env
     )
 
 # 2D scatterplot with custom intensities (red channel)
-def plot_scatter_custom_marker(viz, env):
+def plot_scatter_custom_marker(viz, env, args):
     viz.scatter(
         X=np.random.rand(255, 2),
         Y=(np.random.rand(255) + 1.5).astype(int),
@@ -101,10 +107,11 @@ def plot_scatter_custom_marker(viz, env):
             markersize=10,
             markercolor=np.random.randint(0, 255, (2, 3,)),
         ),
+        env=env
     )
 
 # 2D scatter plot with custom colors per label:
-def plot_scatter_custom_colors(viz, env):
+def plot_scatter_custom_colors(viz, env, args):
     viz.scatter(
         X=np.random.rand(255, 2),
         Y=(np.random.randn(255) > 0) + 1,
@@ -113,19 +120,21 @@ def plot_scatter_custom_colors(viz, env):
             markercolor=np.floor(np.random.random((2, 3)) * 255),
             markerborderwidth=0,
         ),
+        env=env
     )
 
-def plot_scatter_add_trace(viz, env):
+def plot_scatter_add_trace(viz, env, args):
     win = viz.scatter(
         X=np.random.rand(255, 2),
         opts=dict(
             markersize=10,
             markercolor=np.random.randint(0, 255, (255, 3,)),
         ),
+        env=env
     )
 
     # assert that the window exists
-    assert viz.win_exists(win), 'Created window marked as not existing'
+    assert viz.win_exists(win, env=env), 'Created window marked as not existing'
 
     # add new trace to scatter plot
     viz.scatter(
@@ -133,27 +142,30 @@ def plot_scatter_add_trace(viz, env):
         Y=np.random.rand(255),
         win=win,
         name='new_trace',
-        update='new'
+        update='new',
+        env=env
     )
 
 # 1D scatter plot with text labels:
-def plot_scatter_text_labels_1d(viz, env):
+def plot_scatter_text_labels_1d(viz, env, args):
     viz.scatter(
         X=np.random.rand(10, 2),
         opts=dict(
             textlabels=['Label %d' % (i + 1) for i in range(10)]
-        )
+        ),
+        env=env
     )
 
 # 2D scatter plot with text labels:
-def plot_scatter_text_labels_2d(viz, env):
+def plot_scatter_text_labels_2d(viz, env, args):
     viz.scatter(
         X=np.random.rand(10, 2),
         Y=[1] * 5 + [2] * 3 + [3] * 2,
         opts=dict(
             legend=['A', 'B', 'C'],
             textlabels=['Label %d' % (i + 1) for i in range(10)]
-        )
+        ),
+        env=env
     )
 
 
