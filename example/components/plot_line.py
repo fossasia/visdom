@@ -1,54 +1,60 @@
 import numpy as np
 
-def plot_line_basic(viz, env):
-    viz.line(Y=np.random.rand(10), opts=dict(showlegend=True))
+def plot_line_basic(viz, env, args):
+    viz.line(Y=np.random.rand(10), opts=dict(showlegend=True), env=env)
 
-def plot_line_multiple(viz, env):
+def plot_line_multiple(viz, env, args):
     Y = np.linspace(-5, 5, 100)
     viz.line(
         Y=np.column_stack((Y * Y, np.sqrt(Y + 5))),
         X=np.column_stack((Y, Y)),
         opts=dict(markers=False),
+        env=env
     )
 
 # line using WebGL
-def plot_line_webgl(viz, env):
+def plot_line_webgl(viz, env, args):
     webgl_num_points = 200000
     webgl_x = np.linspace(-1, 0, webgl_num_points)
     webgl_y = webgl_x**3
     viz.line(X=webgl_x, Y=webgl_y,
              opts=dict(title='{} points using WebGL'.format(webgl_num_points), webgl=True),
+             env=env,
              win="WebGL demo")
     return webgl_x
 
-def plot_line_update_webgl(viz, env):
-    webgl_x = plot_line_webgl(viz, env)
+def plot_line_update_webgl(viz, env, args):
+    webgl_x = plot_line_webgl(viz, env, args)
     webgl_num_points = len(webgl_x)
     viz.line(
         X=webgl_x+1.,
         Y=(webgl_x+1.)**3,
         win="WebGL demo",
         update='append',
+        env=env,
         opts=dict(title='{} points using WebGL'.format(webgl_num_points*2), webgl=True)
     )
 
 # line updates
-def plot_line_update(viz, env):
+def plot_line_update(viz, env, args):
     win = viz.line(
         X=np.column_stack((np.arange(0, 10), np.arange(0, 10))),
         Y=np.column_stack((np.linspace(5, 10, 10),
                            np.linspace(5, 10, 10) + 5)),
+        env=env
     )
     viz.line(
         X=np.column_stack((np.arange(10, 20), np.arange(10, 20))),
         Y=np.column_stack((np.linspace(5, 10, 10),
                            np.linspace(5, 10, 10) + 5)),
+        env=env,
         win=win,
         update='append'
     )
     viz.line(
         X=np.arange(21, 30),
         Y=np.arange(1, 10),
+        env=env,
         win=win,
         name='2',
         update='append'
@@ -56,6 +62,7 @@ def plot_line_update(viz, env):
     viz.line(
         X=np.arange(1, 10),
         Y=np.arange(11, 20),
+        env=env,
         win=win,
         name='delete this',
         update='append'
@@ -63,14 +70,15 @@ def plot_line_update(viz, env):
     viz.line(
         X=np.arange(1, 10),
         Y=np.arange(11, 20),
+        env=env,
         win=win,
         name='4',
         update='insert'
     )
-    viz.line(X=None, Y=None, win=win, name='delete this', update='remove')
+    viz.line(X=None, Y=None, win=win, name='delete this', update='remove', env=env)
 
 
-def plot_line_opts(viz, env):
+def plot_line_opts(viz, env, args):
     return viz.line(
         X=np.column_stack((
             np.arange(0, 10),
@@ -90,11 +98,12 @@ def plot_line_opts(viz, env):
                 [255, 0, 0],
             ]),
             'title': 'Different line dash types'
-        }
+        },
+        env=env
     )
 
-def plot_line_opts_update(viz, env):
-    win = plot_line_opts(viz, env)
+def plot_line_opts_update(viz, env, args):
+    win = plot_line_opts(viz, env, args)
     viz.line(
         X=np.arange(0, 10),
         Y=np.linspace(5, 10, 10) + 15,
@@ -106,10 +115,11 @@ def plot_line_opts_update(viz, env):
                 [255, 0, 0],
             ]),
             'dash': np.array(['dot']),
-        }
+        },
+        env=env
     )
 
-def plot_line_stackedarea(viz, env):
+def plot_line_stackedarea(viz, env, args):
     Y = np.linspace(0, 4, 200)
     return viz.line(
         Y=np.column_stack((np.sqrt(Y), np.sqrt(Y) + 2)),
@@ -128,43 +138,46 @@ def plot_line_stackedarea(viz, env):
             marginbottom=80,
             margintop=30,
         ),
+        env=env
     )
 
 # Assure that the stacked area plot isn't giant
-def plot_line_maxsize(viz, env):
-    win = plot_line_stackedarea(viz, env)
+def plot_line_maxsize(viz, env, args):
+    win = plot_line_stackedarea(viz, env, args)
     viz.update_window_opts(
         win=win,
         opts=dict(
             width=300,
             height=300,
         ),
+        env=env
     )
 
 
 # double y axis plot
-def plot_line_doubleyaxis(viz, env):
+def plot_line_doubleyaxis(viz, env, args):
     X = np.arange(20)
     Y1 = np.random.randint(0, 20, 20)
     Y2 = np.random.randint(0, 20, 20)
-    viz.dual_axis_lines(X, Y1, Y2)
+    viz.dual_axis_lines(X, Y1, Y2, env=env)
 
 
 
 # PyTorch tensor
-def plot_line_pytorch(viz, env):
+def plot_line_pytorch(viz, env, args):
     try:
         import torch
-        viz.line(Y=torch.Tensor([[0., 0.], [1., 1.]]))
+        viz.line(Y=torch.Tensor([[0., 0.], [1., 1.]]), env=env)
     except ImportError:
         print('Skipped PyTorch example')
 
 # stemplot
-def plot_line_stem(viz, env):
+def plot_line_stem(viz, env, args):
     Y = np.linspace(0, 2 * np.pi, 70)
     X = np.column_stack((np.sin(Y), np.cos(Y)))
     viz.stem(
         X=X,
         Y=Y,
-        opts=dict(legend=['Sine', 'Cosine'])
+        opts=dict(legend=['Sine', 'Cosine']),
+        env=env
     )
