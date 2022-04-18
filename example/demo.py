@@ -8,7 +8,7 @@
 
 from visdom import Visdom
 import argparse
-from components.text import text_basic, text_update, text_callbacks
+from components.text import text_basic, text_update, text_callbacks, text_close
 from components.image import image_basic, image_callback, image_save_jpeg, image_history, image_grid, image_svg
 from components.plot_scatter import plot_scatter_basic, plot_scatter_update_opts, plot_scatter_append, plot_scatter_3d, plot_scatter_custom_marker, plot_scatter_custom_colors, plot_scatter_add_trace, plot_scatter_text_labels_1d, plot_scatter_text_labels_2d
 from components.plot_bar import plot_bar_basic, plot_bar_stacked, plot_bar_nonstacked, plot_bar_histogram, plot_bar_piechart
@@ -19,7 +19,7 @@ from components.misc import misc_plot_matplot, misc_plot_latex, misc_plot_latex_
 
 
 # This demo shows all features in a single environment.
-def run_demo(viz):
+def run_demo(viz, env, args):
     global input
     assert viz.check_connection(timeout_seconds=3), \
         'No connection could be formed quickly'
@@ -27,91 +27,92 @@ def run_demo(viz):
     # ============ #
     # text windows #
     # ============ #
-    text_basic(viz, None)
-    text_update(viz, None)
-    text_callbacks(viz, None)
+    text_basic(viz, env, args)
+    text_update(viz, env, args)
+    text_callbacks(viz, env, args)
+    text_close(viz, env, args)
 
     # ===== #
     # image #
     # ===== #
-    image_basic(viz, None)
-    image_callback(viz, None)
-    image_save_jpeg(viz, None)
-    image_history(viz, None)
-    image_grid(viz, None)
+    image_basic(viz, env, args)
+    image_callback(viz, env, args)
+    image_save_jpeg(viz, env, args)
+    image_history(viz, env, args)
+    image_grid(viz, env, args)
 
     # ========== #
     # line plots #
     # ========== #
-    plot_line_basic(viz, None)
-    plot_line_multiple(viz, None)
-    plot_line_webgl(viz, None)
-    plot_line_update_webgl(viz, None)
-    plot_line_update(viz, None)
-    plot_line_opts(viz, None)
-    plot_line_opts_update(viz, None)
-    plot_line_stackedarea(viz, None)
-    plot_line_maxsize(viz, None)
-    plot_line_doubleyaxis(viz, None)
-    plot_line_pytorch(viz, None)
-    plot_line_stem(viz, None)
+    plot_line_basic(viz, env, args)
+    plot_line_multiple(viz, env, args)
+    plot_line_webgl(viz, env, args)
+    plot_line_update_webgl(viz, env, args)
+    plot_line_update(viz, env, args)
+    plot_line_opts(viz, env, args)
+    plot_line_opts_update(viz, env, args)
+    plot_line_stackedarea(viz, env, args)
+    plot_line_maxsize(viz, env, args)
+    plot_line_doubleyaxis(viz, env, args)
+    plot_line_pytorch(viz, env, args)
+    plot_line_stem(viz, env, args)
 
     # ============= #
     # scatter plots #
     # ============= #
-    plot_scatter_basic(viz, None)
-    plot_scatter_update_opts(viz, None)
-    plot_scatter_append(viz, None)
-    plot_scatter_3d(viz, None)
-    plot_scatter_custom_marker(viz, None)
-    plot_scatter_custom_colors(viz, None)
-    plot_scatter_add_trace(viz, None)
-    plot_scatter_text_labels_1d(viz, None)
-    plot_scatter_text_labels_2d(viz, None)
+    plot_scatter_basic(viz, env, args)
+    plot_scatter_update_opts(viz, env, args)
+    plot_scatter_append(viz, env, args)
+    plot_scatter_3d(viz, env, args)
+    plot_scatter_custom_marker(viz, env, args)
+    plot_scatter_custom_colors(viz, env, args)
+    plot_scatter_add_trace(viz, env, args)
+    plot_scatter_text_labels_1d(viz, env, args)
+    plot_scatter_text_labels_2d(viz, env, args)
 
     # ========= #
     # bar plots #
     # ========= #
-    plot_bar_basic(viz, None)
-    plot_bar_stacked(viz, None)
-    plot_bar_nonstacked(viz, None)
-    plot_bar_histogram(viz, None)
-    plot_bar_piechart(viz, None)
+    plot_bar_basic(viz, env, args)
+    plot_bar_stacked(viz, env, args)
+    plot_bar_nonstacked(viz, env, args)
+    plot_bar_histogram(viz, env, args)
+    plot_bar_piechart(viz, env, args)
 
     # ============= #
     # heatmap plots #
     # ============= #
-    plot_surface_basic(viz, None)
-    plot_surface_basic_withnames(viz, None)
-    plot_surface_append(viz, None)
-    plot_surface_append_withnames(viz, None)
-    plot_surface_remove(viz, None)
-    plot_surface_remove_withnames(viz, None)
-    plot_surface_replace(viz, None)
-    plot_surface_replace_withnames(viz, None)
-    plot_surface_contour(viz, None)
-    plot_surface_3d(viz, None)
+    plot_surface_basic(viz, env, args)
+    plot_surface_basic_withnames(viz, env, args)
+    plot_surface_append(viz, env, args)
+    plot_surface_append_withnames(viz, env, args)
+    plot_surface_remove(viz, env, args)
+    plot_surface_remove_withnames(viz, env, args)
+    plot_surface_replace(viz, env, args)
+    plot_surface_replace_withnames(viz, env, args)
+    plot_surface_contour(viz, env, args)
+    plot_surface_3d(viz, env, args)
 
     # ============= #
     # special plots #
     # ============= #
-    plot_special_boxplot(viz, None)
-    plot_special_quiver(viz, None)
-    plot_special_mesh(viz, None)
-    plot_special_graph(viz, None)
+    plot_special_boxplot(viz, env, args)
+    plot_special_quiver(viz, env, args)
+    plot_special_mesh(viz, env, args)
+    plot_special_graph(viz, env, args)
 
     # ==== #
     # misc #
     # ==== #
-    misc_plot_matplot(viz, None)
-    misc_plot_latex(viz, None)
-    misc_plot_latex_update(viz, None)
-    misc_video_tensor(viz, None)
-    misc_video_download(viz, None)
-    misc_audio_basic(viz, None)
-    misc_audio_download(viz, None)
-    misc_arbitrary_visdom(viz, None)
-    misc_getset_state(viz, None)
+    misc_plot_matplot(viz, env, args)
+    misc_plot_latex(viz, env, args)
+    misc_plot_latex_update(viz, env, args)
+    misc_video_tensor(viz, env, args)
+    misc_video_download(viz, env, args)
+    misc_audio_basic(viz, env, args)
+    misc_audio_download(viz, env, args)
+    misc_arbitrary_visdom(viz, env, args)
+    misc_getset_state(viz, env, args)
        
     try:
         input = raw_input  # for Python 2 compatibility
@@ -143,6 +144,10 @@ if __name__ == '__main__':
                     default=True,
                     help='use_incoming_socket.')
     parser.add_argument('-run', help='demo-function to run. (default: \'all\'). possible values:'+(", ".join(demos_list)), type=str, default="all")
+    parser.add_argument('-env', help='env name to save demo in. By default, main is used for \'-run all\' and otherwise the demo chosen using \'-run\'.', default="")
+    # parser.add_argument('-env', help='The env to save the demo to.', default="main")
+    parser.add_argument('-env_suffix', help='The env suffix to save the demo to.', default="")
+    parser.add_argument('-args', nargs='*', help='Additonal arguments passed to the requested demo. (Mainly to be used for automated testing).', default="")
     FLAGS = parser.parse_args()
 
     viz = Visdom(port=FLAGS.port, server=FLAGS.server, base_url=FLAGS.base_url, username=FLAGS.username, password=FLAGS.password, \
@@ -150,7 +155,7 @@ if __name__ == '__main__':
 
     if FLAGS.run == "all":
         try:
-            run_demo(viz)
+            run_demo(viz, FLAGS.env if FLAGS.env else None, FLAGS.args)
         except Exception as e:
             print(
                 "The visdom experienced an exception while running: {}\n"
@@ -160,3 +165,5 @@ if __name__ == '__main__':
                 "If this does not resolve the problem, please open an issue on "
                 "our GitHub.".format(repr(e))
             )
+    else:
+        locals()[FLAGS.run](viz, FLAGS.run + FLAGS.env_suffix if not FLAGS.env else FLAGS.env, FLAGS.args)
