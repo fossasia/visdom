@@ -6,6 +6,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import time
 from visdom import Visdom
 import argparse
 from components.text import text_basic, text_update, text_callbacks, text_close
@@ -167,3 +168,6 @@ if __name__ == '__main__':
             )
     else:
         locals()[FLAGS.run](viz, FLAGS.run + FLAGS.env_suffix if not FLAGS.env else FLAGS.env, FLAGS.args)
+
+        if len(viz.event_handlers) > 0:
+            time.sleep(10)
