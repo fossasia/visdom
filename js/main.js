@@ -739,10 +739,10 @@ class App extends React.Component {
 
       // resets to default layout (same as during pane creation)
       layoutItem.w = pane.width
-        ? pane.p2w(pane.width)
+        ? this.p2w(pane.width)
         : PANE_SIZE[pane.type][0];
       layoutItem.h = pane.height
-        ? pane.p2w(pane.height + 14)
+        ? this.p2w(pane.height + 14)
         : PANE_SIZE[pane.type][1];
     }
 
