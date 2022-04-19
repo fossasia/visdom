@@ -39,7 +39,7 @@ def plot_special_mesh(viz, env, args):
 
 # plot network graph
 def plot_special_graph(viz, env, args):
-    edges = [(0,1,10),(0,2,20),(1,3,30),(1,4,40),(1,5,50),(4,5,60)]
+    edges = [(0,1),(0,2),(1,3),(1,4),(1,5),(4,5)]
     edgeLabels = [ "A", "B", "C", "D", "E", "F"]    # in the order of edges
     nodeLabels = ["Orange", "Mango", "Apple", "Grapes", "Papaya","kiwi"]
     
