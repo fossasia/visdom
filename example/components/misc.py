@@ -2,6 +2,7 @@ import urllib
 import tempfile
 import os.path
 import numpy as np
+import json
 
 
 def misc_plot_matplot(viz, env, args):
@@ -16,12 +17,10 @@ def misc_plot_matplot(viz, env, args):
 
 # Example for Latex Support
 def misc_plot_latex(viz, env, args):
-    viz.line(
+    return viz.line(
         X=[1, 2, 3, 4],
         Y=[1, 4, 9, 16],
-        win="latex_support",
         name=r'$\alpha_{1c} = 352 \pm 11 \text{ km s}^{-1}$',
-        update='append',
         opts={
             'showlegend': True,
             'title': "Demo Latex in Visdom",
@@ -32,11 +31,11 @@ def misc_plot_latex(viz, env, args):
     )
 
 def misc_plot_latex_update(viz, env, args):
-    misc_plot_latex(viz, env)
+    win = misc_plot_latex(viz, env, args)
     viz.line(
         X=[1, 2, 3, 4],
         Y=[0.5, 2, 4.5, 8],
-        win="latex_support",
+        win=win,
         name=r'$\beta_{1c} = 25 \pm 11 \text{ km s}^{-1}$',
         update='append',
         env=env
@@ -49,8 +48,8 @@ def misc_video_tensor(viz, env, args):
         for n in range(256):
             video[n, :, :, :].fill(n)
         viz.video(tensor=video, env=env)
-    except BaseException:
-        print('Skipped video tensor example')
+    except BaseException as e:
+        print('Skipped video tensor example.' + str(e))
 
 
 def misc_video_download(viz, env, args):
@@ -93,14 +92,13 @@ def misc_arbitrary_visdom(viz, env, args):
     layout = dict(title="First Plot", xaxis={'title': 'x1'},
                   yaxis={'title': 'x2'})
 
-    viz._send({'data': [trace], 'layout': layout, 'win': 'mywin'}, env=env)
+    viz._send({'data': [trace], 'layout': layout, 'win': 'mywin', 'eid': env})
 
 # get/set state
 def misc_getset_state(viz, env, args):
-    import json
-    window = viz.text('test one')
-    data = json.loads(viz.get_window_data(env=env))
-    data[window]['content'] = 'test two'
-    viz.set_window_data(json.dumps(data), env=env)
+    window = viz.text('test one', env=env)
+    data = json.loads(viz.get_window_data(window, env=env))
+    data['content'] = 'test two'
+    viz.set_window_data(json.dumps(data), env=env, win=window)
 
 
