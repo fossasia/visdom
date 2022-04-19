@@ -1518,6 +1518,7 @@ class App extends React.Component {
         <input
           type="text"
           className="form-control"
+          data-cy="filter"
           placeholder="Filter text"
           onChange={ev => {
             this.setState(
