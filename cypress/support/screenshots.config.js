@@ -55,6 +55,7 @@ export const all_screenshots = [
   'misc_audio_download',
   'misc_arbitrary_visdom',
   'misc_getset_state',
+  'properties_basic'
 ];
 
 
