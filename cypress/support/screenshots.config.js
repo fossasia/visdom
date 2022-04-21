@@ -59,3 +59,32 @@ export const all_screenshots = [
 ];
 
 
+export const all_compareviews = [
+  'plot_line_basic',
+  'plot_line_multiple',
+  // // 'plot_line_webgl', // disabled due to webgl
+  // // 'plot_line_update_webgl', // disabled due to webgl
+  'plot_line_update',
+  'plot_line_opts',
+  'plot_line_opts_update',
+  'plot_line_stackedarea',
+  'plot_line_doubleyaxis',
+  'plot_line_stem',
+  'plot_scatter_basic',
+  'plot_scatter_update_opts',
+  'plot_scatter_append',
+  // 'plot_scatter_3d', // disabled due to webgl
+  'plot_scatter_custom_marker',
+  'plot_scatter_custom_colors',
+  'plot_scatter_add_trace',
+  'plot_scatter_text_labels_1d',
+  'plot_scatter_text_labels_2d',
+  // 'plot_bar_basic', // does not work or not implemented
+  'plot_bar_stacked',
+  'plot_bar_nonstacked',
+  // 'plot_bar_histogram', // does not work or not implemented
+  // 'plot_bar_piechart', // does not work or not implemented
+  'plot_special_boxplot',
+  'misc_plot_latex',
+  'misc_plot_latex_update',
+]
