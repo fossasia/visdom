@@ -27,6 +27,7 @@ def text_callbacks(viz, env, args):
             viz.text(curr_txt, win=callback_text_window, env=env)
 
     viz.register_event_handler(type_callback, callback_text_window)
+    return callback_text_window
 
 # close text window:
 def text_close(viz, env, args):
