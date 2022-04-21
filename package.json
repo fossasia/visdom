@@ -31,7 +31,10 @@
   "scripts": {
     "dev": "webpack --watch --progress --colors --config webpack.dev.js",
     "build": "webpack -p --config webpack.prod.js",
-    "cypress:open": "cypress open",
+    "test:gui": "cypress open",
+    "test:init": "cypress run --spec './cypress/integration/screenshots.init.js'",
+    "test:visual": "cypress run --spec './cypress/integration/screenshots.js'",
+    "test": "cypress run --config ignoreTestFiles=*.init.js",
     "lint": "eslint js/."
   },
   "dependencies": {
