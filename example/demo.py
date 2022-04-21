@@ -145,6 +145,7 @@ if __name__ == '__main__':
     # parser.add_argument('-env', help='The env to save the demo to.', default="main")
     parser.add_argument('-env_suffix', help='The env suffix to save the demo to.', default="")
     parser.add_argument('-args', nargs='*', help='Additonal arguments passed to the requested demo. (Mainly to be used for automated testing).', default="")
+    parser.add_argument('-seed', help='Seed to use for random data in -testing mode. (Default: 42)', default=42)
     parser.add_argument('-testing', help='(To be mainly to be used for automated testing). If set to true, waits 10 seconds for callback actions and closes then automatically. Also this sets a random seed for consistent outcomes.', default=False, action='store_true')
     FLAGS = parser.parse_args()
 
@@ -152,7 +153,7 @@ if __name__ == '__main__':
             use_incoming_socket=FLAGS.use_incoming_socket)
 
     if FLAGS.testing:
-        np.random.seed(42)
+        np.random.seed(int(FLAGS.seed))
 
     if FLAGS.run == "all":
         try:
