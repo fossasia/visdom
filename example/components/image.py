@@ -25,6 +25,31 @@ def image_callback(viz, env, args):
 
     viz.register_event_handler(img_click_callback, img_callback_win)
 
+# image callback demo
+image_color = 0
+def image_callback2(viz, env, args):
+    def show_color_image_window(color, win=None):
+        image = np.full([3, 256, 256], color, dtype=float)
+        return viz.image(
+            image,
+            opts=dict(title='Colors', caption='Press arrows to alter color.'),
+            win=win,
+            env=env
+        )
+
+    callback_image_window = show_color_image_window(image_color)
+
+    def image_callback(event):
+        global image_color
+        if event['event_type'] == 'KeyPress':
+            if event['key'] == 'ArrowRight':
+                image_color = min(image_color + 0.2, 1)
+            if event['key'] == 'ArrowLeft':
+                image_color = max(image_color - 0.2, 0)
+            show_color_image_window(image_color, callback_image_window)
+
+    viz.register_event_handler(image_callback, callback_image_window)
+
 # image demo save as jpg
 def image_save_jpeg(viz, env, args):
     viz.image(
