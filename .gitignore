@@ -1,3 +1,6 @@
+cypress/screenshots
+cypress/downloads
+cypress/fixtures
 node_modules
 build
 th/CMakeLists.txt
