@@ -1,6 +1,7 @@
 import numpy as np
 
 def plot_scatter_basic(viz, env, args):
+    title = args[0] if len(args) > 0 else None
     Y = np.random.rand(100)
     return viz.scatter(
         X=np.random.rand(100, 2),
@@ -14,6 +15,7 @@ def plot_scatter_basic(viz, env, args):
             ytickmax=50,
             ytickstep=0.5,
             markersymbol='cross-thin-open',
+            title=title
         ),
         env=env
     )
@@ -37,6 +39,7 @@ def plot_scatter_update_opts(viz, env, args):
 
 # scatter plot example with various type of updates
 def plot_scatter_append(viz, env, args):
+    title = args[0] if len(args) > 0 else None
     colors = np.random.randint(0, 255, (2, 3,))
     win = viz.scatter(
         X=np.random.rand(255, 2),
@@ -44,7 +47,8 @@ def plot_scatter_append(viz, env, args):
         opts=dict(
             markersize=10,
             markercolor=colors,
-            legend=['1', '2']
+            legend=['1', '2'],
+            title=title
         ),
         env=env
     )
@@ -77,6 +81,7 @@ def plot_scatter_append(viz, env, args):
 
 # 3d scatterplot with custom labels and ranges
 def plot_scatter_3d(viz, env, args):
+    title = args[0] if len(args) > 0 else None
     Y = np.random.rand(100)
     viz.scatter(
         X=np.random.rand(100, 3),
@@ -94,24 +99,28 @@ def plot_scatter_3d(viz, env, args):
             ztickmin=0,
             ztickmax=1,
             ztickstep=0.5,
+            title=title
         ),
         env=env
     )
 
 # 2D scatterplot with custom intensities (red channel)
 def plot_scatter_custom_marker(viz, env, args):
+    title = args[0] if len(args) > 0 else None
     viz.scatter(
         X=np.random.rand(255, 2),
         Y=(np.random.rand(255) + 1.5).astype(int),
         opts=dict(
             markersize=10,
             markercolor=np.random.randint(0, 255, (2, 3,)),
+            title=title
         ),
         env=env
     )
 
 # 2D scatter plot with custom colors per label:
 def plot_scatter_custom_colors(viz, env, args):
+    title = args[0] if len(args) > 0 else None
     viz.scatter(
         X=np.random.rand(255, 2),
         Y=(np.random.randn(255) > 0) + 1,
@@ -119,16 +128,19 @@ def plot_scatter_custom_colors(viz, env, args):
             markersize=10,
             markercolor=np.floor(np.random.random((2, 3)) * 255),
             markerborderwidth=0,
+            title=title
         ),
         env=env
     )
 
 def plot_scatter_add_trace(viz, env, args):
+    title = args[0] if len(args) > 0 else None
     win = viz.scatter(
         X=np.random.rand(255, 2),
         opts=dict(
             markersize=10,
             markercolor=np.random.randint(0, 255, (255, 3,)),
+            title=title
         ),
         env=env
     )
@@ -148,22 +160,26 @@ def plot_scatter_add_trace(viz, env, args):
 
 # 1D scatter plot with text labels:
 def plot_scatter_text_labels_1d(viz, env, args):
+    title = args[0] if len(args) > 0 else None
     viz.scatter(
         X=np.random.rand(10, 2),
         opts=dict(
-            textlabels=['Label %d' % (i + 1) for i in range(10)]
+            textlabels=['Label %d' % (i + 1) for i in range(10)],
+            title=title
         ),
         env=env
     )
 
 # 2D scatter plot with text labels:
 def plot_scatter_text_labels_2d(viz, env, args):
+    title = args[0] if len(args) > 0 else None
     viz.scatter(
         X=np.random.rand(10, 2),
         Y=[1] * 5 + [2] * 3 + [3] * 2,
         opts=dict(
             legend=['A', 'B', 'C'],
-            textlabels=['Label %d' % (i + 1) for i in range(10)]
+            textlabels=['Label %d' % (i + 1) for i in range(10)],
+            title=title
         ),
         env=env
     )

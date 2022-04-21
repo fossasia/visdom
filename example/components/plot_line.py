@@ -1,14 +1,17 @@
 import numpy as np
 
 def plot_line_basic(viz, env, args):
-    viz.line(Y=np.random.rand(10), opts=dict(showlegend=True), env=env)
+    title = args[0] if len(args) > 0 else None
+    num = int(args[1]) if len(args) > 1 else 10
+    viz.line(Y=np.random.rand(num), opts=dict(showlegend=True, title=title), env=env)
 
 def plot_line_multiple(viz, env, args):
+    title = args[0] if len(args) > 0 else None
     Y = np.linspace(-5, 5, 100)
     viz.line(
         Y=np.column_stack((Y * Y, np.sqrt(Y + 5))),
         X=np.column_stack((Y, Y)),
-        opts=dict(markers=False),
+        opts=dict(markers=False, title=title),
         env=env
     )
 
@@ -37,11 +40,13 @@ def plot_line_update_webgl(viz, env, args):
 
 # line updates
 def plot_line_update(viz, env, args):
+    opts = {'title': args[0]} if len(args) > 0 else {}
     win = viz.line(
         X=np.column_stack((np.arange(0, 10), np.arange(0, 10))),
         Y=np.column_stack((np.linspace(5, 10, 10),
                            np.linspace(5, 10, 10) + 5)),
-        env=env
+        env=env,
+        opts=opts
     )
     viz.line(
         X=np.column_stack((np.arange(10, 20), np.arange(10, 20))),
@@ -156,10 +161,11 @@ def plot_line_maxsize(viz, env, args):
 
 # double y axis plot
 def plot_line_doubleyaxis(viz, env, args):
+    opts = {'title': args[0]} if len(args) > 0 else {}
     X = np.arange(20)
     Y1 = np.random.randint(0, 20, 20)
     Y2 = np.random.randint(0, 20, 20)
-    viz.dual_axis_lines(X, Y1, Y2, env=env)
+    viz.dual_axis_lines(X, Y1, Y2, env=env, opts=opts)
 
 
 
@@ -173,11 +179,12 @@ def plot_line_pytorch(viz, env, args):
 
 # stemplot
 def plot_line_stem(viz, env, args):
+    title = args[0] if len(args) > 0 else None
     Y = np.linspace(0, 2 * np.pi, 70)
     X = np.column_stack((np.sin(Y), np.cos(Y)))
     viz.stem(
         X=X,
         Y=Y,
-        opts=dict(legend=['Sine', 'Cosine']),
+        opts=dict(legend=['Sine', 'Cosine'], title=title),
         env=env
     )

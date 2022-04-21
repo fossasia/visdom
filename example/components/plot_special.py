@@ -2,11 +2,12 @@ import numpy as np
 
 # boxplot
 def plot_special_boxplot(viz, env, args):
+    title = args[0] if len(args) > 0 else None
     X = np.random.rand(100, 2)
     X[:, 1] += 2
     viz.boxplot(
         X=X,
-        opts=dict(legend=['Men', 'Women']),
+        opts=dict(legend=['Men', 'Women'], title=title),
         env=env
     )
 
