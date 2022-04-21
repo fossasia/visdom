@@ -28,11 +28,12 @@
 
 Cypress.Commands.add('run', (name, opts) => {
   var saveto = (opts && "env" in opts) ? opts["env"] : name + "_" + Cypress._.random(0, 1e6);
-  var argscli = (opts && "args" in opts) ? ('-arg '+opts["args"].join(' ')) : '';
+  var argscli = (opts && "args" in opts) ? (' -arg '+opts["args"].join(' ')) : '';
+  var seed = (opts && "seed" in opts) ? (' -seed '+opts["seed"]) : '';
   if (!opts || !("asyncrun" in opts) || !opts["asyncrun"])
-      cy.exec(`python example/demo.py -port 8098 -testing -run ${name} -env ${saveto} ${argscli}`);
+      cy.exec(`python example/demo.py -port 8098 -testing -run ${name} -env ${saveto} ${seed} ${argscli}`);
   else
-      cy.task('asyncrun', `python example/demo.py -testing -port 8098 -run ${name} -env ${saveto}` + argscli)
+      cy.task('asyncrun', `python example/demo.py -testing -port 8098 -run ${name} -env ${saveto}` + seed + argscli)
 
   if (!opts || !("open" in opts) || opts["open"]) {
       cy.close_envs();
