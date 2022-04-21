@@ -120,6 +120,26 @@ npm install       # install node dependencies
 npm run build     # build js
 ```
 
+#### Test your changes
+This project has some Cypress tests (end-2-end tests and visual regression tests) so you can check for sideeffects of your changes.
+If you add or change functions, feel free to adjust the tests or add new ones if none exist for your case.
+(This will ensure that your function will continue to work in the future. ;) )
+
+To run the predefined tests
+
+**using Cypress GUI**:
+1. start a fresh visdom server instance on port `8098` , i.e. by just calling `visdom -port 8098`. (Just to make sure another instance is not interfering with our test.)
+2. run `npm run test:init`. This generates screenshots of all plots for the visual regression testing.
+3. Adapt the code now to your needs.
+4. run `npm run test:gui` (a new window should appear)
+4. click through the test spec-files and observe the tests done automatically in a newly opened browser instance
+
+**as CLI tests**:
+1. start a fresh visdom server instance on port `8098` , i.e. by just calling `visdom -port 8098` (Just to make sure another instance is not interfering with our test.)
+2. run `npm run test:init`. This generates screenshots of all plots for the visual regression testing.
+3. Adapt the code now to your needs.
+4. run `npm run test`
+
 ## Issues
 We use GitHub issues to track public bugs. Please ensure your description is
 clear and has sufficient instructions to be able to reproduce the issue.
