@@ -6,6 +6,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import numpy as np
 import time
 from visdom import Visdom
 import argparse
@@ -115,12 +116,6 @@ def run_demo(viz, env, args):
     misc_arbitrary_visdom(viz, env, args)
     misc_getset_state(viz, env, args)
        
-    try:
-        input = raw_input  # for Python 2 compatibility
-    except NameError:
-        pass
-    input('Waiting for callbacks, press enter to quit.')
-
 if __name__ == '__main__':
     demos_list = [fn for fn in locals().keys() if fn.split("_")[0] in ["text", "image", "plot", "misc"]]
  
@@ -149,10 +144,14 @@ if __name__ == '__main__':
     # parser.add_argument('-env', help='The env to save the demo to.', default="main")
     parser.add_argument('-env_suffix', help='The env suffix to save the demo to.', default="")
     parser.add_argument('-args', nargs='*', help='Additonal arguments passed to the requested demo. (Mainly to be used for automated testing).', default="")
+    parser.add_argument('-testing', help='(To be mainly to be used for automated testing). If set to true, waits 10 seconds for callback actions and closes then automatically. Also this sets a random seed for consistent outcomes.', default=False, action='store_true')
     FLAGS = parser.parse_args()
 
     viz = Visdom(port=FLAGS.port, server=FLAGS.server, base_url=FLAGS.base_url, username=FLAGS.username, password=FLAGS.password, \
             use_incoming_socket=FLAGS.use_incoming_socket)
+
+    if FLAGS.testing:
+        np.random.seed(42)
 
     if FLAGS.run == "all":
         try:
@@ -169,5 +168,12 @@ if __name__ == '__main__':
     else:
         locals()[FLAGS.run](viz, FLAGS.run + FLAGS.env_suffix if not FLAGS.env else FLAGS.env, FLAGS.args)
 
-        if len(viz.event_handlers) > 0:
+    if len(viz.event_handlers) > 0:
+        if FLAGS.testing:
             time.sleep(10)
+        else:
+            try:
+                input = raw_input  # for Python 2 compatibility
+            except NameError:
+                pass
+            input('Waiting for callbacks, press enter to quit.')
