@@ -17,10 +17,16 @@
  */
 // eslint-disable-next-line no-unused-vars
 const { spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const pixelmatch = require('pixelmatch');
+const PNG = require('pngjs').PNG;
+
 
 module.exports = (on, config) => {
   // `on` is used to hook into various events Cypress emits
   // `config` is the resolved Cypress config
+
   on('task', {
     asyncrun(cmd) {
         cmd = cmd.split(" ")
@@ -32,4 +38,23 @@ module.exports = (on, config) => {
       return [cmd, args]
     },
   })
+
+  on('task', {
+    numDifferentPixels({src1, src2, diffsrc, threshold=0.0, debug=false}) {
+        const img1 = PNG.sync.read(fs.readFileSync(src1));
+        const img2 = PNG.sync.read(fs.readFileSync(src2));
+        const {width, height} = img1;
+        const diff = new PNG({width, height});
+        if (debug)
+            threshold = 0
+        num_diff_pixels = pixelmatch(img1.data, img2.data, diff.data, width, height, {threshold: threshold});
+        fs.mkdirSync(path.dirname(diffsrc), {recursive: true}, (err) => { if(err) throw err;})
+        fs.writeFileSync(diffsrc, PNG.sync.write(diff));
+        if (debug)
+            fs.writeFileSync(diffsrc+".num", (num_diff_pixels / (width * height)) + "");
+      return num_diff_pixels
+    },
+  })
+
 }
+
