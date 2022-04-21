@@ -9,6 +9,7 @@
 
 import React from 'react';
 const AbstractPropertiesList = require('./AbstractPropertiesList');
+const Pane = require('./Pane');
 
 class PropertiesPane extends AbstractPropertiesList {
   updateValue = (propId, value) => {
