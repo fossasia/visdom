@@ -43,7 +43,7 @@ basic_examples.forEach( (setting) => {
 
       it('Drag & Drop Pane to 2nd Position', () => {
 
-          const targetpos = basic_example == "text_basic" ? 263 : basic_example == "image_basic" ? 276 : basic_example == "misc_plot_matplot" || basic_example == "plot_special_graph" ? 10: basic_example == "misc_video_tensor" ? 263 : basic_example == "misc_audio_basic" ? 350 : 390
+          const targetpos = basic_example == "text_basic" ? 263 : basic_example == "image_basic" ? 276 : basic_example == "misc_plot_matplot" || basic_example == "plot_special_graph" ? 10: basic_example == "misc_video_tensor" ? 263 : basic_example == "misc_audio_basic" ? 350 : basic_example == "properties_basic" ? 263 :390
 
           cy
             .get('.layout .react-grid-item').first().should('have.css', 'transform', 'matrix(1, 0, 0, 1, 10, 10)')
@@ -81,6 +81,9 @@ basic_examples.forEach( (setting) => {
       } else if (basic_example == "misc_audio_basic") {
           [ height, width ] = [ 95, 330 ];
           [ height4, width4 ] = [ 410, 307]; // also a bug in the ui
+      } else if (basic_example == "properties_basic") {
+          [ height, width ] = [ 290, 243 ];
+          [ height4, width4 ] = [ height, width];
       } else {
           [ height, width ] = [ 350, 370];
           [ height4, width4 ] = [ height, width];
