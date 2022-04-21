@@ -16,7 +16,8 @@ const basic_examples = [
     ["Matplotlib Plot", "misc_plot_matplot"],
     ["Latex Plot", "misc_plot_latex"],
     ["Video Pane", "misc_video_tensor"],
-    // ["Audio Pane", "misc_audio_basic"] // bug: disabled due to inconsistent resize
+    // ["Audio Pane", "misc_audio_basic"], // bug: disabled due to inconsistent resize
+    ["Properties Pane", "properties_basic"]
 ];
 
 basic_examples.forEach( (setting) => {
