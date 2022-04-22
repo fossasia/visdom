@@ -298,7 +298,6 @@ class ImagePane extends React.Component {
         ref={ref => (this._paneRef = ref)}
         widgets={widgets}
       >
-        >
         <div style={divstyle}>
           <div style={imageContainerStyle}>
             <img
