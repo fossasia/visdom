@@ -56,5 +56,12 @@ module.exports = (on, config) => {
     },
   })
 
+  on('after:screenshot', (details) => {
+    if ((details.specName).endsWith(".init.js")) {
+        newpath = details.path.replace("/"+details.specName, "_init/"+details.specName)
+        fs.mkdirSync(path.dirname(newpath), {recursive: true}, (err) => { })
+        fs.renameSync(details.path, newpath, (err) => { if(err) throw err; })
+    }
+  })
 }
 
