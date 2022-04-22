@@ -1,4 +1,5 @@
 cypress/screenshots
+cypress/screenshots_init
 cypress/downloads
 cypress/fixtures
 node_modules
