@@ -8,6 +8,11 @@ describe(`Take plot screenshots`, () => {
   all_screenshots.forEach( (run) => {
     it(`Screenshot for ${run}`, () => {
         cy.run(run)
+
+        // ImagePane requires an additional rerender for the image to adjust to the Pane size correctly
+        if (run.startsWith("image_"))
+            cy.wait(300)
+
         cy
           .get('.content')
           .screenshot(run, {overwrite: true})
@@ -32,6 +37,7 @@ describe(`Take compare-view screenshots`, () => {
         for (var i=0; i<num_runs; i++) {
             cy.open_env(envs[i]);
         }
+
         cy
           .get('.content').first()
           .screenshot("compare_"+run, {overwrite: true})
