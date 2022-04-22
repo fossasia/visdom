@@ -1511,7 +1511,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         res['jsons'][wid] = None
         res['jsons'].pop(wid)
 
-    for ix, eid in enumerate(envs.keys()):
+    for ix, eid in enumerate(sorted(envs.keys())):
         env = envs[eid]
         for wid in env.get('jsons', {}).keys():
             win = env['jsons'][wid]
