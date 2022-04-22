@@ -20,6 +20,10 @@ describe(`Compare with previous plot screenshots`, () => {
         const img2_src = Cypress.config("screenshotsFolder") + "/" + Cypress.spec.name + "/" + run + ".png";
         const threshold = thresholds[run] || 0;
 
+        // ImagePane requires an additional rerender for the image to adjust to the Pane size correctly
+        if (run.startsWith("image_"))
+            cy.wait(300)
+
         cy
           .get('.content').first()
           .screenshot(run, {overwrite: true})
@@ -44,6 +48,7 @@ describe(`Compare with compare-view screenshots`, () => {
         for (var i=0; i<num_runs; i++) {
             cy.open_env(envs[i]);
         }
+
         cy
           .get('.content').first()
           .screenshot("compare_"+run, {overwrite: true})
