@@ -1,0 +1,122 @@
+name: Test changes
+
+on: pull_request
+# push:
+#   branches:
+#     - master
+
+jobs:
+  install-and-build:
+    runs-on: ubuntu-latest
+    outputs:
+      jsfileschanged: ${{ steps.checkout.outputs.jsfileschanged }}
+    steps:
+      - name: "Checkout Repository"
+        uses: actions/checkout@v3
+      - uses: ./.github/actions/prepare
+        with:
+          loadprbuild: false
+
+      # count changed js files (diff to base branch)
+      - name: "Count changed JS-Files"
+        id: checkout
+        run: |
+          git fetch origin $GITHUB_BASE_REF
+          git fetch origin $GITHUB_HEAD_REF
+          echo "Target branch : $GITHUB_BASE_REF"
+          git checkout -f $GITHUB_HEAD_REF
+          git checkout -f $GITHUB_BASE_REF
+          git diff --name-only $GITHUB_HEAD_REF --
+          echo '::set-output name=jsfileschanged::'$(git diff --name-only $GITHUB_HEAD_REF -- | grep '^js/*' | wc -l)
+          echo 'Num js files changed='$(git diff --name-only $GITHUB_HEAD_REF -- | grep '^js/*' | wc -l)
+          git checkout $GITHUB_HEAD_REF
+
+      - name: "Build Project (PR version)"
+        run: |
+          npm run build
+        if: steps.checkout.outputs.jsfileschanged > 0
+
+      - name: "Save built js-files"
+        uses: actions/upload-artifact@v3
+        with:
+          name: pr-build
+          if-no-files-found: error
+          path: |
+            ./py/visdom/static/js/main.js
+            ./py/visdom/static/js/main.js.map
+
+
+  visual-regression-test-init:
+    runs-on: ubuntu-latest
+    needs: install-and-build
+    steps:
+
+      - name: "Checkout Repository"
+        uses: actions/checkout@v3
+      - uses: ./.github/actions/prepare
+        with:
+          usebasebranch: true
+
+      - name: Cypress test:init
+        uses: cypress-io/github-action@v2
+        with:
+          install: false
+          start: python3 py/visdom/server.py -port 8098 -env_path /tmp
+          wait-on: 'http://localhost:8098'
+          spec: cypress/integration/*.init.js
+
+      - uses: actions/upload-artifact@v2
+        with:
+          name: cypress-init-screenshots
+          path: cypress/screenshots_init
+
+
+  visual-regression-test:
+    runs-on: ubuntu-latest
+    needs: visual-regression-test-init
+    steps:
+      - name: "Checkout Repository"
+        uses: actions/checkout@v3
+      - uses: ./.github/actions/prepare
+
+      - uses: actions/download-artifact@v2
+        with:
+          name: cypress-init-screenshots
+          path: cypress/screenshots_init
+
+      - name: Cypress test:visual
+        uses: cypress-io/github-action@v2
+        with:
+          install: false
+          start: python3 py/visdom/server.py -port 8098 -env_path /tmp
+          wait-on: 'http://localhost:8098'
+          spec: cypress/integration/screenshots.js
+
+      - uses: actions/upload-artifact@v2
+        if: failure()
+        with:
+          name: cypress-screenshots-visual
+          path: cypress/screenshots
+
+  funcitonal-test:
+    runs-on: ubuntu-latest
+    needs: install-and-build
+    steps:
+      - name: "Checkout Repository"
+        uses: actions/checkout@v3
+      - uses: ./.github/actions/prepare
+
+      - name: Cypress test
+        uses: cypress-io/github-action@v2
+        with:
+          install: false
+          start: python3 py/visdom/server.py -port 8098 -env_path /tmp
+          wait-on: 'http://localhost:8098'
+          config: ignoreTestFiles=screenshots.*
+
+      - uses: actions/upload-artifact@v2
+        if: failure()
+        with:
+          name: cypress-screenshots-functional
+          path: cypress/screenshots
+
