@@ -1,0 +1,71 @@
+name: 'Prepare Test Dependencies'
+description: 'Installs Dependencies & Caches Them'
+inputs:
+  usebasebranch:
+    description: 'use true for pr version, use false for base version'
+    required: true
+    default: false
+  loadprbuild:
+    description: 'use true to load the resulting build files (from previous step)'
+    required: true
+    default: true
+
+runs:
+  using: "composite"
+  steps:
+      - name: "Setup Node" 
+        uses: actions/setup-node@v2
+        with:
+          node-version: '16'
+
+      - name: "Action Settings"
+        run: |
+          echo usebasebranch=${{ inputs.usebasebranch }}
+          echo loadprbuild=${{ inputs.loadprbuild }}
+        shell: bash
+
+      # checkout correct version
+      - name: "Checkout base branch"
+        run: |
+          git fetch origin $GITHUB_BASE_REF
+          git checkout -f $GITHUB_BASE_REF
+        shell: bash
+        if: ${{ inputs.usebasebranch == 'true' }}
+
+
+      # now cache pip
+      - uses: actions/cache@v3
+        id: cache-pip
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/test-requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      - name: "Install Pip Dependencies"
+        shell: bash
+        run: |
+          pip3 install -r test-requirements.txt
+          pip3 install -e .
+
+      # now compile the new version
+      - uses: actions/cache@v3
+        id: cache-npm
+        with:
+          path: |
+            "**/node_modules"
+            "/home/runner/.cache"
+          key: ${{ runner.os }}-${{ hashFiles('**/yarn.lock') }}
+      - name: "Install npm Dependencies"
+        shell: bash
+        run: |
+          npm install
+
+      # load artifacts from previous runs
+      - name: "Load built js-files"
+        uses: actions/download-artifact@v3
+        with:
+          name: pr-build
+          path: ./py/visdom/static/js/
+        if: ${{ inputs.loadprbuild == 'true' }}
+
+
