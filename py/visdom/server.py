@@ -936,7 +936,7 @@ class ExistsHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
         eid = extract_eid(args)
-        if args['win'] in handler.state[eid]['jsons']:
+        if eid in handler.state and args['win'] in handler.state[eid]['jsons']:
             handler.write('true')
         else:
             handler.write('false')
