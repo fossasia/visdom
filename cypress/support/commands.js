@@ -47,6 +47,11 @@ Cypress.Commands.add('close_envs', () => {
 
 Cypress.Commands.add('open_env', (name) => {
     cy.get('.rc-tree-select').click()
+    cy.get('.rc-tree-select-tree').then($tree => {
+        var closed_group = '.rc-tree-select-tree-switcher_close'
+        if ($tree.find(closed_group).length > 0)
+            cy.get(closed_group).click()
+    })
     cy.get('.rc-tree-select-tree').contains(name).click()
     cy.get('.rc-tree-select').click({force: true}) // ignore any elements that might cover the list at this point
 });
