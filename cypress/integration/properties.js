@@ -27,7 +27,7 @@ describe('Properties Pane', () => {
       cy.get('button').contains("Start").click()
       cy.get('.layout .react-grid-item .content-text').first().contains("Updated: Button => clicked")
 
-      cy.get('input[value="on"]').first().click()
+      cy.get('input[type="checkbox"]').first().click()
       cy.get('.layout .react-grid-item .content-text').first().contains("Updated: Checkbox => False")
 
       cy.get('select').first().select('Red').select('Blue')

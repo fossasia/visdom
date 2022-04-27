@@ -112,8 +112,7 @@ basic_examples.forEach( (setting) => {
           cy
             .get('.layout .react-grid-item').first()
             .find('.react-resizable-handle')
-            .click()
-            .click()
+            .dblclick()
             .get('.layout .react-grid-item').first()
             .should('have.css', 'height', height4 + 'px')
             .should('have.css', 'width', width4 + 'px')
