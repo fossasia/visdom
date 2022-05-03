@@ -4,6 +4,8 @@ on:
   push:
     paths:
         - 'js/**'
+    branches:
+        - master
 
 jobs:
   update-static-js-files:
