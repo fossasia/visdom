@@ -53,6 +53,11 @@ jobs:
         with:
           usebasebranch: true
 
+      - name: "Checkout Tests from Head-Ref"
+        shell: bash
+        run: |
+          git checkout $GITHUB_HEAD_REF ./cypress
+
       - name: Cypress test:init
         uses: cypress-io/github-action@v2
         with:
