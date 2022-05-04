@@ -49,9 +49,20 @@ jobs:
 
       - name: "Checkout Repository"
         uses: actions/checkout@v3
+
+      - name: "Save current Head-Ref as PR-branch"
+        shell: bash
+        run: |
+          git checkout -B PR-HEAD
+
       - uses: ./.github/actions/prepare
         with:
           usebasebranch: true
+
+      - name: "Checkout Tests from Head-Ref"
+        shell: bash
+        run: |
+          git checkout PR-HEAD -- ./cypress
 
       - name: Cypress test:init
         uses: cypress-io/github-action@v2
