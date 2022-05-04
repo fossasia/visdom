@@ -65,7 +65,8 @@ describe(`Compare with compare-view screenshots`, () => {
 
 
 
-describe(`Compare with privious line smoothing screenshot`, () => {
+describe(`Compare screenshots for plotpane functions`, () => {
+
   it('Compare screenshot for Line Smoothing', () => {
       var run = "line_smoothing"
       var env1 = run + "_1_" + Cypress._.random(0, 1e6)
@@ -92,5 +93,43 @@ describe(`Compare with privious line smoothing screenshot`, () => {
         .screenshot(run, {overwrite: true})
       cy.task('numDifferentPixels', {src1: img1_src, src2: img2_src, diffsrc: diff_src, threshold: threshold}).should('equal', 0)
   })
+
+  it('Compare screenshot for PropertyChnage (Line Plot)', () => {
+      cy.run("plot_line_basic")
+      cy.get('button[title="properties"]').click()
+
+      // change some settings
+      const change = (key, val) => cy.get('td.table-properties-name').contains(key).siblings('td.table-properties-value').find('input').clear().type(val);
+
+      // plot settings
+      change('name', 'a line')
+      change('type', 'bar')
+      change('opacity', '0.75')
+      change('marker.line.width', '5')
+      change('marker.line.color', '#0FF')
+
+      // layout settings
+      change('margin.l', '10')
+      change('margin.r', '10')
+      change('margin.b', '10')
+      change('margin.t', '10')
+      change('xaxis.type', 'log')
+
+      // apply settings
+      cy.get('button[title="properties"]').click()
+
+      const run = "change-properties"
+      const diff_src = Cypress.config("screenshotsFolder") + "/" + "screenshots.diff.js" + "/" + run + ".png";
+      const img1_src = Cypress.config("screenshotsFolder") + "_init/" + "screenshots.init.js" + "/" + run + ".png";
+      const img2_src = Cypress.config("screenshotsFolder") + "/" + Cypress.spec.name + "/" + run + ".png";
+      const threshold = thresholds[run] || 0;
+
+      cy
+        .get('.content').first()
+        .screenshot(run, {overwrite: true})
+      cy.task('numDifferentPixels', {src1: img1_src, src2: img2_src, diffsrc: diff_src, threshold: threshold}).should('equal', 0)
+  })
+
 })
+
 
