@@ -11,7 +11,7 @@ import React from 'react';
 import AbstractPropertiesList from './AbstractPropertiesList';
 import Pane from './Pane';
 
-class PropertiesPane extends AbstractPropertiesList {
+class PropertiesPane extends PropertyItem {
   updateValue = (propId, value) => {
     this.props.onFocus(this.props.id, () => {
       this.props.appApi.sendPaneMessage({
