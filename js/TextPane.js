@@ -12,6 +12,8 @@ import EventSystem from './EventSystem';
 import Pane from './Pane';
 
 function TextPane(props) {
+  // private events
+  // --------------
   const onEvent = (e) => {
     if (!props.isFocused) return;
 
@@ -30,14 +32,6 @@ function TextPane(props) {
     }
   };
 
-  // registers instance with EventSystem
-  useEffect(() => {
-    EventSystem.subscribe('global.event', onEvent);
-    return function cleanup() {
-      EventSystem.unsubscribe('global.event', onEvent);
-    };
-  });
-
   // define action for Pane's download button
   const handleDownload = () => {
     var blob = new Blob([props.content], { type: 'text/plain' });
@@ -47,6 +41,20 @@ function TextPane(props) {
     link.href = url;
     link.click();
   };
+
+  // effects
+  // -------
+
+  // registers instance with EventSystem
+  useEffect(() => {
+    EventSystem.subscribe('global.event', onEvent);
+    return function cleanup() {
+      EventSystem.unsubscribe('global.event', onEvent);
+    };
+  });
+
+  // rendering
+  // ---------
 
   return (
     <Pane {...props} handleDownload={handleDownload}>
