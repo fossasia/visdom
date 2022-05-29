@@ -7,97 +7,78 @@
  *
  */
 
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+const { usePrevious } = require('./util');
 import Pane from './Pane';
 const { sgg } = require('ml-savitzky-golay-generalized');
 
-class PlotPane extends React.Component {
-  _paneRef = null;
-  _plotlyRef = null;
-  _width = null;
-  _height = null;
+function PlotPane(props) {
+  const plotlyRef = useRef();
+  const previousContent = usePrevious(props.content);
+  const [maxsmoothvalue, setMaxsmoothvalue] = useState(100);
+  const [smoothWidgetActive, setSmoothWidgetActive] = useState(false);
+  const [smoothvalue, setSmoothValue] = useState(1);
 
-  constructor(props) {
-    super(props);
-    this.state = {
-      maxsmoothvalue: 100,
-      smoothWidgetActive: false,
-      smoothvalue: 1,
-    };
-  }
-
-  toggleSmoothWidget = () => {
-    this.setState((state) => ({
-      smoothWidgetActive: !state.smoothWidgetActive,
-    }));
+  const handleDownload = () => {
+    Plotly.downloadImage(plotlyRef.current, {
+      format: 'svg',
+      filename: props.contentID,
+    });
   };
 
-  updateSmoothSlider = (value) => {
-    this.setState((state) => ({ smoothvalue: value }));
+  const toggleSmoothWidget = () => {
+    setSmoothWidgetActive(!smoothWidgetActive);
   };
 
-  componentDidMount() {
-    this.newPlot();
-  }
+  const updateSmoothSlider = (value) => {
+    setSmoothValue(value);
+  };
 
-  componentDidUpdate(prevProps) {
-    // Retain trace visibility between old and new plots
-    let trace_visibility_by_name = {};
-    let trace_idx = null;
-    for (trace_idx in prevProps.content.data) {
-      let trace = prevProps.content.data[trace_idx];
-      trace_visibility_by_name[trace.name] = trace.visible;
-    }
-    for (trace_idx in this.props.content.data) {
-      let trace = this.props.content.data[trace_idx];
-      trace.visible = trace_visibility_by_name[trace.name];
-    }
+  useEffect(() => {
+    if (previousContent) {
+      // Retain trace visibility between old and new plots
+      let trace_visibility_by_name = {};
+      let trace_idx = null;
+      for (trace_idx in previousContent.data) {
+        let trace = previousContent.data[trace_idx];
+        trace_visibility_by_name[trace.name] = trace.visible;
+      }
+      for (trace_idx in props.content.data) {
+        let trace = props.content.data[trace_idx];
+        trace.visible = trace_visibility_by_name[trace.name];
+      }
 
-    // Copy user modified zooms
-    let old_x = prevProps.content.layout.xaxis;
-    let new_x = this.props.content.layout.xaxis;
-    let new_range_set = new_x !== undefined && new_x.autorange === false;
-    if (old_x !== undefined && old_x.autorange === false && !new_range_set) {
-      // Take the old x axis layout if changed
-      this.props.content.layout.xaxis = old_x;
-    }
-    let old_y = prevProps.content.layout.yaxis;
-    let new_y = this.props.content.layout.yaxis;
-    new_range_set = new_y !== undefined && new_y.autorange === false;
-    if (old_y !== undefined && old_y.autorange === false && !new_range_set) {
-      // Take the old y axis layout if changed
-      this.props.content.layout.yaxis = old_y;
-    }
-    this.newPlot();
-  }
-
-  shouldComponentUpdate(nextProps, nextState) {
-    if (this.props.contentID !== nextProps.contentID) {
-      return true;
-    } else if (this.props.h !== nextProps.h || this.props.w !== nextProps.w) {
-      return true;
-    } else if (this.props.isFocused !== nextProps.isFocused) {
-      return true;
-    } else if (this.state.smoothWidgetActive !== nextState.smoothWidgetActive) {
-      return true;
-    } else if (this.state.smoothvalue !== nextState.smoothvalue) {
-      return true;
+      // Copy user modified zooms
+      let old_x = previousContent.layout.xaxis;
+      let new_x = props.content.layout.xaxis;
+      let new_range_set = new_x !== undefined && new_x.autorange === false;
+      if (old_x !== undefined && old_x.autorange === false && !new_range_set) {
+        // Take the old x axis layout if changed
+        props.content.layout.xaxis = old_x;
+      }
+      let old_y = previousContent.layout.yaxis;
+      let new_y = props.content.layout.yaxis;
+      new_range_set = new_y !== undefined && new_y.autorange === false;
+      if (old_y !== undefined && old_y.autorange === false && !new_range_set) {
+        // Take the old y axis layout if changed
+        props.content.layout.yaxis = old_y;
+      }
     }
 
-    return false;
-  }
+    newPlot();
+  });
 
-  newPlot = () => {
-    var data = this.props.content.data;
+  const newPlot = () => {
+    var data = props.content.data;
 
     // add smoothed line plots for existing line plots
     var smooth_data = [];
-    if (this.state.smoothWidgetActive) {
+    if (smoothWidgetActive) {
       smooth_data = data
         .filter((d) => d['type'] == 'scatter' && d['mode'] == 'lines')
         .map((d, dataId) => {
           var smooth_d = JSON.parse(JSON.stringify(d));
-          var windowSize = 2 * this.state.smoothvalue + 1;
+          var windowSize = 2 * smoothvalue + 1;
 
           // remove legend of smoothed plot
           smooth_d.showlegend = false;
@@ -116,7 +97,9 @@ class PlotPane extends React.Component {
           if (smooth_d.x.length % 2 == 0)
             windowSize = Math.min(windowSize, smooth_d.x.length - 1);
           else windowSize = Math.min(windowSize, smooth_d.x.length);
-          smooth_d.y = sgg(smooth_d.y, smooth_d.x, { windowSize: windowSize });
+          smooth_d.y = sgg(smooth_d.y, smooth_d.x, {
+            windowSize: windowSize,
+          });
 
           // adapt color & transparency
           d.opacity = 0.35;
@@ -132,92 +115,83 @@ class PlotPane extends React.Component {
         data = Array.from(data);
         let num_to_fill = 10 - (data.length % 10);
         for (let i = 0; i < num_to_fill; i++) data.push({});
-        console.log(data);
       }
     } else
-      this.props.content.data
+      props.content.data
         .filter((data) => data['type'] == 'scatter' && data['mode'] == 'lines')
         .map((d, dataId) => {
           d.opacity = 1.0;
         });
 
     Plotly.newPlot(
-      this.props.contentID,
+      props.contentID,
       data.concat(smooth_data),
-      this.props.content.layout,
+      props.content.layout,
       { showLink: true, linkText: 'Edit' }
     );
   };
 
-  handleDownload = () => {
-    Plotly.downloadImage(this._plotlyRef, {
-      format: 'svg',
-      filename: this.props.contentID,
-    });
-  };
+  // check if data can be smoothed
+  var contains_line_plots = props.content.data.some((data, dataId) => {
+    return data['type'] == 'scatter' && data['mode'] == 'lines';
+  });
 
-  resize = () => {
-    this.componentDidUpdate();
-  };
-
-  render() {
-    // check if data can be smoothed
-    var contains_line_plots = this.props.content.data.some((data, dataId) => {
-      return data['type'] == 'scatter' && data['mode'] == 'lines';
-    });
-
-    var smooth_widget_button = '';
-    var smooth_widget = '';
-    if (contains_line_plots) {
-      smooth_widget_button = (
-        <button
-          key="smooth_widget_button"
-          title="smooth lines"
-          onClick={this.toggleSmoothWidget}
-          className={
-            this.state.smoothWidgetActive ? 'pull-right active' : 'pull-right'
-          }
-        >
-          ~
-        </button>
-      );
-      if (this.state.smoothWidgetActive) {
-        smooth_widget = (
-          <div className="widget" key="smooth_widget">
-            <div style={{ display: 'flex' }}>
-              <span>Smoothing:&nbsp;&nbsp;</span>
-              <input
-                type="range"
-                min="1"
-                max={this.state.maxsmoothvalue}
-                value={this.state.smoothvalue}
-                onInput={(ev) => this.updateSmoothSlider(ev.target.value)}
-              />
-              <span>&nbsp;&nbsp;{this.state.selected}&nbsp;&nbsp;</span>
-            </div>
-          </div>
-        );
-      }
-    }
-
-    return (
-      <Pane
-        {...this.props}
-        handleDownload={this.handleDownload}
-        ref={(ref) => (this._paneRef = ref)}
-        barwidgets={[smooth_widget_button]}
-        widgets={[smooth_widget]}
-        enablePropertyList
+  var smooth_widget_button = '';
+  var smooth_widget = '';
+  if (contains_line_plots) {
+    smooth_widget_button = (
+      <button
+        key="smooth_widget_button"
+        title="smooth lines"
+        onClick={toggleSmoothWidget}
+        className={smoothWidgetActive ? 'pull-right active' : 'pull-right'}
       >
-        <div
-          id={this.props.contentID}
-          style={{ height: '100%', width: '100%' }}
-          className="plotly-graph-div"
-          ref={(ref) => (this._plotlyRef = ref)}
-        />
-      </Pane>
+        ~
+      </button>
     );
+    if (smoothWidgetActive) {
+      smooth_widget = (
+        <div className="widget" key="smooth_widget">
+          <div style={{ display: 'flex' }}>
+            <span>Smoothing:&nbsp;&nbsp;</span>
+            <input
+              type="range"
+              min="1"
+              max={maxsmoothvalue}
+              value={smoothvalue}
+              onInput={(ev) => updateSmoothSlider(ev.target.value)}
+            />
+            <span>&nbsp;&nbsp;&nbsp;&nbsp;</span>
+          </div>
+        </div>
+      );
+    }
   }
+
+  return (
+    <Pane
+      {...props}
+      handleDownload={handleDownload}
+      barwidgets={[smooth_widget_button]}
+      widgets={[smooth_widget]}
+      enablePropertyList
+    >
+      <div
+        id={props.contentID}
+        style={{ height: '100%', width: '100%' }}
+        className="plotly-graph-div"
+        ref={plotlyRef}
+      />
+    </Pane>
+  );
 }
+
+// previously known as shouldComponentUpdate
+PlotPane = React.memo(PlotPane, (props, nextProps) => {
+  if (props.contentID !== nextProps.contentID) return false;
+  else if (props.h !== nextProps.h || props.w !== nextProps.w) return false;
+  else if (props.isFocused !== nextProps.isFocused) return false;
+  return true;
+});
 
 export default PlotPane;
