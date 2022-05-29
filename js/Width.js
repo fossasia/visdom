@@ -11,10 +11,15 @@ import React, { useState, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
 
 const Width = (ComposedComponent) => (props) => {
+  // state varibles
+  // --------------
   const [width, setWidth] = useState(1280);
   const [cols, setCols] = useState(100);
   const [timerActive, setTimerActive] = useState(false);
   const containerRef = useRef();
+
+  // private events
+  // --------------
 
   // when resizing, set timer to trigger onWindowResizeStop
   // (retriggers setTimer setup)
@@ -22,17 +27,6 @@ const Width = (ComposedComponent) => (props) => {
     setTimerActive(false);
     setTimerActive(true);
   };
-
-  // when setting timerActive activates timer
-  // note: this activates actual timer after rendering to ensure only one
-  //       timer is running at a time
-  useEffect(() => {
-    if (!timerActive) return;
-    let resizeTimer = setTimeout(onWindowResizeStop, 200);
-    return function cleanup() {
-      clearTimeout(resizeTimer);
-    };
-  }, [timerActive]);
 
   // when resizing finished, save dimensions & trigger onWidthChange
   const onWindowResizeStop = () => {
@@ -44,6 +38,20 @@ const Width = (ComposedComponent) => (props) => {
     setCols((node.offsetWidth / width) * cols);
     setWidth(node.offsetWidth);
   };
+
+  // effects
+  // -------
+
+  // when setting timerActive activates timer
+  // note: this activates actual timer after rendering to ensure only one
+  //       timer is running at a time
+  useEffect(() => {
+    if (!timerActive) return;
+    let resizeTimer = setTimeout(onWindowResizeStop, 200);
+    return function cleanup() {
+      clearTimeout(resizeTimer);
+    };
+  }, [timerActive]);
 
   // actual onWidthChange occurs only, when the state variables changed
   useEffect(() => {
@@ -62,6 +70,9 @@ const Width = (ComposedComponent) => (props) => {
   useEffect(() => {
     onWindowResize();
   }, []);
+
+  // rendering
+  // ---------
 
   return (
     <ComposedComponent
