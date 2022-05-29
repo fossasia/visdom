@@ -7,15 +7,13 @@
  *
  */
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import EventSystem from './EventSystem';
 import Pane from './Pane';
 
-class TextPane extends React.Component {
-  onEvent = (e) => {
-    if (!this.props.isFocused) {
-      return;
-    }
+function TextPane(props) {
+  const onEvent = (e) => {
+    if (!props.isFocused) return;
 
     switch (e.type) {
       case 'keydown':
@@ -23,7 +21,7 @@ class TextPane extends React.Component {
         e.preventDefault();
         break;
       case 'keyup':
-        this.props.appApi.sendPaneMessage({
+        props.appApi.sendPaneMessage({
           event_type: 'KeyPress',
           key: e.key,
           key_code: e.keyCode,
@@ -32,15 +30,17 @@ class TextPane extends React.Component {
     }
   };
 
-  componentDidMount() {
-    EventSystem.subscribe('global.event', this.onEvent);
-  }
-  componentWillUnmount() {
-    EventSystem.unsubscribe('global.event', this.onEvent);
-  }
+  // registers instance with EventSystem
+  useEffect(() => {
+    EventSystem.subscribe('global.event', onEvent);
+    return function cleanup() {
+      EventSystem.unsubscribe('global.event', onEvent);
+    };
+  });
 
-  handleDownload = () => {
-    var blob = new Blob([this.props.content], { type: 'text/plain' });
+  // define action for Pane's download button
+  const handleDownload = () => {
+    var blob = new Blob([props.content], { type: 'text/plain' });
     var url = window.URL.createObjectURL(blob);
     var link = document.createElement('a');
     link.download = 'visdom_text.txt';
@@ -48,15 +48,13 @@ class TextPane extends React.Component {
     link.click();
   };
 
-  render() {
-    return (
-      <Pane {...this.props} handleDownload={this.handleDownload}>
-        <div className="content-text">
-          <div dangerouslySetInnerHTML={{ __html: this.props.content }} />
-        </div>
-      </Pane>
-    );
-  }
+  return (
+    <Pane {...props} handleDownload={handleDownload}>
+      <div className="content-text">
+        <div dangerouslySetInnerHTML={{ __html: props.content }} />
+      </div>
+    </Pane>
+  );
 }
 
 export default TextPane;
