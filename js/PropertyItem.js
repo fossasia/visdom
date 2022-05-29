@@ -66,7 +66,7 @@ function EditablePropertyText(props) {
   );
 }
 
-class AbstractPropertiesList extends React.Component {
+class PropertiesItem extends React.Component {
   updateValue = (propId, value) => {};
 
   renderPropertyValue = (prop, propId) => {
