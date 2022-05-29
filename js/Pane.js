@@ -237,7 +237,7 @@ function PropertyList(props) {
   if (!Array.isArray(props.keylist))
     return (
       <table className="table table-bordered table-condensed table-properties">
-        {propitems}
+        <tbody>{propitems}</tbody>
       </table>
     );
   else return propitems;
