@@ -7,92 +7,63 @@
  *
  */
 
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
-class MyRef {
-  constructor() {
-    this._ref = null;
-  }
+function EditablePropertyText(props) {
+  const textInput = useRef();
+  const [actualValue, setActualValue] = useState(props.value);
+  const [isEdited, setIsEdited] = useState(false);
 
-  getRef() {
-    return this._ref;
-  }
-
-  setRef = (ref) => {
-    this._ref = ref;
-  };
-}
-
-class EditablePropertyText extends React.Component {
-  constructor(props) {
-    super(props);
-    this.textInput = new MyRef();
-    this.state = {
-      propsValue: props.value,
-      actualValue: props.value,
-      isEdited: false,
-    };
-  }
-
-  handleChange = (event) => {
-    let newValue = event.target.value;
-    if (this.props.validateHandler && !this.props.validateHandler(newValue)) {
-      event.preventDefault();
-    } else {
-      this.setState({
-        actualValue: newValue,
-      });
-    }
-  };
-
-  handleKeyPress = (event) => {
-    if (event.key === 'Enter') {
-      let ref = this.textInput.getRef();
-      if (ref) ref.blur(); // Blur invokes submit
-    }
-  };
-
-  onBlur = () => {
-    this.setState({ isEdited: false }, () => {
-      if (this.props.submitHandler) {
-        this.props.submitHandler(this.state.actualValue);
-      }
+  // update the state to current input value (rejects events based on validateHandler)
+  const handleChange =
+    props.handleChange ||
+    (event => {
+      let newValue = event.target.value;
+      if (props.validateHandler && !props.validateHandler(newValue))
+        event.preventDefault();
+      else setActualValue(newValue);
     });
-  };
 
-  onFocus = () => {
-    this.setState({
-      isEdited: true,
+  // focus / blur toggles edit mode & blur saves the state
+  const onFocus =
+    props.onFocus ||
+    (event => {
+      setIsEdited(true);
     });
-  };
+  const onBlur =
+    props.onBlur ||
+    (event => {
+      setIsEdited(false);
+      if (props.submitHandler) props.submitHandler(actualValue);
 
-  UNSAFE_componentWillReceiveProps(nextProps) {
-    if (this.state.propsValue !== nextProps.value || !this.state.isEdited) {
-      let newState = this.state.isEdited
-        ? {
-            propsValue: nextProps.value,
-          }
-        : {
-            propsValue: nextProps.value,
-            actualValue: nextProps.value,
-          };
-      this.setState(newState);
-    }
-  }
+      // prevents the pane to drop focus
+      // otherwise the sendPaneMessage-API does not work
+      event.stopPropagation();
+    });
 
-  render() {
-    return (
-      <input
-        type="text"
-        ref={this.textInput.setRef}
-        value={this.state.actualValue}
-        onChange={this.handleChange}
-        onKeyPress={this.handleKeyPress}
-        onBlur={this.onBlur}
-        onFocus={this.onFocus}
-      />
-    );
-  }
+  // Enter invokes blur and thus submits the change
+  const handleKeyPress =
+    props.handleKeyPress ||
+    (event => {
+      if (event.key === 'Enter') textInput.current.blur();
+    });
+
+  // adapt state if props changed & we are not in edit mode
+  useEffect(() => {
+    if (!isEdited) setActualValue(props.value);
+  }, [props.value]);
+
+  return (
+    <input
+      type="text"
+      ref={textInput}
+      value={actualValue}
+      onChange={handleChange}
+      onKeyPress={handleKeyPress}
+      onBlur={onBlur}
+      onFocus={onFocus}
+    />
+  );
 }
 
 class AbstractPropertiesList extends React.Component {
