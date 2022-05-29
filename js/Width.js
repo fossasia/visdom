@@ -7,64 +7,70 @@
  *
  */
 
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
 
-const Width = (ComposedComponent) =>
-  class Width extends React.Component {
-    state = {
-      width: 1280,
-      cols: 100,
-    };
+const Width = (ComposedComponent) => (props) => {
+  const [width, setWidth] = useState(1280);
+  const [cols, setCols] = useState(100);
+  const [timerActive, setTimerActive] = useState(false);
+  const containerRef = useRef();
 
-    mounted = false;
-
-    componentDidMount() {
-      this.mounted = true;
-
-      window.addEventListener('resize', this.onWindowResize);
-      this.onWindowResize();
-    }
-
-    componentWillUnmount() {
-      this.mounted = false;
-      window.removeEventListener('resize', this.onWindowResize);
-    }
-
-    resizeTimer = null;
-
-    onWindowResizeStop = () => {
-      if (!this.mounted) return;
-
-      let oldWidth = this.state.width;
-      /* eslint-disable-next-line react/no-find-dom-node */
-      const node = ReactDOM.findDOMNode(this);
-
-      this.setState(
-        {
-          width: node.offsetWidth,
-          cols: (node.offsetWidth / oldWidth) * this.state.cols,
-        },
-        () => {
-          this.props.onWidthChange(this.state.width, this.state.cols);
-        }
-      );
-    };
-
-    onWindowResize = () => {
-      if (this.resizeTimer) clearTimeout(this.resizeTimer);
-      this.resizeTimer = setTimeout(this.onWindowResizeStop, 200);
-    };
-
-    render() {
-      if (this.props.measureBeforeMount && !this.mounted) {
-        return (
-          <div className={this.props.className} style={this.props.style} />
-        );
-      }
-
-      return <ComposedComponent {...this.props} {...this.state} />;
-    }
+  // when resizing, set timer to trigger onWindowResizeStop
+  // (retriggers setTimer setup)
+  const onWindowResize = () => {
+    setTimerActive(false);
+    setTimerActive(true);
   };
+
+  // when setting timerActive activates timer
+  // note: this activates actual timer after rendering to ensure only one
+  //       timer is running at a time
+  useEffect(() => {
+    if (!timerActive) return;
+    let resizeTimer = setTimeout(onWindowResizeStop, 200);
+    return function cleanup() {
+      clearTimeout(resizeTimer);
+    };
+  }, [timerActive]);
+
+  // when resizing finished, save dimensions & trigger onWidthChange
+  const onWindowResizeStop = () => {
+    // reenable timer activation
+    setTimerActive(false);
+
+    // get new dimensions
+    const node = ReactDOM.findDOMNode(containerRef.current);
+    setCols((node.offsetWidth / width) * cols);
+    setWidth(node.offsetWidth);
+  };
+
+  // actual onWidthChange occurs only, when the state variables changed
+  useEffect(() => {
+    props.onWidthChange(width, cols);
+  }, [width]);
+
+  // ensure that resizing callbacks are only called when mounted
+  useEffect(() => {
+    window.addEventListener('resize', onWindowResize);
+    return function cleanup() {
+      window.removeEventListener('resize', onWindowResize);
+    };
+  }, []);
+
+  // call onWindowResize upon initialization to query initial dimensions
+  useEffect(() => {
+    onWindowResize();
+  }, []);
+
+  return (
+    <ComposedComponent
+      {...props}
+      ref={containerRef}
+      width={width}
+      cols={cols}
+    />
+  );
+};
 
 export default Width;
