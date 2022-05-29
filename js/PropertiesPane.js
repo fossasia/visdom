@@ -39,18 +39,20 @@ function PropertiesPane(props) {
     <Pane {...props} handleDownload={handleDownload}>
       <div className="content-properties">
         <table className="table table-bordered table-condensed table-properties">
-          {props.content.map((prop, propId) => (
-            <tr key={propId}>
-              <td className="table-properties-name">{prop.name}</td>
-              <td className="table-properties-value">
-                <PropertyItem
-                  {...prop}
-                  propId={propId}
-                  updateValue={updateValue}
-                />
-              </td>
-            </tr>
-          ))}
+          <tbody>
+            {props.content.map((prop, propId) => (
+              <tr key={propId}>
+                <td className="table-properties-name">{prop.name}</td>
+                <td className="table-properties-value">
+                  <PropertyItem
+                    {...prop}
+                    propId={propId}
+                    updateValue={updateValue}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
         </table>
       </div>
     </Pane>
