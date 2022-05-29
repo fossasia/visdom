@@ -10,9 +10,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 
 function EditablePropertyText(props) {
+  // state varibles
+  // --------------
   const textInput = useRef();
   const [actualValue, setActualValue] = useState(props.value);
   const [isEdited, setIsEdited] = useState(false);
+
+  // private events
+  // --------------
 
   // update the state to current input value (rejects events based on validateHandler)
   const handleChange = (event) => {
@@ -40,10 +45,16 @@ function EditablePropertyText(props) {
     if (event.key === 'Enter') textInput.current.blur();
   };
 
-  // adapt state if props changed & we are not in edit mode
+  // effects
+  // -------
+
+  // save value if props changed & we are not in edit mode
   useEffect(() => {
     if (!isEdited) setActualValue(props.value);
   }, [props.value]);
+
+  // rendering
+  // ---------
 
   return (
     <input
@@ -58,8 +69,13 @@ function EditablePropertyText(props) {
   );
 }
 
+// this component abstracts several types of inputs (text, number, button, checkbox, select) to a common API
 function PropertyItem(props) {
+  // by default, this item has no real function and needs to be replaced when used
   const updateValue = props.updateValue || ((propId, value) => {});
+
+  // rendering
+  // ---------
   switch (props.type) {
     case 'text':
       return (
