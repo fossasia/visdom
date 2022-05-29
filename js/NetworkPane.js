@@ -11,12 +11,17 @@ import React, { useRef, useEffect } from 'react';
 import Pane from './Pane';
 
 function NetworkPane(props) {
+  // private events
+  // --------------
   const handleDownload = () => {
     saveSvgAsPng(document.getElementsByTagName('svg')[0], 'plot.png', {
       scale: 2,
       backgroundColor: '#FFFFFF',
     });
   };
+
+  // effects
+  // -------
 
   // initialize d3
   useEffect(() => {
@@ -187,6 +192,9 @@ function NetworkPane(props) {
       });
     });
   };
+
+  // rendering
+  // ---------
 
   return (
     <Pane {...props} handleDownload={handleDownload}>
