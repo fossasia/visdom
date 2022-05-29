@@ -1,22 +1,31 @@
-import React from 'react';
+/**
+ * Copyright 2017-present, The Visdom Authors
+ * All rights reserved.
+ *
+ * This source code is licensed under the license found in the
+ * LICENSE file in the root directory of this source tree.
+ *
+ */
+
+import React, { useRef, useEffect } from 'react';
 import Pane from './Pane';
 
-class NetworkPane extends React.Component {
-  _paneRef = null;
-  _networkRef = null;
-  _width = null;
-  _height = null;
-
-  handleDownload = () => {
-    var link = document.createElement('a');
-    link.download = `${this.props.title || 'visdom_network'}.jpg`;
-    link.href = this.props.content.src;
-    link.click();
+function NetworkPane(props) {
+  const handleDownload = () => {
+    saveSvgAsPng(document.getElementsByTagName('svg')[0], 'plot.png', {
+      scale: 2,
+      backgroundColor: '#FFFFFF',
+    });
   };
 
-  CreateNetwork = (graph) => {
-    var width = this.props._width,
-      height = this.props._height;
+  // initialize d3
+  useEffect(() => {
+    CreateNetwork(props.content);
+  }, []);
+
+  const CreateNetwork = (graph) => {
+    var width = props._width,
+      height = props._height;
     var color = d3.scale.category10();
     var force = d3.layout
       .force()
@@ -37,7 +46,7 @@ class NetworkPane extends React.Component {
         .attr('preserveAspectRatio', 'xMinYMin meet');
     }
 
-    if (this.props.directed) {
+    if (props.directed) {
       svg
         .append('defs')
         .append('marker')
@@ -100,7 +109,7 @@ class NetworkPane extends React.Component {
         'font-size': 10,
         fill: '#aaa',
       });
-    if (this.props.showEdgeLabels) {
+    if (props.showEdgeLabels) {
       edgelabels
         .append('textPath')
         .attr('xlink:href', (d, i) => '#edgepath' + i)
@@ -125,7 +134,7 @@ class NetworkPane extends React.Component {
     node.append('circle').attr('r', 10);
 
     node.append('title').text((d) => d.name);
-    if (this.props.showVertexLabels) {
+    if (props.showVertexLabels) {
       node
         .append('text')
         .attr('dx', 12)
@@ -179,33 +188,15 @@ class NetworkPane extends React.Component {
     });
   };
 
-  handleDownload = () => {
-    saveSvgAsPng(document.getElementsByTagName('svg')[0], 'plot.png', {
-      scale: 2,
-      backgroundColor: '#FFFFFF',
-    });
-  };
-
-  componentDidMount() {
-    this.CreateNetwork(this.props.content);
-  }
-
-  render() {
-    return (
-      <Pane
-        {...this.props}
-        handleDownload={this.handleDownload}
-        ref={(ref) => (this._paneRef = ref)}
-      >
-        <div
-          id="Network_Div"
-          style={{ height: '100%', width: '100%', flex: 1 }}
-          className="Network_Div"
-          ref={(ref) => (this._networkRef = ref)}
-        />
-      </Pane>
-    );
-  }
+  return (
+    <Pane {...props} handleDownload={handleDownload}>
+      <div
+        id="Network_Div"
+        style={{ height: '100%', width: '100%', flex: 1 }}
+        className="Network_Div"
+      />
+    </Pane>
+  );
 }
 
 export default NetworkPane;
