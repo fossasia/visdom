@@ -32,7 +32,7 @@ function EditablePropertyText(props) {
 
     // prevents the pane to drop focus
     // otherwise the sendPaneMessage-API does not work
-    event.stopPropagation();
+    if (props.blurStopPropagation) event.stopPropagation();
   };
 
   // Enter invokes blur and thus submits the change
@@ -66,6 +66,7 @@ function PropertyItem(props) {
         <EditablePropertyText
           value={props.value}
           submitHandler={(value) => updateValue(props.propId, value)}
+          blurStopPropagation={props.blurStopPropagation}
         />
       );
     case 'number':
@@ -74,6 +75,7 @@ function PropertyItem(props) {
           value={props.value}
           submitHandler={(value) => updateValue(props.propId, value)}
           validateHandler={(value) => value.match(/^[0-9]*([.][0-9]*)?$/i)}
+          blurStopPropagation={props.blurStopPropagation}
         />
       );
     case 'button':
