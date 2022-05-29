@@ -15,6 +15,8 @@ const DEFAULT_HEIGHT = 400;
 const DEFAULT_WIDTH = 300;
 
 function ImagePane(props) {
+  // state varibles
+  // --------------
   const paneRef = useRef();
   const imgRef = useRef();
   const [view, setView] = useState({ scale: 1, tx: 0, ty: 0 });
@@ -30,45 +32,8 @@ function ImagePane(props) {
     y: 0,
   });
 
-  useEffect(() => {
-    setSelected(props.selected);
-  }, [props.selected]);
-  useEffect(() => {
-    // Reset the image settings when the user resizes the window. Avoid
-    // constantly resetting the zoom level when user has not zoomed.
-    if (Math.abs(view['scale'] - 1) > Number.EPSILON) handleReset();
-  }, [props.width, props.height]);
-
-  // initialize
-  useEffect(() => {
-    const onEvent = (event) => {
-      switch (event.type) {
-        case 'keydown':
-        case 'keypress':
-          event.preventDefault();
-          break;
-        case 'keyup':
-          props.appApi.sendPaneMessage({
-            event_type: 'KeyPress',
-            key: event.key,
-            key_code: event.keyCode,
-          });
-          break;
-        case 'click':
-          props.appApi.sendPaneMessage({
-            event_type: 'Click',
-            image_coord: mouseLocation,
-          });
-          break;
-      }
-    };
-
-    EventSystem.subscribe('global.event', onEvent);
-    return function cleanup() {
-      EventSystem.unsubscribe('global.event', onEvent);
-    };
-  }, [mouseLocation]);
-
+  // private events
+  // -------------
   const handleDownload = () => {
     var link = document.createElement('a');
     link.download = `${props.title || 'visdom_image'}.jpg`;
@@ -168,6 +133,53 @@ function ImagePane(props) {
     setSelected(parseInt(evt.target.value));
   };
 
+  // effects
+  // -------
+
+  // reset image selection upon property change
+  useEffect(() => {
+    setSelected(props.selected);
+  }, [props.selected]);
+
+  // Reset the image settings when the user resizes the window. Avoid
+  // constantly resetting the zoom level when user has not zoomed.
+  useEffect(() => {
+    if (Math.abs(view['scale'] - 1) > Number.EPSILON) handleReset();
+  }, [props.width, props.height]);
+
+  // initialize mouse events
+  useEffect(() => {
+    const onEvent = (event) => {
+      switch (event.type) {
+        case 'keydown':
+        case 'keypress':
+          event.preventDefault();
+          break;
+        case 'keyup':
+          props.appApi.sendPaneMessage({
+            event_type: 'KeyPress',
+            key: event.key,
+            key_code: event.keyCode,
+          });
+          break;
+        case 'click':
+          props.appApi.sendPaneMessage({
+            event_type: 'Click',
+            image_coord: mouseLocation,
+          });
+          break;
+      }
+    };
+
+    EventSystem.subscribe('global.event', onEvent);
+    return function cleanup() {
+      EventSystem.unsubscribe('global.event', onEvent);
+    };
+  }, [mouseLocation]);
+
+  // image size/pos computation
+  // --------------------------
+
   // Find the width/height that preserves the aspect ratio given 'scaledWidth/height'
   const computeHFromW = (scaledWidth) => {
     return Math.ceil((imgDim.height / imgDim.width) * scaledWidth);
@@ -176,53 +188,9 @@ function ImagePane(props) {
     return Math.ceil((imgDim.width / imgDim.height) * scaledHeight);
   };
 
-  let content = props.content;
-  let type = props.type;
-  let widgets = [];
-
-  if (type === 'image_history') {
-    if (props.show_slider) {
-      widgets.push(
-        <div className="widget" key="image_slider">
-          <div style={{ display: 'flex' }}>
-            <span>Selected:&nbsp;&nbsp;</span>
-            <input
-              type="range"
-              min="0"
-              max={content.length - 1}
-              value={selected}
-              onChange={updateSlider}
-            />
-            <span>&nbsp;&nbsp;{selected}&nbsp;&nbsp;</span>
-          </div>
-        </div>
-      );
-    }
-    content = content[selected];
-  }
-
-  if (content.caption) {
-    widgets.splice(
-      0,
-      0,
-      <span className="widget" key="img_caption">
-        {content.caption}
-      </span>
-    );
-  }
-
-  // TODO use this widget_height somehow to adjust window height!!!
-  let widget_height = 30 * widgets.length - 10;
-
-  const divstyle = {
-    left: view['tx'],
-    top: view['ty'],
-    position: 'absolute',
-  };
-
+  // compute image size & position
   let candidateWidth = Math.ceil(1 + props.width * view['scale']);
   let candidateHeight = Math.ceil(1 + props.height * view['scale']);
-
   let imageContainerStyle = {
     alignItems: 'row',
     display: 'flex',
@@ -270,6 +238,46 @@ function ImagePane(props) {
 
   if (isNaN(candidateWidth)) {
     candidateWidth = DEFAULT_WIDTH;
+  }
+
+  // rendering
+  // ---------
+  let content = props.content;
+  let type = props.type;
+  let widgets = [];
+  const divstyle = { left: view['tx'], top: view['ty'], position: 'absolute' };
+
+  // add image slider as widget
+  if (type === 'image_history') {
+    if (props.show_slider) {
+      widgets.push(
+        <div className="widget" key="image_slider">
+          <div style={{ display: 'flex' }}>
+            <span>Selected:&nbsp;&nbsp;</span>
+            <input
+              type="range"
+              min="0"
+              max={content.length - 1}
+              value={selected}
+              onChange={updateSlider}
+            />
+            <span>&nbsp;&nbsp;{selected}&nbsp;&nbsp;</span>
+          </div>
+        </div>
+      );
+    }
+    content = content[selected];
+  }
+
+  // add caption as widget
+  if (content.caption) {
+    widgets.splice(
+      0,
+      0,
+      <span className="widget" key="img_caption">
+        {content.caption}
+      </span>
+    );
   }
 
   return (
