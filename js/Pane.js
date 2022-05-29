@@ -8,7 +8,8 @@
  */
 
 import React from 'react';
-import AbstractPropertiesList from './AbstractPropertiesList';
+import PropertyItem from './PropertyItem';
+
 var classNames = require('classnames');
 
 class Pane extends React.Component {
@@ -185,13 +186,13 @@ class Pane extends React.Component {
   }
 }
 
-class PropertyList extends AbstractPropertiesList {
+class PropertyList extends PropertyItem {
   _windowRef = null;
   _barRef = null;
 
   // updates the property of the window dynamically
   // note: this.props refers in this content to the Components directly responsible
-  //       to the key, e.g. EditablePropertyText object from AbstractPropertiesList
+  //       to the key, e.g. EditablePropertyText object from PropertyItem
   updateValue = (key, value) => {
     this.props.content[key] = value;
   };
