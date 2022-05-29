@@ -89,13 +89,16 @@ var Pane = forwardRef((props, ref) => {
       {propertyListShown && (
         <div className="attachedWindow">
           {props.content.data.map((data, dataId) => [
-            <b>Data[{dataId}] Properties</b>,
-            <PropertyList
-              keylist={'data[' + dataId + ']'}
-              content={data}
-              title={'Data[' + dataId + ']'}
-            />,
-            <hr />,
+            <span key={dataId}>
+              <b>Data[{dataId}] Properties</b>,
+              <PropertyList
+                keylist={'data[' + dataId + ']'}
+                content={data}
+                title={'Data[' + dataId + ']'}
+              />
+              ,
+              <hr />,
+            </span>,
           ])}
           <b>Layout Properties</b>
           <PropertyList
@@ -145,7 +148,9 @@ function PropertyList(props) {
     else if (typeof value == 'string') var type = 'text';
     else if (Array.isArray(value)) return [];
     else if (value && typeof value === 'object')
-      return <PropertyList content={value} keylist={keylist} />;
+      return (
+        <PropertyList key={key_string} content={value} keylist={keylist} />
+      );
     else return [];
 
     // list new property as part of a table
