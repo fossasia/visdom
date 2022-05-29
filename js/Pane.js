@@ -12,32 +12,27 @@ import PropertyItem from './PropertyItem';
 var classNames = require('classnames');
 
 var Pane = forwardRef((props, ref) => {
+  // state varibles
+  // --------------
   const [propertyListShown, setPropertyListShown] = useState(false);
   const barRef = useRef();
 
-  const togglePropertyList =
-    props.togglePropertyList ||
-    (() => {
-      setPropertyListShown(!propertyListShown);
-    });
-
+  // public events
+  // -------------
+  const handleOnFocus = props.handleOnFocus || (() => props.onFocus(props.id));
   const handleDownload = props.handleDownload || (() => {});
   const handleReset = props.handleReset || (() => {});
   const handleZoom = props.handleZoom || ((ev) => {});
   const handleMouseMove = props.handleMouseMove || ((ev) => {});
+  const handleClose = props.handleClose || (() => props.onClose(props.id));
 
-  let windowClassNames = classNames({
-    window: true,
-    focus: props.isFocused,
-  });
-
-  let barClassNames = classNames({
-    bar: true,
-    focus: props.isFocused,
-  });
-
+  // rendering
+  // ---------
+  let windowClassNames = classNames({ window: true, focus: props.isFocused });
+  let barClassNames = classNames({ bar: true, focus: props.isFocused });
   let barwidgets = [];
 
+  // add property list button to barwidgets
   if (
     props.enablePropertyList &&
     props.content &&
@@ -48,7 +43,9 @@ var Pane = forwardRef((props, ref) => {
       <button
         key="properties-widget-button"
         title="properties"
-        onClick={togglePropertyList}
+        onClick={() => {
+          setPropertyListShown(!propertyListShown);
+        }}
         className={propertyListShown ? 'pull-right active' : 'pull-right'}
       >
         <span className="glyphicon glyphicon-tags" />
@@ -56,63 +53,86 @@ var Pane = forwardRef((props, ref) => {
     );
   }
 
+  // contat props barwidgets
   if (props.barwidgets) {
     if (Array.isArray(props.barwidgets))
       barwidgets = barwidgets.concat(props.barwidgets);
     else barwidgets.push(props.barwidgets);
   }
 
-  return (
-    <div
-      className={windowClassNames}
-      onClick={() => props.onFocus(props.id)}
-      onDoubleClick={handleReset}
-      onWheel={handleZoom}
-      onMouseMove={handleMouseMove}
-      ref={ref}
-    >
-      <div className={barClassNames} ref={barRef}>
-        <button title="close" onClick={() => props.onClose(props.id)}>
-          X
-        </button>
-        <button title="save" onClick={handleDownload}>
-          &#8681;
-        </button>
-        <button title="reset" onClick={handleReset} hidden={!props.handleReset}>
-          &#10226;
-        </button>
-        {barwidgets}
-        <div>{props.title}</div>
-      </div>
-      <div className="content">{props.children}</div>
-      <div className="widgets">{props.widgets}</div>
-      {propertyListShown && (
-        <div className="attachedWindow">
-          {props.content.data.map((data, dataId) => [
-            <span key={dataId}>
-              <b>Data[{dataId}] Properties</b>,
-              <PropertyList
-                keylist={'data[' + dataId + ']'}
-                content={data}
-                title={'Data[' + dataId + ']'}
-              />
-              ,
-              <hr />,
-            </span>,
-          ])}
+  // render content.data & content.layout as property list
+  let propertyListOverlay = '';
+  if (propertyListShown && typeof props.content == 'object') {
+    let propertylists = [];
+
+    // properties for content.data
+    if (typeof props.content.data == 'object') {
+      propertylists = propertylists.concat(
+        props.content.data.map((data, dataId) => [
+          <span key={dataId}>
+            <b>Data[{dataId}] Properties</b>
+            <PropertyList
+              keylist={'data[' + dataId + ']'}
+              content={data}
+              title={'Data[' + dataId + ']'}
+            />
+            <hr />
+          </span>,
+        ])
+      );
+    }
+
+    // properties for content.data
+    if (typeof props.content.layout == 'object') {
+      propertylists.push(
+        <span key="layout">
           <b>Layout Properties</b>
           <PropertyList
             keylist="layout"
             content={props.content.layout}
             title="Layout"
           />
-        </div>
-      )}
+        </span>
+      );
+    }
+
+    propertyListOverlay = <div className="attachedWindow">{propertylists}</div>;
+  }
+
+  return (
+    <div
+      className={windowClassNames}
+      onClick={handleOnFocus}
+      onDoubleClick={handleReset}
+      onWheel={handleZoom}
+      onMouseMove={handleMouseMove}
+      ref={ref}
+    >
+      <div className={barClassNames} ref={barRef}>
+        <button title="close" onClick={handleClose}>
+          {' '}
+          X{' '}
+        </button>
+        <button title="save" onClick={handleDownload}>
+          {' '}
+          &#8681;{' '}
+        </button>
+        <button title="reset" onClick={handleReset} hidden={!props.handleReset}>
+          {' '}
+          &#10226;{' '}
+        </button>
+        {barwidgets}
+        <div>{props.title}</div>
+      </div>
+      <div className="content">{props.children}</div>
+      <div className="widgets">{props.widgets}</div>
+      {propertyListOverlay}
     </div>
   );
 });
 
-// previously known as shouldComponentUpdate
+// prevent rerender unless we know we need one
+// (previously known as shouldComponentUpdate)
 Pane = React.memo(Pane, (props, nextProps) => {
   if (props.contentID !== nextProps.contentID) return false;
   else if (props.h !== nextProps.h || props.w !== nextProps.w) return false;
@@ -121,15 +141,20 @@ Pane = React.memo(Pane, (props, nextProps) => {
   return true;
 });
 
+// this component is an overlay containing a property list (specialized for Pane)
 function PropertyList(props) {
+  // private events
+  // --------------
+
   // updates the property of the window dynamically
   // note: props refers in this content to the Components directly responsible
   //       to the key, e.g. EditablePropertyText object from PropertyItem
-  const updateValue =
-    props.updateValue ||
-    ((key, value) => {
-      props.content[key] = value;
-    });
+  const updateValue = (key, value) => {
+    props.content[key] = value;
+  };
+
+  // rendering
+  // ---------
 
   // create for each element of props.content a representation in the PropertyList
   let propitems = Object.entries(props.content).map(([key_local, value]) => {
