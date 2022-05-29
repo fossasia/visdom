@@ -48,6 +48,7 @@ function PropertiesPane(props) {
                     {...prop}
                     propId={propId}
                     updateValue={updateValue}
+                    blurStopPropagation={true}
                   />
                 </td>
               </tr>
