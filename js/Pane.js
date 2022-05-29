@@ -7,188 +7,120 @@
  *
  */
 
-import React from 'react';
+import React, { useState, useRef, forwardRef } from 'react';
 import PropertyItem from './PropertyItem';
-
 var classNames = require('classnames');
 
-class Pane extends React.Component {
-  _windowRef = null;
-  _barRef = null;
+var Pane = forwardRef((props, ref) => {
+  const [propertyListShown, setPropertyListShown] = useState(false);
+  const barRef = useRef();
 
-  constructor(props) {
-    super(props);
-    this.state = {
-      propertyListShown: false,
-    };
-  }
-
-  close = () => {
-    this.props.onClose(this.props.id);
-  };
-
-  focus = () => {
-    this.props.onFocus(this.props.id);
-  };
-
-  download = () => {
-    if (this.props.handleDownload) {
-      this.props.handleDownload();
-    }
-  };
-
-  togglePropertyList = () => {
-    this.setState((state) => ({ propertyListShown: !state.propertyListShown }));
-  };
-
-  reset = () => {
-    if (this.props.handleReset) {
-      this.props.handleReset();
-    }
-  };
-
-  zoom = (ev) => {
-    if (this.props.handleZoom) {
-      this.props.handleZoom(ev);
-    }
-  };
-
-  over = (ev) => {
-    if (this.props.handleMouseMove) {
-      this.props.handleMouseMove(ev);
-    }
-  };
-
-  resize = () => {
-    if (this.props.resize) {
-      this.props.onResize();
-    }
-  };
-
-  getWindowSize = () => {
-    return {
-      h: this._windowRef.clientHeight,
-      w: this._windowRef.clientWidth,
-    };
-  };
-
-  getContentSize = () => {
-    return {
-      h: this._windowRef.clientHeight - this._barRef.scrollHeight,
-      w: this._windowRef.clientWidth,
-    };
-  };
-
-  shouldComponentUpdate(nextProps, nextState) {
-    if (this.props.contentID !== nextProps.contentID) {
-      return true;
-    } else if (this.props.h !== nextProps.h || this.props.w !== nextProps.w) {
-      return true;
-    } else if (this.props.children !== nextProps.children) {
-      return true;
-    } else if (this.props.isFocused !== nextProps.isFocused) {
-      return true;
-    } else if (this.state.propertyListShown !== nextState.propertyListShown) {
-      return true;
-    }
-
-    return false;
-  }
-
-  render() {
-    let windowClassNames = classNames({
-      window: true,
-      focus: this.props.isFocused,
+  const togglePropertyList =
+    props.togglePropertyList ||
+    (() => {
+      setPropertyListShown(!propertyListShown);
     });
 
-    let barClassNames = classNames({
-      bar: true,
-      focus: this.props.isFocused,
-    });
+  const handleDownload = props.handleDownload || (() => {});
+  const handleReset = props.handleReset || (() => {});
+  const handleZoom = props.handleZoom || ((ev) => {});
+  const handleMouseMove = props.handleMouseMove || ((ev) => {});
 
-    let barwidgets = [];
+  let windowClassNames = classNames({
+    window: true,
+    focus: props.isFocused,
+  });
 
-    if (
-      this.props.enablePropertyList &&
-      this.props.content &&
-      typeof this.props.content == 'object' &&
-      this.props.content.data
-    ) {
-      barwidgets.push(
-        <button
-          key="properties-widget-button"
-          title="properties"
-          onClick={this.togglePropertyList}
-          className={
-            this.state.propertyListShown ? 'pull-right active' : 'pull-right'
-          }
-        >
-          <span className="glyphicon glyphicon-tags" />
-        </button>
-      );
-    }
+  let barClassNames = classNames({
+    bar: true,
+    focus: props.isFocused,
+  });
 
-    if (this.props.barwidgets) {
-      if (Array.isArray(this.props.barwidgets))
-        barwidgets = barwidgets.concat(this.props.barwidgets);
-      else barwidgets.push(this.props.barwidgets);
-    }
+  let barwidgets = [];
 
-    return (
-      <div
-        className={windowClassNames}
-        onClick={this.focus}
-        onDoubleClick={this.reset}
-        onWheel={this.zoom}
-        onMouseMove={this.over}
-        ref={(ref) => (this._windowRef = ref)}
+  if (
+    props.enablePropertyList &&
+    props.content &&
+    typeof props.content == 'object' &&
+    props.content.data
+  ) {
+    barwidgets.push(
+      <button
+        key="properties-widget-button"
+        title="properties"
+        onClick={togglePropertyList}
+        className={propertyListShown ? 'pull-right active' : 'pull-right'}
       >
-        <div className={barClassNames} ref={(ref) => (this._barRef = ref)}>
-          <button title="close" onClick={this.close}>
-            X
-          </button>
-          <button title="save" onClick={this.download}>
-            &#8681;
-          </button>
-          <button
-            title="reset"
-            onClick={this.reset}
-            hidden={!this.props.handleReset}
-          >
-            &#10226;
-          </button>
-          {barwidgets}
-          <div>{this.props.title}</div>
-        </div>
-        <div className="content">{this.props.children}</div>
-        <div className="widgets">{this.props.widgets}</div>
-        {this.state.propertyListShown && (
-          <div className="attachedWindow">
-            {this.props.content.data.map((data, dataId) => [
-              <b>Data[{dataId}] Properties</b>,
-              <PropertyList
-                keylist={'data[' + dataId + ']'}
-                content={data}
-                title={'Data[' + dataId + ']'}
-              />,
-              <hr />,
-            ])}
-            <b>Layout Properties</b>
-            <PropertyList
-              keylist="layout"
-              content={this.props.content.layout}
-              title="Layout"
-            />
-          </div>
-        )}
-      </div>
+        <span className="glyphicon glyphicon-tags" />
+      </button>
     );
   }
-}
+
+  if (props.barwidgets) {
+    if (Array.isArray(props.barwidgets))
+      barwidgets = barwidgets.concat(props.barwidgets);
+    else barwidgets.push(props.barwidgets);
+  }
+
+  return (
+    <div
+      className={windowClassNames}
+      onClick={() => props.onFocus(props.id)}
+      onDoubleClick={handleReset}
+      onWheel={handleZoom}
+      onMouseMove={handleMouseMove}
+      ref={ref}
+    >
+      <div className={barClassNames} ref={barRef}>
+        <button title="close" onClick={() => props.onClose(props.id)}>
+          X
+        </button>
+        <button title="save" onClick={handleDownload}>
+          &#8681;
+        </button>
+        <button title="reset" onClick={handleReset} hidden={!props.handleReset}>
+          &#10226;
+        </button>
+        {barwidgets}
+        <div>{props.title}</div>
+      </div>
+      <div className="content">{props.children}</div>
+      <div className="widgets">{props.widgets}</div>
+      {propertyListShown && (
+        <div className="attachedWindow">
+          {props.content.data.map((data, dataId) => [
+            <b>Data[{dataId}] Properties</b>,
+            <PropertyList
+              keylist={'data[' + dataId + ']'}
+              content={data}
+              title={'Data[' + dataId + ']'}
+            />,
+            <hr />,
+          ])}
+          <b>Layout Properties</b>
+          <PropertyList
+            keylist="layout"
+            content={props.content.layout}
+            title="Layout"
+          />
+        </div>
+      )}
+    </div>
+  );
+});
+
+// previously known as shouldComponentUpdate
+Pane = React.memo(Pane, (props, nextProps) => {
+  if (props.contentID !== nextProps.contentID) return false;
+  else if (props.h !== nextProps.h || props.w !== nextProps.w) return false;
+  else if (props.children !== nextProps.children) return false;
+  else if (props.isFocused !== nextProps.isFocused) return false;
+  return true;
+});
 
 function PropertyList(props) {
   // updates the property of the window dynamically
-  // note: this.props refers in this content to the Components directly responsible
+  // note: props refers in this content to the Components directly responsible
   //       to the key, e.g. EditablePropertyText object from PropertyItem
   const updateValue =
     props.updateValue ||
