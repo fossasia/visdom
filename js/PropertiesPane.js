@@ -12,6 +12,9 @@ import PropertyItem from './PropertyItem';
 import Pane from './Pane';
 
 function PropertiesPane(props) {
+  // private events
+  // --------------
+
   // send updates in PropertyItem directly to all observers / sources
   const updateValue = (propId, value) => {
     props.onFocus(props.id, () => {
@@ -34,6 +37,9 @@ function PropertiesPane(props) {
     link.href = url;
     link.click();
   };
+
+  // rendering
+  // ---------
 
   return (
     <Pane {...props} handleDownload={handleDownload}>
