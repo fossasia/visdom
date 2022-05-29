@@ -13,12 +13,22 @@ import Pane from './Pane';
 const { sgg } = require('ml-savitzky-golay-generalized');
 
 function PlotPane(props) {
+  // state varibles
+  // --------------
   const plotlyRef = useRef();
   const previousContent = usePrevious(props.content);
   const [maxsmoothvalue, setMaxsmoothvalue] = useState(100);
   const [smoothWidgetActive, setSmoothWidgetActive] = useState(false);
   const [smoothvalue, setSmoothValue] = useState(1);
 
+  // private events
+  // -------------
+  const toggleSmoothWidget = () => {
+    setSmoothWidgetActive(!smoothWidgetActive);
+  };
+  const updateSmoothSlider = (value) => {
+    setSmoothValue(value);
+  };
   const handleDownload = () => {
     Plotly.downloadImage(plotlyRef.current, {
       format: 'svg',
@@ -26,14 +36,8 @@ function PlotPane(props) {
     });
   };
 
-  const toggleSmoothWidget = () => {
-    setSmoothWidgetActive(!smoothWidgetActive);
-  };
-
-  const updateSmoothSlider = (value) => {
-    setSmoothValue(value);
-  };
-
+  // events
+  // ------
   useEffect(() => {
     if (previousContent) {
       // Retain trace visibility between old and new plots
@@ -67,6 +71,9 @@ function PlotPane(props) {
 
     newPlot();
   });
+
+  // rendering
+  // ---------
 
   const newPlot = () => {
     var data = props.content.data;
@@ -186,7 +193,8 @@ function PlotPane(props) {
   );
 }
 
-// previously known as shouldComponentUpdate
+// prevent rerender unless we know we need one
+// (previously known as shouldComponentUpdate)
 PlotPane = React.memo(PlotPane, (props, nextProps) => {
   if (props.contentID !== nextProps.contentID) return false;
   else if (props.h !== nextProps.h || props.w !== nextProps.w) return false;
