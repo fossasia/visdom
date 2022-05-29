@@ -186,65 +186,61 @@ class Pane extends React.Component {
   }
 }
 
-class PropertyList extends PropertyItem {
-  _windowRef = null;
-  _barRef = null;
-
+function PropertyList(props) {
   // updates the property of the window dynamically
   // note: this.props refers in this content to the Components directly responsible
   //       to the key, e.g. EditablePropertyText object from PropertyItem
-  updateValue = (key, value) => {
-    this.props.content[key] = value;
-  };
-
-  render() {
-    // create for each element of props.content a representation in the PropertyList
-    let props = Object.entries(this.props.content).map(([key_local, value]) => {
-      // append key for multi-level objects
-      var keylist = this.props.keylist
-        ? Array.isArray(this.props.keylist)
-          ? this.props.keylist.concat([key_local])
-          : [this.props.keylist, key_local]
-        : [key_local];
-      var key_string =
-        keylist.length > 1 ? keylist.slice(1).join('.') : keylist[0];
-
-      // map value type to property type
-      if (typeof value == 'number') var type = 'number';
-      else if (typeof value == 'boolean') var type = 'checkbox';
-      else if (typeof value == 'string') var type = 'text';
-      else if (Array.isArray(value)) return [];
-      else if (value && typeof value === 'object')
-        return <PropertyList content={value} keylist={keylist} />;
-      else return [];
-
-      // list new property as part of a table
-      return (
-        <tr key={key_string}>
-          <td className="table-properties-name">{key_string}</td>
-          <td className="table-properties-value">
-            {this.renderPropertyValue(
-              {
-                name: key_string,
-                type: type,
-                value: value,
-              },
-              key_local
-            )}
-          </td>
-        </tr>
-      );
+  const updateValue =
+    props.updateValue ||
+    ((key, value) => {
+      props.content[key] = value;
     });
 
-    // only first PropertyList in recursion should create a table-tag
-    if (!Array.isArray(this.props.keylist))
-      return (
-        <table className="table table-bordered table-condensed table-properties">
-          {props}
-        </table>
-      );
-    else return props;
-  }
+  // create for each element of props.content a representation in the PropertyList
+  let propitems = Object.entries(props.content).map(([key_local, value]) => {
+    // append key for multi-level objects
+    var keylist = props.keylist
+      ? Array.isArray(props.keylist)
+        ? props.keylist.concat([key_local])
+        : [props.keylist, key_local]
+      : [key_local];
+    var key_string =
+      keylist.length > 1 ? keylist.slice(1).join('.') : keylist[0];
+
+    // map value type to property type
+    if (typeof value == 'number') var type = 'number';
+    else if (typeof value == 'boolean') var type = 'checkbox';
+    else if (typeof value == 'string') var type = 'text';
+    else if (Array.isArray(value)) return [];
+    else if (value && typeof value === 'object')
+      return <PropertyList content={value} keylist={keylist} />;
+    else return [];
+
+    // list new property as part of a table
+    return (
+      <tr key={key_string}>
+        <td className="table-properties-name">{key_string}</td>
+        <td className="table-properties-value">
+          <PropertyItem
+            name={key_string}
+            type={type}
+            value={value}
+            propId={key_local}
+            updateValue={updateValue}
+          />
+        </td>
+      </tr>
+    );
+  });
+
+  // only first PropertyList in recursion should create a table-tag
+  if (!Array.isArray(props.keylist))
+    return (
+      <table className="table table-bordered table-condensed table-properties">
+        {propitems}
+      </table>
+    );
+  else return propitems;
 }
 
 export default Pane;
