@@ -11,7 +11,7 @@ Main application class that pulls handlers together and maintains
 all of the required state about the currently running server.
 """
 
-from visdom.utils.shared_utils import warn_once, ensure_dir_exists, get_visdom_path_to
+from visdom.utils.shared_utils import warn_once, ensure_dir_exists, get_visdom_path
 
 from visdom.utils.server_utils import (
     serialize_env,
@@ -36,8 +36,8 @@ LAYOUT_FILE = 'layouts.json'
 tornado_settings = {
     "autoescape": None,
     "debug": "/dbg/" in __file__,
-    "static_path": get_visdom_path_to('static'),
-    "template_path": get_visdom_path_to('static'),
+    "static_path": get_visdom_path('static'),
+    "template_path": get_visdom_path('static'),
     "compiled_template_cache": False
 }
 
