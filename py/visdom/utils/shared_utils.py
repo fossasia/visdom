@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2017-present, Facebook, Inc.
+# Copyright 2017-present, The Visdom Authors
 # All rights reserved.
 #
 # This source code is licensed under the license found in the
@@ -39,22 +39,24 @@ def get_rand_id():
 
 def get_new_window_id():
     """Return a string to be used for a new window"""
-    return f'win_{get_rand_id()}'
+    return f'window_{get_rand_id()}'
+
 
 
 def ensure_dir_exists(path):
     """Make sure the parent dir exists for path so we can write a file."""
     try:
-        os.makedirs(os.path.dirname(path))
+        os.makedirs(os.path.dirname(os.path.abspath(path)))
     except OSError as e1:
         assert e1.errno == 17  # errno.EEXIST
 
 
-def get_visdom_path():
-    """Get the path to the visdom/py/visdom directory."""
+def get_visdom_path(filename):
+    """Get the path to an asset."""
     cwd = os.path.dirname(
         os.path.abspath(inspect.getfile(inspect.currentframe())))
-    return os.path.dirname(cwd)
+    return os.path.join(cwd, filename)
+
 
 
 def get_visdom_path_to(filename):

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2017-present, Facebook, Inc.
+# Copyright 2017-present, The Visdom Authors
 # All rights reserved.
 #
 # This source code is licensed under the license found in the
@@ -20,7 +20,6 @@ from visdom.server.defaults import (
     DEFAULT_HOSTNAME,
     DEFAULT_PORT,
 )
-from visdom.utils.shared_utils import get_new_window_id
 from visdom.utils.shared_utils import (
     warn_once,
     get_rand_id,
@@ -48,7 +47,6 @@ import tornado.escape     # noqa E402: gotta install ioloop first
 
 LAYOUT_FILE = 'layouts.json'
 
-here = os.path.abspath(os.path.dirname(__file__))
 COMPACT_SEPARATORS = (',', ':')
 
 MAX_SOCKET_WAIT = 15
@@ -85,13 +83,54 @@ def hash_password(password):
 
 # ------- File management helprs ----- #
 
+class LazyEnvData(Mapping):
+    def __init__(self, env_path_file):
+        self._env_path_file = env_path_file
+        self._raw_dict = None
+
+    def lazy_load_data(self):
+        if self._raw_dict is not None:
+            return
+
+        try:
+            with open(self._env_path_file, 'r') as fn:
+                env_data = tornado.escape.json_decode(fn.read())
+        except Exception as e:
+            raise ValueError(
+                "Failed loading environment json: {} - {}".format(
+                    self._env_path_file, repr(e)))
+        self._raw_dict = {
+                'jsons': env_data['jsons'],
+                'reload': env_data['reload']
+        }
+
+    def __getitem__(self, key):
+        self.lazy_load_data()
+        return self._raw_dict.__getitem__(key)
+
+    def __setitem__(self, key, value):
+        self.lazy_load_data()
+        return self._raw_dict.__setitem__(key, value)
+
+    def __iter__(self):
+        self.lazy_load_data()
+        return iter(self._raw_dict)
+
+    def __len__(self):
+        self.lazy_load_data()
+        return len(self._raw_dict)
+
+
 def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
     env_ids = [i for i in eids if i in state]
     if env_path is not None:
         for env_id in env_ids:
             env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
             with open(env_path_file, 'w') as fn:
-                fn.write(json.dumps(state[env_id]))
+                if isinstance(state[env_id], LazyEnvData):
+                    fn.write(json.dumps(state[env_id]._raw_dict))
+                else:
+                    fn.write(json.dumps(state[env_id]))
     return env_ids
 
 
@@ -163,6 +202,14 @@ def window(args):
         })
     elif ptype in ['image', 'text', 'properties']:
         p.update({'content': args['data'][0]['content'], 'type': ptype})
+    elif ptype == 'network':
+        p.update({
+            'content': args['data'][0]['content'] ,
+            'type': ptype,
+            'directed': opts.get("directed", False),
+            'showEdgeLabels' : opts.get("showEdgeLabels", "hover"),
+            'showVertexLabels' : opts.get("showVertexLabels", "hover"),
+        })
     elif ptype in ['embeddings']:
         p.update({
             'content': args['data'][0]['content'],
@@ -211,7 +258,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         res['jsons'][wid] = None
         res['jsons'].pop(wid)
 
-    for ix, eid in enumerate(envs.keys()):
+    for ix, eid in enumerate(sorted(envs.keys())):
         env = envs[eid]
         for wid in env.get('jsons', {}).keys():
             win = env['jsons'][wid]
@@ -349,7 +396,7 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
 
 def broadcast(self, msg, eid):
     for s in self.subs:
-        if type(self.subs[s].eid) is list:
+        if isinstance(self.subs[s].eid, dict):
             if eid in self.subs[s].eid:
                 self.subs[s].write_message(msg)
         else:
