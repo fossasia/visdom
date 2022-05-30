@@ -11,35 +11,48 @@ Main application class that pulls handlers together and maintains
 all of the required state about the currently running server.
 """
 
-from visdom.utils.shared_utils import warn_once, ensure_dir_exists, get_visdom_path
-
-from visdom.utils.server_utils import (
-    serialize_env,
-)
-
-# TODO replace this next
-from visdom.server.handlers.socket_handlers import *
-from visdom.server.handlers.web_handlers import *
-
-import platform
 import copy
 import hashlib
 import logging
 import os
+import platform
 import time
 
 import tornado.web        # noqa E402: gotta install ioloop first
 import tornado.escape     # noqa E402: gotta install ioloop first
 
-
+from visdom.utils.shared_utils import warn_once, ensure_dir_exists, get_visdom_path
+from visdom.utils.server_utils import serialize_env, LazyEnvData
+from visdom.server.handlers.socket_handlers import (
+    SocketHandler,
+    SocketWrap,
+    VisSocketHandler,
+    VisSocketWrap,
+)
+from visdom.server.handlers.web_handlers import (
+    CloseHandler,
+    CompareHandler,
+    DataHandler,
+    DeleteEnvHandler,
+    EnvHandler,
+    EnvStateHandler,
+    ErrorHandler,
+    ExistsHandler,
+    ForkEnvHandler,
+    HashHandler,
+    IndexHandler,
+    PostHandler,
+    SaveHandler,
+    UpdateHandler,
+    UserSettingsHandler
+)
 from visdom.server.defaults import (
-    LAYOUT_FILE,
     DEFAULT_BASE_URL,
     DEFAULT_ENV_PATH,
     DEFAULT_HOSTNAME,
     DEFAULT_PORT,
+    LAYOUT_FILE
 )
-
 
 
 tornado_settings = {

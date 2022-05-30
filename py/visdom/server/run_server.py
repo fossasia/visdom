@@ -10,6 +10,12 @@
 Provides simple entrypoints to set up and run the main visdom server.
 """
 
+import argparse
+import getpass
+import logging
+import os
+import sys
+from tornado import ioloop
 from visdom.server.app import Application
 from visdom.server.defaults import (
     DEFAULT_BASE_URL,
@@ -18,14 +24,10 @@ from visdom.server.defaults import (
     DEFAULT_PORT,
 )
 from visdom.server.build import download_scripts
-
-import argparse
-import getpass
-import logging
-import os
-import sys
-
-from tornado import ioloop
+from visdom.utils.server_utils import (
+    hash_password,
+    set_cookie
+)
 
 
 def start_server(port=DEFAULT_PORT, hostname=DEFAULT_HOSTNAME,

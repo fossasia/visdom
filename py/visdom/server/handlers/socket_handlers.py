@@ -13,10 +13,6 @@ necessary, but defers underlying manipulations of the server's data to
 the data_model itself.
 """
 
-# TODO fix these imports
-from visdom.utils.shared_utils import *
-from visdom.utils.server_utils import *
-from visdom.server.handlers.base_handlers import *
 import copy
 import getpass
 import hashlib
@@ -36,6 +32,10 @@ except ImportError:
 
 import tornado.ioloop
 import tornado.escape
+from visdom.server.handlers.base_handlers import BaseWebSocketHandler, BaseHandler
+from visdom.utils.shared_utils import get_rand_id
+from visdom.utils.server_utils import check_auth, broadcast_envs, serialize_env, send_to_sources, broadcast, escape_eid
+
 
 MAX_SOCKET_WAIT = 15
 

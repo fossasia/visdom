@@ -13,10 +13,6 @@ necessary, but defers underlying manipulations of the server's data to
 the data_model itself.
 """
 
-# TODO fix these imports
-from visdom.utils.shared_utils import *
-from visdom.utils.server_utils import *
-from visdom.server.handlers.base_handlers import BaseHandler
 import copy
 import getpass
 import json
@@ -33,6 +29,9 @@ except ImportError:
     from collections import Mapping, Sequence
 
 import tornado.escape
+from visdom.utils.shared_utils import get_rand_id
+from visdom.utils.server_utils import check_auth, extract_eid, window, register_window, gather_envs, broadcast_envs, serialize_env, escape_eid, compare_envs, load_env, hash_md_window, broadcast, update_window, hash_password, stringify
+from visdom.server.handlers.base_handlers import BaseHandler
 
 
 
