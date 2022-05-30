@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2017-present, Facebook, Inc.
+# Copyright 2017-present, The Visdom Authors
 # All rights reserved.
 #
 # This source code is licensed under the license found in the
@@ -156,7 +156,7 @@ class VisSocketWrapper():
         to_send = []
         while len(self.messages) > 0:
             message = self.messages.pop()
-            if type(message) is dict:
+            if isinstance(message, dict):
                 # Not all messages are being formatted the same way (JSON)
                 # TODO investigate
                 message = json.dumps(message)
@@ -327,10 +327,6 @@ class ClientSocketWrapper():
             ))
 
     def open(self):
-        if self.login_enabled and not self.current_user:
-            print("AUTH Failed in SocketHandler")
-            self.close()
-            return
         self.sid = get_rand_id()
         if self not in list(self.subs.values()):
             self.eid = 'main'
@@ -409,7 +405,7 @@ class ClientSocketWrapper():
         to_send = []
         while len(self.messages) > 0:
             message = self.messages.pop()
-            if type(message) is dict:
+            if isinstance(message, dict):
                 # Not all messages are being formatted the same way (JSON)
                 # TODO investigate
                 message = json.dumps(message)

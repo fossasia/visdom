@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2017-present, Facebook, Inc.
+# Copyright 2017-present, The Visdom Authors
 # All rights reserved.
 #
 # This source code is licensed under the license found in the
@@ -21,6 +21,7 @@ from visdom.utils.server_utils import (
 from visdom.server.handlers.socket_handlers import *
 from visdom.server.handlers.web_handlers import *
 
+import platform
 import copy
 import hashlib
 import logging
@@ -43,10 +44,13 @@ tornado_settings = {
 class Application(tornado.web.Application):
     def __init__(self, port=DEFAULT_PORT, base_url='',
                  env_path=DEFAULT_ENV_PATH, readonly=False,
-                 user_credential=None, use_frontend_client_polling=False):
+                 user_credential=None, use_frontend_client_polling=False,
+                 eager_data_loading=False):
+        self.eager_data_loading = eager_data_loading
         self.env_path = env_path
         self.state = self.load_state()
         self.layouts = self.load_layouts()
+        self.user_settings = self.load_user_settings()
         self.subs = {}
         self.sources = {}
         self.port = port
@@ -86,6 +90,7 @@ class Application(tornado.web.Application):
             (r"%s/win_hash" % self.base_url, HashHandler, {'app': self}),
             (r"%s/env_state" % self.base_url, EnvStateHandler, {'app': self}),
             (r"%s/fork_env" % self.base_url, ForkEnvHandler, {'app': self}),
+            (r"%s/user/(.*)" % self.base_url, UserSettingsHandler, {'app': self}),
             (r"%s(.*)" % self.base_url, IndexHandler, {'app': self}),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)
@@ -137,24 +142,58 @@ class Application(tornado.web.Application):
             return {'main': {'jsons': {}, 'reload': {}}}
         ensure_dir_exists(env_path)
         env_jsons = [i for i in os.listdir(env_path) if '.json' in i]
-
         for env_json in env_jsons:
-            env_path_file = os.path.join(env_path, env_json)
-            try:
-                with open(env_path_file, 'r') as fn:
-                    env_data = tornado.escape.json_decode(fn.read())
-            except Exception as e:
-                logging.warn(
-                    "Failed loading environment json: {} - {}".format(
-                        env_path_file, repr(e)))
-                continue
-
             eid = env_json.replace('.json', '')
-            state[eid] = {'jsons': env_data['jsons'],
-                               'reload': env_data['reload']}
+            env_path_file = os.path.join(env_path, env_json)
+
+            if self.eager_data_loading:
+                try:
+                    with open(env_path_file, 'r') as fn:
+                        env_data = tornado.escape.json_decode(fn.read())
+                except Exception as e:
+                    logging.warn(
+                        "Failed loading environment json: {} - {}".format(
+                            env_path_file, repr(e)))
+                    continue
+
+                state[eid] = {'jsons': env_data['jsons'],
+                        'reload': env_data['reload']}
+            else:
+                state[eid] = LazyEnvData(env_path_file)
 
         if 'main' not in state and 'main.json' not in env_jsons:
             state['main'] = {'jsons': {}, 'reload': {}}
             serialize_env(state, ['main'], env_path=self.env_path)
 
         return state
+
+    def load_user_settings(self):
+        settings = {}
+
+        """Determines & uses the platform-specific root directory for user configurations."""
+        if platform.system() == "Windows":
+            base_dir = os.getenv('APPDATA')
+        elif platform.system() == "Darwin": # osx
+            base_dir = os.path.expanduser('~/Library/Preferences')
+        else:
+            base_dir = os.getenv('XDG_CONFIG_HOME', os.path.expanduser('~/.config'))
+        config_dir = os.path.join(base_dir, "visdom")
+
+        # initialize user style
+        user_css = ""
+        logging.error("initializing")
+        home_style_path = os.path.join(config_dir, "style.css")
+        if os.path.exists(home_style_path):
+            with open(home_style_path, "r") as f:
+                user_css += "\n" + f.read()
+        project_style_path = os.path.join(self.env_path, "style.css")
+        if os.path.exists(project_style_path):
+            with open(project_style_path, "r") as f:
+                user_css += "\n" + f.read()
+
+        settings['config_dir'] = config_dir
+        settings['user_css'] = user_css
+
+        return settings
+
+

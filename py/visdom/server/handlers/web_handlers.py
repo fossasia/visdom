@@ -19,15 +19,12 @@ from visdom.utils.server_utils import *
 from visdom.server.handlers.base_handlers import BaseHandler
 import copy
 import getpass
-import hashlib
 import json
 import jsonpatch
 import logging
 import math
 import os
-import time
 from collections import OrderedDict
-from collections.abc import Mapping
 try:
     # for after python 3.8
     from collections.abc import Mapping, Sequence
@@ -37,7 +34,6 @@ except ImportError:
 
 import tornado.escape
 
-MAX_SOCKET_WAIT = 15
 
 
 # TODO move the logic that actually parses environments and layouts to

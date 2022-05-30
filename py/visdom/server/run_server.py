@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2017-present, Facebook, Inc.
+# Copyright 2017-present, The Visdom Authors
 # All rights reserved.
 #
 # This source code is licensed under the license found in the
@@ -31,13 +31,17 @@ from tornado import ioloop
 def start_server(port=DEFAULT_PORT, hostname=DEFAULT_HOSTNAME,
                  base_url=DEFAULT_BASE_URL, env_path=DEFAULT_ENV_PATH,
                  readonly=False, print_func=None, user_credential=None,
-                 use_frontend_client_polling=False):
-    """Run a visdom server with the given arguments"""
-    logging.info("It's Alive!")
+                 use_frontend_client_polling=False, bind_local=False,
+                 eager_data_loading=False):
+    print("It's Alive!")
     app = Application(port=port, base_url=base_url, env_path=env_path,
                       readonly=readonly, user_credential=user_credential,
-                      use_frontend_client_polling=use_frontend_client_polling)
-    app.listen(port, max_buffer_size=1024 ** 3)
+                      use_frontend_client_polling=use_frontend_client_polling,
+                      eager_data_loading=eager_data_loading)
+    if bind_local:
+        app.listen(port, max_buffer_size=1024 ** 3, address='127.0.0.1')
+    else:
+        app.listen(port, max_buffer_size=1024 ** 3)
     logging.info("Application Started")
 
     if "HOSTNAME" in os.environ and hostname == DEFAULT_HOSTNAME:
@@ -88,6 +92,13 @@ def main(print_func=None):
                         action='store_true',
                         help='Have the frontend communicate via polling '
                              'rather than over websockets.')
+    parser.add_argument('-bind_local', default=False,
+                        action='store_true',
+                        help='Make server only accessible only from '
+                             'localhost.')
+    parser.add_argument('-eager_data_loading', default=False,
+                        action='store_true',
+                        help='Load data from filesystem when starting server (and not lazily upon first request).')
     FLAGS = parser.parse_args()
 
     # Process base_url
@@ -99,7 +110,7 @@ def main(print_func=None):
 
     try:
         logging_level = int(FLAGS.logging_level)
-    except (ValueError,):
+    except ValueError:
         try:
             logging_level = logging._checkLevel(FLAGS.logging_level)
         except ValueError:
@@ -163,7 +174,9 @@ def main(print_func=None):
     start_server(port=FLAGS.port, hostname=FLAGS.hostname, base_url=base_url,
                  env_path=FLAGS.env_path, readonly=FLAGS.readonly,
                  print_func=print_func, user_credential=user_credential,
-                 use_frontend_client_polling=FLAGS.use_frontend_client_polling)
+                 use_frontend_client_polling=FLAGS.use_frontend_client_polling,
+                 bind_local=FLAGS.bind_local,
+                 eager_data_loading=FLAGS.eager_data_loading)
 
 
 def download_scripts_and_run():
