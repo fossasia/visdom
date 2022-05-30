@@ -15,6 +15,7 @@ in the previous server.py class.
 """
 
 from visdom.server.defaults import (
+    LAYOUT_FILE,
     DEFAULT_BASE_URL,
     DEFAULT_ENV_PATH,
     DEFAULT_HOSTNAME,
@@ -44,8 +45,6 @@ from zmq.eventloop import ioloop
 ioloop.install()  # Needs to happen before any tornado imports!
 
 import tornado.escape     # noqa E402: gotta install ioloop first
-
-LAYOUT_FILE = 'layouts.json'
 
 COMPACT_SEPARATORS = (',', ':')
 
