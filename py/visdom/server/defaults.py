@@ -8,6 +8,7 @@
 
 from os.path import expanduser
 
+LAYOUT_FILE = 'layouts.json'
 DEFAULT_ENV_PATH = '%s/.visdom/' % expanduser("~")
 DEFAULT_PORT = 8097
 DEFAULT_HOSTNAME = "localhost"
