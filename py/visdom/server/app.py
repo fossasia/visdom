@@ -31,7 +31,16 @@ import time
 import tornado.web        # noqa E402: gotta install ioloop first
 import tornado.escape     # noqa E402: gotta install ioloop first
 
-LAYOUT_FILE = 'layouts.json'
+
+from visdom.server.defaults import (
+    LAYOUT_FILE,
+    DEFAULT_BASE_URL,
+    DEFAULT_ENV_PATH,
+    DEFAULT_HOSTNAME,
+    DEFAULT_PORT,
+)
+
+
 
 tornado_settings = {
     "autoescape": None,
