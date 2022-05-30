@@ -12,7 +12,7 @@ parts of the visdom stack. Not to be used for particularly specific
 helper functions.
 """
 
-import inspect
+import importlib
 import uuid
 import warnings
 import os
@@ -51,14 +51,9 @@ def ensure_dir_exists(path):
         assert e1.errno == 17  # errno.EEXIST
 
 
-def get_visdom_path(filename):
+def get_visdom_path(filename=None):
     """Get the path to an asset."""
-    cwd = os.path.dirname(
-        os.path.abspath(inspect.getfile(inspect.currentframe())))
+    cwd = os.path.dirname(importlib.util.find_spec("visdom").origin)
+    if filename is None:
+        return cwd
     return os.path.join(cwd, filename)
-
-
-
-def get_visdom_path_to(filename):
-    """Get the path to a file in the visdom/py/visdom directory."""
-    return os.path.join(get_visdom_path(), filename)
