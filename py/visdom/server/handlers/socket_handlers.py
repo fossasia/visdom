@@ -35,9 +35,8 @@ import tornado.escape
 from visdom.server.handlers.base_handlers import BaseWebSocketHandler, BaseHandler
 from visdom.utils.shared_utils import get_rand_id
 from visdom.utils.server_utils import check_auth, broadcast_envs, serialize_env, send_to_sources, broadcast, escape_eid
+from visdom.server.defaults import MAX_SOCKET_WAIT
 
-
-MAX_SOCKET_WAIT = 15
 
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.

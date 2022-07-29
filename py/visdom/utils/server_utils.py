@@ -43,7 +43,6 @@ from visdom.utils.shared_utils import (
     ensure_dir_exists,
 )
 
-MAX_SOCKET_WAIT = 15
 
 # ---- Vaguely server-security related functions ---- #
 
