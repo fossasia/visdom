@@ -65,8 +65,26 @@ jobs:
         run: |
           git checkout PR-HEAD -- ./cypress
 
+      - name: Check file existence
+        id: check_files
+        run: |
+          if test "py/visdom/server.py"; then
+          echo '::set-output name=file_exists::true'
+          else
+          echo '::set-output name=file_exists::false'
+          fi
+
+      - name: Cypress test:init
+        if: steps.check_files.outputs.file_exists == 'true'
+        uses: cypress-io/github-action@v2
+        with:
+          install: false
+          start: python3 py/visdom/server.py -port 8098 -env_path /tmp
+          wait-on: 'http://localhost:8098'
+          spec: cypress/integration/*.init.js
       - name: Cypress test:init
         uses: cypress-io/github-action@v2
+        if: steps.check_files.outputs.file_exists != 'true'
         with:
           install: false
           start: python3 py/visdom/server -port 8098 -env_path /tmp
