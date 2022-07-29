@@ -297,7 +297,7 @@ class SocketHandler(BaseWebSocketHandler):
 
 # TODO condense some of the functionality between this class and the
 # original SocketHandler class
-class ClientSocketWrapper():
+class SocketWrapper():
     """
     Wraps all of the socket actions in regular request handling, thus
     allowing all of the same information to be sent via a polling interface
@@ -475,7 +475,7 @@ class SocketWrap(BaseHandler):
     @check_auth
     def get(self):
         """Create a new socket wrapper for this requester, return the id"""
-        new_sub = ClientSocketWrapper(self.app)
+        new_sub = SocketWrapper(self.app)
         self.write(json.dumps({'success': True, 'sid': new_sub.sid}))
 
 
