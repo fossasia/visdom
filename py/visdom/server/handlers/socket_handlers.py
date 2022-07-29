@@ -48,6 +48,24 @@ from visdom.server.defaults import MAX_SOCKET_WAIT
 # sockets and the poll-based wrappers are using as much shared code as
 # possible. Try to standardize the code between the client-server and
 # visdom-server socket edges.
+
+
+# ============== #
+# About & Naming #
+# ============== #
+
+# 1. *Handler- & *Wrap-classes are intended to have the same functionality
+#   - *Handler (e.g. VisSocketHandler) use WebSockets
+#   - *Wrap (e.g. VisSocketWrap) use polling-based connections instead
+#   - *Wrapper (e.g. VisSocketWrapper) is just a helper class for the respective *Wrap-class 
+#     to process the current state (instead of the state at the time of polling)
+# 2. VisSocket* classes (VisSocketHandler, VisSocketWrap & VisSocketWrapper)
+#   Their goal is to register clients with write access of actual data.
+# 3. Socket* classes (SocketHandler, SocketWrap & SocketWrapper)
+#   Their goal is to register clients with read access of data.
+#   Write access is limited to data and view organization (i.e. layout settings, env removal and env saving)
+
+
 class VisSocketHandler(BaseWebSocketHandler):
     def initialize(self, app):
         self.state = app.state
