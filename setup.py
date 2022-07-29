@@ -70,5 +70,5 @@ setup(
     include_package_data=True,
     zip_safe=False,
     install_requires=requirements,
-    entry_points={'console_scripts': ['visdom=visdom.server:download_scripts_and_run']}
+    entry_points={'console_scripts': ['visdom=visdom.server.run_server:download_scripts_and_run']}
 )
