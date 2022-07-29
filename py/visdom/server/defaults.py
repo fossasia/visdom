@@ -13,3 +13,4 @@ DEFAULT_ENV_PATH = '%s/.visdom/' % expanduser("~")
 DEFAULT_PORT = 8097
 DEFAULT_HOSTNAME = "localhost"
 DEFAULT_BASE_URL = "/"
+MAX_SOCKET_WAIT = 15
