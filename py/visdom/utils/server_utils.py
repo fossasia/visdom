@@ -14,6 +14,21 @@ At the moment, this just inherited all of the floating functions
 in the previous server.py class.
 """
 
+
+import copy
+import hashlib
+import json
+import logging
+import os
+import time
+import tornado.escape
+from collections import OrderedDict
+try:
+    # for after python 3.8
+    from collections.abc import Mapping, Sequence
+except ImportError:
+    # for python 3.7 and below
+    from collections import Mapping, Sequence
 from visdom.server.defaults import (
     LAYOUT_FILE,
     DEFAULT_BASE_URL,
@@ -27,23 +42,7 @@ from visdom.utils.shared_utils import (
     get_new_window_id,
     ensure_dir_exists,
 )
-import copy
-import hashlib
-import json
-import logging
-import os
-import time
-from collections import OrderedDict
-try:
-    # for after python 3.8
-    from collections.abc import Mapping, Sequence
-except ImportError:
-    # for python 3.7 and below
-    from collections import Mapping, Sequence
 
-import tornado.escape     # noqa E402: gotta install ioloop first
-
-COMPACT_SEPARATORS = (',', ':')
 MAX_SOCKET_WAIT = 15
 
 # ---- Vaguely server-security related functions ---- #
@@ -449,7 +448,7 @@ def recursive_order(node):
 
 
 def stringify(node):
-    return json.dumps(recursive_order(node), separators=COMPACT_SEPARATORS)
+    return json.dumps(recursive_order(node), separators=(',', ':'))
 
 
 def hash_md_window(window_json):
