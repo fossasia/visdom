@@ -41,13 +41,9 @@ except ImportError:
     # for python 3.7 and below
     from collections import Mapping, Sequence
 
-from zmq.eventloop import ioloop
-ioloop.install()  # Needs to happen before any tornado imports!
-
 import tornado.escape     # noqa E402: gotta install ioloop first
 
 COMPACT_SEPARATORS = (',', ':')
-
 MAX_SOCKET_WAIT = 15
 
 # ---- Vaguely server-security related functions ---- #
