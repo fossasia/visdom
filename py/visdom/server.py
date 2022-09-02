@@ -623,18 +623,10 @@ class BaseWebSocketHandler(tornado.websocket.WebSocketHandler):
         '''
         Debugging interceptor
         '''
-        # assert 0
 
-        x = a[0]
-        if B.VERBOSE >=5:
-            print('[DEBUG3]',type(x),(inspect.stack()[1].function),repr(a[0])[:20])
-        # if not x
-        # if isinstance(x,str):
-        #     x = json.loads(x)
-        #
-        # if 'command' not in json.loads(a[0]).keys():
-        #     assert 0, json.loads(a[0]).keys()
-        #     print('[DEBUG2]',a)
+        if 5 >= logging.root.level:
+            x = a[0]
+            logging.log(5, str(['[DEBUG3]',type(x),(inspect.stack()[1].function),repr(a[0])[:20]]) )
         return super().write_message(*a,**kw)
 
 
@@ -1715,17 +1707,16 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
     env = {}
     if eid in state:
         env = state.get(eid)
-        print('[B1]')
     elif env_path is not None:
         p = os.path.join(env_path, eid.strip(), '.json')
         if os.path.exists(p):
             with open(p, 'r') as fn:
                 env = tornado.escape.json_decode(fn.read())
                 state[eid] = env
-        print('[B2]')
 
-    if B.VERBOSE >=3:
-        print(repr(env.get('jsons',{}))[:10])
+    # if B.VERBOSE >=3:
+
+    logging.log(10, repr(env.get('jsons',{}))[:10])
 
     if 'reload' in env:
         socket.write_message(
