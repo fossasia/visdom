@@ -155,26 +155,67 @@ class B(object):
         return B.safe_dir(B.join(x,y))
     J = join
 # class BasicLazyMapping(Mapping):
+
+
 STORES = {}
+
+def NIF(*a,**kw): raise NotImplementedError()
+class StoragePrototype(object):
+    serialze_env = NIF
+    serialize_env_single = NIF
+    get_valid_env_list = NIF
+    lazy_read_env_from_file = NIF
+    # atomic_dump_json = NIF
+    @staticmethod
+    def callback_before_setitem(state, key, v):
+        '''
+        this callback is blocking. could be used for sanity check
+        '''
+        return None
+
+    @staticmethod
+    def setitem_callback_setitem(state, key, v):
+        '''
+        Autosave uses this callback to save to disk
+        '''
+        return None
+
+    @staticmethod
+    def atomic_dump_json(xdir, key, x):
+        xdir = B.safe_dir(xdir)
+        env_path_file = os.path.join(xdir, "{0}.json".format(key))
+        with open(env_path_file+".temp", 'w') as f:
+            f.write(json.dumps(x))
+        shutil.move(env_path_file+'.temp',env_path_file)
+        return env_path_file
+
+    # setitem_cll
+
 @dset(STORES)
-class SimpleJsonStorage(object):
+class SimpleJsonStorage(StoragePrototype):
     '''
     One file per env
     '''
     @staticmethod
-    def read_env_from_file(fn):
-        try:
-            with open( fn, 'r') as f:
-                env_data = tornado.escape.json_decode(f.read())
-        except Exception as e:
-            raise ValueError(
-                "Failed loading environment json: {} - {}".format(
-                    self._env_path_file, repr(e)))
-        _raw_dict = {
-                'jsons': env_data['jsons'],
-                'reload': env_data['reload']
-        }
-        return _raw_dict
+    def lazy_read_env_from_file(fn, state):
+        '''
+        :param state: a dict-like object to trigger laziness
+        '''
+        if state is not None:
+            return state
+        else:
+            try:
+                with open( fn, 'r') as f:
+                    env_data = tornado.escape.json_decode(f.read())
+            except Exception as e:
+                raise ValueError(
+                    "Failed loading environment json: {} - {}".format(
+                        self._env_path_file, repr(e)))
+            _raw_dict = {
+                    'jsons': env_data['jsons'],
+                    'reload': env_data['reload']
+            }
+            return _raw_dict
 
     @staticmethod
     def get_valid_env_list(fn):
@@ -188,8 +229,9 @@ class SimpleJsonStorage(object):
 
         # [i for i in os.listdir(env_path) if '.json' in i]
 
-    @staticmethod
-    def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
+    # @staticmethod
+    @classmethod
+    def serialize_env(cls, state, eids, env_path):
         '''
         This function save serialized data to disk
 
@@ -204,28 +246,22 @@ class SimpleJsonStorage(object):
         and mtime equals to the stored mtime, then
         '''
         env_ids = [i for i in eids if i in state]
-        if env_path is not None:
-            for env_id in env_ids:
-                '''
-                This was unsafe: use .temp to make sure atomicity
-                '''
-                # env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
-                # import pdb; pdb.set_trace()
-                x = {k:v for k,v in state[env_id].items()}
-                x['reload']
-                x['jsons']
-                # os.makedirs(tree) if not os.path.exists(tree) else None
-                LazyEnvData.atomic_dump_json(env_path, env_id, x)
+        if env_path is None: raise RuntimeError('env_path is None')
+
+        for env_id in env_ids:
+            '''
+            This was unsafe: use .temp to make sure atomicity
+            '''
+            # env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
+            # import pdb; pdb.set_trace()
+            x = {k:v for k,v in state[env_id].items()}
+            x['reload']
+            x['jsons']
+            # os.makedirs(tree) if not os.path.exists(tree) else None
+            cls.atomic_dump_json(env_path, env_id, x)
 
         return env_ids
 
-    @staticmethod
-    def atomic_dump_json(xdir, key, x):
-        env_path_file = os.path.join(xdir, "{0}.json".format(key))
-        with open(env_path_file+".temp", 'w') as f:
-            f.write(json.dumps(x))
-        shutil.move(env_path_file+'.temp',env_path_file)
-        return env_path_file
 
     @staticmethod
     def serialize_all(state, env_path=DEFAULT_ENV_PATH):
@@ -233,26 +269,48 @@ class SimpleJsonStorage(object):
 
 
 @dset(STORES)
-class SimpleWindowJsonStorage(object):
+class SimpleWindowJsonStorage(StoragePrototype):
     '''
     One json per window
     '''
+
+    schema_dict = {
+    'jsons':'filedir',
+    'reload':'file',
+    }
     @classmethod
-    def read_env_from_file(self, tree):
+    def lazy_read_env_from_file(self, tree, state):
+        '''
+        Only loads windows that are not in state dict
+        '''
+        # xo = {}
+        if state is None:
+            state = init_default_env()
 
-        xo = {}
-
-        xo['jsons'] = xxo = {}
-        ttree = B.SJ(tree,'jsons')
-        for k in os.listdir(ttree):
-            if k.endswith('.json'):
-                window = k.rsplit('.json',1)[0]
-                v = self.safe_parse_file(B.J(ttree,k))
-                xxo[window] = v
-
-        xo['reload'] = self.safe_parse_file(B.J(tree,'reload.json'))
-        # import pdb; pdb.set_trace()
+        xo = state
+        # xo['jsons'] = xxo = {}
+        key = 'jsons'
+        for key,xt in self.schema_dict.items():
+            if xt == 'filedir':
+                xxo = xo[key]
+                ttree = B.SJ(tree, key)
+                for k in os.listdir(ttree):
+                    if not k.endswith('.json'):
+                        continue
+                    window = k.rsplit('.json',1)[0]
+                    not_up_to_date = window not in xxo
+                    if not_up_to_date:
+                        v = self.safe_parse_file(B.J(ttree,k))
+                        xxo[window] = v
+            elif xt=='file':
+                if xo[key].__len__():
+                    pass
+                else:
+                    xo[key] = self.safe_parse_file(B.J(tree,key + '.json'))
+            else:
+                raise NotImplementedError('lazy_read_env_from_file(%s,%s)'%(key,xt))
         return xo
+    #
 
     @staticmethod
     def get_valid_env_list(fn):
@@ -262,9 +320,6 @@ class SimpleWindowJsonStorage(object):
             if os.path.isdir(ffn):
                 if key =='view': continue
                 ret.append((key,ffn))
-            # if k.endswith('.json'):
-            #     eid = k.rsplit('.',1)[0]
-            #     ret.append((eid, ffn))
         return ret
 
 
@@ -280,9 +335,8 @@ class SimpleWindowJsonStorage(object):
         return env_data
 
 
-
-    @staticmethod
-    def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
+    @classmethod
+    def serialize_env(self, state, eids, env_path):
         '''
         This function save serialized data to disk
 
@@ -297,47 +351,72 @@ class SimpleWindowJsonStorage(object):
         and mtime equals to the stored mtime, then
         '''
         env_ids = [i for i in eids if i in state]
-        if env_path is not None:
-            for env_id in env_ids:
-                '''
-                This was unsafe: use .temp to make sure atomicity
-                '''
-                # env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
-                # import pdb; pdb.set_trace()
-                x = {k:v for k,v in state[env_id].items()}
-                x['reload']
-                x['jsons']
-
-
-                '''
-                This is the root tree for a env
-                '''
-                tree = B.SJ(env_path, env_id)
-                for key, xx in x.items():
-                    if key in 'reload'.split():
-                        'single file '
-                        LazyEnvData.atomic_dump_json(tree, key, x[key])
-                    elif key in 'jsons'.split():
-                        'dir storage'
-                        ttree = B.SJ(tree,key)
-                        for kk,xxx in xx.items():
-                            LazyEnvData.atomic_dump_json(ttree, kk, xxx)
-                    else:
-                        raise NotImplementedError('cannot serialize key %s'%key)
+        if env_path is None: raise RuntimeError('env_path is None')
+        # if env_path is not None:
+        for env_id in env_ids:
+            tree = self.serialize_env_single(state, env_id, env_path)
         return env_ids
 
-    @staticmethod
-    def atomic_dump_json(xdir, key, x):
-        env_path_file = os.path.join(xdir, "{0}.json".format(key))
-        with open(env_path_file+".temp", 'w') as f:
-            f.write(json.dumps(x))
-        shutil.move(env_path_file+'.temp',env_path_file)
-        return env_path_file
+    # @staticmethod
+    @classmethod
+    def write_key_value(cls, tree, key, xx, xt):
+        ret = []
+        if xt == 'file':
+            'single file '
+            rett = cls.atomic_dump_json(tree, key, xx)
+            ret.append( rett )
+
+        elif xt == 'filedir':
+            '''dir storage
+            Note no further directory embedding is allowed
+            '''
+            ttree = B.SJ(tree,key)
+            for kk,xxx in xx.items():
+                rett = cls.write_key_value(ttree, kk, xxx, 'file')
+                ret.append(rett)
+                # ret.append( cls.atomic_dump_json(ttree, kk, xxx) )
+        else:
+            raise NotImplementedError('cannot serialize key %s'%key)
+        return ret
+
+    @classmethod
+    def serialize_env_single(self, state, env_id, env_path):
+        x = {k:v for k,v in state[env_id].items()}
+        x['reload']
+        x['jsons']
+
+        '''
+        This is the root tree for a env
+        '''
+        tree = B.SJ(env_path, env_id)
+        for key, xt in self.schema_dict.items():
+            xx = x[key]
+            self.write_key_value(tree, key, xx, xt)
+        return tree
 
     @staticmethod
     def serialize_all(state, env_path=DEFAULT_ENV_PATH):
         serialize_env(state, list(state.keys()), env_path=env_path)
-# store_dict['SimpleJsonStorage']
+
+
+@dset(STORES)
+class SimpleWindowJsonAutoSave(SimpleWindowJsonStorage):
+    '''
+    One json per window
+
+
+    '''
+    pass
+    @staticmethod
+    def setitem_callback_setitem(state, key, v):
+        '''
+        Autosave uses this callback to save to disk
+
+        Needs to capture the setitem call of json dict
+        '''
+        return None
+
+    # def
 
 
 
@@ -355,10 +434,10 @@ def get_led_cls(sel_led, sel_store):
         Per-env laziness
         '''
         store = _store
-        serialize_env      = _store.serialize_env
-        get_valid_env_list = _store.get_valid_env_list
-        read_env_from_file = _store.read_env_from_file
-        atomic_dump_json   = _store.atomic_dump_json
+        serialize_env           = _store.serialize_env
+        get_valid_env_list      = _store.get_valid_env_list
+        lazy_read_env_from_file = _store.lazy_read_env_from_file
+        atomic_dump_json        = _store.atomic_dump_json
         # def serialize_env(self,*a)
         # SimpleWindowJsonStorage
         def __init__(self, env_path_file):
@@ -370,9 +449,7 @@ def get_led_cls(sel_led, sel_store):
             '''
             This is now the only data entrypoint
             '''
-            if self._raw_dict is not None:
-                return
-            self._raw_dict = self.read_env_from_file(self._env_path_file)
+            self._raw_dict = self.lazy_read_env_from_file(self._env_path_file, self._raw_dict)
 
         def __getitem__(self, key):
             '''
@@ -387,65 +464,10 @@ def get_led_cls(sel_led, sel_store):
             '''
             # self.send_data_to_disk(env_path_file, key, value)
             self.lazy_load_data()
-            return self._raw_dict.__setitem__(key, value)
-
-        def __iter__(self):
-            self.lazy_load_data()
-            return iter(self._raw_dict)
-
-        def __len__(self):
-            self.lazy_load_data()
-            return len(self._raw_dict)
-
-    @dset(LEDS)
-    class LazyEnvDataPerWindow(Mapping):
-        '''
-        Per-env laziness
-        '''
-        store = _store
-        serialize_env      = _store.serialize_env
-        get_valid_env_list = _store.get_valid_env_list
-        read_env_from_file = _store.read_env_from_file
-        # def serialize_env(self,*a)
-        # SimpleWindowJsonStorage
-        def __init__(self, env_path_file):
-            self._env_path_file = env_path_file
-            self._raw_dict = None
-            # self.ser
-
-        def lazy_load_data(self):
-            '''
-            This reduces to a constraint checker checker
-            '''
-            self.check_constraint()
-
-        def check_constraint(self):
-            '''
-            For each valid file in directory
-            check the plot exists in
-            '''
-
-            # self['re']
-
-
-            if self._raw_dict is not None:
-                return
-            self._raw_dict = self.read_env_from_file(self._env_path_file)
-
-        def __getitem__(self, key):
-            '''
-            Upon reading, should lazy load each json
-            '''
-            self.lazy_load_data()
-            return self._raw_dict.__getitem__(key)
-
-        def __setitem__(self, key, value):
-            '''
-            upon setitem, needs to cache data to disk
-            '''
-            # self.send_data_to_disk(env_path_file, key, value)
-            self.lazy_load_data()
-            return self._raw_dict.__setitem__(key, value)
+            self._store.callback_before_setitem(self,key,value)
+            ret = self._raw_dict.__setitem__(key, value)
+            self._store.callback_after_setitem(self,key,value)
+            return ret
 
         def __iter__(self):
             self.lazy_load_data()
@@ -463,7 +485,9 @@ def get_led_cls(sel_led, sel_store):
 # LED = LazyEnvData
 
 # LED = get_led_cls(None, 'SimpleJsonStorage')
-LED = LazyEnvData = get_led_cls( 'LazyEnvData', 'SimpleWindowJsonStorage')
+
+# LED = LazyEnvData = get_led_cls( 'LazyEnvData', 'SimpleWindowJsonStorage')
+LED = LazyEnvData = get_led_cls( 'LazyEnvData', 'SimpleWindowJsonAutoSave')
 serialize_env = LazyEnvData.serialize_env
 
 tornado_settings = {
@@ -473,6 +497,8 @@ tornado_settings = {
     "template_path": get_path('static'),
     "compiled_template_cache": False
 }
+def init_default_env():
+    return {'jsons': {}, 'reload': {}}
 
 class Application(tornado.web.Application):
     def __init__(self, port=DEFAULT_PORT, base_url='',
@@ -579,7 +605,7 @@ class Application(tornado.web.Application):
                 'env_path=None.',
                 RuntimeWarning
             )
-            return {'main': {'jsons': {}, 'reload': {}}}
+            return {'main': init_default_env()}
         ensure_dir_exists(env_path)
 
         '''
@@ -601,7 +627,7 @@ class Application(tornado.web.Application):
         '''
         if 'main' not in state:
              # and 'main.json' not in env_jsons:
-            state['main'] = {'jsons': {}, 'reload': {}}
+            state['main'] = init_default_env()
             # serialize_env(state, ['main'], env_path=self.env_path)
 
         return state
@@ -1175,7 +1201,7 @@ def register_window(self, p, eid):
     is_new_env = False
     if eid not in self.state:
         is_new_env = True
-        self.state[eid] = {'jsons': {}, 'reload': {}}
+        self.state[eid] = init_default_env()
 
     env = self.state[eid]['jsons']
 
@@ -1958,7 +1984,7 @@ class EnvHandler(BaseHandler):
         if 'eid' in msg_args:
             eid = msg_args['eid']
             if eid not in self.state:
-                self.state[eid] = {'jsons': {}, 'reload': {}}
+                self.state[eid] = init_default_env()
                 broadcast_envs(self)
 
 
@@ -2038,7 +2064,7 @@ class DataHandler(BaseHandler):
             data = json.loads(args['data'])
 
             if eid not in handler.state:
-                handler.state[eid] = {'jsons': {}, 'reload': {}}
+                handler.state[eid] = init_default_env()
 
             if 'win' in args and args['win'] is None:
                 handler.state[eid]['jsons'] = data
