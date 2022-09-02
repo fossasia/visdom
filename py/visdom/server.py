@@ -8,6 +8,7 @@
 
 """Server"""
 
+DEBUG = 1
 import argparse
 import copy
 import getpass
@@ -20,6 +21,7 @@ import math
 import os
 import sys
 import time
+import shutil
 import traceback
 import uuid
 import warnings
@@ -131,34 +133,241 @@ def hash_password(password):
 
 
 
+class B(object):
+    VERBOSE = 0
+    @staticmethod
+    def safe_dir(tree):
+        os.makedirs(tree) if not os.path.exists(tree) else None
+        return tree
+    @staticmethod
+    def join(x,y):
+        return os.path.join(x,y)
+    @staticmethod
+    def SJ(x,y):
+        return B.safe_dir(B.join(x,y))
+    J = join
+# class BasicLazyMapping(Mapping):
 
-class LazyEnvData(Mapping):
+class SimpleJsonStorage(object):
+    '''
+    One file per env
+    '''
+    @staticmethod
+    def read_env_from_file(fn):
+        try:
+            with open( fn, 'r') as f:
+                env_data = tornado.escape.json_decode(f.read())
+        except Exception as e:
+            raise ValueError(
+                "Failed loading environment json: {} - {}".format(
+                    self._env_path_file, repr(e)))
+        _raw_dict = {
+                'jsons': env_data['jsons'],
+                'reload': env_data['reload']
+        }
+        return _raw_dict
+
+    @staticmethod
+    def get_valid_env_list(fn):
+        ret = []
+        for k in os.listdir( B.safe_dir(fn) ):
+            if k.endswith('.json'):
+                eid = k.rsplit('.',1)[0]
+                ffn = B.J(fn,k)
+                ret.append((eid, ffn))
+        return ret
+
+        # [i for i in os.listdir(env_path) if '.json' in i]
+
+    @staticmethod
+    def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
+        '''
+        This function save serialized data to disk
+
+        Should perform incremental data writing.
+
+        Incremental writing is implemented as an existence check.
+        If the file associated with the
+
+        up-to-date criteria
+          - key exists,
+          - mtime equals to the mtime
+        and mtime equals to the stored mtime, then
+        '''
+        env_ids = [i for i in eids if i in state]
+        if env_path is not None:
+            for env_id in env_ids:
+                '''
+                This was unsafe: use .temp to make sure atomicity
+                '''
+                # env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
+                # import pdb; pdb.set_trace()
+                x = {k:v for k,v in state[env_id].items()}
+                x['reload']
+                x['jsons']
+                # os.makedirs(tree) if not os.path.exists(tree) else None
+                LED.atomic_dump_json(env_path, env_id, x)
+
+        return env_ids
+
+    @staticmethod
+    def atomic_dump_json(xdir, key, x):
+        env_path_file = os.path.join(xdir, "{0}.json".format(key))
+        with open(env_path_file+".temp", 'w') as f:
+            f.write(json.dumps(x))
+        shutil.move(env_path_file+'.temp',env_path_file)
+        return env_path_file
+
+    @staticmethod
+    def serialize_all(state, env_path=DEFAULT_ENV_PATH):
+        serialize_env(state, list(state.keys()), env_path=env_path)
+
+
+class SimpleWindowJsonStorage(object):
+    '''
+    One json per window
+    '''
+    def read_env_from_file(self, tree):
+
+        xo = {}
+
+        xo['jsons'] = xxo = {}
+        ttree = B.SJ(tree,'jsons')
+        for k in os.listdir(ttree):
+            if k.endswith('.json'):
+                window = k.rsplit('.json',1)[0]
+                v = self.safe_parse_file(B.J(ttree,k))
+                xxo[window] = v
+
+        xo['reload'] = self.safe_parse_file(B.J(tree,'reload.json'))
+        # import pdb; pdb.set_trace()
+        return xo
+        # # for k,v in os.listdir()
+        # # for key in 'jsons reload':
+        #
+        # env_data = self.safe_parse_file(fn)
+        # _raw_dict = {
+        #         'jsons': env_data['jsons'],
+        #         'reload': env_data['reload']
+        # }
+        # return _raw_dict
+    @staticmethod
+    def get_valid_env_list(fn):
+        ret = []
+        for key in os.listdir( B.safe_dir(fn) ):
+            ffn = B.J(fn,key)
+            if os.path.isdir(ffn):
+                if key =='view': continue
+                ret.append((key,ffn))
+            # if k.endswith('.json'):
+            #     eid = k.rsplit('.',1)[0]
+            #     ret.append((eid, ffn))
+        return ret
+
+    # def safe_parse_json(self, fn):
+    #     return self.safe_parse_file(fn+'.json')
+
+    @staticmethod
+    def safe_parse_file(fn):
+        try:
+            with open( fn, 'r') as f:
+                env_data = tornado.escape.json_decode(f.read())
+        except Exception as e:
+            raise ValueError(
+                "Failed loading file: {} - {}".format(
+                    fn, repr(e)))
+        return env_data
+
+
+
+    @staticmethod
+    def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
+        '''
+        This function save serialized data to disk
+
+        Should perform incremental data writing.
+
+        Incremental writing is implemented as an existence check.
+        If the file associated with the
+
+        up-to-date criteria
+          - key exists,
+          - mtime equals to the mtime
+        and mtime equals to the stored mtime, then
+        '''
+        env_ids = [i for i in eids if i in state]
+        if env_path is not None:
+            for env_id in env_ids:
+                '''
+                This was unsafe: use .temp to make sure atomicity
+                '''
+                # env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
+                # import pdb; pdb.set_trace()
+                x = {k:v for k,v in state[env_id].items()}
+                x['reload']
+                x['jsons']
+
+
+                '''
+                This is the root tree for a env
+                '''
+                tree = B.SJ(env_path, env_id)
+                for key, xx in x.items():
+                    if key in 'reload'.split():
+                        'single file '
+                        LED.atomic_dump_json(tree, key, x[key])
+                    elif key in 'jsons'.split():
+                        'dir storage'
+                        ttree = B.SJ(tree,key)
+                        for kk,xxx in xx.items():
+                            LED.atomic_dump_json(ttree, kk, xxx)
+                    else:
+                        raise NotImplementedError('cannot serialize key %s'%key)
+        return env_ids
+
+    @staticmethod
+    def atomic_dump_json(xdir, key, x):
+        env_path_file = os.path.join(xdir, "{0}.json".format(key))
+        with open(env_path_file+".temp", 'w') as f:
+            f.write(json.dumps(x))
+        shutil.move(env_path_file+'.temp',env_path_file)
+        return env_path_file
+
+    @staticmethod
+    def serialize_all(state, env_path=DEFAULT_ENV_PATH):
+        serialize_env(state, list(state.keys()), env_path=env_path)
+
+
+
+# class LazyEnvData(Mapping, SimpleJsonStorage):
+class LazyEnvData(Mapping, SimpleWindowJsonStorage):
     def __init__(self, env_path_file):
         self._env_path_file = env_path_file
         self._raw_dict = None
 
     def lazy_load_data(self):
+        '''
+        This is now the only data entrypoint
+        '''
         if self._raw_dict is not None:
             return
-
-        try:
-            with open(self._env_path_file, 'r') as fn:
-                env_data = tornado.escape.json_decode(fn.read())
-        except Exception as e:
-            raise ValueError(
-                "Failed loading environment json: {} - {}".format(
-                    self._env_path_file, repr(e)))
-        self._raw_dict = {
-                'jsons': env_data['jsons'],
-                'reload': env_data['reload']
-        }
+        self._raw_dict = self.read_env_from_file(self._env_path_file)
 
     def __getitem__(self, key):
+        '''
+        Upon reading, should lazy load each json
+        '''
         self.lazy_load_data()
+        if key =='windows': key = 'jsons'
         return self._raw_dict.__getitem__(key)
 
     def __setitem__(self, key, value):
+        '''
+        upon setitem, needs to cache data to disk
+        '''
+        # self.send_data_to_disk(env_path_file, key, value)
         self.lazy_load_data()
+        if key =='windows': key = 'jsons'
         return self._raw_dict.__setitem__(key, value)
 
     def __iter__(self):
@@ -168,6 +377,9 @@ class LazyEnvData(Mapping):
     def __len__(self):
         self.lazy_load_data()
         return len(self._raw_dict)
+serialize_all = LazyEnvData.serialize_all
+serialize_env = LazyEnvData.serialize_env
+LED = LazyEnvData
 
 
 tornado_settings = {
@@ -178,22 +390,41 @@ tornado_settings = {
     "compiled_template_cache": False
 }
 
+if 0:
 
-def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
-    env_ids = [i for i in eids if i in state]
-    if env_path is not None:
-        for env_id in env_ids:
-            env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
-            with open(env_path_file, 'w') as fn:
-                if isinstance(state[env_id], LazyEnvData):
-                    fn.write(json.dumps(state[env_id]._raw_dict))
-                else:
-                    fn.write(json.dumps(state[env_id]))
-    return env_ids
+    def serialize_env_old(state, eids, env_path=DEFAULT_ENV_PATH):
+        '''
+        This function save serialized data to disk
 
+        Should perform incremental data writing.
 
-def serialize_all(state, env_path=DEFAULT_ENV_PATH):
-    serialize_env(state, list(state.keys()), env_path=env_path)
+        Incremental writing is implemented as an existence check.
+
+        '''
+        env_ids = [i for i in eids if i in state]
+        if env_path is not None:
+            for env_id in env_ids:
+                '''
+                This was unsafe . use .temp to make sure atomicity
+                '''
+                env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
+                with open(env_path_file+".temp", 'w') as fn:
+                    if isinstance(state[env_id], LazyEnvData):
+                        fn.write(json.dumps(state[env_id]._raw_dict))
+                    else:
+                        fn.write(json.dumps(state[env_id]))
+                shutil.move(env_path_file+'.temp',env_path_file)
+        return env_ids
+
+    #
+#     #
+# def get_dict(x):
+#     if isinstance(x, LazyEnvData):
+#         return x._raw_dict
+#     else:
+#         return x
+#         # fn.write(json.dumps(state[env_id]))
+#
 
 
 class Application(tornado.web.Application):
@@ -286,6 +517,13 @@ class Application(tornado.web.Application):
             return ""
 
     def load_state(self):
+        '''
+        This function loads serialized data from disk
+
+        How often this needs to be executed?
+
+
+        '''
         state = {}
         env_path = self.env_path
         if env_path is None:
@@ -296,29 +534,28 @@ class Application(tornado.web.Application):
             )
             return {'main': {'jsons': {}, 'reload': {}}}
         ensure_dir_exists(env_path)
-        env_jsons = [i for i in os.listdir(env_path) if '.json' in i]
-        for env_json in env_jsons:
-            eid = env_json.replace('.json', '')
-            env_path_file = os.path.join(env_path, env_json)
 
-            if self.eager_data_loading:
-                try:
-                    with open(env_path_file, 'r') as fn:
-                        env_data = tornado.escape.json_decode(fn.read())
-                except Exception as e:
-                    logging.warn(
-                        "Failed loading environment json: {} - {}".format(
-                            env_path_file, repr(e)))
-                    continue
+        '''
+        [Note] listdir is used to reconstruct env list from file list
+        '''
+        eid_file_pair = LED.get_valid_env_list(env_path)
+        # env_jsons = [i for i in os.listdir(env_path) if '.json' in i]
+        for eid, env_path_file in eid_file_pair:
+            state[eid] = LazyEnvData(env_path_file)
 
-                state[eid] = {'jsons': env_data['jsons'],
-                        'reload': env_data['reload']}
-            else:
-                state[eid] = LazyEnvData(env_path_file)
+        if self.eager_data_loading:
+            for k,x in state.items():
+                x.lazy_load_data()
 
-        if 'main' not in state and 'main.json' not in env_jsons:
+            # state[eid].lazy_load_data()
+
+        '''
+        Creating default env
+        '''
+        if 'main' not in state:
+             # and 'main.json' not in env_jsons:
             state['main'] = {'jsons': {}, 'reload': {}}
-            serialize_env(state, ['main'], env_path=self.env_path)
+            # serialize_env(state, ['main'], env_path=self.env_path)
 
         return state
 
@@ -357,6 +594,7 @@ def broadcast_envs(handler, target_subs=None):
     if target_subs is None:
         target_subs = handler.subs.values()
     for sub in target_subs:
+        # print('[DEBUG1]',msg.keys())
         sub.write_message(json.dumps(
             {'command': 'env_update', 'data': list(handler.state.keys())}
         ))
@@ -365,10 +603,12 @@ def broadcast_envs(handler, target_subs=None):
 def send_to_sources(handler, msg):
     target_sources = handler.sources.values()
     for source in target_sources:
+        # print('[DEBUG2]',msg.keys())
         source.write_message(json.dumps(msg))
 
 
 class BaseWebSocketHandler(tornado.websocket.WebSocketHandler):
+    # def
     def get_current_user(self):
         """
         This method determines the self.current_user
@@ -379,6 +619,23 @@ class BaseWebSocketHandler(tornado.websocket.WebSocketHandler):
             return self.get_secure_cookie("user_password")
         except Exception:  # Not using secure cookies
             return None
+    def write_message(self,*a,**kw):
+        '''
+        Debugging interceptor
+        '''
+        # assert 0
+
+        x = a[0]
+        if B.VERBOSE >=5:
+            print('[DEBUG3]',type(x),(inspect.stack()[1].function),repr(a[0])[:20])
+        # if not x
+        # if isinstance(x,str):
+        #     x = json.loads(x)
+        #
+        # if 'command' not in json.loads(a[0]).keys():
+        #     assert 0, json.loads(a[0]).keys()
+        #     print('[DEBUG2]',a)
+        return super().write_message(*a,**kw)
 
 
 class VisSocketHandler(BaseWebSocketHandler):
@@ -495,7 +752,6 @@ class VisSocketWrapper():
             to_send.append(message)
         self.last_read_time = time.time()
         return to_send
-
 
 class SocketHandler(BaseWebSocketHandler):
     def initialize(self, app):
@@ -731,6 +987,9 @@ class ClientSocketWrapper():
             self.subs.pop(self.sid, None)
 
     def write_message(self, msg):
+        # import pdb; pdb.set_trace()
+        # print('[DEBUG2]',msg.keys())
+        # assert 0
         self.messages.append(msg)
 
     def get_messages(self):
@@ -1074,12 +1333,12 @@ class UpdateHandler(BaseHandler):
                 del new_data["z"]
 
                 if updateDir in ["appendRow", "prependRow"]:
-                    checkdir = "y" 
+                    checkdir = "y"
                     if len(plot["z"][0]) != len(dz[0]):
                         logging.error("ERROR: There is a mismatch between the number of columns in existing plot ('%i') and new data ('%i')." % (len(plot["z"]), len(dz)))
                         return p
                 else:
-                    checkdir = "x" 
+                    checkdir = "x"
                     if len(plot["z"]) != len(dz):
                         logging.error("ERROR: There is a mismatch between the number of rows in existing plot ('%i') and new data ('%i')." % (len(plot["z"]), len(dz)))
                         return p
@@ -1456,12 +1715,17 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
     env = {}
     if eid in state:
         env = state.get(eid)
+        print('[B1]')
     elif env_path is not None:
         p = os.path.join(env_path, eid.strip(), '.json')
         if os.path.exists(p):
             with open(p, 'r') as fn:
                 env = tornado.escape.json_decode(fn.read())
                 state[eid] = env
+        print('[B2]')
+
+    if B.VERBOSE >=3:
+        print(repr(env.get('jsons',{}))[:10])
 
     if 'reload' in env:
         socket.write_message(
@@ -1805,14 +2069,18 @@ class ErrorHandler(BaseHandler):
         raise Exception(error_text)
 
 
+
 # function that downloads and installs javascript, css, and font dependencies:
 def download_scripts(proxies=None, install_dir=None):
     import visdom
+    if DEBUG:
+        visdom.__version__ = 'test'
     print("Checking for scripts.")
 
     # location in which to download stuff:
     if install_dir is None:
-        install_dir = os.path.dirname(visdom.__file__)
+        # install_dir = os.path.dirname(visdom.__file__)
+        install_dir = os.path.dirname(os.path.realpath(__file__))
 
     # all files that need to be downloaded:
     b = 'https://unpkg.com/'
