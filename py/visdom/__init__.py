@@ -5,6 +5,7 @@
 #
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
+# __version__ = 'test'
 
 import os.path
 import requests
@@ -405,7 +406,7 @@ class Visdom(object):
             'base_url should not end with / as it is appended automatically'
 
         self.ipv6 = ipv6
-        self.env = env      
+        self.env = env
         self.env_list={f'{env}'}      # default env
         self.send = send
         self.event_handlers = {}  # Haven't registered any events
@@ -801,7 +802,7 @@ class Visdom(object):
         This function returns a list of all of the env names that are currently
         in the server.
         """
-        if self.offline:        
+        if self.offline:
             return list(self.env_list)
         else:
             return json.loads(self._send({}, endpoint='env_state', quiet=True))
@@ -1694,7 +1695,7 @@ class Visdom(object):
             assert X.ndim == 1 or X.ndim == 2, 'X should have 1 or 2 dim'
         else:
             X = np.linspace(0, 1, Y.shape[0])
-     
+
         if Y.ndim == 2 and X.ndim == 1:
             X = np.tile(X, (Y.shape[1], 1)).transpose()
 
@@ -2180,7 +2181,7 @@ class Visdom(object):
         line_width=opts.get("marker_width")
 
         assert len(parents.tolist())==len(labels.tolist()), "length of parents and labels should be equal"
-        
+
         data_dict=[{
                 'labels': labels.tolist(),
                 "parents":parents.tolist(),
@@ -2196,7 +2197,7 @@ class Visdom(object):
 
             data_dict[0]['values']=values.tolist()
 
-        data=data_dict          
+        data=data_dict
         return self._send({
             'data': data,
             'win': win,
@@ -2397,7 +2398,7 @@ class Visdom(object):
         """
         This function draws interactive network graphs. It takes list of edges as one of the arguments.
         The user can also provide custom edge Labels and node Labels in edgeLabels and nodeLabels respectively.
-        Along with that we have different parameters in opts for making it more user friendly. 
+        Along with that we have different parameters in opts for making it more user friendly.
 
         Args:
             edges : list, required
@@ -2419,7 +2420,7 @@ class Visdom(object):
         except:
             raise RuntimeError(
                 "networkx must be installed to plot Graph figures")
-        
+
         G = nx.Graph()
         G.add_edges_from(edges)
         node_data = list(G.nodes())
@@ -2434,7 +2435,7 @@ class Visdom(object):
         if nodeLabels is not None:
             assert len(nodeLabels) == len(node_data),\
             "length of nodeLabels does not match with the length of nodes {len1} != {len2}".format(len1 = len(nodeLabels), len2 = len(node_data))
-        
+
         for i in range(len(node_data)):
             if i != node_data[i]:
                 raise RuntimeError("The nodes should be numbered from 0 to n-1 for n nodes! {} node is missing!".format(i))
@@ -2455,7 +2456,7 @@ class Visdom(object):
             edge["target"] = int(link_data[i][1])
             edge["label"] = str(edgeLabels[i]) if edgeLabels is not None else str(link_data[i][0])+"-"+str(link_data[i][1])
             edges.append(edge)
-        
+
         for i in range(len(node_data)):
             node = {}
             node["name"] = int(node_data[i])
@@ -2463,7 +2464,7 @@ class Visdom(object):
             if opts['scheme'] == 'different':
                 node["club"] = int(i)
             nodes.append(node)
-       
+
 
         data = [{
             'content': {"nodes": nodes, "edges": edges},
