@@ -104,6 +104,12 @@ changed JS files on any branch that you create. It automatically builds and
 then commits the resulting `main.js` and `main.js.map` files to the respective
 branch.
 
+#### Python Demo Requirements
+The demo file and the UI tests use some required python-packages. Make sure you have installed these first:
+```bash
+pip install -r test-requirements.txt
+```
+
 #### yarn
 You can find instructions for install `yarn` [here](https://yarnpkg.com/lang/en/docs/install/).
 ```bash
@@ -131,14 +137,16 @@ To run the predefined tests
 1. start a fresh visdom server instance on port `8098` , i.e. by just calling `visdom -port 8098`. (Just to make sure another instance is not interfering with our test.)
 2. run `npm run test:init`. This generates screenshots of all plots for the visual regression testing.
 3. Adapt the code now to your needs.
-4. run `npm run test:gui` (a new window should appear)
-4. click through the test spec-files and observe the tests done automatically in a newly opened browser instance
+4. run `npm run build` *or* `npm run dev` (enables automatic building)
+5. run `npm run test:gui` (a new window should appear)
+6. click through the test spec-files and observe the tests done automatically in a newly opened browser instance
 
 **as CLI tests**:
 1. start a fresh visdom server instance on port `8098` , i.e. by just calling `visdom -port 8098` (Just to make sure another instance is not interfering with our test.)
 2. run `npm run test:init`. This generates screenshots of all plots for the visual regression testing.
 3. Adapt the code now to your needs.
-4. run `npm run test`
+4. run `npm run build` *or* `npm run dev` (enables automatic building)
+5. run `npm run test`
 
 ## Issues
 We use GitHub issues to track public bugs. Please ensure your description is
