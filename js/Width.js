@@ -11,6 +11,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
 
 const Width = (ComposedComponent) => (props) => {
+  const { onWidthChange } = props;
+
   // state varibles
   // --------------
   const [width, setWidth] = useState(1280);
@@ -55,7 +57,7 @@ const Width = (ComposedComponent) => (props) => {
 
   // actual onWidthChange occurs only, when the state variables changed
   useEffect(() => {
-    props.onWidthChange(width, cols);
+    onWidthChange(width, cols);
   }, [width]);
 
   // ensure that resizing callbacks are only called when mounted

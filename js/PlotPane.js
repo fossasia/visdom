@@ -13,10 +13,12 @@ import Pane from './Pane';
 const { sgg } = require('ml-savitzky-golay-generalized');
 
 function PlotPane(props) {
+  const { contentID, content } = props;
+
   // state varibles
   // --------------
   const plotlyRef = useRef();
-  const previousContent = usePrevious(props.content);
+  const previousContent = usePrevious(content);
   const [maxsmoothvalue, setMaxsmoothvalue] = useState(100);
   const [smoothWidgetActive, setSmoothWidgetActive] = useState(false);
   const [smoothvalue, setSmoothValue] = useState(1);
@@ -32,7 +34,7 @@ function PlotPane(props) {
   const handleDownload = () => {
     Plotly.downloadImage(plotlyRef.current, {
       format: 'svg',
-      filename: props.contentID,
+      filename: contentID,
     });
   };
 
@@ -47,25 +49,25 @@ function PlotPane(props) {
         let trace = previousContent.data[trace_idx];
         trace_visibility_by_name[trace.name] = trace.visible;
       }
-      for (trace_idx in props.content.data) {
-        let trace = props.content.data[trace_idx];
+      for (trace_idx in content.data) {
+        let trace = content.data[trace_idx];
         trace.visible = trace_visibility_by_name[trace.name];
       }
 
       // Copy user modified zooms
       let old_x = previousContent.layout.xaxis;
-      let new_x = props.content.layout.xaxis;
+      let new_x = content.layout.xaxis;
       let new_range_set = new_x !== undefined && new_x.autorange === false;
       if (old_x !== undefined && old_x.autorange === false && !new_range_set) {
         // Take the old x axis layout if changed
-        props.content.layout.xaxis = old_x;
+        content.layout.xaxis = old_x;
       }
       let old_y = previousContent.layout.yaxis;
-      let new_y = props.content.layout.yaxis;
+      let new_y = content.layout.yaxis;
       new_range_set = new_y !== undefined && new_y.autorange === false;
       if (old_y !== undefined && old_y.autorange === false && !new_range_set) {
         // Take the old y axis layout if changed
-        props.content.layout.yaxis = old_y;
+        content.layout.yaxis = old_y;
       }
     }
 
@@ -76,7 +78,7 @@ function PlotPane(props) {
   // ---------
 
   const newPlot = () => {
-    var data = props.content.data;
+    var data = content.data;
 
     // add smoothed line plots for existing line plots
     var smooth_data = [];
@@ -124,22 +126,20 @@ function PlotPane(props) {
         for (let i = 0; i < num_to_fill; i++) data.push({});
       }
     } else
-      props.content.data
+      content.data
         .filter((data) => data['type'] == 'scatter' && data['mode'] == 'lines')
         .map((d, dataId) => {
           d.opacity = 1.0;
         });
 
-    Plotly.newPlot(
-      props.contentID,
-      data.concat(smooth_data),
-      props.content.layout,
-      { showLink: true, linkText: 'Edit' }
-    );
+    Plotly.newPlot(contentID, data.concat(smooth_data), content.layout, {
+      showLink: true,
+      linkText: 'Edit',
+    });
   };
 
   // check if data can be smoothed
-  var contains_line_plots = props.content.data.some((data, dataId) => {
+  var contains_line_plots = content.data.some((data, dataId) => {
     return data['type'] == 'scatter' && data['mode'] == 'lines';
   });
 
@@ -184,7 +184,7 @@ function PlotPane(props) {
       enablePropertyList
     >
       <div
-        id={props.contentID}
+        id={contentID}
         style={{ height: '100%', width: '100%' }}
         className="plotly-graph-div"
         ref={plotlyRef}
