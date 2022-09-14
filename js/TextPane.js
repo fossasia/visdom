@@ -12,10 +12,12 @@ import EventSystem from './EventSystem';
 import Pane from './Pane';
 
 function TextPane(props) {
+  const { content, isFocused, appApi } = props;
+
   // private events
   // --------------
   const onEvent = (e) => {
-    if (!props.isFocused) return;
+    if (!isFocused) return;
 
     switch (e.type) {
       case 'keydown':
@@ -23,7 +25,7 @@ function TextPane(props) {
         e.preventDefault();
         break;
       case 'keyup':
-        props.appApi.sendPaneMessage({
+        appApi.sendPaneMessage({
           event_type: 'KeyPress',
           key: e.key,
           key_code: e.keyCode,
@@ -34,7 +36,7 @@ function TextPane(props) {
 
   // define action for Pane's download button
   const handleDownload = () => {
-    var blob = new Blob([props.content], { type: 'text/plain' });
+    var blob = new Blob([content], { type: 'text/plain' });
     var url = window.URL.createObjectURL(blob);
     var link = document.createElement('a');
     link.download = 'visdom_text.txt';
@@ -59,7 +61,7 @@ function TextPane(props) {
   return (
     <Pane {...props} handleDownload={handleDownload}>
       <div className="content-text">
-        <div dangerouslySetInnerHTML={{ __html: props.content }} />
+        <div dangerouslySetInnerHTML={{ __html: content }} />
       </div>
     </Pane>
   );
