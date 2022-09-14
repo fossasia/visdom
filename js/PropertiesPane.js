@@ -12,13 +12,15 @@ import PropertyItem from './PropertyItem';
 import Pane from './Pane';
 
 function PropertiesPane(props) {
+  const { id, content, appApi, onFocus } = props;
+
   // private events
   // --------------
 
   // send updates in PropertyItem directly to all observers / sources
   const updateValue = (propId, value) => {
-    props.onFocus(props.id, () => {
-      props.appApi.sendPaneMessage({
+    onFocus(id, () => {
+      appApi.sendPaneMessage({
         event_type: 'PropertyUpdate',
         propertyId: propId,
         value: value,
@@ -28,7 +30,7 @@ function PropertiesPane(props) {
 
   // download button saves the settings as json
   const handleDownload = () => {
-    let blob = new Blob([JSON.stringify(props.content)], {
+    let blob = new Blob([JSON.stringify(content)], {
       type: 'application/json',
     });
     let url = window.URL.createObjectURL(blob);
@@ -46,7 +48,7 @@ function PropertiesPane(props) {
       <div className="content-properties">
         <table className="table table-bordered table-condensed table-properties">
           <tbody>
-            {props.content.map((prop, propId) => (
+            {content.map((prop, propId) => (
               <tr key={propId}>
                 <td className="table-properties-name">{prop.name}</td>
                 <td className="table-properties-value">

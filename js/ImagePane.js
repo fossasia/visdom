@@ -15,13 +15,16 @@ const DEFAULT_HEIGHT = 400;
 const DEFAULT_WIDTH = 300;
 
 function ImagePane(props) {
+  const { title, type, selected, width, height, appApi } = props;
+  var { content } = props;
+
   // state varibles
   // --------------
   const paneRef = useRef();
   const imgRef = useRef();
   const [view, setView] = useState({ scale: 1, tx: 0, ty: 0 });
   const [imgDim, setImgDim] = useState({ width: null, height: 0 });
-  const [selected, setSelected] = useState(props.selected);
+  const [actualSelected, setActualSelected] = useState(props.selected);
   const [mouseLocation, setMouseLocation] = useState({
     x: 0,
     y: 0,
@@ -36,8 +39,8 @@ function ImagePane(props) {
   // -------------
   const handleDownload = () => {
     var link = document.createElement('a');
-    link.download = `${props.title || 'visdom_image'}.jpg`;
-    link.href = props.content.src;
+    link.download = `${title || 'visdom_image'}.jpg`;
+    link.href = content.src;
     link.click();
   };
 
@@ -130,7 +133,7 @@ function ImagePane(props) {
   const updateSlider = (evt) => {
     // TODO add history update events here! need to send these to the client
     // with sendPaneMessage
-    setSelected(parseInt(evt.target.value));
+    setActualSelected(parseInt(evt.target.value));
   };
 
   // effects
@@ -138,14 +141,14 @@ function ImagePane(props) {
 
   // reset image selection upon property change
   useEffect(() => {
-    setSelected(props.selected);
-  }, [props.selected]);
+    setActualSelected(selected);
+  }, [selected]);
 
   // Reset the image settings when the user resizes the window. Avoid
   // constantly resetting the zoom level when user has not zoomed.
   useEffect(() => {
     if (Math.abs(view['scale'] - 1) > Number.EPSILON) handleReset();
-  }, [props.width, props.height]);
+  }, [width, height]);
 
   // initialize mouse events
   useEffect(() => {
@@ -156,14 +159,14 @@ function ImagePane(props) {
           event.preventDefault();
           break;
         case 'keyup':
-          props.appApi.sendPaneMessage({
+          appApi.sendPaneMessage({
             event_type: 'KeyPress',
             key: event.key,
             key_code: event.keyCode,
           });
           break;
         case 'click':
-          props.appApi.sendPaneMessage({
+          appApi.sendPaneMessage({
             event_type: 'Click',
             image_coord: mouseLocation,
           });
@@ -189,8 +192,8 @@ function ImagePane(props) {
   };
 
   // compute image size & position
-  let candidateWidth = Math.ceil(1 + props.width * view['scale']);
-  let candidateHeight = Math.ceil(1 + props.height * view['scale']);
+  let candidateWidth = Math.ceil(1 + width * view['scale']);
+  let candidateHeight = Math.ceil(1 + height * view['scale']);
   let imageContainerStyle = {
     alignItems: 'row',
     display: 'flex',
@@ -228,7 +231,7 @@ function ImagePane(props) {
   }
 
   // During initial render cycle,
-  // Math.ceil(1 + props.height/width * view["scale"]) may be NaN.
+  // Math.ceil(1 + height/width * view["scale"]) may be NaN.
   // Set a default value here to avoid warnings, which will be updated on the
   // next render
 
@@ -242,8 +245,6 @@ function ImagePane(props) {
 
   // rendering
   // ---------
-  let content = props.content;
-  let type = props.type;
   let widgets = [];
   const divstyle = { left: view['tx'], top: view['ty'], position: 'absolute' };
 
@@ -258,15 +259,15 @@ function ImagePane(props) {
               type="range"
               min="0"
               max={content.length - 1}
-              value={selected}
+              value={actualSelected}
               onChange={updateSlider}
             />
-            <span>&nbsp;&nbsp;{selected}&nbsp;&nbsp;</span>
+            <span>&nbsp;&nbsp;{actualSelected}&nbsp;&nbsp;</span>
           </div>
         </div>
       );
     }
-    content = content[selected];
+    content = content[actualSelected];
   }
 
   // add caption as widget

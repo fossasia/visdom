@@ -11,6 +11,15 @@ import React, { useRef, useEffect } from 'react';
 import Pane from './Pane';
 
 function NetworkPane(props) {
+  const {
+    content,
+    directed,
+    showEdgeLabels,
+    showVertexLabels,
+    _width,
+    _height,
+  } = props;
+
   // private events
   // --------------
   const handleDownload = () => {
@@ -25,12 +34,12 @@ function NetworkPane(props) {
 
   // initialize d3
   useEffect(() => {
-    CreateNetwork(props.content);
+    CreateNetwork(content);
   }, []);
 
   const CreateNetwork = (graph) => {
-    var width = props._width,
-      height = props._height;
+    var width = _width,
+      height = _height;
     var color = d3.scale.category10();
     var force = d3.layout
       .force()
@@ -51,7 +60,7 @@ function NetworkPane(props) {
         .attr('preserveAspectRatio', 'xMinYMin meet');
     }
 
-    if (props.directed) {
+    if (directed) {
       svg
         .append('defs')
         .append('marker')
@@ -114,7 +123,7 @@ function NetworkPane(props) {
         'font-size': 10,
         fill: '#aaa',
       });
-    if (props.showEdgeLabels) {
+    if (showEdgeLabels) {
       edgelabels
         .append('textPath')
         .attr('xlink:href', (d, i) => '#edgepath' + i)
@@ -139,7 +148,7 @@ function NetworkPane(props) {
     node.append('circle').attr('r', 10);
 
     node.append('title').text((d) => d.name);
-    if (props.showVertexLabels) {
+    if (showVertexLabels) {
       node
         .append('text')
         .attr('dx', 12)

@@ -12,6 +12,9 @@ import PropertyItem from './PropertyItem';
 var classNames = require('classnames');
 
 var Pane = forwardRef((props, ref) => {
+  const { id, title, content, children, widgets, enablePropertyList } = props;
+  var { barwidgets } = props;
+
   // state varibles
   // --------------
   const [propertyListShown, setPropertyListShown] = useState(false);
@@ -19,25 +22,24 @@ var Pane = forwardRef((props, ref) => {
 
   // public events
   // -------------
-  const handleOnFocus = props.handleOnFocus || (() => props.onFocus(props.id));
+  const handleOnFocus = props.handleOnFocus || (() => props.onFocus(id));
   const handleDownload = props.handleDownload || (() => {});
   const handleReset = props.handleReset || (() => {});
   const handleZoom = props.handleZoom || ((ev) => {});
   const handleMouseMove = props.handleMouseMove || ((ev) => {});
-  const handleClose = props.handleClose || (() => props.onClose(props.id));
+  const handleClose = props.handleClose || (() => props.onClose(id));
 
   // rendering
   // ---------
   let windowClassNames = classNames({ window: true, focus: props.isFocused });
   let barClassNames = classNames({ bar: true, focus: props.isFocused });
-  let barwidgets = [];
 
   // add property list button to barwidgets
   if (
-    props.enablePropertyList &&
-    props.content &&
-    typeof props.content == 'object' &&
-    props.content.data
+    enablePropertyList &&
+    content &&
+    typeof content == 'object' &&
+    content.data
   ) {
     barwidgets.push(
       <button
@@ -54,21 +56,20 @@ var Pane = forwardRef((props, ref) => {
   }
 
   // contat props barwidgets
-  if (props.barwidgets) {
-    if (Array.isArray(props.barwidgets))
-      barwidgets = barwidgets.concat(props.barwidgets);
-    else barwidgets.push(props.barwidgets);
+  if (barwidgets) {
+    if (Array.isArray(barwidgets)) barwidgets = barwidgets.concat(barwidgets);
+    else barwidgets.push(barwidgets);
   }
 
   // render content.data & content.layout as property list
   let propertyListOverlay = '';
-  if (propertyListShown && typeof props.content == 'object') {
+  if (propertyListShown && typeof content == 'object') {
     let propertylists = [];
 
     // properties for content.data
-    if (typeof props.content.data == 'object') {
+    if (typeof content.data == 'object') {
       propertylists = propertylists.concat(
-        props.content.data.map((data, dataId) => [
+        content.data.map((data, dataId) => [
           <span key={dataId}>
             <b>Data[{dataId}] Properties</b>
             <PropertyList
@@ -83,13 +84,13 @@ var Pane = forwardRef((props, ref) => {
     }
 
     // properties for content.data
-    if (typeof props.content.layout == 'object') {
+    if (typeof content.layout == 'object') {
       propertylists.push(
         <span key="layout">
           <b>Layout Properties</b>
           <PropertyList
             keylist="layout"
-            content={props.content.layout}
+            content={content.layout}
             title="Layout"
           />
         </span>
@@ -122,10 +123,10 @@ var Pane = forwardRef((props, ref) => {
           &#10226;{' '}
         </button>
         {barwidgets}
-        <div>{props.title}</div>
+        <div>{title}</div>
       </div>
-      <div className="content">{props.children}</div>
-      <div className="widgets">{props.widgets}</div>
+      <div className="content">{children}</div>
+      <div className="widgets">{widgets}</div>
       {propertyListOverlay}
     </div>
   );
@@ -143,6 +144,9 @@ Pane = React.memo(Pane, (props, nextProps) => {
 
 // this component is an overlay containing a property list (specialized for Pane)
 function PropertyList(props) {
+  const { keylist } = props;
+  var { content } = props;
+
   // private events
   // --------------
 
@@ -150,14 +154,14 @@ function PropertyList(props) {
   // note: props refers in this content to the Components directly responsible
   //       to the key, e.g. EditablePropertyText object from PropertyItem
   const updateValue = (key, value) => {
-    props.content[key] = value;
+    content[key] = value;
   };
 
   // rendering
   // ---------
 
-  // create for each element of props.content a representation in the PropertyList
-  let propitems = Object.entries(props.content).map(([key_local, value]) => {
+  // create for each element of content a representation in the PropertyList
+  let propitems = Object.entries(content).map(([key_local, value]) => {
     // append key for multi-level objects
     var keylist = props.keylist
       ? Array.isArray(props.keylist)
