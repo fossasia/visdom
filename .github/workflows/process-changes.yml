@@ -58,6 +58,7 @@ jobs:
       - uses: ./.github/actions/prepare
         with:
           usebasebranch: true
+          loadprbuild: false
 
       - name: "Checkout Tests from Head-Ref"
         shell: bash
