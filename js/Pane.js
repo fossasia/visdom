@@ -41,7 +41,8 @@ var Pane = forwardRef((props, ref) => {
     typeof content == 'object' &&
     content.data
   ) {
-    barwidgets.push(
+    barwidgets = [
+      ...barwidgets,
       <button
         key="properties-widget-button"
         title="properties"
@@ -51,14 +52,8 @@ var Pane = forwardRef((props, ref) => {
         className={propertyListShown ? 'pull-right active' : 'pull-right'}
       >
         <span className="glyphicon glyphicon-tags" />
-      </button>
-    );
-  }
-
-  // contat props barwidgets
-  if (barwidgets) {
-    if (Array.isArray(barwidgets)) barwidgets = barwidgets.concat(barwidgets);
-    else barwidgets.push(barwidgets);
+      </button>,
+    ];
   }
 
   // render content.data & content.layout as property list
@@ -123,7 +118,7 @@ var Pane = forwardRef((props, ref) => {
           &#10226;{' '}
         </button>
         {barwidgets}
-        <div>{title}</div>
+        <div class="pull-right">{title}</div>
       </div>
       <div className="content">{children}</div>
       <div className="widgets">{widgets}</div>
