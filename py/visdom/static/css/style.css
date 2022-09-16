@@ -236,10 +236,14 @@ doesn't override our desire to make them non-interactable */
     padding: 0px 10px 0px 2px;
     text-align: right;
     background-color: #F0F0F0;
+    border-color: #dedede;
+    vertical-align: middle;
 }
 
 .table-properties td.table-properties-value {
     padding: 0;
+    vertical-align: middle;
+    border-color: #dedede;
 }
 
 .table-properties td.table-properties-value input[type=checkbox]
