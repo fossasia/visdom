@@ -133,7 +133,7 @@ describe(`Compare screenshots for plotpane functions`, () => {
       seed: 43,
     });
     cy.open_env(env1);
-    cy.get('button[title="smooth lines"]').click({ multiple: true }); // should be single element, concurrency (?) has triggered error here
+    cy.get('button[title="smooth lines"]').click();
     cy.get('input[type="range"]').then(($range) => {
       const range = $range[0]; // get the DOM node
       const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
@@ -178,7 +178,7 @@ describe(`Compare screenshots for plotpane functions`, () => {
 
   it('Compare screenshot for Property Change (using Line Plot)', () => {
     cy.run('plot_line_basic');
-    cy.get('button[title="properties"]').click({ multiple: true }); // should be single element, concurrency (?) has triggered error here
+    cy.get('button[title="properties"]').click();
 
     // change some settings
     const change = (key, val) =>
@@ -205,7 +205,7 @@ describe(`Compare screenshots for plotpane functions`, () => {
     change('xaxis.type', 'log');
 
     // apply settings
-    cy.get('button[title="properties"]').click({ multiple: true }); // should be single element, concurrency (?) has triggered error here
+    cy.get('button[title="properties"]').click();
 
     const run = 'change-properties';
     const diff_src =
