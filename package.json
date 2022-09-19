@@ -49,6 +49,7 @@
     "d3-selection": "^1.4.2",
     "d3-zoom": "^1.8.3",
     "debounce": "^1.2.1",
+    "eslint-plugin-simple-import-sort": "^8.0.0",
     "fast-json-patch": "^3.1.1",
     "https-browserify": "^1.0.0",
     "jquery": "^3.6.0",

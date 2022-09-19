@@ -5,7 +5,7 @@
     "plugin:jsx-a11y/recommended",
     "prettier"
   ],
-  "plugins": ["react", "jsx-a11y", "ignore-generated-and-nolint", "cypress"],
+  "plugins": ["react", "jsx-a11y", "ignore-generated-and-nolint", "cypress", "simple-import-sort"],
   "parser": "@babel/eslint-parser",
   "parserOptions": {
       "requireConfigFile": false,
@@ -30,7 +30,9 @@
         "ignoreUrls": true,
         "ignoreStrings": true
       }
-    ]
+    ],
+    "simple-import-sort/imports": "error",
+    "simple-import-sort/exports": "error"
   },
   "settings": {
     "react": {
