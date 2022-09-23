@@ -7,88 +7,40 @@
  *
  */
 
-// TODO: FIX the following lint errors in this file over time
-// so that nothing needs to be disabled:
-
-/* eslint-disable no-unused-vars, react/no-direct-mutation-state*/
-/* eslint-disable no-redeclare, no-case-declarations */
-/* eslint-disable no-console, no-debugger */
-
 /* global ACTIVE_ENV ENV_LIST $ Bin */
 
 'use strict';
-import React from 'react';
-import ReactDOM from 'react-dom';
-import ReactModal from 'react-modal';
-var classNames = require('classnames');
+
+import 'fetch';
 import 'rc-tree-select/assets/index.css';
 
 import TreeSelect, { SHOW_CHILD } from 'rc-tree-select';
-
-import EventSystem from './EventSystem';
-
-var ReactGridLayout = require('react-grid-layout');
-
-import createClass from 'create-react-class';
-import PropTypes from 'prop-types';
-
-var md5 = require('md5');
-var jsonpatch = require('fast-json-patch');
-var stringify = require('json-stable-stringify');
-
+import React from 'react';
+import ReactDOM from 'react-dom';
+import ReactModal from 'react-modal';
 import ReactResizeDetector from 'react-resize-detector';
 
-import EmbeddingsPane from './EmbeddingsPane';
-import ImagePane from './ImagePane';
+import EventSystem from './EventSystem';
 import Poller from './Legacy';
-import NetworkPane from './NetworkPane';
-import PlotPane from './PlotPane';
-import PropertiesPane from './PropertiesPane';
+import {
+  DEFAULT_LAYOUT,
+  MARGIN,
+  MODAL_STYLE,
+  PANE_SIZE,
+  PANES,
+  ROW_HEIGHT,
+} from './settings';
 import TextPane from './TextPane';
 import WidthProvider from './Width';
 
+const ReactGridLayout = require('react-grid-layout');
+const classNames = require('classnames');
+const jsonpatch = require('fast-json-patch');
+const md5 = require('md5');
+const stringify = require('json-stable-stringify');
 const GridLayout = WidthProvider(ReactGridLayout);
 const sortLayout = ReactGridLayout.utils.sortLayoutItemsByRowCol;
 const getLayoutItem = ReactGridLayout.utils.getLayoutItem;
-
-import 'fetch';
-
-const ROW_HEIGHT = 5; // pixels
-const MARGIN = 10; // pixels
-
-const PANES = {
-  image: ImagePane,
-  image_history: ImagePane,
-  plot: PlotPane,
-  text: TextPane,
-  properties: PropertiesPane,
-  embeddings: EmbeddingsPane,
-  network: NetworkPane,
-};
-
-const PANE_SIZE = {
-  image: [20, 20],
-  image_history: [20, 20],
-  plot: [30, 24],
-  text: [20, 20],
-  embeddings: [20, 20],
-  properties: [20, 20],
-  network: [20, 20],
-};
-
-const MODAL_STYLE = {
-  content: {
-    top: '50%',
-    left: '50%',
-    right: 'auto',
-    bottom: 'auto',
-    marginRight: '-50%',
-    transform: 'translate(-50%, -50%)',
-  },
-};
-
-const DEFAULT_LAYOUT = 'current';
-const POLLING_INTERVAL = 500;
 
 var use_env = null;
 var use_envs = null;

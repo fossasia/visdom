@@ -1,3 +1,5 @@
+import { POLLING_INTERVAL } from './settings.js';
+
 function postData(url = ``, data = {}) {
   return fetch(url, {
     method: 'POST',
@@ -60,8 +62,7 @@ class Poller {
             this.poll(); // Get a response right now if there is one
           }
         },
-        (error) => {
-          console.log(error);
+        () => {
           this.close();
         }
       );
@@ -85,8 +86,7 @@ class Poller {
             });
           }
         },
-        (error) => {
-          console.log(error);
+        () => {
           this.close();
         }
       );
