@@ -29,6 +29,12 @@ class TextPane extends React.Component {
           key_code: e.keyCode,
         });
         break;
+      case 'click':
+        this.props.appApi.sendPaneMessage({
+          event_type: 'Click',
+        });
+        break;
+
     }
   };
 
