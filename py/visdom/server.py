@@ -179,12 +179,14 @@ class B(object):
 
 STORES = {}
 def NIF(*a,**kw): raise NotImplementedError()
+NullValue = object()
 class StoragePrototype(object):
 
     serialize_env = NIF
     get_valid_env_list = NIF
     lazy_read_env_from_file = NIF
     serialize_env_single = NIF
+    managed_dir = NullValue
     '''
     This function save serialized data to disk
 
@@ -199,6 +201,15 @@ class StoragePrototype(object):
     and mtime equals to the stored mtime, then
     '''
     # atomic_dump_json = NIF
+    @staticmethod
+    def callback_before_delitem(state,key):
+        # setitem(state, key, v):
+        '''
+        this callback is blocking. could be used for sanity check
+        '''
+        return key
+
+
     @staticmethod
     def callback_before_setitem(state, key, v):
         '''
@@ -276,6 +287,7 @@ class SimpleJsonStorage(StoragePrototype):
     SCHEMAS = {}
     SCHEMAS['venv'] = 'file'
     SCHEMAS['file'] = 'file'
+
 
     '''
     One file per env
@@ -357,6 +369,10 @@ class SimpleJsonStorage(StoragePrototype):
 
 
 
+
+import os,shutil
+import glob
+
 @dset(STORES,'JPW')
 @dset(STORES,'OneJsonPerWindow')
 @dset(STORES)
@@ -376,6 +392,7 @@ class SimpleWindowJsonStorage(StoragePrototype):
     schema_mapper = {}
     schema_mapper['vstate']  = SCHEMAS['venv']
     schema_mapper['filedir'] = SCHEMAS['file']
+    # schema_mapper
 
     @classmethod
     def map_schema(self,par_schema,key):
@@ -387,17 +404,100 @@ class SimpleWindowJsonStorage(StoragePrototype):
     def legacy_load_state(self, state, env_path, LazyEnvData):
         pass
 
+
+    @staticmethod
+    def path_is_parent(parent_path, child_path):
+        '''
+        https://stackoverflow.com/a/37095733/8083313
+        '''
+        # Smooth out relative path names, note: if you are concerned about symbolic links, you should use os.path.realpath too
+
+        parent_path = os.path.realpath(parent_path)
+        child_path = os.path.realpath(child_path)
+
+        # Compare the common path of the parent and child path with the common path of just the parent path. Using the commonpath method on just the parent path will regularise the path name in the same way as the comparison that deals with both paths, removing any trailing path separator
+        return os.path.commonpath([parent_path]) == os.path.commonpath([parent_path, child_path])
+
     @classmethod
-    def callback_before_setitem(self, state, key, v):
+    def safe_rm_path(cls, tree,typ):
+        par = cls.managed_dir
+        if cls.managed_dir is None:
+            assert 0, f'This should not happen. self.managed_dir not specified for {cls!r}'
+        if not cls.path_is_parent(par, tree):
+            assert 0,f'parent({par}) needs to contain ({tree})'
+
+        if typ=='file':
+            os.unlink(tree)
+        elif typ=='dir':
+            shutil.rmtree(tree)
+        else:
+            raise NotImplementedError(typ)
+
+    @classmethod
+    def safe_rm_node(cls, node):
+        # if isinstance()
+        if node.schema == 'file':
+            cls.safe_rm_path(cls.add_extension(node.tree), 'file')
+        elif node.schema=='filedir':
+            cls.safe_rm_path(node.tree, 'dir')
+        elif isinstance(node.schema, Mapping):
+            for k,v in node.items():
+                cls.safe_rm_node(v)
+        else:
+            raise NotImplementedError(node.schema)
+
+        #     # +'.json')
+        #
+        # tree = node.tree
+        # print(f'{par}\n{tree}\n{cls.path_is_parent(par,tree)},{os.path.exists(tree)}')
+        # if cls.path_is_parent(par, tree):
+        #
+        #     for tree_match in glob.glob(tree+'*'):
+        #         '''
+        #         This is to match file like .json
+        #         '''
+        #         shutil.rmtree(tree_match)
+        # # res:
+        #     for
+        #     shutil.rmtree(tree)
+
+    @classmethod
+    def callback_before_delitem(cls,node,key):
+        '''
+        persistent file is removed if item is deleted from memory
+        '''
+        if key in node:
+            if node.schema == 'file':
+                pass
+            else:
+                child = node.data[key]
+                cls.safe_rm_node(child)
+                # cls.safe_rmtree(child.tree)
+
+        return
+
+
+    @classmethod
+    def callback_before_setitem(cls, self, key, v):
         '''
         casting incoming data according to schemas
 
         need to inherit tree path from state
         '''
         # return v
-        assert key is not None,f'not allowed in {state!r}'
-        v = state.LazyContainerCurrentBase( B.J( state.tree,key), self.map_schema( state.schema, key), v)
-        logging.log(5,f'callback_before_setitem({repr(state)[:10]},{key!r},{v!r})')
+        assert key is not None,f'not allowed in {self!r}'
+        if self.schema == 'file':
+            '''
+            file is a terminal node. its content remain uncasted
+            '''
+            v = v
+        else:
+            v = self.LazyContainerCurrentBase( B.J( self.tree,key), cls.map_schema( self.schema, key), v)
+        # print('-----')
+
+        if 5 >= logging.root.level:
+            logging.log(5,f'callback_before_setitem({repr(self)[:10]},{key!r},{repr(v)[:20]})')
+        # print('-----'*2)
         # tree = state.tree
         # v = self.cast_to_schema(v, state.schema[key])
         return v
@@ -585,21 +685,29 @@ class SimpleWindowJsonAutoSave(SimpleWindowJsonStorage):
 
     # def        :param data: value to be stored, usually a dict like
 
-class LazyContainerPrototype(Mapping):
+# from collections import Mapping
+import collections
+class LazyContainerPrototype(collections.UserDict):
+# class LazyContainerPrototype(Mapping):
     pass
     def save_children(self):
         return None
+#     def __delitem__(self,k):
+#         print(f'[LCP.__delitem__] {k}')
+# LCP = LazyContainerPrototype
+# import pdb; pdb.set_trace()
 
-
-def get_led_cls(sel_store):
+def get_led_cls(sel_store, env_path):
     '''
     LED stands for LazyEnvData
     '''
 # class LazyEnvData(Mapping, SimpleJsonStorage):
     # if sel_store == ''
     _store = STORES[sel_store]
+    _store.managed_dir = env_path
     LEDS = {}
 
+    _RaiseKeyError = object()
     @dset(LEDS)
     class LazyContainerCurrent(LazyContainerPrototype):
         # def __init__(self,):
@@ -608,7 +716,7 @@ def get_led_cls(sel_store):
         get_valid_env_list       = _store.get_valid_env_list
         lazy_read_env_from_file  = _store.lazy_read_env_from_file
         atomic_dump_json         = _store.atomic_dump_json
-
+        # _env_path
         def __init__(self, tree, schema, value):
             self._tree = tree
             self.schema = schema
@@ -619,7 +727,40 @@ def get_led_cls(sel_store):
                 v = v._raw_dict
             else:
                 v = v
-            self._raw_dict = (v)
+            # print(type(v))
+            # super().__init__({})
+            super().__init__({})
+            self.data = v
+
+            if tree=='visdom_data/main/jsons':
+                print(f'{self}.__init__')
+
+            # self.data.update(v)
+
+            # self._raw_dict = (v)
+        def _set_raw_dict(self,v):
+            self.data = v
+        @property
+        def _raw_dict(self):
+            return self.data
+        def __delitem__(self,key):
+            print(f'{self!r}.__delitem__({key})')
+            self.store.callback_before_delitem(self,key)
+            # print(key in self)
+            print(self)
+            super().__delitem__(key)
+            print(key in self.data)
+            print(f'{self!r}.__delitem__({key})')
+            # print(f'{self.__class__}({hex(id(self)})).__delitem__({key})')
+            # print(self)
+            # self.data.__delitem__(key)
+            # print(key in self.data)
+            # print(key in self.data)
+            # print(key in self)
+
+        def __repr__(self):
+            return f'<{self.__class__}(data_id={hex(id(self.data))},tree={self.tree}) with {len(self.data)} elements>'
+        #
 
         @property
         def tree(self):
@@ -647,7 +788,9 @@ def get_led_cls(sel_store):
             if issubclass(self.store, SimpleWindowJsonStorage):
                 root = {None: self}
                 env = self.store.lazy_read_file_xt( self.tree, root, None, self.schema)
-                self._raw_dict = env._raw_dict
+                # self._raw_dict = env._raw_dict
+                self._set_raw_dict(env._raw_dict)
+                # self._raw_dict.update(env._raw_dict)
             elif issubclass(self.store,SimpleJsonStorage):
                 '''
                 One file per env caching scheme
@@ -655,13 +798,16 @@ def get_led_cls(sel_store):
                 if self.schema == 'vstate':
                     pass
                 elif self.schema == 'file':
-                    self._raw_dict = v =  self.store.lazy_read_env_from_file(self.tree, self._raw_dict, None)
+                    v =  self.store.lazy_read_env_from_file(self.tree, self._raw_dict, None)
+                    # self._raw_dict = v
+                    self._set_raw_dict(v)
+                    # self._raw_dict.update(v)
                 else:
                     raise NotImplementedError(self.schema,self.store)
             else:
                 raise NotImplementedError(self.store)
 
-
+        # import pdb; pdb.set_trace()
         lazy_load_data = lazy_load_children
 
         def save_children(self):
@@ -766,7 +912,7 @@ class Application(tornado.web.Application):
                  user_credential=None, use_frontend_client_polling=False,
                  eager_data_loading=False, cache_type=None):
         if cache_type is None: cache_type = DEFAULT_CACHE_TYPE
-        self.LED = get_led_cls(cache_type)
+        self.LED = get_led_cls(cache_type, env_path)
         # self.LED = LED
         self.eager_data_loading = eager_data_loading
         self.env_path = env_path
@@ -871,6 +1017,7 @@ class Application(tornado.web.Application):
                 RuntimeWarning
             )
             return {'main': init_default_env()}
+        B.safe_dir(env_path)
         ensure_dir_exists(env_path)
 
         '''
@@ -1541,6 +1688,8 @@ class PostHandler(BaseHandler):
 class ExistsHandler(BaseHandler):
     def initialize(self, app):
         self.state = app.state
+        print(self.state)
+        print(app.state)
         self.subs = app.subs
         self.sources = app.sources
         self.port = app.port
@@ -1550,6 +1699,9 @@ class ExistsHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
         eid = extract_eid(args)
+        if not args['win']:
+            handler.write('false')
+            return
         if eid in handler.state and args['win'] in handler.state[eid]['jsons']:
             handler.write('true')
         else:

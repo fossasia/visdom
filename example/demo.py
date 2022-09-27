@@ -156,17 +156,17 @@ if __name__ == '__main__':
         np.random.seed(int(FLAGS.seed))
 
     if FLAGS.run == "all":
-        try:
+#        try:
             run_demo(viz, FLAGS.env if FLAGS.env else None, FLAGS.args)
-        except Exception as e:
-            print(
-                "The visdom experienced an exception while running: {}\n"
-                "The demo displays up-to-date functionality with the GitHub "
-                "version, which may not yet be pushed to pip. Please upgrade "
-                "using `pip install -e .` or `easy_install .`\n"
-                "If this does not resolve the problem, please open an issue on "
-                "our GitHub.".format(repr(e))
-            )
+#        except Exception as e:
+#            print(
+#                "The visdom experienced an exception while running: {}\n"
+#                "The demo displays up-to-date functionality with the GitHub "
+#                "version, which may not yet be pushed to pip. Please upgrade "
+#                "using `pip install -e .` or `easy_install .`\n"
+#                "If this does not resolve the problem, please open an issue on "
+#                "our GitHub.".format(repr(e))
+#            )
     else:
         locals()[FLAGS.run](viz, FLAGS.run + FLAGS.env_suffix if not FLAGS.env else FLAGS.env, FLAGS.args)
 
