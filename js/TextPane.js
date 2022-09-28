@@ -20,7 +20,7 @@ class TextPane extends React.Component {
     switch (e.type) {
       case 'keydown':
       case 'keypress':
-        e.preventDefault();
+//        e.preventDefault();  /// this would prevent entering text into input box
         break;
       case 'keyup':
         this.props.appApi.sendPaneMessage({
