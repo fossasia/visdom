@@ -1323,7 +1323,10 @@ class SocketHandler(BaseWebSocketHandler):
         elif cmd == 'forward_to_vis':
             packet = msg.get('data')
             environment = self.state[packet['eid']]
-            if packet.get('pane_data') is not False:
+            # [shouldsee:20220928] old code default to None
+	    # triggers unwanted access to undefined pane_data 
+            # for custom callback
+            if packet.get('pane_data',False) is not False:
                 packet['pane_data'] = environment['jsons'][packet['target']]
             send_to_sources(self, msg.get('data'))
         elif cmd == 'layout_item_update':
