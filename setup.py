@@ -59,6 +59,7 @@ setup(
     author_email='jju@fb.com',
     url='https://github.com/facebookresearch/visdom',
     description='A tool for visualizing live, rich data for Torch and Numpy',
+    long_description_content_type="text/markdown",
     long_description=readme,
     license='Apache-2.0',
 
