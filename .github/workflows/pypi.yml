@@ -46,7 +46,7 @@ jobs:
         run: python setup.py sdist
       - name: Publish a Python distribution to PyPI
         if: ${{ steps.version.outputs.TAG_EXISTS == '0' }}
-        uses: pypa/gh-action-pypi-publish@master
+        uses: pypa/gh-action-pypi-publish@release/v1
         with:
             user: __token__
             password: ${{ secrets.pypi_password }}
