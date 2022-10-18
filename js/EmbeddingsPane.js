@@ -484,6 +484,8 @@ class Scene extends React.Component {
         >
           {this.props.content.has_previous ? (
             <div
+              tabIndex={0}
+              role="button"
               style={Object.assign(
                 {
                   width: 24,
@@ -500,11 +502,17 @@ class Scene extends React.Component {
                 e.preventDefault();
                 this.props.onGoBack();
               }}
+              onKeyDown={(e) => {
+                e.preventDefault();
+                if (e.keyCode === 13) this.props.onGoBack();
+              }}
             >
               {'\u2190'}
             </div>
           ) : null}
           <div
+            tabIndex={0}
+            role="button"
             style={Object.assign(
               {
                 width: 24,
@@ -520,6 +528,11 @@ class Scene extends React.Component {
             onClick={(e) => {
               e.preventDefault();
               this.setState({ selectMode: !this.state.selectMode });
+            }}
+            onKeyDown={(e) => {
+              e.preventDefault();
+              if (e.keyCode === 13)
+                this.setState({ selectMode: !this.state.selectMode });
             }}
           >
             <span
@@ -624,10 +637,6 @@ class LassoSelection extends React.Component {
         });
         const selected = points.filter((point) =>
           polygonContains(polygon, point.test)
-        );
-        console.log(
-          'Entities selected:',
-          selected.map((pt) => pt.ref.idx)
         );
         if (selected.length <= 21) {
           lassoInstance.reset();

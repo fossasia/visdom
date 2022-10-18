@@ -7,7 +7,10 @@
  *
  */
 
-import React, { useEffect, useRef } from 'react';
+// ignoring errors due to statically loaded d3 and saveSvgAsPng
+/* eslint-disable no-undef */
+
+import React, { useEffect } from 'react';
 
 import Pane from './Pane';
 

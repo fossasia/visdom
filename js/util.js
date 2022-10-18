@@ -7,7 +7,7 @@
  *
  */
 
-import React, { useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 
 // custom hook to get previous value of a variable
 function usePrevious(value) {
