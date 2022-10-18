@@ -7,10 +7,21 @@
  *
  */
 
+/* Notes:
+ * Width requires to know the DOM-Element of the Grid it wraps.
+ * While this works in the current setup, for a refactored version
+ * of main.js's App that uses function-components this function may break.
+ * Also, eslint requires a displayName for every component that cannot be
+ * inferred automatically in this cane, and also not set by hand.
+ * Thus, we ignore these eslint-errors here for now.
+ */
+
+/* eslint-disable react/no-find-dom-node, react/display-name */
+
 import React, { useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
 
-const Width = (ComposedComponent) => (props) => {
+var Width = (ComposedComponent) => (props) => {
   const { onWidthChange } = props;
 
   // state varibles

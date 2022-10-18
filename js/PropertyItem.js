@@ -21,7 +21,8 @@ function EditablePropertyText(props) {
   // private events
   // --------------
 
-  // update the state to current input value (rejects events based on validateHandler)
+  // update the state to current input value
+  // (rejects events based on validateHandler)
   const handleChange = (event) => {
     let newValue = event.target.value;
     if (validateHandler && !validateHandler(newValue)) event.preventDefault();
@@ -29,7 +30,7 @@ function EditablePropertyText(props) {
   };
 
   // focus / blur toggles edit mode & blur saves the state
-  const onFocus = (event) => {
+  const onFocus = () => {
     setIsEdited(true);
   };
   const onBlur = (event) => {
@@ -70,12 +71,13 @@ function EditablePropertyText(props) {
   );
 }
 
-// this component abstracts several types of inputs (text, number, button, checkbox, select) to a common API
+// this component abstracts several types of inputs
+// (text, number, button, checkbox, select) to a common API
 function PropertyItem(props) {
   const { propId, type, value, values, blurStopPropagation } = props;
 
-  // by default, this item has no real function and needs to be replaced when used
-  const updateValue = props.updateValue || ((propId, value) => {});
+  // by default, this item has no real function & needs to be replaced when used
+  const updateValue = props.updateValue || (() => {});
 
   // rendering
   // ---------

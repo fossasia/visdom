@@ -26,8 +26,8 @@ var Pane = forwardRef((props, ref) => {
   const handleOnFocus = props.handleOnFocus || (() => props.onFocus(id));
   const handleDownload = props.handleDownload || (() => {});
   const handleReset = props.handleReset || (() => {});
-  const handleZoom = props.handleZoom || ((ev) => {});
-  const handleMouseMove = props.handleMouseMove || ((ev) => {});
+  const handleZoom = props.handleZoom || (() => {});
+  const handleMouseMove = props.handleMouseMove || (() => {});
   const handleClose = props.handleClose || (() => props.onClose(id));
 
   // rendering
@@ -98,6 +98,7 @@ var Pane = forwardRef((props, ref) => {
 
   return (
     <div
+      role="presentation"
       className={windowClassNames}
       onClick={handleOnFocus}
       onDoubleClick={handleReset}
@@ -127,6 +128,7 @@ var Pane = forwardRef((props, ref) => {
     </div>
   );
 });
+Pane.displayName = 'Pane';
 
 // prevent rerender unless we know we need one
 // (previously known as shouldComponentUpdate)
@@ -138,9 +140,9 @@ Pane = React.memo(Pane, (props, nextProps) => {
   return true;
 });
 
-// this component is an overlay containing a property list (specialized for Pane)
+// this component is an overlay containing a property list
+// (specialized for Pane)
 function PropertyList(props) {
-  const { keylist } = props;
   var { content } = props;
 
   // private events
@@ -168,9 +170,10 @@ function PropertyList(props) {
       keylist.length > 1 ? keylist.slice(1).join('.') : keylist[0];
 
     // map value type to property type
-    if (typeof value == 'number') var type = 'number';
-    else if (typeof value == 'boolean') var type = 'checkbox';
-    else if (typeof value == 'string') var type = 'text';
+    var type;
+    if (typeof value == 'number') type = 'number';
+    else if (typeof value == 'boolean') type = 'checkbox';
+    else if (typeof value == 'string') type = 'text';
     else if (Array.isArray(value)) return [];
     else if (value && typeof value === 'object')
       return (
