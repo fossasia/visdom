@@ -17,7 +17,7 @@ jobs:
         # see: https://stackoverflow.com/questions/57921401/push-to-origin-from-github-action/58393457#58393457
         # with:
         #   token: ${{ secrets.PAT }}
-      - uses: actions/setup-node@v2
+      - uses: actions/setup-node@v3
         with:
           node-version: '16'
       - run: npm install
