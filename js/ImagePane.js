@@ -7,7 +7,8 @@
  *
  */
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+
 import EventSystem from './EventSystem';
 import Pane from './Pane';
 

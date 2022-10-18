@@ -7,7 +7,8 @@
  *
  */
 
-import React, { useRef, useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
+
 import Pane from './Pane';
 
 function NetworkPane(props) {

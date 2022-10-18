@@ -7,7 +7,7 @@
  *
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 function EditablePropertyText(props) {
   const { value, validateHandler, submitHandler, blurStopPropagation } = props;
