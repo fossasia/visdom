@@ -35,7 +35,8 @@
     "test:init": "cypress run --spec './cypress/integration/screenshots.init.js'",
     "test:visual": "cypress run --spec './cypress/integration/screenshots.js'",
     "test": "cypress run --config ignoreTestFiles=*.init.js",
-    "lint": "eslint js/."
+    "lint": "eslint js/.",
+    "lint:fix": "eslint --fix --ext .js,.jsx js/"
   },
   "dependencies": {
     "assert": "^2.0.0",
