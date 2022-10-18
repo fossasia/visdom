@@ -6,6 +6,21 @@ on: pull_request
 #     - master
 
 jobs:
+  eslint_check:
+    name: Linter Check
+    runs-on: ubuntu-latest
+    steps:
+    - name: "Checkout Repository"
+      uses: actions/checkout@v3
+    - name: "Install Node"
+      uses: actions/setup-node@v1
+      with:
+          node-version: 16
+    - name: "Install Dependencies"
+      run: npm install
+    - name: "Linter Check (ESLint)"
+      run: npm run lint
+
   install-and-build:
     runs-on: ubuntu-latest
     outputs:
