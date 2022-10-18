@@ -12,14 +12,14 @@ const { usePrevious } = require('./util');
 import Pane from './Pane';
 const { sgg } = require('ml-savitzky-golay-generalized');
 
-function PlotPane(props) {
+var PlotPane = (props) => {
   const { contentID, content } = props;
 
   // state varibles
   // --------------
   const plotlyRef = useRef();
   const previousContent = usePrevious(content);
-  const [maxsmoothvalue, setMaxsmoothvalue] = useState(100);
+  const maxsmoothvalue = 100;
   const [smoothWidgetActive, setSmoothWidgetActive] = useState(false);
   const [smoothvalue, setSmoothValue] = useState(1);
 
@@ -85,7 +85,7 @@ function PlotPane(props) {
     if (smoothWidgetActive) {
       smooth_data = data
         .filter((d) => d['type'] == 'scatter' && d['mode'] == 'lines')
-        .map((d, dataId) => {
+        .map((d) => {
           var smooth_d = JSON.parse(JSON.stringify(d));
           var windowSize = 2 * smoothvalue + 1;
 
@@ -119,7 +119,7 @@ function PlotPane(props) {
         });
 
       // pad data in case we have some smoothed lines
-      // this is to let plotly use the same colors if no colors are given by the user
+      // (lets plotly use the same colors if no colors are given by the user)
       if (smooth_data.length > 0) {
         data = Array.from(data);
         let num_to_fill = 10 - (data.length % 10);
@@ -128,7 +128,7 @@ function PlotPane(props) {
     } else
       content.data
         .filter((data) => data['type'] == 'scatter' && data['mode'] == 'lines')
-        .map((d, dataId) => {
+        .map((d) => {
           d.opacity = 1.0;
         });
 
@@ -139,7 +139,7 @@ function PlotPane(props) {
   };
 
   // check if data can be smoothed
-  var contains_line_plots = content.data.some((data, dataId) => {
+  var contains_line_plots = content.data.some((data) => {
     return data['type'] == 'scatter' && data['mode'] == 'lines';
   });
 
@@ -191,7 +191,7 @@ function PlotPane(props) {
       />
     </Pane>
   );
-}
+};
 
 // prevent rerender unless we know we need one
 // (previously known as shouldComponentUpdate)

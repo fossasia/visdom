@@ -390,6 +390,7 @@ class App extends React.Component {
     if (this._socket) {
       return;
     }
+    // eslint-disable-next-line no-undef
     if (USE_POLLING) {
       this.setupPolling();
       return;
@@ -1451,7 +1452,7 @@ class App extends React.Component {
         }
         return (
           <li key={view}>
-            <a href="#" onClick={this.updateToLayout.bind(this, view)}>
+            <a href={'#' + view} onClick={this.updateToLayout.bind(this, view)}>
               {view}
               {check_space}
             </a>
@@ -1688,6 +1689,7 @@ class App extends React.Component {
         </div>
         <div
           tabIndex="-1"
+          role="presentation"
           className="no-focus"
           onBlur={this.blurPane}
           onClick={this.publishEvent}

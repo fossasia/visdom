@@ -184,7 +184,7 @@ function ImagePane(props) {
   // image size/pos computation
   // --------------------------
 
-  // Find the width/height that preserves the aspect ratio given 'scaledWidth/height'
+  // Find the width/height that preserves the aspect ratio 'scaledWidth/height'
   const computeHFromW = (scaledWidth) => {
     return Math.ceil((imgDim.height / imgDim.width) * scaledWidth);
   };
@@ -296,6 +296,7 @@ function ImagePane(props) {
         <div style={imageContainerStyle}>
           <img
             className="content-image cssTransforms"
+            alt={content.caption}
             src={content.src}
             ref={imgRef}
             onLoad={() => {
