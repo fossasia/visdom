@@ -7,7 +7,8 @@
  *
  */
 
-import React, { useState, useRef, forwardRef } from 'react';
+import React, { forwardRef, useRef, useState } from 'react';
+
 import PropertyItem from './PropertyItem';
 var classNames = require('classnames');
 
@@ -118,7 +119,7 @@ var Pane = forwardRef((props, ref) => {
           &#10226;{' '}
         </button>
         {barwidgets}
-        <div class="pull-right">{title}</div>
+        <div className="pull-right">{title}</div>
       </div>
       <div className="content">{children}</div>
       <div className="widgets">{widgets}</div>

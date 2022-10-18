@@ -8,8 +8,9 @@
  */
 
 import React from 'react';
-import PropertyItem from './PropertyItem';
+
 import Pane from './Pane';
+import PropertyItem from './PropertyItem';
 
 function PropertiesPane(props) {
   const { id, content, appApi, onFocus } = props;
