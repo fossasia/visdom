@@ -7,15 +7,16 @@
  *
  */
 
-import React from 'react';
-import EventSystem from './EventSystem';
-import Pane from './Pane';
-import * as THREE from 'three';
-import * as d3 from 'd3-zoom';
-import { select, event as currentEvent, mouse } from 'd3-selection';
-import debounce from 'debounce';
-import lasso from './lasso';
 import { polygonContains } from 'd3-polygon';
+import { event as currentEvent, mouse, select } from 'd3-selection';
+import * as d3 from 'd3-zoom';
+import debounce from 'debounce';
+import React from 'react';
+import * as THREE from 'three';
+
+import EventSystem from './EventSystem';
+import lasso from './lasso';
+import Pane from './Pane';
 
 const SCALE_RADIUS = 2000;
 

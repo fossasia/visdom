@@ -24,6 +24,7 @@ var classNames = require('classnames');
 import 'rc-tree-select/assets/index.css';
 
 import TreeSelect, { SHOW_CHILD } from 'rc-tree-select';
+
 import EventSystem from './EventSystem';
 
 var ReactGridLayout = require('react-grid-layout');
@@ -37,12 +38,12 @@ var stringify = require('json-stable-stringify');
 
 import ReactResizeDetector from 'react-resize-detector';
 
+import EmbeddingsPane from './EmbeddingsPane';
+import ImagePane from './ImagePane';
+import NetworkPane from './NetworkPane';
+import PlotPane from './PlotPane';
 import PropertiesPane from './PropertiesPane';
 import TextPane from './TextPane';
-import ImagePane from './ImagePane';
-import PlotPane from './PlotPane';
-import EmbeddingsPane from './EmbeddingsPane';
-import NetworkPane from './NetworkPane';
 import WidthProvider from './Width';
 
 const GridLayout = WidthProvider(ReactGridLayout);

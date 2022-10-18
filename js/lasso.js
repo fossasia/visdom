@@ -7,9 +7,9 @@
  *
  */
 
-import * as d3 from 'd3-selection';
 import { dispatch as d3dispatch } from 'd3-dispatch';
 import { drag as d3drag } from 'd3-drag';
+import * as d3 from 'd3-selection';
 
 function polygonToPath(polygon) {
   return (
