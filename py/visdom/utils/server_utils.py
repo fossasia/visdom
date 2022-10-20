@@ -39,8 +39,7 @@ from visdom.server.defaults import (
 from visdom.utils.shared_utils import (
     warn_once,
     get_rand_id,
-    get_new_window_id,
-    ensure_dir_exists,
+    get_new_window_id
 )
 
 
