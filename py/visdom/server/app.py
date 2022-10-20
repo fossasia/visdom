@@ -144,12 +144,13 @@ class Application(tornado.web.Application):
                 RuntimeWarning
             )
             return ""
-        layout_filepath = os.path.join(self.env_path, 'view', LAYOUT_FILE)
-        ensure_dir_exists(layout_filepath)
+        layout_dir = os.path.join(self.env_path, 'view')
+        layout_filepath = os.path.join(layout_dir, LAYOUT_FILE)
         if os.path.isfile(layout_filepath):
             with open(layout_filepath, 'r') as fn:
                 return fn.read()
         else:
+            ensure_dir_exists(layout_dir)
             return ""
 
     def load_state(self):
