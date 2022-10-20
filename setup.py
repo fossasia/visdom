@@ -8,7 +8,7 @@
 
 import os
 from io import open
-from setuptools import setup
+from setuptools import setup, find_packages
 from pkg_resources import get_distribution, DistributionNotFound
 
 
@@ -63,7 +63,7 @@ setup(
     license='Apache-2.0',
 
     # Package info
-    packages=['visdom'],
+    packages=find_packages(where="py"),
     package_dir={'': 'py'},
     package_data={'visdom': ['static/*.*', 'static/**/*', 'py.typed', '*.pyi']},
     include_package_data=True,
