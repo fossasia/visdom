@@ -39,7 +39,7 @@ jobs:
           git fetch origin $GITHUB_BASE_REF
           echo "Target branch : $GITHUB_BASE_REF"
           git diff --name-only origin/$GITHUB_BASE_REF --
-          echo '::set-output name=jsfileschanged::'$(git diff --name-only origin/$GITHUB_BASE_REF -- | grep '^js/*' | wc -l)
+          echo 'jsfileschanged='$(git diff --name-only origin/$GITHUB_BASE_REF -- | grep '^js/*' | wc -l) >> $GITHUB_OUTPUT
           echo 'Num js files changed='$(git diff --name-only origin/$GITHUB_BASE_REF -- | grep '^js/*' | wc -l)
 
       - name: "Build Project (PR version)"
