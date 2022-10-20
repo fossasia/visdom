@@ -44,9 +44,9 @@ def get_new_window_id():
 
 
 def ensure_dir_exists(path):
-    """Make sure the parent dir exists for path so we can write a file."""
+    """Make sure the dir exists so we can write a file."""
     try:
-        os.makedirs(os.path.dirname(os.path.abspath(path)))
+        os.makedirs(os.path.abspath(path))
     except OSError as e1:
         assert e1.errno == 17  # errno.EEXIST
 
