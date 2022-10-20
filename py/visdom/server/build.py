@@ -11,7 +11,7 @@ import os
 import visdom
 from urllib import request
 from urllib.error import HTTPError, URLError
-from visdom.utils.shared_utils import ensure_dir_exists, get_visdom_path
+from visdom.utils.shared_utils import get_visdom_path
 
 
 def download_scripts(proxies=None, install_dir=None):
