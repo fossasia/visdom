@@ -7,7 +7,7 @@ on: pull_request
 
 jobs:
   eslint_check:
-    name: Linter Check
+    name: "Linter Check"
     runs-on: ubuntu-latest
     steps:
     - name: "Checkout Repository"
@@ -22,6 +22,7 @@ jobs:
       run: npm run lint
 
   install-and-build:
+    name: "Install and Build"
     runs-on: ubuntu-latest
     outputs:
       jsfileschanged: ${{ steps.checkout.outputs.jsfileschanged }}
@@ -58,6 +59,7 @@ jobs:
 
 
   visual-regression-test-init:
+    name: "Initialize Visual Regression Test"
     runs-on: ubuntu-latest
     needs: install-and-build
     steps:
@@ -95,6 +97,7 @@ jobs:
 
 
   visual-regression-test:
+    name: "Visual Regression Test"
     runs-on: ubuntu-latest
     needs: visual-regression-test-init
     steps:
@@ -122,6 +125,7 @@ jobs:
           path: cypress/screenshots
 
   funcitonal-test:
+    name: "Functional Test"
     runs-on: ubuntu-latest
     needs: install-and-build
     steps:
