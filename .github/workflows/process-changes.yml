@@ -29,6 +29,9 @@ jobs:
       - uses: psf/black@22.10.0
         with:
           src: "./py"
+      - name: Check for Linting Errors
+        if: failure()
+        run: echo "::warning title='Python Linter Check failed'::Please run \"pip install black; black py\" before committing code changes to python files."
 
   install-and-build:
     name: "Install and Build"
