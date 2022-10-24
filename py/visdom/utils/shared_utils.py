@@ -39,8 +39,7 @@ def get_rand_id():
 
 def get_new_window_id():
     """Return a string to be used for a new window"""
-    return f'window_{get_rand_id()}'
-
+    return f"window_{get_rand_id()}"
 
 
 def ensure_dir_exists(path):
