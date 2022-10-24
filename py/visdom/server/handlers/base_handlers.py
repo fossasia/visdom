@@ -60,8 +60,9 @@ class BaseHandler(tornado.web.RequestHandler):
     def write_error(self, status_code, **kwargs):
         logging.error("ERROR: %s: %s" % (status_code, kwargs))
         if "exc_info" in kwargs:
-            logging.info('Traceback: {}'.format(
-                traceback.format_exception(*kwargs["exc_info"])))
+            logging.info(
+                "Traceback: {}".format(traceback.format_exception(*kwargs["exc_info"]))
+            )
         if self.settings.get("debug") and "exc_info" in kwargs:
             logging.error("rendering error page")
             exc_info = kwargs["exc_info"]
@@ -71,9 +72,9 @@ class BaseHandler(tornado.web.RequestHandler):
             # 3. The traceback opbject
             try:
                 params = {
-                    'error': exc_info[1],
-                    'trace_info': traceback.format_exception(*exc_info),
-                    'request': self.request.__dict__
+                    "error": exc_info[1],
+                    "trace_info": traceback.format_exception(*exc_info),
+                    "request": self.request.__dict__,
                 }
 
                 # TODO make an error.html page
