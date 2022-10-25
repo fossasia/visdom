@@ -40,7 +40,6 @@
     "assert": "^2.0.0",
     "browserify-zlib": "^0.2.0",
     "buffer": "^6.0.3",
-    "create-react-class": "^15.7.0",
     "css-loader": "^6.7.1",
     "d3-dispatch": "^1.0.6",
     "d3-drag": "^1.2.5",
