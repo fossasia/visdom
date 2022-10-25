@@ -18,8 +18,6 @@
     "eslint-plugin-ignore-generated-and-nolint": "^1.0.0",
     "eslint-plugin-jsx-a11y": "^6.5.1",
     "eslint-plugin-react": "^7.29.4",
-    "husky": "^7.0.4",
-    "lint-staged": "^12.3.7",
     "pixelmatch": "^5.2.1",
     "pngjs": "^6.0.0",
     "prettier": "^2.6.2",
@@ -71,16 +69,5 @@
     "url": "^0.11.0",
     "util": "^0.12.4",
     "whatwg-fetch": "^3.6.2"
-  },
-  "husky": {
-    "hooks": {
-      "pre-commit": "lint-staged"
-    }
-  },
-  "lint-staged": {
-    "*.{js,json,css}": [
-      "prettier --write",
-      "git add"
-    ]
   }
 }
