@@ -14,8 +14,8 @@ import debounce from 'debounce';
 import React from 'react';
 import * as THREE from 'three';
 
-import EventSystem from './EventSystem';
-import lasso from './lasso';
+import EventSystem from '../EventSystem';
+import lasso from '../lasso';
 import Pane from './Pane';
 
 const SCALE_RADIUS = 2000;

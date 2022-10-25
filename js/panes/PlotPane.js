@@ -8,7 +8,7 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-const { usePrevious } = require('./util');
+const { usePrevious } = require('../util');
 import Pane from './Pane';
 const { sgg } = require('ml-savitzky-golay-generalized');
 
