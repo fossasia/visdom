@@ -9,7 +9,7 @@
 
 import React, { useEffect } from 'react';
 
-import EventSystem from './EventSystem';
+import EventSystem from '../EventSystem';
 import Pane from './Pane';
 
 function TextPane(props) {

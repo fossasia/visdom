@@ -1,9 +1,9 @@
-import EmbeddingsPane from './EmbeddingsPane';
-import ImagePane from './ImagePane';
-import NetworkPane from './NetworkPane';
-import PlotPane from './PlotPane';
-import PropertiesPane from './PropertiesPane';
-import TextPane from './TextPane';
+import EmbeddingsPane from './panes/EmbeddingsPane';
+import ImagePane from './panes/ImagePane';
+import NetworkPane from './panes/NetworkPane';
+import PlotPane from './panes/PlotPane';
+import PropertiesPane from './panes/PropertiesPane';
+import TextPane from './panes/TextPane';
 
 const ROW_HEIGHT = 5; // pixels
 const MARGIN = 10; // pixels
