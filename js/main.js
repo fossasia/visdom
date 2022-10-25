@@ -22,6 +22,7 @@ import ReactResizeDetector from 'react-resize-detector';
 
 import EventSystem from './EventSystem';
 import Poller from './Legacy';
+import TextPane from './panes/TextPane';
 import {
   DEFAULT_LAYOUT,
   MARGIN,
@@ -30,7 +31,6 @@ import {
   PANES,
   ROW_HEIGHT,
 } from './settings';
-import TextPane from './TextPane';
 import WidthProvider from './Width';
 
 const ReactGridLayout = require('react-grid-layout');

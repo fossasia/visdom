@@ -9,7 +9,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 
-import EventSystem from './EventSystem';
+import EventSystem from '../EventSystem';
 import Pane from './Pane';
 
 const DEFAULT_HEIGHT = 400;
