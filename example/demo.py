@@ -10,7 +10,7 @@ import numpy as np
 import time
 from visdom import Visdom
 import argparse
-from components.text import text_basic, text_update, text_callbacks, text_close
+from components.text import text_basic, text_update, text_callbacks, text_close, text_fork_part1, text_fork_part2
 from components.image import image_basic, image_callback, image_callback2, image_save_jpeg, image_history, image_grid, image_svg
 from components.plot_scatter import plot_scatter_basic, plot_scatter_update_opts, plot_scatter_append, plot_scatter_3d, plot_scatter_custom_marker, plot_scatter_custom_colors, plot_scatter_add_trace, plot_scatter_text_labels_1d, plot_scatter_text_labels_2d
 from components.plot_bar import plot_bar_basic, plot_bar_stacked, plot_bar_nonstacked, plot_bar_histogram, plot_bar_piechart
