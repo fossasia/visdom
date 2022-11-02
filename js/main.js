@@ -22,6 +22,7 @@ import ReactResizeDetector from 'react-resize-detector';
 
 import EventSystem from './EventSystem';
 import Poller from './Legacy';
+import EnvModal from './modals/EnvModal';
 import TextPane from './panes/TextPane';
 import {
   DEFAULT_LAYOUT,
@@ -96,7 +97,6 @@ class App extends React.Component {
 
   _bin = null;
   _socket = null;
-  _envFieldRef = null;
   _timeoutID = null;
   _pendingPanes = [];
   _firstLoad = true;
@@ -518,22 +518,20 @@ class App extends React.Component {
     }
   };
 
-  deleteEnv = () => {
+  onEnvDelete = (env2delete, previousEnv) => {
     this.sendSocketMessage({
       cmd: 'delete_env',
-      prev_eid: this.state.envID,
-      eid: this.state.modifyID,
+      prev_eid: previousEnv,
+      eid: env2delete,
     });
   };
 
-  saveEnv = () => {
+  onEnvSave = (env) => {
     if (!this.state.connected) {
       return;
     }
 
     this.updateLayout(this.state.layout);
-
-    let env = this._envFieldRef.value;
 
     let payload = {};
     Object.keys(this.state.panes).map((paneID) => {
@@ -969,20 +967,6 @@ class App extends React.Component {
     return $.post(url, JSON.stringify(body));
   };
 
-  openEnvModal() {
-    this.setState({
-      showEnvModal: true,
-      saveText: this.state.envID,
-      modifyID: this.state.envList[0],
-    });
-  }
-
-  closeEnvModal() {
-    this.setState({
-      showEnvModal: false,
-    });
-  }
-
   openViewModal() {
     this.setState({
       showViewModal: true,
@@ -995,85 +979,6 @@ class App extends React.Component {
     this.setState({
       showViewModal: false,
     });
-  }
-
-  renderEnvModal() {
-    return (
-      <ReactModal
-        isOpen={this.state.showEnvModal}
-        onRequestClose={this.closeEnvModal.bind(this)}
-        contentLabel="Environment Management Modal"
-        ariaHideApp={false}
-        style={MODAL_STYLE}
-      >
-        <span className="visdom-title">Manage Environments</span>
-        <br />
-        Save or fork current environment:
-        <br />
-        <div className="form-inline">
-          <input
-            className="form-control"
-            type="text"
-            onChange={(ev) => {
-              this.setState({
-                saveText: ev.target.value,
-              });
-            }}
-            value={this.state.saveText}
-            ref={(ref) => (this._envFieldRef = ref)}
-          />
-          <button
-            className="btn btn-default"
-            disabled={
-              !(
-                this.state.connected &&
-                this.state.envID &&
-                this.state.saveText.length > 0
-              )
-            }
-            onClick={this.saveEnv}
-          >
-            {this.state.envList.indexOf(this.state.saveText) >= 0
-              ? 'save'
-              : 'fork'}
-          </button>
-        </div>
-        <br />
-        Delete environment selected in dropdown:
-        <br />
-        <div className="form-inline">
-          <select
-            className="form-control"
-            disabled={!this.state.connected}
-            onChange={(ev) => {
-              this.setState({
-                modifyID: ev.target.value,
-              });
-            }}
-            value={this.state.modifyID}
-          >
-            {this.state.envList.map((env) => {
-              return (
-                <option key={env} value={env}>
-                  {env}
-                </option>
-              );
-            })}
-          </select>
-          <button
-            className="btn btn-default"
-            disabled={
-              !this.state.connected ||
-              !this.state.modifyID ||
-              this.state.modifyID == 'main'
-            }
-            onClick={this.deleteEnv.bind(this)}
-          >
-            Delete
-          </button>
-        </div>
-      </ReactModal>
-    );
   }
 
   renderViewModal() {
@@ -1288,7 +1193,9 @@ class App extends React.Component {
                 !this.state.readonly
               )
             }
-            onClick={this.openEnvModal.bind(this)}
+            onClick={() => {
+              this.setState({ showEnvModal: !this.state.showEnvModal });
+            }}
           >
             <span className="glyphicon glyphicon-folder-open" />
           </button>
@@ -1498,7 +1405,19 @@ class App extends React.Component {
       }
     });
 
-    let envModal = this.renderEnvModal();
+    let modals = [
+      <EnvModal
+        key="EnvModal"
+        activeEnv={this.state.envID}
+        connected={this.state.connected}
+        envList={this.state.envList}
+        onEnvDelete={this.onEnvDelete}
+        onEnvSave={this.onEnvSave}
+        onModalClose={() => this.setState({ showEnvModal: false })}
+        show={this.state.showEnvModal}
+      />,
+    ];
+
     let viewModal = this.renderViewModal();
     let envControls = this.renderEnvControls();
     let viewControls = this.renderViewControls();
@@ -1506,7 +1425,7 @@ class App extends React.Component {
 
     return (
       <div>
-        {envModal}
+        {modals}
         {viewModal}
         <div className="navbar-form navbar-default">
           <span className="navbar-brand visdom-title">visdom</span>
