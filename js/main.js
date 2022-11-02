@@ -17,17 +17,16 @@ import 'rc-tree-select/assets/index.css';
 import TreeSelect, { SHOW_CHILD } from 'rc-tree-select';
 import React from 'react';
 import ReactDOM from 'react-dom';
-import ReactModal from 'react-modal';
 import ReactResizeDetector from 'react-resize-detector';
 
 import EventSystem from './EventSystem';
 import Poller from './Legacy';
 import EnvModal from './modals/EnvModal';
+import ViewModal from './modals/ViewModal';
 import TextPane from './panes/TextPane';
 import {
   DEFAULT_LAYOUT,
   MARGIN,
-  MODAL_STYLE,
   PANE_SIZE,
   PANES,
   ROW_HEIGHT,
@@ -72,7 +71,6 @@ class App extends React.Component {
     focusedPaneID: null,
     envID: use_env,
     envIDs: use_envs,
-    saveText: ACTIVE_ENV,
     layoutID: DEFAULT_LAYOUT,
     // Bad form... make a copy of the global var we generated in python.
     envList: ENV_LIST.slice(),
@@ -83,7 +81,6 @@ class App extends React.Component {
     layoutLists: new Map([['main', new Map([[DEFAULT_LAYOUT, new Map()]])]]),
     showEnvModal: false,
     showViewModal: false,
-    modifyID: null,
     treeDataSimpleMode: {
       id: 'key',
       rootPId: 0,
@@ -353,7 +350,7 @@ class App extends React.Component {
         this.relayout();
         break;
       case 'env_update':
-        let layoutLists = this.state.layoutLists;
+        var layoutLists = this.state.layoutLists;
         for (var envIdx in cmd.data) {
           if (!layoutLists.has(cmd.data[envIdx])) {
             layoutLists.set(
@@ -362,18 +359,10 @@ class App extends React.Component {
             );
           }
         }
-        if (!this.state.showEnvModal || this.state.modifyID in cmd.data) {
-          this.setState({
-            envList: cmd.data,
-            layoutLists: layoutLists,
-          });
-        } else {
-          this.setState({
-            envList: cmd.data,
-            layoutLists: layoutLists,
-            modifyID: cmd.data[0],
-          });
-        }
+        this.setState({
+          envList: cmd.data,
+          layoutLists: layoutLists,
+        });
         break;
       case 'layout_update':
         this.parseLayoutsFromServer(cmd.data);
@@ -488,7 +477,6 @@ class App extends React.Component {
     this.setState({
       envID: envID,
       envIDs: selectedNodes,
-      saveText: envID,
       panes: isSameEnv ? this.state.panes : {},
       layout: isSameEnv ? this.state.layout : [],
       focusedPaneID: isSameEnv ? this.state.focusedPaneID : null,
@@ -848,7 +836,7 @@ class App extends React.Component {
     });
   }
 
-  saveLayout() {
+  onLayoutSave(layoutName) {
     // Saves the current view as a new layout, pushes to the server
     let sorted = sortLayout(this.state.layout);
     let layoutMap = new Map();
@@ -858,21 +846,22 @@ class App extends React.Component {
       layoutMap.set(sorted[idx].i, [idx, currLayout.h, currLayout.w]);
     }
     let layoutLists = this.state.layoutLists;
-    layoutLists.get(this.state.envID).set(this.state.saveText, layoutMap);
+    layoutLists.get(this.state.envID).set(layoutName, layoutMap);
     this.exportLayoutsToServer(layoutLists);
     this.setState({
       layoutLists: layoutLists,
-      layoutID: this.state.saveText,
+      layoutID: layoutName,
     });
   }
 
-  deleteLayout() {
+  onLayoutDelete(layoutName) {
     // Deletes the selected view, pushes to server
     let layoutLists = this.state.layoutLists;
-    layoutLists.get(this.state.envID).delete(this.state.modifyID);
+    layoutLists.get(this.state.envID).delete(layoutName);
     this.exportLayoutsToServer(layoutLists);
     this.setState({
       layoutLists: layoutLists,
+      layoutID: layoutLists.get(this.state.envID).keys()[0],
     });
   }
 
@@ -966,94 +955,6 @@ class App extends React.Component {
 
     return $.post(url, JSON.stringify(body));
   };
-
-  openViewModal() {
-    this.setState({
-      showViewModal: true,
-      saveText: this.state.layoutID,
-      modifyID: this.state.layoutLists.get(this.state.envID).keys()[0],
-    });
-  }
-
-  closeViewModal() {
-    this.setState({
-      showViewModal: false,
-    });
-  }
-
-  renderViewModal() {
-    return (
-      <ReactModal
-        isOpen={this.state.showViewModal}
-        onRequestClose={this.closeViewModal.bind(this)}
-        contentLabel="Layout Views Management Modal"
-        ariaHideApp={false}
-        style={MODAL_STYLE}
-      >
-        <span className="visdom-title">Manage Views</span>
-        <br />
-        Save or fork current layout:
-        <br />
-        <div className="form-inline">
-          <input
-            className="form-control"
-            type="text"
-            onChange={(ev) => {
-              this.setState({
-                saveText: ev.target.value,
-              });
-            }}
-            value={this.state.saveText}
-          />
-          <button
-            className="btn btn-default"
-            disabled={
-              !this.state.connected || this.state.saveText == DEFAULT_LAYOUT
-            }
-            onClick={this.saveLayout.bind(this)}
-          >
-            {this.getCurrLayoutList().has(this.state.saveText)
-              ? 'save'
-              : 'fork'}
-          </button>
-        </div>
-        <br />
-        Delete layout view selected in dropdown:
-        <br />
-        <div className="form-inline">
-          <select
-            className="form-control"
-            disabled={!this.state.connected}
-            onChange={(ev) => {
-              this.setState({
-                modifyID: ev.target.value,
-              });
-            }}
-            value={this.state.modifyID}
-          >
-            {Array.from(this.getCurrLayoutList().keys()).map((view) => {
-              return (
-                <option key={view} value={view}>
-                  {view}
-                </option>
-              );
-            })}
-          </select>
-          <button
-            className="btn btn-default"
-            disabled={
-              !this.state.connected ||
-              !this.state.modifyID ||
-              this.state.modifyID == DEFAULT_LAYOUT
-            }
-            onClick={this.deleteLayout.bind(this)}
-          >
-            Delete
-          </button>
-        </div>
-      </ReactModal>
-    );
-  }
 
   mouseOverSelect = () => {
     if (this.state.flexSelectorOnHover) {
@@ -1267,8 +1168,8 @@ class App extends React.Component {
                 !this.state.readonly
               )
             }
-            onClick={(ev) => {
-              this.openViewModal();
+            onClick={() => {
+              this.setState({ showViewModal: true });
             }}
           >
             <span className="glyphicon glyphicon-folder-open" />
@@ -1416,9 +1317,18 @@ class App extends React.Component {
         onModalClose={() => this.setState({ showEnvModal: false })}
         show={this.state.showEnvModal}
       />,
+      <ViewModal
+        key="ViewModal"
+        activeLayout={this.state.layoutID}
+        connected={this.state.connected}
+        layoutList={this.getCurrLayoutList()}
+        onModalClose={() => this.setState({ showViewModal: false })}
+        onLayoutDelete={this.onLayoutDelete.bind(this)}
+        onLayoutSave={this.onLayoutSave.bind(this)}
+        show={this.state.showViewModal}
+      />,
     ];
 
-    let viewModal = this.renderViewModal();
     let envControls = this.renderEnvControls();
     let viewControls = this.renderViewControls();
     let filterControl = this.renderFilterControl();
@@ -1426,7 +1336,6 @@ class App extends React.Component {
     return (
       <div>
         {modals}
-        {viewModal}
         <div className="navbar-form navbar-default">
           <span className="navbar-brand visdom-title">visdom</span>
           <span className="vertical-line" />
