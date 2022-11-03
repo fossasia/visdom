@@ -14,7 +14,6 @@
 import 'fetch';
 import 'rc-tree-select/assets/index.css';
 
-import TreeSelect, { SHOW_CHILD } from 'rc-tree-select';
 import React from 'react';
 import ReactDOM from 'react-dom';
 import ReactResizeDetector from 'react-resize-detector';
@@ -31,6 +30,7 @@ import {
   PANES,
   ROW_HEIGHT,
 } from './settings';
+import EnvControls from './topbar/EnvControls';
 import WidthProvider from './Width';
 
 const ReactGridLayout = require('react-grid-layout');
@@ -81,15 +81,9 @@ class App extends React.Component {
     layoutLists: new Map([['main', new Map([[DEFAULT_LAYOUT, new Map()]])]]),
     showEnvModal: false,
     showViewModal: false,
-    treeDataSimpleMode: {
-      id: 'key',
-      rootPId: 0,
-    },
     envSelectorStyle: {
       width: 1280 / 2,
     },
-    flexSelectorOnHover: false,
-    confirmClear: false,
   };
 
   _bin = null;
@@ -438,29 +432,11 @@ class App extends React.Component {
       panes: {},
       consistent_pane_copy: {},
       focusedPaneID: null,
-      confirmClear: false,
+      // confirmClear: false,
     });
   };
 
-  triggerClear = () => {
-    if (this.state.confirmClear) {
-      this.closeAllPanes();
-    } else {
-      this.setState({
-        confirmClear: true,
-      });
-    }
-  };
-
-  cancelClear = () => {
-    if (this.state.confirmClear) {
-      this.setState({
-        confirmClear: false,
-      });
-    }
-  };
-
-  selectEnv = (selectedNodes) => {
+  onEnvSelect = (selectedNodes) => {
     var isSameEnv = selectedNodes.length == this.state.envIDs.length;
     if (isSameEnv) {
       for (var i = 0; i < selectedNodes.length; i++) {
@@ -956,155 +932,6 @@ class App extends React.Component {
     return $.post(url, JSON.stringify(body));
   };
 
-  mouseOverSelect = () => {
-    if (this.state.flexSelectorOnHover) {
-      this.setState({
-        envSelectorStyle: {
-          display: 'flex',
-          width: this.getEnvSelectWidth(this.state.width),
-          'min-width': this.getEnvSelectWidth(this.state.width),
-          'flex-direction': 'column',
-        },
-      });
-    }
-  };
-
-  mouseOutSelect = () => {
-    if (this.state.flexSelectorOnHover) {
-      this.setState({
-        envSelectorStyle: {
-          display: 'block',
-          width: this.getEnvSelectWidth(this.state.width),
-          height: 30,
-          overflow: 'auto',
-        },
-      });
-    }
-  };
-
-  renderEnvControls() {
-    var slist = this.state.envList.slice();
-    slist.sort();
-    var roots = Array.from(
-      new Set(
-        slist.map((x) => {
-          return x.split('_')[0];
-        })
-      )
-    );
-
-    let env_options2 = slist.map((env, idx) => {
-      //var check_space = this.state.envIDs.includes(env);
-      if (env.split('_').length == 1) {
-        return null;
-      }
-      return {
-        key: idx + 1 + roots.length,
-        pId: roots.indexOf(env.split('_')[0]) + 1,
-        label: env,
-        value: env,
-      };
-    });
-
-    env_options2 = env_options2.filter((x) => x != null);
-
-    env_options2 = env_options2.concat(
-      roots.map((x, idx) => {
-        return {
-          key: idx + 1,
-          pId: 0,
-          label: x,
-          value: x,
-        };
-      })
-    );
-
-    if (this.state.confirmClear) {
-      var clearText = 'Are you sure?';
-      var clearStyle = 'btn btn-warning';
-    } else {
-      var clearText = 'Clear Current Environment';
-      var clearStyle = 'btn btn-default';
-    }
-
-    return (
-      <span>
-        <span>Environment&nbsp;</span>
-        <div
-          className="btn-group navbar-btn"
-          role="group"
-          aria-label="Environment:"
-        >
-          <div
-            className="btn-group"
-            role="group"
-            onMouseEnter={this.mouseOverSelect}
-            onMouseLeave={this.mouseOutSelect}
-          >
-            <TreeSelect
-              style={this.state.envSelectorStyle}
-              allowClear={true}
-              dropdownStyle={{
-                maxHeight: 900,
-                overflow: 'auto',
-              }}
-              placeholder={<i>Select environment(s)</i>}
-              searchPlaceholder="search"
-              treeLine
-              maxTagTextLength={1000}
-              inputValue={null}
-              value={this.state.envIDs}
-              treeData={env_options2}
-              treeDefaultExpandAll
-              treeNodeFilterProp="title"
-              treeDataSimpleMode={this.state.treeDataSimpleMode}
-              treeCheckable
-              showCheckedStrategy={SHOW_CHILD}
-              dropdownMatchSelectWidth={false}
-              onChange={this.selectEnv}
-            />
-          </div>
-          <button
-            id="clear-button"
-            data-toggle="tooltip"
-            title={clearText}
-            data-placement="bottom"
-            className={clearStyle}
-            disabled={
-              !(
-                this.state.connected &&
-                this.state.envID &&
-                !this.state.readonly
-              )
-            }
-            onClick={this.triggerClear}
-            onBlur={this.cancelClear}
-          >
-            <span className="glyphicon glyphicon-erase" />
-          </button>
-          <button
-            data-toggle="tooltip"
-            title="Manage Environments"
-            data-placement="bottom"
-            className="btn btn-default"
-            disabled={
-              !(
-                this.state.connected &&
-                this.state.envID &&
-                !this.state.readonly
-              )
-            }
-            onClick={() => {
-              this.setState({ showEnvModal: !this.state.showEnvModal });
-            }}
-          >
-            <span className="glyphicon glyphicon-folder-open" />
-          </button>
-        </div>
-      </span>
-    );
-  }
-
   renderViewControls() {
     let view_options = Array.from(this.getCurrLayoutList().keys()).map(
       (view) => {
@@ -1329,7 +1156,21 @@ class App extends React.Component {
       />,
     ];
 
-    let envControls = this.renderEnvControls();
+    let envControls = (
+      <EnvControls
+        connected={this.state.connected}
+        envID={this.state.envID}
+        envIDs={this.state.envIDs}
+        envList={this.state.envList}
+        envSelectorStyle={this.state.envSelectorStyle}
+        onEnvClear={this.closeAllPanes}
+        onEnvManageButton={() => {
+          this.setState({ showEnvModal: !this.state.showEnvModal });
+        }}
+        onEnvSelect={this.onEnvSelect}
+        readonly={this.state.readonly}
+      />
+    );
     let viewControls = this.renderViewControls();
     let filterControl = this.renderFilterControl();
 
