@@ -30,12 +30,12 @@ import {
   PANES,
   ROW_HEIGHT,
 } from './settings';
+import ConnectionIndicator from './topbar/ConnectionIndicator';
 import EnvControls from './topbar/EnvControls';
 import ViewControls from './topbar/ViewControls';
 import WidthProvider from './Width';
 
 const ReactGridLayout = require('react-grid-layout');
-const classNames = require('classnames');
 const jsonpatch = require('fast-json-patch');
 const md5 = require('md5');
 const stringify = require('json-stable-stringify');
@@ -1116,6 +1116,13 @@ class App extends React.Component {
       />
     );
     let filterControl = this.renderFilterControl();
+    let connectionIndicator = (
+      <ConnectionIndicator
+        connected={this.state.connected}
+        onClick={this.toggleOnlineState}
+        readonly={this.state.readonly}
+      />
+    );
 
     return (
       <div>
@@ -1136,21 +1143,7 @@ class App extends React.Component {
           >
             {filterControl}
             &nbsp;&nbsp;
-            <button
-              className={classNames({
-                btn: true,
-                'btn-warning': this.state.connected && this.state.readonly,
-                'btn-success': this.state.connected && !this.state.readonly,
-                'btn-danger': !this.state.connected,
-              })}
-              onClick={this.toggleOnlineState}
-            >
-              {this.state.connected
-                ? this.state.readonly
-                  ? 'readonly'
-                  : 'online'
-                : 'offline'}
-            </button>
+            {connectionIndicator}
           </span>
         </div>
         <div
