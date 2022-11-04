@@ -31,6 +31,7 @@ import {
   ROW_HEIGHT,
 } from './settings';
 import EnvControls from './topbar/EnvControls';
+import ViewControls from './topbar/ViewControls';
 import WidthProvider from './Width';
 
 const ReactGridLayout = require('react-grid-layout');
@@ -932,80 +933,6 @@ class App extends React.Component {
     return $.post(url, JSON.stringify(body));
   };
 
-  renderViewControls() {
-    let view_options = Array.from(this.getCurrLayoutList().keys()).map(
-      (view) => {
-        let check_space = '';
-        if (view == this.state.layoutID) {
-          check_space = <span>&nbsp;&#10003;</span>;
-        }
-        return (
-          <li key={view}>
-            <a href={'#' + view} onClick={this.updateToLayout.bind(this, view)}>
-              {view}
-              {check_space}
-            </a>
-          </li>
-        );
-      }
-    );
-    return (
-      <span>
-        <span>View&nbsp;</span>
-        <div className="btn-group navbar-btn" role="group" aria-label="View:">
-          <div className="btn-group" role="group">
-            <button
-              className="btn btn-default dropdown-toggle"
-              type="button"
-              id="viewDropdown"
-              data-toggle="dropdown"
-              aria-haspopup="true"
-              aria-expanded="true"
-              disabled={!(this.state.connected && this.state.envID)}
-            >
-              {this.state.envID == null ? 'compare' : this.state.layoutID}
-              &nbsp;
-              <span className="caret" />
-            </button>
-            <ul className="dropdown-menu" aria-labelledby="viewDropdown">
-              {view_options}
-            </ul>
-          </div>
-          <button
-            data-toggle="tooltip"
-            title="Repack"
-            data-placement="bottom"
-            className="btn btn-default"
-            onClick={(ev) => {
-              this.relayout();
-              this.relayout();
-            }}
-          >
-            <span className="glyphicon glyphicon-th" />
-          </button>
-          <button
-            data-toggle="tooltip"
-            title="Manage Views"
-            data-placement="bottom"
-            className="btn btn-default"
-            disabled={
-              !(
-                this.state.connected &&
-                this.state.envID &&
-                !this.state.readonly
-              )
-            }
-            onClick={() => {
-              this.setState({ showViewModal: true });
-            }}
-          >
-            <span className="glyphicon glyphicon-folder-open" />
-          </button>
-        </div>
-      </span>
-    );
-  }
-
   renderFilterControl() {
     return (
       <div className="input-group navbar-btn">
@@ -1171,7 +1098,23 @@ class App extends React.Component {
         readonly={this.state.readonly}
       />
     );
-    let viewControls = this.renderViewControls();
+    let viewControls = (
+      <ViewControls
+        activeLayout={this.state.layoutID}
+        connected={this.state.connected}
+        envID={this.state.envID}
+        layoutList={this.getCurrLayoutList()}
+        onRepackButton={() => {
+          this.relayout();
+          this.relayout();
+        }}
+        onViewChange={this.updateToLayout}
+        onViewManageButton={() => {
+          this.setState({ showViewModal: !this.state.showViewModal });
+        }}
+        readonly={this.state.readonly}
+      />
+    );
     let filterControl = this.renderFilterControl();
 
     return (
