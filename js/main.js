@@ -32,6 +32,7 @@ import {
 } from './settings';
 import ConnectionIndicator from './topbar/ConnectionIndicator';
 import EnvControls from './topbar/EnvControls';
+import FilterControls from './topbar/FilterControls';
 import ViewControls from './topbar/ViewControls';
 import WidthProvider from './Width';
 
@@ -933,67 +934,6 @@ class App extends React.Component {
     return $.post(url, JSON.stringify(body));
   };
 
-  renderFilterControl() {
-    return (
-      <div className="input-group navbar-btn">
-        <input
-          type="text"
-          className="form-control"
-          data-cy="filter"
-          placeholder="Filter text"
-          onChange={(ev) => {
-            this.setState(
-              {
-                filter: ev.target.value,
-              },
-              () => {
-                Object.keys(this.state.panes).map((paneID) => {
-                  this.focusPane(paneID);
-                });
-              }
-            );
-            localStorage.setItem('filter', ev.target.value);
-            // TODO remove this once relayout is moved to a post-state
-            // update kind of thing
-            this.state.filter = ev.target.value;
-            this.relayout();
-            this.relayout();
-          }}
-          value={this.state.filter}
-        />
-        <span className="input-group-btn">
-          <button
-            data-toggle="tooltip"
-            title="Clear filter"
-            data-placement="bottom"
-            type="button"
-            className="btn btn-default"
-            onClick={(ev) => {
-              this.setState(
-                {
-                  filter: '',
-                },
-                () => {
-                  Object.keys(this.state.panes).map((paneID) => {
-                    this.focusPane(paneID);
-                  });
-                }
-              );
-              // TODO remove this once relayout is moved to a post-state
-              // update kind of thing
-              this.state.filter = '';
-              localStorage.setItem('filter', '');
-              this.relayout();
-              this.relayout();
-            }}
-          >
-            <span className="glyphicon glyphicon-erase" />
-          </button>
-        </span>
-      </div>
-    );
-  }
-
   render() {
     let panes = Object.keys(this.state.panes).map((id) => {
       let pane = this.state.panes[id];
@@ -1115,7 +1055,37 @@ class App extends React.Component {
         readonly={this.state.readonly}
       />
     );
-    let filterControl = this.renderFilterControl();
+    let filterControl = (
+      <FilterControls
+        filter={this.state.filter}
+        onFilterChange={(ev) => {
+          this.setState({ filter: ev.target.value }, () => {
+            Object.keys(this.state.panes).map((paneID) => {
+              this.focusPane(paneID);
+            });
+          });
+          localStorage.setItem('filter', ev.target.value);
+          // TODO remove this once relayout is moved to a post-state
+          // update kind of thing
+          this.state.filter = ev.target.value;
+          this.relayout();
+          this.relayout();
+        }}
+        onFilterClear={() => {
+          this.setState({ filter: '' }, () => {
+            Object.keys(this.state.panes).map((paneID) => {
+              this.focusPane(paneID);
+            });
+          });
+          // TODO remove this once relayout is moved to a post-state
+          // update kind of thing
+          this.state.filter = '';
+          localStorage.setItem('filter', '');
+          this.relayout();
+          this.relayout();
+        }}
+      />
+    );
     let connectionIndicator = (
       <ConnectionIndicator
         connected={this.state.connected}
