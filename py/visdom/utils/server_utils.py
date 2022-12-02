@@ -182,6 +182,7 @@ def window(args):
         'inflate': opts.get('inflate', True),
         'width': opts.get('width'),
         'height': opts.get('height'),
+        'envID': args.get('eid'),
         'contentID': get_rand_id(),   # to detected updated windows
     }
 

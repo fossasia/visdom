@@ -472,6 +472,14 @@ class App extends React.Component {
         // If we're in compare mode and recieve an update to an environment
         // that is selected that isn't from the compare output, we need to
         // reload the compare output
+        if(cmd.envID !== undefined && cmd.envID !== this.state.envID){
+          // If env of the window is not same to the current env then ignore it
+          break;
+        }
+        if(cmd.contentID === 'compare_legend' && this.state.envIDs.length < 2){
+          // if compare_legend comes and only one env is selected then ignore it
+          break;
+        }
         if (this.state.envIDs.length > 1 && cmd.has_compare !== true) {
           this.postForEnv(this.state.envIDs);
         } else {
