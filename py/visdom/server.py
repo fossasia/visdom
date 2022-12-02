@@ -1684,6 +1684,7 @@ class PostHandler(BaseHandler):
 
         eid = extract_eid(req)
         p = window(req)
+        print(p)
 
         register_window(self, p, eid)
 
@@ -2608,7 +2609,9 @@ def download_scripts(proxies=None, install_dir=None):
             'react-modal.min.js',
         # here is another url in case the cdn breaks down again.
         # https://raw.githubusercontent.com/plotly/plotly.js/master/dist/plotly.min.js
-        'https://cdn.plot.ly/plotly-latest.min.js': 'plotly-plotly.min.js',
+	'https://cdn.plot.ly/plotly-2.11.1.min.js': 'plotly-plotly.min.js', 
+	## [shouldsee]:latest.min.js not pointing to latest 
+        ## see https://github.com/plotly/plotly.py/issues/3651
         # Stanford Javascript Crypto Library for Password Hashing
         '%ssjcl@1.0.7/sjcl.js' % b: 'sjcl.js',
         '%slayout-bin-packer@1.4.0/dist/layout-bin-packer.js.map' % b: 'layout-bin-packer.js.map',

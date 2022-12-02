@@ -577,12 +577,12 @@ class Visdom(object):
                     try:
                         handler(message)
                     except Exception as e:
-                        logger.warn(
-                            'Visdom failed to handle a handler for {}: {}'
-                            ''.format(message, e)
-                        )
                         import traceback
-                        traceback.print_exc()
+                        tbmsg = traceback.format_exc()
+                        logger.warn(
+                            'Visdom failed to handle a handler for {}: {}.'
+                            '\n traceback:{}'.format(message, e, tbmsg)
+                        )
 
         def on_error(ws, error):
             if hasattr(error, "errno") and  error.errno == errno.ECONNREFUSED:
@@ -666,6 +666,17 @@ class Visdom(object):
         created with a random name. If `create=False`, `win=None` indicates the
         operation should be applied to all windows.
         """
+        # if endpoint == 'window':
+        # print(f'[endpoint]{endpoint}') 
+        # import inspect,traceback
+        # traceback.print_stack()
+        # from pprint import pprint
+        # # pprint(msg)
+        # print(msg.get('layout').__repr__()[:10])
+        # print(msg.get('height'))
+        # print(msg.get('width'))
+        # traceback.print_tb(inspect.currentframe())
+            # import pdb;pdb.set_trace()
         if msg.get('eid', None) is None:
             msg['eid'] = self.env
             self.env_list.add(self.env)
@@ -890,7 +901,7 @@ class Visdom(object):
 
     # Content
 
-    def text(self, text, win=None, env=None, opts=None, append=False):
+    def text(self, text, win=None, env=None, opts=None, append=False,extra={}):
         """
         This function prints text in a box. It takes as input an `text` string.
         No specific `opts` are currently supported.
