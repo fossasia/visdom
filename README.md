@@ -13,7 +13,7 @@
 
 <p align="center">
     <a href="https://github.com/fossasia/visdom/releases"><img src="https://img.shields.io/github/v/release/fossasia/visdom?colorA=363a4f&colorB=a6da95&style=for-the-badge"/></a>
-    <a href="https://pypi.org/visdom"><img src="https://img.shields.io/pypi/dd/visdom?colorA=363a4f&colorB=156df1&style=for-the-badge"></a>
+    <a href="https://pypi.org/project/visdom"><img src="https://img.shields.io/pypi/dd/visdom?colorA=363a4f&colorB=156df1&style=for-the-badge"></a>
     <a href="https://github.com/fossasia/visdom/commits"><img src="https://img.shields.io/github/commit-activity/m/fossasia/visdom?colorA=363a4f&colorB=0099ff&style=for-the-badge"/></a>
     <a href="https://github.com/fossasia/visdom/contributors"><img src="https://img.shields.io/github/contributors/fossasia/visdom?colorA=363a4f&colorB=60b9f4&style=for-the-badge"/></a>
 </p>
