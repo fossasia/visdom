@@ -208,7 +208,6 @@ class Application(tornado.web.Application):
 
         # initialize user style
         user_css = ""
-        logging.error("initializing")
         home_style_path = os.path.join(config_dir, "style.css")
         if os.path.exists(home_style_path):
             with open(home_style_path, "r") as f:
