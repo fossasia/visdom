@@ -6,8 +6,8 @@ on: pull_request
 #     - master
 
 jobs:
-  eslint_check:
-    name: "Linter Check"
+  lint-js:
+    name: "Javascript Linter Check"
     runs-on: ubuntu-latest
     steps:
     - name: "Checkout Repository"
@@ -20,6 +20,18 @@ jobs:
       run: npm install
     - name: "Linter Check (ESLint)"
       run: npm run lint
+
+  lint-py:
+    name: "Python Linter Check"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: psf/black@22.10.0
+        with:
+          src: "./py"
+      - name: Check for Linting Errors
+        if: failure()
+        run: echo "::warning title='Python Linter Check failed'::Please run \"pip install black; black py\" before committing code changes to python files."
 
   install-and-build:
     name: "Install and Build"
@@ -146,4 +158,3 @@ jobs:
         with:
           name: cypress-screenshots-functional
           path: cypress/screenshots
-

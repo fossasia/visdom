@@ -38,3 +38,10 @@ def text_close(viz, env, args):
     assert not viz.win_exists(textwindow), 'Closed window still exists'
 
 
+# helpers for forking test
+def text_fork_part1(viz, env, args):
+    viz.text('This text will change. Fork to the rescue!', env=env, win="fork_test")
+def text_fork_part2(viz, env, args):
+    viz.text('Changed text.', env=env, win="fork_test")
+
+

@@ -7,87 +7,42 @@
  *
  */
 
-// TODO: FIX the following lint errors in this file over time
-// so that nothing needs to be disabled:
-
-/* eslint-disable no-unused-vars, react/no-direct-mutation-state*/
-/* eslint-disable no-redeclare, no-case-declarations */
-/* eslint-disable no-console, no-debugger */
-
 /* global ACTIVE_ENV ENV_LIST $ Bin */
 
 'use strict';
-import React from 'react';
-import ReactDOM from 'react-dom';
-import ReactModal from 'react-modal';
-var classNames = require('classnames');
+
+import 'fetch';
 import 'rc-tree-select/assets/index.css';
 
-import TreeSelect, { SHOW_CHILD } from 'rc-tree-select';
-
-import EventSystem from './EventSystem';
-
-var ReactGridLayout = require('react-grid-layout');
-
-import createClass from 'create-react-class';
-import PropTypes from 'prop-types';
-
-var md5 = require('md5');
-var jsonpatch = require('fast-json-patch');
-var stringify = require('json-stable-stringify');
-
+import React from 'react';
+import ReactDOM from 'react-dom';
 import ReactResizeDetector from 'react-resize-detector';
 
-import EmbeddingsPane from './EmbeddingsPane';
-import ImagePane from './ImagePane';
-import NetworkPane from './NetworkPane';
-import PlotPane from './PlotPane';
-import PropertiesPane from './PropertiesPane';
-import TextPane from './TextPane';
+import EventSystem from './EventSystem';
+import Poller from './Legacy';
+import EnvModal from './modals/EnvModal';
+import ViewModal from './modals/ViewModal';
+import TextPane from './panes/TextPane';
+import {
+  DEFAULT_LAYOUT,
+  MARGIN,
+  PANE_SIZE,
+  PANES,
+  ROW_HEIGHT,
+} from './settings';
+import ConnectionIndicator from './topbar/ConnectionIndicator';
+import EnvControls from './topbar/EnvControls';
+import FilterControls from './topbar/FilterControls';
+import ViewControls from './topbar/ViewControls';
 import WidthProvider from './Width';
 
+const ReactGridLayout = require('react-grid-layout');
+const jsonpatch = require('fast-json-patch');
+const md5 = require('md5');
+const stringify = require('json-stable-stringify');
 const GridLayout = WidthProvider(ReactGridLayout);
 const sortLayout = ReactGridLayout.utils.sortLayoutItemsByRowCol;
 const getLayoutItem = ReactGridLayout.utils.getLayoutItem;
-
-import 'fetch';
-
-const ROW_HEIGHT = 5; // pixels
-const MARGIN = 10; // pixels
-
-const PANES = {
-  image: ImagePane,
-  image_history: ImagePane,
-  plot: PlotPane,
-  text: TextPane,
-  properties: PropertiesPane,
-  embeddings: EmbeddingsPane,
-  network: NetworkPane,
-};
-
-const PANE_SIZE = {
-  image: [20, 20],
-  image_history: [20, 20],
-  plot: [30, 24],
-  text: [20, 20],
-  embeddings: [20, 20],
-  properties: [20, 20],
-  network: [20, 20],
-};
-
-const MODAL_STYLE = {
-  content: {
-    top: '50%',
-    left: '50%',
-    right: 'auto',
-    bottom: 'auto',
-    marginRight: '-50%',
-    transform: 'translate(-50%, -50%)',
-  },
-};
-
-const DEFAULT_LAYOUT = 'current';
-const POLLING_INTERVAL = 500;
 
 var use_env = null;
 var use_envs = null;
@@ -106,101 +61,6 @@ if (ACTIVE_ENV !== '') {
   use_envs = JSON.parse(localStorage.getItem('envIDs')) || ['main'];
 }
 
-function postData(url = ``, data = {}) {
-  return fetch(url, {
-    method: 'POST',
-    mode: 'cors',
-    cache: 'no-cache',
-    credentials: 'same-origin',
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-    },
-    redirect: 'follow',
-    referrer: 'no-referrer',
-    body: JSON.stringify(data),
-  });
-}
-
-class Poller {
-  /**
-   * Wrapper around what would regularly be socket communications, but handled
-   * through a POST-based polling loop
-   */
-  constructor(app) {
-    this.app = app;
-    var url = window.location;
-    this.target =
-      url.protocol + '//' + url.host + app.correctPathname() + 'socket_wrap';
-    this.handleMessage = app._handleMessage;
-    fetch(this.target)
-      .then((res) => {
-        return res.json();
-      })
-      .then((data) => {
-        this.finishSetup(data.sid);
-      });
-  }
-
-  finishSetup = (sid) => {
-    this.sid = sid;
-    this.poller_id = window.setInterval(() => this.poll(), POLLING_INTERVAL);
-    this.app.setState({
-      connected: true,
-    });
-  };
-
-  close = () => {
-    this.app.setState({ connected: false }, () => {
-      this.app._socket = null;
-    });
-    window.clearInterval(this.poller_id);
-  };
-
-  send = (msg) => {
-    // Post a messge containing the desired command
-    postData(this.target, { message_type: 'send', sid: this.sid, message: msg })
-      .then((res) => res.json())
-      .then(
-        (result) => {
-          if (!result.success) {
-            this.close();
-          } else {
-            this.poll(); // Get a response right now if there is one
-          }
-        },
-        (error) => {
-          console.log(error);
-          this.close();
-        }
-      );
-  };
-
-  poll = () => {
-    // Post message to query possible socket messages
-    postData(this.target, { message_type: 'query', sid: this.sid })
-      .then((res) => res.json())
-      .then(
-        (result) => {
-          if (!result.success) {
-            this.close();
-          } else {
-            let messages = result.messages;
-            messages.forEach((msg) => {
-              // Must re-encode message as handle message expects json
-              // in this particular format from sockets
-              // TODO Could refactor message parsing out elsewhere.
-              this.handleMessage({ data: msg });
-            });
-          }
-        },
-        (error) => {
-          console.log(error);
-          this.close();
-        }
-      );
-  };
-}
-
 // TODO: Move some of this to smaller components and/or use something like redux
 // to move state out of the app to a standalone store.
 class App extends React.Component {
@@ -213,7 +73,6 @@ class App extends React.Component {
     focusedPaneID: null,
     envID: use_env,
     envIDs: use_envs,
-    saveText: ACTIVE_ENV,
     layoutID: DEFAULT_LAYOUT,
     // Bad form... make a copy of the global var we generated in python.
     envList: ENV_LIST.slice(),
@@ -224,21 +83,13 @@ class App extends React.Component {
     layoutLists: new Map([['main', new Map([[DEFAULT_LAYOUT, new Map()]])]]),
     showEnvModal: false,
     showViewModal: false,
-    modifyID: null,
-    treeDataSimpleMode: {
-      id: 'key',
-      rootPId: 0,
-    },
     envSelectorStyle: {
       width: 1280 / 2,
     },
-    flexSelectorOnHover: false,
-    confirmClear: false,
   };
 
   _bin = null;
   _socket = null;
-  _envFieldRef = null;
   _timeoutID = null;
   _pendingPanes = [];
   _firstLoad = true;
@@ -382,17 +233,13 @@ class App extends React.Component {
     }
   };
 
-  setupPolling = () => {
-    this._socket = new Poller(this);
-  };
-
   connect = () => {
     if (this._socket) {
       return;
     }
     // eslint-disable-next-line no-undef
     if (USE_POLLING) {
-      this.setupPolling();
+      this._socket = new Poller(this);
       return;
     }
     var url = window.location;
@@ -507,7 +354,7 @@ class App extends React.Component {
         this.relayout();
         break;
       case 'env_update':
-        let layoutLists = this.state.layoutLists;
+        var layoutLists = this.state.layoutLists;
         for (var envIdx in cmd.data) {
           if (!layoutLists.has(cmd.data[envIdx])) {
             layoutLists.set(
@@ -516,18 +363,10 @@ class App extends React.Component {
             );
           }
         }
-        if (!this.state.showEnvModal || this.state.modifyID in cmd.data) {
-          this.setState({
-            envList: cmd.data,
-            layoutLists: layoutLists,
-          });
-        } else {
-          this.setState({
-            envList: cmd.data,
-            layoutLists: layoutLists,
-            modifyID: cmd.data[0],
-          });
-        }
+        this.setState({
+          envList: cmd.data,
+          layoutLists: layoutLists,
+        });
         break;
       case 'layout_update':
         this.parseLayoutsFromServer(cmd.data);
@@ -603,29 +442,11 @@ class App extends React.Component {
       panes: {},
       consistent_pane_copy: {},
       focusedPaneID: null,
-      confirmClear: false,
+      // confirmClear: false,
     });
   };
 
-  triggerClear = () => {
-    if (this.state.confirmClear) {
-      this.closeAllPanes();
-    } else {
-      this.setState({
-        confirmClear: true,
-      });
-    }
-  };
-
-  cancelClear = () => {
-    if (this.state.confirmClear) {
-      this.setState({
-        confirmClear: false,
-      });
-    }
-  };
-
-  selectEnv = (selectedNodes) => {
+  onEnvSelect = (selectedNodes) => {
     var isSameEnv = selectedNodes.length == this.state.envIDs.length;
     if (isSameEnv) {
       for (var i = 0; i < selectedNodes.length; i++) {
@@ -642,7 +463,6 @@ class App extends React.Component {
     this.setState({
       envID: envID,
       envIDs: selectedNodes,
-      saveText: envID,
       panes: isSameEnv ? this.state.panes : {},
       layout: isSameEnv ? this.state.layout : [],
       focusedPaneID: isSameEnv ? this.state.focusedPaneID : null,
@@ -672,22 +492,20 @@ class App extends React.Component {
     }
   };
 
-  deleteEnv = () => {
+  onEnvDelete = (env2delete, previousEnv) => {
     this.sendSocketMessage({
       cmd: 'delete_env',
-      prev_eid: this.state.envID,
-      eid: this.state.modifyID,
+      prev_eid: previousEnv,
+      eid: env2delete,
     });
   };
 
-  saveEnv = () => {
+  onEnvSave = (env) => {
     if (!this.state.connected) {
       return;
     }
 
     this.updateLayout(this.state.layout);
-
-    let env = this._envFieldRef.value;
 
     let payload = {};
     Object.keys(this.state.panes).map((paneID) => {
@@ -1004,7 +822,7 @@ class App extends React.Component {
     });
   }
 
-  saveLayout() {
+  onLayoutSave(layoutName) {
     // Saves the current view as a new layout, pushes to the server
     let sorted = sortLayout(this.state.layout);
     let layoutMap = new Map();
@@ -1014,21 +832,22 @@ class App extends React.Component {
       layoutMap.set(sorted[idx].i, [idx, currLayout.h, currLayout.w]);
     }
     let layoutLists = this.state.layoutLists;
-    layoutLists.get(this.state.envID).set(this.state.saveText, layoutMap);
+    layoutLists.get(this.state.envID).set(layoutName, layoutMap);
     this.exportLayoutsToServer(layoutLists);
     this.setState({
       layoutLists: layoutLists,
-      layoutID: this.state.saveText,
+      layoutID: layoutName,
     });
   }
 
-  deleteLayout() {
+  onLayoutDelete(layoutName) {
     // Deletes the selected view, pushes to server
     let layoutLists = this.state.layoutLists;
-    layoutLists.get(this.state.envID).delete(this.state.modifyID);
+    layoutLists.get(this.state.envID).delete(layoutName);
     this.exportLayoutsToServer(layoutLists);
     this.setState({
       layoutLists: layoutLists,
+      layoutID: layoutLists.get(this.state.envID).keys()[0],
     });
   }
 
@@ -1123,469 +942,6 @@ class App extends React.Component {
     return $.post(url, JSON.stringify(body));
   };
 
-  openEnvModal() {
-    this.setState({
-      showEnvModal: true,
-      saveText: this.state.envID,
-      modifyID: this.state.envList[0],
-    });
-  }
-
-  closeEnvModal() {
-    this.setState({
-      showEnvModal: false,
-    });
-  }
-
-  openViewModal() {
-    this.setState({
-      showViewModal: true,
-      saveText: this.state.layoutID,
-      modifyID: this.state.layoutLists.get(this.state.envID).keys()[0],
-    });
-  }
-
-  closeViewModal() {
-    this.setState({
-      showViewModal: false,
-    });
-  }
-
-  renderEnvModal() {
-    return (
-      <ReactModal
-        isOpen={this.state.showEnvModal}
-        onRequestClose={this.closeEnvModal.bind(this)}
-        contentLabel="Environment Management Modal"
-        ariaHideApp={false}
-        style={MODAL_STYLE}
-      >
-        <span className="visdom-title">Manage Environments</span>
-        <br />
-        Save or fork current environment:
-        <br />
-        <div className="form-inline">
-          <input
-            className="form-control"
-            type="text"
-            onChange={(ev) => {
-              this.setState({
-                saveText: ev.target.value,
-              });
-            }}
-            value={this.state.saveText}
-            ref={(ref) => (this._envFieldRef = ref)}
-          />
-          <button
-            className="btn btn-default"
-            disabled={
-              !(
-                this.state.connected &&
-                this.state.envID &&
-                this.state.saveText.length > 0
-              )
-            }
-            onClick={this.saveEnv}
-          >
-            {this.state.envList.indexOf(this.state.saveText) >= 0
-              ? 'save'
-              : 'fork'}
-          </button>
-        </div>
-        <br />
-        Delete environment selected in dropdown:
-        <br />
-        <div className="form-inline">
-          <select
-            className="form-control"
-            disabled={!this.state.connected}
-            onChange={(ev) => {
-              this.setState({
-                modifyID: ev.target.value,
-              });
-            }}
-            value={this.state.modifyID}
-          >
-            {this.state.envList.map((env) => {
-              return (
-                <option key={env} value={env}>
-                  {env}
-                </option>
-              );
-            })}
-          </select>
-          <button
-            className="btn btn-default"
-            disabled={
-              !this.state.connected ||
-              !this.state.modifyID ||
-              this.state.modifyID == 'main'
-            }
-            onClick={this.deleteEnv.bind(this)}
-          >
-            Delete
-          </button>
-        </div>
-      </ReactModal>
-    );
-  }
-
-  renderViewModal() {
-    return (
-      <ReactModal
-        isOpen={this.state.showViewModal}
-        onRequestClose={this.closeViewModal.bind(this)}
-        contentLabel="Layout Views Management Modal"
-        ariaHideApp={false}
-        style={MODAL_STYLE}
-      >
-        <span className="visdom-title">Manage Views</span>
-        <br />
-        Save or fork current layout:
-        <br />
-        <div className="form-inline">
-          <input
-            className="form-control"
-            type="text"
-            onChange={(ev) => {
-              this.setState({
-                saveText: ev.target.value,
-              });
-            }}
-            value={this.state.saveText}
-          />
-          <button
-            className="btn btn-default"
-            disabled={
-              !this.state.connected || this.state.saveText == DEFAULT_LAYOUT
-            }
-            onClick={this.saveLayout.bind(this)}
-          >
-            {this.getCurrLayoutList().has(this.state.saveText)
-              ? 'save'
-              : 'fork'}
-          </button>
-        </div>
-        <br />
-        Delete layout view selected in dropdown:
-        <br />
-        <div className="form-inline">
-          <select
-            className="form-control"
-            disabled={!this.state.connected}
-            onChange={(ev) => {
-              this.setState({
-                modifyID: ev.target.value,
-              });
-            }}
-            value={this.state.modifyID}
-          >
-            {Array.from(this.getCurrLayoutList().keys()).map((view) => {
-              return (
-                <option key={view} value={view}>
-                  {view}
-                </option>
-              );
-            })}
-          </select>
-          <button
-            className="btn btn-default"
-            disabled={
-              !this.state.connected ||
-              !this.state.modifyID ||
-              this.state.modifyID == DEFAULT_LAYOUT
-            }
-            onClick={this.deleteLayout.bind(this)}
-          >
-            Delete
-          </button>
-        </div>
-      </ReactModal>
-    );
-  }
-
-  mouseOverSelect = () => {
-    if (this.state.flexSelectorOnHover) {
-      this.setState({
-        envSelectorStyle: {
-          display: 'flex',
-          width: this.getEnvSelectWidth(this.state.width),
-          'min-width': this.getEnvSelectWidth(this.state.width),
-          'flex-direction': 'column',
-        },
-      });
-    }
-  };
-
-  mouseOutSelect = () => {
-    if (this.state.flexSelectorOnHover) {
-      this.setState({
-        envSelectorStyle: {
-          display: 'block',
-          width: this.getEnvSelectWidth(this.state.width),
-          height: 30,
-          overflow: 'auto',
-        },
-      });
-    }
-  };
-
-  renderEnvControls() {
-    var slist = this.state.envList.slice();
-    slist.sort();
-    var roots = Array.from(
-      new Set(
-        slist.map((x) => {
-          return x.split('_')[0];
-        })
-      )
-    );
-
-    let env_options2 = slist.map((env, idx) => {
-      //var check_space = this.state.envIDs.includes(env);
-      if (env.split('_').length == 1) {
-        return null;
-      }
-      return {
-        key: idx + 1 + roots.length,
-        pId: roots.indexOf(env.split('_')[0]) + 1,
-        label: env,
-        value: env,
-      };
-    });
-
-    env_options2 = env_options2.filter((x) => x != null);
-
-    env_options2 = env_options2.concat(
-      roots.map((x, idx) => {
-        return {
-          key: idx + 1,
-          pId: 0,
-          label: x,
-          value: x,
-        };
-      })
-    );
-
-    if (this.state.confirmClear) {
-      var clearText = 'Are you sure?';
-      var clearStyle = 'btn btn-warning';
-    } else {
-      var clearText = 'Clear Current Environment';
-      var clearStyle = 'btn btn-default';
-    }
-
-    return (
-      <span>
-        <span>Environment&nbsp;</span>
-        <div
-          className="btn-group navbar-btn"
-          role="group"
-          aria-label="Environment:"
-        >
-          <div
-            className="btn-group"
-            role="group"
-            onMouseEnter={this.mouseOverSelect}
-            onMouseLeave={this.mouseOutSelect}
-          >
-            <TreeSelect
-              style={this.state.envSelectorStyle}
-              allowClear={true}
-              dropdownStyle={{
-                maxHeight: 900,
-                overflow: 'auto',
-              }}
-              placeholder={<i>Select environment(s)</i>}
-              searchPlaceholder="search"
-              treeLine
-              maxTagTextLength={1000}
-              inputValue={null}
-              value={this.state.envIDs}
-              treeData={env_options2}
-              treeDefaultExpandAll
-              treeNodeFilterProp="title"
-              treeDataSimpleMode={this.state.treeDataSimpleMode}
-              treeCheckable
-              showCheckedStrategy={SHOW_CHILD}
-              dropdownMatchSelectWidth={false}
-              onChange={this.selectEnv}
-            />
-          </div>
-          <button
-            id="clear-button"
-            data-toggle="tooltip"
-            title={clearText}
-            data-placement="bottom"
-            className={clearStyle}
-            disabled={
-              !(
-                this.state.connected &&
-                this.state.envID &&
-                !this.state.readonly
-              )
-            }
-            onClick={this.triggerClear}
-            onBlur={this.cancelClear}
-          >
-            <span className="glyphicon glyphicon-erase" />
-          </button>
-          <button
-            data-toggle="tooltip"
-            title="Manage Environments"
-            data-placement="bottom"
-            className="btn btn-default"
-            disabled={
-              !(
-                this.state.connected &&
-                this.state.envID &&
-                !this.state.readonly
-              )
-            }
-            onClick={this.openEnvModal.bind(this)}
-          >
-            <span className="glyphicon glyphicon-folder-open" />
-          </button>
-        </div>
-      </span>
-    );
-  }
-
-  renderViewControls() {
-    let view_options = Array.from(this.getCurrLayoutList().keys()).map(
-      (view) => {
-        let check_space = '';
-        if (view == this.state.layoutID) {
-          check_space = <span>&nbsp;&#10003;</span>;
-        }
-        return (
-          <li key={view}>
-            <a href={'#' + view} onClick={this.updateToLayout.bind(this, view)}>
-              {view}
-              {check_space}
-            </a>
-          </li>
-        );
-      }
-    );
-    return (
-      <span>
-        <span>View&nbsp;</span>
-        <div className="btn-group navbar-btn" role="group" aria-label="View:">
-          <div className="btn-group" role="group">
-            <button
-              className="btn btn-default dropdown-toggle"
-              type="button"
-              id="viewDropdown"
-              data-toggle="dropdown"
-              aria-haspopup="true"
-              aria-expanded="true"
-              disabled={!(this.state.connected && this.state.envID)}
-            >
-              {this.state.envID == null ? 'compare' : this.state.layoutID}
-              &nbsp;
-              <span className="caret" />
-            </button>
-            <ul className="dropdown-menu" aria-labelledby="viewDropdown">
-              {view_options}
-            </ul>
-          </div>
-          <button
-            data-toggle="tooltip"
-            title="Repack"
-            data-placement="bottom"
-            className="btn btn-default"
-            onClick={(ev) => {
-              this.relayout();
-              this.relayout();
-            }}
-          >
-            <span className="glyphicon glyphicon-th" />
-          </button>
-          <button
-            data-toggle="tooltip"
-            title="Manage Views"
-            data-placement="bottom"
-            className="btn btn-default"
-            disabled={
-              !(
-                this.state.connected &&
-                this.state.envID &&
-                !this.state.readonly
-              )
-            }
-            onClick={(ev) => {
-              this.openViewModal();
-            }}
-          >
-            <span className="glyphicon glyphicon-folder-open" />
-          </button>
-        </div>
-      </span>
-    );
-  }
-
-  renderFilterControl() {
-    return (
-      <div className="input-group navbar-btn">
-        <input
-          type="text"
-          className="form-control"
-          data-cy="filter"
-          placeholder="Filter text"
-          onChange={(ev) => {
-            this.setState(
-              {
-                filter: ev.target.value,
-              },
-              () => {
-                Object.keys(this.state.panes).map((paneID) => {
-                  this.focusPane(paneID);
-                });
-              }
-            );
-            localStorage.setItem('filter', ev.target.value);
-            // TODO remove this once relayout is moved to a post-state
-            // update kind of thing
-            this.state.filter = ev.target.value;
-            this.relayout();
-            this.relayout();
-          }}
-          value={this.state.filter}
-        />
-        <span className="input-group-btn">
-          <button
-            data-toggle="tooltip"
-            title="Clear filter"
-            data-placement="bottom"
-            type="button"
-            className="btn btn-default"
-            onClick={(ev) => {
-              this.setState(
-                {
-                  filter: '',
-                },
-                () => {
-                  Object.keys(this.state.panes).map((paneID) => {
-                    this.focusPane(paneID);
-                  });
-                }
-              );
-              // TODO remove this once relayout is moved to a post-state
-              // update kind of thing
-              this.state.filter = '';
-              localStorage.setItem('filter', '');
-              this.relayout();
-              this.relayout();
-            }}
-          >
-            <span className="glyphicon glyphicon-erase" />
-          </button>
-        </span>
-      </div>
-    );
-  }
-
   render() {
     let panes = Object.keys(this.state.panes).map((id) => {
       let pane = this.state.panes[id];
@@ -1652,16 +1008,103 @@ class App extends React.Component {
       }
     });
 
-    let envModal = this.renderEnvModal();
-    let viewModal = this.renderViewModal();
-    let envControls = this.renderEnvControls();
-    let viewControls = this.renderViewControls();
-    let filterControl = this.renderFilterControl();
+    let modals = [
+      <EnvModal
+        key="EnvModal"
+        activeEnv={this.state.envID}
+        connected={this.state.connected}
+        envList={this.state.envList}
+        onEnvDelete={this.onEnvDelete}
+        onEnvSave={this.onEnvSave}
+        onModalClose={() => this.setState({ showEnvModal: false })}
+        show={this.state.showEnvModal}
+      />,
+      <ViewModal
+        key="ViewModal"
+        activeLayout={this.state.layoutID}
+        connected={this.state.connected}
+        layoutList={this.getCurrLayoutList()}
+        onModalClose={() => this.setState({ showViewModal: false })}
+        onLayoutDelete={this.onLayoutDelete.bind(this)}
+        onLayoutSave={this.onLayoutSave.bind(this)}
+        show={this.state.showViewModal}
+      />,
+    ];
+
+    let envControls = (
+      <EnvControls
+        connected={this.state.connected}
+        envID={this.state.envID}
+        envIDs={this.state.envIDs}
+        envList={this.state.envList}
+        envSelectorStyle={this.state.envSelectorStyle}
+        onEnvClear={this.closeAllPanes}
+        onEnvManageButton={() => {
+          this.setState({ showEnvModal: !this.state.showEnvModal });
+        }}
+        onEnvSelect={this.onEnvSelect}
+        readonly={this.state.readonly}
+      />
+    );
+    let viewControls = (
+      <ViewControls
+        activeLayout={this.state.layoutID}
+        connected={this.state.connected}
+        envID={this.state.envID}
+        layoutList={this.getCurrLayoutList()}
+        onRepackButton={() => {
+          this.relayout();
+          this.relayout();
+        }}
+        onViewChange={this.updateToLayout}
+        onViewManageButton={() => {
+          this.setState({ showViewModal: !this.state.showViewModal });
+        }}
+        readonly={this.state.readonly}
+      />
+    );
+    let filterControl = (
+      <FilterControls
+        filter={this.state.filter}
+        onFilterChange={(ev) => {
+          this.setState({ filter: ev.target.value }, () => {
+            Object.keys(this.state.panes).map((paneID) => {
+              this.focusPane(paneID);
+            });
+          });
+          localStorage.setItem('filter', ev.target.value);
+          // TODO remove this once relayout is moved to a post-state
+          // update kind of thing
+          this.state.filter = ev.target.value;
+          this.relayout();
+          this.relayout();
+        }}
+        onFilterClear={() => {
+          this.setState({ filter: '' }, () => {
+            Object.keys(this.state.panes).map((paneID) => {
+              this.focusPane(paneID);
+            });
+          });
+          // TODO remove this once relayout is moved to a post-state
+          // update kind of thing
+          this.state.filter = '';
+          localStorage.setItem('filter', '');
+          this.relayout();
+          this.relayout();
+        }}
+      />
+    );
+    let connectionIndicator = (
+      <ConnectionIndicator
+        connected={this.state.connected}
+        onClick={this.toggleOnlineState}
+        readonly={this.state.readonly}
+      />
+    );
 
     return (
       <div>
-        {envModal}
-        {viewModal}
+        {modals}
         <div className="navbar-form navbar-default">
           <span className="navbar-brand visdom-title">visdom</span>
           <span className="vertical-line" />
@@ -1678,21 +1121,7 @@ class App extends React.Component {
           >
             {filterControl}
             &nbsp;&nbsp;
-            <button
-              className={classNames({
-                btn: true,
-                'btn-warning': this.state.connected && this.state.readonly,
-                'btn-success': this.state.connected && !this.state.readonly,
-                'btn-danger': !this.state.connected,
-              })}
-              onClick={this.toggleOnlineState}
-            >
-              {this.state.connected
-                ? this.state.readonly
-                  ? 'readonly'
-                  : 'online'
-                : 'offline'}
-            </button>
+            {connectionIndicator}
           </span>
         </div>
         <div

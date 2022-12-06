@@ -91,7 +91,11 @@ We actively welcome your pull requests.
 5. If you change `js/`, commit the React-compiled version of `main.js`. For details, please see `Contributing to the UI` below.
 6. Add demos for new features. Ensure the demos work.
 7. Make sure your code lints.
+    - For JavaScript-Files, use `npm lint`
+    - For Python-Files, use `black py`
+    - To do that automatically before each `git commit`, enable pre-commit hooks: `pre-commit install`.
 8. If you haven't already, complete the Contributor License Agreement ("CLA").
+
 
 ## Contributing to the UI
 The UI is built with [React](https://facebook.github.io/react/). For testing,
