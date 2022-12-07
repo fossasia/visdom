@@ -14,22 +14,11 @@ the data_model itself.
 """
 
 import copy
-import getpass
-import hashlib
 import json
-import jsonpatch
 import logging
-import math
 import os
 import time
-from collections import OrderedDict
-
-try:
-    # for after python 3.8
-    from collections.abc import Mapping, Sequence
-except ImportError:
-    # for python 3.7 and below
-    from collections import Mapping, Sequence
+import types
 
 import tornado.ioloop
 import tornado.escape
@@ -52,9 +41,7 @@ from visdom.server.defaults import MAX_SOCKET_WAIT
 # basehandler
 # TODO abstract out any direct references to the app where possible from
 # all handlers. Can instead provide accessor functions on the state?
-# TODO abstract socket interaction logic such that both the regular
-# sockets and the poll-based wrappers are using as much shared code as
-# possible. Try to standardize the code between the client-server and
+# TODO Try to standardize the code between the client-server and
 # visdom-server socket edges.
 
 
@@ -74,7 +61,11 @@ from visdom.server.defaults import MAX_SOCKET_WAIT
 #   Write access is limited to data and view organization (i.e. layout settings, env removal and env saving)
 
 
-class VisSocketHandler(BaseWebSocketHandler):
+class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
+    def __init__(self, *args, **kwargs):
+        self.polling = False
+        super().__init__(*args, **kwargs)
+
     def initialize(self, app):
         self.state = app.state
         self.subs = app.subs
@@ -82,165 +73,31 @@ class VisSocketHandler(BaseWebSocketHandler):
         self.port = app.port
         self.env_path = app.env_path
         self.login_enabled = app.login_enabled
-
-    def check_origin(self, origin):
-        return True
-
-    def open(self):
-        if self.login_enabled and not self.current_user:
-            self.close()
-            return
-        self.sid = str(hex(int(time.time() * 10000000))[2:])
-        if self not in list(self.sources.values()):
-            self.eid = "main"
-            self.sources[self.sid] = self
-        logging.info("Opened visdom socket from ip: {}".format(self.request.remote_ip))
-
-        self.write_message(json.dumps({"command": "alive", "data": "vis_alive"}))
-
-    def on_message(self, message):
-        logging.info("from visdom client: {}".format(message))
-        msg = tornado.escape.json_decode(tornado.escape.to_basestring(message))
-
-        cmd = msg.get("cmd")
-        if cmd == "echo":
-            for sub in self.sources.values():
-                sub.write_message(json.dumps(msg))
-
-    def on_close(self):
-        if self in list(self.sources.values()):
-            self.sources.pop(self.sid, None)
-
-
-class VisSocketWrapper:
-    def __init__(self, app):
-        self.state = app.state
-        self.subs = app.subs
-        self.sources = app.sources
-        self.port = app.port
-        self.env_path = app.env_path
-        self.login_enabled = app.login_enabled
         self.app = app
-        self.messages = []
-        self.last_read_time = time.time()
-        self.open()
-        try:
-            if not self.app.socket_wrap_monitor.is_running():
-                self.app.socket_wrap_monitor.start()
-        except AttributeError:
-            self.app.socket_wrap_monitor = tornado.ioloop.PeriodicCallback(
-                self.socket_wrap_monitor_thread, 15000
-            )
-            self.app.socket_wrap_monitor.start()
-
-    # TODO refactor the two socket wrappers into a wrapper class
-    def socket_wrap_monitor_thread(self):
-        if len(self.subs) > 0 or len(self.sources) > 0:
-            for sub in list(self.subs.values()):
-                if time.time() - sub.last_read_time > MAX_SOCKET_WAIT:
-                    sub.close()
-            for sub in list(self.sources.values()):
-                if time.time() - sub.last_read_time > MAX_SOCKET_WAIT:
-                    sub.close()
-        else:
-            self.app.socket_wrap_monitor.stop()
-
-    def open(self):
-        if self.login_enabled and not self.current_user:
-            print("AUTH Failed in SocketHandler")
-            self.close()
-            return
-        self.sid = get_rand_id()
-        if self not in list(self.sources.values()):
-            self.eid = "main"
-            self.sources[self.sid] = self
-        logging.info("Mocking visdom socket: {}".format(self.sid))
-
-        self.write_message(json.dumps({"command": "alive", "data": "vis_alive"}))
-
-    def on_message(self, message):
-        logging.info("from visdom client: {}".format(message))
-        msg = tornado.escape.json_decode(tornado.escape.to_basestring(message))
-
-        cmd = msg.get("cmd")
-        if cmd == "echo":
-            for sub in self.sources.values():
-                sub.write_message(json.dumps(msg))
-
-    def close(self):
-        if self in list(self.sources.values()):
-            self.sources.pop(self.sid, None)
-
-    def write_message(self, msg):
-        self.messages.append(msg)
-
-    def get_messages(self):
-        to_send = []
-        while len(self.messages) > 0:
-            message = self.messages.pop()
-            if isinstance(message, dict):
-                # Not all messages are being formatted the same way (JSON)
-                # TODO investigate
-                message = json.dumps(message)
-            to_send.append(message)
-        self.last_read_time = time.time()
-        return to_send
-
-
-class SocketHandler(BaseWebSocketHandler):
-    def initialize(self, app):
-        self.port = app.port
-        self.env_path = app.env_path
-        self.app = app
-        self.state = app.state
-        self.subs = app.subs
-        self.sources = app.sources
-        self.broadcast_layouts()
         self.readonly = app.readonly
-        self.login_enabled = app.login_enabled
 
-    def check_origin(self, origin):
-        return True
-
-    def broadcast_layouts(self, target_subs=None):
-        if target_subs is None:
-            target_subs = self.subs.values()
-        for sub in target_subs:
-            sub.write_message(
-                json.dumps({"command": "layout_update", "data": self.app.layouts})
-            )
-
-    def open(self):
-        if self.login_enabled and not self.current_user:
-            print("AUTH Failed in SocketHandler")
-            self.close()
-            return
+    def open(self, register_to="sources"):
+        # self.sid = str(hex(int(time.time() * 10000000))[2:]) # TODO: was previously used for websockets+vis only
         self.sid = get_rand_id()
-        if self not in list(self.subs.values()):
+        register_list = self.sources if register_to == "sources" else self.subs
+        if self not in list(register_list.values()):
             self.eid = "main"
-            self.subs[self.sid] = self
-        logging.info("Opened new socket from ip: {}".format(self.request.remote_ip))
+            register_list[self.sid] = self
 
-        self.write_message(
-            json.dumps(
-                {"command": "register", "data": self.sid, "readonly": self.readonly}
-            )
-        )
-        self.broadcast_layouts([self])
-        broadcast_envs(self, [self])
+    def broadcast_layouts(self):
+        raise ValueError("Should be replaced in child class")
 
     def on_message(self, message):
-        logging.info("from web client: {}".format(message))
+        logging.info(f"from visdom client: {message}")
         msg = tornado.escape.json_decode(tornado.escape.to_basestring(message))
 
         cmd = msg.get("cmd")
-
         if self.readonly:
             return
 
-        if cmd == "close":
+        elif cmd == "close":
             if "data" in msg and "eid" in msg:
-                logging.info("closing window {}".format(msg["data"]))
+                logging.info(f"closing window {msg['data']}")
                 p_data = self.state[msg["eid"]]["jsons"].pop(msg["data"], None)
                 event = {
                     "event_type": "close",
@@ -249,6 +106,7 @@ class SocketHandler(BaseWebSocketHandler):
                     "pane_data": p_data,
                 }
                 send_to_sources(self, event)
+
         elif cmd == "save":
             # save localStorage window metadata
             if "data" in msg and "eid" in msg:
@@ -257,29 +115,34 @@ class SocketHandler(BaseWebSocketHandler):
                 self.state[msg["eid"]]["reload"] = msg["data"]
                 self.eid = msg["eid"]
                 serialize_env(self.state, [self.eid], env_path=self.env_path)
+
         elif cmd == "delete_env":
             if "eid" in msg:
-                logging.info("closing environment {}".format(msg["eid"]))
+                logging.info(f"closing environment {msg['eid']}")
                 del self.state[msg["eid"]]
                 if self.env_path is not None:
                     p = os.path.join(self.env_path, "{0}.json".format(msg["eid"]))
                     os.remove(p)
                 broadcast_envs(self)
+
         elif cmd == "save_layouts":
             if "data" in msg:
                 self.app.layouts = msg.get("data")
                 self.app.save_layouts()
                 self.broadcast_layouts()
+
         elif cmd == "forward_to_vis":
             packet = msg.get("data")
             environment = self.state[packet["eid"]]
             if packet.get("pane_data") is not False:
                 packet["pane_data"] = environment["jsons"][packet["target"]]
             send_to_sources(self, msg.get("data"))
+
         elif cmd == "layout_item_update":
             eid = msg.get("eid")
             win = msg.get("win")
             self.state[eid]["reload"][win] = msg.get("data")
+
         elif cmd == "pop_embeddings_pane":
             packet = msg.get("data")
             eid = packet["eid"]
@@ -292,28 +155,15 @@ class SocketHandler(BaseWebSocketHandler):
             p["contentID"] = get_rand_id()
             broadcast(self, p, eid)
 
-    def on_close(self):
-        if self in list(self.subs.values()):
-            self.subs.pop(self.sid, None)
 
+class AnySocketWrapper(AnySocketHandlerOrWrapper):
+    def __init__(self, *args, **kwargs):
+        self.polling = True
+        super().__init__(*args, **kwargs)
 
-# TODO condense some of the functionality between this class and the
-# original SocketHandler class
-class SocketWrapper:
-    """
-    Wraps all of the socket actions in regular request handling, thus
-    allowing all of the same information to be sent via a polling interface
-    """
+    def initialize(self, app):
+        super().initialize(app)
 
-    def __init__(self, app):
-        self.port = app.port
-        self.env_path = app.env_path
-        self.app = app
-        self.state = app.state
-        self.subs = app.subs
-        self.sources = app.sources
-        self.readonly = app.readonly
-        self.login_enabled = app.login_enabled
         self.messages = []
         self.last_read_time = time.time()
         self.open()
@@ -327,7 +177,6 @@ class SocketWrapper:
             self.app.socket_wrap_monitor.start()
 
     def socket_wrap_monitor_thread(self):
-        # TODO mark wrapped subs and sources separately
         if len(self.subs) > 0 or len(self.sources) > 0:
             for sub in list(self.subs.values()):
                 if (
@@ -344,83 +193,8 @@ class SocketWrapper:
         else:
             self.app.socket_wrap_monitor.stop()
 
-    def broadcast_layouts(self, target_subs=None):
-        if target_subs is None:
-            target_subs = self.subs.values()
-        for sub in target_subs:
-            sub.write_message(
-                json.dumps({"command": "layout_update", "data": self.app.layouts})
-            )
-
-    def open(self):
-        self.sid = get_rand_id()
-        if self not in list(self.subs.values()):
-            self.eid = "main"
-            self.subs[self.sid] = self
-        logging.info("Mocking new socket: {}".format(self.sid))
-
-        self.write_message(
-            json.dumps(
-                {"command": "register", "data": self.sid, "readonly": self.readonly}
-            )
-        )
-        self.broadcast_layouts([self])
-        broadcast_envs(self, [self])
-
-    def on_message(self, message):
-        logging.info("from web client: {}".format(message))
-        msg = tornado.escape.json_decode(tornado.escape.to_basestring(message))
-
-        cmd = msg.get("cmd")
-
-        if self.readonly:
-            return
-
-        if cmd == "close":
-            if "data" in msg and "eid" in msg:
-                logging.info("closing window {}".format(msg["data"]))
-                p_data = self.state[msg["eid"]]["jsons"].pop(msg["data"], None)
-                event = {
-                    "event_type": "close",
-                    "target": msg["data"],
-                    "eid": msg["eid"],
-                    "pane_data": p_data,
-                }
-                send_to_sources(self, event)
-        elif cmd == "save":
-            # save localStorage window metadata
-            if "data" in msg and "eid" in msg:
-                msg["eid"] = escape_eid(msg["eid"])
-                self.state[msg["eid"]] = copy.deepcopy(self.state[msg["prev_eid"]])
-                self.state[msg["eid"]]["reload"] = msg["data"]
-                self.eid = msg["eid"]
-                serialize_env(self.state, [self.eid], env_path=self.env_path)
-        elif cmd == "delete_env":
-            if "eid" in msg:
-                logging.info("closing environment {}".format(msg["eid"]))
-                del self.state[msg["eid"]]
-                if self.env_path is not None:
-                    p = os.path.join(self.env_path, "{0}.json".format(msg["eid"]))
-                    os.remove(p)
-                broadcast_envs(self)
-        elif cmd == "save_layouts":
-            if "data" in msg:
-                self.app.layouts = msg.get("data")
-                self.app.save_layouts()
-                self.broadcast_layouts()
-        elif cmd == "forward_to_vis":
-            packet = msg.get("data")
-            environment = self.state[packet["eid"]]
-            packet["pane_data"] = environment["jsons"][packet["target"]]
-            send_to_sources(self, msg.get("data"))
-        elif cmd == "layout_item_update":
-            eid = msg.get("eid")
-            win = msg.get("win")
-            self.state[eid]["reload"][win] = msg.get("data")
-
     def close(self):
-        if self in list(self.subs.values()):
-            self.subs.pop(self.sid, None)
+        self.on_close()
 
     def write_message(self, msg):
         self.messages.append(msg)
@@ -438,94 +212,163 @@ class SocketWrapper:
         return to_send
 
 
-class SocketWrap(BaseHandler):
-    def initialize(self, app):
-        self.state = app.state
-        self.subs = app.subs
-        self.sources = app.sources
-        self.port = app.port
-        self.env_path = app.env_path
-        self.login_enabled = app.login_enabled
-        self.app = app
+class VisSocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
-    @check_auth
-    def post(self):
-        """Either write a message to the socket, or query what's there"""
-        # TODO formalize failure reasons
-        args = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
+    def open(self):
+        logging.info(
+            f'{"Mocking" if self.polling else "Opened"} visdom source socket from ip: {self.request.remote_ip}'
         )
-        type = args.get("message_type")
-        sid = args.get("sid")
-        socket_wrap = self.subs.get(sid)
-        # ensure a wrapper still exists for this connection
-        if socket_wrap is None:
-            self.write(json.dumps({"success": False, "reason": "closed"}))
+        if self.login_enabled and not self.current_user:
+            self.close()
+            return
+        super().open("sources")
+        self.write_message(json.dumps({"command": "alive", "data": "vis_alive"}))
+
+    def on_close(self):
+        if self in list(self.sources.values()):
+            self.sources.pop(self.sid, None)
+
+    def on_message(self, message):
+        msg = tornado.escape.json_decode(tornado.escape.to_basestring(message))
+        cmd = msg.get("cmd")
+
+        if cmd == "echo":
+            logging.info(f"from visdom client: {message}")
+            for sub in self.sources.values():
+                sub.write_message(json.dumps(msg))
             return
 
-        # handle the requests
-        if type == "query":
-            messages = socket_wrap.get_messages()
-            self.write(json.dumps({"success": True, "messages": messages}))
-        elif type == "send":
-            msg = args.get("message")
-            if msg is None:
-                self.write(json.dumps({"success": False, "reason": "no msg"}))
-            else:
-                socket_wrap.on_message(msg)
-                self.write(json.dumps({"success": True}))
-        else:
-            self.write(json.dumps({"success": False, "reason": "invalid"}))
-
-    @check_auth
-    def get(self):
-        """Create a new socket wrapper for this requester, return the id"""
-        new_sub = SocketWrapper(self.app)
-        self.write(json.dumps({"success": True, "sid": new_sub.sid}))
+        super().on_message(message)
 
 
-# TODO refactor socket wrappers to one class
-class VisSocketWrap(BaseHandler):
-    def initialize(self, app):
-        self.state = app.state
-        self.subs = app.subs
-        self.sources = app.sources
-        self.port = app.port
-        self.env_path = app.env_path
-        self.login_enabled = app.login_enabled
-        self.app = app
+class VisSocketHandler(VisSocketHandlerOrWrapper):
+    pass
 
-    @check_auth
-    def post(self):
-        """Either write a message to the socket, or query what's there"""
-        # TODO formalize failure reasons
-        args = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
+
+class VisSocketWrapper(VisSocketHandlerOrWrapper, AnySocketWrapper):
+    # this ignores tornados initialization
+    def __init__(self):
+        self.polling = True
+        pass
+
+
+class SocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def open(self):
+        logging.info(
+            f'{"Mocking" if self.polling else "Opened"} visdom sub socket from ip: {self.request.remote_ip}'
         )
-        type = args.get("message_type")
-        sid = args.get("sid")
 
-        if sid is None:
-            new_sub = VisSocketWrapper(self.app)
+        if self.login_enabled and not self.current_user:
+            print("AUTH Failed in SocketHandler")
+            self.close()
+            return
+
+        super().open("subs")
+
+        self.write_message(
+            json.dumps(
+                {"command": "register", "data": self.sid, "readonly": self.readonly}
+            )
+        )
+        self.broadcast_layouts([self])
+        broadcast_envs(self, [self])
+
+    def broadcast_layouts(self, target_subs=None):
+        if target_subs is None:
+            target_subs = self.subs.values()
+        for sub in target_subs:
+            sub.write_message(
+                json.dumps({"command": "layout_update", "data": self.app.layouts})
+            )
+
+    def initialize(self, app):
+        super().initialize(app)
+        self.broadcast_layouts()
+
+    def on_close(self):
+        if self in list(self.subs.values()):
+            self.subs.pop(self.sid, None)
+
+
+class SocketHandler(SocketHandlerOrWrapper):
+    pass
+
+
+class SocketWrapper(SocketHandlerOrWrapper, AnySocketWrapper):
+    # this ignores tornados initialization
+    def __init__(self):
+        self.polling = True
+        pass
+
+
+def WrapSocketWrapper(BaseWrapper):
+    class WrappedSocketWrap(BaseHandler):
+        def initialize(self, app):
+            self.state = app.state
+            self.subs = app.subs
+            self.sources = app.sources
+            self.port = app.port
+            self.env_path = app.env_path
+            self.login_enabled = app.login_enabled
+            self.app = app
+
+        def post(self):
+            """Either write a message to the socket, or query what's there"""
+            # TODO formalize failure reasons
+            args = tornado.escape.json_decode(
+                tornado.escape.to_basestring(self.request.body)
+            )
+            msg_type = args.get("message_type")
+            sid = args.get("sid")
+
+            if BaseWrapper == VisSocketWrapper and sid is None:
+                new_sub = VisSocketWrapper()
+                new_sub.initialize(self.app)
+                self.write(json.dumps({"success": True, "sid": new_sub.sid}))
+                return
+
+            socket_wrap = (
+                self.subs if BaseWrapper == SocketWrapper else self.sources
+            ).get(sid)
+
+            # ensure a wrapper still exists for this connection
+            if socket_wrap is None:
+                self.write(json.dumps({"success": False, "reason": "closed"}))
+                return
+
+            # handle the requests
+            if msg_type == "query":
+                messages = socket_wrap.get_messages()
+                self.write(json.dumps({"success": True, "messages": messages}))
+            elif msg_type == "send":
+                msg = args.get("message")
+                if msg is None:
+                    self.write(json.dumps({"success": False, "reason": "no msg"}))
+                else:
+                    socket_wrap.on_message(msg)
+                    self.write(json.dumps({"success": True}))
+            else:
+                self.write(json.dumps({"success": False, "reason": "invalid"}))
+
+    if BaseWrapper == SocketWrapper:
+
+        @check_auth
+        def _get(self):
+            """Create a new socket wrapper for this requester, return the id"""
+            new_sub = SocketWrapper()
+            new_sub.request = self.request
+            new_sub.initialize(self.app)
             self.write(json.dumps({"success": True, "sid": new_sub.sid}))
-            return
 
-        socket_wrap = self.sources.get(sid)
-        # ensure a wrapper still exists for this connection
-        if socket_wrap is None:
-            self.write(json.dumps({"success": False, "reason": "closed"}))
-            return
+        WrappedSocketWrap.get = _get
 
-        # handle the requests
-        if type == "query":
-            messages = socket_wrap.get_messages()
-            self.write(json.dumps({"success": True, "messages": messages}))
-        elif type == "send":
-            msg = args.get("message")
-            if msg is None:
-                self.write(json.dumps({"success": False, "reason": "no msg"}))
-            else:
-                socket_wrap.on_message(msg)
-                self.write(json.dumps({"success": True}))
-        else:
-            self.write(json.dumps({"success": False, "reason": "invalid"}))
+    return WrappedSocketWrap
+
+
+SocketWrap = WrapSocketWrapper(SocketWrapper)
+VisSocketWrap = WrapSocketWrapper(VisSocketWrapper)
