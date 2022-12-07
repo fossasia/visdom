@@ -94,10 +94,10 @@ describe('Test View Modal', () => {
     var env = 'view_modal_' + Cypress._.random(0, 1e6);
 
     // initialize any env
-    cy.run('text_basic', { env: env, open: false });
-    cy.run('image_basic', { env: env, open: false });
-    cy.run('plot_line_basic', { env: env, open: false });
-    cy.run('plot_bar_basic', { env: env });
+    cy.run('text_basic', { env: env }).wait(500);
+    cy.run('image_basic', { env: env, open: false }).wait(500);
+    cy.run('plot_line_basic', { env: env, open: false }).wait(500);
+    cy.run('plot_bar_basic', { env: env, open: false }).wait(500);
 
     // save the view at this point
     cy.get(viewbutton).click();
