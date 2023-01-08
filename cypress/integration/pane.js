@@ -68,13 +68,13 @@ basic_examples.forEach( (setting) => {
           [ height4, width4 ] = [ height, width];
       } else if (basic_example == "image_basic") {
           [ height, width ] = [ 545, 256 ];
-          [ height4, width4 ] = [ 624, width]; // this is an obvious bug in the ui
+          [ height4, width4 ] = [ 545, width];
       } else if (basic_example == "misc_plot_matplot") {
           [ height, width ] = [ 500, 622 ];
-          [ height4, width4 ] = [ 592, width];
+          [ height4, width4 ] = [ 500, width];
       } else if (basic_example == "plot_special_graph") {
           [ height, width ] = [ 515, 500 ];
-          [ height4, width4 ] = [ 610, width];
+          [ height4, width4 ] = [ 515, width];
       } else if (basic_example == "misc_video_tensor") {
           [ height, width ] = [ 290, 243 ];
           [ height4, width4 ] = [ 290, width];
