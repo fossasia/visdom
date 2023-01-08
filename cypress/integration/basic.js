@@ -25,7 +25,7 @@ describe('Test Setup', () => {
   it('env selection works', () => {
     cy.visit('/')
     cy.get('.rc-tree-select [title="main"]').should('exist')
-    cy.get('.rc-tree-select').contains('main').trigger('mouseover')
+    cy.get('.rc-tree-select').contains('main').trigger('mouseover').wait(100);
     cy.get('.rc-tree-select .rc-tree-select-selection__choice__remove').click({force: true})
     cy.get('.rc-tree-select [title="main"]').should('not.exist')
     cy.get('.rc-tree-select').click()
