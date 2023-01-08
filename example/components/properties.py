@@ -30,7 +30,7 @@ def properties_callbacks(viz, env, args):
             else:
                 new_value = value
             properties[prop_id]['value'] = new_value
-            viz.properties(properties, win=properties_window)
+            viz.properties(properties, win=properties_window, env=env)
             viz.text("Updated: {} => {}".format(properties[event['propertyId']]['name'], str(event['value'])),
                      win=callback_text_window, append=True, env=env)
 
