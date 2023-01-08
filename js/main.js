@@ -813,12 +813,13 @@ function App() {
    *
    * @param data Data to be sent to backend.
    */
-  const sendPaneMessage = (data) => {
-    if (focusedPaneID === null || sessionInfo.readonly) {
+  const sendPaneMessage = (data, target = null) => {
+    if (!target) target = focusedPaneID;
+    if (target === null || sessionInfo.readonly) {
       return;
     }
     let finalData = {
-      target: focusedPaneID,
+      target: target,
       eid: selection.envID,
     };
     $.extend(finalData, data);
