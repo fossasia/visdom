@@ -107,6 +107,13 @@ function App() {
   const _timeoutID = useRef(null);
   const _pendingPanes = useRef([]);
 
+  // flush pre-render callbacks
+  const callbacks = useRef([]);
+  callbacks.current.forEach((cb) => {
+    if (cb) cb();
+  });
+  callbacks.current = [];
+
   // --------------------- //
   // grid helper functions //
   // --------------------- //
@@ -280,7 +287,9 @@ function App() {
       // check if is mounted. error can appear on unmounted component
       if (mounted.current) {
         setConnected(false);
-        socket.current = null;
+        callbacks.current.push(() => {
+          socket.current = null;
+        });
       }
     };
 
@@ -432,10 +441,9 @@ function App() {
         ...prev,
         layout: newLayout,
         panes: newPanes,
-        // TODO: before function based react, this has called a relayout (right after setState)
-        // () => relayout();
       }));
       setFocusedPaneID(focusedPaneID === paneID ? null : focusedPaneID);
+      callbacks.current.push(relayout);
     }
   };
 
@@ -561,8 +569,10 @@ function App() {
   };
 
   const focusPane = (paneID, callback) => {
-    if (callback) callback();
-    if (focusedPaneID != paneID) setFocusedPaneID(paneID);
+    if (focusedPaneID != paneID) {
+      setFocusedPaneID(paneID);
+      if (callback) callbacks.current.push(callback);
+    } else if (callback) callback();
   };
 
   const blurPane = () => {
