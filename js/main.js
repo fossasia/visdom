@@ -393,6 +393,9 @@ function App() {
     }
   };
 
+  // we need to update the socket-callback so that we have an up-to date state
+  if (_socket.current) _socket.current.onmessage = _handleMessage;
+
   // close server connection
   const disconnect = () => {
     _socket.current.close();
