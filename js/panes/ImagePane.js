@@ -17,7 +17,7 @@ const DEFAULT_WIDTH = 300;
 
 function ImagePane(props) {
   const { title, type, selected, width, height, appApi } = props;
-  var { content } = props;
+  var { isFocused, content } = props;
 
   // state varibles
   // --------------
@@ -179,7 +179,7 @@ function ImagePane(props) {
     return function cleanup() {
       EventSystem.unsubscribe('global.event', onEvent);
     };
-  }, [mouseLocation]);
+  }, [mouseLocation, isFocused]);
 
   // image size/pos computation
   // --------------------------
