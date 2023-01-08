@@ -696,9 +696,6 @@ function App() {
       ...prev,
       panes: newPanes,
     }));
-    // TODO this is very non-conventional react, someday it shall be fixed but
-    // for now it's important to fix relayout grossness
-    storeData.panes = newPanes;
     updateLayout(newLayout);
   };
 
