@@ -744,18 +744,18 @@ function App() {
     });
   };
 
-  const updateToLayout = (layoutID) => {
+  const updateToLayout = (newLayoutID) => {
     setSelection((prev) => ({
       ...prev,
-      layoutID: layoutID,
+      layoutID: newLayoutID,
     }));
     // TODO this is very non-conventional react, someday it shall be fixed but
     // for now it's important to fix relayout grossness
-    selection.layoutID = layoutID;
+    selection.layoutID = newLayoutID;
     if (selection.layoutID !== DEFAULT_LAYOUT) {
-      relayout();
-      relayout();
-      relayout();
+      callbacks.current.push('relayout');
+      callbacks.current.push('relayout');
+      callbacks.current.push('relayout');
     }
   };
 
@@ -1076,17 +1076,11 @@ function App() {
       filter={filterString}
       onFilterChange={(ev) => {
         setFilterString(ev.target.value);
-        // TODO remove this once relayout is moved to a post-state
-        // update kind of thing
-        relayout();
-        relayout();
+        callbacks.current.push('relayout');
       }}
       onFilterClear={() => {
         setFilterString('');
-        // TODO remove this once relayout is moved to a post-state
-        // update kind of thing
-        relayout();
-        relayout();
+        callbacks.current.push('relayout');
       }}
     />
   );
