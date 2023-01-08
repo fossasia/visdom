@@ -21,11 +21,14 @@ function PropertiesPane(props) {
   // send updates in PropertyItem directly to all observers / sources
   const updateValue = (propId, value) => {
     onFocus(id, () => {
-      appApi.sendPaneMessage({
-        event_type: 'PropertyUpdate',
-        propertyId: propId,
-        value: value,
-      });
+      appApi.sendPaneMessage(
+        {
+          event_type: 'PropertyUpdate',
+          propertyId: propId,
+          value: value,
+        },
+        id
+      );
     });
   };
 
