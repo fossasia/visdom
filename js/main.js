@@ -107,13 +107,6 @@ function App() {
   const _timeoutID = useRef(null);
   const _pendingPanes = useRef([]);
 
-  // flush pre-render callbacks
-  const callbacks = useRef([]);
-  callbacks.current.forEach((cb) => {
-    if (cb) cb();
-  });
-  callbacks.current = [];
-
   // --------------------- //
   // grid helper functions //
   // --------------------- //
@@ -446,7 +439,7 @@ function App() {
         panes: newPanes,
       }));
       setFocusedPaneID(focusedPaneID === paneID ? null : focusedPaneID);
-      callbacks.current.push(relayout);
+      callbacks.current.push('relayout');
     }
   };
 
@@ -903,6 +896,14 @@ function App() {
   // -------
   // effects
   // -------
+
+  // flush pre-render callbacks
+  const callbacks = useRef([]);
+  callbacks.current.forEach((cb) => {
+    if (cb === 'relayout') relayout();
+    else if (cb) cb();
+  });
+  callbacks.current = [];
 
   // ask server for envs after registration succeeded
   useEffect(() => {
