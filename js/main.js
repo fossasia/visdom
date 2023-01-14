@@ -101,7 +101,6 @@ function App() {
   );
 
   // non-triggering state variables
-  const consistent_pane_copy = useRef({});
   const _bin = useRef(null);
   const _socket = useRef(null);
   const _timeoutID = useRef(null);
@@ -129,7 +128,6 @@ function App() {
   // ---------------- //
   // helper functions //
   // ---------------- //
-  const deepcopy = (obj) => JSON.parse(JSON.stringify(obj));
 
   // append env to pane id for localStorage key
   const keyLS = (key) => selection.envID + '_' + key;
@@ -198,8 +196,6 @@ function App() {
   const processPane = (newPane, newPanes, newLayout) => {
     let exists = newPane.id in newPanes;
     newPanes[newPane.id] = newPane;
-
-    consistent_pane_copy.current[newPane.id] = deepcopy(newPane);
 
     if (!exists) {
       let stored = JSON.parse(localStorage.getItem(keyLS(newPane.id)));
@@ -294,34 +290,17 @@ function App() {
     _socket.current = socket;
   };
 
-  // Apply patch and check hash. Re-fetch if final window doesn't match hash
-  const _checkWindow = (cmd, numTries) => {
-    if (cmd.win in consistent_pane_copy.current) {
-      let windowContent = consistent_pane_copy.current[cmd.win];
-      let finalWindow = jsonpatch.applyPatch(
-        windowContent,
+  // Apply patch or queries window if window to be patched does not exist
+  const updateWindow = (cmd) => {
+    if (cmd.win in storeData.panes) {
+      let modifiedWindow = storeData.panes[cmd.win];
+      let modifiedFinalWindow = jsonpatch.applyPatch(
+        modifiedWindow,
         cmd.content
       ).newDocument;
-      let hashed = md5(stringify(finalWindow));
-      if (hashed === cmd.finalHash) {
-        consistent_pane_copy.current[cmd.win] = finalWindow;
-
-        let modifiedWindow = storeData.panes[cmd.win];
-        let modifiedFinalWindow = jsonpatch.applyPatch(
-          modifiedWindow,
-          cmd.content
-        ).newDocument;
-        addPaneBatched(modifiedFinalWindow);
-      } else {
-        postForEnv(selection.envIDs);
-      }
+      addPaneBatched(modifiedFinalWindow);
     } else {
-      numTries--;
-      if (numTries) {
-        setTimeout(_checkWindow, 100, cmd, numTries);
-      } else {
-        postForEnv(selection.envIDs);
-      }
+      postForEnv(selection.envIDs);
     }
   };
 
@@ -351,9 +330,7 @@ function App() {
         if (selection.envIDs.length > 1 && cmd.has_compare !== true) {
           postForEnv(selection.envIDs);
         } else {
-          let numTries = 3;
-          // Check to see if the window exists before trying to update
-          setTimeout(_checkWindow, 0, cmd, numTries);
+          updateWindow(cmd);
         }
         break;
       case 'reload':
@@ -418,9 +395,7 @@ function App() {
       return;
     }
     let newPanes = Object.assign({}, storeData.panes);
-    let newPanesCopy = Object.assign({}, consistent_pane_copy.current);
     delete newPanes[paneID];
-    delete newPanesCopy[paneID];
     if (!keepPosition) {
       localStorage.removeItem(keyLS(paneID));
 
@@ -437,7 +412,6 @@ function App() {
         (paneLayout) => paneLayout.i !== paneID
       );
 
-      consistent_pane_copy.current = newPanesCopy;
       setStoreData((prev) => ({
         ...prev,
         layout: newLayout,
@@ -456,7 +430,6 @@ function App() {
       closePane(paneID, false, false);
     });
     rebin();
-    consistent_pane_copy.current = {};
     setStoreData((prev) => ({
       ...prev,
       layout: [],
@@ -587,7 +560,7 @@ function App() {
       layoutItem.w == oldLayoutItem.w &&
       layoutItem.h == oldLayoutItem.h
     ) {
-      let pane = consistent_pane_copy.current[layoutItem.i];
+      let pane = storeData.panes[layoutItem.i];
 
       // resets to default layout (same as during pane creation)
       layoutItem.w = pane.width ? p2w(pane.width) : PANE_SIZE[pane.type][0];
