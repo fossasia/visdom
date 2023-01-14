@@ -52,7 +52,6 @@
     "https-browserify": "^1.0.0",
     "jquery": "^3.6.3",
     "json-stable-stringify": "^1.0.1",
-    "md5": "^2.3.0",
     "ml-savitzky-golay-generalized": "^4.0.1",
     "rc-tree-select": "^1.12.13",
     "react": "^17.0.2",
