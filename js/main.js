@@ -254,11 +254,29 @@ function App() {
     if (_socket.current) {
       return;
     }
+
+    const _onConnect = () => setConnected(true);
+    const _onDisconnect = () => {
+      // check if is mounted. error can appear on unmounted component
+      if (mounted.current) {
+        callbacks.current.push(() => {
+          _socket.current = null;
+        });
+        setConnected(false);
+      }
+    };
+
     // eslint-disable-next-line no-undef
     if (USE_POLLING) {
-      _socket.current = new Poller(this);
+      _socket.current = new Poller(
+        correctPathname,
+        _handleMessage,
+        _onConnect,
+        _onDisconnect
+      );
       return;
     }
+
     var url = window.location;
     var ws_protocol = null;
     if (url.protocol == 'https:') {
@@ -271,21 +289,8 @@ function App() {
     );
 
     socket.onmessage = _handleMessage;
-
-    socket.onopen = () => {
-      setConnected(true);
-    };
-
-    socket.onerror = socket.onclose = () => {
-      // check if is mounted. error can appear on unmounted component
-      if (mounted.current) {
-        setConnected(false);
-        callbacks.current.push(() => {
-          socket.current = null;
-        });
-      }
-    };
-
+    socket.onopen = _onConnect;
+    socket.onerror = socket.onclose = _onDisconnect;
     _socket.current = socket;
   };
 
