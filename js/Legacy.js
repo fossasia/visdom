@@ -20,12 +20,13 @@ class Poller {
    * Wrapper around what would regularly be socket communications, but handled
    * through a POST-based polling loop
    */
-  constructor(app) {
-    this.app = app;
+  constructor(correctPathname, _handleMessage, onConnect, onDisconnect) {
+    this.onConnect = onConnect;
+    this.onDisconnect = onDisconnect;
     var url = window.location;
     this.target =
-      url.protocol + '//' + url.host + app.correctPathname() + 'socket_wrap';
-    this.handleMessage = app._handleMessage;
+      url.protocol + '//' + url.host + correctPathname() + 'socket_wrap';
+    this.onmessage = _handleMessage;
     fetch(this.target)
       .then((res) => {
         return res.json();
@@ -38,15 +39,11 @@ class Poller {
   finishSetup = (sid) => {
     this.sid = sid;
     this.poller_id = window.setInterval(() => this.poll(), POLLING_INTERVAL);
-    this.app.setState({
-      connected: true,
-    });
+    this.onConnect(true);
   };
 
   close = () => {
-    this.app.setState({ connected: false }, () => {
-      this.app._socket = null;
-    });
+    this.onDisconnect();
     window.clearInterval(this.poller_id);
   };
 
@@ -82,7 +79,7 @@ class Poller {
               // Must re-encode message as handle message expects json
               // in this particular format from sockets
               // TODO Could refactor message parsing out elsewhere.
-              this.handleMessage({ data: msg });
+              this.onmessage({ data: msg });
             });
           }
         },
