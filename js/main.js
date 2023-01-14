@@ -38,7 +38,6 @@ import WidthProvider from './Width';
 
 const ReactGridLayout = require('react-grid-layout');
 const jsonpatch = require('fast-json-patch');
-const md5 = require('md5');
 const stringify = require('json-stable-stringify');
 const GridLayout = WidthProvider(ReactGridLayout);
 const sortLayout = ReactGridLayout.utils.sortLayoutItemsByRowCol;
