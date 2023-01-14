@@ -184,7 +184,8 @@ def window(args):
         "inflate": opts.get("inflate", True),
         "width": opts.get("width"),
         "height": opts.get("height"),
-        "contentID": get_rand_id(),  # to detected updated windows
+        "envID": args.get("eid"),
+        "contentID": get_rand_id(),   # to detected updated windows
     }
 
     if ptype == "image_history":
