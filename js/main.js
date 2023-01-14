@@ -180,11 +180,11 @@ function App() {
     let newPanes = Object.assign({}, storeData.panes);
     let newLayout = storeData.layout.slice();
 
-    _pendingPanes.current.forEach((pane) => {
+    let pendingPanes = _pendingPanes.current;
+    _pendingPanes.current = [];
+    pendingPanes.forEach((pane) => {
       processPane(pane, newPanes, newLayout);
     });
-
-    _pendingPanes.current = [];
     _timeoutID.current = null;
 
     setStoreData((prev) => ({
