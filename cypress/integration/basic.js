@@ -10,7 +10,11 @@ describe('Test Setup', () => {
   });
 
   it('manual server reconnect', () => {
-    cy.visit('/')
+    cy.visit('/').wait(1000)
+    cy.contains('online').click()
+    cy.contains('offline').click()
+    cy.contains('online').click()
+    cy.contains('offline').click()
     cy.contains('online').click()
     cy.contains('offline').click()
     cy.contains('online')
