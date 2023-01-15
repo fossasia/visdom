@@ -26,6 +26,8 @@
 //
 //
 
+import '@4tw/cypress-drag-drop';
+
 Cypress.Commands.add('run', (name, opts) => {
   var saveto = (opts && "env" in opts) ? opts["env"] : name + "_" + Cypress._.random(0, 1e6);
   var argscli = (opts && "args" in opts) ? (' -arg '+opts["args"].join(' ')) : '';
