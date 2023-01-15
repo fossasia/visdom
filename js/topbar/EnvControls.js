@@ -14,7 +14,6 @@ function EnvControls(props) {
   const {
     connected,
     envList,
-    envID,
     envIDs,
     readonly,
     envSelectorStyle,
@@ -101,7 +100,7 @@ function EnvControls(props) {
           title={confirmClear ? 'Are you sure?' : 'Clear Current Environment'}
           data-placement="bottom"
           className={confirmClear ? 'btn btn-warning' : 'btn btn-default'}
-          disabled={!(connected && envID && !readonly)}
+          disabled={!(connected && envIDs.length > 0 && !readonly)}
           onClick={() => {
             if (confirmClear) {
               onEnvClear();
@@ -117,7 +116,7 @@ function EnvControls(props) {
           title="Manage Environments"
           data-placement="bottom"
           className="btn btn-default"
-          disabled={!(connected && envID && !readonly)}
+          disabled={!(connected && envIDs.length > 0 && !readonly)}
           onClick={onEnvManageButton}
         >
           <span className="glyphicon glyphicon-folder-open" />
