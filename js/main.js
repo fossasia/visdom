@@ -42,20 +42,16 @@ const GridLayout = WidthProvider(ReactGridLayout);
 const sortLayout = ReactGridLayout.utils.sortLayoutItemsByRowCol;
 const getLayoutItem = ReactGridLayout.utils.getLayoutItem;
 
-var use_env = null;
 var use_envs = null;
 if (ACTIVE_ENV !== '') {
   if (ACTIVE_ENV.indexOf('+') > -1) {
     // Compare case
-    use_env = null;
     use_envs = ACTIVE_ENV.split('+');
   } else {
     // not compare case
-    use_env = ACTIVE_ENV;
     use_envs = [ACTIVE_ENV];
   }
 } else {
-  use_env = localStorage.getItem('envID') || 'main';
   use_envs = JSON.parse(localStorage.getItem('envIDs')) || ['main'];
 }
 
@@ -89,7 +85,6 @@ function App() {
   const [showViewModal, setShowViewModal] = useState(false);
   const [focusedPaneID, setFocusedPaneID] = useState(null);
   const [selection, setSelection] = useState({
-    envID: use_env,
     envIDs: use_envs,
     layoutID: DEFAULT_LAYOUT,
     // Bad form... make a copy of the global var we generated in python.
@@ -129,7 +124,7 @@ function App() {
   // ---------------- //
 
   // append env to pane id for localStorage key
-  const keyLS = (key) => selection.envID + '_' + key;
+  const keyLS = (key) => selection.envIDs[0] + '_' + key;
 
   // Ensure the regex filter is valid
   const getValidFilter = (filter) => {
@@ -414,7 +409,7 @@ function App() {
       sendSocketMessage({
         cmd: 'close',
         data: paneID,
-        eid: selection.envID,
+        eid: selection.envIDs[0],
       });
     }
 
@@ -460,13 +455,8 @@ function App() {
         }
       }
     }
-    var envID = null;
-    if (selectedNodes.length == 1) {
-      envID = selectedNodes[0];
-    }
     setSelection((prev) => ({
       ...prev,
-      envID: envID,
       envIDs: selectedNodes,
     }));
     setStoreData((prev) => ({
@@ -475,7 +465,6 @@ function App() {
       layout: isSameEnv ? storeData.layout : [],
     }));
     setFocusedPaneID(isSameEnv ? focusedPaneID : null);
-    localStorage.setItem('envID', envID);
     localStorage.setItem('envIDs', JSON.stringify(selectedNodes));
     postForEnv(selectedNodes);
   };
@@ -523,7 +512,7 @@ function App() {
     sendSocketMessage({
       cmd: 'save',
       data: payload,
-      prev_eid: selection.envID,
+      prev_eid: selection.envIDs[0],
       eid: env,
     });
 
@@ -549,7 +538,6 @@ function App() {
     }));
     setSelection((prev) => ({
       ...prev,
-      envID: env,
       envIDs: [env],
     }));
   };
@@ -638,8 +626,8 @@ function App() {
   };
 
   const getCurrLayoutList = () => {
-    if (storeMeta.layoutLists.has(selection.envID)) {
-      return storeMeta.layoutLists.get(selection.envID);
+    if (storeMeta.layoutLists.has(selection.envIDs[0])) {
+      return storeMeta.layoutLists.get(selection.envIDs[0]);
     } else {
       return new Map();
     }
@@ -725,7 +713,7 @@ function App() {
   }) => {
     sendSocketMessage({
       cmd: 'layout_item_update',
-      eid: selection.envID,
+      eid: selection.envIDs[0],
       win: i,
       data: { i, h, w, x, y, moved, static: staticBool },
     });
@@ -800,7 +788,7 @@ function App() {
     }
     let finalData = {
       target: target,
-      eid: selection.envID,
+      eid: selection.envIDs[0],
     };
     $.extend(finalData, data);
     sendSocketMessage({
@@ -815,7 +803,7 @@ function App() {
     }
     let finalData = {
       target: focusedPaneID,
-      eid: selection.envID,
+      eid: selection.envIDs[0],
     };
     $.extend(finalData, data);
     sendSocketMessage({
@@ -853,7 +841,7 @@ function App() {
       layoutMap.set(sorted[idx].i, [idx, currLayout.h, currLayout.w]);
     }
     let layoutLists = storeMeta.layoutLists;
-    layoutLists.get(selection.envID).set(layoutName, layoutMap);
+    layoutLists.get(selection.envIDs[0]).set(layoutName, layoutMap);
     exportLayoutsToServer(layoutLists);
     setStoreMeta((prev) => ({
       ...prev,
@@ -868,7 +856,7 @@ function App() {
   const onLayoutDelete = (layoutName) => {
     // Deletes the selected view, pushes to server
     let layoutLists = storeMeta.layoutLists;
-    layoutLists.get(selection.envID).delete(layoutName);
+    layoutLists.get(selection.envIDs[0]).delete(layoutName);
     exportLayoutsToServer(layoutLists);
     setStoreMeta((prev) => ({
       ...prev,
@@ -876,7 +864,7 @@ function App() {
     }));
     setSelection((prev) => ({
       ...prev,
-      layoutID: layoutLists.get(selection.envID).keys()[0],
+      layoutID: layoutLists.get(selection.envIDs[0]).keys()[0],
     }));
   };
 
@@ -909,7 +897,6 @@ function App() {
         setSelection((prev) => ({
           ...prev,
           envIDs: ['main'],
-          envID: 'main',
         }));
         postForEnv(['main']);
       }
@@ -1008,7 +995,7 @@ function App() {
   let modals = [
     <EnvModal
       key="EnvModal"
-      activeEnv={selection.envID}
+      activeEnv={selection.envIDs[0]}
       connected={connected}
       envList={storeMeta.envList}
       onEnvDelete={onEnvDelete}
@@ -1031,7 +1018,6 @@ function App() {
   let envControls = (
     <EnvControls
       connected={connected}
-      envID={selection.envID}
       envIDs={selection.envIDs}
       envList={storeMeta.envList}
       envSelectorStyle={{
@@ -1047,7 +1033,7 @@ function App() {
     <ViewControls
       activeLayout={selection.layoutID}
       connected={connected}
-      envID={selection.envID}
+      envIDs={selection.envIDs}
       layoutList={getCurrLayoutList()}
       onRepackButton={() => {
         relayout();
