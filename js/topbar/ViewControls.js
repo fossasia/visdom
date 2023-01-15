@@ -11,7 +11,7 @@ import React from 'react';
 function ViewControls(props) {
   const {
     connected,
-    envID,
+    envIDs,
     activeLayout,
     layoutList,
     readonly,
@@ -50,9 +50,9 @@ function ViewControls(props) {
             data-toggle="dropdown"
             aria-haspopup="true"
             aria-expanded="true"
-            disabled={!(connected && envID)}
+            disabled={!(connected && envIDs.length > 0)}
           >
-            {envID == null ? 'compare' : activeLayout}
+            {envIDs.length > 0 == null ? 'compare' : activeLayout}
             &nbsp;
             <span className="caret" />
           </button>
@@ -74,7 +74,7 @@ function ViewControls(props) {
           title="Manage Views"
           data-placement="bottom"
           className="btn btn-default"
-          disabled={!(connected && envID && !readonly)}
+          disabled={!(connected && envIDs.length > 0 && !readonly)}
           onClick={onViewManageButton}
         >
           <span className="glyphicon glyphicon-folder-open" />
