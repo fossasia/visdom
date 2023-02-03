@@ -101,8 +101,7 @@ def download_scripts(proxies=None, install_dir=None):
         print("Downloading scripts, this may take a little while")
 
     # download files one-by-one:
-    for (key, val) in ext_files.items():
-
+    for key, val in ext_files.items():
         # set subdirectory:
         if val.endswith(".js") or val.endswith(".js.map"):
             sub_dir = "js"
