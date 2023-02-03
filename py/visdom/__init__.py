@@ -2233,7 +2233,6 @@ class Visdom(object):
 
         # add arrow heads:
         if opts["arrowheads"]:
-
             # compute tip points:
             alpha = 0.33  # size of arrow head relative to vector length
             beta = 0.33  # width of the base of the arrow head
