@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: psf/black@22.10.0
+      - uses: psf/black@23.1.0
         with:
           src: "./py"
       - name: Check for Linting Errors
