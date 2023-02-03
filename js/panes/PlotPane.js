@@ -132,7 +132,7 @@ var PlotPane = (props) => {
           d.opacity = 1.0;
         });
 
-    Plotly.newPlot(contentID, data.concat(smooth_data), content.layout, {
+    Plotly.react(contentID, data.concat(smooth_data), content.layout, {
       showLink: true,
       linkText: 'Edit',
     });
