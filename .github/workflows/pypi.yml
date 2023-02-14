@@ -30,12 +30,11 @@ jobs:
       - name: Create Release
         if: ${{ steps.version.outputs.TAG_EXISTS == '0' }}
         id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.version.outputs.TAG_NAME }}
-          release_name: "Release ${{ steps.version.outputs.TAG_NAME }}"
+          name: "Visdom v${{ steps.version.outputs.TAG_NAME }}"
+          generate_release_notes: true
       - name: Set up Python
         if: ${{ steps.version.outputs.TAG_EXISTS == '0' }}
         uses: actions/setup-python@v4
