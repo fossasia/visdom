@@ -165,19 +165,21 @@ describe('Image Pane', () => {
       .should('have.attr', 'ry', 30);
   });
 
+  let click1 = [12, 34];
+  let click2 = [45, 67];
   it('image_callback', () => {
     cy.run('image_callback', { asyncrun: true });
     cy.get(img_selector)
       .parents(win_selector)
       .click() // to focus the pane
-      .find('img')
-      .click(12, 34)
-      .click(45, 67);
+      .find('div.content')
+      .click(click1[0], click1[1])
+      .click(click2[0], click2[1]);
     cy.get('.layout .react-grid-item .content-text')
       .first()
       .contains('Coords:')
-      .contains('x: 12, y: 35;') // bug: y is off by 1
-      .contains('x: 45, y: 68;'); // bug: y is off by 1
+      .contains(`x: ${click1[0]}, y: ${click1[1]};`)
+      .contains(`x: ${click2[0]}, y: ${click2[1]};`);
   });
 
   it('image_callback2', () => {
