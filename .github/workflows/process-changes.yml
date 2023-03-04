@@ -141,6 +141,9 @@ jobs:
     name: "Functional Test (Websocket)"
     runs-on: ubuntu-latest
     needs: install-and-build
+    strategy:
+      matrix:
+        python: ['3.8', '3.9', '3.10']
     steps:
       - name: "Checkout Repository"
         uses: actions/checkout@v3
