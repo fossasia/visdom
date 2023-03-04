@@ -61,6 +61,7 @@ setup(
     long_description_content_type="text/markdown",
     long_description=readme,
     license='Apache-2.0',
+    python_requires='>=3.8',
 
     # Package info
     packages=find_packages(where="py"),
