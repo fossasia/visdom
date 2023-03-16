@@ -330,10 +330,16 @@ class SocketWrapper:
         # TODO mark wrapped subs and sources separately
         if len(self.subs) > 0 or len(self.sources) > 0:
             for sub in list(self.subs.values()):
-                if time.time() - sub.last_read_time > MAX_SOCKET_WAIT:
+                if (
+                    hasattr(sub, "last_read_time")
+                    and time.time() - sub.last_read_time > MAX_SOCKET_WAIT
+                ):
                     sub.close()
             for sub in list(self.sources.values()):
-                if time.time() - sub.last_read_time > MAX_SOCKET_WAIT:
+                if (
+                    hasattr(sub, "last_read_time")
+                    and time.time() - sub.last_read_time > MAX_SOCKET_WAIT
+                ):
                     sub.close()
         else:
             self.app.socket_wrap_monitor.stop()
