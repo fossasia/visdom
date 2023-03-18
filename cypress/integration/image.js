@@ -276,6 +276,7 @@ describe('Image Pane', () => {
       .click() // to focus the pane
       .find('div.content')
       .click(click1[0], click1[1])
+      .wait(300)
       .click(click2[0], click2[1]);
     cy.get('.layout .react-grid-item .content-text')
       .first()
