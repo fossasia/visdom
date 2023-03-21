@@ -483,30 +483,6 @@ class ForkEnvHandler(BaseHandler):
         self.wrap_func(self, args)
 
 
-class HashHandler(BaseHandler):
-    def initialize(self, app):
-        self.app = app
-        self.state = app.state
-        self.login_enabled = app.login_enabled
-
-    @staticmethod
-    def wrap_func(handler, args):
-        eid = extract_eid(args)
-        handler_json = handler.state[eid]["jsons"]
-        if args["win"] in handler_json:
-            hashed = hash_md_window(handler_json[args["win"]])
-            handler.write(hashed)
-        else:
-            handler.write("false")
-
-    @check_auth
-    def post(self):
-        args = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
-        self.wrap_func(self, args)
-
-
 class EnvHandler(BaseHandler):
     def initialize(self, app):
         self.state = app.state
