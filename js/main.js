@@ -290,7 +290,10 @@ function App() {
 
   // Apply patch or queries window if window to be patched does not exist
   const updateWindow = (cmd) => {
-    if (cmd.win in storeData.panes) {
+    if (
+      cmd.win in storeData.panes &&
+      cmd.version == storeData.panes[cmd.win].version + 1
+    ) {
       let modifiedWindow = storeData.panes[cmd.win];
       let modifiedFinalWindow = jsonpatch.applyPatch(
         modifiedWindow,
