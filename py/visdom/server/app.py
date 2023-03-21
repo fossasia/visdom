@@ -11,8 +11,6 @@ Main application class that pulls handlers together and maintains
 all of the required state about the currently running server.
 """
 
-import copy
-import hashlib
 import logging
 import os
 import platform
@@ -39,7 +37,6 @@ from visdom.server.handlers.web_handlers import (
     ErrorHandler,
     ExistsHandler,
     ForkEnvHandler,
-    HashHandler,
     IndexHandler,
     PostHandler,
     SaveHandler,
@@ -112,7 +109,6 @@ class Application(tornado.web.Application):
             (r"%s/win_exists" % self.base_url, ExistsHandler, {"app": self}),
             (r"%s/win_data" % self.base_url, DataHandler, {"app": self}),
             (r"%s/delete_env" % self.base_url, DeleteEnvHandler, {"app": self}),
-            (r"%s/win_hash" % self.base_url, HashHandler, {"app": self}),
             (r"%s/env_state" % self.base_url, EnvStateHandler, {"app": self}),
             (r"%s/fork_env" % self.base_url, ForkEnvHandler, {"app": self}),
             (r"%s/user/(.*)" % self.base_url, UserSettingsHandler, {"app": self}),

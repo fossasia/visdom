@@ -308,7 +308,6 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 - [`vis.delete_env`](#visdelete_env) : delete an environment by env_id
 - [`vis.win_exists`](#viswin_exists) : check if a window already exists by id
 - [`vis.get_env_list`](#visget_env_list) : get a list of all of the environments on your server
-- [`vis.win_hash`](#viswin_hash): get md5 hash of window's contents
 - [`vis.get_window_data`](#visget_window_data): get current data for a window
 - [`vis.check_connection`](#vischeck_connection): check if the server is connected
 - [`vis.replay_log`](#visreplay_log): replay the actions from the provided log file
@@ -753,13 +752,6 @@ Optional arguments:
 #### vis.get_env_list
 
 This function returns a list of all of the environments on the server at the time of calling. It takes no arguments.
-
-#### vis.win_hash
-
-This function returns md5 hash of the contents of a window `win` if it exists on the server. Returns None otherwise.
-
-Optional arguments:
-- `env` : Environment to search for the window in. Default is `None`.
 
 
 #### vis.get_window_data
