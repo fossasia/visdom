@@ -103,6 +103,7 @@ function App() {
   const _socket = useRef(null);
   const _timeoutID = useRef(null);
   const _pendingPanes = useRef([]);
+  const _pendingPanesVersions = useRef({});
 
   // --------------------- //
   // grid helper functions //
@@ -164,6 +165,9 @@ function App() {
       _timeoutID.current = setTimeout(processBatchedPanes, 100);
     }
     _pendingPanes.current.push(pane);
+    _pendingPanesVersions.current[
+      Object.prototype.hasOwnProperty.call(pane, 'win') ? pane.win : pane.id
+    ] = pane.version;
   };
 
   // run processing on queue
@@ -177,6 +181,7 @@ function App() {
     let newLayout = storeData.layout.slice();
 
     let pendingPanes = _pendingPanes.current;
+    _pendingPanesVersions.current = {};
     _pendingPanes.current = [];
     pendingPanes.forEach((pane) => {
       processPane(pane, newPanes, newLayout);
@@ -192,6 +197,14 @@ function App() {
 
   // process single pane
   const processPane = (newPane, newPanes, newLayout) => {
+    // if newPane is actually window_update object, apply the to newPanes
+    if (newPane.command == 'window_update') {
+      newPane = jsonpatch.applyPatch(
+        newPanes[newPane.win],
+        newPane.content
+      ).newDocument;
+    }
+
     let exists = newPane.id in newPanes;
     newPanes[newPane.id] = newPane;
 
@@ -288,18 +301,16 @@ function App() {
     _socket.current = socket;
   };
 
-  // Apply patch or queries window if window to be patched does not exist
+  // Apply patch or queries window depending on if we know of the window
+  // to be processed soon and matching the expected version.
   const updateWindow = (cmd) => {
     if (
-      cmd.win in storeData.panes &&
-      cmd.version == storeData.panes[cmd.win].version + 1
+      (cmd.win in storeData.panes &&
+        cmd.version == storeData.panes[cmd.win].version + 1) ||
+      (cmd.win in _pendingPanesVersions.current &&
+        cmd.version == _pendingPanesVersions.current[cmd.win] + 1)
     ) {
-      let modifiedWindow = storeData.panes[cmd.win];
-      let modifiedFinalWindow = jsonpatch.applyPatch(
-        modifiedWindow,
-        cmd.content
-      ).newDocument;
-      addPaneBatched(modifiedFinalWindow);
+      addPaneBatched(cmd);
     } else {
       postForEnv(selection.envIDs);
     }
