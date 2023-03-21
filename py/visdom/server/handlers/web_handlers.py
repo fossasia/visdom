@@ -42,7 +42,6 @@ from visdom.utils.server_utils import (
     escape_eid,
     compare_envs,
     load_env,
-    hash_md_window,
     broadcast,
     update_window,
     hash_password,
@@ -359,13 +358,12 @@ class UpdateHandler(BaseHandler):
         if len(stringify(p)) <= len(stringify(diff_packet)):
             broadcast(handler, p, eid)
         else:
-            hashed = hash_md_window(p)
             broadcast_packet = {
                 "command": "window_update",
                 "win": args["win"],
                 "env": eid,
                 "content": diff_packet,
-                "finalHash": hashed,
+                "version": p.get("version", 1),
             }
             broadcast(handler, broadcast_packet, eid)
         handler.write(p["id"])

@@ -165,12 +165,14 @@ def update_window(p, args):
         pdata = p["content"]["data"]
         for i, d in enumerate(pdata):
             d["name"] = opts["legend"][i]
+    p["version"] += 1
     return p
 
 
 def window(args):
     """Build a window dict structure for sending to client"""
     uid = args.get("win", get_new_window_id())
+    version = args.get("version", 1)
     if uid is None:
         uid = get_new_window_id()
     opts = args.get("opts", {})
@@ -179,6 +181,7 @@ def window(args):
 
     p = {
         "command": "window",
+        "version": version,
         "id": str(uid),
         "title": opts.get("title", ""),
         "inflate": opts.get("inflate", True),
@@ -330,6 +333,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
 
     res["jsons"]["window_compare_legend"] = {
         "command": "window",
+        "version": 1,
         "id": "window_compare_legend",
         "title": "compare_legend",
         "inflate": True,
@@ -457,8 +461,3 @@ def recursive_order(node):
 
 def stringify(node):
     return json.dumps(recursive_order(node), separators=(",", ":"))
-
-
-def hash_md_window(window_json):
-    json_string = stringify(window_json).encode("utf-8")
-    return hashlib.md5(json_string).hexdigest()
