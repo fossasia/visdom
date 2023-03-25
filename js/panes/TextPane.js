@@ -7,13 +7,15 @@
  *
  */
 
-import React, { useEffect } from 'react';
+import React, { useContext, useEffect } from 'react';
 
+import ApiContext from '../api/ApiContext';
 import EventSystem from '../EventSystem';
 import Pane from './Pane';
 
 function TextPane(props) {
-  const { content, isFocused, appApi } = props;
+  const { sendPaneMessage } = useContext(ApiContext);
+  const { envID, id, content, isFocused } = props;
 
   // private events
   // --------------
@@ -26,11 +28,15 @@ function TextPane(props) {
         e.preventDefault();
         break;
       case 'keyup':
-        appApi.sendPaneMessage({
-          event_type: 'KeyPress',
-          key: e.key,
-          key_code: e.keyCode,
-        });
+        sendPaneMessage(
+          {
+            event_type: 'KeyPress',
+            key: e.key,
+            key_code: e.keyCode,
+          },
+          id,
+          envID
+        );
         break;
     }
   };
