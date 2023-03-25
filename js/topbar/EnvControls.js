@@ -8,14 +8,16 @@
  */
 
 import TreeSelect, { SHOW_CHILD } from 'rc-tree-select';
-import React, { useState } from 'react';
+import React, { useContext, useState } from 'react';
+
+import ApiContext from '../api/ApiContext';
 
 function EnvControls(props) {
+  const { connected, sessionInfo } = useContext(ApiContext);
+  const readonly = sessionInfo.readonly;
   const {
-    connected,
     envList,
     envIDs,
-    readonly,
     envSelectorStyle,
     onEnvSelect,
     onEnvClear,

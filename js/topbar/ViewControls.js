@@ -6,15 +6,17 @@
  * LICENSE file in the root directory of this source tree.
  *
  */
-import React from 'react';
+import React, { useContext } from 'react';
+
+import ApiContext from '../api/ApiContext';
 
 function ViewControls(props) {
+  const { connected, sessionInfo } = useContext(ApiContext);
+  const readonly = sessionInfo.readonly;
   const {
-    connected,
     envIDs,
     activeLayout,
     layoutList,
-    readonly,
     onViewManageButton,
     onRepackButton,
     onViewChange,

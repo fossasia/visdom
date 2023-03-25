@@ -6,11 +6,14 @@
  * LICENSE file in the root directory of this source tree.
  *
  */
-import React from 'react';
+import React, { useContext } from 'react';
 const classNames = require('classnames');
+import ApiContext from '../api/ApiContext';
 
 function ConnectionIndicator(props) {
-  const { connected, readonly, onClick } = props;
+  const { connected, sessionInfo } = useContext(ApiContext);
+  const readonly = sessionInfo.readonly;
+  const { onClick } = props;
 
   // rendering
   // ---------
