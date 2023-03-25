@@ -7,15 +7,16 @@
  *
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useContext, useEffect, useState } from 'react';
 import ReactModal from 'react-modal';
 
+import ApiContext from '../api/ApiContext';
 import { DEFAULT_LAYOUT, MODAL_STYLE } from '../settings';
 
 function ViewModal(props) {
+  const { connected } = useContext(ApiContext);
   const {
     activeLayout,
-    connected,
     layoutList,
     onModalClose,
     onLayoutSave,

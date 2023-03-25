@@ -1,4 +1,4 @@
-import { POLLING_INTERVAL } from './settings.js';
+import { POLLING_INTERVAL } from '../settings.js';
 
 function postData(url = ``, data = {}) {
   return fetch(url, {

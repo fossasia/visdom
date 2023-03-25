@@ -7,13 +7,15 @@
  *
  */
 
-import React from 'react';
+import React, { useContext } from 'react';
 
+import ApiContext from '../api/ApiContext';
 import Pane from './Pane';
 import PropertyItem from './PropertyItem';
 
 function PropertiesPane(props) {
-  const { id, content, appApi, onFocus } = props;
+  const { sendPaneMessage } = useContext(ApiContext);
+  const { envID, id, content, onFocus } = props;
 
   // private events
   // --------------
@@ -21,13 +23,14 @@ function PropertiesPane(props) {
   // send updates in PropertyItem directly to all observers / sources
   const updateValue = (propId, value) => {
     onFocus(id, () => {
-      appApi.sendPaneMessage(
+      sendPaneMessage(
         {
           event_type: 'PropertyUpdate',
           propertyId: propId,
           value: value,
         },
-        id
+        id,
+        envID
       );
     });
   };

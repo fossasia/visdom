@@ -14,6 +14,7 @@ import debounce from 'debounce';
 import React from 'react';
 import * as THREE from 'three';
 
+import ApiContext from '../api/ApiContext';
 import EventSystem from '../EventSystem';
 import lasso from '../lasso';
 import Pane from './Pane';
@@ -32,38 +33,57 @@ class EmbeddingsPane extends React.Component {
         e.preventDefault();
         break;
       case 'keyup':
-        this.props.appApi.sendPaneMessage({
-          event_type: 'KeyPress',
-          key: event.key,
-          key_code: event.keyCode,
-          pane_data: false, // No need to send the full data for this
-        });
+        if (this.props.isFocused)
+          this.context.sendPaneMessage(
+            {
+              event_type: 'KeyPress',
+              key: event.key,
+              key_code: event.keyCode,
+              pane_data: false, // No need to send the full data for this
+            },
+            this.props.id,
+            this.props.envID
+          );
         break;
     }
   };
 
   onEntitySelection = (e) => {
-    this.props.appApi.sendPaneMessage({
-      event_type: 'EntitySelected',
-      entityId: e.name,
-      idx: e.idx,
-      pane_data: false, // No need to send the full data for this
-    });
+    if (this.props.isFocused)
+      this.context.sendPaneMessage(
+        {
+          event_type: 'EntitySelected',
+          entityId: e.name,
+          idx: e.idx,
+          pane_data: false, // No need to send the full data for this
+        },
+        this.props.id,
+        this.props.envID
+      );
   };
 
   onRegionSelection = (pointIdxs) => {
-    this.props.appApi.sendPaneMessage({
-      event_type: 'RegionSelected',
-      selectedIdxs: pointIdxs,
-      pane_data: false, // No need to send the full data for this
-    });
+    if (this.props.isFocused)
+      this.context.sendPaneMessage(
+        {
+          event_type: 'RegionSelected',
+          selectedIdxs: pointIdxs,
+          pane_data: false, // No need to send the full data for this
+        },
+        this.props.id,
+        this.props.envID
+      );
   };
 
   // Used to pop an embeddings drilldown off of the stack
   onGoBack = () => {
-    this.props.appApi.sendEmbeddingPop({
-      pane_data: false, // No need to send the full data for this
-    });
+    this.context.sendEmbeddingPop(
+      {
+        pane_data: false, // No need to send the full data for this
+      },
+      this.props.id,
+      this.props.env
+    );
   };
 
   componentDidMount() {
@@ -663,5 +683,7 @@ class LassoSelection extends React.Component {
     );
   }
 }
+
+EmbeddingsPane.contextType = ApiContext;
 
 export default EmbeddingsPane;

@@ -7,8 +7,9 @@
  *
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useContext, useEffect, useRef, useState } from 'react';
 
+import ApiContext from '../api/ApiContext';
 import EventSystem from '../EventSystem';
 import Pane from './Pane';
 
@@ -16,7 +17,8 @@ const DEFAULT_HEIGHT = 400;
 const DEFAULT_WIDTH = 300;
 
 function ImagePane(props) {
-  const { title, type, selected, width, height, appApi } = props;
+  const { sendPaneMessage } = useContext(ApiContext);
+  const { envID, id, title, type, selected, width, height } = props;
   var { isFocused, content } = props;
 
   // state varibles
@@ -160,17 +162,27 @@ function ImagePane(props) {
           event.preventDefault();
           break;
         case 'keyup':
-          appApi.sendPaneMessage({
-            event_type: 'KeyPress',
-            key: event.key,
-            key_code: event.keyCode,
-          });
+          if (isFocused)
+            sendPaneMessage(
+              {
+                event_type: 'KeyPress',
+                key: event.key,
+                key_code: event.keyCode,
+              },
+              id,
+              envID
+            );
           break;
         case 'click':
-          appApi.sendPaneMessage({
-            event_type: 'Click',
-            image_coord: mouseLocation,
-          });
+          if (isFocused)
+            sendPaneMessage(
+              {
+                event_type: 'Click',
+                image_coord: mouseLocation,
+              },
+              id,
+              envID
+            );
           break;
       }
     };

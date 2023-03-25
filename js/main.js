@@ -14,12 +14,13 @@
 import 'fetch';
 import 'rc-tree-select/assets/index.css';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useContext, useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
 import ReactResizeDetector from 'react-resize-detector';
 
+import ApiContext from './api/ApiContext';
+import ApiProvider from './api/ApiProvider';
 import EventSystem from './EventSystem';
-import Poller from './Legacy';
 import EnvModal from './modals/EnvModal';
 import ViewModal from './modals/ViewModal';
 import TextPane from './panes/TextPane';
@@ -55,15 +56,27 @@ if (ACTIVE_ENV !== '') {
   use_envs = JSON.parse(localStorage.getItem('envIDs')) || ['main'];
 }
 
-function App() {
+const App = () => {
   // -------------- //
   // state varibles //
   // -------------- //
 
+  // api variables & functions
+  const {
+    connected,
+    sessionInfo,
+    toggleOnlineState,
+    postForEnv,
+    exportLayoutsToServer,
+    onHandlers,
+    sendEnvSave,
+    sendDeleteEnv,
+    sendClosePane,
+    sendLayoutItemState,
+  } = useContext(ApiContext);
+
   // internal variables
   const mounted = useRef(false);
-  const [connected, setConnected] = useState(false);
-  const [sessionInfo, setSessionInfo] = useState({ id: null, readonly: false });
   const [resizeClickHappened, setResizeClickHappened] = useState(false);
   const windowSize = useRef({
     width: 1280,
@@ -95,7 +108,6 @@ function App() {
 
   // non-triggering state variables
   const _bin = useRef(null);
-  const _socket = useRef(null);
   const _timeoutID = useRef(null);
   const _pendingPanes = useRef([]);
   const _pendingPanesVersions = useRef({});
@@ -134,20 +146,6 @@ function App() {
       filter = '';
     }
     return filter;
-  };
-
-  // retrieve normalized window.location
-  const correctPathname = () => {
-    var pathname = window.location.pathname;
-    if (pathname.indexOf('/env/') > -1) {
-      pathname = pathname.split('/env/')[0];
-    } else if (pathname.indexOf('/compare/') > -1) {
-      pathname = pathname.split('/compare/')[0];
-    }
-    if (pathname.slice(-1) != '/') {
-      pathname = pathname + '/';
-    }
-    return pathname;
   };
 
   // ------------------ //
@@ -251,51 +249,6 @@ function App() {
     }
   };
 
-  // connect to server
-  const connect = () => {
-    if (_socket.current) {
-      return;
-    }
-
-    const _onConnect = () => setConnected(true);
-    const _onDisconnect = () => {
-      // check if is mounted. error can appear on unmounted component
-      if (mounted.current) {
-        callbacks.current.push(() => {
-          _socket.current = null;
-        });
-        setConnected(false);
-      }
-    };
-
-    // eslint-disable-next-line no-undef
-    if (USE_POLLING) {
-      _socket.current = new Poller(
-        correctPathname,
-        _handleMessage,
-        _onConnect,
-        _onDisconnect
-      );
-      return;
-    }
-
-    var url = window.location;
-    var ws_protocol = null;
-    if (url.protocol == 'https:') {
-      ws_protocol = 'wss';
-    } else {
-      ws_protocol = 'ws';
-    }
-    var socket = new WebSocket(
-      ws_protocol + '://' + url.host + correctPathname() + 'socket'
-    );
-
-    socket.onmessage = _handleMessage;
-    socket.onopen = _onConnect;
-    socket.onerror = socket.onclose = _onDisconnect;
-    _socket.current = socket;
-  };
-
   // Apply patch or queries window depending on if we know of the window
   // to be processed soon and matching the expected version.
   const updateWindow = (cmd) => {
@@ -306,93 +259,45 @@ function App() {
         cmd.version == _pendingPanesVersions.current[cmd.win] + 1)
     ) {
       addPaneBatched(cmd);
-    } else {
+    }
+  };
+
+  const onWindowMessage = ({ cmd, update }) => {
+    // If we're in compare mode and recieve an update to an environment
+    // that is selected that isn't from the compare output, we need to
+    // reload the compare output
+    if (selection.envIDs.length > 1 && cmd.has_compare !== true) {
       postForEnv(selection.envIDs);
+    } else if (update) {
+      updateWindow(cmd);
+    } else {
+      addPaneBatched(cmd);
     }
   };
 
-  // handle server messages
-  const _handleMessage = (evt) => {
-    var cmd = JSON.parse(evt.data);
-    switch (cmd.command) {
-      case 'register':
-        setSessionInfo((prev) => ({
-          ...prev,
-          id: cmd.data,
-          readonly: cmd.readonly,
-        }));
-        break;
-      case 'pane':
-      case 'window':
-        // If we're in compare mode and recieve an update to an environment
-        // that is selected that isn't from the compare output, we need to
-        // reload the compare output
-        if (selection.envIDs.length > 1 && cmd.has_compare !== true) {
-          postForEnv(selection.envIDs);
-        } else {
-          addPaneBatched(cmd);
-        }
-        break;
-      case 'window_update':
-        if (selection.envIDs.length > 1 && cmd.has_compare !== true) {
-          postForEnv(selection.envIDs);
-        } else {
-          updateWindow(cmd);
-        }
-        break;
-      case 'reload':
-        for (var it in cmd.data) {
-          localStorage.setItem(keyLS(it), JSON.stringify(cmd.data[it]));
-        }
-        break;
-      case 'close':
-        closePane(cmd.data);
-        break;
-      case 'layout':
-        relayout();
-        break;
-      case 'env_update':
-        var layoutLists = storeMeta.layoutLists;
-        for (var envIdx in cmd.data) {
-          if (!layoutLists.has(cmd.data[envIdx])) {
-            layoutLists.set(
-              cmd.data[envIdx],
-              new Map([[DEFAULT_LAYOUT, new Map()]])
-            );
-          }
-        }
-        setStoreMeta((prev) => ({
-          ...prev,
-          envList: cmd.data,
-          layoutLists: layoutLists,
-        }));
-        break;
-      case 'layout_update':
-        parseLayoutsFromServer(cmd.data);
-        break;
-      default:
-        console.error('unrecognized command', cmd);
+  const onReloadMessage = (cmd) => {
+    for (var it in cmd.data) {
+      localStorage.setItem(keyLS(it), JSON.stringify(cmd.data[it]));
     }
   };
 
-  // we need to update the socket-callback so that we have an up-to date state
-  if (_socket.current) _socket.current.onmessage = _handleMessage;
-
-  // close server connection
-  const disconnect = () => {
-    _socket.current.close();
-    _socket.current = null;
+  const onLayoutMessage = ({ data, update }) => {
+    if (update) parseLayoutsFromServer(data);
+    else relayout();
   };
 
-  // send message to server
-  const sendSocketMessage = (data) => {
-    if (!_socket.current) {
-      // TODO: error? warn?
-      return;
+  const onEnvUpdate = (data) => {
+    var layoutLists = storeMeta.layoutLists;
+    for (var envIdx in data) {
+      if (!layoutLists.has(data[envIdx])) {
+        layoutLists.set(data[envIdx], new Map([[DEFAULT_LAYOUT, new Map()]]));
+      }
     }
-
-    let msg = JSON.stringify(data);
-    return _socket.current.send(msg);
+    setStoreMeta((prev) => ({
+      ...prev,
+      envList: data,
+      layoutLists: layoutLists,
+    }));
   };
 
   // remove paneID from pane list
@@ -405,12 +310,7 @@ function App() {
     delete newPanes[paneID];
     if (!keepPosition) {
       localStorage.removeItem(keyLS(paneID));
-
-      sendSocketMessage({
-        cmd: 'close',
-        data: paneID,
-        eid: selection.envIDs[0],
-      });
+      sendClosePane(paneID, selection.envIDs[0]);
     }
 
     if (setState) {
@@ -469,32 +369,8 @@ function App() {
     postForEnv(selectedNodes);
   };
 
-  const postForEnv = (envIDs) => {
-    // This kicks off a new stream of events from the socket so there's nothing
-    // to handle here. We might want to surface the error state.
-    if (envIDs.length == 1) {
-      $.post(
-        correctPathname() + 'env/' + envIDs[0],
-        JSON.stringify({
-          sid: sessionInfo.id,
-        })
-      );
-    } else if (envIDs.length > 1) {
-      $.post(
-        correctPathname() + 'compare/' + envIDs.join('+'),
-        JSON.stringify({
-          sid: sessionInfo.id,
-        })
-      );
-    }
-  };
-
   const onEnvDelete = (env2delete, previousEnv) => {
-    sendSocketMessage({
-      cmd: 'delete_env',
-      prev_eid: previousEnv,
-      eid: env2delete,
-    });
+    sendDeleteEnv(env2delete, previousEnv);
   };
 
   const onEnvSave = (env) => {
@@ -509,12 +385,7 @@ function App() {
       payload[paneID] = JSON.parse(localStorage.getItem(keyLS(paneID)));
     });
 
-    sendSocketMessage({
-      cmd: 'save',
-      data: payload,
-      prev_eid: selection.envIDs[0],
-      eid: env,
-    });
+    sendEnvSave(env, selection.envIDs[0], payload);
 
     let newEnvList = storeMeta.envList;
     if (newEnvList.indexOf(env) === -1) {
@@ -577,7 +448,7 @@ function App() {
     }));
     focusPane(layoutItem.i);
     updateLayout(layout);
-    sendLayoutItemState(layoutItem);
+    sendPaneLayoutUpdate(selection.envIDs[0], layoutItem);
 
     // register a double click in this function
     setResizeClickHappened(true);
@@ -677,14 +548,6 @@ function App() {
     updateLayout(newLayout);
   };
 
-  const toggleOnlineState = () => {
-    if (connected) {
-      disconnect();
-    } else {
-      connect();
-    }
-  };
-
   const updateLayout = (layout) => {
     setStoreData((prev) => ({ ...prev, layout: layout }));
     // TODO this is very non-conventional react, someday it shall be fixed but
@@ -696,28 +559,6 @@ function App() {
       localStorage.setItem(keyLS(playout.i), JSON.stringify(playout));
     });
   }, [storeData]);
-
-  /**
-   * Send layout item state to backend to update backend state.
-   *
-   * @param layout Layout to be sent to backend.
-   */
-  const sendLayoutItemState = ({
-    i,
-    h,
-    w,
-    x,
-    y,
-    moved,
-    static: staticBool,
-  }) => {
-    sendSocketMessage({
-      cmd: 'layout_item_update',
-      eid: selection.envIDs[0],
-      win: i,
-      data: { i, h, w, x, y, moved, static: staticBool },
-    });
-  };
 
   const updateToLayout = (newLayoutID) => {
     setSelection((prev) => ({
@@ -770,65 +611,6 @@ function App() {
 
   const publishEvent = (event) => {
     EventSystem.publish('global.event', event);
-  };
-
-  /**
-   * Send message to backend.
-   *
-   * The `data` object is extended by pane and environment Id.
-   * This function is exposed to Pane components through `appApi` prop.
-   * Note: Only focused panes should call this method.
-   *
-   * @param data Data to be sent to backend.
-   */
-  const sendPaneMessage = (data, target = null) => {
-    if (!target) target = focusedPaneID;
-    if (target === null || sessionInfo.readonly) {
-      return;
-    }
-    let finalData = {
-      target: target,
-      eid: selection.envIDs[0],
-    };
-    $.extend(finalData, data);
-    sendSocketMessage({
-      cmd: 'forward_to_vis',
-      data: finalData,
-    });
-  };
-
-  const sendEmbeddingPop = (data) => {
-    if (focusedPaneID === null || sessionInfo.readonly) {
-      return;
-    }
-    let finalData = {
-      target: focusedPaneID,
-      eid: selection.envIDs[0],
-    };
-    $.extend(finalData, data);
-    sendSocketMessage({
-      cmd: 'pop_embeddings_pane',
-      data: finalData,
-    });
-  };
-
-  const exportLayoutsToServer = (layoutLists) => {
-    // pushes layouts to the server
-    let objForm = {};
-    for (let [envName, layoutList] of layoutLists) {
-      objForm[envName] = {};
-      for (let [layoutName, layoutMap] of layoutList) {
-        objForm[envName][layoutName] = {};
-        for (let [contentID, contentLoc] of layoutMap) {
-          objForm[envName][layoutName][contentID] = contentLoc;
-        }
-      }
-    }
-    let exportForm = JSON.stringify(objForm);
-    sendSocketMessage({
-      cmd: 'save_layouts',
-      data: exportForm,
-    });
   };
 
   const onLayoutSave = (layoutName) => {
@@ -884,9 +666,6 @@ function App() {
   useEffect(() => {
     postForEnv(selection.envIDs);
   }, [sessionInfo]);
-
-  // connect session upon componentDidMount
-  useEffect(connect, []);
 
   //componentDidUpdate
   useEffect(() => {
@@ -951,6 +730,7 @@ function App() {
           <ReactResizeDetector handleWidth handleHeight>
             <Comp
               {...pane}
+              envID={selection.envIDs[0]}
               key={pane.id}
               onClose={closePane}
               onFocus={focusPane}
@@ -961,10 +741,6 @@ function App() {
               height={h2p(panelayout.h) - PANE_TITLE_BAR_HEIGHT}
               _width={_width}
               _height={_height - PANE_TITLE_BAR_HEIGHT}
-              appApi={{
-                sendPaneMessage: sendPaneMessage,
-                sendEmbeddingPop: sendEmbeddingPop,
-              }}
             />
           </ReactResizeDetector>
         </div>
@@ -978,6 +754,7 @@ function App() {
               (err.message ||
                 JSON.stringify(err, Object.getOwnPropertyNames(err)))
             }
+            envID={selection.envIDs[0]}
             id={pane.id}
             key={pane.id}
             onClose={closePane}
@@ -985,7 +762,6 @@ function App() {
             isFocused={pane.id === focusedPaneID}
             w={300}
             h={300}
-            appApi={{ sendPaneMessage: sendPaneMessage }}
           />
         </div>
       );
@@ -996,7 +772,6 @@ function App() {
     <EnvModal
       key="EnvModal"
       activeEnv={selection.envIDs[0]}
-      connected={connected}
       envList={storeMeta.envList}
       onEnvDelete={onEnvDelete}
       onEnvSave={onEnvSave}
@@ -1006,7 +781,6 @@ function App() {
     <ViewModal
       key="ViewModal"
       activeLayout={selection.layoutID}
-      connected={connected}
       layoutList={getCurrLayoutList()}
       onModalClose={() => setShowViewModal(false)}
       onLayoutDelete={onLayoutDelete.bind(this)}
@@ -1017,7 +791,6 @@ function App() {
 
   let envControls = (
     <EnvControls
-      connected={connected}
       envIDs={selection.envIDs}
       envList={storeMeta.envList}
       envSelectorStyle={{
@@ -1026,13 +799,11 @@ function App() {
       onEnvClear={closeAllPanes}
       onEnvManageButton={() => setShowEnvModal(!showEnvModal)}
       onEnvSelect={onEnvSelect}
-      readonly={sessionInfo.readonly}
     />
   );
   let viewControls = (
     <ViewControls
       activeLayout={selection.layoutID}
-      connected={connected}
       envIDs={selection.envIDs}
       layoutList={getCurrLayoutList()}
       onRepackButton={() => {
@@ -1041,7 +812,6 @@ function App() {
       }}
       onViewChange={updateToLayout}
       onViewManageButton={() => setShowViewModal(!showViewModal)}
-      readonly={sessionInfo.readonly}
     />
   );
   let filterControl = (
@@ -1057,13 +827,26 @@ function App() {
       }}
     />
   );
-  let connectionIndicator = (
-    <ConnectionIndicator
-      connected={connected}
-      onClick={toggleOnlineState}
-      readonly={sessionInfo.readonly}
-    />
-  );
+  let connectionIndicator = <ConnectionIndicator onClick={toggleOnlineState} />;
+
+  const onDisconnect = (_socket) => {
+    // check if is mounted. error can appear on unmounted component
+    if (mounted.current) {
+      callbacks.current.push(() => {
+        _socket.current = null;
+      });
+    }
+  };
+
+  const onCloseMessage = closePane;
+  onHandlers.current = {
+    onWindowMessage,
+    onLayoutMessage,
+    onReloadMessage,
+    onEnvUpdate,
+    onCloseMessage,
+    onDisconnect,
+  };
 
   return (
     <div>
@@ -1113,10 +896,18 @@ function App() {
       </div>
     </div>
   );
+};
+
+function AppWithApi() {
+  return (
+    <ApiProvider>
+      <App />
+    </ApiProvider>
+  );
 }
 
 function load() {
-  ReactDOM.render(<App />, document.getElementById('app'));
+  ReactDOM.render(<AppWithApi />, document.getElementById('app'));
   document.removeEventListener('DOMContentLoaded', load);
 }
 

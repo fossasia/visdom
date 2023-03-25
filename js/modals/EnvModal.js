@@ -7,21 +7,16 @@
  *
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useContext, useEffect, useState } from 'react';
 import ReactModal from 'react-modal';
 
+import ApiContext from '../api/ApiContext';
 import { MODAL_STYLE } from '../settings';
 
 function EnvModal(props) {
-  const {
-    activeEnv,
-    connected,
-    envList,
-    onModalClose,
-    onEnvSave,
-    onEnvDelete,
-    show,
-  } = props;
+  const { connected } = useContext(ApiContext);
+  const { activeEnv, envList, onModalClose, onEnvSave, onEnvDelete, show } =
+    props;
 
   // effects
   // -------
