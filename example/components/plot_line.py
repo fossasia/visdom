@@ -83,6 +83,30 @@ def plot_line_update(viz, env, args):
     viz.line(X=None, Y=None, win=win, name='delete this', update='remove', env=env)
 
 
+# many small line updates
+def plot_line_many_updates(viz, env, args):
+    opts = {'title': args[0]} if len(args) > 0 else {}
+    win = viz.line(
+        X=np.column_stack((np.arange(0, 10), np.arange(0, 10))),
+        Y=np.column_stack((np.linspace(5, 10, 10),
+                           np.linspace(5, 10, 10) + 5)),
+        env=env,
+        opts=opts
+    )
+    for i in range(1,101):
+        offset1 = np.random.random() * 100
+        offset2 = np.random.random() * 100
+        viz.line(
+            X=np.column_stack((i * 10 + np.arange(10, 20), i * 10 + np.arange(10, 20))),
+            Y=np.column_stack((offset1 + np.linspace(5, 10, 10),
+                               offset2 + np.linspace(5, 10, 10))),
+            env=env,
+            win=win,
+            update='append'
+        )
+
+
+
 def plot_line_opts(viz, env, args):
     return viz.line(
         X=np.column_stack((
