@@ -1,4 +1,3 @@
-
 export const all_screenshots = [
   'text_basic',
   'text_update',
@@ -11,6 +10,7 @@ export const all_screenshots = [
   // 'plot_line_webgl', // disabled due to webgl
   // 'plot_line_update_webgl', // disabled due to webgl
   'plot_line_update',
+  'plot_line_many_updates',
   'plot_line_opts',
   'plot_line_opts_update',
   'plot_line_stackedarea',
@@ -55,9 +55,8 @@ export const all_screenshots = [
   // 'misc_audio_download', // disabled to circumvent problems due to varying download speeds
   'misc_arbitrary_visdom',
   'misc_getset_state',
-  'properties_basic'
+  'properties_basic',
 ];
-
 
 export const all_compareviews = [
   'plot_line_basic',
@@ -65,6 +64,7 @@ export const all_compareviews = [
   // // 'plot_line_webgl', // disabled due to webgl
   // // 'plot_line_update_webgl', // disabled due to webgl
   'plot_line_update',
+  'plot_line_many_updates',
   'plot_line_opts',
   'plot_line_opts_update',
   'plot_line_stackedarea',
@@ -87,4 +87,4 @@ export const all_compareviews = [
   'plot_special_boxplot',
   'misc_plot_latex',
   'misc_plot_latex_update',
-]
+];
