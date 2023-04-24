@@ -94,6 +94,7 @@ jobs:
         shell: bash
         run: |
           git checkout PR-HEAD -- ./cypress
+          git checkout PR-HEAD -- ./example
 
       - name: Cypress test:init
         uses: cypress-io/github-action@v4
