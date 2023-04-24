@@ -8,13 +8,14 @@ const ApiProvider = ({ children }) => {
   const [connected, setConnected] = useState(false);
   const [sessionInfo, setSessionInfo] = useState({ id: null, readonly: false });
   const _socket = useRef(null);
-  const onHandlers = useRef(null);
+  const apiHandlers = useRef(null);
 
   // ---------------- //
   // helper functions //
   // ---------------- //
 
-  // retrieve normalized window.location
+  // Normalize window.location by removing specific path segments
+  // and ensuring the pathname ends with a '/'
   const correctPathname = () => {
     var pathname = window.location.pathname;
     if (pathname.indexOf('/env/') > -1) {
@@ -32,7 +33,7 @@ const ApiProvider = ({ children }) => {
   // basic communication //
   // ------------------- //
 
-  // low-level message to server
+  // Send a low-level message to the server
   const sendSocketMessage = (data) => {
     if (!_socket.current) {
       // TODO: error? warn?
@@ -43,7 +44,7 @@ const ApiProvider = ({ children }) => {
     return _socket.current.send(msg);
   };
 
-  // connect to server
+  // Establish a connection to the server
   const connect = () => {
     if (_socket.current) {
       return;
@@ -53,7 +54,7 @@ const ApiProvider = ({ children }) => {
       setConnected(true);
     };
     const _onDisconnect = () => {
-      onHandlers.current.onDisconnect(_socket);
+      apiHandlers.current.onDisconnect(_socket);
       setConnected(false);
     };
 
@@ -85,7 +86,7 @@ const ApiProvider = ({ children }) => {
     _socket.current = socket;
   };
 
-  // close server connection
+  // Close the server connection and reset the _socket ref
   const disconnect = () => {
     _socket.current.close();
     _socket.current = null;
@@ -95,7 +96,9 @@ const ApiProvider = ({ children }) => {
   // API receive events //
   // -------------------//
 
-  // handle server messages
+  // Process messages received from the server by
+  // implicitly defining event handlers for
+  // different types of server-commands
   const handleMessage = (evt) => {
     var cmd = JSON.parse(evt.data);
     switch (cmd.command) {
@@ -109,26 +112,26 @@ const ApiProvider = ({ children }) => {
       case 'pane':
       case 'window':
       case 'window_update':
-        onHandlers.current.onWindowMessage({
+        apiHandlers.current.onWindowMessage({
           cmd: cmd,
           update: cmd.commmand == 'window_update',
         });
         break;
       case 'reload':
-        onHandlers.current.onReloadMessage(cmd.data);
+        apiHandlers.current.onReloadMessage(cmd.data);
         break;
       case 'close':
-        onHandlers.current.onCloseMessage(cmd.data);
+        apiHandlers.current.onCloseMessage(cmd.data);
         break;
       case 'layout':
       case 'layout_update':
-        onHandlers.current.onLayoutMessage({
+        apiHandlers.current.onLayoutMessage({
           cmd: cmd.data,
           update: cmd.commmand == 'layout_update',
         });
         break;
       case 'env_update':
-        onHandlers.current.onEnvUpdate(cmd.data);
+        apiHandlers.current.onEnvUpdate(cmd.data);
         break;
 
       default:
@@ -143,8 +146,8 @@ const ApiProvider = ({ children }) => {
   // API send events //
   // ----------------//
 
-  // query env from server
-  const postForEnv = (envIDs) => {
+  // Request environment data from the server
+  const sendEnvQuery = (envIDs) => {
     // This kicks off a new stream of events from the socket so there's nothing
     // to handle here. We might want to surface the error state.
     if (envIDs.length == 1) {
@@ -164,6 +167,7 @@ const ApiProvider = ({ children }) => {
     }
   };
 
+  // Toggle connection state between online and offline
   const toggleOnlineState = () => {
     if (connected) {
       disconnect();
@@ -172,14 +176,7 @@ const ApiProvider = ({ children }) => {
     }
   };
 
-  /**
-   * Send message to backend.
-   *
-   * The `data` object is extended by pane and environment Id.
-   * Note: Only focused panes should call this method.
-   *
-   * @param data Data to be sent to backend.
-   */
+  // Send message to server backend for a specific pane and environment.
   const sendPaneMessage = (data, targetPaneID, targetEnvID) => {
     if (targetPaneID === null || sessionInfo.readonly) {
       return;
@@ -195,6 +192,7 @@ const ApiProvider = ({ children }) => {
     });
   };
 
+  // Send request to revert to the previous set of embeddings in the given pane
   const sendEmbeddingPop = (data, targetPaneID, targetEnvID) => {
     if (targetPaneID === null || sessionInfo.readonly) {
       return;
@@ -210,7 +208,8 @@ const ApiProvider = ({ children }) => {
     });
   };
 
-  const sendClosePane = (paneID, envID) => {
+  // Send request to close a specific pane
+  const sendPaneClose = (paneID, envID) => {
     sendSocketMessage({
       cmd: 'close',
       data: paneID,
@@ -218,7 +217,8 @@ const ApiProvider = ({ children }) => {
     });
   };
 
-  const sendDeleteEnv = (envID, previousEnv) => {
+  // Send request to delete an environment
+  const sendEnvDelete = (envID, previousEnv) => {
     sendSocketMessage({
       cmd: 'delete_env',
       prev_eid: previousEnv,
@@ -226,6 +226,7 @@ const ApiProvider = ({ children }) => {
     });
   };
 
+  // Send request to save the current environment
   const sendEnvSave = (envID, prev_envID, data) => {
     sendSocketMessage({
       cmd: 'save',
@@ -235,12 +236,8 @@ const ApiProvider = ({ children }) => {
     });
   };
 
-  /**
-   * Send layout item state to backend to update backend state.
-   *
-   * @param layout Layout to be sent to backend.
-   */
-  const sendLayoutItemState = (
+  // Update the pane layout item in the backend.
+  const sendPaneLayoutUpdate = (
     envID,
     { i, h, w, x, y, moved, static: staticBool }
   ) => {
@@ -252,7 +249,8 @@ const ApiProvider = ({ children }) => {
     });
   };
 
-  const exportLayoutsToServer = (layoutLists) => {
+  // Save layout lists to the server
+  const sendLayoutsSave = (layoutLists) => {
     // pushes layouts to the server
     let objForm = {};
     for (let [envName, layoutList] of layoutLists) {
@@ -289,19 +287,19 @@ const ApiProvider = ({ children }) => {
   return (
     <ApiContext.Provider
       value={{
+        apiHandlers,
         connected,
+        sendEmbeddingPop,
+        sendEnvDelete,
+        sendEnvQuery,
+        sendEnvSave,
+        sendLayoutsSave,
+        sendPaneClose,
+        sendPaneLayoutUpdate,
+        sendPaneMessage,
         sessionInfo,
         setConnected,
-        onHandlers,
-        postForEnv,
-        sendPaneMessage,
-        sendEmbeddingPop,
-        exportLayoutsToServer,
         toggleOnlineState,
-        sendEnvSave,
-        sendDeleteEnv,
-        sendClosePane,
-        sendLayoutItemState,
       }}
     >
       {children}
