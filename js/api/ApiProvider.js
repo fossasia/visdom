@@ -43,27 +43,6 @@ const ApiProvider = ({ children }) => {
     return _socket.current.send(msg);
   };
 
-  // query env from server
-  const postForEnv = (envIDs) => {
-    // This kicks off a new stream of events from the socket so there's nothing
-    // to handle here. We might want to surface the error state.
-    if (envIDs.length == 1) {
-      $.post(
-        correctPathname() + 'env/' + envIDs[0],
-        JSON.stringify({
-          sid: sessionInfo.id,
-        })
-      );
-    } else if (envIDs.length > 1) {
-      $.post(
-        correctPathname() + 'compare/' + envIDs.join('+'),
-        JSON.stringify({
-          sid: sessionInfo.id,
-        })
-      );
-    }
-  };
-
   // connect to server
   const connect = () => {
     if (_socket.current) {
@@ -112,9 +91,9 @@ const ApiProvider = ({ children }) => {
     _socket.current = null;
   };
 
-  // ------------- //
-  // api functions //
-  // --------------//
+  // ------------------ //
+  // API receive events //
+  // -------------------//
 
   // handle server messages
   const handleMessage = (evt) => {
@@ -159,6 +138,31 @@ const ApiProvider = ({ children }) => {
 
   // we need to update the socket-callback so that we have an up-to date state
   if (_socket.current) _socket.current.onmessage = handleMessage;
+
+  // --------------- //
+  // API send events //
+  // ----------------//
+
+  // query env from server
+  const postForEnv = (envIDs) => {
+    // This kicks off a new stream of events from the socket so there's nothing
+    // to handle here. We might want to surface the error state.
+    if (envIDs.length == 1) {
+      $.post(
+        correctPathname() + 'env/' + envIDs[0],
+        JSON.stringify({
+          sid: sessionInfo.id,
+        })
+      );
+    } else if (envIDs.length > 1) {
+      $.post(
+        correctPathname() + 'compare/' + envIDs.join('+'),
+        JSON.stringify({
+          sid: sessionInfo.id,
+        })
+      );
+    }
+  };
 
   const toggleOnlineState = () => {
     if (connected) {
@@ -267,6 +271,10 @@ const ApiProvider = ({ children }) => {
     });
   };
 
+  // ------- //
+  // Effects //
+  // ------- //
+
   // connect on mount, disconnect on unmount
   useEffect(() => {
     connect();
@@ -275,9 +283,9 @@ const ApiProvider = ({ children }) => {
     };
   }, []);
 
-  // connect session upon componentDidMount
-  useEffect(connect, []);
-
+  // -------------- //
+  // Define Context //
+  // -------------- //
   return (
     <ApiContext.Provider
       value={{
