@@ -63,16 +63,16 @@ const App = () => {
 
   // api variables & functions
   const {
+    apiHandlers,
     connected,
+    sendEnvDelete,
+    sendEnvQuery,
+    sendEnvSave,
+    sendLayoutsSave,
+    sendPaneClose,
+    sendPaneLayoutUpdate,
     sessionInfo,
     toggleOnlineState,
-    postForEnv,
-    exportLayoutsToServer,
-    onHandlers,
-    sendEnvSave,
-    sendDeleteEnv,
-    sendClosePane,
-    sendLayoutItemState,
   } = useContext(ApiContext);
 
   // internal variables
@@ -267,7 +267,7 @@ const App = () => {
     // that is selected that isn't from the compare output, we need to
     // reload the compare output
     if (selection.envIDs.length > 1 && cmd.has_compare !== true) {
-      postForEnv(selection.envIDs);
+      sendEnvQuery(selection.envIDs);
     } else if (update) {
       updateWindow(cmd);
     } else {
@@ -310,7 +310,7 @@ const App = () => {
     delete newPanes[paneID];
     if (!keepPosition) {
       localStorage.removeItem(keyLS(paneID));
-      sendClosePane(paneID, selection.envIDs[0]);
+      sendPaneClose(paneID, selection.envIDs[0]);
     }
 
     if (setState) {
@@ -366,11 +366,11 @@ const App = () => {
     }));
     setFocusedPaneID(isSameEnv ? focusedPaneID : null);
     localStorage.setItem('envIDs', JSON.stringify(selectedNodes));
-    postForEnv(selectedNodes);
+    sendEnvQuery(selectedNodes);
   };
 
   const onEnvDelete = (env2delete, previousEnv) => {
-    sendDeleteEnv(env2delete, previousEnv);
+    sendEnvDelete(env2delete, previousEnv);
   };
 
   const onEnvSave = (env) => {
@@ -624,7 +624,7 @@ const App = () => {
     }
     let layoutLists = storeMeta.layoutLists;
     layoutLists.get(selection.envIDs[0]).set(layoutName, layoutMap);
-    exportLayoutsToServer(layoutLists);
+    sendLayoutsSave(layoutLists);
     setStoreMeta((prev) => ({
       ...prev,
       layoutLists: layoutLists,
@@ -639,7 +639,7 @@ const App = () => {
     // Deletes the selected view, pushes to server
     let layoutLists = storeMeta.layoutLists;
     layoutLists.get(selection.envIDs[0]).delete(layoutName);
-    exportLayoutsToServer(layoutLists);
+    sendLayoutsSave(layoutLists);
     setStoreMeta((prev) => ({
       ...prev,
       layoutLists: layoutLists,
@@ -664,20 +664,20 @@ const App = () => {
 
   // ask server for envs after registration succeeded
   useEffect(() => {
-    postForEnv(selection.envIDs);
+    sendEnvQuery(selection.envIDs);
   }, [sessionInfo]);
 
   //componentDidUpdate
   useEffect(() => {
     if (mounted.current) {
       if (selection.envIDs.length > 0) {
-        postForEnv(selection.envIDs);
+        sendEnvQuery(selection.envIDs);
       } else {
         setSelection((prev) => ({
           ...prev,
           envIDs: ['main'],
         }));
-        postForEnv(['main']);
+        sendEnvQuery(['main']);
       }
     }
 
@@ -839,7 +839,7 @@ const App = () => {
   };
 
   const onCloseMessage = closePane;
-  onHandlers.current = {
+  apiHandlers.current = {
     onWindowMessage,
     onLayoutMessage,
     onReloadMessage,
