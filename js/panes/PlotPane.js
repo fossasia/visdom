@@ -132,6 +132,10 @@ var PlotPane = (props) => {
           d.opacity = 1.0;
         });
 
+    // required for Plotly.react to register the update
+    content.layout.datarevision = props.version;
+
+    // draw / redraw plot with layout-options
     Plotly.react(contentID, data.concat(smooth_data), content.layout, {
       showLink: true,
       linkText: 'Edit',
