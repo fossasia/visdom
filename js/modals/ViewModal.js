@@ -88,7 +88,7 @@ function ViewModal(props) {
         </select>
         <button
           className="btn btn-default"
-          disabled={!connected || !selectText || selectText == DEFAULT_LAYOUT}
+          disabled={!connected || !selectText || layoutList.size <= 1}
           onClick={() => onLayoutDelete(selectText)}
         >
           Delete

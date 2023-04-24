@@ -638,6 +638,7 @@ const App = () => {
   const onLayoutDelete = (layoutName) => {
     // Deletes the selected view, pushes to server
     let layoutLists = storeMeta.layoutLists;
+    let layoutKeys = Array.from(layoutLists.get(selection.envIDs[0]).keys());
     layoutLists.get(selection.envIDs[0]).delete(layoutName);
     sendLayoutsSave(layoutLists);
     setStoreMeta((prev) => ({
@@ -646,7 +647,7 @@ const App = () => {
     }));
     setSelection((prev) => ({
       ...prev,
-      layoutID: layoutLists.get(selection.envIDs[0]).keys()[0],
+      layoutID: layoutKeys[0] == layoutName ? layoutKeys[1] : layoutKeys[0],
     }));
   };
 
