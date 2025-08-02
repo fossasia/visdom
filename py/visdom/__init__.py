@@ -1733,6 +1733,11 @@ class Visdom(object):
 
     @pytorch_wrap
     def line(self, Y, X=None, win=None, env=None, opts=None, update=None, name=None):
+        import numpy as np
+
+    Y = np.array(Y)
+    if np.any(np.isnan(Y)):
+        Y = np.ma.masked_invalid(Y)
         """
         This function draws a line plot. It takes in an `N` or `NxM` tensor
         `Y` that specifies the values of the `M` lines (that connect `N` points)
@@ -1761,6 +1766,7 @@ class Visdom(object):
         If `update` is specified, the figure will be updated without
         creating a new plot -- this can be used for efficient updating.
         """
+ 
         if update is not None:
             if update == "remove":
                 return self.scatter(
@@ -1804,6 +1810,14 @@ class Visdom(object):
         if Y.ndim == 2:
             labels = np.arange(1, Y.shape[1] + 1)
             labels = np.tile(labels, (Y.shape[0], 1)).ravel(order="F")
+
+        win = 'line_' + env + str(idx)
+        return _send({
+        'data': Y.tolist(),  # Send cleaned data
+        'win': win,
+        'eid': env,
+        'layout': layout,
+        'opts': opts})
 
         return self.scatter(
             X=linedata, Y=labels, opts=opts, win=win, env=env, update=update, name=name
