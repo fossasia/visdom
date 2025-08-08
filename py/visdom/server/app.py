@@ -217,3 +217,25 @@ class Application(tornado.web.Application):
         settings["user_css"] = user_css
 
         return settings
+class SocketHandler(tornado.websocket.WebSocketHandler):
+    def check_origin(self, origin):
+        return True  # Or customize for security
+
+    def open(self):
+        try:
+            logging.info("WebSocket connection opened")
+            # Existing open logic (e.g., register client)
+        except Exception as e:
+            logging.error(f"WebSocket open error: {e}")
+
+    def on_message(self, message):
+        try:
+            # Existing message handling logic
+            pass
+        except Exception as e:
+            logging.error(f"WebSocket message error: {e}")
+            self.close()  # Gracefully close on error
+
+    def on_close(self):
+        logging.info("WebSocket connection closed")
+        # Existing cleanup logic
