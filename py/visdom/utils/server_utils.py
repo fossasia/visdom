@@ -114,12 +114,21 @@ class LazyEnvData(Mapping):
         self.lazy_load_data()
         return len(self._raw_dict)
 
-
 def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
     env_ids = [i for i in eids if i in state]
     if env_path is not None:
         for env_id in env_ids:
-            env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
+            # Truncate long environment IDs to prevent filesystem errors
+            MAX_FILENAME_LENGTH = 200  # Leave room for .json extension
+            if len(env_id) > MAX_FILENAME_LENGTH:
+                # Keep first 190 chars + 10 char hash for uniqueness
+                import hashlib
+                hash_part = hashlib.md5(env_id.encode()).hexdigest()[:10]
+                safe_env_id = env_id[:190] + "_" + hash_part
+                env_path_file = os.path.join(env_path, "{0}.json".format(safe_env_id))
+            else:
+                env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
+            
             with open(env_path_file, "w") as fn:
                 if isinstance(state[env_id], LazyEnvData):
                     fn.write(json.dumps(state[env_id]._raw_dict))
@@ -382,7 +391,17 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
     if eid in state:
         env = state.get(eid)
     elif env_path is not None:
-        p = os.path.join(env_path, eid.strip(), ".json")
+        # Try to find the environment file
+        # First try exact filename
+        p = os.path.join(env_path, "{0}.json".format(eid.strip()))
+        
+        # If not found and env_id is long, try truncated version
+        if not os.path.exists(p) and len(eid) > 200:
+            import hashlib
+            hash_part = hashlib.md5(eid.encode()).hexdigest()[:10]
+            safe_eid = eid[:190] + "_" + hash_part
+            p = os.path.join(env_path, "{0}.json".format(safe_eid))
+        
         if os.path.exists(p):
             with open(p, "r") as fn:
                 env = tornado.escape.json_decode(fn.read())
