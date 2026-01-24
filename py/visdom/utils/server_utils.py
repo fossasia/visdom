@@ -23,6 +23,7 @@ import os
 import time
 import tornado.escape
 from collections import OrderedDict
+import hashlib
 
 try:
     # for after python 3.8
@@ -41,7 +42,38 @@ from visdom.utils.shared_utils import warn_once, get_rand_id, get_new_window_id
 
 
 # ---- Vaguely server-security related functions ---- #
-
+def _safe_env_filename(env_id, max_length=200, extension=".json"):
+    """
+    Return a filesystem-safe filename for the given env_id.
+    
+    If env_id fits within max_length (including extension), use it as-is.
+    Otherwise, truncate and append a hash for uniqueness.
+    """
+    # Strip whitespace once for consistency
+    env_id = env_id.strip()
+    
+    # Calculate available space for the base name
+    base_length = max_length - len(extension)
+    
+    # If it already fits, use as-is
+    if len(env_id) <= base_length:
+        return f"{env_id}{extension}"
+    
+    # Reserve space for "_" + hash
+    HASH_LEN = 10
+    SEP_LEN = 1  # underscore
+    prefix_length = base_length - (HASH_LEN + SEP_LEN)
+    
+    # Safety check in case max_length is too small
+    if prefix_length <= 0:
+        # If max_length is too small, just use hash
+        hash_part = hashlib.md5(env_id.encode()).hexdigest()[:HASH_LEN]
+        return f"{hash_part}{extension}"
+    
+    # Truncate and add hash
+    hash_part = hashlib.md5(env_id.encode()).hexdigest()[:HASH_LEN]
+    safe_env_id = f"{env_id[:prefix_length]}_{hash_part}"
+    return f"{safe_env_id}{extension}"
 
 def check_auth(f):
     """
@@ -118,16 +150,8 @@ def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
     env_ids = [i for i in eids if i in state]
     if env_path is not None:
         for env_id in env_ids:
-            # Truncate long environment IDs to prevent filesystem errors
-            MAX_FILENAME_LENGTH = 200  # Leave room for .json extension
-            if len(env_id) > MAX_FILENAME_LENGTH:
-                # Keep first 190 chars + 10 char hash for uniqueness
-                import hashlib
-                hash_part = hashlib.md5(env_id.encode()).hexdigest()[:10]
-                safe_env_id = env_id[:190] + "_" + hash_part
-                env_path_file = os.path.join(env_path, "{0}.json".format(safe_env_id))
-            else:
-                env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
+            safe_filename = _safe_env_filename(env_id)
+            env_path_file = os.path.join(env_path, safe_filename)
             
             with open(env_path_file, "w") as fn:
                 if isinstance(state[env_id], LazyEnvData):
@@ -391,17 +415,8 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
     if eid in state:
         env = state.get(eid)
     elif env_path is not None:
-        # Try to find the environment file
-        # First try exact filename
-        p = os.path.join(env_path, "{0}.json".format(eid.strip()))
-        
-        # If not found and env_id is long, try truncated version
-        if not os.path.exists(p) and len(eid) > 200:
-            import hashlib
-            hash_part = hashlib.md5(eid.encode()).hexdigest()[:10]
-            safe_eid = eid[:190] + "_" + hash_part
-            p = os.path.join(env_path, "{0}.json".format(safe_eid))
-        
+        safe_filename = _safe_env_filename(eid)
+        p = os.path.join(env_path, safe_filename)
         if os.path.exists(p):
             with open(p, "r") as fn:
                 env = tornado.escape.json_decode(fn.read())
