@@ -1876,11 +1876,19 @@ class Visdom(object):
                 len(opts["rownames"]) == X.shape[0]
             ), "number of row names should match number of rows in X"
 
+        if opts.get("x") is not None:
+            assert len(opts["x"]) == X.shape[1], \
+                "length of x must match number of columns in X"
+
+        if opts.get("y") is not None:
+            assert len(opts["y"]) == X.shape[0], \
+                "length of y must match number of row in X"
+
         data = [
             {
                 "z": nan2none(X.tolist()),
-                "x": opts.get("columnnames"),
-                "y": opts.get("rownames"),
+                "x": opts.get("x", opts.get("columnnames")),
+                "y": opts.get("y", opts.get("rownames")),
                 "zmin": opts.get("xmin"),
                 "zmax": opts.get("xmax"),
                 "type": "heatmap",
