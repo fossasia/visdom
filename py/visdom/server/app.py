@@ -111,7 +111,7 @@ class Application(tornado.web.Application):
             (r"%s/delete_env" % self.base_url, DeleteEnvHandler, {"app": self}),
             (r"%s/env_state" % self.base_url, EnvStateHandler, {"app": self}),
             (r"%s/fork_env" % self.base_url, ForkEnvHandler, {"app": self}),
-            (r"%s/user/(.*)" % self.base_url, UserSettingsHandler, {"app": self}),
+            (r"%s/user" % self.base_url, UserSettingsHandler, {"app": self}),
             (r"%s(.*)" % self.base_url, IndexHandler, {"app": self}),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)
