@@ -125,6 +125,7 @@ def download_scripts(proxies=None, install_dir=None):
 
     # Download MathJax Js Files
     import requests
+    import certifi
 
     cdnjs_url = "https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.5/"
     mathjax_dir = os.path.join(*cdnjs_url.split("/")[-3:])
@@ -146,7 +147,7 @@ def download_scripts(proxies=None, install_dir=None):
         if not os.path.exists(extracted_directory):
             os.makedirs(extracted_directory)
         if not os.path.exists(os.path.join(extracted_directory, filename)):
-            js_file = requests.get(cdnjs_url + path)
+            js_file = requests.get(cdnjs_url + path, verify=certifi.where())
             with open(os.path.join(extracted_directory, filename), "wb+") as file:
                 file.write(js_file.content)
 
