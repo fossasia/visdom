@@ -82,6 +82,8 @@ class PostHandler(BaseHandler):
         eid = extract_eid(req)
         p = window(req)
 
+        p["env"] = eid
+
         register_window(self, p, eid)
 
 
@@ -356,6 +358,7 @@ class UpdateHandler(BaseHandler):
         p, diff_packet = UpdateHandler.update_packet(p, args)
         # send the smaller of the patch and the updated pane
         if len(stringify(p)) <= len(stringify(diff_packet)):
+            p['env'] = eid
             broadcast(handler, p, eid)
         else:
             broadcast_packet = {

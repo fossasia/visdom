@@ -266,6 +266,10 @@ const App = () => {
     // If we're in compare mode and recieve an update to an environment
     // that is selected that isn't from the compare output, we need to
     // reload the compare output
+    if (cmd.env && !selection.envIDs.includes(cmd.env)) {
+      return;
+    }
+    
     if (selection.envIDs.length > 1 && cmd.has_compare !== true) {
       sendEnvQuery(selection.envIDs);
     } else if (update) {
