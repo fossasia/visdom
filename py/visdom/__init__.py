@@ -1272,18 +1272,30 @@ class Visdom(object):
         opts = {} if opts is None else opts
         _title2str(opts)
         _assert_opts(opts)
-        opts["width"] = opts.get("width", img.shape[img.ndim - 1])
-        opts["height"] = opts.get("height", img.shape[img.ndim - 2])
 
-        nchannels = img.shape[0] if img.ndim == 3 else 1
-        if nchannels == 1:
-            img = np.squeeze(img)
-            img = img[np.newaxis, :, :].repeat(3, axis=0)
-
-        if "float" in str(img.dtype):
+        if np.issubdtype(img.dtype, np.floating):
             if img.max() <= 1:
                 img = img * 255.0
-            img = np.uint8(img)
+
+        img = np.clip(img, 0, 255).astype(np.uint8)
+
+        nchannels = img.shape[0] if img.ndim == 3 else 1
+
+        if img.ndim == 2:
+            img = img[np.newaxis, :, :]
+            img = np.repeat(img, 4, axis=0)
+            img[3, :, :] = 255
+
+        elif nchannels == 1:
+            img = np.repeat(img, 4, axis=0)
+            img[3, :, :] = 255
+
+        elif nchannels == 3:
+            alpha = np.ones_like(img[0:1]) * 255
+            img = np.concatenate([img, alpha], axis=0)
+
+        elif nchannels == 4:
+            pass
 
         img = np.transpose(img, (1, 2, 0))
         im = Image.fromarray(img)
