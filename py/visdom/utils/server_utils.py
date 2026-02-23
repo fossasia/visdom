@@ -235,9 +235,24 @@ def gather_envs(state, env_path=DEFAULT_ENV_PATH):
     return sorted(list(set(items + list(state.keys()))))
 
 
+_COMPARE_LEGEND_NAME_MAX = 50
+
+
+def _compare_legend_label(eid):
+    """Return eid truncated to _COMPARE_LEGEND_NAME_MAX chars.
+
+    Long environment names are shortened with a trailing ellipsis so
+    that Plotly legend entries remain readable without horizontal
+    scrolling.
+    """
+    if len(eid) <= _COMPARE_LEGEND_NAME_MAX:
+        return eid
+    return eid[:47] + "..."
+
+
 def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
     logging.info("comparing envs")
-    eidNums = {e: str(i) for i, e in enumerate(eids)}
+    eid_labels = {e: _compare_legend_label(e) for e in eids}
     env = {}
     envs = {}
     for eid in eids:
@@ -292,7 +307,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
                     if "name" not in data:
                         break  # stop working with this plot, not right format
                     destWidJson["content"]["data"][dataIdx]["name"] = "{}_{}".format(
-                        eidNums[eid], data["name"]
+                        eid_labels[eid], data["name"]
                     )
             else:
                 if "name" not in destWidJson["content"]["data"][0]:
@@ -305,7 +320,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
                     if "name" not in data:
                         destWidJson["has_compare"] = False
                         break  # stop working with this plot, not right format
-                    data["name"] = "{}_{}".format(eidNums[eid], data["name"])
+                    data["name"] = "{}_{}".format(eid_labels[eid], data["name"])
                     destWidJson["content"]["data"].append(data)
 
     # Make sure that only plots that are shared by at least two envs are shown.
@@ -316,18 +331,21 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         ):
             del res["jsons"][destWid]
 
-    # create legend mapping environment names to environment numbers so one can
-    # look it up for the new legend
+    # create legend mapping environment names to legend labels so users
+    # can identify which line belongs to which environment
     tableRows = [
-        "<tr> <td> {} </td> <td> {} </td> </tr>".format(v, eidNums[v]) for v in eidNums
+        "<tr> <td> {} </td> <td> {} </td> </tr>".format(v, eid_labels[v])
+        for v in eid_labels
     ]
 
-    tbl = """"<style>
+    tbl = """<style>
     table, th, td {{
         border: 1px solid black;
     }}
     </style>
-    <table> {} </table>""".format(
+    <table>
+    <tr> <th>Env name</th> <th>Legend label</th> </tr>
+    {} </table>""".format(
         " ".join(tableRows)
     )
 
