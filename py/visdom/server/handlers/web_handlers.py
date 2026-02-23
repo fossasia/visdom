@@ -527,6 +527,7 @@ class CompareHandler(BaseHandler):
         self.env_path = app.env_path
         self.login_enabled = app.login_enabled
         self.wrap_socket = app.wrap_socket
+        self.base_url = app.base_url if app.base_url != "" else "/"
 
     @check_auth
     def get(self, eids):
@@ -541,6 +542,7 @@ class CompareHandler(BaseHandler):
             items=items,
             active_item=eids,
             wrap_socket=self.wrap_socket,
+            base_url=self.base_url,
         )
 
     @check_auth
@@ -643,6 +645,7 @@ class IndexHandler(BaseHandler):
                 items=items,
                 active_item="",
                 wrap_socket=self.wrap_socket,
+                base_url=self.base_url,
             )
         elif self.login_enabled:
             self.render(
