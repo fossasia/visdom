@@ -60,9 +60,7 @@ try:
         perplexity = (
             50
             if num_entities >= 150
-            else num_entities // 3
-            if num_entities >= 21
-            else 7
+            else num_entities // 3 if num_entities >= 21 else 7
         )
         Y = bhtsne.run_bh_tsne(
             X, initial_dims=X.shape[1], perplexity=perplexity, verbose=True
@@ -179,9 +177,11 @@ def _axisformat(xy, opts):
         return {
             "type": opts.get(xy + "type"),
             "title": opts.get(xy + "label"),
-            "range": [opts.get(xy + "tickmin"), opts.get(xy + "tickmax")]
-            if has_ticks
-            else None,
+            "range": (
+                [opts.get(xy + "tickmin"), opts.get(xy + "tickmax")]
+                if has_ticks
+                else None
+            ),
             "tickvals": opts.get(xy + "tickvals"),
             "ticktext": opts.get(xy + "ticklabels"),
             "dtick": opts.get(xy + "tickstep"),
@@ -209,17 +209,21 @@ def _axisformat3d(xyz, opts):
         return {
             "type": opts.get(xyz + "type"),
             "title": opts.get(xyz + "label"),
-            "range": [opts.get(xyz + "tickmin"), opts.get(xyz + "tickmax")]
-            if has_ticks
-            else None,
+            "range": (
+                [opts.get(xyz + "tickmin"), opts.get(xyz + "tickmax")]
+                if has_ticks
+                else None
+            ),
             "tickvals": opts.get(xyz + "tickvals"),
             "ticktext": opts.get(xyz + "ticklabels"),
             "nticks": (
-                (opts.get(xyz + "tickmax") - opts.get(xyz + "tickmin"))
-                / opts.get(xyz + "tickstep")
-            )
-            if has_step
-            else None,
+                (
+                    (opts.get(xyz + "tickmax") - opts.get(xyz + "tickmin"))
+                    / opts.get(xyz + "tickstep")
+                )
+                if has_step
+                else None
+            ),
             "tickfont": opts.get(xyz + "tickfont"),
         }
 
@@ -1607,17 +1611,29 @@ class Visdom(object):
         if Y is not None:
             Y = np.ravel(Y)
             assert X.shape[0] == Y.shape[0], "sizes of X and Y should match"
-            assert np.equal(np.mod(Y, 1), 0).all(), "labels should be integers"
-            assert Y.min() >= 1, "labels are assumed to be at least 1"
-            labels = np.unique(Y.astype(int, copy=False))
+            # Float labels are supported: if Y is already a valid set of
+            # 1-based integer labels keep the existing path unchanged.
+            # Otherwise remap arbitrary values (int or float) to sequential
+            # 1-based indices via np.unique/np.searchsorted.  label_values
+            # stores the original values so the legend shows real text;
+            # it is None for the integer path (trace names keep str(k)).
+            if np.equal(np.mod(Y, 1), 0).all() and Y.min() >= 1:
+                labels = np.unique(Y.astype(int, copy=False))
+                K = int(Y.max())  # largest label
+                label_values = None  # integer path: use str(k) for names
+            else:
+                label_values = np.unique(Y)
+                K = len(label_values)
+                Y = (np.searchsorted(label_values, Y) + 1).astype(int)
+                labels = np.arange(1, K + 1, dtype=int)
             assert (
                 len(labels) == 1 or name is None
             ), "name should not be specified with multiple labels or lines"
-            K = int(Y.max())  # largest label
         else:
             Y = np.ones(X.shape[0], dtype=int)
             labels = np.ones(1, dtype=int)
             K = 1  # largest label
+            label_values = None  # single unlabelled trace
 
         is3d = X.shape[1] == 3
 
@@ -1666,15 +1682,20 @@ class Visdom(object):
                 elif len(labels) == 1 and name is not None:
                     trace_name = name
                 else:
-                    trace_name = str(k)
+                    # For float-remapped labels show the original value;
+                    # for integer labels keep existing str(k) behaviour.
+                    if label_values is not None:
+                        trace_name = str(label_values[k - 1])
+                    else:
+                        trace_name = str(k)
                 use_gl = opts.get("webgl", False)
                 _data = {
                     "x": nan2none(X.take(0, 1)[ind].tolist()),
                     "y": nan2none(X.take(1, 1)[ind].tolist()),
                     "name": trace_name,
-                    "type": "scatter3d"
-                    if is3d
-                    else ("scattergl" if use_gl else "scatter"),
+                    "type": (
+                        "scatter3d" if is3d else ("scattergl" if use_gl else "scatter")
+                    ),
                     "mode": opts.get("mode"),
                     "text": L[ind].tolist() if L is not None else None,
                     "textposition": "right",
