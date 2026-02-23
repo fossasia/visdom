@@ -490,6 +490,7 @@ class EnvHandler(BaseHandler):
         self.env_path = app.env_path
         self.login_enabled = app.login_enabled
         self.wrap_socket = app.wrap_socket
+        self.base_url = app.base_url if app.base_url != "" else "/"
 
     @check_auth
     def get(self, eid):
@@ -501,6 +502,7 @@ class EnvHandler(BaseHandler):
             items=items,
             active_item=active,
             wrap_socket=self.wrap_socket,
+            base_url=self.base_url,
         )
 
     @check_auth
