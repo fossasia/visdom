@@ -1285,13 +1285,17 @@ class Visdom(object):
             img = img[np.newaxis, :, :].repeat(3, axis=0)
 
         if "float" in str(img.dtype):
-            if img.max() <= 1.0:
+            # Tolerance for floating-point rounding artefacts just above 1.0
+            # (e.g. after ImageNet-style de-normalisation).
+            _FLOAT_UPPER_TOL = np.finfo(img.dtype).eps ** 0.5
+            max_val = float(img.max())
+            if max_val <= 1.0:
                 img = img * 255.0
-            elif img.max() <= 1.01:
+            elif max_val <= 1.0 + _FLOAT_UPPER_TOL:
                 warnings.warn(
                     "Image has float values slightly above 1.0 "
                     "(max={:.6f}). Values will be clamped to "
-                    "[0, 1] and scaled to [0, 255].".format(float(img.max())),
+                    "[0, 1] and scaled to [0, 255].".format(max_val),
                     UserWarning,
                     stacklevel=2,
                 )
