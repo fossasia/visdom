@@ -1272,30 +1272,38 @@ class Visdom(object):
         opts = {} if opts is None else opts
         _title2str(opts)
         _assert_opts(opts)
+        
+        opts["width"] = opts.get("width", img.shape[img.ndim - 1])
+        opts["height"] = opts.get("height", img.shape[img.ndim - 2])
 
         if np.issubdtype(img.dtype, np.floating):
             if img.max() <= 1:
                 img = img * 255.0
-
+        
         img = np.clip(img, 0, 255).astype(np.uint8)
 
         nchannels = img.shape[0] if img.ndim == 3 else 1
+        is_jpeg = opts.get('jpgquality') is not None
 
         if img.ndim == 2:
             img = img[np.newaxis, :, :]
-            img = np.repeat(img, 4, axis=0)
-            img[3, :, :] = 255
+            nchannels = 1 
 
-        elif nchannels == 1:
-            img = np.repeat(img, 4, axis=0)
-            img[3, :, :] = 255
-
-        elif nchannels == 3:
-            alpha = np.ones_like(img[0:1]) * 255
-            img = np.concatenate([img, alpha], axis=0)
-
+        if nchannels == 1:
+            img = np.repeat(img, 3, axis=0)
         elif nchannels == 4:
+            if is_jpeg:
+                img = img[:3, :, :]
+        elif nchannels == 3:
             pass
+        else:
+            raise ValueError(
+                "Unsupported number of channels: {}. Expected 1, 3, or 4.".format(nchannels)
+            )
+
+        if not is_jpeg and img.shape[0] == 3:
+            alpha = np.full((1, img.shape[1], img.shape[2]), 255, dtype=np.uint8)
+            img = np.concatenate([img, alpha], axis=0)
 
         img = np.transpose(img, (1, 2, 0))
         im = Image.fromarray(img)
