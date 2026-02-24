@@ -14,22 +14,24 @@ const ApiProvider = ({ children }) => {
   // helper functions //
   // ---------------- //
 
+  // Normalize VISDOM_BASE_URL once: return base path with trailing slash, or
+  // null when unset (caller falls back to pathname). Precedence:
+  //   undefined → null (derive from pathname)
+  //   '' or '/' → '/'
+  //   else      → value with trailing slash appended if missing
+  const getNormalizedBaseUrl = () => {
+    if (typeof VISDOM_BASE_URL === 'undefined') return null;
+    if (VISDOM_BASE_URL === '' || VISDOM_BASE_URL === '/') return '/';
+    return VISDOM_BASE_URL.slice(-1) === '/'
+      ? VISDOM_BASE_URL
+      : VISDOM_BASE_URL + '/';
+  };
+
   // Use server-configured base URL when behind a proxy (e.g. /path1); otherwise
   // derive from pathname so static and socket URLs use the correct path.
   const correctPathname = () => {
-    if (
-      typeof VISDOM_BASE_URL !== 'undefined' &&
-      VISDOM_BASE_URL &&
-      VISDOM_BASE_URL !== '/'
-    ) {
-      return VISDOM_BASE_URL.slice(-1) === '/' ? VISDOM_BASE_URL : VISDOM_BASE_URL + '/';
-    }
-    if (
-      typeof VISDOM_BASE_URL !== 'undefined' &&
-      (VISDOM_BASE_URL === '/' || VISDOM_BASE_URL === '')
-    ) {
-      return '/';
-    }
+    const base = getNormalizedBaseUrl();
+    if (base !== null) return base;
     var pathname = window.location.pathname;
     if (pathname.indexOf('/env/') > -1) {
       pathname = pathname.split('/env/')[0];
