@@ -131,7 +131,7 @@ npm run build     # build js
 ```
 
 #### Test your changes
-This project has some Cypress tests (end-2-end tests and visual regression tests) so you can check for side effects of your changes.
+This project has some Cypress tests (end-to-end tests and visual regression tests) so you can check for side effects of your changes.
 If you add or change functions, feel free to adjust the tests or add new ones if none exist for your case.
 (This will ensure that your function will continue to work in the future. ;) )
 
