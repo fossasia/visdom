@@ -4986,8 +4986,8 @@ write-file-atomic@^2.0.0:
     signal-exit "^3.0.2"
 
 ws@^7:
-  version "7.5.9"
-  resolved "https://registry.npmjs.org/ws/-/ws-7.5.9.tgz"
+  version "7.5.10"
+  resolved "https://registry.yarnpkg.com/ws/-/ws-7.5.10.tgz#58b5c20dc281633f6c19113f39b349bd8bd558d9"
 
 xdg-basedir@^3.0.0:
   version "3.0.0"
