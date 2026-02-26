@@ -36,7 +36,7 @@ the dependencies manually:
 Note that the variables `$ANACONDA_FOLDER`, `$PYTHON_VERSION`, and
 `$VISDOM_VERSION` may not be set and depend on your configuration. Furthermore,
 if you are installing from source or using another method of installing
-dependancies, the folder to use may be different.
+dependencies, the folder to use may be different.
 
 * View the `download.sh` script and either execute it to automatically download the resources or manually download all the files that it requests.
 
@@ -115,7 +115,7 @@ pip install -r test-requirements.txt
 ```
 
 #### yarn
-You can find instructions for install `yarn` [here](https://yarnpkg.com/lang/en/docs/install/).
+You can find instructions for installing `yarn` [here](https://yarnpkg.com/lang/en/docs/install/).
 ```bash
 cd /path/to/visdom
 yarn             # install node dependencies
@@ -131,7 +131,7 @@ npm run build     # build js
 ```
 
 #### Test your changes
-This project has some Cypress tests (end-2-end tests and visual regression tests) so you can check for sideeffects of your changes.
+This project has some Cypress tests (end-to-end tests and visual regression tests) so you can check for side effects of your changes.
 If you add or change functions, feel free to adjust the tests or add new ones if none exist for your case.
 (This will ensure that your function will continue to work in the future. ;) )
 
