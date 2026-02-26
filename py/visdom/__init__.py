@@ -1274,17 +1274,18 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
+        # ---- normalize image layout FIRST ----
         img = np.asarray(img)
-        if img.size == 0:
-            raise ValueError("Visdom.image expects a non-empty image array.")
 
-        if img.ndim < 2:
-            raise ValueError(
-                f"Invalid image dimensions: img.shape={img.shape}, img.ndim={img.ndim}"
-            )
+        if img.ndim == 3 and img.shape[-1] in (1, 3, 4):
+            img = img.transpose(2, 0, 1)
 
-        opts["width"] = opts.get("width", img.shape[img.ndim - 1])
-        opts["height"] = opts.get("height", img.shape[img.ndim - 2])
+        if img.ndim == 2:
+            img = img[np.newaxis, :, :]
+
+        # ---- NOW dimensions are reliable ----
+        opts.setdefault("width", img.shape[-1])
+        opts.setdefault("height", img.shape[-2])
 
         if np.issubdtype(img.dtype, np.floating):
             if img.size > 0 and img.max() <= 1:
