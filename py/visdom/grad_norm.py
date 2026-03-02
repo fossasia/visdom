@@ -11,7 +11,7 @@ Shared gradient-norm math utilities.
 
 These functions are used by:
   - visdom.Visdom.log_gradient_norm (manual logging)
-  - visdom.loggers.lightning.GradientNormCallback (hook-based auto-logging)
+  - visdom.lightning_logger.GradientNormCallback (hook-based auto-logging)
 
 Keeping the math in one place means any bug fix applies everywhere.
 """
@@ -63,12 +63,10 @@ def compute_grad_norm(params, norm_type=2.0):
     True
     """
     if norm_type <= 0:
-        raise ValueError(
-            f"norm_type must be strictly positive, got {norm_type!r}"
-        )
+        raise ValueError(f"norm_type must be strictly positive, got {norm_type!r}")
 
     per_param = [
-        torch.norm(p.grad.detach(), norm_type)
+        torch.linalg.vector_norm(p.grad.detach(), ord=norm_type)
         for p in params
         if p.grad is not None
     ]
@@ -77,7 +75,7 @@ def compute_grad_norm(params, norm_type=2.0):
         return 0.0
 
     # stack into a 1-D tensor then take the global norm
-    return torch.norm(torch.stack(per_param), norm_type).item()
+    return torch.linalg.vector_norm(torch.stack(per_param), ord=norm_type).item()
 
 
 def compute_layer_grad_norms(model, norm_type=2.0):
@@ -99,9 +97,7 @@ def compute_layer_grad_norms(model, norm_type=2.0):
         gradients are present.
     """
     if norm_type <= 0:
-        raise ValueError(
-            f"norm_type must be strictly positive, got {norm_type!r}"
-        )
+        raise ValueError(f"norm_type must be strictly positive, got {norm_type!r}")
 
     # named_parameters() yields (name, param) pairs with human-readable
     # keys (e.g. "features.0.weight"), making them directly usable as
@@ -109,7 +105,7 @@ def compute_layer_grad_norms(model, norm_type=2.0):
     # consider aggregating (e.g. mean per layer group) to avoid spawning
     # too many Visdom windows.
     return {
-        name: torch.norm(p.grad.detach(), norm_type).item()
+        name: torch.linalg.vector_norm(p.grad.detach(), ord=norm_type).item()
         for name, p in model.named_parameters()
         if p.grad is not None
     }

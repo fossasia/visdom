@@ -53,7 +53,7 @@ except ImportError:
             "Install with:  pip install lightning"
         )
 
-from visdom.loggers import GradientNormCallback, VisdomLogger
+from visdom.lightning_logger import GradientNormCallback, VisdomLogger
 
 # ---------------------------------------------------------------------------
 # Config
@@ -126,9 +126,7 @@ class LitMNIST(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
-        scheduler = torch.optim.lr_scheduler.StepLR(
-            optimizer, step_size=2, gamma=0.5
-        )
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=0.5)
         return {"optimizer": optimizer, "lr_scheduler": scheduler}
 
 
@@ -176,9 +174,9 @@ if __name__ == "__main__":
     # GradientNormCallback tracks grad norms via autograd hooks — zero
     # boilerplate in the model code.  profile_hooks=True adds timing data.
     grad_cb = GradientNormCallback(
-        log_every=50,       # every 50 optimizer steps
-        per_layer=True,     # one grad_norm/<param> window per parameter
-        profile_hooks=True, # logs grad_hook_ms to measure overhead
+        log_every=50,  # every 50 optimizer steps
+        per_layer=True,  # one grad_norm/<param> window per parameter
+        profile_hooks=True,  # logs grad_hook_ms to measure overhead
     )
 
     trainer = pl.Trainer(
@@ -191,7 +189,9 @@ if __name__ == "__main__":
     model = LitMNIST(lr=LR)
     trainer.fit(model, train_dl, val_dl)
 
-    print("Per-layer norms: each parameter has its own grad_norm/<name> window (per_layer=True).")
+    print(
+        "Per-layer norms: each parameter has its own grad_norm/<name> window (per_layer=True)."
+    )
     print("\nDashboard: http://localhost:8097")
     print(
         "Windows created:\n"
@@ -199,6 +199,6 @@ if __name__ == "__main__":
         "  mnist_lightning-v*/val_loss    — validation loss per epoch\n"
         "  mnist_lightning-v*/val_acc     — validation accuracy per epoch\n"
         "  mnist_lightning-v*/grad_norm   — gradient norm per step\n"
-        "  mnist_lightning-v*/grad_hook_ms — hook overhead (µs)\n"
+        "  mnist_lightning-v*/grad_hook_ms — hook overhead (ms)\n"
         "  mnist_lightning-v*/hparams     — hyperparameter table\n"
     )

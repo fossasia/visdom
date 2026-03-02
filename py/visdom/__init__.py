@@ -60,9 +60,7 @@ try:
         perplexity = (
             50
             if num_entities >= 150
-            else num_entities // 3
-            if num_entities >= 21
-            else 7
+            else num_entities // 3 if num_entities >= 21 else 7
         )
         Y = bhtsne.run_bh_tsne(
             X, initial_dims=X.shape[1], perplexity=perplexity, verbose=True
@@ -179,9 +177,11 @@ def _axisformat(xy, opts):
         return {
             "type": opts.get(xy + "type"),
             "title": opts.get(xy + "label"),
-            "range": [opts.get(xy + "tickmin"), opts.get(xy + "tickmax")]
-            if has_ticks
-            else None,
+            "range": (
+                [opts.get(xy + "tickmin"), opts.get(xy + "tickmax")]
+                if has_ticks
+                else None
+            ),
             "tickvals": opts.get(xy + "tickvals"),
             "ticktext": opts.get(xy + "ticklabels"),
             "dtick": opts.get(xy + "tickstep"),
@@ -209,17 +209,21 @@ def _axisformat3d(xyz, opts):
         return {
             "type": opts.get(xyz + "type"),
             "title": opts.get(xyz + "label"),
-            "range": [opts.get(xyz + "tickmin"), opts.get(xyz + "tickmax")]
-            if has_ticks
-            else None,
+            "range": (
+                [opts.get(xyz + "tickmin"), opts.get(xyz + "tickmax")]
+                if has_ticks
+                else None
+            ),
             "tickvals": opts.get(xyz + "tickvals"),
             "ticktext": opts.get(xyz + "ticklabels"),
             "nticks": (
-                (opts.get(xyz + "tickmax") - opts.get(xyz + "tickmin"))
-                / opts.get(xyz + "tickstep")
-            )
-            if has_step
-            else None,
+                (
+                    (opts.get(xyz + "tickmax") - opts.get(xyz + "tickmin"))
+                    / opts.get(xyz + "tickstep")
+                )
+                if has_step
+                else None
+            ),
             "tickfont": opts.get(xyz + "tickfont"),
         }
 
@@ -1672,9 +1676,9 @@ class Visdom(object):
                     "x": nan2none(X.take(0, 1)[ind].tolist()),
                     "y": nan2none(X.take(1, 1)[ind].tolist()),
                     "name": trace_name,
-                    "type": "scatter3d"
-                    if is3d
-                    else ("scattergl" if use_gl else "scatter"),
+                    "type": (
+                        "scatter3d" if is3d else ("scattergl" if use_gl else "scatter")
+                    ),
                     "mode": opts.get("mode"),
                     "text": L[ind].tolist() if L is not None else None,
                     "textposition": "right",
@@ -2592,3 +2596,137 @@ class Visdom(object):
         return self._send(
             {"data": data, "win": win, "eid": env, "opts": opts}, endpoint="events"
         )
+
+    def log_gradient_norm(
+        self,
+        model,
+        step,
+        win="grad_norm",
+        env=None,
+        opts=None,
+        norm_type=2.0,
+        per_layer=False,
+    ):
+        """
+        Log the global (and optionally per-layer) gradient norm to Visdom.
+
+        Call this **after** ``loss.backward()`` and **before**
+        ``optimizer.step()`` so that ``.grad`` tensors are still populated.
+        ``update='append'`` is used unconditionally — Visdom creates the
+        window on the first call and appends on subsequent ones.
+
+        The global norm is computed as::
+
+            global_norm = (sum_i ||p.grad||^q)^(1/q)
+
+        where *q* = ``norm_type``.  This matches
+        ``torch.nn.utils.clip_grad_norm_`` exactly.
+
+        Parameters
+        ----------
+        model : torch.nn.Module
+            The model whose parameter gradients to inspect.
+        step : int
+            Training step / epoch used as the X-axis value.
+        win : str, optional
+            Visdom window name for the global norm line chart.
+            Default ``"grad_norm"``.
+        env : str or None, optional
+            Visdom environment.  ``None`` falls back to ``self.env``.
+        opts : dict or None, optional
+            Extra Visdom ``line()`` opts.  The defaults (title) are applied
+            first; values in *opts* override them.
+        norm_type : float, optional
+            Lp exponent (default ``2.0`` for L2). Must be positive.
+        per_layer : bool, optional
+            When ``True`` an additional bar chart (``win + '_layers'``) is
+            rendered with per-parameter norms at the current step.
+
+        Returns
+        -------
+        float
+            The global gradient norm.
+
+        Raises
+        ------
+        TypeError
+            If *model* is not a ``torch.nn.Module``.
+
+        Examples
+        --------
+        ::
+
+            viz = visdom.Visdom()
+            for epoch in range(10):
+                optimizer.zero_grad()
+                loss = criterion(model(x), y)
+                loss.backward()
+                norm = viz.log_gradient_norm(model, epoch)
+                optimizer.step()
+        """
+        try:
+            import torch.nn as _nn
+            from visdom.grad_norm import (
+                compute_grad_norm,
+                compute_layer_grad_norms,
+            )
+        except ImportError as exc:
+            raise ImportError("torch is required for log_gradient_norm.") from exc
+
+        if not isinstance(model, _nn.Module):
+            raise TypeError(
+                "model must be a torch.nn.Module, " f"got {type(model).__name__!r}"
+            )
+
+        total_norm = compute_grad_norm(model.parameters(), norm_type)
+        resolved_env = env if env is not None else self.env
+
+        line_opts = {"title": win}
+        if opts:
+            line_opts.update(opts)
+
+        self.line(
+            Y=np.array([total_norm]),
+            X=np.array([step]),
+            win=win,
+            env=resolved_env,
+            update="append",
+            opts=line_opts,
+        )
+
+        if per_layer:
+            layer_norms = compute_layer_grad_norms(model, norm_type)
+            if layer_norms:
+                self.bar(
+                    X=np.array(list(layer_norms.values())),
+                    win=win + "_layers",
+                    env=resolved_env,
+                    opts=dict(
+                        title=win + " (per layer)",
+                        rownames=list(layer_norms.keys()),
+                    ),
+                )
+
+        return total_norm
+
+
+# ---------------------------------------------------------------------------
+# Optional top-level exports (Lightning integration — lazy to keep the dep
+# optional: users who don't have Lightning installed can still import visdom)
+# ---------------------------------------------------------------------------
+
+try:
+    from visdom.grad_norm import compute_grad_norm, compute_layer_grad_norms
+except ImportError:
+    pass  # torch not installed; log_gradient_norm will raise at call-time
+
+
+def __getattr__(name):
+    if name in ("VisdomLogger", "GradientNormCallback"):
+        from visdom.lightning_logger import VisdomLogger, GradientNormCallback
+
+        return {
+            "VisdomLogger": VisdomLogger,
+            "GradientNormCallback": GradientNormCallback,
+        }[name]
+    raise AttributeError(f"module 'visdom' has no attribute {name!r}")

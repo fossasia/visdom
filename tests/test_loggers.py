@@ -15,7 +15,7 @@ import pytest
 import torch
 import torch.nn as nn
 
-from visdom.loggers.base import compute_grad_norm, compute_layer_grad_norms
+from visdom.grad_norm import compute_grad_norm, compute_layer_grad_norms
 
 
 # ---------------------------------------------------------------------------
@@ -65,12 +65,14 @@ class TestComputeGradNorm:
         with_grad.grad = torch.tensor([3.0, 4.0])
         assert compute_grad_norm([no_grad, with_grad], 2.0) == pytest.approx(5.0)
 
+    def test_inf_norm_type(self):
+        # inf-norm = max absolute gradient element across all params
+        params = _params(torch.tensor([1.0, -5.0, 3.0]), torch.tensor([2.0]))
+        assert compute_grad_norm(params, float('inf')) == pytest.approx(5.0)
+
     def test_invalid_norm_type_raises(self):
         with pytest.raises(ValueError, match="norm_type"):
             compute_grad_norm(_params(torch.tensor([1.0])), norm_type=0.0)
-
-    def test_returns_float(self):
-        assert isinstance(compute_grad_norm(_trained_model().parameters(), 2.0), float)
 
 
 # ---------------------------------------------------------------------------
@@ -84,9 +86,14 @@ class TestComputeLayerGradNorms:
         param_names = {n for n, p in model.named_parameters() if p.grad is not None}
         assert set(layer_norms.keys()) == param_names
 
-    def test_all_values_non_negative(self):
-        for v in compute_layer_grad_norms(_trained_model(), 2.0).values():
-            assert v >= 0.0
+    def test_values_match_per_param_norm(self):
+        # Each value must equal the L2 norm of that parameter's gradient tensor.
+        model = _trained_model()
+        layer_norms = compute_layer_grad_norms(model, 2.0)
+        for name, param in model.named_parameters():
+            if param.grad is not None:
+                expected = param.grad.norm(2.0).item()
+                assert layer_norms[name] == pytest.approx(expected, rel=1e-5)
 
     def test_empty_when_no_grads(self):
         assert compute_layer_grad_norms(nn.Linear(2, 1), 2.0) == {}
@@ -185,16 +192,24 @@ class TestLogGradientNorm:
 
 
 # ---------------------------------------------------------------------------
-# Lightning tests   (skipped when Lightning is not installed)
+# Lightning tests   (skip only Lightning-specific tests when unavailable)
 # ---------------------------------------------------------------------------
 
-_lightning = pytest.importorskip(
-    "lightning.pytorch",
-    reason="PyTorch Lightning not installed; skipping Lightning logger tests",
-    exc_type=(ImportError, ModuleNotFoundError),
-)
+try:
+    import lightning.pytorch  # noqa: F401
+    _HAS_LIGHTNING = True
+except (ImportError, ModuleNotFoundError):
+    try:
+        import pytorch_lightning  # noqa: F401
+        _HAS_LIGHTNING = True
+    except (ImportError, ModuleNotFoundError):
+        _HAS_LIGHTNING = False
 
-from visdom.loggers.lightning import GradientNormCallback, VisdomLogger  # noqa: E402
+if _HAS_LIGHTNING:
+    from visdom.lightning_logger import GradientNormCallback, VisdomLogger  # noqa: E402
+else:  # pragma: no cover
+    GradientNormCallback = None  # type: ignore[assignment]
+    VisdomLogger = None  # type: ignore[assignment]
 
 
 def _mock_pl_module():
@@ -216,6 +231,10 @@ def _mock_trainer(step=0):
 
 # ---- VisdomLogger properties ----
 
+@pytest.mark.skipif(
+    not _HAS_LIGHTNING,
+    reason="PyTorch Lightning not installed; skipping Lightning logger tests",
+)
 class TestVisdomLoggerProperties:
     def test_name(self):
         assert VisdomLogger(name="proj", fail_on_no_connection=False).name == "proj"
@@ -237,6 +256,10 @@ class TestVisdomLoggerProperties:
 
 # ---- VisdomLogger.log_metrics ----
 
+@pytest.mark.skipif(
+    not _HAS_LIGHTNING,
+    reason="PyTorch Lightning not installed; skipping Lightning logger tests",
+)
 class TestVisdomLoggerLogMetrics:
     @pytest.fixture
     def logger(self):
@@ -281,6 +304,10 @@ class TestVisdomLoggerLogMetrics:
 
 # ---- VisdomLogger.log_hyperparams ----
 
+@pytest.mark.skipif(
+    not _HAS_LIGHTNING,
+    reason="PyTorch Lightning not installed; skipping Lightning logger tests",
+)
 class TestVisdomLoggerLogHyperparams:
     @pytest.fixture
     def logger(self):
@@ -306,6 +333,10 @@ class TestVisdomLoggerLogHyperparams:
 
 # ---- GradientNormCallback validation ----
 
+@pytest.mark.skipif(
+    not _HAS_LIGHTNING,
+    reason="PyTorch Lightning not installed; skipping Lightning logger tests",
+)
 class TestGradientNormCallbackInit:
     def test_invalid_log_every(self):
         with pytest.raises(ValueError, match="log_every"):
@@ -325,6 +356,10 @@ class TestGradientNormCallbackInit:
 
 # ---- GradientNormCallback hooks lifecycle ----
 
+@pytest.mark.skipif(
+    not _HAS_LIGHTNING,
+    reason="PyTorch Lightning not installed; skipping Lightning logger tests",
+)
 class TestGradientNormCallbackHooks:
     def test_hooks_registered_for_fit(self):
         cb = GradientNormCallback()
@@ -349,6 +384,10 @@ class TestGradientNormCallbackHooks:
 
 # ---- GradientNormCallback step logging ----
 
+@pytest.mark.skipif(
+    not _HAS_LIGHTNING,
+    reason="PyTorch Lightning not installed; skipping Lightning logger tests",
+)
 class TestGradientNormCallbackStep:
     def test_logs_grad_norm(self):
         cb = GradientNormCallback()
@@ -376,13 +415,15 @@ class TestGradientNormCallbackStep:
         )
         pl_module.log.assert_not_called()
 
-    def test_per_layer_logs_multiple(self):
+    def test_per_layer_logs_exact_count(self):
+        # Expects one global grad_norm call plus one call per parameter with a grad.
         cb = GradientNormCallback(per_layer=True)
         pl_module = _mock_pl_module()
+        n_params = sum(1 for _, p in pl_module.named_parameters() if p.grad is not None)
         cb.on_before_optimizer_step(
             _mock_trainer(step=0), pl_module, optimizer=MagicMock()
         )
-        assert pl_module.log.call_count >= 2
+        assert pl_module.log.call_count == 1 + n_params
 
     def test_per_layer_keys_match_param_names(self):
         """Logged keys are grad_norm/<param_name> for every parameter with a grad."""
@@ -399,21 +440,30 @@ class TestGradientNormCallbackStep:
         }
         assert expected.issubset(logged_keys)
 
-    def test_profile_hooks_logs_hook_ms(self):
+    def test_profile_hooks_logs_hook_ms_via_real_backward(self):
+        # Hooks must fire during an actual backward pass and produce a logged value.
+        real = nn.Linear(4, 2)
         cb = GradientNormCallback(profile_hooks=True)
-        pl_module = _mock_pl_module()
-        cb._hook_times_ms = [0.1, 0.2, 0.15]
-        cb.on_before_optimizer_step(
-            _mock_trainer(step=0), pl_module, optimizer=MagicMock()
-        )
+        pl_module = MagicMock()
+        pl_module.named_parameters = real.named_parameters
+        pl_module.parameters = real.parameters
+        cb.setup(_mock_trainer(), pl_module, stage="fit")
+        # Trigger backward so registered hooks populate timing data.
+        real(torch.randn(3, 4)).sum().backward()
+        cb.on_before_optimizer_step(_mock_trainer(step=0), pl_module, optimizer=MagicMock())
         keys = [c[0][0] for c in pl_module.log.call_args_list]
         assert "grad_hook_ms" in keys
+        hook_val = next(c[0][1] for c in pl_module.log.call_args_list if c[0][0] == "grad_hook_ms")
+        assert hook_val >= 0.0
 
-    def test_profile_times_cleared_after_step(self):
-        cb = GradientNormCallback(profile_hooks=True)
-        pl_module = _mock_pl_module()
-        cb._hook_times_ms = [0.1, 0.2]
-        cb.on_before_optimizer_step(
-            _mock_trainer(step=0), pl_module, optimizer=MagicMock()
-        )
-        assert cb._hook_times_ms == []
+    def test_log_every_boundary(self):
+        # step=0 logs; steps 1..log_every-1 skip; step=log_every logs again.
+        cb = GradientNormCallback(log_every=5)
+        for step in [0, 5, 10]:
+            pm = _mock_pl_module()
+            cb.on_before_optimizer_step(_mock_trainer(step=step), pm, optimizer=MagicMock())
+            pm.log.assert_called()
+        for step in [1, 3, 4, 6, 9]:
+            pm = _mock_pl_module()
+            cb.on_before_optimizer_step(_mock_trainer(step=step), pm, optimizer=MagicMock())
+            pm.log.assert_not_called()
