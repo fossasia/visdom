@@ -1831,6 +1831,8 @@ class Visdom(object):
         - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
         - `opts.columnnames`: `list` containing x-axis labels
         - `opts.rownames`: `list` containing y-axis labels
+        - `opts.x`: list containing x-axis labels
+        - `opts.y`: list containing y-axis labels
         - `opts.nancolor`: if not None, color for plotting nan
                            (`string`; default = `None`)
         """
@@ -1866,6 +1868,12 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
+        if "x" in opts and isinstance(opts["x"], np.ndarray):
+            opts["x"] = opts["x"].tolist()
+    
+        if "y" in opts and isinstance(opts["y"], np.ndarray):
+            opts["y"] = opts["y"].tolist()
+
         if opts.get("columnnames") is not None:
             assert (
                 len(opts["columnnames"]) == X.shape[1]
@@ -1882,13 +1890,17 @@ class Visdom(object):
 
         if opts.get("y") is not None:
             assert len(opts["y"]) == X.shape[0], \
-                "length of y must match number of row in X"
+                "length of y must match number of rows in X"
+
+        x_vals = opts["x"] if "x" in opts else opts.get("columnnames")
+        y_vals = opts["y"] if "y" in opts else opts.get("rownames")
+
 
         data = [
             {
                 "z": nan2none(X.tolist()),
-                "x": opts.get("x", opts.get("columnnames")),
-                "y": opts.get("y", opts.get("rownames")),
+                "x": x_vals,
+                "y": y_vals,
                 "zmin": opts.get("xmin"),
                 "zmax": opts.get("xmax"),
                 "type": "heatmap",
@@ -1927,6 +1939,7 @@ class Visdom(object):
             endpoint = "update"
 
         return self._send(data_to_send, endpoint=endpoint)
+    
 
     @pytorch_wrap
     def bar(self, X, Y=None, win=None, env=None, opts=None):
