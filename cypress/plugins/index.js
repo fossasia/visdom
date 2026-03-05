@@ -22,29 +22,10 @@ const path = require('path');
 const pixelmatch = require('pixelmatch');
 const PNG = require('pngjs').PNG;
 
-function parseCommand(cmd) {
-  if (typeof cmd !== 'string' || cmd.trim().length === 0) {
-    throw new Error('asyncrun requires a non-empty command string.');
-  }
-
-  // Supports plain tokens and simple quoted arguments.
-  // Escaped quotes inside quoted args are not supported.
-  const tokens = cmd.match(/[^\s"']+|"([^"]*)"|'([^']*)'/g) || [];
-  const normalized = tokens.map((token) => token.replace(/^['"]|['"]$/g, ''));
-
-  if (normalized.length === 0) {
-    throw new Error('Unable to parse asyncrun command.');
-  }
-
-  const command = normalized[0];
-  const args = normalized.slice(1);
-  return { command, args };
-}
-
-function assertSafeCommand(command) {
-  const allowedCommands = new Set(['python', 'python3']);
-  if (!allowedCommands.has(command)) {
-    throw new Error(`Unsupported command in asyncrun: ${command}`);
+function assertSafeToken(name, value) {
+  const safePattern = /^[A-Za-z0-9._:-]+$/;
+  if (typeof value !== 'string' || value.length === 0 || !safePattern.test(value)) {
+    throw new Error(`Invalid value for ${name}: ${value}`);
   }
 }
 
@@ -54,17 +35,57 @@ module.exports = (on) => {
   // `config` is the resolved Cypress config
 
   on('task', {
-    asyncrun(cmd) {
-      const { command, args } = parseCommand(cmd);
-      assertSafeCommand(command);
+    asyncrun(payload) {
+      if (!payload || typeof payload !== 'object') {
+        throw new Error('asyncrun requires a payload object.');
+      }
 
-      const child = spawn(command, args, {
+      const { run, env, seed, args = [] } = payload;
+
+      assertSafeToken('run', run);
+      assertSafeToken('env', env);
+
+      if (!Array.isArray(args)) {
+        throw new Error('asyncrun payload field `args` must be an array.');
+      }
+
+      args.forEach((arg, index) => {
+        assertSafeToken(`args[${index}]`, arg);
+      });
+
+      const spawnArgs = [
+        'example/demo.py',
+        '-testing',
+        '-port',
+        '8098',
+        '-run',
+        run,
+        '-env',
+        env,
+      ];
+
+      if (seed !== undefined && seed !== null) {
+        const seedValue = Number(seed);
+        if (!Number.isFinite(seedValue)) {
+          throw new Error(`Invalid value for seed: ${seed}`);
+        }
+        spawnArgs.push('-seed', String(seedValue));
+      }
+
+      if (args.length > 0) {
+        spawnArgs.push('-arg', ...args);
+      }
+
+      const child = spawn('python', spawnArgs, {
         stdio: 'ignore',
         detached: true,
       });
       child.unref();
 
-      return [command, args];
+      return {
+        command: 'python',
+        args: spawnArgs,
+      };
     },
 
     numDifferentPixels({
