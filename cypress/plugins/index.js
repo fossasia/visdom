@@ -23,45 +23,84 @@ const pixelmatch = require('pixelmatch');
 const PNG = require('pngjs').PNG;
 
 
-module.exports = (on, config) => {
+module.exports = (on) => {
   // `on` is used to hook into various events Cypress emits
   // `config` is the resolved Cypress config
 
   on('task', {
     asyncrun(cmd) {
-        cmd = cmd.split(" ")
-        const args = cmd.splice(1)
-        a = spawn(cmd[0], args, {
-            stdio: 'ignore', // piping all stdio to /dev/null
-            detached: true
-        }).unref();
-      return [cmd, args]
+      const cmdParts = cmd.split(' ');
+      const args = cmdParts.splice(1);
+      const command = cmdParts[0];
+
+      const child = spawn(command, args, {
+        stdio: 'ignore',
+        detached: true,
+      });
+      child.unref();
+
+      return [command, args];
     },
-  })
+  });
 
   on('task', {
-    numDifferentPixels({src1, src2, diffsrc, threshold=0.0, debug=false}) {
-        const img1 = PNG.sync.read(fs.readFileSync(src1));
-        const img2 = PNG.sync.read(fs.readFileSync(src2));
-        const {width, height} = img1;
-        const diff = new PNG({width, height});
-        if (debug)
-            threshold = 0
-        num_diff_pixels = pixelmatch(img1.data, img2.data, diff.data, width, height, {threshold: threshold});
-        fs.mkdirSync(path.dirname(diffsrc), {recursive: true}, (err) => { if(err) throw err;})
-        fs.writeFileSync(diffsrc, PNG.sync.write(diff));
-        if (debug)
-            fs.writeFileSync(diffsrc+".num", (num_diff_pixels / (width * height)) + "");
-      return num_diff_pixels
+    numDifferentPixels({
+      src1,
+      src2,
+      diffsrc,
+      threshold = 0.0,
+      debug = false,
+    }) {
+      const img1 = PNG.sync.read(fs.readFileSync(src1));
+      const img2 = PNG.sync.read(fs.readFileSync(src2));
+
+      if (img1.width !== img2.width || img1.height !== img2.height) {
+        throw new Error('Images must have same dimensions for comparison.');
+      }
+
+      const { width, height } = img1;
+      const diff = new PNG({ width, height });
+      const appliedThreshold = debug ? 0 : threshold;
+
+      const numDiffPixels = pixelmatch(
+        img1.data,
+        img2.data,
+        diff.data,
+        width,
+        height,
+        { threshold: appliedThreshold }
+      );
+
+      fs.mkdirSync(path.dirname(diffsrc), { recursive: true });
+      fs.writeFileSync(diffsrc, PNG.sync.write(diff));
+
+      if (debug) {
+        fs.writeFileSync(
+          `${diffsrc}.num`,
+          `${numDiffPixels / (width * height)}`
+        );
+      }
+
+      return numDiffPixels;
     },
-  })
+  });
 
   on('after:screenshot', (details) => {
-    if ((details.specName).endsWith(".init.js")) {
-        newpath = details.path.replace("/"+details.specName, "_init/"+details.specName)
-        fs.mkdirSync(path.dirname(newpath), {recursive: true}, (err) => { })
-        fs.renameSync(details.path, newpath, (err) => { if(err) throw err; })
+    if (details.specName.endsWith('.init.js')) {
+      const newPath = details.path.replace(
+        `/${details.specName}`,
+        `_init/${details.specName}`
+      );
+
+      fs.mkdirSync(path.dirname(newPath), { recursive: true });
+      fs.renameSync(details.path, newPath);
+
+      return {
+        path: newPath,
+      };
     }
-  })
-}
+
+    return details;
+  });
+};
 
