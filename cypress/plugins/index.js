@@ -27,6 +27,8 @@ function parseCommand(cmd) {
     throw new Error('asyncrun requires a non-empty command string.');
   }
 
+  // Supports plain tokens and simple quoted arguments.
+  // Escaped quotes inside quoted args are not supported.
   const tokens = cmd.match(/[^\s"']+|"([^"]*)"|'([^']*)'/g) || [];
   const normalized = tokens.map((token) => token.replace(/^['"]|['"]$/g, ''));
 
@@ -39,18 +41,10 @@ function parseCommand(cmd) {
   return { command, args };
 }
 
-function assertSafeCommand(command, args) {
+function assertSafeCommand(command) {
   const allowedCommands = new Set(['python', 'python3']);
   if (!allowedCommands.has(command)) {
     throw new Error(`Unsupported command in asyncrun: ${command}`);
-  }
-
-  const forbiddenPattern = /[;&|`$><]/;
-  if (
-    forbiddenPattern.test(command) ||
-    args.some((a) => forbiddenPattern.test(a))
-  ) {
-    throw new Error('Unsafe token detected in asyncrun input.');
   }
 }
 
@@ -62,7 +56,7 @@ module.exports = (on) => {
   on('task', {
     asyncrun(cmd) {
       const { command, args } = parseCommand(cmd);
-      assertSafeCommand(command, args);
+      assertSafeCommand(command);
 
       const child = spawn(command, args, {
         stdio: 'ignore',
@@ -72,9 +66,7 @@ module.exports = (on) => {
 
       return [command, args];
     },
-  });
 
-  on('task', {
     numDifferentPixels({
       src1,
       src2,
