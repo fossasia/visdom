@@ -22,6 +22,38 @@ const path = require('path');
 const pixelmatch = require('pixelmatch');
 const PNG = require('pngjs').PNG;
 
+function parseCommand(cmd) {
+  if (typeof cmd !== 'string' || cmd.trim().length === 0) {
+    throw new Error('asyncrun requires a non-empty command string.');
+  }
+
+  const tokens = cmd.match(/[^\s"']+|"([^"]*)"|'([^']*)'/g) || [];
+  const normalized = tokens.map((token) => token.replace(/^['"]|['"]$/g, ''));
+
+  if (normalized.length === 0) {
+    throw new Error('Unable to parse asyncrun command.');
+  }
+
+  const command = normalized[0];
+  const args = normalized.slice(1);
+  return { command, args };
+}
+
+function assertSafeCommand(command, args) {
+  const allowedCommands = new Set(['python', 'python3']);
+  if (!allowedCommands.has(command)) {
+    throw new Error(`Unsupported command in asyncrun: ${command}`);
+  }
+
+  const forbiddenPattern = /[;&|`$><]/;
+  if (
+    forbiddenPattern.test(command) ||
+    args.some((a) => forbiddenPattern.test(a))
+  ) {
+    throw new Error('Unsafe token detected in asyncrun input.');
+  }
+}
+
 
 module.exports = (on) => {
   // `on` is used to hook into various events Cypress emits
@@ -29,9 +61,8 @@ module.exports = (on) => {
 
   on('task', {
     asyncrun(cmd) {
-      const cmdParts = cmd.split(' ');
-      const args = cmdParts.splice(1);
-      const command = cmdParts[0];
+      const { command, args } = parseCommand(cmd);
+      assertSafeCommand(command, args);
 
       const child = spawn(command, args, {
         stdio: 'ignore',
@@ -55,7 +86,11 @@ module.exports = (on) => {
       const img2 = PNG.sync.read(fs.readFileSync(src2));
 
       if (img1.width !== img2.width || img1.height !== img2.height) {
-        throw new Error('Images must have same dimensions for comparison.');
+        throw new Error(
+          'Images must have same dimensions for comparison. ' +
+          `src1: ${src1} (${img1.width}x${img1.height}), ` +
+          `src2: ${src2} (${img2.width}x${img2.height})`
+        );
       }
 
       const { width, height } = img1;
