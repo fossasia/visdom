@@ -50,8 +50,11 @@ module.exports = (on, config) => {
       }
 
       // Security: Whitelist allowed executables to prevent command injection
+      // Normalize to basename so absolute/relative paths like `/usr/bin/python3`
+      // or `C:\Python39\python.exe` are still validated correctly.
+      const executable = path.basename(command);
       const allowedCommands = ['python', 'python3', 'python.exe'];
-      if (!allowedCommands.includes(command)) {
+      if (!allowedCommands.includes(executable)) {
         throw new Error(`Execution of '${command}' is not permitted for security reasons.`);
       }
 
@@ -141,9 +144,16 @@ module.exports = (on, config) => {
 
     if (details.specName && details.specName.endsWith('.init.js')) {
 
-      const newPath = details.path.replace(
-        `/${details.specName}`,
-        `_init/${details.specName}`
+      // Cross-platform path construction
+      const screenshotName = path.basename(details.path);
+      const specFolder = path.dirname(details.path);
+      const screenshotsDir = path.dirname(specFolder);
+
+      const newPath = path.join(
+        screenshotsDir,
+        '_init',
+        details.specName,
+        screenshotName
       );
 
       // Ensure directory exists
