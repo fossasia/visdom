@@ -43,18 +43,24 @@ module.exports = (on, config) => {
         throw new Error('Command must be a string');
       }
 
-      const parts = cmd.split(' ');
+      const parts = cmd.trim().split(/\s+/);
       const command = parts[0];
+      if (!command) {
+        throw new Error('Command must be a non-empty string');
+      }
+
       const args = parts.slice(1);
 
       const child = spawn(command, args, {
         stdio: 'ignore', // piping all stdio to /dev/null
-        detached: true
+        detached: true,
+        shell: false
       });
 
       child.unref();
 
-      return { command, args };
+      // Cypress tasks must return a value; returning null for fire-and-forget
+      return null;
     },
 
 
@@ -69,8 +75,21 @@ module.exports = (on, config) => {
         throw new Error(`Source image not found: ${src2}`);
       }
 
-      const img1 = PNG.sync.read(fs.readFileSync(src1));
-      const img2 = PNG.sync.read(fs.readFileSync(src2));
+      let img1;
+      try {
+        const img1Buffer = fs.readFileSync(src1);
+        img1 = PNG.sync.read(img1Buffer);
+      } catch (err) {
+        throw new Error(`Failed to read or parse source image (${src1}): ${err.message}`);
+      }
+
+      let img2;
+      try {
+        const img2Buffer = fs.readFileSync(src2);
+        img2 = PNG.sync.read(img2Buffer);
+      } catch (err) {
+        throw new Error(`Failed to read or parse source image (${src2}): ${err.message}`);
+      }
 
       // Validate dimensions
       if (img1.width !== img2.width || img1.height !== img2.height) {
