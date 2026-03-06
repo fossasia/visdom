@@ -49,6 +49,12 @@ module.exports = (on, config) => {
         throw new Error('Command must be a non-empty string');
       }
 
+      // Security: Whitelist allowed executables to prevent command injection
+      const allowedCommands = ['python', 'python3', 'python.exe'];
+      if (!allowedCommands.includes(command)) {
+        throw new Error(`Execution of '${command}' is not permitted for security reasons.`);
+      }
+
       const args = parts.slice(1);
 
       const child = spawn(command, args, {
