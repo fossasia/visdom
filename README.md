@@ -1,5 +1,3 @@
-
-
 <h3 align="center">
     <br/>
     <img src="https://user-images.githubusercontent.com/19650074/198746195-574bb828-026f-41cb-82a9-250fcbc4e090.png" width="300" alt="Logo"/><br/><br/>
@@ -190,6 +188,22 @@ Start the server (probably in a  `screen` or `tmux`) from the command line:
 Visdom now can be accessed by going to `http://localhost:8097` in your browser, or your own host address if specified.
 
 > The `visdom` command is equivalent to running `python -m visdom.server`.
+
+### Troubleshooting Installation Errors
+
+Some users may experience installation errors when running:
+
+pip install visdom
+
+This issue may occur when using newer Python versions (e.g. Python 3.13) because
+the pkg_resources module is no longer available in newer setuptools builds.
+
+Possible solution:
+
+pip install "setuptools<81"
+pip install tornado websocket-client numpy scipy
+
+If installation still fails, run the server directly from the source code.
 
 >If the above does not work, try using an SSH tunnel to your server by adding the following line to your local  `~/.ssh/config`:
 ```LocalForward 127.0.0.1:8097 127.0.0.1:8097```.
