@@ -160,10 +160,6 @@ Using the repack icon (9 boxes), visdom will attempt to pack your windows in a w
 Using the view dropdown it is possible to select previously saved views, restoring the locations and sizes of all of the windows within the current environment to the places they were when that view was saved last.
 </details>
 
-
-
-
-
 ## Setup
 Python and web clients come bundled with the python server.
 
@@ -191,19 +187,37 @@ Visdom now can be accessed by going to `http://localhost:8097` in your browser, 
 
 ### Troubleshooting Installation Errors
 
-Some users may experience installation errors when running:
+Some users may encounter installation errors when running:
 
+```bash
 pip install visdom
+```
 
-This issue may occur when using newer Python versions (e.g. Python 3.13) because
-the pkg_resources module is no longer available in newer setuptools builds.
+This may happen when using newer Python versions (e.g., Python 3.13)
+because the `pkg_resources` module is removed from newer `setuptools`.
 
-Possible solution:
+### Possible Solution
 
+Create a virtual environment and install compatible dependencies:
+
+```bash
+python -m venv visdom-env
+source visdom-env/bin/activate
 pip install "setuptools<81"
 pip install tornado websocket-client numpy scipy
+```
 
-If installation still fails, run the server directly from the source code.
+### Run Visdom from Source
+
+If installation still fails, run the server directly from the repository root:
+
+```bash
+python -m visdom.server
+```
+
+The dashboard will be available at:
+
+http://localhost:8097
 
 >If the above does not work, try using an SSH tunnel to your server by adding the following line to your local  `~/.ssh/config`:
 ```LocalForward 127.0.0.1:8097 127.0.0.1:8097```.
