@@ -548,14 +548,16 @@ class Visdom(object):
         self._session = sess
         return sess
 
-    def register_event_handler(self, handler, target):
-        assert callable(handler), "Event handler must be a function"
-        assert self.use_socket, (
-            "Must be using the incoming socket to " "register events to web actions"
-        )
-        if target not in self.event_handlers:
-            self.event_handlers[target] = []
-        self.event_handlers[target].append(handler)
+    def register_event_handler(self, handler, target, env=None):
+    assert callable(handler), 'Event handler must be a function'
+    assert self.use_socket, 'Must be using the incoming socket to register events to web actions'
+
+    key = (env, target)
+
+    if key not in self.event_handlers:
+        self.event_handlers[key] = []
+
+    self.event_handlers[key].append(handler)
 
     def clear_event_handlers(self, target):
         self.event_handlers[target] = []
@@ -577,8 +579,11 @@ class Visdom(object):
                             "Visdom server failed handshake, may not "
                             "be properly connected"
                         )
-            if "target" in message:
-                for handler in list(self.event_handlers.get(message["target"], [])):
+            if 'target' in message:
+                env = message.get('eid')
+                key = (env, message['target'])
+
+                for handler in list(self.event_handlers.get(key, [])):
                     handler(message)
 
         def on_close(ws):
