@@ -2002,7 +2002,7 @@ class Visdom(object):
 
         - `opts.numbins`: number of bins (`number`; default = 30)
         """
-        X = np.asarray(X)   # ✅ Added line (convert list/tensor to numpy array)
+        X = np.asarray(X)   # Added line (convert list/tensor to numpy array)
         X = np.squeeze(X)
         assert X.ndim == 1, "X should be one-dimensional"
 
