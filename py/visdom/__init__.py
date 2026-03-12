@@ -2002,7 +2002,18 @@ class Visdom(object):
 
         - `opts.numbins`: number of bins (`number`; default = 30)
         """
-        X = np.asarray(X)   # Added line (convert list/tensor to numpy array)
+        # handle torch tensors if available
+        torch = None
+        try:
+            import torch
+        except ImportError:
+            pass
+
+        if torch is not None and torch.is_tensor(X):
+            X = X.detach().cpu().numpy()
+        else:
+            X = np.asarray(X)
+            
         X = np.squeeze(X)
         assert X.ndim == 1, "X should be one-dimensional"
 
