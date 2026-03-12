@@ -118,13 +118,31 @@ class LazyEnvData(Mapping):
 def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
     env_ids = [i for i in eids if i in state]
     if env_path is not None:
-        for env_id in env_ids:
-            env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
-            with open(env_path_file, "w") as fn:
-                if isinstance(state[env_id], LazyEnvData):
-                    fn.write(json.dumps(state[env_id]._raw_dict))
-                else:
-                    fn.write(json.dumps(state[env_id]))
+       for env_id in env_ids:
+    filename = f"{env_id}.json"
+    env_path_file = os.path.join(env_path, filename)
+
+    try:
+        with open(env_path_file, "w") as fn:
+            if isinstance(state[env_id], LazyEnvData):
+                fn.write(json.dumps(state[env_id]._raw_dict))
+            else:
+                fn.write(json.dumps(state[env_id]))
+
+    except OSError:
+        # fallback if filename exceeds filesystem limit
+        hashed_name = hashlib.md5(env_id.encode("utf-8")).hexdigest() + ".json"
+        env_path_file = os.path.join(env_path, hashed_name)
+
+        logging.warning(
+            f"Environment name too long, saving as hashed filename: {hashed_name}"
+        )
+
+        with open(env_path_file, "w") as fn:
+            if isinstance(state[env_id], LazyEnvData):
+                fn.write(json.dumps(state[env_id]._raw_dict))
+            else:
+                fn.write(json.dumps(state[env_id]))
     return env_ids
 
 
