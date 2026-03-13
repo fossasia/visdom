@@ -5,12 +5,12 @@ on:
     branches:
       - master
     paths:
-        - 'py/visdom/VERSION'
+      - 'py/visdom/VERSION'
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    name: "Deploy to PyPI"
+    name: 'Deploy to PyPI'
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -20,8 +20,8 @@ jobs:
           git tag --list
       - name: Retrieve version
         run: |
-          echo "::set-output name=TAG_NAME::$(cat py/visdom/VERSION)"
-          echo "::set-output name=TAG_EXISTS::$(git tag | grep v$(cat py/visdom/VERSION) | wc -l)"
+          echo "TAG_NAME=$(cat py/visdom/VERSION)" >> $GITHUB_OUTPUT
+          echo "TAG_EXISTS=$(git tag | grep v$(cat py/visdom/VERSION) | wc -l)" >> $GITHUB_OUTPUT
         id: version
       - name: Show version
         run: |
@@ -33,13 +33,13 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.version.outputs.TAG_NAME }}
-          name: "Visdom v${{ steps.version.outputs.TAG_NAME }}"
+          name: 'Visdom v${{ steps.version.outputs.TAG_NAME }}'
           generate_release_notes: true
       - name: Set up Python
         if: ${{ steps.version.outputs.TAG_EXISTS == '0' }}
         uses: actions/setup-python@v4
         with:
-            python-version: '3.x'
+          python-version: '3.x'
       - name: Install dependencies
         if: ${{ steps.version.outputs.TAG_EXISTS == '0' }}
         run: python setup.py sdist
@@ -47,7 +47,7 @@ jobs:
         if: ${{ steps.version.outputs.TAG_EXISTS == '0' }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-            user: __token__
-            password: ${{ secrets.pypi_password }}
+          user: __token__
+          password: ${{ secrets.pypi_password }}
 
 # Guide: https://help.github.com/en/actions/language-and-framework-guides/using-python-with-github-actions
