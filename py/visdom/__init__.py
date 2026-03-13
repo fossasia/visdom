@@ -1794,6 +1794,9 @@ class Visdom(object):
 
         _title2str(opts)
         _assert_opts(opts)
+        
+        if Y.ndim == 2 and Y.shape[1] == 1:
+        Y = Y.reshape(-1)
 
         if Y.ndim == 1:
             linedata = np.column_stack((X, Y))
