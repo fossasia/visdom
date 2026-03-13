@@ -1761,6 +1761,9 @@ class Visdom(object):
         If `update` is specified, the figure will be updated without
         creating a new plot -- this can be used for efficient updating.
         """
+        if update == "append" and win is None:
+            update = None
+            
         if update is not None:
             if update == "remove":
                 return self.scatter(
