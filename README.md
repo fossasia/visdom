@@ -181,19 +181,29 @@ Install from source
 
 ## Usage
 
-Start the server (probably in a  `screen` or `tmux`) from the command line:
+Start the Visdom server from the command line:
 
 ```bash
-> visdom
+visdom
 ```
 
-Visdom now can be accessed by going to `http://localhost:8097` in your browser, or your own host address if specified.
+Once the server starts, open the dashboard in your browser:
 
-> The `visdom` command is equivalent to running `python -m visdom.server`.
+```
+http://localhost:8097
+```
 
->If the above does not work, try using an SSH tunnel to your server by adding the following line to your local  `~/.ssh/config`:
-```LocalForward 127.0.0.1:8097 127.0.0.1:8097```.
+The `visdom` command is equivalent to running:
 
+```bash
+python -m visdom.server
+```
+
+If the above does not work and you are running the server on a remote machine, you can use an SSH tunnel by adding the following line to your `~/.ssh/config`:
+
+```
+LocalForward 127.0.0.1:8097 127.0.0.1:8097
+```
 #### Command Line Options
 
 The following options can be provided to the server:
