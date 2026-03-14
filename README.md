@@ -166,17 +166,40 @@ Using the view dropdown it is possible to select previously saved views, restori
 
 
 
-## Setup
-Python and web clients come bundled with the python server.
+## Installation and Quick Start
 
-Install from pip
+To get Visdom up and running locally, follow these steps:
+
+**1. Install Visdom**
+Install the package using pip:
 ```bash
-> pip install visdom
+pip install visdom
 ```
 
-Install from source
+**2. Start the Server**
+Start the Visdom server from your terminal:
 ```bash
-> pip install git+https://github.com/fossasia/visdom
+python -m visdom.server
+```
+
+**3. Access the Dashboard**
+Open your web browser and navigate to [http://localhost:8097/](http://localhost:8097/).
+
+**4. Create a Simple Visualization**
+You can now send data to your Visdom server. Here is a quick example using Python:
+
+```python
+import visdom
+import numpy as np
+
+# Initialize the Visdom client
+vis = visdom.Visdom()
+
+# Create a simple text visualization
+vis.text('Hello, world!')
+
+# Create a simple line plot
+vis.line(Y=np.random.rand(10), opts=dict(title='Random Data Plot'))
 ```
 
 ## Usage
