@@ -21,3 +21,25 @@ py/visdom/static/version.built
 __pycache__/
 py/visdom/static/js/layout_bin_packer.js
 py/visdom/extra_deps/**/*
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+venv/
+.env/
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
