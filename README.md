@@ -172,6 +172,30 @@ Install from source
 ```bash
 > pip install git+https://github.com/fossasia/visdom
 ```
+## Beginner Setup Guide
+
+Follow these steps to run Visdom locally.
+
+### 1. Install Visdom
+
+pip install visdom
+
+### 2. Start the Visdom Server
+
+python -m visdom.server
+
+### 3. Open Dashboard
+
+Open your browser and go to:
+
+http://localhost:8097
+
+### 4. Simple Example
+
+import visdom
+viz = visdom.Visdom()
+
+viz.text("Hello Visdom!")
 
 ## Usage
 
