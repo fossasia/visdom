@@ -178,24 +178,39 @@ Follow these steps to run Visdom locally.
 
 ### 1. Install Visdom
 
+Install Visdom using pip:
+
+```bash
 pip install visdom
+```
 
 ### 2. Start the Visdom Server
 
+Run the following command to start the server:
+
+```bash
 python -m visdom.server
+```
 
 ### 3. Open Dashboard
 
 Open your browser and go to:
 
+```
 http://localhost:8097
+```
 
 ### 4. Simple Example
 
+Example Python code to test Visdom:
+
+```python
 import visdom
+
 viz = visdom.Visdom()
 
 viz.text("Hello Visdom!")
+```
 
 ## Usage
 
