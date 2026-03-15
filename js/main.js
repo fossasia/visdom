@@ -105,7 +105,7 @@ const App = () => {
   const [filterString, setFilterString] = useState(
     localStorage.getItem('filter') || ''
   );
-
+  
   // non-triggering state variables
   const _bin = useRef(null);
   const _timeoutID = useRef(null);
@@ -370,6 +370,33 @@ const App = () => {
   };
 
   const onEnvDelete = (env2delete, previousEnv) => {
+     
+    if(env2delete == previousEnv){
+      previousEnv = 'main';
+    }
+
+    let EnvIds = selection.envIDs;
+    EnvIds = EnvIds.filter(env => env !== env2delete);
+    setSelection((prev)=>({
+      ...prev,
+      envIDs: EnvIds,
+    }));
+
+    let layoutLists = storeMeta.layoutLists;
+    layoutLists.delete(env2delete);
+
+    setStoreMeta((prev)=>({
+      ...prev,
+      envList: EnvIds,
+      layoutLists: layoutLists,
+    }));
+
+    setStoreData((prev)=>({
+      ...prev,
+      panes: {},   
+      layout: [], 
+    }))
+
     sendEnvDelete(env2delete, previousEnv);
   };
 
@@ -401,7 +428,7 @@ const App = () => {
         );
       }
     }
-
+    
     setStoreMeta((prev) => ({
       ...prev,
       envList: newEnvList,
@@ -708,7 +735,7 @@ const App = () => {
     windowSize.current.cols = cols;
     windowSize.current.width = width;
   };
-
+  
   let panes = Object.keys(storeData.panes).map((id) => {
     let pane = storeData.panes[id];
 
