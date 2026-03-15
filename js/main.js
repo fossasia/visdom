@@ -105,7 +105,7 @@ const App = () => {
   const [filterString, setFilterString] = useState(
     localStorage.getItem('filter') || ''
   );
-  
+
   // non-triggering state variables
   const _bin = useRef(null);
   const _timeoutID = useRef(null);
@@ -401,6 +401,7 @@ const App = () => {
   };
 
   const onEnvSave = (env) => {
+
     if (!connected) {
       return;
     }
@@ -428,7 +429,6 @@ const App = () => {
         );
       }
     }
-    
     setStoreMeta((prev) => ({
       ...prev,
       envList: newEnvList,
@@ -709,6 +709,7 @@ const App = () => {
       }
     }
 
+
     // Bootstrap tooltips need some encouragement
     $('#clear-button').attr('data-original-title', 'Clear Current Environment');
   }, [mounted.current]);
@@ -735,7 +736,6 @@ const App = () => {
     windowSize.current.cols = cols;
     windowSize.current.width = width;
   };
-  
   let panes = Object.keys(storeData.panes).map((id) => {
     let pane = storeData.panes[id];
 
