@@ -370,38 +370,39 @@ const App = () => {
   };
 
   const onEnvDelete = (env2delete, previousEnv) => {
-     
-    if(env2delete == previousEnv){
+    if (env2delete === previousEnv) {
       previousEnv = 'main';
     }
 
-    let EnvIds = selection.envIDs;
-    EnvIds = EnvIds.filter(env => env !== env2delete);
-    setSelection((prev)=>({
+    setSelection((prev) => {
+      let EnvIds = prev.envIDs.filter((env) => env !== env2delete);
+      return {
+        ...prev,
+        envIDs: EnvIds,
+      };
+    });
+
+    setStoreMeta((prev) => {
+      let layoutLists = storeMeta.layoutLists;
+      layoutLists.delete(env2delete);
+      let EnvIds = selection.envIDs.filter((env) => env !== env2delete);
+      return {
+        ...prev,
+        envList: EnvIds,
+        layoutLists: layoutLists,
+      };
+    });
+
+    setStoreData((prev) => ({
       ...prev,
-      envIDs: EnvIds,
+      panes: {},
+      layout: [],
     }));
-
-    let layoutLists = storeMeta.layoutLists;
-    layoutLists.delete(env2delete);
-
-    setStoreMeta((prev)=>({
-      ...prev,
-      envList: EnvIds,
-      layoutLists: layoutLists,
-    }));
-
-    setStoreData((prev)=>({
-      ...prev,
-      panes: {},   
-      layout: [], 
-    }))
 
     sendEnvDelete(env2delete, previousEnv);
   };
 
   const onEnvSave = (env) => {
-
     if (!connected) {
       return;
     }
@@ -708,7 +709,6 @@ const App = () => {
         sendEnvQuery(['main']);
       }
     }
-
 
     // Bootstrap tooltips need some encouragement
     $('#clear-button').attr('data-original-title', 'Clear Current Environment');
