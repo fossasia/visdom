@@ -8,6 +8,7 @@
  */
 
 import React, { useContext, useEffect } from 'react';
+import ScrollToBottom from 'react-scroll-to-bottom';
 
 import ApiContext from '../api/ApiContext';
 import EventSystem from '../EventSystem';
@@ -64,12 +65,18 @@ function TextPane(props) {
 
   // rendering
   // ---------
-
+  
   return (
     <Pane {...props} handleDownload={handleDownload}>
-      <div className="content-text">
+      <ScrollToBottom
+        className="content-text"
+        scrollViewClassName="content-text-scroll-view"
+        followButtonClassName="content-text-follow-button"
+        initialScrollBehavior="smooth"
+        mode="bottom"
+      >
         <div dangerouslySetInnerHTML={{ __html: content }} />
-      </div>
+      </ScrollToBottom>
     </Pane>
   );
 }
