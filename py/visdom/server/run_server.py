@@ -58,8 +58,6 @@ def start_server(
 
     if "HOSTNAME" in os.environ and hostname == DEFAULT_HOSTNAME:
         hostname = os.environ["HOSTNAME"]
-    else:
-        hostname = hostname
     if print_func is None:
         print("You can navigate to http://%s:%s%s" % (hostname, port, base_url))
     else:
