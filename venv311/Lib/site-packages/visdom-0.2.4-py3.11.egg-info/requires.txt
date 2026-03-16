@@ -1,0 +1,9 @@
+numpy>=1.8
+scipy
+requests
+tornado
+six
+jsonpatch
+websocket-client
+networkx
+pillow

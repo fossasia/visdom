@@ -1,0 +1,77 @@
+<!--
+
+Copyright 2017-present, The Visdom Authors
+All rights reserved.
+
+This source code is licensed under the license found in the
+LICENSE file in the root directory of this source tree.
+
+-->
+
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <link rel="shortcut icon" href="favicon.png">
+
+    <!-- Bootstrap & jQuery -->
+    <link rel="stylesheet" href={{ static_url("css/bootstrap.min.css") }}>
+    <script src={{ static_url("js/jquery.min.js") }}></script>
+    <script src={{ static_url("js/bootstrap.min.js") }}></script>
+
+    <link rel="stylesheet" href={{ static_url("css/react-resizable-styles.css") }}>
+    <link rel="stylesheet" href={{ static_url("css/react-grid-layout-styles.css") }}>
+
+    <!-- Other deps -->
+    <script src={{ static_url("js/react-react.min.js") }}></script>
+    <script src={{ static_url("js/react-dom.min.js") }}></script>
+    <script src={{ static_url("js/layout_bin_packer.js") }}></script>
+
+    <!-- Mathjax -->
+	  <script type='text/javascript' src={{ static_url('js/mathjax/2.7.5/MathJax.js') }}></script>
+    <script type='text/x-mathjax-config'>MathJax.Hub.Config({tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']], processEscapes: true}});</script>
+    <script type='text/javascript' src={{ static_url('js/mathjax/2.7.5/config/TeX-AMS-MML_HTMLorMML.js') }}></script>
+
+    <!-- Plotly -->
+    <script src={{ static_url("js/plotly-plotly.min.js") }}></script>
+
+    <!-- Network-Graph-->
+    <script src={{static_url("js/d3.v3.min.js")}}></script>
+    <script src={{static_url("js/d3-selection-multi.v1.js")}}></script>
+    <script src={{static_url("js/saveSvgAsPng.js")}}></script>
+
+    <!-- Custom styles for this template -->
+    <script>
+    // TODO: this is not great. Should probably be an endpoint with a JSON
+    // response or the first thing the socket sends back.
+    var ENV_LIST = [
+      {% for item in items %}
+      '{{escape(item)}}',
+      {% end %}
+    ];
+    var ACTIVE_ENV = '{{escape(active_item)}}';
+    var USER = '{{escape(user)}}';
+    var USE_POLLING = ('{{wrap_socket}}' == 'True');
+
+    // Plotly setup
+    window.PLOTLYENV = window.PLOTLYENV || {};
+    window.PLOTLYENV.BASE_URL = 'https://plot.ly';
+
+    </script>
+    <script src={{ static_url("js/main.js") }}></script>
+    <link rel="stylesheet" href={{ static_url("css/style.css") }}>
+    <link rel="stylesheet" href={{ static_url("../user/style.css") }}>
+    <!-- Added Script for NetworkPane -->
+    <link rel="stylesheet" href={{ static_url("css/network.css") }}>
+
+    <title>visdom</title>
+    <!-- <link rel="icon" href="http://example.com/favicon.png"> -->
+  </head>
+
+  <body>
+    <noscript>JS is required</noscript>
+    <div id="app"></div>
+  </body>
+</html>

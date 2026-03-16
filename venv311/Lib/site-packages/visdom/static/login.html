@@ -1,0 +1,77 @@
+<!--
+
+Copyright 2017-present, The Visdom Authors
+All rights reserved.
+
+This source code is licensed under the license found in the
+LICENSE file in the root directory of this source tree.
+
+-->
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <meta name="description" content="">
+    <meta name="author" content="">
+
+    <title>Visdom Login</title>
+
+    <!-- Bootstrap core CSS -->
+    <link href={{ static_url("css/bootstrap.min.css") }} rel="stylesheet">
+
+    <!-- Custom styles for this template -->
+    <link href={{ static_url("css/login.css") }} rel="stylesheet">
+
+    <!-- jQuery -->
+    <script src={{ static_url("js/jquery.min.js") }}></script>
+
+    <!-- Hashing Password using Stanford Javascript Crypto Library-->
+    <script src={{ static_url("js/sjcl.js") }}></script>
+
+    <script>
+      $(document).ready(function () {
+          // initialize the viewer
+          $('#submitButton').click(function (event) {
+              var username = $("#inputUsername").val();
+              var password = $("#inputPassword").val();
+              password = sjcl.hash.sha256.hash(password)
+              var data =
+              {
+                  username: username,
+                  password: sjcl.codec.hex.fromBits(password)
+              };
+              var dataToSend = JSON.stringify(data);
+              $.ajax(
+                      {
+                          url: '{{base_url}}',
+                          type: 'POST',
+                          data: dataToSend,
+                          success:function() {
+                            window.location.replace("{{base_url}}")
+                          },
+                          error: function () {
+                            $("#errorMessage").text("Invalid Login Information");
+                          }
+                      });
+              event.preventDefault();
+          });
+      });
+
+  </script>
+
+  </head>
+
+  <body class="text-center">
+    <form class="form-signin">
+      <h1 class="h3 mb-3 font-weight-normal">Visdom Login</h1>
+      <label for="inputUsername" class="sr-only">Email address</label>
+      <input name=username type="username" id="inputUsername" class="form-control" placeholder="Username" required autofocus>
+      <label for="inputPassword" class="sr-only">Password</label>
+      <input name=password type="password" id="inputPassword" class="form-control" placeholder="Password" required>
+      <button class="btn btn-lg btn-primary btn-block" type="submit" id="submitButton" >Login</button>
+      <p id="errorMessage"></p>
+    </form>
+  </body>
+</html>

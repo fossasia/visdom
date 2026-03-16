@@ -1,0 +1,28 @@
+/* Network CSS for d3 components */
+
+.node text textPath {
+    stroke: #000;
+    stroke-width: px;
+    pointer-events: none;
+    font: 8px sans-serif;
+  }
+  .link {
+    stroke: #999;
+    stroke-opacity: 0.6;
+  }
+  
+  .Network_Div_container {
+    display: inline-block;
+    position: relative;
+    width: 100%;
+    padding-bottom: 100%;
+    vertical-align: top;
+    overflow: hidden;
+  }
+
+  .svg-content {
+    display: inline-block;
+    position: absolute;
+    top: 0;
+    left: 0;
+}
