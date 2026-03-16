@@ -38,6 +38,33 @@ var PlotPane = (props) => {
     });
   };
 
+  const handleTrackExperiment = () => {
+    fetch('/experiment/track', {
+      method: 'POST',
+      body: JSON.stringify({
+        eid: props.envID,
+        win: props.id,
+        config: {} // Could be extended to gather from a form
+      })
+    }).then(res => res.json())
+      .then(data => alert(`Experiment archived: ${data.archive_file}`));
+  };
+
+  const handlePublicationExport = () => {
+    fetch('/experiment/export', {
+      method: 'POST',
+      body: JSON.stringify({
+        eid: props.envID,
+        win: props.id,
+        type: 'tikz'
+      })
+    }).then(res => res.json())
+      .then(data => {
+        console.log(data.output);
+        alert('LaTeX/TikZ code copied to console!');
+      });
+  };
+
   // events
   // ------
   useEffect(() => {
@@ -183,7 +210,18 @@ var PlotPane = (props) => {
     <Pane
       {...props}
       handleDownload={handleDownload}
-      barwidgets={[smooth_widget_button]}
+      barwidgets={[
+        smooth_widget_button,
+        <button key="track_exp" title="Track Experiment" onClick={handleTrackExperiment} className="pull-right">
+          <span className="glyphicon glyphicon-record" />
+        </button>,
+        <button key="pub_export" title="Publication Export" onClick={handlePublicationExport} className="pull-right">
+          <span className="glyphicon glyphicon-export" />
+        </button>,
+        <button key="svg_export" title="Export as SVG" onClick={handleDownload} className="pull-right">
+          <span className="glyphicon glyphicon-picture" />
+        </button>
+      ]}
       widgets={[smooth_widget]}
       enablePropertyList
     >

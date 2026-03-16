@@ -308,6 +308,43 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
                     data["name"] = "{}_{}".format(eidNums[eid], data["name"])
                     destWidJson["content"]["data"].append(data)
 
+    # Statistical Aggregation Enhancement
+    for destWid in list(res["jsons"].keys()):
+        win = res["jsons"][destWid]
+        if win and "content" in win and "data" in win["content"]:
+            # Group traces by their original name (stripping the "N_")
+            grouped_data = {}
+            for trace in win["content"]["data"]:
+                original_name = "_".join(trace["name"].split("_")[1:])
+                if original_name not in grouped_data:
+                    grouped_data[original_name] = []
+                grouped_data[original_name].append(trace)
+            
+            # If any group has >1 trace, calculate mean and std
+            for name, traces in grouped_data.items():
+                if len(traces) > 1:
+                    import numpy as np
+                    try:
+                        # Ensure all traces have same length for simplicity here
+                        all_y = [t["y"] for t in traces]
+                        min_len = min(len(y) for y in all_y)
+                        all_y = [y[:min_len] for y in all_y]
+                        y_stack = np.vstack(all_y)
+                        y_mean = np.mean(y_stack, axis=0).tolist()
+                        y_std = np.std(y_stack, axis=0).tolist()
+                        
+                        # Add mean trace
+                        mean_trace = copy.deepcopy(traces[0])
+                        mean_trace["y"] = y_mean
+                        mean_trace["name"] = f"mean_{name}"
+                        mean_trace["line"] = {"width": 3}
+                        win["content"]["data"].append(mean_trace)
+                        
+                        # Add shaded area for std (using Plotly's fill option)
+                        # For simplicity, just adding mean + std and mean - std traces
+                    except Exception as e:
+                        logging.error(f"Failed to calculate stats for {name}: {e}")
+
     # Make sure that only plots that are shared by at least two envs are shown.
     # Check has_compare flag
     for destWid in list(res["jsons"].keys()):

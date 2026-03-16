@@ -43,6 +43,12 @@ from visdom.server.handlers.web_handlers import (
     UpdateHandler,
     UserSettingsHandler,
 )
+from visdom.server.handlers.experiment_handlers import (
+    ExperimentTrackHandler,
+    ExperimentListHandler,
+    ExperimentDataHandler,
+    ExperimentExportHandler,
+)
 from visdom.server.defaults import (
     DEFAULT_BASE_URL,
     DEFAULT_ENV_PATH,
@@ -112,6 +118,10 @@ class Application(tornado.web.Application):
             (r"%s/env_state" % self.base_url, EnvStateHandler, {"app": self}),
             (r"%s/fork_env" % self.base_url, ForkEnvHandler, {"app": self}),
             (r"%s/user/(.*)" % self.base_url, UserSettingsHandler, {"app": self}),
+            (r"%s/experiment/track" % self.base_url, ExperimentTrackHandler, {"app": self}),
+            (r"%s/experiment/list" % self.base_url, ExperimentListHandler, {"app": self}),
+            (r"%s/experiment/get/(.*)" % self.base_url, ExperimentDataHandler, {"app": self}),
+            (r"%s/experiment/export" % self.base_url, ExperimentExportHandler, {"app": self}),
             (r"%s(.*)" % self.base_url, IndexHandler, {"app": self}),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)

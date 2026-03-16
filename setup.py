@@ -9,7 +9,7 @@
 import os
 from io import open
 from setuptools import setup, find_packages
-from pkg_resources import get_distribution, DistributionNotFound
+import importlib.metadata
 
 
 try:
@@ -26,8 +26,8 @@ except Exception:
 
 def get_dist(pkgname):
     try:
-        return get_distribution(pkgname)
-    except DistributionNotFound:
+        return importlib.metadata.distribution(pkgname)
+    except importlib.metadata.PackageNotFoundError:
         return None
 
 here = os.path.abspath(os.path.dirname(__file__))
