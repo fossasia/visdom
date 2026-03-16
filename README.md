@@ -91,9 +91,14 @@ You can partition your visualization space with `envs`. By default, every user w
 
 You can access a specific env via url: `http://localhost.com:8097/env/main`. If your server is hosted, you can share this url so others can see your visualizations too.
 
-Environments are automatically hierarchically organized by the first `_`.
+Environments are automatically hierarchically organized using `/` in the environment name.
 
+For example:
+experiment/run1
+experiment/run2
+project/model1
 #### Selecting Environments
+
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/19650074/198821299-6602d557-7a02-4b9f-b1d5-d57615cdc15c.png" width="300" /></p>
 
 From the main page it is possible to toggle between different environments using the environment selector. Selecting a new environment will query the server for the plots that exist in that environment. The environment selector allows for searching and filtering for the new enironment.
