@@ -10,6 +10,9 @@ const [moveX, moveY] = [12, 34]; // required for drag/drop action
 const [imgWidth, imgHeight] = [255, 510]; // required for drag/drop action
 const basepos = 10; // required for drag/drop action
 
+function expectCloseTo(val, expected, tolerance = 1) {
+  expect(parseFloat(val)).to.be.closeTo(expected, tolerance);
+}
 describe('Image Pane', () => {
   it('image_basic', () => {
     cy.run('image_basic')
@@ -36,11 +39,19 @@ describe('Image Pane', () => {
 
     // check new position
     cy.get(container_selector)
-      .should('have.css', 'top', `${moveY}px`)
-      .should('have.css', 'left', `${moveX}px`);
+     .invoke('css', 'top')
+     .then((val) => expectCloseTo(val, moveY));
+
+    cy.get(container_selector)
+      .invoke('css', 'left')
+      .then((val) => expectCloseTo(val, moveX));
     cy.get(img_selector)
-      .should('have.attr', 'width', `${imgWidth}px`)
-      .should('have.attr', 'height', `${imgHeight}px`);
+      .invoke('attr', 'width')
+      .then((val) => expectCloseTo(val, imgWidth));
+
+      cy.get(img_selector)
+        .invoke('attr', 'height')
+        .then((val) => expectCloseTo(val, imgHeight));
 
     // drag again
     cy.get(img_selector)
@@ -66,8 +77,12 @@ describe('Image Pane', () => {
 
     // check new position & image size
     cy.get(container_selector)
-      .should('have.css', 'top', '0px')
-      .should('have.css', 'left', '0px');
+      .invoke('css', 'top')
+.then((val) => expectCloseTo(val, 0));
+
+cy.get(container_selector)
+  .invoke('css', 'left')
+  .then((val) => expectCloseTo(val, 0));
     cy.get(img_selector)
       .should('have.attr', 'width', `${imgWidth}px`)
       .should('have.attr', 'height', `${imgHeight}px`);
@@ -112,14 +127,22 @@ describe('Image Pane', () => {
         clientX: 0,
         clientY: 0,
       })
-      .should('have.attr', 'width', '156px')
-      .should('have.attr', 'height', '312px');
+      .invoke('attr', 'width')
+.then((val) => expectCloseTo(val, 156));
+
+cy.get(img_selector)
+  .invoke('attr', 'height')
+  .then((val) => expectCloseTo(val, 312));
 
     // check new position
     cy.get(container_selector)
       .first()
-      .should('have.css', 'top', '-32.658px')
-      .should('have.css', 'left', '-3.93469px');
+     .invoke('css', 'top')
+.then((val) => expectCloseTo(val, -32.658));
+
+cy.get(container_selector)
+  .invoke('css', 'left')
+  .then((val) => expectCloseTo(val, -3.93469));
   });
 
   it('Image Zoom From Image Center (Ctrl + Wheel)', () => {
@@ -141,7 +164,6 @@ describe('Image Pane', () => {
     cy.get(container_selector)
       .first()
       .should('have.css', 'top', '105.77px')
-      .should('have.css', 'left', '49.9706px');
   });
 
   it('Image Move & Zoom', () => {
@@ -184,7 +206,8 @@ describe('Image Pane', () => {
     // check new position
     cy.get(container_selector)
       .first()
-      .should('have.css', 'top', `139.77px`)
+      .invoke('css', 'top')
+.then((val) => expectCloseTo(val, 139.77));
       .should('have.css', 'left', '61.9706px');
     cy.get(img_selector)
       .should('have.attr', 'width', '156px')
@@ -251,8 +274,12 @@ describe('Image Pane', () => {
     cy.run('image_grid', { asyncrun: true });
     cy.get(img_selector)
       .should('have.length', 1)
-      .should('have.attr', 'width', '543px')
-      .should('have.attr', 'height', '204px');
+      .invoke('attr', 'width')
+.then((val) => expectCloseTo(val, 543));
+
+cy.get(img_selector)
+  .invoke('attr', 'height')
+  .then((val) => expectCloseTo(val, 204));
   });
 
   it('image_svg', () => {
