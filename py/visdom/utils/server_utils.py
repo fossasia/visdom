@@ -7,11 +7,10 @@
 # LICENSE file in the root directory of this source tree.
 
 """
-Utilities for the server architecture that don't really have
-a more appropriate place.
+Utility functions supporting the Visdom server.
 
-At the moment, this just inherited all of the floating functions
-in the previous server.py class.
+Includes helpers for authentication, environment management,
+window handling, and server communication.
 """
 
 
@@ -61,7 +60,7 @@ def check_auth(f):
 
 
 def set_cookie(value=None):
-    """Create cookie secret key for authentication"""
+    """Create and store a cookie secret key used for authentication."""
     if value is not None:
         cookie_secret = value
     else:
@@ -71,11 +70,11 @@ def set_cookie(value=None):
 
 
 def hash_password(password):
-    """Hashing Password with SHA-256"""
+    """Hash a password using SHA-256."""
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
-# ------- File management helprs ----- #
+# ------- File management helpers ----- #
 
 
 class LazyEnvData(Mapping):
