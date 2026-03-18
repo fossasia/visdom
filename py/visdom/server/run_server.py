@@ -39,6 +39,7 @@ def start_server(
     bind_local=False,
     eager_data_loading=False,
 ):
+    print("It's Alive!")
     app = Application(
         port=port,
         base_url=base_url,
