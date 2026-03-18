@@ -39,7 +39,6 @@ def start_server(
     bind_local=False,
     eager_data_loading=False,
 ):
-    logging.info("Server started successfully.")
     app = Application(
         port=port,
         base_url=base_url,
@@ -80,37 +79,40 @@ def main(print_func=None):
         metavar="port",
         type=int,
         default=DEFAULT_PORT,
-        help="port to run the server on.",
+        help="Port number to run the Visdom server on (default: 8097).",
     )
     parser.add_argument(
         "--hostname",
         metavar="hostname",
         type=str,
         default=DEFAULT_HOSTNAME,
-        help="host to run the server on.",
+        help="Hostname or IP address to run the server on (default: localhost).",
     )
     parser.add_argument(
         "-base_url",
         metavar="base_url",
         type=str,
         default=DEFAULT_BASE_URL,
-        help="base url for server (default = /).",
+        help="Base URL path for the server (default: '/').",
     )
     parser.add_argument(
         "-env_path",
         metavar="env_path",
         type=str,
         default=DEFAULT_ENV_PATH,
-        help="path to serialized session to reload.",
+        help="Path to load saved environment sessions.",
     )
     parser.add_argument(
         "-logging_level",
         metavar="logger_level",
         default="INFO",
-        help="logging level (default = INFO). Can take "
-        "logging level name or int (example: 20)",
+        help="Logging level (default: INFO). Accepts level name or integer value (e.g., 20).",
     )
-    parser.add_argument("-readonly", help="start in readonly mode", action="store_true")
+    parser.add_argument(
+        "-readonly",
+         help="Start the server in read-only mode.", 
+         action="store_true",
+    )
     parser.add_argument(
         "-enable_login",
         default=False,
