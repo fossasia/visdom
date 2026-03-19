@@ -92,7 +92,7 @@ class LazyEnvData(Mapping):
                 env_data = tornado.escape.json_decode(fn.read())
         except Exception as e:
             raise ValueError(
-    f"Failed to load environment JSON file: {self._env_path_file}. Error: {e}"
+               f"Failed to load environment JSON file '{self._env_path_file}': {e!r}"
             )
         self._raw_dict = {"jsons": env_data["jsons"], "reload": env_data["reload"]}
 
