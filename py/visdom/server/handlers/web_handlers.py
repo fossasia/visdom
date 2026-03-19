@@ -134,7 +134,11 @@ class UpdateHandler(BaseHandler):
         # Update text in window, separated by a line break
         if p["type"] == "text":
             if args.get("data") and len(args["data"]) > 0:
-                p["content"] += "<br>" + args["data"][0].get("content", "")
+                data_item = args["data"][0]
+                if "content" in data_item:
+                    new_content = data_item["content"]
+                    if new_content:
+                        p["content"] += "<br>" + new_content
             return p
         if p["type"] == "embeddings":
             # TODO embeddings updates should be handled outside of the regular
