@@ -35,6 +35,7 @@ import ConnectionIndicator from './topbar/ConnectionIndicator';
 import EnvControls from './topbar/EnvControls';
 import FilterControls from './topbar/FilterControls';
 import ViewControls from './topbar/ViewControls';
+import UserDropdown from './topbar/UserDropdown';
 import WidthProvider from './Width';
 
 const ReactGridLayout = require('react-grid-layout');
@@ -830,6 +831,7 @@ const App = () => {
   );
   let connectionIndicator = <ConnectionIndicator onClick={toggleOnlineState} />;
 
+  let userDropdown = <UserDropdown />;
   const onDisconnect = (_socket) => {
     // check if is mounted. error can appear on unmounted component
     if (mounted.current) {
@@ -849,54 +851,59 @@ const App = () => {
     onDisconnect,
   };
 
-  return (
-    <div>
-      {modals}
-      <div className="navbar-form navbar-default">
-        <span className="navbar-brand visdom-title">visdom</span>
-        <span className="vertical-line" />
-        &nbsp;&nbsp;
-        {envControls}
-        &nbsp;&nbsp;
-        <span className="vertical-line" />
-        &nbsp;&nbsp;
-        {viewControls}
-        <span
-          style={{
-            float: 'right',
-          }}
-        >
-          {filterControl}
-          &nbsp;&nbsp;
-          {connectionIndicator}
-        </span>
-      </div>
-      <div
-        tabIndex="-1"
-        role="presentation"
-        className="no-focus"
-        onBlur={blurPane}
-        onClick={publishEvent}
-        onKeyUp={publishEvent}
-        onKeyDown={publishEvent}
-        onKeyPress={publishEvent}
+return (
+  <div>
+    {modals}
+    <div className="navbar-form navbar-default">
+      <span className="navbar-brand visdom-title">visdom</span>
+      <span className="vertical-line" />
+      &nbsp;&nbsp;
+      {envControls}
+      &nbsp;&nbsp;
+      <span className="vertical-line" />
+      &nbsp;&nbsp;
+      {viewControls}
+
+      <span
+        style={{
+          float: 'right',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+        }}
       >
-        <GridLayout
-          className="layout"
-          rowHeight={ROW_HEIGHT}
-          autoSize={false}
-          margin={[MARGIN, MARGIN]}
-          layout={storeData.layout}
-          draggableHandle={'.bar'}
-          onWidthChange={onWidthChange}
-          onResizeStop={resizePane}
-          onDragStop={movePane}
-        >
-          {panes}
-        </GridLayout>
-      </div>
+        {filterControl}
+        {connectionIndicator}
+        {userDropdown}
+      </span>
     </div>
-  );
+
+    <div
+      tabIndex="-1"
+      role="presentation"
+      className="no-focus"
+      onBlur={blurPane}
+      onClick={publishEvent}
+      onKeyUp={publishEvent}
+      onKeyDown={publishEvent}
+      onKeyPress={publishEvent}
+    >
+      <GridLayout
+        className="layout"
+        rowHeight={ROW_HEIGHT}
+        autoSize={false}
+        margin={[MARGIN, MARGIN]}
+        layout={storeData.layout}
+        draggableHandle={'.bar'}
+        onWidthChange={onWidthChange}
+        onResizeStop={resizePane}
+        onDragStop={movePane}
+      >
+        {panes}
+      </GridLayout>
+    </div>
+  </div>
+);
 };
 
 function AppWithApi() {
