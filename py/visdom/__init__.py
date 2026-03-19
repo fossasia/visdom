@@ -1788,7 +1788,7 @@ class Visdom(object):
         elif Y.ndim == 2 and X.ndim == 1:
             # Y is NxM (many lines), so repeat X for each line
             X = np.tile(X, (Y.shape[1], 1)).transpose()
-            
+
         assert X.shape == Y.shape, "X and Y should be the same shape"
 
         opts = {} if opts is None else opts
