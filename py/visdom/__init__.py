@@ -2526,7 +2526,7 @@ class Visdom(object):
         """
         try:
             import networkx as nx
-        except:
+        except ImportError:
             raise RuntimeError("networkx must be installed to plot Graph figures")
 
         G = nx.Graph()

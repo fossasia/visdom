@@ -133,7 +133,8 @@ class UpdateHandler(BaseHandler):
     def update(p, args):
         # Update text in window, separated by a line break
         if p["type"] == "text":
-            p["content"] += "<br>" + args["data"][0]["content"]
+            if args.get("data") and len(args["data"]) > 0:
+                p["content"] += "<br>" + args["data"][0].get("content", "")
             return p
         if p["type"] == "embeddings":
             # TODO embeddings updates should be handled outside of the regular
@@ -143,11 +144,9 @@ class UpdateHandler(BaseHandler):
                 p["content"]["selected"] = args["data"]["selected"]
             elif args["data"]["update_type"] == "RegionSelected":
                 p["content"]["selected"] = None
-                print(len(p["content"]["data"]))
                 p["old_content"].append(p["content"]["data"])
                 p["content"]["has_previous"] = True
                 p["content"]["data"] = args["data"]["points"]
-                print(len(p["content"]["data"]))
             return p
         if p["type"] == "image_history":
             utype = args["data"][0]["type"]
