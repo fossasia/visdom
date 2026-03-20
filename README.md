@@ -167,11 +167,14 @@ Using the view dropdown it is possible to select previously saved views, restori
 
 
 ## Setup
-Python and web clients come bundled with the python server.
+This section provides a step-by-step guide to install and run Visdom locally.
 
-Install from pip
+### 1. Install Visdom
+
+You can install Visdom using pip:
+
 ```bash
-> pip install visdom
+pip install visdom
 ```
 
 Install from source
