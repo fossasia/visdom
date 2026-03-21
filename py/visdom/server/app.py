@@ -11,6 +11,7 @@ Main application class that pulls handlers together and maintains
 all of the required state about the currently running server.
 """
 
+import json
 import logging
 import os
 import platform
@@ -42,6 +43,7 @@ from visdom.server.handlers.web_handlers import (
     SaveHandler,
     UpdateHandler,
     UserSettingsHandler,
+    TagsHandler,
 )
 from visdom.server.defaults import (
     DEFAULT_BASE_URL,
@@ -111,6 +113,7 @@ class Application(tornado.web.Application):
             (r"%s/delete_env" % self.base_url, DeleteEnvHandler, {"app": self}),
             (r"%s/env_state" % self.base_url, EnvStateHandler, {"app": self}),
             (r"%s/fork_env" % self.base_url, ForkEnvHandler, {"app": self}),
+            (r"%s/tags" % self.base_url, TagsHandler, {"app": self}),
             (r"%s/user/(.*)" % self.base_url, UserSettingsHandler, {"app": self}),
             (r"%s(.*)" % self.base_url, IndexHandler, {"app": self}),
         ]
@@ -163,7 +166,13 @@ class Application(tornado.web.Application):
             )
             return {"main": {"jsons": {}, "reload": {}}}
         ensure_dir_exists(env_path)
-        env_jsons = [i for i in os.listdir(env_path) if ".json" in i]
+        env_jsons = [
+            i
+            for i in os.listdir(env_path)
+            if i.endswith(".json") and i != "tags_index.json"
+        ]
+        self.tags = self.load_tag_index()
+
         for env_json in env_jsons:
             eid = env_json.replace(".json", "")
             env_path_file = os.path.join(env_path, env_json)
@@ -185,10 +194,31 @@ class Application(tornado.web.Application):
                 state[eid] = LazyEnvData(env_path_file)
 
         if "main" not in state and "main.json" not in env_jsons:
-            state["main"] = {"jsons": {}, "reload": {}}
+            state["main"] = {"jsons": {}, "reload": {}, "tags": []}
             serialize_env(state, ["main"], env_path=self.env_path)
 
         return state
+
+    def load_tag_index(self):
+        index_path = os.path.join(self.env_path, "tags_index.json")
+        if os.path.exists(index_path):
+            try:
+                with open(index_path, "r") as f:
+                    return json.load(f)
+            except Exception:
+                logging.warn(f"Failed to load tag index at {index_path}")
+        return {}
+
+    def save_tag_index(self):
+        index_path = os.path.join(self.env_path, "tags_index.json")
+        try:
+            from visdom.utils.server_utils import atomic_save
+
+            atomic_save(index_path, json.dumps(self.tags))
+        except Exception:
+            import traceback
+
+            logging.warn(f"Failed to save tag index at {index_path}: {traceback.format_exc()}")
 
     def load_user_settings(self):
         settings = {}

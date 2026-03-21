@@ -27,6 +27,7 @@ from visdom.utils.shared_utils import get_rand_id
 from visdom.utils.server_utils import (
     check_auth,
     broadcast_envs,
+    sync_tags,
     serialize_env,
     send_to_sources,
     broadcast,
@@ -277,6 +278,7 @@ class SocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
         )
         self.broadcast_layouts([self])
         broadcast_envs(self, [self])
+        sync_tags(self, [self])
 
     def broadcast_layouts(self, target_subs=None):
         if target_subs is None:

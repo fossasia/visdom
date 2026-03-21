@@ -43,6 +43,8 @@ from visdom.utils.server_utils import (
     compare_envs,
     load_env,
     broadcast,
+    broadcast_tags,
+    sync_tags,
     update_window,
     hash_password,
     stringify,
@@ -675,6 +677,62 @@ class UserSettingsHandler(BaseHandler):
             self.set_status(200)
             self.set_header("Content-type", "text/css")
             self.write(self.user_settings["user_css"])
+
+
+class TagsHandler(BaseHandler):
+    def initialize(self, app):
+        self.state = app.state
+        self.env_path = app.env_path
+        self.subs = app.subs
+        self.login_enabled = app.login_enabled
+        self.app = app
+
+    @check_auth
+    def post(self):
+        logging.info("TagsHandler.post called")
+        args = tornado.escape.json_decode(
+            tornado.escape.to_basestring(self.request.body)
+        )
+        eid = extract_eid(args)
+        
+        if "tags" in args:
+            tags = args.get("tags", [])
+            append = args.get("append", False)
+
+            if eid not in self.state:
+                self.state[eid] = {"jsons": {}, "reload": {}, "tags": []}
+
+            if append:
+                current_tags = set(self.state[eid].get("tags", []))
+                current_tags.update(tags)
+                self.state[eid]["tags"] = list(current_tags)
+            else:
+                self.state[eid]["tags"] = list(set(tags))
+
+            # Update global index
+            self.app.tags[eid] = self.state[eid]["tags"]
+            self.app.save_tag_index()
+
+            # Broadcast update
+            broadcast_tags(self, eid, self.state[eid]["tags"])
+
+            # Async save env
+            serialize_env(self.state, [eid], env_path=self.env_path)
+            
+            res = json.dumps(self.state[eid]["tags"])
+            logging.info(f"TagsHandler: (SET) returning {res}")
+            self.write(res)
+        else:
+            # This is a GET request (sent via POST for convenience in SDK)
+            if eid in self.state:
+                res = json.dumps(self.state[eid].get("tags", []))
+            elif eid in self.app.tags:
+                res = json.dumps(self.app.tags[eid])
+            else:
+                res = json.dumps([])
+            
+            logging.info(f"TagsHandler: (GET) returning {res}")
+            self.write(res)
 
 
 class ErrorHandler(BaseHandler):

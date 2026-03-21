@@ -815,6 +815,47 @@ class Visdom(object):
             create=False,
         )
 
+    def set_tags(self, tags, env=None, append=False):
+        """
+        This function sets tags for a specified environment.
+        If append is True, tags are added to the existing ones.
+        Otherwise, tags are replaced.
+        """
+        if isinstance(tags, str):
+            tags = [tags]
+
+        return self._send(
+            msg={
+                "eid": env,
+                "tags": tags,
+                "append": append,
+            },
+            endpoint="tags",
+            create=False,
+        )
+
+    def get_tags(self, env=None):
+        """
+        This function returns the tags for a specified environment.
+        """
+        if env is None:
+            env = self.env
+
+        try:
+            url = "{0}:{1}{2}/tags".format(
+                self.server, self.port, self.base_url
+            )
+            # We use a custom GET or POST here. Our handler currently only has POST.
+            # But let's check if we should support GET for simpler retrieval.
+            # For now, let's use the POST endpoint with just the eid.
+            return self._send(
+                msg={"eid": env},
+                endpoint="tags",
+                create=False,
+            )
+        except Exception:
+            return []
+
     def set_window_data(self, data, win=None, env=None):
         """
         This function sets all the window data for a specified window in

@@ -20,9 +20,11 @@ import hashlib
 import json
 import logging
 import os
+import tempfile
+import threading
 import time
 import tornado.escape
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 
 try:
     # for after python 3.8
@@ -78,6 +80,29 @@ def hash_password(password):
 # ------- File management helprs ----- #
 
 
+WRITE_LOCKS = defaultdict(threading.Lock)
+
+
+def atomic_save(path, data):
+    """
+    Atomic write to a file using a temporary file and os.replace.
+    Ensures that the file is either fully written or not written at all.
+    """
+    dir_path = os.path.dirname(path)
+    with tempfile.NamedTemporaryFile("w", dir=dir_path, delete=False) as tf:
+        temp_name = tf.name
+        tf.write(data)
+        tf.flush()
+        os.fsync(tf.fileno())
+
+    try:
+        os.replace(temp_name, path)
+    except Exception:
+        if os.path.exists(temp_name):
+            os.remove(temp_name)
+        raise
+
+
 class LazyEnvData(Mapping):
     def __init__(self, env_path_file):
         self._env_path_file = env_path_file
@@ -96,7 +121,11 @@ class LazyEnvData(Mapping):
                     self._env_path_file, repr(e)
                 )
             )
-        self._raw_dict = {"jsons": env_data["jsons"], "reload": env_data["reload"]}
+        self._raw_dict = {
+            "jsons": env_data["jsons"],
+            "reload": env_data["reload"],
+            "tags": env_data.get("tags", []),
+        }
 
     def __getitem__(self, key):
         self.lazy_load_data()
@@ -119,12 +148,13 @@ def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
     env_ids = [i for i in eids if i in state]
     if env_path is not None:
         for env_id in env_ids:
-            env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
-            with open(env_path_file, "w") as fn:
+            with WRITE_LOCKS[env_id]:
+                env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
                 if isinstance(state[env_id], LazyEnvData):
-                    fn.write(json.dumps(state[env_id]._raw_dict))
+                    data = json.dumps(state[env_id]._raw_dict)
                 else:
-                    fn.write(json.dumps(state[env_id]))
+                    data = json.dumps(state[env_id])
+                atomic_save(env_path_file, data)
     return env_ids
 
 
@@ -368,6 +398,24 @@ def broadcast_envs(handler, target_subs=None):
         sub.write_message(
             json.dumps({"command": "env_update", "data": list(handler.state.keys())})
         )
+
+
+def broadcast_tags(handler, eid, tags, target_subs=None):
+    if target_subs is None:
+        target_subs = handler.subs.values()
+    for sub in target_subs:
+        sub.write_message(
+            json.dumps({"command": "tags_update", "data": {"eid": eid, "tags": tags}})
+        )
+
+
+def sync_tags(handler, target_subs=None):
+    if target_subs is None:
+        target_subs = handler.subs.values()
+    # Use the app's tag index for fast synchronization
+    tags_map = handler.app.tags
+    for sub in target_subs:
+        sub.write_message(json.dumps({"command": "tags_sync", "data": tags_map}))
 
 
 def send_to_sources(handler, msg):
