@@ -703,11 +703,12 @@ class TagsHandler(BaseHandler):
                 self.state[eid] = {"jsons": {}, "reload": {}, "tags": []}
 
             if append:
-                current_tags = set(self.state[eid].get("tags", []))
-                current_tags.update(tags)
-                self.state[eid]["tags"] = list(current_tags)
+                current_tags = self.state[eid].get("tags", [])
+                # Deduplicate while preserving order
+                new_tags = list(OrderedDict.fromkeys(current_tags + tags))
+                self.state[eid]["tags"] = new_tags
             else:
-                self.state[eid]["tags"] = list(set(tags))
+                self.state[eid]["tags"] = list(OrderedDict.fromkeys(tags))
 
             # Update global index
             self.app.tags[eid] = self.state[eid]["tags"]

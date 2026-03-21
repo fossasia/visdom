@@ -842,12 +842,6 @@ class Visdom(object):
             env = self.env
 
         try:
-            url = "{0}:{1}{2}/tags".format(
-                self.server, self.port, self.base_url
-            )
-            # We use a custom GET or POST here. Our handler currently only has POST.
-            # But let's check if we should support GET for simpler retrieval.
-            # For now, let's use the POST endpoint with just the eid.
             return self._send(
                 msg={"eid": env},
                 endpoint="tags",
