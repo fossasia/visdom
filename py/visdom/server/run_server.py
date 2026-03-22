@@ -49,21 +49,33 @@ def start_server(
         use_frontend_client_polling=use_frontend_client_polling,
         eager_data_loading=eager_data_loading,
     )
-    if bind_local:
-        app.listen(port, max_buffer_size=1024**3, address="127.0.0.1")
-    else:
-        app.listen(port, max_buffer_size=1024**3)
-    logging.info("Application Started")
-    logging.info(f"Working directory: {os.path.abspath(env_path)}")
 
+    import sys
+
+    try:
+        if bind_local:
+            app.listen(port, max_buffer_size=1024**3, address="127.0.0.1")
+        else:
+            app.listen(port, max_buffer_size=1024**3)
+
+        logging.info("Application Started")
+        logging.info(f"Working directory: {os.path.abspath(env_path)}")
+
+    except OSError:
+        print(f"\nError: Port {port} is already in use.")
+        print("Try running on another port:")
+        print(f"python -m visdom.server -port {port+1}\n")
+        sys.exit(1)
+
+    # KEEP ORIGINAL CODE BELOW (IMPORTANT)
     if "HOSTNAME" in os.environ and hostname == DEFAULT_HOSTNAME:
         hostname = os.environ["HOSTNAME"]
-    else:
-        hostname = hostname
+
     if print_func is None:
         print("You can navigate to http://%s:%s%s" % (hostname, port, base_url))
     else:
         print_func(port)
+
     ioloop.IOLoop.instance().start()
     app.subs = []
     app.sources = []
