@@ -182,20 +182,17 @@ Install from source
 ## Local Development Setup (From Scratch)
 
 ### 1. Create environment
-,,,bash
+
+```bash
 conda create -n visdom_env python=3.10 -y
 conda activate visdom_env
-pip install -r requirements.txt
-pip install pillow charset-normalizer
 pip install -e .
+
+python -m visdom.server
+
 python example/demo.py
 
-### Troubleshooting
-
-If you are running directly from source without installing the package:
-
 PYTHONPATH=./py python -m visdom.server
-,,,bash
 
 ## Usage
 
