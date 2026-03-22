@@ -948,6 +948,65 @@ class Visdom(object):
                 "opts": opts,
             },
             endpoint=endpoint,
+
+        )
+    
+    def table(self, headers, data, win=None, env=None, opts=None):
+        """
+        This function displays data as a formatted HTML table.
+        It takes as input a list of `headers` and a list of lists `data`.
+
+        The following `opts` are supported:
+
+        - `opts.title`: title of the window
+        """
+        opts = {} if opts is None else opts
+        opts['title'] = opts.get('title', 'Table')
+        _title2str(opts)
+        _assert_opts(opts)
+
+        # Validate inputs
+        assert isinstance(headers, list), "headers should be a list"
+        assert isinstance(data, list), "data should be a list of lists"
+        for row in data:
+            assert isinstance(row, list), "each row in data should be a list"
+            assert len(row) == len(headers), \
+                "each row length must match number of headers"
+
+        # Build header HTML
+        header_html = ''.join(
+            '<th style="background:#4a90d9; color:white; '
+            'padding:8px 12px; text-align:left;">%s</th>' % str(h)
+            for h in headers
+        )
+
+        # Build rows HTML
+        rows_html = ''
+        for i, row in enumerate(data):
+            bg = '#fafafa' if i % 2 == 0 else '#ffffff'
+            cells = ''.join(
+                '<td style="padding:6px 12px; '
+                'border-bottom:1px solid #ddd;">%s</td>' % str(cell)
+                for cell in row
+            )
+            rows_html += (
+                '<tr style="background:%s;">%s</tr>' % (bg, cells)
+            )
+
+        # Build full table HTML
+        table_html = (
+            '<table style="border-collapse:collapse; '
+            'width:100%%; font-family:monospace;">'
+            '<thead><tr>%s</tr></thead>'
+            '<tbody>%s</tbody>'
+            '</table>'
+        ) % (header_html, rows_html)
+
+        return self.text(
+            text=table_html,
+            win=win,
+            env=env,
+            opts=opts
         )
 
     def properties(self, data, win=None, env=None, opts=None):
