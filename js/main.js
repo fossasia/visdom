@@ -86,6 +86,7 @@ const App = () => {
   // data stores
   const [storeMeta, setStoreMeta] = useState({
     envList: ENV_LIST.slice(),
+    tags: typeof TAGS_INDEX !== 'undefined' ? TAGS_INDEX : {},
     layoutLists: new Map([['main', new Map([[DEFAULT_LAYOUT, new Map()]])]]),
   });
   const [storeData, setStoreData] = useState({
@@ -297,6 +298,22 @@ const App = () => {
       ...prev,
       envList: data,
       layoutLists: layoutLists,
+    }));
+  };
+  const onTagsUpdate = (data) => {
+    setStoreMeta((prev) => ({
+      ...prev,
+      tags: {
+        ...prev.tags,
+        [data.eid]: data.tags,
+      },
+    }));
+  };
+
+  const onTagsSync = (data) => {
+    setStoreMeta((prev) => ({
+      ...prev,
+      tags: data,
     }));
   };
 
@@ -794,6 +811,7 @@ const App = () => {
     <EnvControls
       envIDs={selection.envIDs}
       envList={storeMeta.envList}
+      tags={storeMeta.tags}
       envSelectorStyle={{
         width: Math.max(window.innerWidth / 3, 50),
       }}
@@ -845,6 +863,8 @@ const App = () => {
     onLayoutMessage,
     onReloadMessage,
     onEnvUpdate,
+    onTagsUpdate,
+    onTagsSync,
     onCloseMessage,
     onDisconnect,
   };

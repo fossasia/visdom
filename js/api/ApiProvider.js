@@ -133,6 +133,12 @@ const ApiProvider = ({ children }) => {
       case 'env_update':
         apiHandlers.current.onEnvUpdate(cmd.data);
         break;
+      case 'tags_update':
+        apiHandlers.current.onTagsUpdate(cmd.data);
+        break;
+      case 'tags_sync':
+        apiHandlers.current.onTagsSync(cmd.data);
+        break;
 
       default:
         console.error('unrecognized command', cmd);

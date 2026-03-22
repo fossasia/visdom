@@ -18,6 +18,7 @@ function EnvControls(props) {
   const {
     envList,
     envIDs,
+    tags,
     envSelectorStyle,
     onEnvSelect,
     onEnvClear,
@@ -41,10 +42,14 @@ function EnvControls(props) {
     if (env.split('_').length == 1) {
       return null;
     }
+    const env_tags = (tags && tags[env]) || [];
+    const label = env_tags.length > 0 ? `${env} [${env_tags.join(', ')}]` : env;
+
     return {
       key: idx + 1 + roots.length,
       pId: roots.indexOf(env.split('_')[0]) + 1,
-      label: env,
+      label: label,
+      title: label,
       value: env,
     };
   });
@@ -53,10 +58,13 @@ function EnvControls(props) {
 
   env_options2 = env_options2.concat(
     roots.map((x, idx) => {
+      const root_tags = (tags && tags[x]) || [];
+      const label = root_tags.length > 0 ? `${x} [${root_tags.join(', ')}]` : x;
       return {
         key: idx + 1,
         pId: 0,
-        label: x,
+        label: label,
+        title: label,
         value: x,
       };
     })
