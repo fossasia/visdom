@@ -190,8 +190,11 @@ pip install pillow charset-normalizer
 pip install -e .
 python example/demo.py
 
-If you get module import errors:
-export PYTHONPATH=$(pwd)/py
+### Troubleshooting
+
+If you are running directly from source without installing the package:
+
+PYTHONPATH=./py python -m visdom.server
 ,,,bash
 
 ## Usage
