@@ -179,21 +179,20 @@ Install from source
 > pip install git+https://github.com/fossasia/visdom
 ```
 
-Improve local setup instructions in README for fresh clone
+## Local Development Setup (From Scratch)
 
-# Setup from scratch
-
+### 1. Create environment
+,,,bash
 conda create -n visdom_env python=3.10 -y
 conda activate visdom_env
-
 pip install -r requirements.txt
+pip install pillow charset-normalizer
 pip install -e .
+python example/demo.py
 
-# Run server
-python -m visdom.server
-
-# Alternative (if import error)
+If you get module import errors:
 export PYTHONPATH=$(pwd)/py
+,,,bash
 
 ## Usage
 
