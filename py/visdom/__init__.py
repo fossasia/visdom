@@ -842,12 +842,15 @@ class Visdom(object):
             env = self.env
 
         try:
-            return self._send(
-                msg={"eid": env},
-                endpoint="tags",
-                create=False,
+            url = "{0}:{1}{2}/tags?eid={3}".format(
+                self.server, self.port, self.base_url, env
             )
-        except Exception:
+            r = self.session.get(url)
+            res = r.json()
+            # print(f"DEBUG SDK: get_tags type={type(res)} val={res}")
+            return res
+        except Exception as e:
+            # print(f"DEBUG SDK: get_tags error={e}")
             return []
 
     def set_window_data(self, data, win=None, env=None):

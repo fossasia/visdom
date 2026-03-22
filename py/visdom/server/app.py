@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import platform
+import threading
 import time
 
 import tornado.web  # noqa E402: gotta install ioloop first
@@ -76,6 +77,7 @@ class Application(tornado.web.Application):
     ):
         self.eager_data_loading = eager_data_loading
         self.env_path = env_path
+        self.index_lock = threading.Lock()
         self.state = self.load_state()
         self.layouts = self.load_layouts()
         self.user_settings = self.load_user_settings()
@@ -214,7 +216,8 @@ class Application(tornado.web.Application):
         try:
             from visdom.utils.server_utils import atomic_save
 
-            atomic_save(index_path, json.dumps(self.tags))
+            with self.index_lock:
+                atomic_save(index_path, json.dumps(self.tags))
         except Exception:
             import traceback
 

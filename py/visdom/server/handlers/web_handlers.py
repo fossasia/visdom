@@ -688,17 +688,31 @@ class TagsHandler(BaseHandler):
         self.app = app
 
     @check_auth
+    def get(self):
+        """Handle GET requests for retrieving tags."""
+        eid = self.get_argument("eid", "main")
+        eid = escape_eid(eid)
+
+        if eid in self.state:
+            res = json.dumps(self.state[eid].get("tags", []))
+        elif eid in self.app.tags:
+            res = json.dumps(self.app.tags[eid])
+        else:
+            res = json.dumps([])
+
+        self.write(res)
+
+    @check_auth
     def post(self):
-        logging.info("TagsHandler.post called")
+        """Handle POST requests for updating tags."""
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
         eid = extract_eid(args)
-        
-        if "tags" in args:
-            tags = args.get("tags", [])
-            append = args.get("append", False)
+        tags = args.get("tags", [])
+        append = args.get("append", False)
 
+        with self.app.index_lock:
             if eid not in self.state:
                 self.state[eid] = {"jsons": {}, "reload": {}, "tags": []}
 
@@ -710,30 +724,18 @@ class TagsHandler(BaseHandler):
             else:
                 self.state[eid]["tags"] = list(OrderedDict.fromkeys(tags))
 
-            # Update global index
+            # Update global index and save
             self.app.tags[eid] = self.state[eid]["tags"]
             self.app.save_tag_index()
 
-            # Broadcast update
-            broadcast_tags(self, eid, self.state[eid]["tags"])
+        # Broadcast update (outside the lock to minimize hold time)
+        broadcast_tags(self, eid, self.state[eid]["tags"])
 
-            # Async save env
-            serialize_env(self.state, [eid], env_path=self.env_path)
-            
-            res = json.dumps(self.state[eid]["tags"])
-            logging.info(f"TagsHandler: (SET) returning {res}")
-            self.write(res)
-        else:
-            # This is a GET request (sent via POST for convenience in SDK)
-            if eid in self.state:
-                res = json.dumps(self.state[eid].get("tags", []))
-            elif eid in self.app.tags:
-                res = json.dumps(self.app.tags[eid])
-            else:
-                res = json.dumps([])
-            
-            logging.info(f"TagsHandler: (GET) returning {res}")
-            self.write(res)
+        # Async save env
+        serialize_env(self.state, [eid], env_path=self.env_path)
+
+        res = json.dumps(self.state[eid]["tags"])
+        self.write(res)
 
 
 class ErrorHandler(BaseHandler):
