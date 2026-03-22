@@ -179,6 +179,22 @@ Install from source
 > pip install git+https://github.com/fossasia/visdom
 ```
 
+Improve local setup instructions in README for fresh clone
+
+# Setup from scratch
+
+conda create -n visdom_env python=3.10 -y
+conda activate visdom_env
+
+pip install -r requirements.txt
+pip install -e .
+
+# Run server
+python -m visdom.server
+
+# Alternative (if import error)
+export PYTHONPATH=$(pwd)/py
+
 ## Usage
 
 Start the server (probably in a  `screen` or `tmux`) from the command line:
@@ -800,3 +816,4 @@ See guidelines for contributing [here.](./CONTRIBUTING.md)
 
 ## Acknowledgments
 Visdom was inspired by tools like [display](https://github.com/szym/display) and relies on [Plotly](https://plot.ly/) as a plotting front-end.
+
