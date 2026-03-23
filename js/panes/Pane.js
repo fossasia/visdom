@@ -6,7 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  *
  */
-
+//Pane.js
 import React, { forwardRef, useRef, useState } from 'react';
 
 import PropertyItem from './PropertyItem';
@@ -14,11 +14,12 @@ var classNames = require('classnames');
 
 var Pane = forwardRef((props, ref) => {
   const { id, title, content, children, widgets, enablePropertyList } = props;
-  var { barwidgets } = props;
+  var { barwidgets = [] } = props;
 
   // state varibles
   // --------------
   const [propertyListShown, setPropertyListShown] = useState(false);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const barRef = useRef();
 
   // public events
@@ -29,6 +30,8 @@ var Pane = forwardRef((props, ref) => {
   const handleZoom = props.handleZoom || (() => {});
   const handleMouseMove = props.handleMouseMove || (() => {});
   const handleClose = props.handleClose || (() => props.onClose(id));
+  const handleShowExportHistory =
+    props.onShowExportHistory || (() => {});
 
   // rendering
   // ---------
@@ -111,10 +114,60 @@ var Pane = forwardRef((props, ref) => {
           {' '}
           X{' '}
         </button>
-        <button title="save" onClick={handleDownload}>
+
+        <button
+          title="save"
+          onClick={(e) => {
+            e.stopPropagation();
+            setExportMenuOpen((v) => !v);
+          }}
+        >
           {' '}
           &#8681;{' '}
         </button>
+
+        {exportMenuOpen && (
+          <div
+            className="export-menu"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'absolute',
+              zIndex: 20,
+              marginTop: '4px',
+              padding: '6px',
+              background: '#fff',
+              border: '1px solid #ccc',
+              borderRadius: '4px',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+            }}
+          >
+            <button
+              onClick={() => {
+                handleDownload('svg');
+                setExportMenuOpen(false);
+              }}
+            >
+              Export SVG
+            </button>
+            <button
+              onClick={() => {
+                handleDownload('png');
+                setExportMenuOpen(false);
+              }}
+            >
+              Export PNG
+            </button>
+            <button
+              onClick={() => {
+                handleShowExportHistory();
+                setExportMenuOpen(false);
+              }}
+            >
+              Export history
+            </button>
+          </div>
+        )}
+
         <button title="reset" onClick={handleReset} hidden={!props.handleReset}>
           {' '}
           &#10226;{' '}
