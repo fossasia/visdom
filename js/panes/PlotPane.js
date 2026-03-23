@@ -6,7 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  *
  */
-
+//PlotPane.js
 import React, { useEffect, useRef, useState } from 'react';
 const { usePrevious } = require('../util');
 import Pane from './Pane';
@@ -22,6 +22,16 @@ var PlotPane = (props) => {
   const maxsmoothvalue = 100;
   const [smoothWidgetActive, setSmoothWidgetActive] = useState(false);
   const [smoothvalue, setSmoothValue] = useState(1);
+  const [showExportHistory, setShowExportHistory] = useState(false);
+  const [exportHistory, setExportHistory] = useState([]);
+
+  const loadExportHistory = () => {
+    try {
+      return JSON.parse(localStorage.getItem('visdom_export_log') || '[]');
+    } catch {
+      return [];
+    }
+  };
 
   // private events
   // -------------
@@ -31,11 +41,40 @@ var PlotPane = (props) => {
   const updateSmoothSlider = (value) => {
     setSmoothValue(value);
   };
-  const handleDownload = () => {
+
+  const saveExportLog = (entry) => {
+    try {
+      const existing = JSON.parse(
+        localStorage.getItem('visdom_export_log') || '[]'
+      );
+      existing.push(entry);
+      localStorage.setItem('visdom_export_log', JSON.stringify(existing));
+    } catch (err) {
+      console.error('Failed to save export log', err);
+    }
+  };
+
+  const handleDownload = (format = 'svg') => {
+    console.log('handleDownload clicked', contentID, format);
+    const filename = `${contentID}_${new Date()
+      .toISOString()
+      .replace(/[:.]/g, '-')}`;
+
     Plotly.downloadImage(plotlyRef.current, {
-      format: 'svg',
-      filename: contentID,
+      format,
+      filename,
     });
+
+    saveExportLog({
+      contentID,
+      filename,
+      format,
+      timestamp: new Date().toISOString(),
+      title: content?.layout?.title || '',
+      status: 'success',
+    });
+
+    setExportHistory(loadExportHistory().slice().reverse());
   };
 
   // events
@@ -72,7 +111,26 @@ var PlotPane = (props) => {
     }
 
     newPlot();
+
+    // 🔥 ADD THIS BELOW newPlot()
+    setTimeout(() => {
+      if (plotlyRef.current) {
+        Plotly.Plots.resize(plotlyRef.current);
+      }
+    }, 0);
   });
+
+  useEffect(() => {
+    if (showExportHistory) {
+      setExportHistory(loadExportHistory().slice().reverse());
+    }
+    // 🔥 ADD THIS
+    if (plotlyRef.current) {
+      setTimeout(() => {
+        Plotly.Plots.resize(plotlyRef.current);
+      }, 0);
+    }
+  }, [showExportHistory]);
 
   // rendering
   // ---------
@@ -139,6 +197,7 @@ var PlotPane = (props) => {
     Plotly.react(contentID, data.concat(smooth_data), content.layout, {
       showLink: true,
       linkText: 'Edit',
+      modeBarButtonsToRemove: ['toImage'],
     });
   };
 
@@ -147,8 +206,8 @@ var PlotPane = (props) => {
     return data['type'] == 'scatter' && data['mode'] == 'lines';
   });
 
-  var smooth_widget_button = '';
-  var smooth_widget = '';
+  var smooth_widget_button = null;
+  var smooth_widget = null;
   if (contains_line_plots) {
     smooth_widget_button = (
       <button
@@ -183,17 +242,71 @@ var PlotPane = (props) => {
     <Pane
       {...props}
       handleDownload={handleDownload}
-      barwidgets={[smooth_widget_button]}
-      widgets={[smooth_widget]}
+      onShowExportHistory={() => setShowExportHistory((v) => !v)}
+      barwidgets={[smooth_widget_button].filter(Boolean)}
+      widgets={[
+        smooth_widget,
+        showExportHistory && (
+          <div
+            key="export_history"
+            className="widget"
+            style={{
+              maxHeight: '200px',
+              overflowY: 'auto',
+              overflowX: 'hidden',
+              padding: '6px'
+            }}
+          >
+            <h4>Export history</h4>
+            {exportHistory.length === 0 ? (
+              <div>No export history yet.</div>
+            ) : (
+              exportHistory.map((item, idx) => (
+                <div key={idx}
+                  style={{
+                    marginBottom: '10px',
+                    borderBottom: '1px solid #eee',
+                    paddingBottom: '6px'
+                  }}
+                >
+                  {/* FORMAT */}
+                  <div style={{ fontWeight: 'bold' }}>
+                    {item.format.toUpperCase()}
+                  </div>
+
+                  {/* TIME */}
+                  <div style={{ fontSize: '12px', color: '#555' }}>
+                    {item.timestamp
+                      ? new Date(item.timestamp).toLocaleString()
+                      : ''}
+                  </div>
+
+                  {/* STATUS */}
+                  <div style={{ fontSize: '12px', color: 'green' }}>
+                    {item.status}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        ),
+      ].filter(Boolean)}
       enablePropertyList
     >
+
+
       <div
         id={contentID}
-        style={{ height: '100%', width: '100%' }}
+        style={{
+          height: showExportHistory ? '70%' : '100%',
+          width: '100%'
+        }}
         className="plotly-graph-div"
         ref={plotlyRef}
       />
+
     </Pane>
+
   );
 };
 
