@@ -183,7 +183,7 @@ Install from source
 
 ### 1. Create environment
 
-```bash
+
 conda create -n visdom_env python=3.10 -y
 conda activate visdom_env
 pip install -e .

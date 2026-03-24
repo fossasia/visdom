@@ -426,8 +426,10 @@ class DeleteEnvHandler(BaseHandler):
             # Safe delete from file system
             if handler.env_path is not None:
                 p = os.path.join(handler.env_path, "{}.json".format(eid))
-                if os.path.exists(p):
+                try:
                     os.remove(p)
+                except FileNotFoundError:
+                    pass
             broadcast_envs(handler)
 
     @check_auth
