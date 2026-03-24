@@ -33,6 +33,18 @@ var PlotPane = (props) => {
     }
   };
 
+  const refreshExportHistory = () => {
+    setExportHistory(loadExportHistory().slice().reverse());
+  };
+
+  const resizePlot = () => {
+    if (plotlyRef.current) {
+      setTimeout(() => {
+        Plotly.Plots.resize(plotlyRef.current);
+      }, 0);
+    }
+  };
+
   // private events
   // -------------
   const toggleSmoothWidget = () => {
@@ -44,9 +56,7 @@ var PlotPane = (props) => {
 
   const saveExportLog = (entry) => {
     try {
-      const existing = JSON.parse(
-        localStorage.getItem('visdom_export_log') || '[]'
-      );
+      const existing = loadExportHistory();
       existing.push(entry);
       localStorage.setItem('visdom_export_log', JSON.stringify(existing));
     } catch (err) {
@@ -54,27 +64,39 @@ var PlotPane = (props) => {
     }
   };
 
-  const handleDownload = (format = 'svg') => {
-    console.log('handleDownload clicked', contentID, format);
+  const handleDownload = async (format = 'svg') => {
     const filename = `${contentID}_${new Date()
       .toISOString()
       .replace(/[:.]/g, '-')}`;
+    const timestamp = new Date().toISOString();
 
-    Plotly.downloadImage(plotlyRef.current, {
-      format,
-      filename,
-    });
+    try {
+      await Plotly.downloadImage(plotlyRef.current, {
+        format,
+        filename,
+      });
 
-    saveExportLog({
-      contentID,
-      filename,
-      format,
-      timestamp: new Date().toISOString(),
-      title: content?.layout?.title || '',
-      status: 'success',
-    });
-
-    setExportHistory(loadExportHistory().slice().reverse());
+      saveExportLog({
+        contentID,
+        filename,
+        format,
+        timestamp,
+        title: content?.layout?.title || '',
+        status: 'success',
+      });
+    } catch (error) {
+      saveExportLog({
+        contentID,
+        filename,
+        format,
+        timestamp,
+        title: content?.layout?.title || '',
+        status: 'error',
+        error: error?.message || String(error),
+      });
+    } finally {
+      refreshExportHistory();
+    }
   };
 
   // events
@@ -111,25 +133,14 @@ var PlotPane = (props) => {
     }
 
     newPlot();
-
-    // 🔥 ADD THIS BELOW newPlot()
-    setTimeout(() => {
-      if (plotlyRef.current) {
-        Plotly.Plots.resize(plotlyRef.current);
-      }
-    }, 0);
+    resizePlot();
   });
 
   useEffect(() => {
     if (showExportHistory) {
-      setExportHistory(loadExportHistory().slice().reverse());
+      refreshExportHistory();
     }
-    // 🔥 ADD THIS
-    if (plotlyRef.current) {
-      setTimeout(() => {
-        Plotly.Plots.resize(plotlyRef.current);
-      }, 0);
-    }
+    resizePlot();
   }, [showExportHistory]);
 
   // rendering
@@ -254,7 +265,7 @@ var PlotPane = (props) => {
               maxHeight: '200px',
               overflowY: 'auto',
               overflowX: 'hidden',
-              padding: '6px'
+              padding: '6px',
             }}
           >
             <h4>Export history</h4>
@@ -262,29 +273,38 @@ var PlotPane = (props) => {
               <div>No export history yet.</div>
             ) : (
               exportHistory.map((item, idx) => (
-                <div key={idx}
+                <div
+                  key={idx}
                   style={{
                     marginBottom: '10px',
                     borderBottom: '1px solid #eee',
-                    paddingBottom: '6px'
+                    paddingBottom: '6px',
                   }}
                 >
-                  {/* FORMAT */}
                   <div style={{ fontWeight: 'bold' }}>
                     {item.format.toUpperCase()}
                   </div>
 
-                  {/* TIME */}
                   <div style={{ fontSize: '12px', color: '#555' }}>
                     {item.timestamp
                       ? new Date(item.timestamp).toLocaleString()
                       : ''}
                   </div>
 
-                  {/* STATUS */}
-                  <div style={{ fontSize: '12px', color: 'green' }}>
+                  <div
+                    style={{
+                      fontSize: '12px',
+                      color: item.status === 'error' ? '#c00' : 'green',
+                    }}
+                  >
                     {item.status}
                   </div>
+
+                  {item.error ? (
+                    <div style={{ fontSize: '12px', color: '#c00' }}>
+                      {item.error}
+                    </div>
+                  ) : null}
                 </div>
               ))
             )}
@@ -293,20 +313,16 @@ var PlotPane = (props) => {
       ].filter(Boolean)}
       enablePropertyList
     >
-
-
       <div
         id={contentID}
         style={{
           height: showExportHistory ? '70%' : '100%',
-          width: '100%'
+          width: '100%',
         }}
         className="plotly-graph-div"
         ref={plotlyRef}
       />
-
     </Pane>
-
   );
 };
 
