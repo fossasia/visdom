@@ -419,10 +419,15 @@ class DeleteEnvHandler(BaseHandler):
     def wrap_func(handler, args):
         eid = extract_eid(args)
         if eid is not None:
-            del handler.state[eid]
+            # Safe delete from state
+            if eid in handler.state:
+                del handler.state[eid]
+
+            # Safe delete from file system
             if handler.env_path is not None:
-                p = os.path.join(handler.env_path, "{0}.json".format(eid))
-                os.remove(p)
+                p = os.path.join(handler.env_path, "{}.json".format(eid))
+                if os.path.exists(p):
+                    os.remove(p)
             broadcast_envs(handler)
 
     @check_auth
