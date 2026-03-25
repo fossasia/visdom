@@ -289,3 +289,176 @@ button[title="smooth lines"] {
 button[title="smooth lines"].active {
     color: red;
 }
+
+/* ===================== */
+/*      DARK MODE        */
+/* ===================== */
+
+.dark-mode {
+  background-color: #1a1a2e;
+}
+
+.dark-mode html,
+html.dark-mode {
+  background-color: #1a1a2e;
+}
+
+/* Navbar */
+.dark-mode .navbar-default,
+.dark-mode .navbar-form.navbar-default {
+  background-color: #16213e;
+  border-color: #0f3460;
+  color: #e0e0e0;
+}
+
+.dark-mode .navbar-brand,
+.dark-mode .visdom-title {
+  color: #a0c4ff !important;
+}
+
+.dark-mode .vertical-line {
+  border-left-color: #444;
+}
+
+/* Pane windows */
+.dark-mode .window {
+  background: #1e1e2e;
+  border-color: #2a2a4a;
+  color: #e0e0e0;
+  box-shadow: rgba(0, 0, 0, 0.4) 1px 1px 8px;
+}
+
+.dark-mode .window.focus {
+  border-color: #0f3460;
+  outline-color: #4a6fa5;
+}
+
+/* Title bar */
+.dark-mode .bar {
+  color: #b0b0c0;
+  background-color: #16213e;
+}
+
+.dark-mode .bar.focus {
+  background-color: #0f3460;
+}
+
+.dark-mode .bar button {
+  background: transparent;
+  color: #b0b0c0;
+}
+
+.dark-mode .bar button:hover {
+  background: #2a2a4a;
+}
+
+.dark-mode button > span.glyphicon {
+  color: #a0a0c0;
+}
+
+/* Widgets and content areas */
+.dark-mode .widgets {
+  background-color: #1e1e2e;
+  color: #e0e0e0;
+}
+
+.dark-mode .widget {
+  color: #e0e0e0;
+}
+
+.dark-mode .content-plot {
+  background: #1e1e2e;
+}
+
+.dark-mode .content-image {
+  background-color: #1e1e2e;
+}
+
+.dark-mode .content-properties {
+  background-color: #1e1e2e;
+  color: #e0e0e0;
+}
+
+.dark-mode .attachedWindow {
+  background: rgba(30, 30, 46, 0.92);
+  color: #e0e0e0;
+}
+
+/* Properties table */
+.dark-mode .table-properties td {
+  border-color: #2a2a4a;
+  color: #e0e0e0;
+}
+
+.dark-mode .table-properties td.table-properties-name {
+  background-color: #16213e;
+  border-color: #2a2a4a;
+  color: #b0b0c0;
+}
+
+/* Grid placeholder */
+.dark-mode .react-grid-item.react-grid-placeholder {
+  background: #2a2a4a;
+}
+
+/* Dropdown menus */
+.dark-mode .dropdown-menu {
+  background-color: #16213e;
+  border-color: #0f3460;
+  color: #e0e0e0;
+}
+
+.dark-mode .dropdown-menu > li > a {
+  color: #e0e0e0;
+}
+
+.dark-mode .dropdown-menu > li > a:hover {
+  background-color: #0f3460;
+  color: #fff;
+}
+
+/* Form controls in navbar */
+.dark-mode .btn-default {
+  background-color: #16213e;
+  border-color: #0f3460;
+  color: #e0e0e0;
+}
+
+.dark-mode .btn-default:hover,
+.dark-mode .btn-default:focus {
+  background-color: #0f3460;
+  color: #fff;
+}
+
+.dark-mode input.form-control {
+  background-color: #1e1e2e;
+  border-color: #0f3460;
+  color: #e0e0e0;
+}
+
+.dark-mode input.form-control::placeholder {
+  color: #6a6a8a;
+}
+
+/* Dark mode toggle button */
+.dark-mode-toggle {
+  background: transparent;
+  border: 1px solid #aaa;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 7px;
+  margin-left: 8px;
+  vertical-align: middle;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.dark-mode-toggle:hover {
+  background: rgba(128, 128, 128, 0.2);
+}
+
+.dark-mode .dark-mode-toggle {
+  border-color: #4a6fa5;
+  color: #e0e0e0;
+}

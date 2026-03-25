@@ -105,6 +105,9 @@ const App = () => {
   const [filterString, setFilterString] = useState(
     localStorage.getItem('filter') || ''
   );
+  const [darkMode, setDarkMode] = useState(
+    localStorage.getItem('darkMode') === 'true'
+  );
 
   // non-triggering state variables
   const _bin = useRef(null);
@@ -704,6 +707,16 @@ const App = () => {
     localStorage.setItem('filter', filterString);
   }, [filterString]);
 
+  // sync dark mode: apply class to <html> for full-page background coverage
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark-mode');
+    } else {
+      document.documentElement.classList.remove('dark-mode');
+    }
+    localStorage.setItem('darkMode', darkMode);
+  }, [darkMode]);
+
   const onWidthChange = (width, cols) => {
     windowSize.current.cols = cols;
     windowSize.current.width = width;
@@ -829,6 +842,16 @@ const App = () => {
     />
   );
   let connectionIndicator = <ConnectionIndicator onClick={toggleOnlineState} />;
+  let darkModeToggle = (
+    <button
+      className="dark-mode-toggle"
+      title={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+      onClick={() => setDarkMode(!darkMode)}
+      aria-label="Toggle dark mode"
+    >
+      {darkMode ? '☀️' : '🌙'}
+    </button>
+  );
 
   const onDisconnect = (_socket) => {
     // check if is mounted. error can appear on unmounted component
@@ -850,7 +873,7 @@ const App = () => {
   };
 
   return (
-    <div>
+    <div className={darkMode ? 'dark-mode' : ''}>
       {modals}
       <div className="navbar-form navbar-default">
         <span className="navbar-brand visdom-title">visdom</span>
@@ -867,6 +890,8 @@ const App = () => {
           }}
         >
           {filterControl}
+          &nbsp;&nbsp;
+          {darkModeToggle}
           &nbsp;&nbsp;
           {connectionIndicator}
         </span>

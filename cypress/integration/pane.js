@@ -170,3 +170,20 @@ describe('Test Pane Filter', () => {
 })
 
 
+describe('SVG Export Button on Plot Pane', () => {
+  it('Export SVG button is present on plot pane', () => {
+    cy.run('plot_line_basic');
+    cy.get('.layout .window')
+      .first()
+      .find('button[title="export svg"]')
+      .should('exist');
+  });
+
+  it('Export SVG button is not present on text pane', () => {
+    cy.run('text_basic');
+    cy.get('.layout .window')
+      .first()
+      .find('button[title="export svg"]')
+      .should('not.exist');
+  });
+});

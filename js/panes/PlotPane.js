@@ -37,6 +37,28 @@ var PlotPane = (props) => {
       filename: contentID,
     });
   };
+  const handleExportSVG = () => {
+    const container = plotlyRef.current;
+    if (!container) {
+      console.warn('[visdom] Export SVG: plot container not found.');
+      return;
+    }
+    const svgEl = container.querySelector('svg.main-svg');
+    if (!svgEl) {
+      alert('No SVG found for this plot. Only Plotly chart types support SVG export.');
+      return;
+    }
+    const svgContent = svgEl.outerHTML;
+    const blob = new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = contentID + '.svg';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
 
   // events
   // ------
@@ -147,6 +169,16 @@ var PlotPane = (props) => {
     return data['type'] == 'scatter' && data['mode'] == 'lines';
   });
 
+  var svg_export_button = (
+    <button
+      key="svg_export_button"
+      title="export svg"
+      onClick={handleExportSVG}
+      className="pull-right"
+    >
+      <span className="glyphicon glyphicon-download-alt" />
+    </button>
+  );
   var smooth_widget_button = '';
   var smooth_widget = '';
   if (contains_line_plots) {
@@ -183,7 +215,7 @@ var PlotPane = (props) => {
     <Pane
       {...props}
       handleDownload={handleDownload}
-      barwidgets={[smooth_widget_button]}
+      barwidgets={[svg_export_button, smooth_widget_button]}
       widgets={[smooth_widget]}
       enablePropertyList
     >
