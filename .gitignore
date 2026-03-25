@@ -11,7 +11,7 @@ visdom*.tgz
 visdom.egg-info/
 setup.cfg
 py/visdom/static/fonts/
-py/visdom/static/css/
+
 py/visdom/static/js/*.min.js
 py/visdom/static/js/*.js
 py/visdom/static/js/*.js.map
