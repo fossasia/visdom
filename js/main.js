@@ -263,19 +263,29 @@ const App = () => {
   };
 
   const onWindowMessage = ({ cmd, update }) => {
-    // If we're in compare mode and recieve an update to an environment
-    // that is selected that isn't from the compare output, we need to
-    // reload the compare output
-    if (
-      cmd.env &&
-      Array.isArray(selection.envIDs) &&
-      !selection.envIDs.includes(cmd.env)
-    ) {
-      return;
+    let selected = selection.envIDs;
+
+    // 🔥 fallback to ACTIVE_ENV (CRITICAL)
+    if (!selected || selected.length === 0) {
+      if (typeof ACTIVE_ENV === 'string') {
+        selected = ACTIVE_ENV.includes('+')
+          ? ACTIVE_ENV.split('+')
+          : [ACTIVE_ENV];
+      } else {
+        selected = ["main"];
+      }
     }
-    
-    if (selection.envIDs.length > 1 && cmd.has_compare !== true) {
-      sendEnvQuery(selection.envIDs);
+
+    if (cmd.env && selected.length > 0) {
+      const match = selected.some(
+        (eid) => eid.trim() === cmd.env.trim()
+      );
+
+      if (!match) return;
+    }
+
+    if (selected.length > 1 && cmd.has_compare !== true) {
+      sendEnvQuery(selected);
     } else if (update) {
       updateWindow(cmd);
     } else {
@@ -306,6 +316,7 @@ const App = () => {
       envList: data,
       layoutLists: layoutLists,
     }));
+    console.log("ENV UPDATE:", data);
   };
 
   // remove paneID from pane list
