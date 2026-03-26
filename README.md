@@ -179,9 +179,8 @@ Install from source
 > pip install git+https://github.com/fossasia/visdom
 ```
 
-## Local Development Setup (From Scratch)
+### Local Development Setup (From Scratch)
 
-````markdown
 ### 1. Create environment
 ```bash
 conda create -n visdom_env python=3.10 -y
