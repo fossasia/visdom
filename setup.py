@@ -26,10 +26,9 @@ except Exception:
 
 def get_dist(pkgname):
     try:
-        metadata.distribution(pkgname)
-        return True
+        return metadata.distribution(pkgname)
     except metadata.PackageNotFoundError:
-        return False
+        return None
 
 here = os.path.abspath(os.path.dirname(__file__))
 
