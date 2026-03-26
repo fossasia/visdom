@@ -264,7 +264,7 @@ const App = () => {
 
   const onWindowMessage = ({ cmd, update }) => {
 <<<<<<< HEAD
-    // If we're in compare mode and recieve an update to an environment
+    // If we're in compare mode and receive an update to an environment
     // that is selected that isn't from the compare output, we need to
     // reload the compare output
     if (
