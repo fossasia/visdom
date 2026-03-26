@@ -328,12 +328,15 @@ class UpdateHandler(BaseHandler):
             append = args.get("append")
             if append:
                 p = window(args)
+                p["env"] = eid   
                 register_window(handler, p, eid)
             else:
                 handler.write("win does not exist")
             return
 
         p = handler.state[eid]["jsons"][args["win"]]
+
+        p["env"] = eid   
 
         if not (
             p["type"] == "text"
@@ -399,7 +402,7 @@ class CloseHandler(BaseHandler):
         keys = list(handler.state[eid]["jsons"].keys()) if win is None else [win]
         for win in keys:
             handler.state[eid]["jsons"].pop(win, None)
-            broadcast(handler, json.dumps({"command": "close", "data": win}), eid)
+            broadcast(handler, json.dumps({"command": "close", "data": win,"env" : eid}), eid)
 
     @check_auth
     def post(self):
@@ -471,6 +474,9 @@ class ForkEnvHandler(BaseHandler):
         assert prev_eid in handler.state, "env to be forked doesn't exit"
 
         handler.state[eid] = copy.deepcopy(handler.state[prev_eid])
+        eid = escape_eid(eid)
+        for win in handler.state[eid]["jsons"].values():
+            win["env"] = eid
         serialize_env(handler.state, [eid], env_path=handler.app.env_path)
         broadcast_envs(handler)
 
@@ -602,6 +608,7 @@ class DataHandler(BaseHandler):
             if "win" in args and args["win"] is None:
                 handler.state[eid]["jsons"] = data
             else:
+                data["env"] = eid
                 handler.state[eid]["jsons"][args["win"]] = data
 
             broadcast_envs(handler)
