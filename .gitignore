@@ -7,6 +7,7 @@ build
 th/CMakeLists.txt
 th/build.luarocks
 dist/
+venv/
 visdom*.tgz
 visdom.egg-info/
 setup.cfg
