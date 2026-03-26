@@ -331,7 +331,6 @@ const App = () => {
       envList: data,
       layoutLists: layoutLists,
     }));
-    console.log("ENV UPDATE:", data);
   };
 
   // remove paneID from pane list
