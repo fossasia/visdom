@@ -8,7 +8,7 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import Plotly from 'plotly.js-dist-min';
+const Plotly = window.Plotly;
 
 const { usePrevious } = require('../util');
 import Pane from './Pane';
@@ -35,6 +35,15 @@ var PlotPane = (props) => {
 
   // NEW: Export plot as SVG (publication quality)
   const handleDownload = (format = 'svg') => {
+
+    // defensive check
+    if (!plotlyRef.current || !window.Plotly) {
+      console.warn("Plotly not ready yet");
+      return;
+    }
+
+    const Plotly = window.Plotly;
+
     Plotly.downloadImage(plotlyRef.current, {
       format: format,
       filename: `${contentID}_plot`,
@@ -238,7 +247,7 @@ var PlotPane = (props) => {
 
     <Pane
       {...props}
-      handleDownload={handleDownload}
+      handleDownload={() => handleDownload('svg')}
       barwidgets={[smooth_widget_button, export_widget_button]}
       widgets={[smooth_widget]}
       enablePropertyList
