@@ -22,6 +22,13 @@ function EnvControls(props) {
     onEnvSelect,
     onEnvClear,
     onEnvManageButton,
+    activeExperimentTags,
+    tagInput,
+    onTagInputChange,
+    onTagInputSubmit,
+    tagFilter,
+    onTagFilterChange,
+    onTagFilterClear,
   } = props;
   const [confirmClear, setConfirmClear] = useState(false);
 
@@ -123,6 +130,62 @@ function EnvControls(props) {
         >
           <span className="glyphicon glyphicon-folder-open" />
         </button>
+      </div>
+      <span style={{ marginLeft: 10 }}>
+        <span className="label label-default">Tags</span>
+        {activeExperimentTags.map((tag) => (
+          <span key={tag} className="label label-primary" style={{ marginLeft: 5 }}>
+            {tag}
+          </span>
+        ))}
+      </span>
+      <div
+        className="input-group navbar-btn"
+        style={{ width: 200, display: 'inline-flex', marginLeft: 10 }}
+      >
+        <input
+          type="text"
+          className="form-control"
+          placeholder="Add tags (comma)"
+          value={tagInput}
+          onChange={onTagInputChange}
+          onKeyDown={(ev) => {
+            if (ev.key === 'Enter') {
+              onTagInputSubmit();
+            }
+          }}
+        />
+        <span className="input-group-btn">
+          <button
+            type="button"
+            className="btn btn-default"
+            disabled={!(connected && envIDs.length > 0 && !readonly)}
+            onClick={onTagInputSubmit}
+          >
+            Add
+          </button>
+        </span>
+      </div>
+      <div
+        className="input-group navbar-btn"
+        style={{ width: 180, display: 'inline-flex', marginLeft: 10 }}
+      >
+        <input
+          type="text"
+          className="form-control"
+          placeholder="Filter env by tag"
+          value={tagFilter}
+          onChange={onTagFilterChange}
+        />
+        <span className="input-group-btn">
+          <button
+            type="button"
+            className="btn btn-default"
+            onClick={onTagFilterClear}
+          >
+            <span className="glyphicon glyphicon-erase" />
+          </button>
+        </span>
       </div>
     </span>
   );

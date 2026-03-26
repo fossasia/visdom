@@ -46,6 +46,11 @@ from visdom.utils.server_utils import (
     update_window,
     hash_password,
     stringify,
+    build_empty_env,
+    ensure_env_structure,
+    add_tags,
+    remove_tag,
+    get_experiments_by_tag,
 )
 from visdom.server.handlers.base_handlers import BaseHandler
 
@@ -468,6 +473,7 @@ class ForkEnvHandler(BaseHandler):
         assert prev_eid in handler.state, "env to be forked doesn't exit"
 
         handler.state[eid] = copy.deepcopy(handler.state[prev_eid])
+        ensure_env_structure(handler.state[eid])
         serialize_env(handler.state, [eid], env_path=handler.app.env_path)
         broadcast_envs(handler)
 
@@ -515,7 +521,7 @@ class EnvHandler(BaseHandler):
         if "eid" in msg_args:
             eid = msg_args["eid"]
             if eid not in self.state:
-                self.state[eid] = {"jsons": {}, "reload": {}}
+                self.state[eid] = build_empty_env()
                 broadcast_envs(self)
 
 
@@ -594,7 +600,9 @@ class DataHandler(BaseHandler):
             data = json.loads(args["data"])
 
             if eid not in handler.state:
-                handler.state[eid] = {"jsons": {}, "reload": {}}
+                handler.state[eid] = build_empty_env()
+            else:
+                ensure_env_structure(handler.state[eid])
 
             if "win" in args and args["win"] is None:
                 handler.state[eid]["jsons"] = data
@@ -681,3 +689,61 @@ class ErrorHandler(BaseHandler):
     def get(self, text):
         error_text = text or "test error"
         raise Exception(error_text)
+
+
+class ExperimentTagsHandler(BaseHandler):
+    def initialize(self, app):
+        self.app = app
+        self.state = app.state
+        self.login_enabled = app.login_enabled
+        self.env_path = app.env_path
+
+    @check_auth
+    def post(self, experiment_id):
+        body = tornado.escape.json_decode(
+            tornado.escape.to_basestring(self.request.body)
+        )
+        tags = body.get("tags", [])
+        updated_tags = add_tags(self.state, experiment_id, tags)
+        serialize_env(self.state, [escape_eid(experiment_id)], env_path=self.env_path)
+        self.write(
+            json.dumps(
+                {"experiment_id": escape_eid(experiment_id), "tags": updated_tags}
+            )
+        )
+
+    @check_auth
+    def delete(self, experiment_id):
+        body = tornado.escape.json_decode(
+            tornado.escape.to_basestring(self.request.body)
+        )
+        tag = body.get("tag", "")
+        updated_tags = remove_tag(self.state, experiment_id, tag)
+        serialize_env(self.state, [escape_eid(experiment_id)], env_path=self.env_path)
+        self.write(
+            json.dumps(
+                {"experiment_id": escape_eid(experiment_id), "tags": updated_tags}
+            )
+        )
+
+
+class ExperimentsHandler(BaseHandler):
+    def initialize(self, app):
+        self.state = app.state
+        self.login_enabled = app.login_enabled
+
+    @check_auth
+    def get(self):
+        tag = self.get_argument("tag", default=None)
+        if tag is None or tag.strip() == "":
+            experiment_ids = sorted(list(self.state.keys()))
+        else:
+            experiment_ids = get_experiments_by_tag(self.state, tag)
+
+        experiments = []
+        for experiment_id in experiment_ids:
+            env = ensure_env_structure(self.state[experiment_id])
+            experiments.append(
+                {"experiment_id": experiment_id, "tags": env.get("tags", [])}
+            )
+        self.write(json.dumps({"experiments": experiments}))

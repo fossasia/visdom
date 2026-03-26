@@ -96,7 +96,11 @@ class LazyEnvData(Mapping):
                     self._env_path_file, repr(e)
                 )
             )
-        self._raw_dict = {"jsons": env_data["jsons"], "reload": env_data["reload"]}
+        self._raw_dict = {
+            "jsons": env_data["jsons"],
+            "reload": env_data["reload"],
+            "tags": env_data.get("tags", []),
+        }
 
     def __getitem__(self, key):
         self.lazy_load_data()
@@ -133,6 +137,37 @@ def serialize_all(state, env_path=DEFAULT_ENV_PATH):
 
 
 # ------- Environment management helpers ----- #
+def build_empty_env():
+    """Creates a default env record."""
+    return {"jsons": {}, "reload": {}, "tags": []}
+
+
+def ensure_env_structure(env):
+    """Normalizes an env record so legacy data without tags still works."""
+    if "jsons" not in env:
+        env["jsons"] = {}
+    if "reload" not in env:
+        env["reload"] = {}
+    if "tags" not in env or env["tags"] is None:
+        env["tags"] = []
+    return env
+
+
+def normalize_tags(tags):
+    """Converts user-provided tags into a unique, trimmed list of strings."""
+    if tags is None:
+        return []
+    if isinstance(tags, str):
+        tags = [tags]
+    clean_tags = []
+    for tag in tags:
+        if tag is None:
+            continue
+        tag_str = str(tag).strip()
+        if tag_str != "":
+            clean_tags.append(tag_str)
+    # Keep insertion order while removing duplicates.
+    return list(dict.fromkeys(clean_tags))
 
 
 def escape_eid(eid):
@@ -147,6 +182,44 @@ def extract_eid(args):
     it returns 'main'."""
     eid = "main" if args.get("eid") is None else args.get("eid")
     return escape_eid(eid)
+
+
+def add_tags(state, experiment_id, tags):
+    """Adds one or more tags to an experiment (environment) id."""
+    eid = escape_eid(experiment_id)
+    if eid not in state:
+        state[eid] = build_empty_env()
+    env = ensure_env_structure(state[eid])
+    existing = normalize_tags(env.get("tags", []))
+    additions = normalize_tags(tags)
+    env["tags"] = list(dict.fromkeys(existing + additions))
+    return env["tags"]
+
+
+def remove_tag(state, experiment_id, tag):
+    """Removes a single tag from an experiment (environment) id."""
+    eid = escape_eid(experiment_id)
+    if eid not in state:
+        return []
+    env = ensure_env_structure(state[eid])
+    tag_to_remove = str(tag).strip()
+    if tag_to_remove == "":
+        return normalize_tags(env.get("tags", []))
+    env["tags"] = [t for t in normalize_tags(env.get("tags", [])) if t != tag_to_remove]
+    return env["tags"]
+
+
+def get_experiments_by_tag(state, tag):
+    """Returns experiment ids that include the provided tag."""
+    target_tag = str(tag).strip()
+    if target_tag == "":
+        return sorted(list(state.keys()))
+    matched = []
+    for experiment_id, env in state.items():
+        env = ensure_env_structure(env)
+        if target_tag in normalize_tags(env.get("tags", [])):
+            matched.append(experiment_id)
+    return sorted(matched)
 
 
 def update_window(p, args):
@@ -415,7 +488,9 @@ def register_window(self, p, eid):
     is_new_env = False
     if eid not in self.state:
         is_new_env = True
-        self.state[eid] = {"jsons": {}, "reload": {}}
+        self.state[eid] = build_empty_env()
+    else:
+        ensure_env_structure(self.state[eid])
 
     env = self.state[eid]["jsons"]
 

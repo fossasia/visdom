@@ -167,6 +167,31 @@ const ApiProvider = ({ children }) => {
     }
   };
 
+  const getExperiments = (tag = '') => {
+    const query = tag ? '?tag=' + encodeURIComponent(tag) : '';
+    return fetch(correctPathname() + 'experiments' + query, {
+      method: 'GET',
+      credentials: 'same-origin',
+    }).then((res) => res.json());
+  };
+
+  const addExperimentTags = (experimentID, tags) => {
+    return fetch(
+      correctPathname() +
+        'experiment/' +
+        encodeURIComponent(experimentID) +
+        '/tags',
+      {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+        },
+        body: JSON.stringify({ tags: tags }),
+      }
+    ).then((res) => res.json());
+  };
+
   // Toggle connection state between online and offline
   const toggleOnlineState = () => {
     if (connected) {
@@ -297,6 +322,8 @@ const ApiProvider = ({ children }) => {
         sendPaneClose,
         sendPaneLayoutUpdate,
         sendPaneMessage,
+        getExperiments,
+        addExperimentTags,
         sessionInfo,
         setConnected,
         toggleOnlineState,
