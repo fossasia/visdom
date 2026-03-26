@@ -1,225 +1,234 @@
 /**
  * Copyright 2017-present, The Visdom Authors
- * All rights reserved.
- *
- * This source code is licensed under the license found in the
- * LICENSE file in the root directory of this source tree.
- *
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-const Plotly = window.Plotly;
 
 const { usePrevious } = require('../util');
 import Pane from './Pane';
 const { sgg } = require('ml-savitzky-golay-generalized');
 
 var PlotPane = (props) => {
+
   const { contentID, content } = props;
 
-  // state variables
   const plotlyRef = useRef();
   const previousContent = usePrevious(content);
+
   const maxsmoothvalue = 100;
+
   const [smoothWidgetActive, setSmoothWidgetActive] = useState(false);
   const [smoothvalue, setSmoothValue] = useState(1);
 
-  // toggle smoothing UI
-  const toggleSmoothWidget = () => {
-    setSmoothWidgetActive(!smoothWidgetActive);
+
+  // -------------------------
+  // DOWNLOAD HANDLER (SVG)
+  // -------------------------
+
+  const handleDownload = () => {
+
+    if (!plotlyRef.current || !window.Plotly) return;
+
+    window.Plotly.downloadImage(
+
+      plotlyRef.current,
+
+      {
+        format: 'svg',
+        filename: `${contentID}_plot`,
+        width: 1200,
+        height: 800,
+        scale: 2
+      }
+
+    );
+
   };
+
+
+  // -------------------------
+  // smoothing toggle
+  // -------------------------
+
+  const toggleSmoothWidget = () => {
+
+    setSmoothWidgetActive(!smoothWidgetActive);
+
+  };
+
 
   const updateSmoothSlider = (value) => {
+
     setSmoothValue(value);
+
   };
 
-  // NEW: Export plot as SVG (publication quality)
-  const handleDownload = (format = 'svg') => {
 
-    // defensive check
-    if (!plotlyRef.current || !window.Plotly) {
-      console.warn("Plotly not ready yet");
-      return;
-    }
+  // -------------------------
+  // update plot
+  // -------------------------
 
-    const Plotly = window.Plotly;
-
-    Plotly.downloadImage(plotlyRef.current, {
-      format: format,
-      filename: `${contentID}_plot`,
-      width: 1200,
-      height: 800,
-      scale: 2
-    });
-  };
-
-  // update plot when content changes
   useEffect(() => {
+
     if (previousContent) {
 
-      // retain trace visibility
       let trace_visibility_by_name = {};
-      let trace_idx = null;
 
-      for (trace_idx in previousContent.data) {
-        let trace = previousContent.data[trace_idx];
+      for (let trace of previousContent.data) {
+
         trace_visibility_by_name[trace.name] = trace.visible;
+
       }
 
-      for (trace_idx in content.data) {
-        let trace = content.data[trace_idx];
+      for (let trace of content.data) {
+
         trace.visible = trace_visibility_by_name[trace.name];
+
       }
 
-      // retain zoom
-      let old_x = previousContent.layout.xaxis;
-      let new_x = content.layout.xaxis;
-
-      let new_range_set = new_x !== undefined && new_x.autorange === false;
-
-      if (old_x !== undefined && old_x.autorange === false && !new_range_set) {
-        content.layout.xaxis = old_x;
-      }
-
-      let old_y = previousContent.layout.yaxis;
-      let new_y = content.layout.yaxis;
-
-      new_range_set = new_y !== undefined && new_y.autorange === false;
-
-      if (old_y !== undefined && old_y.autorange === false && !new_range_set) {
-        content.layout.yaxis = old_y;
-      }
     }
 
     newPlot();
 
   });
 
-  // draw plot
+
+  // -------------------------
+  // plotting logic
+  // -------------------------
+
   const newPlot = () => {
 
-    var data = content.data;
-
-    var smooth_data = [];
+    let data = content.data;
+    let smooth_data = [];
 
     if (smoothWidgetActive) {
 
       smooth_data = data
-        .filter((d) => d['type'] == 'scatter' && d['mode'] == 'lines')
-        .map((d) => {
 
-          var smooth_d = JSON.parse(JSON.stringify(d));
+        .filter(d => d.type === 'scatter' && d.mode === 'lines')
 
-          var windowSize = 2 * smoothvalue + 1;
+        .map(d => {
+
+          let smooth_d = JSON.parse(JSON.stringify(d));
+
+          let windowSize = 2 * smoothvalue + 1;
 
           smooth_d.showlegend = false;
 
           if (windowSize < 5 || smooth_d.x.length <= 5) {
 
-            d.opacity = 1.0;
+            d.opacity = 1;
             return smooth_d;
 
           }
 
           windowSize = Math.max(windowSize, 5);
 
-          if (smooth_d.x.length % 2 == 0)
-            windowSize = Math.min(windowSize, smooth_d.x.length - 1);
-          else
-            windowSize = Math.min(windowSize, smooth_d.x.length);
+          smooth_d.y = sgg(
 
-          smooth_d.y = sgg(smooth_d.y, smooth_d.x, {
-            windowSize: windowSize,
-          });
+            smooth_d.y,
+
+            smooth_d.x,
+
+            { windowSize }
+
+          );
 
           d.opacity = 0.35;
-          smooth_d.opacity = 1.0;
-          smooth_d.marker.line.color = 0;
+          smooth_d.opacity = 1;
 
           return smooth_d;
 
-        });
-
-      if (smooth_data.length > 0) {
-
-        data = Array.from(data);
-
-        let num_to_fill = 10 - (data.length % 10);
-
-        for (let i = 0; i < num_to_fill; i++)
-          data.push({});
-
-      }
-
-    }
-    else {
-
-      content.data
-        .filter((data) => data['type'] == 'scatter' && data['mode'] == 'lines')
-        .map((d) => {
-          d.opacity = 1.0;
         });
 
     }
 
     content.layout.datarevision = props.version;
 
-    Plotly.react(
+
+    window.Plotly.react(
+
       contentID,
+
       data.concat(smooth_data),
-      content.layout,
-      {
-        showLink: true,
-        linkText: 'Edit',
-      }
+
+      content.layout
+
     );
 
   };
 
-  // check smoothing compatibility
-  var contains_line_plots = content.data.some((data) => {
-    return data['type'] == 'scatter' && data['mode'] == 'lines';
-  });
 
-  var smooth_widget_button = '';
-  var smooth_widget = '';
+  // -------------------------
+  // smoothing UI
+  // -------------------------
+
+  let contains_line_plots = content.data.some(
+
+    d => d.type === 'scatter' && d.mode === 'lines'
+
+  );
+
+
+  let smooth_widget_button = '';
+  let smooth_widget = '';
+
 
   if (contains_line_plots) {
 
     smooth_widget_button = (
 
       <button
+
         key="smooth_widget_button"
+
         title="smooth lines"
+
         onClick={toggleSmoothWidget}
-        className={smoothWidgetActive ? 'pull-right active' : 'pull-right'}
+
+        className={
+
+          smoothWidgetActive
+
+            ? 'pull-right active'
+
+            : 'pull-right'
+
+        }
+
       >
+
         ~
+
       </button>
 
     );
+
 
     if (smoothWidgetActive) {
 
       smooth_widget = (
 
-        <div className="widget" key="smooth_widget">
+        <div className="widget">
 
-          <div style={{ display: 'flex' }}>
+          <input
 
-            <span>Smoothing:&nbsp;&nbsp;</span>
+            type="range"
 
-            <input
-              type="range"
-              min="1"
-              max={maxsmoothvalue}
-              value={smoothvalue}
-              onInput={(ev) => updateSmoothSlider(ev.target.value)}
-            />
+            min="1"
 
-            <span>&nbsp;&nbsp;&nbsp;&nbsp;</span>
+            max={maxsmoothvalue}
 
-          </div>
+            value={smoothvalue}
+
+            onInput={
+
+              ev => updateSmoothSlider(ev.target.value)
+
+            }
+
+          />
 
         </div>
 
@@ -229,35 +238,50 @@ var PlotPane = (props) => {
 
   }
 
-  // NEW: Export button UI
-  const export_widget_button = (
 
-    <button
-      key="export_svg_button"
-      title="Export SVG"
-      onClick={() => handleDownload('svg')}
-      className="pull-right"
-    >
-      ⬇ SVG
-    </button>
-
-  );
+  // -------------------------
+  // render
+  // -------------------------
 
   return (
 
     <Pane
+
       {...props}
-      handleDownload={() => handleDownload('svg')}
-      barwidgets={[smooth_widget_button, export_widget_button]}
-      widgets={[smooth_widget]}
+
+      handleDownload={handleDownload}
+
+      barwidgets={[
+
+        smooth_widget_button
+
+      ]}
+
+      widgets={[
+
+        smooth_widget
+
+      ]}
+
       enablePropertyList
+
     >
 
       <div
+
         id={contentID}
-        style={{ height: '100%', width: '100%' }}
+
+        style={{
+
+          height: '100%',
+          width: '100%'
+
+        }}
+
         className="plotly-graph-div"
+
         ref={plotlyRef}
+
       />
 
     </Pane>
@@ -266,21 +290,18 @@ var PlotPane = (props) => {
 
 };
 
-// prevent unnecessary rerender
+
 PlotPane = React.memo(
 
   PlotPane,
 
   (props, nextProps) => {
 
-    if (props.contentID !== nextProps.contentID)
-      return false;
+    if (props.contentID !== nextProps.contentID) return false;
 
-    else if (props.h !== nextProps.h || props.w !== nextProps.w)
-      return false;
+    if (props.h !== nextProps.h || props.w !== nextProps.w) return false;
 
-    else if (props.isFocused !== nextProps.isFocused)
-      return false;
+    if (props.isFocused !== nextProps.isFocused) return false;
 
     return true;
 
