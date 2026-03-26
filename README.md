@@ -319,8 +319,17 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 ### Basics
 
 #### vis.image
-This function draws an `img`. It takes as input an `CxHxW` tensor `img`
-that contains the image.
+This function draws an `img`. It takes as input an `CxHxW` tensor `img` that contains the image.
+Most Python image libraries (e.g. OpenCV, PIL, matplotlib) return images in `HxWxC` format.
+Passing images in that format will raise errors or lead to incorrect rendering.
+
+For example:
+
+```python
+# Convert HxWxC → CxHxW before passing to vis.image
+img = img.transpose(2, 0, 1)   # NumPy
+img = img.permute(2, 0, 1)     # PyTorch
+```
 
 The following `opts` are supported:
 
