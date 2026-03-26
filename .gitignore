@@ -7,7 +7,6 @@ build
 th/CMakeLists.txt
 th/build.luarocks
 dist/
-venv/
 visdom*.tgz
 visdom.egg-info/
 setup.cfg
@@ -22,3 +21,4 @@ py/visdom/static/version.built
 __pycache__/
 py/visdom/static/js/layout_bin_packer.js
 py/visdom/extra_deps/**/*
+venv/
