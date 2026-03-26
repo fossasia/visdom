@@ -7,9 +7,9 @@
 # LICENSE file in the root directory of this source tree.
 
 import os
+from importlib import metadata
 from io import open
 from setuptools import setup, find_packages
-from pkg_resources import get_distribution, DistributionNotFound
 
 
 try:
@@ -26,9 +26,10 @@ except Exception:
 
 def get_dist(pkgname):
     try:
-        return get_distribution(pkgname)
-    except DistributionNotFound:
-        return None
+        metadata.distribution(pkgname)
+        return True
+    except metadata.PackageNotFoundError:
+        return False
 
 here = os.path.abspath(os.path.dirname(__file__))
 
@@ -47,7 +48,7 @@ requirements = [
     'websocket-client',
     'networkx'
 ]
-pillow_req = 'pillow-simd' if get_dist('pillow-simd') is not None else 'pillow'
+pillow_req = 'pillow-simd' if get_dist('pillow-simd') else 'pillow'
 requirements.append(pillow_req)
 
 setup(
