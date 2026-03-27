@@ -1584,9 +1584,8 @@ class Visdom(object):
                     update = None
                 elif not self.offline:
                     exists = self.win_exists(win, env)
-                    if not exists:
-                       # fallback to create new window
-                        update = None
+                    if exists is False or exists is None:
+                       update = None
 
                         
             # case when X is 1 dimensional and corresponding values on y-axis
