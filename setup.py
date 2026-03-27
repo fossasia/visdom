@@ -35,7 +35,8 @@ here = os.path.abspath(os.path.dirname(__file__))
 with open(os.path.join(here, 'py/visdom/VERSION')) as version_file:
     version = version_file.read().strip()
 
-readme = open('README.md', 'rt', encoding='utf8').read()
+with open(os.path.join(here, 'README.md'), 'rt', encoding='utf8') as readme_file:
+    readme = readme_file.read()
 
 requirements = [
     'numpy>=1.8',
