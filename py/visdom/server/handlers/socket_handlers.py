@@ -34,7 +34,6 @@ from visdom.utils.server_utils import (
 )
 from visdom.server.defaults import MAX_SOCKET_WAIT
 
-
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
 # TODO move generalized initialization logic from these handlers into the

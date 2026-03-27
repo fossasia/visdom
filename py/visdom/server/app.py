@@ -51,7 +51,6 @@ from visdom.server.defaults import (
     LAYOUT_FILE,
 )
 
-
 tornado_settings = {
     "autoescape": None,
     "debug": "/dbg/" in __file__,
