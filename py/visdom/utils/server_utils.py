@@ -322,7 +322,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         "<tr> <td> {} </td> <td> {} </td> </tr>".format(v, eidNums[v]) for v in eidNums
     ]
 
-    tbl = """"<style>
+    tbl = """<style>
     table, th, td {{
         border: 1px solid black;
     }}
