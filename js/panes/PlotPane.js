@@ -183,7 +183,17 @@ var PlotPane = (props) => {
     <Pane
       {...props}
       handleDownload={handleDownload}
-      barwidgets={[smooth_widget_button]}
+      barwidgets={[
+        smooth_widget_button,
+        <button
+          key="svg_export_button"
+          title="Download as SVG"
+          onClick={handleDownload}
+          className="pull-right"
+        >
+          ⬇ SVG
+        </button>,
+      ]}
       widgets={[smooth_widget]}
       enablePropertyList
     >
