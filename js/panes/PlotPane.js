@@ -12,6 +12,18 @@ const { usePrevious } = require('../util');
 import Pane from './Pane';
 const { sgg } = require('ml-savitzky-golay-generalized');
 
+const ToolbarButton = ({ active, ariaLabel, onClick, title, children }) => (
+  <button
+    type="button"
+    title={title}
+    aria-label={ariaLabel}
+    onClick={onClick}
+    className={active ? 'pull-right active' : 'pull-right'}
+  >
+    {children}
+  </button>
+);
+
 var PlotPane = (props) => {
   const { contentID, content } = props;
 
@@ -151,14 +163,15 @@ var PlotPane = (props) => {
   var smooth_widget = '';
   if (contains_line_plots) {
     smooth_widget_button = (
-      <button
+      <ToolbarButton
         key="smooth_widget_button"
         title="smooth lines"
+        ariaLabel="Toggle line smoothing"
         onClick={toggleSmoothWidget}
-        className={smoothWidgetActive ? 'pull-right active' : 'pull-right'}
+        active={smoothWidgetActive}
       >
         ~
-      </button>
+      </ToolbarButton>
     );
     if (smoothWidgetActive) {
       smooth_widget = (
@@ -185,14 +198,14 @@ var PlotPane = (props) => {
       handleDownload={handleDownload}
       barwidgets={[
         smooth_widget_button,
-        <button
+        <ToolbarButton
           key="svg_export_button"
           title="Download as SVG"
+          ariaLabel="Download plot as SVG"
           onClick={handleDownload}
-          className="pull-right"
         >
           ⬇ SVG
-        </button>,
+        </ToolbarButton>,
       ]}
       widgets={[smooth_widget]}
       enablePropertyList
