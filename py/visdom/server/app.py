@@ -77,7 +77,7 @@ class Application(tornado.web.Application):
     ):
         self.eager_data_loading = eager_data_loading
         self.env_path = env_path
-        self.index_lock = threading.Lock()
+        self.index_lock = threading.RLock()
         self.state = self.load_state()
         self.layouts = self.load_layouts()
         self.user_settings = self.load_user_settings()

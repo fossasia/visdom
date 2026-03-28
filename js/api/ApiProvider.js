@@ -242,6 +242,17 @@ const ApiProvider = ({ children }) => {
     });
   };
 
+  // Send request to update tags for an environment
+  const sendTagsUpdate = (envID, tags) => {
+    return $.post(
+      correctPathname() + 'tags',
+      JSON.stringify({
+        eid: envID,
+        tags: tags,
+      })
+    );
+  };
+
   // Update the pane layout item in the backend.
   const sendPaneLayoutUpdate = (
     envID,
@@ -300,6 +311,7 @@ const ApiProvider = ({ children }) => {
         sendEnvQuery,
         sendEnvSave,
         sendLayoutsSave,
+        sendTagsUpdate,
         sendPaneClose,
         sendPaneLayoutUpdate,
         sendPaneMessage,

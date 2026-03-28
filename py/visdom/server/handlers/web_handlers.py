@@ -635,7 +635,7 @@ class IndexHandler(BaseHandler):
 
     def get(self, args, **kwargs):
         items = gather_envs(self.state, env_path=self.env_path)
-        tags_index = json.dumps(self.app.tags)
+        tags_index = json.dumps(getattr(self.app, 'tags', {}))
         if (not self.login_enabled) or self.current_user:
             """self.current_user is an authenticated user provided by Tornado,
             available when we set self.get_current_user in BaseHandler,

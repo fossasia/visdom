@@ -69,6 +69,7 @@ const App = () => {
     sendEnvQuery,
     sendEnvSave,
     sendLayoutsSave,
+    sendTagsUpdate,
     sendPaneClose,
     sendPaneLayoutUpdate,
     sessionInfo,
@@ -388,6 +389,10 @@ const App = () => {
 
   const onEnvDelete = (env2delete, previousEnv) => {
     sendEnvDelete(env2delete, previousEnv);
+  };
+
+  const onTagsSave = (env, tags) => {
+    return sendTagsUpdate(env, tags);
   };
 
   const onEnvSave = (env) => {
@@ -793,6 +798,8 @@ const App = () => {
       envList={storeMeta.envList}
       onEnvDelete={onEnvDelete}
       onEnvSave={onEnvSave}
+      onTagsSave={onTagsSave}
+      tags={storeMeta.tags}
       onModalClose={() => setShowEnvModal(false)}
       show={showEnvModal}
     />,
