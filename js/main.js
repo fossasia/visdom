@@ -33,6 +33,7 @@ import {
 } from './settings';
 import ConnectionIndicator from './topbar/ConnectionIndicator';
 import EnvControls from './topbar/EnvControls';
+import ExperimentSearchControls from './topbar/ExperimentSearchControls';
 import FilterControls from './topbar/FilterControls';
 import ViewControls from './topbar/ViewControls';
 import WidthProvider from './Width';
@@ -68,6 +69,7 @@ const App = () => {
     sendEnvDelete,
     sendEnvQuery,
     sendEnvSave,
+    searchExperiments,
     sendLayoutsSave,
     sendPaneClose,
     sendPaneLayoutUpdate,
@@ -105,6 +107,8 @@ const App = () => {
   const [filterString, setFilterString] = useState(
     localStorage.getItem('filter') || ''
   );
+  const [experimentQuery, setExperimentQuery] = useState('');
+  const [filteredEnvList, setFilteredEnvList] = useState(null);
 
   // non-triggering state variables
   const _bin = useRef(null);
@@ -613,6 +617,22 @@ const App = () => {
     EventSystem.publish('global.event', event);
   };
 
+  const runExperimentSearch = async (query) => {
+    const trimmedQuery = query.trim();
+
+    if (trimmedQuery === '') {
+      setFilteredEnvList(null);
+      return;
+    }
+
+    try {
+      const result = await searchExperiments(trimmedQuery);
+      setFilteredEnvList(result.experiments.map((experiment) => experiment.id));
+    } catch (error) {
+      setFilteredEnvList([]);
+    }
+  };
+
   const onLayoutSave = (layoutName) => {
     // Saves the current view as a new layout, pushes to the server
     let sorted = sortLayout(storeData.layout);
@@ -704,6 +724,12 @@ const App = () => {
     localStorage.setItem('filter', filterString);
   }, [filterString]);
 
+  useEffect(() => {
+    if (experimentQuery.trim() !== '') {
+      runExperimentSearch(experimentQuery);
+    }
+  }, [storeMeta.envList]);
+
   const onWidthChange = (width, cols) => {
     windowSize.current.cols = cols;
     windowSize.current.width = width;
@@ -793,7 +819,11 @@ const App = () => {
   let envControls = (
     <EnvControls
       envIDs={selection.envIDs}
-      envList={storeMeta.envList}
+      envList={
+        filteredEnvList === null
+          ? storeMeta.envList
+          : Array.from(new Set(filteredEnvList.concat(selection.envIDs)))
+      }
       envSelectorStyle={{
         width: Math.max(window.innerWidth / 3, 50),
       }}
@@ -825,6 +855,22 @@ const App = () => {
       onFilterClear={() => {
         setFilterString('');
         callbacks.current.push('relayout');
+      }}
+    />
+  );
+  let experimentSearchControl = (
+    <ExperimentSearchControls
+      query={experimentQuery}
+      onQueryChange={(ev) => {
+        setExperimentQuery(ev.target.value);
+      }}
+      onSearchSubmit={(ev) => {
+        ev.preventDefault();
+        runExperimentSearch(experimentQuery);
+      }}
+      onSearchClear={() => {
+        setExperimentQuery('');
+        setFilteredEnvList(null);
       }}
     />
   );
@@ -866,6 +912,8 @@ const App = () => {
             float: 'right',
           }}
         >
+          {experimentSearchControl}
+          &nbsp;&nbsp;
           {filterControl}
           &nbsp;&nbsp;
           {connectionIndicator}

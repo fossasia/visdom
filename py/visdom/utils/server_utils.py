@@ -20,6 +20,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time
 import tornado.escape
 from collections import OrderedDict
@@ -233,6 +234,166 @@ def gather_envs(state, env_path=DEFAULT_ENV_PATH):
     else:
         items = []
     return sorted(list(set(items + list(state.keys()))))
+
+
+def normalize_query_key(key):
+    """Normalize keys so query fields can match UI labels more flexibly."""
+    return re.sub(r"[\s\-]+", "_", key.strip().lower())
+
+
+def parse_query_value(raw_value):
+    """Coerce obvious scalar values and fall back to the original string."""
+    value = raw_value.strip()
+    lowered = value.lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+
+    try:
+        if "." in value:
+            return float(value)
+        return int(value)
+    except ValueError:
+        try:
+            return float(value)
+        except ValueError:
+            return value
+
+
+def parse_query(query_string):
+    """
+    Parse simple `key op value` conditions joined by `AND`.
+
+    Example:
+    `learning_rate=0.001 AND batch_size>32`
+    =>
+    [
+        {"key": "learning_rate", "op": "=", "value": 0.001},
+        {"key": "batch_size", "op": ">", "value": 32},
+    ]
+    """
+    if query_string is None or query_string.strip() == "":
+        return []
+
+    conditions = []
+    # Keep the parser intentionally small: split on AND, then parse one
+    # comparison per condition.
+    for raw_condition in re.split(r"\s+AND\s+", query_string.strip(), flags=re.IGNORECASE):
+        condition = raw_condition.strip()
+        if condition == "":
+            continue
+
+        match = re.match(r"^\s*([^<>=]+?)\s*(=|>|<)\s*(.+?)\s*$", condition)
+        if match is None:
+            raise ValueError("Invalid query condition: {}".format(condition))
+
+        key, op, value = match.groups()
+        conditions.append(
+            {
+                "key": normalize_query_key(key),
+                "op": op,
+                "value": parse_query_value(value),
+            }
+        )
+
+    return conditions
+
+
+def extract_env_metadata(eid, env):
+    """
+    Build a lightweight metadata dict from existing environment contents.
+
+    This starter implementation uses property panes as the main structured
+    source of experiment metadata and also exposes the environment name and
+    simple tags derived from it.
+    """
+    metadata = {
+        "env": eid,
+        "name": eid,
+        "id": eid,
+        "tag": [tag for tag in eid.split("_") if tag],
+    }
+
+    for window_data in env.get("jsons", {}).values():
+        if not isinstance(window_data, Mapping):
+            continue
+        if window_data.get("type") != "properties":
+            continue
+
+        for prop in window_data.get("content", []):
+            if not isinstance(prop, Mapping) or "name" not in prop:
+                continue
+
+            key = normalize_query_key(str(prop["name"]))
+            value = prop.get("value")
+
+            if prop.get("type") == "select" and "values" in prop:
+                values = prop.get("values") or []
+                if isinstance(value, int) and 0 <= value < len(values):
+                    value = values[value]
+
+            metadata[key] = value
+
+    return metadata
+
+
+def compare_query_values(actual, expected):
+    if type(actual) != type(expected) and (
+        isinstance(actual, (int, float)) and isinstance(expected, (int, float))
+    ):
+        return float(actual), float(expected)
+    return actual, expected
+
+
+def match_query_condition(actual_value, condition):
+    if actual_value is None:
+        return False
+
+    expected_value = condition["value"]
+    op = condition["op"]
+
+    if isinstance(actual_value, (list, tuple, set)):
+        if op != "=":
+            return False
+        normalized_values = [str(item).lower() for item in actual_value]
+        return str(expected_value).lower() in normalized_values
+
+    actual_value, expected_value = compare_query_values(actual_value, expected_value)
+
+    if op == "=":
+        return actual_value == expected_value
+    if op == ">":
+        try:
+            return actual_value > expected_value
+        except TypeError:
+            return False
+    if op == "<":
+        try:
+            return actual_value < expected_value
+        except TypeError:
+            return False
+    return False
+
+
+def filter_experiments(state, query_string):
+    parsed_query = parse_query(query_string)
+    results = []
+
+    for eid, env in state.items():
+        metadata = extract_env_metadata(eid, env)
+        include_env = True
+
+        for condition in parsed_query:
+            actual_value = metadata.get(condition["key"])
+            if not match_query_condition(actual_value, condition):
+                include_env = False
+                break
+
+        if include_env:
+            results.append({"id": eid, "metadata": metadata})
+
+    return parsed_query, results
 
 
 def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):

@@ -46,6 +46,7 @@ from visdom.utils.server_utils import (
     update_window,
     hash_password,
     stringify,
+    filter_experiments,
 )
 from visdom.server.handlers.base_handlers import BaseHandler
 
@@ -451,6 +452,35 @@ class EnvStateHandler(BaseHandler):
             tornado.escape.to_basestring(self.request.body)
         )
         self.wrap_func(self, args)
+
+
+class ExperimentSearchHandler(BaseHandler):
+    def initialize(self, app):
+        self.state = app.state
+        self.login_enabled = app.login_enabled
+
+    @check_auth
+    def get(self):
+        query = self.get_argument("q", default="")
+
+        try:
+            parsed_query, experiments = filter_experiments(self.state, query)
+        except ValueError as exc:
+            self.set_status(400)
+            self.set_header("Content-type", "application/json")
+            self.write(json.dumps({"error": str(exc), "query": query}))
+            return
+
+        self.set_header("Content-type", "application/json")
+        self.write(
+            json.dumps(
+                {
+                    "query": query,
+                    "parsed_query": parsed_query,
+                    "experiments": experiments,
+                }
+            )
+        )
 
 
 class ForkEnvHandler(BaseHandler):

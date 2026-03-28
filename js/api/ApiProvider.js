@@ -176,6 +176,23 @@ const ApiProvider = ({ children }) => {
     }
   };
 
+  // Search environments using structured experiment metadata.
+  const searchExperiments = async (query) => {
+    const response = await fetch(
+      correctPathname() + 'experiments/search?q=' + encodeURIComponent(query),
+      {
+        credentials: 'same-origin',
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error || 'Failed to search experiments');
+    }
+
+    return response.json();
+  };
+
   // Send message to server backend for a specific pane and environment.
   const sendPaneMessage = (data, targetPaneID, targetEnvID) => {
     if (targetPaneID === null || sessionInfo.readonly) {
@@ -293,6 +310,7 @@ const ApiProvider = ({ children }) => {
         sendEnvDelete,
         sendEnvQuery,
         sendEnvSave,
+        searchExperiments,
         sendLayoutsSave,
         sendPaneClose,
         sendPaneLayoutUpdate,
