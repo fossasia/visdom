@@ -37,21 +37,41 @@ class VisdomLogger(Logger):
         # This is the core function Lightning calls every logging step
         for metric_name, metric_value in metrics.items():
 
-            # Skip non-numeric metrics for line plots
-            if not isinstance(metric_value, (int, float)):
-                continue
+            # Convert common scalar types (Python numbers, 0-dim tensors, NumPy scalars)
+            # to a plain Python float. Skip values that cannot be interpreted as scalars.
+            scalar_value = None
+
+            if isinstance(metric_value, (int, float)):
+                scalar_value = float(metric_value)
+            else:
+                # Try `.item()` first (works for PyTorch tensors and many NumPy scalars)
+                if hasattr(metric_value, "item"):
+                    try:
+                        candidate = metric_value.item()
+                        if isinstance(candidate, (int, float)):
+                            scalar_value = float(candidate)
+                    except (TypeError, ValueError):
+                        scalar_value = None
+
+                # Fall back to float(...) if `.item()` is not available or not usable
+                if scalar_value is None:
+                    try:
+                        scalar_value = float(metric_value)
+                    except (TypeError, ValueError):
+                        # Skip non-numeric or non-scalar values
+                        continue
 
             # If the window doesn't exist, create it. Otherwise, append.
             if metric_name not in self.windows:
                 self.windows[metric_name] = self._vis.line(
                     X=[step],
-                    Y=[metric_value],
+                    Y=[scalar_value],
                     opts=dict(title=metric_name, xlabel="Step", ylabel=metric_name),
                 )
             else:
                 self._vis.line(
                     X=[step],
-                    Y=[metric_value],
+                    Y=[scalar_value],
                     win=self.windows[metric_name],
                     update="append",
                 )
