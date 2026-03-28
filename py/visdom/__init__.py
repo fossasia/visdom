@@ -1746,12 +1746,14 @@ class Visdom(object):
         """
         import torch
 
-        total_norm = 0.0
-        for p in model.parameters():
-            if p.grad is not None:
-                param_norm = p.grad.data.norm(2)  # L2 norm
-                total_norm += param_norm.item() ** 2
-        total_norm = total_norm ** (1.0 / 2)
+        grads = [
+            p.grad.detach().norm(2) ** 2
+            for p in model.parameters()
+            if p.grad is not None
+        ]
+        if not grads:
+            return win
+        total_norm = torch.stack(grads).sum().sqrt().item()
 
         if opts is None:
             opts = dict(title="Gradient Norm")

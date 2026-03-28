@@ -210,3 +210,13 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
+    def plot_grad_norm(
+        self,
+        model: Any,
+        step: int,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+        name: str = ...,
+        update: _OptStr = ...,
+    ) -> _SendReturn: ...

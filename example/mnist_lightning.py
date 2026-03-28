@@ -34,7 +34,7 @@ class LitMNIST(pl.LightningModule):
 
     def on_before_optimizer_step(self, optimizer):
         # We ensure env is set so it appears in 'lightning_mnist' with the other plots
-        current_env = self.logger._env
+        current_env = self.logger.env
 
         if not hasattr(self, "grad_win"):
             self.grad_win = self.logger.experiment.plot_grad_norm(

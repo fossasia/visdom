@@ -27,6 +27,10 @@ class VisdomLogger(Logger):
     def experiment(self):
         return self._vis
 
+    @property
+    def env(self):
+        return self._env
+
     @rank_zero_only
     def log_hyperparams(self, params):
         # We will implement this later to log model config
