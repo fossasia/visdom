@@ -62,7 +62,7 @@ runs:
 
       # load artifacts from previous runs
       - name: "Load built js-files"
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v7
         with:
           name: pr-build
           path: ./py/visdom/static/js/
