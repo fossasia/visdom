@@ -112,6 +112,33 @@ You can use the eraser button to remove all of the current contents of an enviro
 
 Pressing the folder icon opens a dialog that allows you to fork or force save the current environment, or delete any of your existing environments. Use of this feature is fully described in the **State** section.
 
+#### Experiment Tags
+Experiment tagging enables better organization, search, and comparison of machine learning experiments.
+
+Each environment can now store `tags` (useful for experiment tracking). Tags are saved in the env JSON and remain backward compatible for older env files that do not include tags yet.
+
+Example env JSON:
+```json
+{
+  "jsons": {},
+  "reload": {},
+  "tags": ["cnn", "resnet", "vision"]
+}
+```
+
+You can add tags from the top bar UI (`Add tags (comma)`) and filter environments with `Filter env by tag`.
+
+API examples:
+```bash
+curl -X POST http://localhost:8097/experiment/exp1/tags \
+  -H "Content-Type: application/json" \
+  -d '{"tags":["cnn","resnet","vision"]}'
+```
+
+```bash
+curl "http://localhost:8097/experiments?tag=cnn"
+```
+
 >**Env Files:**
 >Your envs are loaded upon request by the user, by default from `$HOME/.visdom/`. Custom paths can be passed as a cmd-line argument. Envs are removed by using the delete button or by deleting the corresponding `.json` file from the env dir. In case you want the server to pre-load all files into cache, use the flag `-eager_data_loading`.
 

@@ -20,7 +20,12 @@ import tornado.web  # noqa E402: gotta install ioloop first
 import tornado.escape  # noqa E402: gotta install ioloop first
 
 from visdom.utils.shared_utils import warn_once, ensure_dir_exists, get_visdom_path
-from visdom.utils.server_utils import serialize_env, LazyEnvData
+from visdom.utils.server_utils import (
+    serialize_env,
+    LazyEnvData,
+    ensure_env_structure,
+    build_empty_env,
+)
 from visdom.server.handlers.socket_handlers import (
     SocketHandler,
     SocketWrap,
@@ -42,6 +47,8 @@ from visdom.server.handlers.web_handlers import (
     SaveHandler,
     UpdateHandler,
     UserSettingsHandler,
+    ExperimentTagsHandler,
+    ExperimentsHandler,
 )
 from visdom.server.defaults import (
     DEFAULT_BASE_URL,
@@ -111,6 +118,12 @@ class Application(tornado.web.Application):
             (r"%s/delete_env" % self.base_url, DeleteEnvHandler, {"app": self}),
             (r"%s/env_state" % self.base_url, EnvStateHandler, {"app": self}),
             (r"%s/fork_env" % self.base_url, ForkEnvHandler, {"app": self}),
+            (
+                r"%s/experiment/(.*)/tags" % self.base_url,
+                ExperimentTagsHandler,
+                {"app": self},
+            ),
+            (r"%s/experiments" % self.base_url, ExperimentsHandler, {"app": self}),
             (r"%s/user/(.*)" % self.base_url, UserSettingsHandler, {"app": self}),
             (r"%s(.*)" % self.base_url, IndexHandler, {"app": self}),
         ]
@@ -161,7 +174,7 @@ class Application(tornado.web.Application):
                 "env_path=None.",
                 RuntimeWarning,
             )
-            return {"main": {"jsons": {}, "reload": {}}}
+            return {"main": build_empty_env()}
         ensure_dir_exists(env_path)
         env_jsons = [i for i in os.listdir(env_path) if ".json" in i]
         for env_json in env_jsons:
@@ -181,11 +194,12 @@ class Application(tornado.web.Application):
                     continue
 
                 state[eid] = {"jsons": env_data["jsons"], "reload": env_data["reload"]}
+                ensure_env_structure(state[eid])
             else:
                 state[eid] = LazyEnvData(env_path_file)
 
         if "main" not in state and "main.json" not in env_jsons:
-            state["main"] = {"jsons": {}, "reload": {}}
+            state["main"] = build_empty_env()
             serialize_env(state, ["main"], env_path=self.env_path)
 
         return state

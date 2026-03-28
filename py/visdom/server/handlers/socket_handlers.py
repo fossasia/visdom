@@ -31,6 +31,7 @@ from visdom.utils.server_utils import (
     send_to_sources,
     broadcast,
     escape_eid,
+    ensure_env_structure,
 )
 from visdom.server.defaults import MAX_SOCKET_WAIT
 
@@ -112,6 +113,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
             if "data" in msg and "eid" in msg:
                 msg["eid"] = escape_eid(msg["eid"])
                 self.state[msg["eid"]] = copy.deepcopy(self.state[msg["prev_eid"]])
+                ensure_env_structure(self.state[msg["eid"]])
                 self.state[msg["eid"]]["reload"] = msg["data"]
                 self.eid = msg["eid"]
                 serialize_env(self.state, [self.eid], env_path=self.env_path)

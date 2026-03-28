@@ -71,6 +71,8 @@ const App = () => {
     sendLayoutsSave,
     sendPaneClose,
     sendPaneLayoutUpdate,
+    getExperiments,
+    addExperimentTags,
     sessionInfo,
     toggleOnlineState,
   } = useContext(ApiContext);
@@ -105,6 +107,12 @@ const App = () => {
   const [filterString, setFilterString] = useState(
     localStorage.getItem('filter') || ''
   );
+  const [experimentTags, setExperimentTags] = useState({});
+  const [tagInput, setTagInput] = useState('');
+  const [tagFilter, setTagFilter] = useState(
+    localStorage.getItem('tagFilter') || ''
+  );
+  const [tagFilteredEnvList, setTagFilteredEnvList] = useState(null);
 
   // non-triggering state variables
   const _bin = useRef(null);
@@ -298,6 +306,27 @@ const App = () => {
       envList: data,
       layoutLists: layoutLists,
     }));
+    refreshExperimentTags(tagFilter);
+  };
+
+  const refreshExperimentTags = (tag = '') => {
+    getExperiments(tag).then((resp) => {
+      const experiments = (resp && resp.experiments) || [];
+      let nextTags = {};
+      let filteredEnvs = [];
+      experiments.forEach((experiment) => {
+        nextTags[experiment.experiment_id] = experiment.tags || [];
+        filteredEnvs.push(experiment.experiment_id);
+      });
+
+      if (!tag || tag.trim() === '') {
+        setExperimentTags(nextTags);
+        setTagFilteredEnvList(null);
+      } else {
+        setExperimentTags((prev) => ({ ...prev, ...nextTags }));
+        setTagFilteredEnvList(filteredEnvs);
+      }
+    });
   };
 
   // remove paneID from pane list
@@ -371,6 +400,24 @@ const App = () => {
 
   const onEnvDelete = (env2delete, previousEnv) => {
     sendEnvDelete(env2delete, previousEnv);
+  };
+
+  const onTagSubmit = () => {
+    const activeExperimentID = selection.envIDs[0];
+    if (!activeExperimentID) {
+      return;
+    }
+    const tags = tagInput
+      .split(',')
+      .map((tag) => tag.trim())
+      .filter((tag) => tag.length > 0);
+    if (tags.length === 0) {
+      return;
+    }
+    addExperimentTags(activeExperimentID, tags).then(() => {
+      setTagInput('');
+      refreshExperimentTags(tagFilter);
+    });
   };
 
   const onEnvSave = (env) => {
@@ -704,6 +751,11 @@ const App = () => {
     localStorage.setItem('filter', filterString);
   }, [filterString]);
 
+  useEffect(() => {
+    localStorage.setItem('tagFilter', tagFilter);
+    refreshExperimentTags(tagFilter);
+  }, [tagFilter]);
+
   const onWidthChange = (width, cols) => {
     windowSize.current.cols = cols;
     windowSize.current.width = width;
@@ -793,13 +845,20 @@ const App = () => {
   let envControls = (
     <EnvControls
       envIDs={selection.envIDs}
-      envList={storeMeta.envList}
+      envList={tagFilteredEnvList || storeMeta.envList}
       envSelectorStyle={{
         width: Math.max(window.innerWidth / 3, 50),
       }}
       onEnvClear={closeAllPanes}
       onEnvManageButton={() => setShowEnvModal(!showEnvModal)}
       onEnvSelect={onEnvSelect}
+      activeExperimentTags={experimentTags[selection.envIDs[0]] || []}
+      tagInput={tagInput}
+      onTagInputChange={(ev) => setTagInput(ev.target.value)}
+      onTagInputSubmit={onTagSubmit}
+      tagFilter={tagFilter}
+      onTagFilterChange={(ev) => setTagFilter(ev.target.value)}
+      onTagFilterClear={() => setTagFilter('')}
     />
   );
   let viewControls = (
