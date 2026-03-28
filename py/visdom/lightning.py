@@ -41,21 +41,41 @@ class VisdomLogger(Logger):
         # This is the core function Lightning calls every logging step
         for metric_name, metric_value in metrics.items():
 
-            # Skip non-numeric metrics for line plots
-            if not isinstance(metric_value, (int, float)):
-                continue
+            # Convert common scalar types (Python numbers, 0-dim tensors, NumPy scalars)
+            # to a plain Python float. Skip values that cannot be interpreted as scalars.
+            scalar_value = None
+
+            if isinstance(metric_value, (int, float)):
+                scalar_value = float(metric_value)
+            else:
+                # Try `.item()` first (works for PyTorch tensors and many NumPy scalars)
+                if hasattr(metric_value, "item"):
+                    try:
+                        candidate = metric_value.item()
+                        if isinstance(candidate, (int, float)):
+                            scalar_value = float(candidate)
+                    except (TypeError, ValueError):
+                        scalar_value = None
+
+                # Fall back to float(...) if `.item()` is not available or not usable
+                if scalar_value is None:
+                    try:
+                        scalar_value = float(metric_value)
+                    except (TypeError, ValueError):
+                        # Skip non-numeric or non-scalar values
+                        continue
 
             # If the window doesn't exist, create it. Otherwise, append.
             if metric_name not in self.windows:
                 self.windows[metric_name] = self._vis.line(
                     X=[step],
-                    Y=[metric_value],
+                    Y=[scalar_value],
                     opts=dict(title=metric_name, xlabel="Step", ylabel=metric_name),
                 )
             else:
                 self._vis.line(
                     X=[step],
-                    Y=[metric_value],
+                    Y=[scalar_value],
                     win=self.windows[metric_name],
                     update="append",
                 )
@@ -65,23 +85,45 @@ class VisdomLogger(Logger):
         """
         Automatically hooks into the PyTorch model to compute and log gradient norms
         to Visdom at the specified frequency.
+
+        Note:
+            Gradient hooks are registered per-parameter, but logging is aggregated
+            per backward pass so that `log_freq` refers to the number of backward
+            steps rather than the number of per-parameter gradient computations.
         """
         self._log_freq = log_freq
         self._norm_type = norm_type
         self._step_count = 0
+        self._num_tracked_params = 0
 
         for name, parameter in model.named_parameters():
             if parameter.requires_grad:
+                self._num_tracked_params += 1
                 parameter.register_hook(self._make_grad_hook(name))
 
     def _make_grad_hook(self, name):
         def hook(grad):
+            # Count every per-parameter gradient, but interpret logging frequency
+            # in terms of backward steps (i.e., once all tracked parameters have
+            # received a gradient).
             self._step_count += 1
-            if self._step_count % self._log_freq == 0:
-                norm = grad.norm(self._norm_type).item()
-                metric_name = f"grad_norm/{name}"
-                step = self._step_count // self._log_freq
-                self.log_metrics({metric_name: norm}, step=step)
+
+            # If for some reason no parameters are tracked, do nothing.
+            if getattr(self, "_num_tracked_params", 0) == 0:
+                return
+
+            # One backward step corresponds to gradients computed for all tracked
+            # parameters.
+            if self._step_count % self._num_tracked_params != 0:
+                return
+
+            backward_step = self._step_count // self._num_tracked_params
+            if backward_step % self._log_freq != 0:
+                return
+
+            norm = grad.norm(self._norm_type).item()
+            metric_name = f"grad_norm/{name}"
+            self.log_metrics({metric_name: norm}, step=backward_step)
 
         return hook
 
@@ -102,7 +144,7 @@ class VisdomGradNormCallback(Callback):
             return
 
         for p in parameters:
-            param_norm = p.grad.detach().data.norm(self.norm_type)
+            param_norm = p.grad.detach().norm(self.norm_type)
             total_norm += param_norm.item() ** self.norm_type
         total_norm = total_norm ** (1.0 / self.norm_type)
 
