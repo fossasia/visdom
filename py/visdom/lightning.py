@@ -119,7 +119,7 @@ class VisdomGradNormCallback(Callback):
             return
 
         for p in parameters:
-            param_norm = p.grad.detach().data.norm(self.norm_type)
+            param_norm = p.grad.detach().norm(self.norm_type)
             total_norm += param_norm.item() ** self.norm_type
         total_norm = total_norm ** (1.0 / self.norm_type)
 
