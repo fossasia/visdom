@@ -45,15 +45,25 @@ except ImportError:
     BS4_AVAILABLE = False
 
 import sys
+from typing import TYPE_CHECKING
 
 assert sys.version_info[0] >= 3, "To use visdom with python 2, downgrade to v0.1.8.9"
 
 # Optional PyTorch Lightning Integration
-try:
-    from .lightning import VisdomLogger
-except ImportError:
-    pass
+if TYPE_CHECKING:  # pragma: no cover - for static type checkers only
+    from .lightning import VisdomLogger as _VisdomLogger
 
+
+def __getattr__(name):
+    """
+    Lazily provide optional integrations such as `VisdomLogger` without
+    importing their heavy dependencies (e.g., pytorch_lightning/torch)
+    at visdom import time.
+    """
+    if name == "VisdomLogger":
+        from .lightning import VisdomLogger
+        return VisdomLogger
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 try:
     # TODO try to import https://github.com/CannyLab/tsne-cuda first? will be
     # faster but requires more setup
