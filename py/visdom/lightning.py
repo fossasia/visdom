@@ -61,24 +61,45 @@ class VisdomLogger(Logger):
         """
         Automatically hooks into the PyTorch model to compute and log gradient norms
         to Visdom at the specified frequency.
+
+        Note:
+            Gradient hooks are registered per-parameter, but logging is aggregated
+            per backward pass so that `log_freq` refers to the number of backward
+            steps rather than the number of per-parameter gradient computations.
         """
         self._log_freq = log_freq
         self._norm_type = norm_type
         self._step_count = 0
+        self._num_tracked_params = 0
 
         for name, parameter in model.named_parameters():
             if parameter.requires_grad:
+                self._num_tracked_params += 1
                 parameter.register_hook(self._make_grad_hook(name))
 
     def _make_grad_hook(self, name):
         def hook(grad):
+            # Count every per-parameter gradient, but interpret logging frequency
+            # in terms of backward steps (i.e., once all tracked parameters have
+            # received a gradient).
             self._step_count += 1
-            if self._step_count % self._log_freq == 0:
-                norm = grad.norm(self._norm_type).item()
-                metric_name = f"grad_norm/{name}"
-                step = self._step_count // self._log_freq
-                self.log_metrics({metric_name: norm}, step=step)
 
+            # If for some reason no parameters are tracked, do nothing.
+            if getattr(self, "_num_tracked_params", 0) == 0:
+                return
+
+            # One backward step corresponds to gradients computed for all tracked
+            # parameters.
+            if self._step_count % self._num_tracked_params != 0:
+                return
+
+            backward_step = self._step_count // self._num_tracked_params
+            if backward_step % self._log_freq != 0:
+                return
+
+            norm = grad.norm(self._norm_type).item()
+            metric_name = f"grad_norm/{name}"
+            self.log_metrics({metric_name: norm}, step=backward_step)
         return hook
 
 
