@@ -19,6 +19,7 @@ import copy
 import hashlib
 import json
 import logging
+import numbers
 import os
 import re
 import time
@@ -339,8 +340,11 @@ def extract_env_metadata(eid, env):
 
 
 def compare_query_values(actual, expected):
-    if type(actual) != type(expected) and (
-        isinstance(actual, (int, float)) and isinstance(expected, (int, float))
+    if (
+        not isinstance(actual, bool)
+        and not isinstance(expected, bool)
+        and isinstance(actual, numbers.Number)
+        and isinstance(expected, numbers.Number)
     ):
         return float(actual), float(expected)
     return actual, expected
