@@ -48,6 +48,12 @@ import sys
 
 assert sys.version_info[0] >= 3, "To use visdom with python 2, downgrade to v0.1.8.9"
 
+# Optional PyTorch Lightning Integration
+try:
+    from .lightning import VisdomLogger
+except ImportError:
+    pass
+
 try:
     # TODO try to import https://github.com/CannyLab/tsne-cuda first? will be
     # faster but requires more setup
@@ -1730,6 +1736,35 @@ class Visdom(object):
             endpoint = "update"
 
         return self._send(data_to_send, endpoint=endpoint)
+
+    @pytorch_wrap
+    def plot_grad_norm(
+        self, model, step, win=None, env=None, opts=None, name="grad_norm", update=None
+    ):
+        """
+        Calculates and plots the gradient norm of a PyTorch model.
+        """
+        import torch
+
+        total_norm = 0.0
+        for p in model.parameters():
+            if p.grad is not None:
+                param_norm = p.grad.data.norm(2)  # L2 norm
+                total_norm += param_norm.item() ** 2
+        total_norm = total_norm ** (1.0 / 2)
+
+        if opts is None:
+            opts = dict(title="Gradient Norm")
+
+        return self.line(
+            X=torch.tensor([step]),
+            Y=torch.tensor([total_norm]),
+            win=win,
+            env=env,
+            opts=opts,
+            name=name,
+            update=update,
+        )
 
     @pytorch_wrap
     def line(self, Y, X=None, win=None, env=None, opts=None, update=None, name=None):
