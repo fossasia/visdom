@@ -1276,9 +1276,14 @@ class Visdom(object):
         opts["height"] = opts.get("height", img.shape[img.ndim - 2])
 
         nchannels = img.shape[0] if img.ndim == 3 else 1
+
         if nchannels == 1:
             img = np.squeeze(img)
             img = img[np.newaxis, :, :].repeat(3, axis=0)
+
+        elif nchannels not in (3, 4):
+            raise ValueError("Image should have 1, 3 or 4 channels")
+
 
         if "float" in str(img.dtype):
             if img.max() <= 1:
