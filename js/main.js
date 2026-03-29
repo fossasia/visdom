@@ -21,6 +21,7 @@ import ReactResizeDetector from 'react-resize-detector';
 import ApiContext from './api/ApiContext';
 import ApiProvider from './api/ApiProvider';
 import EventSystem from './EventSystem';
+import ExperimentVisualization from './ExperimentVisualization';
 import EnvModal from './modals/EnvModal';
 import ViewModal from './modals/ViewModal';
 import TextPane from './panes/TextPane';
@@ -919,6 +920,7 @@ const App = () => {
           {connectionIndicator}
         </span>
       </div>
+      <ExperimentVisualization envIDs={selection.envIDs} />
       <div
         tabIndex="-1"
         role="presentation"

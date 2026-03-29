@@ -34,6 +34,7 @@ from visdom.server.handlers.web_handlers import (
     DeleteEnvHandler,
     EnvHandler,
     ExperimentSearchHandler,
+    ExperimentParallelDataHandler,
     EnvStateHandler,
     ErrorHandler,
     ExistsHandler,
@@ -108,6 +109,11 @@ class Application(tornado.web.Application):
             (
                 r"%s/experiments/search" % self.base_url,
                 ExperimentSearchHandler,
+                {"app": self},
+            ),
+            (
+                r"%s/experiments/parallel-data" % self.base_url,
+                ExperimentParallelDataHandler,
                 {"app": self},
             ),
             (r"%s/save" % self.base_url, SaveHandler, {"app": self}),

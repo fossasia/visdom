@@ -32,6 +32,7 @@ except ImportError:
 import tornado.escape
 from visdom.utils.shared_utils import get_rand_id
 from visdom.utils.server_utils import (
+    build_parallel_experiment_data,
     check_auth,
     extract_eid,
     window,
@@ -477,6 +478,27 @@ class ExperimentSearchHandler(BaseHandler):
                 {
                     "query": query,
                     "parsed_query": parsed_query,
+                    "experiments": experiments,
+                }
+            )
+        )
+
+
+class ExperimentParallelDataHandler(BaseHandler):
+    def initialize(self, app):
+        self.state = app.state
+        self.login_enabled = app.login_enabled
+
+    @check_auth
+    def get(self):
+        envs_argument = self.get_argument("envs", default=None)
+        experiments = build_parallel_experiment_data(self.state, envs_argument)
+
+        self.set_header("Content-type", "application/json")
+        self.write(
+            json.dumps(
+                {
+                    "envs": envs_argument,
                     "experiments": experiments,
                 }
             )

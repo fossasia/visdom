@@ -400,6 +400,58 @@ def filter_experiments(state, query_string):
     return parsed_query, results
 
 
+def _parse_env_list(envs_argument):
+    if envs_argument is None:
+        return None
+
+    env_ids = [env_id.strip() for env_id in envs_argument.split(",") if env_id.strip()]
+    if len(env_ids) == 0:
+        return None
+    return env_ids
+
+
+def _get_numeric_parallel_value(metadata, key):
+    value = metadata.get(key)
+    if isinstance(value, bool) or not isinstance(value, numbers.Number):
+        return None
+    return float(value)
+
+
+def build_parallel_experiment_data(state, envs_argument=None):
+    """
+    Build starter-level parallel coordinates data from experiment metadata.
+
+    Only environments with numeric values for the required dimensions are
+    included so the frontend can render the Plotly parcoords trace directly.
+    """
+    env_filter = _parse_env_list(envs_argument)
+    experiments = []
+
+    for eid, env in state.items():
+        if env_filter is not None and eid not in env_filter:
+            continue
+
+        metadata = extract_env_metadata(eid, env)
+        experiment = {
+            "env": eid,
+            "learning_rate": _get_numeric_parallel_value(metadata, "learning_rate"),
+            "batch_size": _get_numeric_parallel_value(metadata, "batch_size"),
+            "accuracy": _get_numeric_parallel_value(metadata, "accuracy"),
+            "loss": _get_numeric_parallel_value(metadata, "loss"),
+        }
+
+        if (
+            experiment["learning_rate"] is None
+            or experiment["batch_size"] is None
+            or experiment["accuracy"] is None
+        ):
+            continue
+
+        experiments.append(experiment)
+
+    return experiments
+
+
 def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
     logging.info("comparing envs")
     eidNums = {e: str(i) for i, e in enumerate(eids)}

@@ -193,6 +193,27 @@ const ApiProvider = ({ children }) => {
     return response.json();
   };
 
+  const fetchParallelExperimentData = async (envIDs) => {
+    const params = new URLSearchParams();
+    if (envIDs && envIDs.length > 0) {
+      params.set('envs', envIDs.join(','));
+    }
+
+    const response = await fetch(
+      correctPathname() + 'experiments/parallel-data?' + params.toString(),
+      {
+        credentials: 'same-origin',
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error || 'Failed to load parallel experiment data');
+    }
+
+    return response.json();
+  };
+
   // Send message to server backend for a specific pane and environment.
   const sendPaneMessage = (data, targetPaneID, targetEnvID) => {
     if (targetPaneID === null || sessionInfo.readonly) {
@@ -306,6 +327,7 @@ const ApiProvider = ({ children }) => {
       value={{
         apiHandlers,
         connected,
+        fetchParallelExperimentData,
         sendEmbeddingPop,
         sendEnvDelete,
         sendEnvQuery,
