@@ -800,3 +800,10 @@ See guidelines for contributing [here.](./CONTRIBUTING.md)
 
 ## Acknowledgments
 Visdom was inspired by tools like [display](https://github.com/szym/display) and relies on [Plotly](https://plot.ly/) as a plotting front-end.
+
+
+
+## Suggested Improvement
+
+- Document how frontend UI can be extended
+- Clarify where plotting components are defined
