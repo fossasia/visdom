@@ -16,6 +16,21 @@ from visdom.utils.shared_utils import get_visdom_path
 import certifi
 
 
+def _build_url_opener(proxies=None, cafile=None):
+    ssl_context = ssl.create_default_context(cafile=cafile)
+    https_handler = request.HTTPSHandler(context=ssl_context)
+    proxy_handler = (
+        request.ProxyHandler(proxies) if proxies is not None else request.BaseHandler()
+    )
+    return request.build_opener(proxy_handler, https_handler)
+
+
+def _is_cert_verification_error(exc):
+    if isinstance(exc.reason, ssl.SSLCertVerificationError):
+        return True
+    return "CERTIFICATE_VERIFY_FAILED" in str(exc.reason)
+
+
 def download_scripts(proxies=None, install_dir=None):
     """
     Function to download all of the javascript, css, and font dependencies,
@@ -83,17 +98,9 @@ def download_scripts(proxies=None, install_dir=None):
         if not os.path.exists(directory):
             os.makedirs(directory)
 
-    # set up proxy handler:
-    # Use SSL context backed by certifi's CA bundle to avoid system CA issues
-    ssl_context = ssl.create_default_context(cafile=certifi.where())
-
-    https_handler = request.HTTPSHandler(context=ssl_context)
-
-    handler = (
-        request.ProxyHandler(proxies) if proxies is not None else request.BaseHandler()
-    )
-    opener = request.build_opener(handler, https_handler)
-    request.install_opener(opener)
+    # set up download opener with system/user trust store by default.
+    default_opener = _build_url_opener(proxies=proxies)
+    certifi_opener = _build_url_opener(proxies=proxies, cafile=certifi.where())
 
     built_path = os.path.join(install_dir, "static/version.built")
     is_built = visdom.__version__ == "no_version_file"
@@ -123,21 +130,46 @@ def download_scripts(proxies=None, install_dir=None):
         if not os.path.exists(filename) or not is_built:
             req = request.Request(key, headers={"User-Agent": "Chrome/30.0.0.0"})
             try:
-                data = opener.open(req).read()
+                data = default_opener.open(req).read()
                 with open(filename, "wb") as fwrite:
                     fwrite.write(data)
+            except URLError as exc:
+                if _is_cert_verification_error(exc):
+                    logging.warning(
+                        "SSL verification failed with default CA bundle, "
+                        "retrying with certifi for %s",
+                        key,
+                    )
+                    try:
+                        data = certifi_opener.open(req).read()
+                        with open(filename, "wb") as fwrite:
+                            fwrite.write(data)
+                    except HTTPError as certifi_exc:
+                        logging.error(
+                            "Error {} while downloading {}".format(
+                                certifi_exc.code, key
+                            )
+                        )
+                        download_failed = True
+                    except URLError as certifi_exc:
+                        logging.error(
+                            "Error {} while downloading {}".format(
+                                certifi_exc.reason, key
+                            )
+                        )
+                        download_failed = True
+                else:
+                    logging.error("Error {} while downloading {}".format(exc.reason, key))
+                    download_failed = True
             except HTTPError as exc:
                 logging.error("Error {} while downloading {}".format(exc.code, key))
-                download_failed = True
-            except URLError as exc:
-                logging.error("Error {} while downloading {}".format(exc.reason, key))
                 download_failed = True
 
     # Download MathJax Js Files
     import requests
 
-    cdnjs_url = "https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.5/"
-    mathjax_dir = os.path.join(*cdnjs_url.split("/")[-3:])
+    mathjax_base_url = "https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.5/"
+    mathjax_dir = os.path.join(*mathjax_base_url.split("/")[-3:])
     mathjax_path = [
         "config/Safe.js?V=2.7.5",
         "config/TeX-AMS-MML_HTMLorMML.js?V=2.7.5",
@@ -159,39 +191,33 @@ def download_scripts(proxies=None, install_dir=None):
             not os.path.exists(os.path.join(extracted_directory, filename))
             or not is_built
         ):
-            url = cdnjs_url + path
-            # Try default SSL verification first, fallback to certifi on SSLError
-            for use_certifi in (False, True):
+            url = mathjax_base_url + path
+            js_file = None
+            download_ok = False
+            try:
+                js_file = requests.get(url, proxies=proxies, verify=True, timeout=10)
+                js_file.raise_for_status()
+                download_ok = True
+            except requests.exceptions.SSLError:
+                logging.warning(
+                    "SSL verification failed with default CA bundle, "
+                    "retrying with certifi for %s",
+                    url,
+                )
                 try:
-                    verify_param = certifi.where() if use_certifi else True
                     js_file = requests.get(
-                        url, proxies=proxies, verify=verify_param, timeout=10
+                        url, proxies=proxies, verify=certifi.where(), timeout=10
                     )
                     js_file.raise_for_status()
-                    break  # Success, exit retry loop
-                except requests.exceptions.SSLError as exc:
-                    if use_certifi:
-                        # Both attempts failed
-                        logging.error("SSL error %s while downloading %s", exc, url)
-                        download_failed = True
-                        break
-                    # Retry with certifi
-                    logging.warning(
-                        "SSL verification failed with default CA bundle, "
-                        "retrying with certifi for %s",
-                        url,
-                    )
-                    continue
+                    download_ok = True
                 except requests.exceptions.RequestException as exc:
                     logging.error("Error %s while downloading %s", exc, url)
                     download_failed = True
-                    break
-            else:
-                # Loop completed without break (shouldn't happen with current logic)
-                continue
+            except requests.exceptions.RequestException as exc:
+                logging.error("Error %s while downloading %s", exc, url)
+                download_failed = True
 
-            # Only write file if download succeeded
-            if "js_file" in locals() and hasattr(js_file, "content"):
+            if download_ok and js_file is not None:
                 try:
                     with open(
                         os.path.join(extracted_directory, filename), "wb+"
