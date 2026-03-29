@@ -868,17 +868,13 @@ const App = () => {
           }}
         >
           {filterControl}
-          
-        &nbsp;&nbsp;
-        <span className='vertical-line' />
-        &nbsp;&nbsp;
-        <UserDropdown/>
-        &nbsp;&nbsp;
-
+          &nbsp;&nbsp;
+          <span className="vertical-line" />
+          &nbsp;&nbsp;
+          <UserDropdown />
+          &nbsp;&nbsp;
           {connectionIndicator}
         </span>
-
-        
       </div>
       <div
         tabIndex="-1"

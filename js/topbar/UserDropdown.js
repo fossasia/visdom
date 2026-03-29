@@ -7,25 +7,40 @@
  *
  */
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 
 function UserDropdown() {
   const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef(null);
 
   // TODO Hardcoded rn extend later for real auth
   const currentUser = 'Guest';
 
+  const handleBlur = (event) => {
+    const nextFocused = event.relatedTarget;
+    const container = containerRef.current;
+
+    if (!container || !nextFocused || !container.contains(nextFocused)) {
+      setTimeout(() => setIsOpen(false), 200);
+    }
+  };
+
   return (
     <span>
       <span>User&nbsp;</span>
-      <div className="btn-group navbar-btn" role="group" aria-label="User:">
+      <div
+        className="btn-group navbar-btn"
+        role="group"
+        aria-label="User:"
+        ref={containerRef}
+        onBlur={handleBlur}
+      >
         <div className={`btn-group ${isOpen ? 'open' : ''}`} role="group">
           <button
             className="btn btn-default dropdown-toggle"
             type="button"
             id="userDropdown"
             onClick={() => setIsOpen(!isOpen)}
-            onBlur={() => setTimeout(() => setIsOpen(false), 200)}
             aria-haspopup="true"
             aria-expanded={isOpen}
           >
