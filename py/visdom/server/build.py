@@ -84,13 +84,8 @@ def download_scripts(proxies=None, install_dir=None):
             os.makedirs(directory)
 
     # set up proxy handler:
-    # Try default SSL context first, fallback to certifi if needed
-    # This respects custom CA configurations (corporate proxies, REQUESTS_CA_BUNDLE, etc.)
-    try:
-        ssl_context = ssl.create_default_context()
-    except Exception:
-        # Fallback to certifi's CA bundle if default fails
-        ssl_context = ssl.create_default_context(cafile=certifi.where())
+    # Use SSL context backed by certifi's CA bundle to avoid system CA issues
+    ssl_context = ssl.create_default_context(cafile=certifi.where())
 
     https_handler = request.HTTPSHandler(context=ssl_context)
 
@@ -166,7 +161,7 @@ def download_scripts(proxies=None, install_dir=None):
         ):
             url = cdnjs_url + path
             # Try default SSL verification first, fallback to certifi on SSLError
-            for attempt, use_certifi in enumerate([False, True]):
+            for use_certifi in (False, True):
                 try:
                     verify_param = certifi.where() if use_certifi else True
                     js_file = requests.get(
