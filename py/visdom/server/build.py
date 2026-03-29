@@ -84,10 +84,16 @@ def download_scripts(proxies=None, install_dir=None):
             os.makedirs(directory)
 
     # set up proxy handler:
-    # Create SSL context using certifi's CA bundle
-    ssl_context = ssl.create_default_context(cafile=certifi.where())
+    # Try default SSL context first, fallback to certifi if needed
+    # This respects custom CA configurations (corporate proxies, REQUESTS_CA_BUNDLE, etc.)
+    try:
+        ssl_context = ssl.create_default_context()
+    except Exception:
+        # Fallback to certifi's CA bundle if default fails
+        ssl_context = ssl.create_default_context(cafile=certifi.where())
+
     https_handler = request.HTTPSHandler(context=ssl_context)
-    
+
     handler = (
         request.ProxyHandler(proxies) if proxies is not None else request.BaseHandler()
     )
@@ -107,6 +113,7 @@ def download_scripts(proxies=None, install_dir=None):
         print("Downloading scripts, this may take a little while")
 
     # download files one-by-one:
+    download_failed = False
     for key, val in ext_files.items():
         # set subdirectory:
         if val.endswith(".js") or val.endswith(".js.map"):
@@ -126,8 +133,10 @@ def download_scripts(proxies=None, install_dir=None):
                     fwrite.write(data)
             except HTTPError as exc:
                 logging.error("Error {} while downloading {}".format(exc.code, key))
+                download_failed = True
             except URLError as exc:
                 logging.error("Error {} while downloading {}".format(exc.reason, key))
+                download_failed = True
 
     # Download MathJax Js Files
     import requests
@@ -151,26 +160,62 @@ def download_scripts(proxies=None, install_dir=None):
         extracted_directory = os.path.join(mathjax_dir_path, *path.split("/")[:-1])
         if not os.path.exists(extracted_directory):
             os.makedirs(extracted_directory)
-        if not os.path.exists(os.path.join(extracted_directory, filename)) or not is_built:
+        if (
+            not os.path.exists(os.path.join(extracted_directory, filename))
+            or not is_built
+        ):
             url = cdnjs_url + path
-            try:
-                js_file = requests.get(
-                    url, proxies=proxies, verify=certifi.where(), timeout=10
-                )
-                js_file.raise_for_status()
-            except requests.exceptions.RequestException as exc:
-                logging.error("Error %s while downloading %s", exc, url)
+            # Try default SSL verification first, fallback to certifi on SSLError
+            for attempt, use_certifi in enumerate([False, True]):
+                try:
+                    verify_param = certifi.where() if use_certifi else True
+                    js_file = requests.get(
+                        url, proxies=proxies, verify=verify_param, timeout=10
+                    )
+                    js_file.raise_for_status()
+                    break  # Success, exit retry loop
+                except requests.exceptions.SSLError as exc:
+                    if use_certifi:
+                        # Both attempts failed
+                        logging.error("SSL error %s while downloading %s", exc, url)
+                        download_failed = True
+                        break
+                    # Retry with certifi
+                    logging.warning(
+                        "SSL verification failed with default CA bundle, "
+                        "retrying with certifi for %s",
+                        url,
+                    )
+                    continue
+                except requests.exceptions.RequestException as exc:
+                    logging.error("Error %s while downloading %s", exc, url)
+                    download_failed = True
+                    break
+            else:
+                # Loop completed without break (shouldn't happen with current logic)
                 continue
-            try:
-                with open(os.path.join(extracted_directory, filename), "wb+") as file:
-                    file.write(js_file.content)
-            except OSError as exc:
-                logging.error(
-                    "Filesystem error %s while writing %s",
-                    exc,
-                    os.path.join(extracted_directory, filename),
-                )
 
-    if not is_built:
+            # Only write file if download succeeded
+            if "js_file" in locals() and hasattr(js_file, "content"):
+                try:
+                    with open(
+                        os.path.join(extracted_directory, filename), "wb+"
+                    ) as file:
+                        file.write(js_file.content)
+                except OSError as exc:
+                    logging.error(
+                        "Filesystem error %s while writing %s",
+                        exc,
+                        os.path.join(extracted_directory, filename),
+                    )
+                    download_failed = True
+
+    # Only mark as built if no downloads failed
+    if not is_built and not download_failed:
         with open(built_path, "w+") as build_file:
             build_file.write(visdom.__version__)
+    elif download_failed:
+        logging.warning(
+            "Some downloads failed - will retry on next run. "
+            "Check network connection and proxy settings."
+        )
