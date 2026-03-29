@@ -8,10 +8,12 @@
 
 import logging
 import os
+import ssl
 import visdom
 from urllib import request
 from urllib.error import HTTPError, URLError
 from visdom.utils.shared_utils import get_visdom_path
+import certifi
 
 
 def download_scripts(proxies=None, install_dir=None):
@@ -82,10 +84,14 @@ def download_scripts(proxies=None, install_dir=None):
             os.makedirs(directory)
 
     # set up proxy handler:
+    # Create SSL context using certifi's CA bundle
+    ssl_context = ssl.create_default_context(cafile=certifi.where())
+    https_handler = request.HTTPSHandler(context=ssl_context)
+    
     handler = (
         request.ProxyHandler(proxies) if proxies is not None else request.BaseHandler()
     )
-    opener = request.build_opener(handler)
+    opener = request.build_opener(handler, https_handler)
     request.install_opener(opener)
 
     built_path = os.path.join(install_dir, "static/version.built")
@@ -125,7 +131,6 @@ def download_scripts(proxies=None, install_dir=None):
 
     # Download MathJax Js Files
     import requests
-    import certifi
 
     cdnjs_url = "https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.5/"
     mathjax_dir = os.path.join(*cdnjs_url.split("/")[-3:])
@@ -146,10 +151,25 @@ def download_scripts(proxies=None, install_dir=None):
         extracted_directory = os.path.join(mathjax_dir_path, *path.split("/")[:-1])
         if not os.path.exists(extracted_directory):
             os.makedirs(extracted_directory)
-        if not os.path.exists(os.path.join(extracted_directory, filename)):
-            js_file = requests.get(cdnjs_url + path, verify=certifi.where())
-            with open(os.path.join(extracted_directory, filename), "wb+") as file:
-                file.write(js_file.content)
+        if not os.path.exists(os.path.join(extracted_directory, filename)) or not is_built:
+            url = cdnjs_url + path
+            try:
+                js_file = requests.get(
+                    url, proxies=proxies, verify=certifi.where(), timeout=10
+                )
+                js_file.raise_for_status()
+            except requests.exceptions.RequestException as exc:
+                logging.error("Error %s while downloading %s", exc, url)
+                continue
+            try:
+                with open(os.path.join(extracted_directory, filename), "wb+") as file:
+                    file.write(js_file.content)
+            except OSError as exc:
+                logging.error(
+                    "Filesystem error %s while writing %s",
+                    exc,
+                    os.path.join(extracted_directory, filename),
+                )
 
     if not is_built:
         with open(built_path, "w+") as build_file:

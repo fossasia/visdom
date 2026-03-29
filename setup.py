@@ -41,6 +41,7 @@ requirements = [
     'numpy>=1.8',
     'scipy',
     'requests',
+    'certifi',
     'tornado',
     'six',
     'jsonpatch',
