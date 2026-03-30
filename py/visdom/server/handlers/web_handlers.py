@@ -34,12 +34,13 @@ from visdom.utils.shared_utils import get_rand_id
 from visdom.utils.server_utils import (
     check_auth,
     extract_eid,
+    scope_eid_for_handler,
+    unscope_eid_for_handler,
     window,
     register_window,
     gather_envs,
     broadcast_envs,
     serialize_env,
-    escape_eid,
     compare_envs,
     load_env,
     broadcast,
@@ -79,7 +80,7 @@ class PostHandler(BaseHandler):
                 "but it is no longer officially supported."
             )
 
-        eid = extract_eid(req)
+        eid = extract_eid(req, handler=self)
         p = window(req)
 
         register_window(self, p, eid)
@@ -96,7 +97,7 @@ class ExistsHandler(BaseHandler):
 
     @staticmethod
     def wrap_func(handler, args):
-        eid = extract_eid(args)
+        eid = extract_eid(args, handler=handler)
         if eid in handler.state and args["win"] in handler.state[eid]["jsons"]:
             handler.write("true")
         else:
@@ -318,7 +319,7 @@ class UpdateHandler(BaseHandler):
 
     @staticmethod
     def wrap_func(handler, args):
-        eid = extract_eid(args)
+        eid = extract_eid(args, handler=handler)
 
         if args["win"] not in handler.state[eid]["jsons"]:
             # Append to a window that doesn't exist attempts to create
@@ -390,7 +391,7 @@ class CloseHandler(BaseHandler):
 
     @staticmethod
     def wrap_func(handler, args):
-        eid = extract_eid(args)
+        eid = extract_eid(args, handler=handler)
         win = args.get("win")
 
         keys = list(handler.state[eid]["jsons"].keys()) if win is None else [win]
@@ -417,7 +418,7 @@ class DeleteEnvHandler(BaseHandler):
 
     @staticmethod
     def wrap_func(handler, args):
-        eid = extract_eid(args)
+        eid = extract_eid(args, handler=handler)
         if eid is not None:
             del handler.state[eid]
             if handler.env_path is not None:
@@ -442,7 +443,11 @@ class EnvStateHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
         # TODO if an env is provided return the state of that env
-        all_eids = list(handler.state.keys())
+        all_eids = gather_envs(
+            handler.state,
+            env_path=handler.app.env_path,
+            handler=handler,
+        )
         handler.write(json.dumps(all_eids))
 
     @check_auth
@@ -462,8 +467,8 @@ class ForkEnvHandler(BaseHandler):
 
     @staticmethod
     def wrap_func(handler, args):
-        prev_eid = escape_eid(args.get("prev_eid"))
-        eid = escape_eid(args.get("eid"))
+        prev_eid = scope_eid_for_handler(handler, args.get("prev_eid"))
+        eid = scope_eid_for_handler(handler, args.get("eid"))
 
         assert prev_eid in handler.state, "env to be forked doesn't exit"
 
@@ -471,7 +476,8 @@ class ForkEnvHandler(BaseHandler):
         serialize_env(handler.state, [eid], env_path=handler.app.env_path)
         broadcast_envs(handler)
 
-        handler.write(eid)
+        user_eid = unscope_eid_for_handler(handler, eid)
+        handler.write(user_eid if user_eid is not None else eid)
 
     @check_auth
     def post(self):
@@ -493,7 +499,7 @@ class EnvHandler(BaseHandler):
 
     @check_auth
     def get(self, eid):
-        items = gather_envs(self.state, env_path=self.env_path)
+        items = gather_envs(self.state, env_path=self.env_path, handler=self)
         active = "" if eid not in items else eid
         self.render(
             "index.html",
@@ -511,9 +517,15 @@ class EnvHandler(BaseHandler):
         if "sid" in msg_args:
             sid = msg_args["sid"]
             if sid in self.subs:
-                load_env(self.state, args, self.subs[sid], env_path=self.env_path)
+                scoped_args = scope_eid_for_handler(self, args)
+                load_env(
+                    self.state,
+                    scoped_args,
+                    self.subs[sid],
+                    env_path=self.env_path,
+                )
         if "eid" in msg_args:
-            eid = msg_args["eid"]
+            eid = scope_eid_for_handler(self, msg_args["eid"])
             if eid not in self.state:
                 self.state[eid] = {"jsons": {}, "reload": {}}
                 broadcast_envs(self)
@@ -530,7 +542,7 @@ class CompareHandler(BaseHandler):
 
     @check_auth
     def get(self, eids):
-        items = gather_envs(self.state)
+        items = gather_envs(self.state, env_path=self.env_path, handler=self)
         eids = eids.split("+")
         # Filter out eids that don't exist
         eids = [x for x in eids if x in items]
@@ -549,7 +561,8 @@ class CompareHandler(BaseHandler):
             tornado.escape.to_basestring(self.request.body)
         )["sid"]
         if sid in self.subs:
-            compare_envs(self.state, args.split("+"), self.subs[sid], self.env_path)
+            scoped_eids = [scope_eid_for_handler(self, eid) for eid in args.split("+")]
+            compare_envs(self.state, scoped_eids, self.subs[sid], self.env_path)
 
 
 class SaveHandler(BaseHandler):
@@ -564,9 +577,11 @@ class SaveHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
         envs = args["data"]
-        envs = [escape_eid(eid) for eid in envs]
+        envs = [scope_eid_for_handler(handler, eid) for eid in envs]
         # this drops invalid env ids
         ret = serialize_env(handler.state, envs, env_path=handler.env_path)
+        if handler.login_enabled:
+            ret = [unscope_eid_for_handler(handler, eid) or eid for eid in ret]
         handler.write(json.dumps(ret))
 
     @check_auth
@@ -587,7 +602,7 @@ class DataHandler(BaseHandler):
 
     @staticmethod
     def wrap_func(handler, args):
-        eid = extract_eid(args)
+        eid = extract_eid(args, handler=handler)
 
         if "data" in args:
             # Load data from client
@@ -631,7 +646,7 @@ class IndexHandler(BaseHandler):
         self.wrap_socket = app.wrap_socket
 
     def get(self, args, **kwargs):
-        items = gather_envs(self.state, env_path=self.env_path)
+        items = gather_envs(self.state, env_path=self.env_path, handler=self)
         if (not self.login_enabled) or self.current_user:
             """self.current_user is an authenticated user provided by Tornado,
             available when we set self.get_current_user in BaseHandler,
@@ -662,6 +677,7 @@ class IndexHandler(BaseHandler):
             password == self.user_credential["password"]
         ):
             self.set_secure_cookie("user_password", username + password)
+            self.set_secure_cookie("visdom_user", username)
         else:
             self.set_status(400)
 

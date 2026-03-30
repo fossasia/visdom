@@ -74,6 +74,8 @@ class Application(tornado.web.Application):
     ):
         self.eager_data_loading = eager_data_loading
         self.env_path = env_path
+        self.user_credential = user_credential
+        self.login_enabled = user_credential is not None
         self.state = self.load_state()
         self.layouts = self.load_layouts()
         self.user_settings = self.load_user_settings()
@@ -82,13 +84,10 @@ class Application(tornado.web.Application):
         self.port = port
         self.base_url = base_url
         self.readonly = readonly
-        self.user_credential = user_credential
-        self.login_enabled = False
         self.last_access = time.time()
         self.wrap_socket = use_frontend_client_polling
 
         if user_credential:
-            self.login_enabled = True
             with open(DEFAULT_ENV_PATH + "COOKIE_SECRET", "r") as fn:
                 tornado_settings["cookie_secret"] = fn.read()
 
@@ -184,7 +183,7 @@ class Application(tornado.web.Application):
             else:
                 state[eid] = LazyEnvData(env_path_file)
 
-        if "main" not in state and "main.json" not in env_jsons:
+        if (not self.login_enabled) and "main" not in state and "main.json" not in env_jsons:
             state["main"] = {"jsons": {}, "reload": {}}
             serialize_env(state, ["main"], env_path=self.env_path)
 

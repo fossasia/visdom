@@ -75,6 +75,82 @@ def hash_password(password):
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
+USER_SCOPE_PREFIX = "__user__"
+USER_SCOPE_SEPARATOR = "__"
+
+
+def _sanitize_user_scope(username):
+    if username is None:
+        return None
+    return "".join(
+        c if (c.isalnum() or c in "._-") else "_" for c in username
+    ) or "anonymous"
+
+
+def get_username_from_handler(handler):
+    """Best-effort extraction of authenticated username from secure cookies."""
+    if not getattr(handler, "login_enabled", False):
+        return None
+
+    username_cookie = None
+    try:
+        username_cookie = handler.get_secure_cookie("visdom_user")
+    except Exception:
+        username_cookie = None
+
+    if username_cookie:
+        if isinstance(username_cookie, bytes):
+            return username_cookie.decode("utf-8")
+        return username_cookie
+
+    # Backward compatibility with older cookie format: username + sha256(password)
+    try:
+        legacy_cookie = handler.get_secure_cookie("user_password")
+    except Exception:
+        legacy_cookie = None
+
+    if not legacy_cookie:
+        return None
+
+    if isinstance(legacy_cookie, bytes):
+        legacy_cookie = legacy_cookie.decode("utf-8")
+    # sha256 digest has fixed length 64; strip it if possible.
+    if len(legacy_cookie) > 64:
+        return legacy_cookie[:-64]
+    return None
+
+
+def get_user_scope(handler):
+    username = get_username_from_handler(handler)
+    return _sanitize_user_scope(username)
+
+
+def scope_eid_for_handler(handler, eid):
+    if eid is None:
+        eid = "main"
+    escaped_eid = escape_eid(eid)
+    if not getattr(handler, "login_enabled", False):
+        return escaped_eid
+    scope = get_user_scope(handler)
+    if scope is None:
+        return escaped_eid
+    return f"{USER_SCOPE_PREFIX}{scope}{USER_SCOPE_SEPARATOR}{escaped_eid}"
+
+
+def unscope_eid_for_handler(handler, scoped_eid):
+    if scoped_eid is None:
+        return None
+    if not getattr(handler, "login_enabled", False):
+        return scoped_eid
+    scope = get_user_scope(handler)
+    if scope is None:
+        return None
+    prefix = f"{USER_SCOPE_PREFIX}{scope}{USER_SCOPE_SEPARATOR}"
+    if scoped_eid.startswith(prefix):
+        return scoped_eid[len(prefix) :]
+    return None
+
+
 # ------- File management helprs ----- #
 
 
@@ -142,10 +218,12 @@ def escape_eid(eid):
     return eid.replace("/", "_")
 
 
-def extract_eid(args):
+def extract_eid(args, handler=None):
     """Extract eid from args. If eid does not exist in args,
     it returns 'main'."""
     eid = "main" if args.get("eid") is None else args.get("eid")
+    if handler is not None:
+        return scope_eid_for_handler(handler, eid)
     return escape_eid(eid)
 
 
@@ -227,12 +305,21 @@ def window(args):
     return p
 
 
-def gather_envs(state, env_path=DEFAULT_ENV_PATH):
+def gather_envs(state, env_path=DEFAULT_ENV_PATH, handler=None):
     if env_path is not None:
         items = [i.replace(".json", "") for i in os.listdir(env_path) if ".json" in i]
     else:
         items = []
-    return sorted(list(set(items + list(state.keys()))))
+    merged = sorted(list(set(items + list(state.keys()))))
+    if handler is None or not getattr(handler, "login_enabled", False):
+        return merged
+
+    visible = []
+    for eid in merged:
+        user_eid = unscope_eid_for_handler(handler, eid)
+        if user_eid is not None:
+            visible.append(user_eid)
+    return sorted(list(set(visible)))
 
 
 def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
@@ -365,8 +452,9 @@ def broadcast_envs(handler, target_subs=None):
     if target_subs is None:
         target_subs = handler.subs.values()
     for sub in target_subs:
+        envs = gather_envs(handler.state, env_path=handler.env_path, handler=sub)
         sub.write_message(
-            json.dumps({"command": "env_update", "data": list(handler.state.keys())})
+            json.dumps({"command": "env_update", "data": envs})
         )
 
 

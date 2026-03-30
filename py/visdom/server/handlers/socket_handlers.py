@@ -30,7 +30,7 @@ from visdom.utils.server_utils import (
     serialize_env,
     send_to_sources,
     broadcast,
-    escape_eid,
+    scope_eid_for_handler,
 )
 from visdom.server.defaults import MAX_SOCKET_WAIT
 
@@ -81,7 +81,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
         self.sid = get_rand_id()
         register_list = self.sources if register_to == "sources" else self.subs
         if self not in list(register_list.values()):
-            self.eid = "main"
+            self.eid = scope_eid_for_handler(self, "main")
             register_list[self.sid] = self
 
     def broadcast_layouts(self):
@@ -98,7 +98,8 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
         elif cmd == "close":
             if "data" in msg and "eid" in msg:
                 logging.info(f"closing window {msg['data']}")
-                p_data = self.state[msg["eid"]]["jsons"].pop(msg["data"], None)
+                scoped_eid = scope_eid_for_handler(self, msg["eid"])
+                p_data = self.state[scoped_eid]["jsons"].pop(msg["data"], None)
                 event = {
                     "event_type": "close",
                     "target": msg["data"],
@@ -110,18 +111,20 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
         elif cmd == "save":
             # save localStorage window metadata
             if "data" in msg and "eid" in msg:
-                msg["eid"] = escape_eid(msg["eid"])
-                self.state[msg["eid"]] = copy.deepcopy(self.state[msg["prev_eid"]])
-                self.state[msg["eid"]]["reload"] = msg["data"]
-                self.eid = msg["eid"]
+                scoped_eid = scope_eid_for_handler(self, msg["eid"])
+                scoped_prev_eid = scope_eid_for_handler(self, msg["prev_eid"])
+                self.state[scoped_eid] = copy.deepcopy(self.state[scoped_prev_eid])
+                self.state[scoped_eid]["reload"] = msg["data"]
+                self.eid = scoped_eid
                 serialize_env(self.state, [self.eid], env_path=self.env_path)
 
         elif cmd == "delete_env":
             if "eid" in msg:
                 logging.info(f"closing environment {msg['eid']}")
-                del self.state[msg["eid"]]
+                scoped_eid = scope_eid_for_handler(self, msg["eid"])
+                del self.state[scoped_eid]
                 if self.env_path is not None:
-                    p = os.path.join(self.env_path, "{0}.json".format(msg["eid"]))
+                    p = os.path.join(self.env_path, "{0}.json".format(scoped_eid))
                     os.remove(p)
                 broadcast_envs(self)
 
@@ -133,19 +136,20 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
 
         elif cmd == "forward_to_vis":
             packet = msg.get("data")
-            environment = self.state[packet["eid"]]
+            scoped_eid = scope_eid_for_handler(self, packet["eid"])
+            environment = self.state[scoped_eid]
             if packet.get("pane_data") is not False:
                 packet["pane_data"] = environment["jsons"][packet["target"]]
             send_to_sources(self, msg.get("data"))
 
         elif cmd == "layout_item_update":
-            eid = msg.get("eid")
+            eid = scope_eid_for_handler(self, msg.get("eid"))
             win = msg.get("win")
             self.state[eid]["reload"][win] = msg.get("data")
 
         elif cmd == "pop_embeddings_pane":
             packet = msg.get("data")
-            eid = packet["eid"]
+            eid = scope_eid_for_handler(self, packet["eid"])
             win = packet["target"]
             p = self.state[eid]["jsons"][win]
             p["content"]["selected"] = None
