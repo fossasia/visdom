@@ -407,30 +407,30 @@ class CloseHandler(BaseHandler):
 
 
 class DeleteEnvHandler(BaseHandler):
+
     def initialize(self, app):
-        self.state = app.state
-        self.subs = app.subs
-        self.sources = app.sources
         self.port = app.port
         self.env_path = app.env_path
         self.login_enabled = app.login_enabled
 
-@staticmethod
-def wrap_func(handler, args):
-    eid = extract_eid(args)
-    if eid is not None:
+    @staticmethod
+    def wrap_func(handler, args):
+        eid = extract_eid(args)
 
-        # Safe delete from state
-        if eid in handler.state:
-            del handler.state[eid]
+        if eid is not None:
+            # Safe delete from state
+            if eid in handler.state:
+                del handler.state[eid]
 
-        # Safe file deletion
-        if handler.env_path is not None:
-            p = os.path.join(handler.env_path, "{0}.json".format(eid))
-            if os.path.exists(p):
-                os.remove(p)
+            # Safe file deletion (avoid race condition)
+            if handler.env_path is not None:
+                p = os.path.join(handler.env_path, "{0}.json".format(eid))
+                try:
+                    os.remove(p)
+                except FileNotFoundError:
+                    pass
 
-        broadcast_envs(handler)
+            broadcast_envs(handler)
 
     @check_auth
     def post(self):
