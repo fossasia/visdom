@@ -462,3 +462,247 @@ html.dark-mode {
   border-color: #4a6fa5;
   color: #e0e0e0;
 }
+
+/* ===================== */
+/*    APP SHELL LAYOUT   */
+/* ===================== */
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
+.visdom-app-shell {
+  display: flex;
+  flex-direction: row;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.visdom-main-area {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* ===================== */
+/*    SLIM TOOLBAR       */
+/* ===================== */
+
+.visdom-toolbar {
+  display: flex !important;
+  flex-direction: row;
+  align-items: center;
+  height: 46px;
+  padding: 0 12px;
+  flex-shrink: 0;
+  border-bottom: 1px solid #ddd;
+  /* background/border come from .navbar-default */
+}
+
+.visdom-toolbar .navbar-brand.visdom-title {
+  padding: 0;
+  line-height: 46px;
+  margin-right: 8px;
+}
+
+.visdom-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* remove float that was used in old toolbar */
+.visdom-toolbar-right .input-group.navbar-btn,
+.visdom-toolbar-right .navbar-btn {
+  float: none;
+  margin: 0;
+}
+
+/* ===================== */
+/*       CANVAS          */
+/* ===================== */
+
+.visdom-canvas {
+  flex: 1;
+  overflow: auto;
+}
+
+/* ===================== */
+/*       SIDEBAR         */
+/* ===================== */
+
+.visdom-sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  background: #f5f6f8;
+  border-right: 1px solid #ddd;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  transition: width 0.2s ease;
+  overflow: hidden;
+  height: 100vh;
+}
+
+.visdom-sidebar.collapsed {
+  width: 36px;
+}
+
+/* Inner content — hidden when collapsed */
+.sidebar-inner {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  opacity: 1;
+  transition: opacity 0.15s ease;
+  min-width: 224px; /* keeps inner content from wrapping during collapse animation */
+}
+
+.visdom-sidebar.collapsed .sidebar-inner {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Header strip at top of sidebar */
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid #e0e0e0;
+  background: #ecedf0;
+}
+
+.sidebar-brand {
+  font-size: 15px;
+  color: #555;
+}
+
+.sidebar-brand-text {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #555;
+  white-space: nowrap;
+}
+
+/* Each labelled section */
+.sidebar-section {
+  padding: 12px 10px 14px;
+  border-bottom: 1px solid #e8e8e8;
+}
+
+.sidebar-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #888;
+  margin-bottom: 8px;
+}
+
+/* Wrapper around each control to go full-width */
+.sidebar-control {
+  width: 100%;
+}
+
+/* Hide the redundant inline "Environment" / "View" text labels
+   that are baked into EnvControls and ViewControls */
+.sidebar-control > span > span:first-child {
+  display: none;
+}
+
+/* Make btn-groups and tree-select fill sidebar width */
+.sidebar-control .btn-group.navbar-btn {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  float: none;
+  width: 100%;
+}
+
+.sidebar-control .btn-group.navbar-btn > .btn-group {
+  flex: 1;
+  min-width: 0;
+}
+
+.sidebar-control .rc-tree-select {
+  width: 100% !important;
+}
+
+/* Sidebar collapse / expand toggle button */
+.sidebar-toggle {
+  position: absolute;
+  bottom: 16px;
+  right: 0;
+  width: 36px;
+  height: 36px;
+  background: #ecedf0;
+  border: 1px solid #ddd;
+  border-right: none;
+  border-radius: 4px 0 0 4px;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 34px;
+  text-align: center;
+  color: #555;
+  transition: background 0.15s;
+  z-index: 10;
+}
+
+.sidebar-toggle:hover {
+  background: #dde0e6;
+}
+
+.visdom-sidebar.collapsed .sidebar-toggle {
+  border-radius: 0 4px 4px 0;
+  border-right: 1px solid #ddd;
+  border-left: none;
+}
+
+/* ===================================== */
+/*   DARK MODE — sidebar & toolbar       */
+/* ===================================== */
+
+.dark-mode .visdom-toolbar {
+  border-color: #0f3460;
+}
+
+.dark-mode .visdom-sidebar {
+  background: #12172a;
+  border-color: #0f3460;
+}
+
+.dark-mode .sidebar-header {
+  background: #0f1529;
+  border-color: #0f3460;
+}
+
+.dark-mode .sidebar-brand,
+.dark-mode .sidebar-brand-text {
+  color: #a0b4d0;
+}
+
+.dark-mode .sidebar-section {
+  border-color: #1a2540;
+}
+
+.dark-mode .sidebar-section-title {
+  color: #6080a0;
+}
+
+.dark-mode .sidebar-toggle {
+  background: #16213e;
+  border-color: #0f3460;
+  color: #a0b4d0;
+}
+
+.dark-mode .sidebar-toggle:hover {
+  background: #0f3460;
+}

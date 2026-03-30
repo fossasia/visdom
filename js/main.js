@@ -32,9 +32,8 @@ import {
   ROW_HEIGHT,
 } from './settings';
 import ConnectionIndicator from './topbar/ConnectionIndicator';
-import EnvControls from './topbar/EnvControls';
 import FilterControls from './topbar/FilterControls';
-import ViewControls from './topbar/ViewControls';
+import Sidebar from './sidebar/Sidebar';
 import WidthProvider from './Width';
 
 const ReactGridLayout = require('react-grid-layout');
@@ -803,31 +802,7 @@ const App = () => {
     />,
   ];
 
-  let envControls = (
-    <EnvControls
-      envIDs={selection.envIDs}
-      envList={storeMeta.envList}
-      envSelectorStyle={{
-        width: Math.max(window.innerWidth / 3, 50),
-      }}
-      onEnvClear={closeAllPanes}
-      onEnvManageButton={() => setShowEnvModal(!showEnvModal)}
-      onEnvSelect={onEnvSelect}
-    />
-  );
-  let viewControls = (
-    <ViewControls
-      activeLayout={selection.layoutID}
-      envIDs={selection.envIDs}
-      layoutList={getCurrLayoutList()}
-      onRepackButton={() => {
-        relayout();
-        relayout();
-      }}
-      onViewChange={updateToLayout}
-      onViewManageButton={() => setShowViewModal(!showViewModal)}
-    />
-  );
+  // EnvControls and ViewControls are now rendered inside <Sidebar />
   let filterControl = (
     <FilterControls
       filter={filterString}
@@ -875,50 +850,56 @@ const App = () => {
   return (
     <div className={darkMode ? 'dark-mode' : ''}>
       {modals}
-      <div className="navbar-form navbar-default">
-        <span className="navbar-brand visdom-title">visdom</span>
-        <span className="vertical-line" />
-        &nbsp;&nbsp;
-        {envControls}
-        &nbsp;&nbsp;
-        <span className="vertical-line" />
-        &nbsp;&nbsp;
-        {viewControls}
-        <span
-          style={{
-            float: 'right',
+      <div className="visdom-app-shell">
+        <Sidebar
+          envIDs={selection.envIDs}
+          envList={storeMeta.envList}
+          onEnvClear={closeAllPanes}
+          onEnvManageButton={() => setShowEnvModal(!showEnvModal)}
+          onEnvSelect={onEnvSelect}
+          activeLayout={selection.layoutID}
+          layoutList={getCurrLayoutList()}
+          onRepackButton={() => {
+            relayout();
+            relayout();
           }}
-        >
-          {filterControl}
-          &nbsp;&nbsp;
-          {darkModeToggle}
-          &nbsp;&nbsp;
-          {connectionIndicator}
-        </span>
-      </div>
-      <div
-        tabIndex="-1"
-        role="presentation"
-        className="no-focus"
-        onBlur={blurPane}
-        onClick={publishEvent}
-        onKeyUp={publishEvent}
-        onKeyDown={publishEvent}
-        onKeyPress={publishEvent}
-      >
-        <GridLayout
-          className="layout"
-          rowHeight={ROW_HEIGHT}
-          autoSize={false}
-          margin={[MARGIN, MARGIN]}
-          layout={storeData.layout}
-          draggableHandle={'.bar'}
-          onWidthChange={onWidthChange}
-          onResizeStop={resizePane}
-          onDragStop={movePane}
-        >
-          {panes}
-        </GridLayout>
+          onViewChange={updateToLayout}
+          onViewManageButton={() => setShowViewModal(!showViewModal)}
+        />
+        <div className="visdom-main-area">
+          <div className="visdom-toolbar navbar-default">
+            <span className="navbar-brand visdom-title">visdom</span>
+            <span className="visdom-toolbar-right">
+              {filterControl}
+              {darkModeToggle}
+              {connectionIndicator}
+            </span>
+          </div>
+          <div
+            tabIndex="-1"
+            role="presentation"
+            className="no-focus visdom-canvas"
+            onBlur={blurPane}
+            onClick={publishEvent}
+            onKeyUp={publishEvent}
+            onKeyDown={publishEvent}
+            onKeyPress={publishEvent}
+          >
+            <GridLayout
+              className="layout"
+              rowHeight={ROW_HEIGHT}
+              autoSize={false}
+              margin={[MARGIN, MARGIN]}
+              layout={storeData.layout}
+              draggableHandle={'.bar'}
+              onWidthChange={onWidthChange}
+              onResizeStop={resizePane}
+              onDragStop={movePane}
+            >
+              {panes}
+            </GridLayout>
+          </div>
+        </div>
       </div>
     </div>
   );
