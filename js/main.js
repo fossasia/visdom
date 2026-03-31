@@ -368,8 +368,8 @@ const App = () => {
     localStorage.setItem('envIDs', JSON.stringify(selectedNodes));
     sendEnvQuery(selectedNodes);
   };
-
   const onEnvDelete = (env2delete, previousEnv) => {
+
     if (env2delete === previousEnv) {
       previousEnv = 'main';
     }
