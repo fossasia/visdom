@@ -23,21 +23,23 @@ var PlotPane = (props) => {
   const [smoothWidgetActive, setSmoothWidgetActive] = useState(false);
   const [smoothvalue, setSmoothValue] = useState(1);
 
-  // private events
-  // -------------
-  const toggleSmoothWidget = () => {
-    setSmoothWidgetActive(!smoothWidgetActive);
-  };
-  const updateSmoothSlider = (value) => {
-    setSmoothValue(value);
-  };
-  const handleDownload = () => {
-    Plotly.downloadImage(plotlyRef.current, {
-      format: 'svg',
-      filename: contentID,
-    });
-  };
+// private events
+// -------------
+const toggleSmoothWidget = () => {
+  setSmoothWidgetActive(!smoothWidgetActive);
+};
 
+const updateSmoothSlider = (value) => {
+  setSmoothValue(value);
+};
+
+
+const handleDownload = (format = 'png') => {
+  Plotly.downloadImage(plotlyRef.current, {
+    format: format,
+    filename: `plot.${format}`,
+  });
+};
   // events
   // ------
   useEffect(() => {
