@@ -53,7 +53,7 @@ def check_auth(f):
         # TODO this should call a shared method of the handler
         handler.last_access = time.time()
         if handler.login_enabled and not handler.current_user:
-            handler.set_status(400)
+            handler.set_status(401)
             handler.write({"error": "Authentication required"})
             return
         f(handler, *args, **kwargs)
