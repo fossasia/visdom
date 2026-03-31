@@ -383,7 +383,7 @@ const App = () => {
     });
 
     setStoreMeta((prev) => {
-      let layoutLists = storeMeta.layoutLists;
+      const layoutLists = new Map(storeMeta.layoutLists);
       layoutLists.delete(env2delete);
       let EnvIds = selection.envIDs.filter((env) => env !== env2delete);
       return {
