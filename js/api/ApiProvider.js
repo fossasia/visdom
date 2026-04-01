@@ -109,14 +109,14 @@ const ApiProvider = ({ children }) => {
           readonly: cmd.readonly,
         }));
         break;
-      case 'pane':
-      case 'window':
-      case 'window_update':
-        apiHandlers.current.onWindowMessage({
-          cmd: cmd,
-          update: cmd.commmand == 'window_update',
-        });
-        break;
+     case 'pane':
+case 'window':
+case 'window_update':
+  apiHandlers.current.onWindowMessage({
+    cmd: cmd,
+    update: cmd.command === 'window_update',
+  });
+  break;
       case 'reload':
         apiHandlers.current.onReloadMessage(cmd.data);
         break;
@@ -124,12 +124,12 @@ const ApiProvider = ({ children }) => {
         apiHandlers.current.onCloseMessage(cmd.data);
         break;
       case 'layout':
-      case 'layout_update':
-        apiHandlers.current.onLayoutMessage({
-          cmd: cmd.data,
-          update: cmd.commmand == 'layout_update',
-        });
-        break;
+case 'layout_update':
+  apiHandlers.current.onLayoutMessage({
+    data: cmd.data,
+    update: cmd.command === 'layout_update',
+  });
+  break;
       case 'env_update':
         apiHandlers.current.onEnvUpdate(cmd.data);
         break;
