@@ -96,8 +96,11 @@ class LazyEnvData(Mapping):
                     self._env_path_file, repr(e)
                 )
             )
-        self._raw_dict = {"jsons": env_data["jsons"], "reload": env_data["reload"]}
-
+        self._raw_dict = {
+    "jsons": env_data.get("jsons", {}),
+    "reload": env_data.get("reload", {}),
+    "meta": env_data.get("meta", {})  # ✅ NEW
+}
     def __getitem__(self, key):
         self.lazy_load_data()
         return self._raw_dict.__getitem__(key)
@@ -120,11 +123,23 @@ def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
     if env_path is not None:
         for env_id in env_ids:
             env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
-            with open(env_path_file, "w") as fn:
-                if isinstance(state[env_id], LazyEnvData):
-                    fn.write(json.dumps(state[env_id]._raw_dict))
-                else:
-                    fn.write(json.dumps(state[env_id]))
+           with open(env_path_file, "w") as fn:
+    env_data = state[env_id]
+
+    if isinstance(env_data, LazyEnvData):
+        env_dict = env_data._raw_dict
+    else:
+        env_dict = env_data
+
+    if "meta" not in env_dict:
+        env_dict["meta"] = {
+            "timestamp": time.time(),
+            "experiment_id": env_id,
+            "description": "",
+            "tags": []
+        }
+
+    fn.write(json.dumps(env_dict))
     return env_ids
 
 
@@ -187,7 +202,7 @@ def window(args):
         "inflate": opts.get("inflate", True),
         "width": opts.get("width"),
         "height": opts.get("height"),
-        "contentID": get_rand_id(),  # to detected updated windows
+        "contentID": get_rand_id(),  
     }
 
     if ptype == "image_history":
@@ -216,7 +231,7 @@ def window(args):
             {
                 "content": args["data"][0]["content"],
                 "type": ptype,
-                "old_content": [],  # Used to cache previous to prevent recompute
+                "old_content": [],
             }
         )
         p["content"]["has_previous"] = False
@@ -248,6 +263,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
             if os.path.exists(p):
                 with open(p, "r") as fn:
                     env = tornado.escape.json_decode(fn.read())
+                    env.setdefault("meta", {})
                     state[eid] = env
                     envs[eid] = env
 
@@ -415,7 +431,14 @@ def register_window(self, p, eid):
     is_new_env = False
     if eid not in self.state:
         is_new_env = True
-        self.state[eid] = {"jsons": {}, "reload": {}}
+        self.state[eid] = {
+            "jsons": {},
+            "reload": {},
+            "meta": {
+                "timestamp": time.time(),
+                "experiment_id": eid
+    }
+}
 
     env = self.state[eid]["jsons"]
 
