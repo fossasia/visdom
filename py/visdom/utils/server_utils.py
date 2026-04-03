@@ -97,10 +97,10 @@ class LazyEnvData(Mapping):
                 )
             )
         self._raw_dict = {
-    "jsons": env_data.get("jsons", {}),
-    "reload": env_data.get("reload", {}),
-    "meta": env_data.get("meta", {})  # ✅ NEW
-}
+            "jsons": env_data.get("jsons", {}),
+            "reload": env_data.get("reload", {}),
+            "meta": env_data.get("meta", {})  # ✅ NEW
+    }
     def __getitem__(self, key):
         self.lazy_load_data()
         return self._raw_dict.__getitem__(key)
@@ -127,9 +127,9 @@ def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
     env_data = state[env_id]
 
     if isinstance(env_data, LazyEnvData):
-        env_dict = env_data._raw_dict
+        env_dict = dict(env_data._raw_dict)
     else:
-        env_dict = env_data
+       env_dict = dict(env_data)
 
     if "meta" not in env_dict:
         env_dict["meta"] = {
@@ -263,6 +263,12 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
             if os.path.exists(p):
                 with open(p, "r") as fn:
                     env = tornado.escape.json_decode(fn.read())
+                    env.setdefault("meta", {})
+
+                    env["meta"].setdefault("timestamp", time.time())
+                    env["meta"].setdefault("experiment_id", eid)
+                    env["meta"].setdefault("description", "")
+                    env["meta"].setdefault("tags", [])
                     env.setdefault("meta", {})
                     state[eid] = env
                     envs[eid] = env
