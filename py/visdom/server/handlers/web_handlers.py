@@ -353,7 +353,7 @@ class UpdateHandler(BaseHandler):
         p, diff_packet = UpdateHandler.update_packet(p, args)
         # send the smaller of the patch and the updated pane
         if len(stringify(p)) <= len(stringify(diff_packet)):
-            p['env'] = eid
+            p["env"] = eid
             broadcast(handler, p, eid)
         else:
             broadcast_packet = {
