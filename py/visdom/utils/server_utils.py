@@ -401,8 +401,6 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
 
 
 def broadcast(self, msg, eid):
-    import json
-
     if isinstance(msg, str):
         msg = json.loads(msg)
 
