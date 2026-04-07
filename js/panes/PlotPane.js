@@ -89,7 +89,7 @@ var PlotPane = (props) => {
     }
 
     newPlot(currentFrame);
-  });
+  }, [content, actualSelected, smoothWidgetActive, smoothvalue, props.version, type]);
 
   // rendering
   // ---------

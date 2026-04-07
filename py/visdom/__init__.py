@@ -1719,15 +1719,19 @@ class Visdom(object):
                     del opts[dash]
 
         if opts.get("store_history"):
-            assert update is None, (
-                "Cannot use store_history=True together with the update parameter"
-            )
+            assert (
+                update is None
+            ), "Cannot use store_history=True together with the update parameter"
             layout = _opts2layout(opts, is3d)
             data_to_send = {
                 "data": [
                     {
                         "type": "plot_history",
-                        "content": {"data": data, "layout": layout, "caption": opts.get("caption")},
+                        "content": {
+                            "data": data,
+                            "layout": layout,
+                            "caption": opts.get("caption"),
+                        },
                     }
                 ],
                 "win": win,
