@@ -205,8 +205,8 @@ var PlotPane = (props) => {
     }
   }
 
-  let history_caption = '';
-  let history_slider = '';
+  let history_caption = null;
+  let history_slider = null;
   if (type === 'plot_history' && Array.isArray(content)) {
     if (frameForRender.caption) {
       history_caption = (
