@@ -163,6 +163,13 @@ class UpdateHandler(BaseHandler):
                 p["selected"] = selected_exists
             return p
 
+        if p["type"] == "plot_history":
+            utype = args["data"][0]["type"]
+            if utype == "plot_history":
+                p["content"].append(args["data"][0]["content"])
+                p["selected"] = len(p["content"]) - 1
+            return p
+
         pdata = p["content"]["data"]
 
         new_data = args.get("data")
@@ -336,6 +343,7 @@ class UpdateHandler(BaseHandler):
         if not (
             p["type"] == "text"
             or p["type"] == "image_history"
+            or p["type"] == "plot_history"
             or p["type"] == "embeddings"
             or (
                 len(p["content"]["data"]) == 0

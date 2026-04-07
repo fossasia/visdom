@@ -13,7 +13,7 @@ import Pane from './Pane';
 const { sgg } = require('ml-savitzky-golay-generalized');
 
 var PlotPane = (props) => {
-  const { contentID, content } = props;
+  const { contentID, content, type, show_slider } = props;
 
   // state varibles
   // --------------
@@ -22,6 +22,11 @@ var PlotPane = (props) => {
   const maxsmoothvalue = 100;
   const [smoothWidgetActive, setSmoothWidgetActive] = useState(false);
   const [smoothvalue, setSmoothValue] = useState(1);
+  const [actualSelected, setActualSelected] = useState(props.selected || 0);
+
+  useEffect(() => {
+    setActualSelected(props.selected || 0);
+  }, [props.selected]);
 
   // private events
   // -------------
@@ -30,6 +35,9 @@ var PlotPane = (props) => {
   };
   const updateSmoothSlider = (value) => {
     setSmoothValue(value);
+  };
+  const updateHistorySlider = (evt) => {
+    setActualSelected(parseInt(evt.target.value));
   };
   const handleDownload = () => {
     Plotly.downloadImage(plotlyRef.current, {
@@ -41,44 +49,54 @@ var PlotPane = (props) => {
   // events
   // ------
   useEffect(() => {
-    if (previousContent) {
+    const isHistory = type === 'plot_history';
+    const currentFrame = isHistory
+      ? content[actualSelected] || content[0]
+      : content;
+    const previousFrame =
+      isHistory && previousContent
+        ? previousContent[actualSelected] || previousContent[0]
+        : previousContent;
+
+    if (previousFrame) {
       // Retain trace visibility between old and new plots
       let trace_visibility_by_name = {};
       let trace_idx = null;
-      for (trace_idx in previousContent.data) {
-        let trace = previousContent.data[trace_idx];
+      for (trace_idx in previousFrame.data) {
+        let trace = previousFrame.data[trace_idx];
         trace_visibility_by_name[trace.name] = trace.visible;
       }
-      for (trace_idx in content.data) {
-        let trace = content.data[trace_idx];
+      for (trace_idx in currentFrame.data) {
+        let trace = currentFrame.data[trace_idx];
         trace.visible = trace_visibility_by_name[trace.name];
       }
 
       // Copy user modified zooms
-      let old_x = previousContent.layout.xaxis;
-      let new_x = content.layout.xaxis;
+      let old_x = previousFrame.layout.xaxis;
+      let new_x = currentFrame.layout.xaxis;
       let new_range_set = new_x !== undefined && new_x.autorange === false;
       if (old_x !== undefined && old_x.autorange === false && !new_range_set) {
         // Take the old x axis layout if changed
-        content.layout.xaxis = old_x;
+        currentFrame.layout.xaxis = old_x;
       }
-      let old_y = previousContent.layout.yaxis;
-      let new_y = content.layout.yaxis;
+      let old_y = previousFrame.layout.yaxis;
+      let new_y = currentFrame.layout.yaxis;
       new_range_set = new_y !== undefined && new_y.autorange === false;
       if (old_y !== undefined && old_y.autorange === false && !new_range_set) {
         // Take the old y axis layout if changed
-        content.layout.yaxis = old_y;
+        currentFrame.layout.yaxis = old_y;
       }
     }
 
-    newPlot();
+    newPlot(currentFrame);
   });
 
   // rendering
   // ---------
 
-  const newPlot = () => {
-    var data = content.data;
+  const newPlot = (frame) => {
+    frame = frame || content;
+    var data = frame.data;
 
     // add smoothed line plots for existing line plots
     var smooth_data = [];
@@ -126,24 +144,32 @@ var PlotPane = (props) => {
         for (let i = 0; i < num_to_fill; i++) data.push({});
       }
     } else
-      content.data
+      frame.data
         .filter((data) => data['type'] == 'scatter' && data['mode'] == 'lines')
         .map((d) => {
           d.opacity = 1.0;
         });
 
     // required for Plotly.react to register the update
-    content.layout.datarevision = props.version;
+    frame.layout.datarevision =
+      type === 'plot_history'
+        ? props.version + '-' + actualSelected
+        : props.version;
 
     // draw / redraw plot with layout-options
-    Plotly.react(contentID, data.concat(smooth_data), content.layout, {
+    Plotly.react(contentID, data.concat(smooth_data), frame.layout, {
       showLink: true,
       linkText: 'Edit',
     });
   };
 
+  const frameForRender =
+    type === 'plot_history'
+      ? content[actualSelected] || content[0]
+      : content;
+
   // check if data can be smoothed
-  var contains_line_plots = content.data.some((data) => {
+  var contains_line_plots = frameForRender.data.some((data) => {
     return data['type'] == 'scatter' && data['mode'] == 'lines';
   });
 
@@ -179,12 +205,41 @@ var PlotPane = (props) => {
     }
   }
 
+  let history_caption = '';
+  let history_slider = '';
+  if (type === 'plot_history' && Array.isArray(content)) {
+    if (frameForRender.caption) {
+      history_caption = (
+        <span className="widget" key="plot_history_caption">
+          {frameForRender.caption}
+        </span>
+      );
+    }
+    if (show_slider && content.length > 1) {
+      history_slider = (
+        <div className="widget" key="plot_history_slider">
+          <div style={{ display: 'flex' }}>
+            <span>Iteration:&nbsp;&nbsp;</span>
+            <input
+              type="range"
+              min="0"
+              max={content.length - 1}
+              value={actualSelected}
+              onChange={updateHistorySlider}
+            />
+            <span>&nbsp;&nbsp;{actualSelected}&nbsp;&nbsp;</span>
+          </div>
+        </div>
+      );
+    }
+  }
+
   return (
     <Pane
       {...props}
       handleDownload={handleDownload}
       barwidgets={[smooth_widget_button]}
-      widgets={[smooth_widget]}
+      widgets={[smooth_widget, history_caption, history_slider]}
       enablePropertyList
     >
       <div

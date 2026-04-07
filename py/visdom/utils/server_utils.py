@@ -197,6 +197,15 @@ def window(args):
                 "show_slider": opts.get("show_slider", True),
             }
         )
+    elif ptype == "plot_history":
+        p.update(
+            {
+                "content": [args["data"][0]["content"]],
+                "selected": 0,
+                "type": ptype,
+                "show_slider": opts.get("show_slider", True),
+            }
+        )
     elif ptype in ["image", "text", "properties"]:
         p.update({"content": args["data"][0]["content"], "type": ptype})
     elif ptype == "network":
