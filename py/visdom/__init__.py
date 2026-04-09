@@ -229,14 +229,32 @@ def _axisformat3d(xyz, opts):
 
 
 def _opts2layout(opts, is3d=False):
+    tight = opts.get("tight_layout", False)
+
+    if tight:
+        default_margin_l = 0
+        default_margin_r = 0
+        default_margin_t = 30 if opts.get("title") else 0
+        default_margin_b = 0
+    elif is3d:
+        default_margin_l = 0
+        default_margin_r = 60
+        default_margin_t = 20
+        default_margin_b = 0
+    else:
+        default_margin_l = 60
+        default_margin_r = 60
+        default_margin_t = 60
+        default_margin_b = 60
+
     layout = {
         "showlegend": opts.get("showlegend", "legend" in opts),
         "title": opts.get("title"),
         "margin": {
-            "l": opts.get("marginleft", 0 if is3d else 60),
-            "r": opts.get("marginright", 60),
-            "t": opts.get("margintop", 20 if is3d else 60),
-            "b": opts.get("marginbottom", 0 if is3d else 60),
+            "l": opts.get("marginleft", default_margin_l),
+            "r": opts.get("marginright", default_margin_r),
+            "t": opts.get("margintop", default_margin_t),
+            "b": opts.get("marginbottom", default_margin_b),
         },
     }
 
@@ -249,6 +267,15 @@ def _opts2layout(opts, is3d=False):
     else:
         layout["xaxis"] = _axisformat("x", opts)
         layout["yaxis"] = _axisformat("y", opts)
+
+    if tight and not is3d:
+        
+        if layout["xaxis"] is None:
+            layout["xaxis"] = {}
+        if layout["yaxis"] is None:
+            layout["yaxis"] = {}
+        layout["xaxis"]["automargin"] = True
+        layout["yaxis"]["automargin"] = True
 
     if opts.get("stacked"):
         layout["barmode"] = "stack" if opts.get("stacked") else "group"
@@ -1538,6 +1565,38 @@ class Visdom(object):
             "opts": opts,
         }
         return self._send(data_to_send, endpoint="update")
+
+    def tight_layout(self, win=None, env=None):
+        """
+        This function applies a tight layout to one or all plot windows in an
+        environment, minimizing whitespace around visualizations similarly to
+        ``matplotlib.pyplot.tight_layout()``.
+
+        Specifically, margins are reduced to near zero and Plotly's
+        ``automargin`` is enabled on each axis so that tick labels and axis
+        titles are never clipped.
+
+        Args:
+            win (str, optional): Window ID to update. When ``None`` (default)
+                the tight layout is applied to *all* windows in the env.
+            env (str, optional): Environment ID. Defaults to ``self.env``.
+        """
+        if win is not None:
+            return self.update_window_opts(win, {"tight_layout": True}, env=env)
+
+        raw = self.get_window_data(win=None, env=env)
+        if raw is None:
+            return
+        try:
+            win_map = json.loads(raw) if isinstance(raw, str) else raw
+        except (ValueError, TypeError):
+            return
+        results = {}
+        for win_id in win_map:
+            results[win_id] = self.update_window_opts(
+                win_id, {"tight_layout": True}, env=env
+            )
+        return results
 
     @pytorch_wrap
     def scatter(self, X, Y=None, win=None, env=None, opts=None, update=None, name=None):
