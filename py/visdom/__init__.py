@@ -269,7 +269,7 @@ def _opts2layout(opts, is3d=False):
         layout["yaxis"] = _axisformat("y", opts)
 
     if tight and not is3d:
-        
+
         if layout["xaxis"] is None:
             layout["xaxis"] = {}
         if layout["yaxis"] is None:
