@@ -269,10 +269,9 @@ def _opts2layout(opts, is3d=False):
         layout["yaxis"] = _axisformat("y", opts)
 
     if tight and not is3d:
-
-        if layout["xaxis"] is None:
+        if not layout.get("xaxis"):
             layout["xaxis"] = {}
-        if layout["yaxis"] is None:
+        if not layout.get("yaxis"):
             layout["yaxis"] = {}
         layout["xaxis"]["automargin"] = True
         layout["yaxis"]["automargin"] = True
