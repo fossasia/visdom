@@ -16,25 +16,14 @@ import PropertyItem from './PropertyItem';
 function PropertiesPane(props) {
   const { sendPaneMessage } = useContext(ApiContext);
   const { envID, id, content, onFocus } = props;
-  
-  console.log('🔄 PropertiesPane rendering');
-  console.log('📦 Received content prop:', content);
-  
+
   const [localContent, setLocalContent] = useState(content);
-  
+
   useEffect(() => {
-    console.log('📥 useEffect triggered - content changed!');
-    console.log('Old content:', localContent);
-    console.log('New content:', content);
     setLocalContent(content);
   }, [content]);
-  
-  useEffect(() => {
-    console.log('🎨 localContent state updated:', localContent);
-  }, [localContent]);
 
   const updateValue = (propId, value) => {
-    console.log('✏️ Updating property:', propId, value);
     onFocus(id, () => {
       sendPaneMessage(
         {
@@ -49,7 +38,6 @@ function PropertiesPane(props) {
   };
 
   const handleDownload = () => {
-    console.log('💾 Downloading properties:', localContent);
     let blob = new Blob([JSON.stringify(localContent)], {
       type: 'application/json',
     });
