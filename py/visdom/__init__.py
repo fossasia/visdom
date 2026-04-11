@@ -1567,6 +1567,67 @@ class Visdom(object):
         }
         return self._send(data_to_send, endpoint="update")
 
+    def _update_window_tight_layout(self, win, env=None):
+        """
+        Update a window's layout in-place to enable a tight layout without
+        discarding any existing Plotly layout configuration.
+        """
+        raw = self.get_window_data(win=win, env=env)
+        current = {}
+        if raw is not None:
+            try:
+                current = json.loads(raw) if isinstance(raw, str) else raw
+            except (ValueError, TypeError):
+                current = {}
+
+        if (
+            isinstance(current, dict)
+            and win in current
+            and isinstance(current[win], dict)
+        ):
+            current = current[win]
+
+        if not isinstance(current, dict):
+            current = {}
+
+        current_layout = current.get("layout")
+        if not isinstance(current_layout, dict):
+            content = current.get("content")
+            if isinstance(content, dict):
+                current_layout = content.get("layout")
+
+        if not isinstance(current_layout, dict):
+            current_layout = {}
+
+        layout = dict(current_layout)
+        margin = layout.get("margin")
+        margin = dict(margin) if isinstance(margin, dict) else {}
+        margin.update({"l": 0, "r": 0, "b": 0, "t": 0})
+        layout["margin"] = margin
+
+        axis_keys = [
+            key
+            for key, value in layout.items()
+            if isinstance(key, str)
+            and (key.startswith("xaxis") or key.startswith("yaxis"))
+            and isinstance(value, dict)
+        ]
+        if not axis_keys:
+            axis_keys = ["xaxis", "yaxis"]
+
+        for key in axis_keys:
+            axis = dict(layout[key]) if isinstance(layout.get(key), dict) else {}
+            axis["automargin"] = True
+            layout[key] = axis
+
+        data_to_send = {
+            "win": win,
+            "eid": env,
+            "layout": layout,
+            "opts": {"tight_layout": True},
+        }
+        return self._send(data_to_send, endpoint="update")
+
     def tight_layout(self, win=None, env=None):
         """
         This function applies a tight layout to one or all plot windows in an
@@ -1583,7 +1644,7 @@ class Visdom(object):
             env (str, optional): Environment ID. Defaults to ``self.env``.
         """
         if win is not None:
-            return self.update_window_opts(win, {"tight_layout": True}, env=env)
+            return self._update_window_tight_layout(win, env=env)
 
         raw = self.get_window_data(win=None, env=env)
         if raw is None:
@@ -1593,10 +1654,10 @@ class Visdom(object):
         except (ValueError, TypeError):
             return
         results = {}
-        for win_id in win_map:
-            results[win_id] = self.update_window_opts(
-                win_id, {"tight_layout": True}, env=env
-            )
+        for win_id, win_info in win_map.items():
+            if not isinstance(win_info, dict) or win_info.get("type") != "plot":
+                continue
+            results[win_id] = self._update_window_tight_layout(win_id, env=env)
         return results
 
     @pytorch_wrap
