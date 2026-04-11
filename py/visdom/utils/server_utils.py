@@ -14,7 +14,6 @@ At the moment, this just inherited all of the floating functions
 in the previous server.py class.
 """
 
-
 import copy
 import hashlib
 import json
@@ -38,7 +37,6 @@ from visdom.server.defaults import (
     DEFAULT_PORT,
 )
 from visdom.utils.shared_utils import warn_once, get_rand_id, get_new_window_id
-
 
 # ---- Vaguely server-security related functions ---- #
 
@@ -327,9 +325,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         border: 1px solid black;
     }}
     </style>
-    <table> {} </table>""".format(
-        " ".join(tableRows)
-    )
+    <table> {} </table>""".format(" ".join(tableRows))
 
     res["jsons"]["window_compare_legend"] = {
         "command": "window",
