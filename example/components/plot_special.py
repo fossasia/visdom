@@ -1,30 +1,24 @@
 import numpy as np
 
+
 # boxplot
 def plot_special_boxplot(viz, env, args):
     title = args[0] if len(args) > 0 else None
     X = np.random.rand(100, 2)
     X[:, 1] += 2
-    viz.boxplot(
-        X=X,
-        opts=dict(legend=['Men', 'Women'], title=title),
-        env=env
-    )
+    viz.boxplot(X=X, opts=dict(legend=["Men", "Women"], title=title), env=env)
+
 
 # quiver plot
 def plot_special_quiver(viz, env, args):
-    X = np.arange(0, 2.1, .2)
-    Y = np.arange(0, 2.1, .2)
+    X = np.arange(0, 2.1, 0.2)
+    Y = np.arange(0, 2.1, 0.2)
     X = np.broadcast_to(np.expand_dims(X, axis=1), (len(X), len(X)))
     Y = np.broadcast_to(np.expand_dims(Y, axis=0), (len(Y), len(Y)))
     U = np.multiply(np.cos(X), Y)
     V = np.multiply(np.sin(X), Y)
-    viz.quiver(
-        X=U,
-        Y=V,
-        opts=dict(normalize=0.9),
-        env=env
-    )
+    viz.quiver(X=U, Y=V, opts=dict(normalize=0.9), env=env)
+
 
 # mesh plot
 def plot_special_mesh(viz, env, args):
@@ -38,12 +32,22 @@ def plot_special_mesh(viz, env, args):
     Y = np.c_[i, j, k]
     viz.mesh(X=X, Y=Y, opts=dict(opacity=0.5), env=env)
 
+
 # plot network graph
 def plot_special_graph(viz, env, args):
-    edges = [(0,1),(0,2),(1,3),(1,4),(1,5),(4,5)]
-    edgeLabels = [ "A", "B", "C", "D", "E", "F"]    # in the order of edges
-    nodeLabels = ["Orange", "Mango", "Apple", "Grapes", "Papaya","kiwi"]
-    
-    viz.graph(edges, edgeLabels, nodeLabels, opts = {"showEdgeLabels" : True, "showVertexLabels" : True, "scheme" : "different", "directed" : False}, env=env)
+    edges = [(0, 1), (0, 2), (1, 3), (1, 4), (1, 5), (4, 5)]
+    edgeLabels = ["A", "B", "C", "D", "E", "F"]  # in the order of edges
+    nodeLabels = ["Orange", "Mango", "Apple", "Grapes", "Papaya", "kiwi"]
 
-
+    viz.graph(
+        edges,
+        edgeLabels,
+        nodeLabels,
+        opts={
+            "showEdgeLabels": True,
+            "showVertexLabels": True,
+            "scheme": "different",
+            "directed": False,
+        },
+        env=env,
+    )
