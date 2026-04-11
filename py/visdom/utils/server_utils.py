@@ -334,9 +334,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         border: 1px solid black;
     }}
     </style>
-    <table> {} </table>""".format(
-        " ".join(tableRows)
-    )
+    <table> {} </table>""".format(" ".join(tableRows))
 
     res["jsons"]["window_compare_legend"] = {
         "command": "window",

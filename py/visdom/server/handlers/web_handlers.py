@@ -352,7 +352,7 @@ class UpdateHandler(BaseHandler):
             )
         ):
             handler.write(
-                "win is not scatter, heatmap, custom, image_history, embeddings, or text; "
+                "win is not scatter, heatmap, custom, plot_history, image_history, embeddings, or text; "
                 "was {}".format(
                     p["content"]["data"][0]["type"]
                     if len(p["content"]["data"]) > 0

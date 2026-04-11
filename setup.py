@@ -11,7 +11,6 @@ from io import open
 from setuptools import setup, find_packages
 from pkg_resources import get_distribution, DistributionNotFound
 
-
 try:
     import torch
 

@@ -19,6 +19,7 @@ var PlotPane = (props) => {
   // --------------
   const plotlyRef = useRef();
   const previousContent = usePrevious(content);
+  const prevSelected = usePrevious(actualSelected);
   const maxsmoothvalue = 100;
   const [smoothWidgetActive, setSmoothWidgetActive] = useState(false);
   const [smoothvalue, setSmoothValue] = useState(1);
@@ -55,7 +56,8 @@ var PlotPane = (props) => {
       : content;
     const previousFrame =
       isHistory && previousContent
-        ? previousContent[actualSelected] || previousContent[0]
+        ? previousContent[prevSelected != null ? prevSelected : 0] ||
+          previousContent[0]
         : previousContent;
 
     if (previousFrame) {

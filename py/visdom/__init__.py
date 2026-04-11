@@ -60,9 +60,7 @@ try:
         perplexity = (
             50
             if num_entities >= 150
-            else num_entities // 3
-            if num_entities >= 21
-            else 7
+            else num_entities // 3 if num_entities >= 21 else 7
         )
         Y = bhtsne.run_bh_tsne(
             X, initial_dims=X.shape[1], perplexity=perplexity, verbose=True
@@ -1742,7 +1740,12 @@ class Visdom(object):
             }
             endpoint = "events"
             if win is not None and self.win_exists(win, env):
-                endpoint = "update"
+                window_data = self.get_window_data(win, env)
+                if (
+                    isinstance(window_data, dict)
+                    and window_data.get("type") == "plot_history"
+                ):
+                    endpoint = "update"
             return self._send(data_to_send, endpoint=endpoint)
 
         # Only send updates to the layout on the first plot, future updates
@@ -1788,6 +1791,8 @@ class Visdom(object):
         - `opts.linecolor`   : line colors (`np.array`; default = None)
         - `opts.dash`        : line dash type (`np.array`; default = None)
         - `opts.legend`      : `list` or `tuple` containing legend names
+        - `opts.store_history` : Append this plot as a new frame in a plot
+                                 history window (`boolean`; default = `false`)
 
         If `update` is specified, the figure will be updated without
         creating a new plot -- this can be used for efficient updating.
@@ -1819,6 +1824,10 @@ class Visdom(object):
         assert X.shape == Y.shape, "X and Y should be the same shape"
 
         opts = {} if opts is None else opts
+        if opts.get("store_history"):
+            assert (
+                update is None
+            ), "Cannot use store_history=True together with the update parameter"
         opts["markers"] = opts.get("markers", False)
         opts["fillarea"] = opts.get("fillarea", False)
         opts["mode"] = "lines+markers" if opts.get("markers") else "lines"
