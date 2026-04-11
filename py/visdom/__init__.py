@@ -60,7 +60,9 @@ try:
         perplexity = (
             50
             if num_entities >= 150
-            else num_entities // 3 if num_entities >= 21 else 7
+            else num_entities // 3
+            if num_entities >= 21
+            else 7
         )
         Y = bhtsne.run_bh_tsne(
             X, initial_dims=X.shape[1], perplexity=perplexity, verbose=True
