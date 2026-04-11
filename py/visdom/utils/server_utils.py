@@ -178,6 +178,7 @@ def window(args):
     opts = args.get("opts", {})
 
     ptype = args["data"][0]["type"]
+    is_visdom_type = "content" in args["data"][0]
 
     p = {
         "command": "window",
@@ -190,7 +191,7 @@ def window(args):
         "contentID": get_rand_id(),  # to detected updated windows
     }
 
-    if ptype == "image_history":
+    if ptype == "image_history" and is_visdom_type:
         p.update(
             {
                 "content": [args["data"][0]["content"]],
@@ -199,9 +200,9 @@ def window(args):
                 "show_slider": opts.get("show_slider", True),
             }
         )
-    elif ptype in ["image", "text", "properties"]:
+    elif ptype in ["image", "text", "properties"] and is_visdom_type:
         p.update({"content": args["data"][0]["content"], "type": ptype})
-    elif ptype == "network":
+    elif ptype == "network" and is_visdom_type:
         p.update(
             {
                 "content": args["data"][0]["content"],
@@ -211,7 +212,7 @@ def window(args):
                 "showVertexLabels": opts.get("showVertexLabels", "hover"),
             }
         )
-    elif ptype in ["embeddings"]:
+    elif ptype in ["embeddings"] and is_visdom_type:
         p.update(
             {
                 "content": args["data"][0]["content"],
