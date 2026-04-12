@@ -2136,7 +2136,16 @@ class Visdom(object):
         which to construct the `M` boxplots.
 
         The following plot-specific `opts` are currently supported:
-        - `opts.legend`: labels for each of the columns in `X`
+
+        - `opts.legend`   : labels for each of the columns in `X`
+        - `opts.fillarea` : if `True`, render as violin plots (shaded distribution
+                            area) instead of box glyphs. This avoids the visual
+                            collision of whiskers when many series overlap.
+                            (`boolean`; default = `False`)
+        - `opts.boxpoints`: show underlying data points alongside the box.
+                            One of `'all'`, `'outliers'`, `'suspectedoutliers'`,
+                            or `False`. Only used when `fillarea=False`.
+                            (`string`/`bool`; default = `'outliers'`)
         """
 
         X = np.squeeze(X)
@@ -2153,18 +2162,29 @@ class Visdom(object):
                 len(opts["legend"]) == X.shape[1]
             ), "number of legened labels must match number of columns"
 
+        fillarea = opts.get("fillarea", False)
         data = []
-        for k in range(X.shape[1]):
-            _data = {
-                "y": X.take(k, 1).tolist(),
-                "type": "box",
-            }
-            if opts.get("legend"):
-                _data["name"] = opts["legend"][k]
-            else:
-                _data["name"] = "column " + str(k)
 
-            data.append(_data)
+        for k in range(X.shape[1]):
+            name = opts["legend"][k] if opts.get("legend") else "column " + str(k)
+            col = X.take(k, 1).tolist()
+
+            if fillarea:
+                data.append({
+                    "y": col,
+                    "type": "violin",
+                    "name": name,
+                    "box": {"visible": True},
+                    "meanline": {"visible": True},
+                    "points": "outliers",
+                })
+            else:
+                data.append({
+                    "y": col,
+                    "type": "box",
+                    "name": name,
+                    "boxpoints": opts.get("boxpoints", "outliers"),
+                })
 
         return self._send(
             {
