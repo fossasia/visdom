@@ -2176,7 +2176,7 @@ class Visdom(object):
                     "name": name,
                     "box": {"visible": True},
                     "meanline": {"visible": True},
-                    "points": "outliers",
+                    "points": opts.get("boxpoints", "outliers"),
                 })
             else:
                 data.append({
