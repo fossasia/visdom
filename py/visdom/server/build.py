@@ -159,7 +159,9 @@ def download_scripts(proxies=None, install_dir=None):
                         )
                         download_failed = True
                 else:
-                    logging.error("Error {} while downloading {}".format(exc.reason, key))
+                    logging.error(
+                        "Error {} while downloading {}".format(exc.reason, key)
+                    )
                     download_failed = True
             except HTTPError as exc:
                 logging.error("Error {} while downloading {}".format(exc.code, key))
