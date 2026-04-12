@@ -130,9 +130,13 @@ def download_scripts(proxies=None, install_dir=None):
         if not os.path.exists(filename) or not is_built:
             req = request.Request(key, headers={"User-Agent": "Chrome/30.0.0.0"})
             try:
-                data = default_opener.open(req).read()
-                with open(filename, "wb") as fwrite:
-                    fwrite.write(data)
+                data = default_opener.open(req, timeout=30).read()
+                try:
+                    with open(filename, "wb") as fwrite:
+                        fwrite.write(data)
+                except OSError as exc:
+                    logging.error("Filesystem error %s while writing %s", exc, filename)
+                    download_failed = True
             except URLError as exc:
                 if _is_cert_verification_error(exc):
                     logging.warning(
@@ -141,9 +145,17 @@ def download_scripts(proxies=None, install_dir=None):
                         key,
                     )
                     try:
-                        data = certifi_opener.open(req).read()
-                        with open(filename, "wb") as fwrite:
-                            fwrite.write(data)
+                        data = certifi_opener.open(req, timeout=30).read()
+                        try:
+                            with open(filename, "wb") as fwrite:
+                                fwrite.write(data)
+                        except OSError as fs_exc:
+                            logging.error(
+                                "Filesystem error %s while writing %s",
+                                fs_exc,
+                                filename,
+                            )
+                            download_failed = True
                     except HTTPError as certifi_exc:
                         logging.error(
                             "Error {} while downloading {}".format(
