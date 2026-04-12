@@ -1269,22 +1269,14 @@ class Visdom(object):
         `img` that contains the image. The array values can be float in [0,1] or
         uint8 in [0, 255].
         """
-
         opts = {} if opts is None else opts
         _title2str(opts)
         _assert_opts(opts)
 
-        # -------------------------------------------------
-        # Normalize input
-        # -------------------------------------------------
         img = np.asarray(img)
 
         if img.size == 0:
             raise ValueError("Visdom.image expects a non-empty image array.")
-
-        # Convert HWC -> CHW if needed
-        if img.ndim == 3 and img.shape[-1] in (1, 3, 4):
-            img = img.transpose(2, 0, 1)
 
         # Convert grayscale HxW -> 1xHxW
         if img.ndim == 2:
@@ -1295,31 +1287,53 @@ class Visdom(object):
                 f"Unsupported image dimensions: img.shape={img.shape}, img.ndim={img.ndim}"
             )
 
-        # -------------------------------------------------
-        # Default display size
-        # -------------------------------------------------
+        if img.shape[0] not in (1, 3, 4):
+            if img.shape[-1] in (1, 3, 4):
+                raise ValueError(
+                    "It looks like you passed an image in HWC format. "
+                    "Visdom expects CHW format (C, H, W). "
+                    "Please convert using img.transpose(2, 0, 1). "
+                    f"Received shape: {img.shape}"
+                )
+            else:
+                raise ValueError(
+                    f"Unsupported number of channels: {img.shape[0]}. "
+                    f"Expected 1, 3, or 4. img.shape={img.shape}"
+                )
+
         opts.setdefault("width", img.shape[-1])
         opts.setdefault("height", img.shape[-2])
 
-        # -------------------------------------------------
-        # Normalize dtype
-        # -------------------------------------------------
         if np.issubdtype(img.dtype, np.floating):
             if img.max() <= 1:
                 img = img * 255.0
 
         img = np.clip(img, 0, 255).astype(np.uint8)
 
-        # -------------------------------------------------
-        # Channel handling
-        # -------------------------------------------------
         nchannels = img.shape[0]
 
         is_jpeg = "jpgquality" in opts
-        if is_jpeg and opts["jpgquality"] is None:
-            raise ValueError("jpgquality must be a valid integer when provided.")
+        if is_jpeg:
+            jpgquality = opts["jpgquality"]
 
-        # ---- Grayscale ----
+            if jpgquality is None:
+                raise ValueError("jpgquality must be an integer between 1 and 100.")
+
+            if isinstance(jpgquality, bool):
+                raise ValueError("jpgquality must be an integer between 1 and 100.")
+
+            if isinstance(jpgquality, int):
+                pass
+            elif isinstance(jpgquality, float) and jpgquality.is_integer():
+                jpgquality = int(jpgquality)
+            else:
+                raise ValueError("jpgquality must be an integer between 1 and 100.")
+
+            if jpgquality < 1 or jpgquality > 100:
+                raise ValueError("jpgquality must be between 1 and 100.")
+
+            opts["jpgquality"] = int(jpgquality)
+
         if nchannels == 1:
             rgb = np.repeat(img, 3, axis=0)
             if is_jpeg:
@@ -1328,29 +1342,30 @@ class Visdom(object):
                 alpha = np.full((1, rgb.shape[1], rgb.shape[2]), 255, dtype=np.uint8)
                 img = np.concatenate([rgb, alpha], axis=0)
 
-        # ---- RGB ----
         elif nchannels == 3:
             if not is_jpeg:
                 alpha = np.full((1, img.shape[1], img.shape[2]), 255, dtype=np.uint8)
                 img = np.concatenate([img, alpha], axis=0)
 
-        # ---- RGBA ----
         elif nchannels == 4:
             if is_jpeg:
                 img = img[:3, :, :]  # JPEG cannot store alpha
 
-        # ---- Invalid ----
         else:
             raise ValueError(
                 f"Unsupported number of channels: {nchannels}. "
                 f"Expected 1, 3, or 4. img.shape={img.shape}, img.ndim={img.ndim}"
             )
+
         img = np.transpose(img, (1, 2, 0))
+
         im = Image.fromarray(img)
         buf = BytesIO()
+
         image_type = "png"
         imsave_args = {}
-        if "jpgquality" in opts:
+
+        if is_jpeg:
             image_type = "jpeg"
             imsave_args["quality"] = opts["jpgquality"]
 
