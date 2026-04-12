@@ -1,3 +1,8 @@
+/**
+ * Copyright 2017-present, The Visdom Authors
+ * All rights reserved.
+ */
+
 import React, { useContext, useEffect, useRef, useState } from 'react';
 
 import ApiContext from '../api/ApiContext';
@@ -12,6 +17,8 @@ function ImagePane(props) {
   const { envID, id, title, type, selected, width, height } = props;
   var { isFocused, content } = props;
 
+  // state variables
+  // --------------
   const paneRef = useRef();
   const imgRef = useRef();
 
@@ -23,10 +30,10 @@ function ImagePane(props) {
     y: 0,
     visibility: 'hidden',
   });
-  const [dragStart, setDragStart] = useState({
-    x: 0,
-    y: 0,
-  });
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+
+  // private events
+  // --------------
 
   const handleDownload = () => {
     var link = document.createElement('a');
@@ -92,7 +99,9 @@ function ImagePane(props) {
     setDragStart({ x: ev.screenX, y: ev.screenY });
   };
 
-  // 🔥 FIXED FUNCTION (ONLY CHANGE)
+  /**
+   * FIX: Calculate mouse coordinates relative to actual image
+   */
   const handleMouseOver = (ev) => {
     if (!imgRef.current || !imgDim.width || !imgDim.height) return;
 
@@ -115,16 +124,15 @@ function ImagePane(props) {
   };
 
   const handleReset = () => {
-    setView({
-      scale: 1,
-      tx: 0,
-      ty: 0,
-    });
+    setView({ scale: 1, tx: 0, ty: 0 });
   };
 
   const updateSlider = (evt) => {
     setActualSelected(parseInt(evt.target.value));
   };
+
+  // effects
+  // -------
 
   useEffect(() => {
     setActualSelected(selected);
@@ -168,21 +176,14 @@ function ImagePane(props) {
     };
 
     EventSystem.subscribe('global.event', onEvent);
-    return function cleanup() {
-      EventSystem.unsubscribe('global.event', onEvent);
-    };
-  }, [mouseLocation, isFocused, id, envID, sendPaneMessage]); // 🔥 fixed deps
+    return () => EventSystem.unsubscribe('global.event', onEvent);
+  }, [mouseLocation, isFocused, id, envID, sendPaneMessage]);
+
+  // rendering
+  // ---------
 
   let candidateWidth = Math.ceil(1 + width * view['scale']);
   let candidateHeight = Math.ceil(1 + height * view['scale']);
-
-  let imageContainerStyle = {
-    alignItems: 'row',
-    display: 'flex',
-    height: isNaN(candidateHeight) ? DEFAULT_HEIGHT : candidateHeight,
-    justifyContent: 'center',
-    width: isNaN(candidateWidth) ? DEFAULT_WIDTH : candidateWidth,
-  };
 
   if (isNaN(candidateHeight)) candidateHeight = DEFAULT_HEIGHT;
   if (isNaN(candidateWidth)) candidateWidth = DEFAULT_WIDTH;
@@ -232,7 +233,7 @@ function ImagePane(props) {
       widgets={widgets}
     >
       <div style={divstyle}>
-        <div style={imageContainerStyle}>
+        <div style={{ display: 'flex', justifyContent: 'center' }}>
           <img
             className="content-image cssTransforms"
             alt={content.caption}
@@ -244,15 +245,17 @@ function ImagePane(props) {
                 width: imgRef.current.naturalWidth,
               });
             }}
-            width={candidateWidth + 'px'}
-            height={candidateHeight + 'px'}
+            width={candidateWidth}
+            height={candidateHeight}
             onDoubleClick={handleReset}
             onDragStart={handleDragStart}
             onDragOver={handleDragOver}
           />
         </div>
       </div>
+
       <p className="caption">{content.caption}</p>
+
       <span
         className="mouse_image_location"
         style={{ visibility: mouseLocation.visibility }}
