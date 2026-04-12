@@ -1831,8 +1831,8 @@ class Visdom(object):
         - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
         - `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
         - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
-        - `opts.columnnames`: list or array containing x-axis values (numeric or strings)
-        - `opts.rownames`: list or array containing y-axis values (numeric or strings)
+        - `opts.columnnames`: list containing x-axis values (numbers or strings)
+        - `opts.rownames`: list containing y-axis values (numbers or strings)
         Example:
         viz.heatmap(
             X=np.array([[1,2],[3,4]]),
