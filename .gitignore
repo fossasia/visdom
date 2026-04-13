@@ -1,15 +1,20 @@
-cypress/screenshots
-cypress/screenshots_init
-cypress/downloads
-cypress/fixtures
-node_modules
-build
-th/CMakeLists.txt
-th/build.luarocks
+# ---- Build / dist ----
+build/
 dist/
-visdom*.tgz
+*.tgz
 visdom.egg-info/
 setup.cfg
+
+# ---- Node / frontend ----
+node_modules/
+
+# ---- Cypress ----
+cypress/screenshots/
+cypress/screenshots_init/
+cypress/downloads/
+cypress/fixtures/
+
+# ---- Static generated files ----
 py/visdom/static/fonts/
 py/visdom/static/css/
 py/visdom/static/js/*.min.js
@@ -18,6 +23,18 @@ py/visdom/static/js/*.js.map
 py/visdom/static/js/mathjax/
 py/visdom/static/js/sjcl.js
 py/visdom/static/version.built
-__pycache__/
 py/visdom/static/js/layout_bin_packer.js
 py/visdom/extra_deps/**/*
+
+# ---- Python ----
+__pycache__/
+*.pyc
+
+# ---- Virtual environments ----
+venv/
+env/
+.venv/
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
