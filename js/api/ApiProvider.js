@@ -8,6 +8,7 @@ const ApiProvider = ({ children }) => {
   const [connected, setConnected] = useState(false);
   const [sessionInfo, setSessionInfo] = useState({ id: null, readonly: false });
   const _socket = useRef(null);
+  const _hasDisconnected = useRef(false);
   const apiHandlers = useRef(null);
 
   // ---------------- //
@@ -29,6 +30,21 @@ const ApiProvider = ({ children }) => {
     return pathname;
   };
 
+  // Extract safe metadata from message (avoids logging sensitive payload data)
+  const getSafeMessageMetadata = (data) => {
+    if (!data || typeof data !== 'object') {
+      return { type: typeof data };
+    }
+    const safeFields = ['type', 'id', 'event', 'requestId', 'win', 'eid'];
+    const metadata = {};
+    safeFields.forEach(field => {
+      if (field in data) {
+        metadata[field] = data[field];
+      }
+    });
+    return Object.keys(metadata).length > 0 ? metadata : { fields: 'unknown' };
+  };
+
   // ------------------- //
   // basic communication //
   // ------------------- //
@@ -38,14 +54,24 @@ const ApiProvider = ({ children }) => {
     if (!_socket.current) {
       console.error(
         '[Visdom API] Cannot send message: WebSocket is not connected. ' +
-        'Message data:',
-        data
+        'Message type:',
+        getSafeMessageMetadata(data)
       );
       return;
     }
 
-    let msg = JSON.stringify(data);
-    return _socket.current.send(msg);
+    try {
+      let msg = JSON.stringify(data);
+      _socket.current.send(msg);
+    } catch (e) {
+      // WebSocket may be CLOSING or CLOSED state
+      console.error(
+        '[Visdom API] Failed to send message:',
+        e.message,
+        'Message type:',
+        getSafeMessageMetadata(data)
+      );
+    }
   };
 
   // Establish a connection to the server
@@ -54,12 +80,21 @@ const ApiProvider = ({ children }) => {
       return;
     }
 
+    // Reset disconnect flag for new connection attempt
+    _hasDisconnected.current = false;
+
     const _onConnect = () => {
       console.log('[Visdom API] WebSocket connected');
       setConnected(true);
     };
     const _onDisconnect = () => {
-      console.warn('[Visdom API] WebSocket disconnected or connection failed');
+      // Prevent duplicate disconnect handling (both onerror and onclose can trigger)
+      if (_hasDisconnected.current) {
+        return;
+      }
+      _hasDisconnected.current = true;
+      
+      // Silent cleanup - logging is done by specific event handlers (onerror, onclose)
       apiHandlers.current.onDisconnect(_socket);
       setConnected(false);
     };
@@ -91,16 +126,20 @@ const ApiProvider = ({ children }) => {
     socket.onmessage = handleMessage;
     socket.onopen = _onConnect;
     socket.onerror = (event) => {
-      console.error('[Visdom API] WebSocket error:', event);
-      _onDisconnect();
+      // Log error but don't call _onDisconnect here (let onclose handle it)
+      console.error(
+        '[Visdom API] WebSocket error - the socket will likely close next',
+        event
+      );
     };
     socket.onclose = (event) => {
+      // Determine if this was a clean close or an error
       if (!event.wasClean) {
         console.warn(
           '[Visdom API] WebSocket closed unexpectedly. Code:',
           event.code,
           'Reason:',
-          event.reason
+          event.reason || '(no reason provided)'
         );
       } else {
         console.log(
@@ -108,6 +147,7 @@ const ApiProvider = ({ children }) => {
           event.code
         );
       }
+      // Only call _onDisconnect from onclose to avoid duplicate handling
       _onDisconnect();
     };
     _socket.current = socket;
@@ -116,6 +156,8 @@ const ApiProvider = ({ children }) => {
   // Close the server connection and reset the _socket ref
   const disconnect = () => {
     if (_socket.current) {
+      // Set flag to prevent duplicate _onDisconnect calls
+      _hasDisconnected.current = true;
       console.log('[Visdom API] Closing WebSocket connection');
       _socket.current.close();
       _socket.current = null;
