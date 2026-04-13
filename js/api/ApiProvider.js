@@ -36,7 +36,11 @@ const ApiProvider = ({ children }) => {
   // Send a low-level message to the server
   const sendSocketMessage = (data) => {
     if (!_socket.current) {
-      // TODO: error? warn?
+      console.error(
+        '[Visdom API] Cannot send message: WebSocket is not connected. ' +
+        'Message data:',
+        data
+      );
       return;
     }
 
@@ -51,9 +55,11 @@ const ApiProvider = ({ children }) => {
     }
 
     const _onConnect = () => {
+      console.log('[Visdom API] WebSocket connected');
       setConnected(true);
     };
     const _onDisconnect = () => {
+      console.warn('[Visdom API] WebSocket disconnected or connection failed');
       apiHandlers.current.onDisconnect(_socket);
       setConnected(false);
     };
@@ -76,20 +82,44 @@ const ApiProvider = ({ children }) => {
     } else {
       ws_protocol = 'ws';
     }
-    var socket = new WebSocket(
-      ws_protocol + '://' + url.host + correctPathname() + 'socket'
-    );
+    
+    const wsUrl = ws_protocol + '://' + url.host + correctPathname() + 'socket';
+    console.log('[Visdom API] Attempting to connect to WebSocket:', wsUrl);
+    
+    var socket = new WebSocket(wsUrl);
 
     socket.onmessage = handleMessage;
     socket.onopen = _onConnect;
-    socket.onerror = socket.onclose = _onDisconnect;
+    socket.onerror = (event) => {
+      console.error('[Visdom API] WebSocket error:', event);
+      _onDisconnect();
+    };
+    socket.onclose = (event) => {
+      if (!event.wasClean) {
+        console.warn(
+          '[Visdom API] WebSocket closed unexpectedly. Code:',
+          event.code,
+          'Reason:',
+          event.reason
+        );
+      } else {
+        console.log(
+          '[Visdom API] WebSocket closed cleanly. Code:',
+          event.code
+        );
+      }
+      _onDisconnect();
+    };
     _socket.current = socket;
   };
 
   // Close the server connection and reset the _socket ref
   const disconnect = () => {
-    _socket.current.close();
-    _socket.current = null;
+    if (_socket.current) {
+      console.log('[Visdom API] Closing WebSocket connection');
+      _socket.current.close();
+      _socket.current = null;
+    }
   };
 
   // ------------------ //
