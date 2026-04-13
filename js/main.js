@@ -7,7 +7,7 @@
  *
  */
 
-/* global ACTIVE_ENV ENV_LIST $ Bin */
+/* global ACTIVE_ENV ENV_LIST TAGS_INDEX $ Bin */
 
 'use strict';
 

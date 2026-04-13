@@ -141,7 +141,7 @@ const ApiProvider = ({ children }) => {
         break;
 
       default:
-        console.error('unrecognized command', cmd);
+        console.error('unrecognized command', cmd); // eslint-disable-line no-console
     }
   };
 
@@ -243,12 +243,13 @@ const ApiProvider = ({ children }) => {
   };
 
   // Send request to update tags for an environment
-  const sendTagsUpdate = (envID, tags) => {
+  const sendTagsUpdate = (envID, tags, append = false) => {
     return $.post(
       correctPathname() + 'tags',
       JSON.stringify({
         eid: envID,
         tags: tags,
+        append: append,
       })
     );
   };

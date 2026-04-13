@@ -196,7 +196,7 @@ class Application(tornado.web.Application):
                 state[eid] = LazyEnvData(env_path_file)
 
         if "main" not in state and "main.json" not in env_jsons:
-            state["main"] = {"jsons": {}, "reload": {}, "tags": []}
+            state["main"] = {"jsons": {}, "reload": {}}
             serialize_env(state, ["main"], env_path=self.env_path)
 
         return state
@@ -212,16 +212,22 @@ class Application(tornado.web.Application):
         return {}
 
     def save_tag_index(self):
+        """Persist the global tag index atomically.
+
+        IMPORTANT: Must only be called while self.index_lock is already held
+        by the caller (e.g. inside TagsHandler.post).
+        """
         index_path = os.path.join(self.env_path, "tags_index.json")
         try:
             from visdom.utils.server_utils import atomic_save
 
-            with self.index_lock:
-                atomic_save(index_path, json.dumps(self.tags))
+            atomic_save(index_path, json.dumps(self.tags))
         except Exception:
             import traceback
 
-            logging.warn(f"Failed to save tag index at {index_path}: {traceback.format_exc()}")
+            logging.warn(
+                f"Failed to save tag index at {index_path}: {traceback.format_exc()}"
+            )
 
     def load_user_settings(self):
         settings = {}

@@ -42,7 +42,8 @@ function EnvModal(props) {
     setTagEnv(activeEnv);
   }, [activeEnv]);
 
-  // Update tagText whenever the selected tag environment or the global tags index changes
+  // Update tagText whenever the selected tag environment
+  // or the global tags index changes
   useEffect(() => {
     const currentTags = (tags && tags[tagEnv]) || [];
     setTagText(currentTags.join(', '));

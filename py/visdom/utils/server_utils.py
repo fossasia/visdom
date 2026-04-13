@@ -80,7 +80,16 @@ def hash_password(password):
 # ------- File management helprs ----- #
 
 
-WRITE_LOCKS = defaultdict(threading.Lock)
+_WRITE_LOCKS_GUARD = threading.Lock()
+_WRITE_LOCKS: dict = {}
+
+
+def _get_write_lock(env_id):
+    """Thread-safe per-environment file write lock factory."""
+    with _WRITE_LOCKS_GUARD:
+        if env_id not in _WRITE_LOCKS:
+            _WRITE_LOCKS[env_id] = threading.Lock()
+        return _WRITE_LOCKS[env_id]
 
 
 def atomic_save(path, data):
@@ -148,7 +157,7 @@ def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
     env_ids = [i for i in eids if i in state]
     if env_path is not None:
         for env_id in env_ids:
-            with WRITE_LOCKS[env_id]:
+            with _get_write_lock(env_id):
                 env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
                 if isinstance(state[env_id], LazyEnvData):
                     data = json.dumps(state[env_id]._raw_dict)
@@ -259,7 +268,11 @@ def window(args):
 
 def gather_envs(state, env_path=DEFAULT_ENV_PATH):
     if env_path is not None:
-        items = [i.replace(".json", "") for i in os.listdir(env_path) if ".json" in i]
+        items = [
+            i.replace(".json", "")
+            for i in os.listdir(env_path)
+            if i.endswith(".json") and i != "tags_index.json"
+        ]
     else:
         items = []
     return sorted(list(set(items + list(state.keys()))))
@@ -412,8 +425,9 @@ def broadcast_tags(handler, eid, tags, target_subs=None):
 def sync_tags(handler, target_subs=None):
     if target_subs is None:
         target_subs = handler.subs.values()
-    # Use the app's tag index for fast synchronization
-    tags_map = handler.app.tags
+    # Take a snapshot under the lock to prevent race with concurrent tag writes
+    with handler.app.index_lock:
+        tags_map = dict(handler.app.tags)
     for sub in target_subs:
         sub.write_message(json.dumps({"command": "tags_sync", "data": tags_map}))
 

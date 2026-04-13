@@ -4,6 +4,8 @@ cypress/downloads
 cypress/fixtures
 node_modules
 build
+js/main.js
+js/main.js.map
 th/CMakeLists.txt
 th/build.luarocks
 dist/

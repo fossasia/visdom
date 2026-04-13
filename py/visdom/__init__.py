@@ -820,11 +820,12 @@ class Visdom(object):
         This function sets tags for a specified environment.
         If append is True, tags are added to the existing ones.
         Otherwise, tags are replaced.
+        Returns the resulting list of tags (same type as get_tags).
         """
         if isinstance(tags, str):
             tags = [tags]
 
-        return self._send(
+        raw = self._send(
             msg={
                 "eid": env,
                 "tags": tags,
@@ -833,6 +834,12 @@ class Visdom(object):
             endpoint="tags",
             create=False,
         )
+        try:
+            if isinstance(raw, (str, bytes, bytearray)):
+                return json.loads(raw)
+            return raw
+        except (TypeError, ValueError):
+            return raw
 
     def get_tags(self, env=None):
         """
@@ -846,11 +853,8 @@ class Visdom(object):
                 self.server, self.port, self.base_url, env
             )
             r = self.session.get(url)
-            res = r.json()
-            # print(f"DEBUG SDK: get_tags type={type(res)} val={res}")
-            return res
-        except Exception as e:
-            # print(f"DEBUG SDK: get_tags error={e}")
+            return r.json()
+        except Exception:
             return []
 
     def set_window_data(self, data, win=None, env=None):

@@ -635,7 +635,7 @@ class IndexHandler(BaseHandler):
 
     def get(self, args, **kwargs):
         items = gather_envs(self.state, env_path=self.env_path)
-        tags_index = json.dumps(getattr(self.app, 'tags', {}))
+        tags_index = json.dumps(getattr(self.app, "tags", {}))
         if (not self.login_enabled) or self.current_user:
             """self.current_user is an authenticated user provided by Tornado,
             available when we set self.get_current_user in BaseHandler,
@@ -697,10 +697,11 @@ class TagsHandler(BaseHandler):
         eid = self.get_argument("eid", "main")
         eid = escape_eid(eid)
 
-        if eid in self.state:
-            res = json.dumps(self.state[eid].get("tags", []))
-        elif eid in self.app.tags:
+        # Prefer app.tags (global authoritative source) over per-env state
+        if eid in self.app.tags:
             res = json.dumps(self.app.tags[eid])
+        elif eid in self.state:
+            res = json.dumps(self.state[eid].get("tags", []))
         else:
             res = json.dumps([])
 
@@ -716,9 +717,20 @@ class TagsHandler(BaseHandler):
         tags = args.get("tags", [])
         append = args.get("append", False)
 
+        # Fix 8: Pre-trigger lazy load BEFORE acquiring the lock to
+        # avoid file I/O under mutex.
+        if eid in self.state:
+            _ = self.state[eid]["jsons"]
+
         with self.app.index_lock:
             if eid not in self.state:
-                self.state[eid] = {"jsons": {}, "reload": {}, "tags": []}
+                # Fix 9: Backfill historical tags so new-in-memory envs
+                # don't silently drop persisted tags.
+                self.state[eid] = {
+                    "jsons": {},
+                    "reload": {},
+                    "tags": list(self.app.tags.get(eid, [])),
+                }
 
             if append:
                 current_tags = self.state[eid].get("tags", [])
@@ -732,14 +744,17 @@ class TagsHandler(BaseHandler):
             self.app.tags[eid] = self.state[eid]["tags"]
             self.app.save_tag_index()
 
-        # Broadcast update (outside the lock to minimize hold time)
-        broadcast_tags(self, eid, self.state[eid]["tags"])
+            # Fix 5: Capture snapshot while still under lock so broadcast and
+            # response are consistent even if another POST lands immediately after.
+            tags_snapshot = list(self.state[eid]["tags"])
 
-        # Async save env
+        # Broadcast update outside the lock to minimise hold time
+        broadcast_tags(self, eid, tags_snapshot)
+
+        # Async save env to disk
         serialize_env(self.state, [eid], env_path=self.env_path)
 
-        res = json.dumps(self.state[eid]["tags"])
-        self.write(res)
+        self.write(json.dumps(tags_snapshot))
 
 
 class ErrorHandler(BaseHandler):

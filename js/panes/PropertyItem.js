@@ -116,7 +116,7 @@ function PropertyItem(props) {
             checked={value}
             onChange={() => updateValue(propId, !value)}
           />
-          &nbsp;
+          <span className="sr-only">Checkbox</span>
         </label>
       );
     case 'select':
