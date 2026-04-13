@@ -9,7 +9,11 @@
 import os
 from io import open
 from setuptools import setup, find_packages
-from importlib.metadata import version as get_metadata_version, PackageNotFoundError
+
+try:
+    from importlib.metadata import version as get_metadata_version, PackageNotFoundError
+except ImportError:
+    from importlib_metadata import version as get_metadata_version, PackageNotFoundError
 
 
 try:
@@ -24,9 +28,14 @@ except Exception:
     pass  # User doesn't have torch
 
 
+class Dist:
+    def __init__(self, version):
+        self.version = version
+
+
 def get_dist(pkgname):
     try:
-        return get_metadata_version(pkgname)
+        return Dist(get_metadata_version(pkgname))
     except PackageNotFoundError:
         return None
 
