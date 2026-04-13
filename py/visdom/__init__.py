@@ -1280,13 +1280,14 @@ class Visdom(object):
             img = np.squeeze(img)
             img = img[np.newaxis, :, :].repeat(3, axis=0)
 
-        if "float" in str(img.dtype):
-    min_val = img.min()
-    max_val = img.max()
+       if "float" in str(img.dtype):
+            min_val = img.min()
+            max_val = img.max()
 
-    # Normalize only if clearly in [0,1] range AND has variation
-    if 0.0 <= min_val and max_val <= 1.0 and (max_val - min_val) > 0:
-        img = img * 255.0
+            # Preserve documented behavior: scale [0,1] floats
+            if 0.0 <= min_val and max_val <= 1.0:
+                img = img * 255.0
+
             img = np.uint8(img)
 
         img = np.transpose(img, (1, 2, 0))
