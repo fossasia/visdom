@@ -96,7 +96,10 @@ class LazyEnvData(Mapping):
                     self._env_path_file, repr(e)
                 )
             )
-        self._raw_dict = {"jsons": env_data["jsons"], "reload": env_data["reload"]}
+        self._raw_dict = {
+            "jsons": env_data.get("jsons", {}),
+            "reload": env_data.get("reload", {})
+        }
 
     def __getitem__(self, key):
         self.lazy_load_data()
@@ -121,7 +124,14 @@ def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
         for env_id in env_ids:
             env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
             with open(env_path_file, "w") as fn:
-                if isinstance(state[env_id], LazyEnvData):
+                env_data = state[env_id]
+
+                if isinstance(env_data, LazyEnvData):
+                    env_data = copy.deepcopy(env_data._raw_dict)
+                else:
+                    env_data = copy.deepcopy(env_data)
+    
+                fn.write(json.dumps(env_data))
                     fn.write(json.dumps(state[env_id]._raw_dict))
                 else:
                     fn.write(json.dumps(state[env_id]))
@@ -250,6 +260,15 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
                     env = tornado.escape.json_decode(fn.read())
                     state[eid] = env
                     envs[eid] = env
+                    meta = env.get("meta", {})
+
+                    if "timestamp" not in meta:
+                        meta["timestamp"] = int(time.time())
+
+                    if "experiment_id" not in meta:
+                        meta["experiment_id"] = get_rand_id()
+
+                    env["meta"] = meta
 
     res = copy.deepcopy(envs[list(envs.keys())[0]])
     name2Wid = {
