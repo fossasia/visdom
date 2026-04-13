@@ -163,7 +163,7 @@ class Application(tornado.web.Application):
             )
             return {"main": {"jsons": {}, "reload": {}}}
         ensure_dir_exists(env_path)
-        env_jsons = [i for i in os.listdir(env_path) if i.endswith
+        env_jsons = [i for i in os.listdir(env_path) if i.endswith(".json")]
         for env_json in env_jsons:
             eid = env_json.replace(".json", "")
             env_path_file = os.path.join(env_path, env_json)
