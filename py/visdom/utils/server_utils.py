@@ -257,6 +257,10 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
                     envs[eid] = env
 
     sorted_eids = sorted(envs.keys())
+    if not sorted_eids:
+        socket.write_message(json.dumps({"command": "layout"}))
+        socket.eid = eids
+        return
     base_eid = sorted_eids[0]
     res = copy.deepcopy(envs[base_eid])
     name2Wid = {
