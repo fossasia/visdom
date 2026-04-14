@@ -59,7 +59,13 @@ function ImageComparePane(props) {
              }}
           >
             {imgItem.caption && (
-               <span className="widget" style={{ marginBottom: '5px', fontWeight: 'bold' }}>
+               <span
+                 className="widget"
+                 style={{
+                   marginBottom: '5px',
+                   fontWeight: 'bold'
+                 }}
+               >
                  {imgItem.caption}
                </span>
             )}

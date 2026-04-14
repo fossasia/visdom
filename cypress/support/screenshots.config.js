@@ -59,6 +59,8 @@ export const all_screenshots = [
 ];
 
 export const all_compareviews = [
+  'image_basic',
+  'image_history',
   'plot_line_basic',
   'plot_line_multiple',
   // // 'plot_line_webgl', // disabled due to webgl

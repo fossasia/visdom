@@ -256,7 +256,9 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
                     state[eid] = env
                     envs[eid] = env
 
-    res = copy.deepcopy(envs[list(envs.keys())[0]])
+    sorted_eids = sorted(envs.keys())
+    base_eid = sorted_eids[0]
+    res = copy.deepcopy(envs[base_eid])
     name2Wid = {
         res["jsons"][wid].get("title", None): wid + "_compare"
         for wid in res.get("jsons", {})
@@ -267,7 +269,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         res["jsons"][wid] = None
         res["jsons"].pop(wid)
 
-    for ix, eid in enumerate(sorted(envs.keys())):
+    for ix, eid in enumerate(sorted_eids):
         env = envs[eid]
         for wid in env.get("jsons", {}).keys():
             win = env["jsons"][wid]
@@ -284,6 +286,11 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
 
             destWid = name2Wid[title]
             destWidJson = res["jsons"][destWid]
+            base_ptype = destWidJson.get("type", None)
+            if base_ptype == "image_compare":
+                base_ptype = "image"
+            if ptype != base_ptype:
+                continue
             # Combine plots with the same window title. If plot data source was
             # labeled "name" in the legend, rename to "envId_legend" where
             # envId is enumeration of the selected environments (not the long
