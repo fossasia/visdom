@@ -253,8 +253,9 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
                     state[eid] = env
                     envs[eid] = env
                 except (OSError, ValueError) as e:
-                  logging.error(f"Failed to load environment {eid}: {e}")
-
+                    logging.error(f"Failed to load environment {eid}: {e}")
+                    continue
+    
     res = copy.deepcopy(envs[list(envs.keys())[0]])
     name2Wid = {
         res["jsons"][wid].get("title", None): wid + "_compare"
@@ -395,8 +396,9 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
                 state[eid] = env
             except (OSError, ValueError) as e:
                 logging.error(f"Failed to load environment {eid}: {e}")
+                return
 
-    if "reload" in env:
+    if env and "reload" in env:
         socket.write_message(json.dumps({"command": "reload", "data": env["reload"]}))
 
     jsons = list(env.get("jsons", {}).values())
