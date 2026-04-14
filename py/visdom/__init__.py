@@ -1896,7 +1896,7 @@ class Visdom(object):
         if Y.ndim == 2 and X.ndim == 1:
             if X.shape[0] == Y.shape[0]:
               X = np.tile(X, (Y.shape[1], 1)).transpose()
-            else :
+            elif X.shape[0] == Y.shape[1]:
               X = np.tile(X, (Y.shape[0], 1))
 
         assert X.shape == Y.shape, "X and Y should be the same shape"
