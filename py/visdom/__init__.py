@@ -332,22 +332,15 @@ def _assert_opts(opts):
         assert isstr(opts.get("mode")), "mode should be a string"
 
     if opts.get("markersymbol"):
-        assert isstr(opts.get("markersymbol")), "marker symbol should be string"
+         assert isstr(opts.get("markersymbol")), "marker symbol should be string"
 
     if opts.get("markersize"):
-        ms = opts.get("markersize")
+       ms = opts.get("markersize")
 
-    # Allow number OR list/array
-    assert (
-        isinstance(ms, numbers.Number)
-        or isinstance(ms, (list, tuple, np.ndarray))
-    ), "marker size should be a positive number or list"
-
-    # Validate values
     if isinstance(ms, (list, tuple, np.ndarray)):
         assert all(m > 0 for m in ms), "all marker sizes must be positive"
     else:
-        assert ms > 0, "marker size should be positive"
+        assert isnum(ms) and ms > 0, "marker size should be positive"
 
     if opts.get("markerborderwidth"):
         assert (
