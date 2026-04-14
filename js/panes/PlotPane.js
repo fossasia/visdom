@@ -80,6 +80,24 @@ var PlotPane = (props) => {
   const newPlot = () => {
     var data = content.data;
 
+    // =========================
+    //  NEW CODE ADDED START
+    // Support markersize as array or number (no breaking changes)
+    data = data.map((trace) => {
+      if (trace.marker && trace.marker.size) {
+        const size = trace.marker.size;
+
+        if (Array.isArray(size)) {
+          trace.marker.size = size;
+        } else {
+          trace.marker.size = size;
+        }
+      }
+      return trace;
+    });
+    //  NEW CODE ADDED END
+    // =========================
+
     // add smoothed line plots for existing line plots
     var smooth_data = [];
     if (smoothWidgetActive) {
@@ -95,7 +113,6 @@ var PlotPane = (props) => {
           // turn off smoothing for smoothvalue of 3 or too small arrays
           if (windowSize < 5 || smooth_d.x.length <= 5) {
             d.opacity = 1.0;
-
             return smooth_d;
           }
 
@@ -106,6 +123,7 @@ var PlotPane = (props) => {
           if (smooth_d.x.length % 2 == 0)
             windowSize = Math.min(windowSize, smooth_d.x.length - 1);
           else windowSize = Math.min(windowSize, smooth_d.x.length);
+
           smooth_d.y = sgg(smooth_d.y, smooth_d.x, {
             windowSize: windowSize,
           });
@@ -119,7 +137,6 @@ var PlotPane = (props) => {
         });
 
       // pad data in case we have some smoothed lines
-      // (lets plotly use the same colors if no colors are given by the user)
       if (smooth_data.length > 0) {
         data = Array.from(data);
         let num_to_fill = 10 - (data.length % 10);
@@ -198,7 +215,6 @@ var PlotPane = (props) => {
 };
 
 // prevent rerender unless we know we need one
-// (previously known as shouldComponentUpdate)
 PlotPane = React.memo(PlotPane, (props, nextProps) => {
   if (props.contentID !== nextProps.contentID) return false;
   else if (props.h !== nextProps.h || props.w !== nextProps.w) return false;
