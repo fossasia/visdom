@@ -235,6 +235,10 @@ def gather_envs(state, env_path=DEFAULT_ENV_PATH):
     return sorted(list(set(items + list(state.keys()))))
 
 
+def get_env_json_path(env_path, eid):
+    return os.path.join(env_path, f"{eid.strip()}.json")
+
+
 def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
     logging.info("comparing envs")
     eidNums = {e: str(i) for i, e in enumerate(eids)}
@@ -244,7 +248,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         if eid in state:
             envs[eid] = state.get(eid)
         elif env_path is not None:
-            p = os.path.join(env_path, f"{eid.strip()}.json")
+            p = get_env_json_path(env_path, eid)
             if os.path.exists(p):
                 with open(p, "r") as fn:
                     env = tornado.escape.json_decode(fn.read())
@@ -382,7 +386,7 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
     if eid in state:
         env = state.get(eid)
     elif env_path is not None:
-        p = os.path.join(env_path, f"{eid.strip()}.json")
+        p = get_env_json_path(env_path, eid)
         if os.path.exists(p):
             with open(p, "r") as fn:
                 env = tornado.escape.json_decode(fn.read())
