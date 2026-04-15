@@ -117,7 +117,7 @@ def isndarray(n):
     return isinstance(n, (np.ndarray))
 
 
-# Only works on (possibly nested) lists of numbers
+# Only works on (possibly nested) lists of numbers.
 # TODO: Create our own JSONEncoder that automatically does this.
 #       Maybe we can port plotly's over:
 #       https://github.com/plotly/plotly.py/blob/81629273ff6d7a30257a42572ed0e4e6ad436009/_plotly_utils/utils.py#L16
