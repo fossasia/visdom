@@ -1523,7 +1523,7 @@ class Visdom(object):
         return self.text(text=videodata, win=win, env=env, opts=opts)
     
 
-    def gif(self, gif_path, win=None, opts=None):
+    def gif(self, gif_path, win=None, env=None, opts=None):
         """
         Display a GIF image using text pane with base64 encoding.
         """
@@ -1535,7 +1535,7 @@ class Visdom(object):
 
         html = '<img src="data:image/gif;base64,{}" />'.format(encoded)
 
-        return self.text(html, win=win, opts=opts)   
+        return self.text(text=html, win=win, env=env, opts=opts)
          
     def update_window_opts(self, win, opts, env=None):
         """
