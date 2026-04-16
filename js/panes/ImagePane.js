@@ -111,7 +111,7 @@ function ImagePane(props) {
 
   const handleMouseOver = (ev) => {
     // get the x and y offset of the pane
-    var rect = paneRef.current.children[1].getBoundingClientRect();
+    var rect = imgRef.current.getBoundingClientRect();
 
     // Compute the coords of the mouse relative to the top left of the pane
     var xscreen = ev.clientX - rect.x;
