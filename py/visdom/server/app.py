@@ -183,6 +183,8 @@ class Application(tornado.web.Application):
                     f"Skipping corrupted environment file '{env_path_file}': {e!r}"
                   )
                   continue
+            else:
+                state[eid] = LazyEnvData(env_path_file)    
 
         if "main" not in state and "main.json" not in env_jsons:
             state["main"] = {"jsons": {}, "reload": {}}
