@@ -1521,7 +1521,22 @@ class Visdom(object):
             base64.b64encode(bytestr).decode("utf-8"),
         )
         return self.text(text=videodata, win=win, env=env, opts=opts)
+    
 
+    def gif(self, gif_path, win=None, opts=None):
+        """
+        Display a GIF image using text pane with base64 encoding.
+        """
+
+        import base64
+
+        with open(gif_path, "rb") as f:
+            encoded = base64.b64encode(f.read()).decode("utf-8")
+
+        html = '<img src="data:image/gif;base64,{}" />'.format(encoded)
+
+        return self.text(html, win=win, opts=opts)   
+         
     def update_window_opts(self, win, opts, env=None):
         """
         This function allows pushing new options to an existing plot window
