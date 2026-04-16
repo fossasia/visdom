@@ -118,14 +118,18 @@ function ImagePane(props) {
     var yscreen = ev.clientY - rect.top;
 
     // Compute the coords of the pixel under the mouse wrt the image top left
-    var ximage = Math.round((xscreen / rect.width) * imgDim.width);
-    var yimage = Math.round((yscreen / rect.height) * imgDim.height);
+    var ximage = Math.round(
+      ((xscreen / rect.width) * imgDim.width - view['tx']) / view['scale']
+    );
+    var yimage = Math.round(
+      ((yscreen / rect.height) * imgDim.height - view['ty']) / view['scale']
+    );
 
     setMouseLocation({
       x: ximage,
       y: yimage,
       visibility: ev.altKey ? 'visible' : 'hidden',
-     });
+    });
   };
 
   const handleReset = () => {
