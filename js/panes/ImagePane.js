@@ -111,19 +111,21 @@ function ImagePane(props) {
 
   const handleMouseOver = (ev) => {
     // get the x and y offset of the pane
-    var rect = imgRef.current.getBoundingClientRect();
+    var rect = paneRef.current.children[1].getBoundingClientRect();
 
     // Compute the coords of the mouse relative to the top left of the pane
-    var xscreen = ev.clientX - rect.left;
-    var yscreen = ev.clientY - rect.top;
+    var xscreen = ev.clientX - rect.x;
+    var yscreen = ev.clientY - rect.y;
 
     // Compute the coords of the pixel under the mouse wrt the image top left
-    var ximage = Math.round(
-      ((xscreen / rect.width) * imgDim.width - view['tx']) / view['scale']
-    );
-    var yimage = Math.round(
-      ((yscreen / rect.height) * imgDim.height - view['ty']) / view['scale']
-    );
+
+    // Step 1: remove pan
+    var x = xscreen - view['tx'];
+    var y = yscreen - view['ty'];
+
+    // Step 2: remove zoom (IMPORTANT)
+    var ximage = Math.round(x / view['scale']);
+    var yimage = Math.round(y / view['scale']);
 
     setMouseLocation({
       x: ximage,
