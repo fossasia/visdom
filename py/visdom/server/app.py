@@ -170,19 +170,19 @@ class Application(tornado.web.Application):
 
             if self.eager_data_loading:
                 try:
-                    with open(env_path_file, "r") as fn:
-                        env_data = tornado.escape.json_decode(fn.read())
-                except Exception as e:
-                    logging.warn(
-                        "Failed loading environment json: {} - {}".format(
-                            env_path_file, repr(e)
-                        )
-                    )
-                    continue
+                  with open(env_path_file, "r") as fn:
+                     env_data = tornado.escape.json_decode(fn.read())
 
-                state[eid] = {"jsons": env_data["jsons"], "reload": env_data["reload"]}
-            else:
-                state[eid] = LazyEnvData(env_path_file)
+                     jsons = env_data.get("jsons", {})
+                     reload_data = env_data.get("reload", {})
+
+                  state[eid] = {"jsons": jsons, "reload": reload_data}
+
+                except Exception as e:
+                  logging.warning(
+                    f"Skipping corrupted environment file '{env_path_file}': {e!r}"
+                  )
+                  continue
 
         if "main" not in state and "main.json" not in env_jsons:
             state["main"] = {"jsons": {}, "reload": {}}
