@@ -36,24 +36,24 @@ function ImageComparePane(props) {
       handleDownload={handleDownload}
       ref={paneRef}
     >
-      <div 
-        style={{ 
-          display: 'flex', 
-          flexDirection: 'row', 
-          width: '100%', 
-          height: '100%', 
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'row',
+          width: '100%',
+          height: '100%',
           overflowX: 'auto',
           alignItems: 'center',
           justifyContent: 'space-around'
         }}
       >
         {content.map((imgItem, idx) => (
-          <div 
-             key={`${id}-compare-${idx}`} 
-             style={{ 
-               flex: 1, 
-               display: 'flex', 
-               flexDirection: 'column', 
+          <div
+             key={`${id}-compare-${idx}`}
+             style={{
+               flex: 1,
+               display: 'flex',
+               flexDirection: 'column',
                alignItems: 'center',
                padding: '5px'
              }}

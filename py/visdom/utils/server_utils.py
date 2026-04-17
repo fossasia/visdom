@@ -345,8 +345,8 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
                         data["name"] = "{}_{}".format(eidNums[eid], data["name"])
                         destWidJson["content"]["data"].append(data)
 
-    # Make sure that only plots that are shared by at least two envs are shown.
-    # Check has_compare flag
+    # Make sure that only windows shared by at least two envs are shown.
+    # Check the has_compare flag for plots, image comparisons, and similar windows.
     for destWid in list(res["jsons"].keys()):
         if ("has_compare" not in res["jsons"][destWid]) or (
             not res["jsons"][destWid]["has_compare"]
