@@ -300,4 +300,32 @@ describe('Image Pane', () => {
       .should('match', /^data:image\/png;base64,/)
       .and((src) => expect(src).not.to.equal(initialSrc));
   });
+
+  it('Image Compare Mode', () => {
+    const envA = 'compare_image_env_A_' + Cypress._.random(0,1e6);
+    const envB = 'compare_image_env_B_' + Cypress._.random(0,1e6);
+
+    cy.run('image_basic', {env:envA, open:false, seed: 1});
+    cy.run('image_basic', {env:envB, open:false, seed: 2});
+
+    cy.open_env(envA);
+    cy.open_env(envB);
+
+    cy.get(win_selector).should('have.length', 2);
+    
+    cy.get(win_selector)
+      .contains('Random!')
+      .parents(win_selector)
+      .find('img.content-image')
+      .should('have.length', 2);
+
+    cy.get(win_selector)
+      .contains('Random!')
+      .parents(win_selector)
+      .find("button[title='save']")
+      .click();
+
+    const downloadsFolder = Cypress.config('downloadsFolder');
+    cy.readFile(path.join(downloadsFolder, 'Random!.jpg')).should('exist');
+  })
 });
