@@ -340,7 +340,7 @@ class UpdateHandler(BaseHandler):
             or (
                 len(p["content"]["data"]) == 0
                 or p["content"]["data"][0]["type"]
-                in ["scatter", "scattergl", "custom", "heatmap"]
+                in ["scatter", "scatter3d", "scattergl", "custom", "heatmap"]
             )
         ):
             handler.write(
