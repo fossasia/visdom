@@ -244,12 +244,15 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         if eid in state:
             envs[eid] = state.get(eid)
         elif env_path is not None:
-            p = os.path.join(env_path, eid.strip(), ".json")
+            p = os.path.join(env_path, f"{eid.strip()}.json")
             if os.path.exists(p):
-                with open(p, "r") as fn:
-                    env = tornado.escape.json_decode(fn.read())
-                    state[eid] = env
-                    envs[eid] = env
+                try:
+                    with open(p, "r") as fn:
+                        env = tornado.escape.json_decode(fn.read())
+                        state[eid] = env
+                        envs[eid] = env
+                except Exception as e:
+                    logging.warning(f"Failed to load env {eid}: {e}")
 
     res = copy.deepcopy(envs[list(envs.keys())[0]])
     name2Wid = {
@@ -382,11 +385,15 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
     if eid in state:
         env = state.get(eid)
     elif env_path is not None:
-        p = os.path.join(env_path, eid.strip(), ".json")
+        p = os.path.join(env_path, f"{eid.strip()}.json")
         if os.path.exists(p):
-            with open(p, "r") as fn:
-                env = tornado.escape.json_decode(fn.read())
-                state[eid] = env
+            try:
+                with open(p, "r") as fn:
+                    env = tornado.escape.json_decode(fn.read())
+                    state[eid] = env
+            except Exception as e:
+                logging.warning(f"Failed to load env {eid}: {e}")
+                env = {}
 
     if "reload" in env:
         socket.write_message(json.dumps({"command": "reload", "data": env["reload"]}))
