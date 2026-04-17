@@ -24,6 +24,18 @@ import time
 import tornado.escape
 from collections import OrderedDict
 
+def load_env_from_disk(eid, env_path):
+    p = os.path.join(env_path, f"{eid.strip()}.json")
+
+    if not os.path.exists(p):
+        return None
+
+    try:
+        with open(p, "r") as fn:
+            return tornado.escape.json_decode(fn.read())
+    except (OSError, json.JSONDecodeError) as e:
+        logging.warning(f"Failed to load env {eid}: {e}")
+        return None
 try:
     # for after python 3.8
     from collections.abc import Mapping, Sequence
@@ -244,16 +256,20 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         if eid in state:
             envs[eid] = state.get(eid)
         elif env_path is not None:
-            p = os.path.join(env_path, f"{eid.strip()}.json")
-            if os.path.exists(p):
+            env = load_env_from_disk(eid, env_path)
+            if env:
+                state[eid] = env
+                envs[eid] = env
                 try:
                     with open(p, "r") as fn:
                         env = tornado.escape.json_decode(fn.read())
                         state[eid] = env
                         envs[eid] = env
-                except Exception as e:
+                except (OSError, json.JSONDecodeError) as e:
                     logging.warning(f"Failed to load env {eid}: {e}")
-
+            if not envs:
+                logging.warning("No environments could be loaded for comparison")
+                return
     res = copy.deepcopy(envs[list(envs.keys())[0]])
     name2Wid = {
         res["jsons"][wid].get("title", None): wid + "_compare"
@@ -385,13 +401,14 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
     if eid in state:
         env = state.get(eid)
     elif env_path is not None:
-        p = os.path.join(env_path, f"{eid.strip()}.json")
-        if os.path.exists(p):
+        env = load_env_from_disk(eid, env_path)
+        if env:
+            state[eid] = env
             try:
                 with open(p, "r") as fn:
                     env = tornado.escape.json_decode(fn.read())
                     state[eid] = env
-            except Exception as e:
+            except (OSError, json.JSONDecodeError) as e:
                 logging.warning(f"Failed to load env {eid}: {e}")
                 env = {}
 
