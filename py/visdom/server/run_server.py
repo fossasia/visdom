@@ -49,10 +49,26 @@ def start_server(
         use_frontend_client_polling=use_frontend_client_polling,
         eager_data_loading=eager_data_loading,
     )
-    if bind_local:
-        app.listen(port, max_buffer_size=1024**3, address="127.0.0.1")
-    else:
-        app.listen(port, max_buffer_size=1024**3)
+    initial_port = port
+    max_attempts = 10
+    attempt = 0
+
+    while attempt < max_attempts:
+      try:
+        if bind_local:
+            app.listen(port, max_buffer_size=1024**3, address="127.0.0.1")
+        else:
+            app.listen(port, max_buffer_size=1024**3)
+        break
+      except OSError:
+        logging.warning(f"Port {port} unavailable, trying next port...")
+        port += 1
+        attempt += 1
+
+    if attempt == max_attempts:
+     raise RuntimeError(
+        f"Failed to bind server after {max_attempts} attempts starting from port {initial_port}"
+     )
     logging.info("Application Started")
     logging.info(f"Working directory: {os.path.abspath(env_path)}")
 
