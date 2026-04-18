@@ -52,6 +52,7 @@ def start_server(
     initial_port = port
     max_attempts = 10
     attempt = 0
+    bound = False
 
     while attempt < max_attempts:
       try:
@@ -59,13 +60,14 @@ def start_server(
             app.listen(port, max_buffer_size=1024**3, address="127.0.0.1")
         else:
             app.listen(port, max_buffer_size=1024**3)
+        bound = True
         break
       except OSError:
         logging.warning(f"Port {port} unavailable, trying next port...")
         port += 1
         attempt += 1
 
-    if attempt == max_attempts:
+    if not bound:
      raise RuntimeError(
         f"Failed to bind server after {max_attempts} attempts starting from port {initial_port}"
      )
