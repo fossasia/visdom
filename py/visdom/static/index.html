@@ -46,13 +46,8 @@ LICENSE file in the root directory of this source tree.
     <script>
     // TODO: this is not great. Should probably be an endpoint with a JSON
     // response or the first thing the socket sends back.
-    var ENV_LIST = [
-      {% for item in items %}
-      '{{escape(item)}}',
-      {% end %}
-    ];
-    var ACTIVE_ENV = '{{escape(active_item)}}';
-    var USER = '{{escape(user)}}';
+    var ENV_LIST = [];
+    var ACTIVE_ENV = '';
     var USE_POLLING = ('{{wrap_socket}}' == 'True');
 
     // Plotly setup

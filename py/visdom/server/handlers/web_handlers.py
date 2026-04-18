@@ -497,9 +497,6 @@ class EnvHandler(BaseHandler):
         active = "" if eid not in items else eid
         self.render(
             "index.html",
-            user=getpass.getuser(),
-            items=items,
-            active_item=active,
             wrap_socket=self.wrap_socket,
         )
 
@@ -537,9 +534,6 @@ class CompareHandler(BaseHandler):
         eids = "+".join(eids)
         self.render(
             "index.html",
-            user=getpass.getuser(),
-            items=items,
-            active_item=eids,
             wrap_socket=self.wrap_socket,
         )
 
@@ -639,9 +633,6 @@ class IndexHandler(BaseHandler):
             """
             self.render(
                 "index.html",
-                user=getpass.getuser(),
-                items=items,
-                active_item="",
                 wrap_socket=self.wrap_socket,
             )
         elif self.login_enabled:
