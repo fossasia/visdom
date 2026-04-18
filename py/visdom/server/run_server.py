@@ -61,6 +61,7 @@ def start_server(
         else:
             app.listen(port, max_buffer_size=1024**3)
         bound = True
+        logging.info(f"Server successfully bound to port {port}")
         break
       except OSError:
         logging.warning(f"Port {port} unavailable, trying next port...")
