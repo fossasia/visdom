@@ -40,13 +40,11 @@ The project is built to stay lightweight by default while still supporting deepe
 
 ## Visuals
 
-> Place the media files inside an `assests/` folder next to this README.
-
 ### 1) Dashboard with NaN and exploding-gradient warnings
-![Visdom dashboard with warning spikes](assests/Nan.png)
+![Visdom dashboard with warning spikes](assets/Nan.png)
 
 ### 2) Clean dashboard without NaN warning spikes
-![Visdom dashboard without warning spikes](assests/NonNan.png)
+![Visdom dashboard without warning spikes](assets/NonNan.png)
 
 ### 3) Demo video
 [Watch the demo video](https://github.com/user-attachments/assets/fed2d8e4-3287-40a9-a0ba-d7b28de7208b)
@@ -95,19 +93,6 @@ Optional model-health features include:
 - heatmap visualization of model health
 - weight histograms for selected layers
 
-
-### Example usage
-
-A full MNIST example is included in the repository. It shows how to:
-
-- train a small CNN
-- log loss, accuracy, and confidence
-- track gradient warnings
-- track learning rate
-- optionally enable heavier diagnostics
-
-**The example also demonstrates how the logger can be kept lightweight while still supporting deeper diagnostics when needed.**
-
 ### Optional diagnostics
 
 These are available in the code and can be enabled when needed:
@@ -120,23 +105,8 @@ These are available in the code and can be enabled when needed:
 
 **These options are useful when you want a more detailed view of training behavior without cluttering the default dashboard.**
 
-### Folder Structure 
+![### Folder Structure ](assets/fs.png)
 
-py/
-└── visdom/
-    └── integrations/
-        ├── __init__.py
-        └── pytorch/
-            ├── __init__.py
-            ├── diagnostics.py
-            ├── hooks.py
-            ├── metrics.py
-            ├── logger.py
-            └── examples/
-                └── train_mnist_diagnostics.py
-
-tests/
-└── test_pytorch_logger.
 
 
 
