@@ -2170,21 +2170,25 @@ class Visdom(object):
             col = X.take(k, 1).tolist()
 
             if fillarea:
-                data.append({
-                    "y": col,
-                    "type": "violin",
-                    "name": name,
-                    "box": {"visible": True},
-                    "meanline": {"visible": True},
-                    "points": opts.get("boxpoints", "outliers"),
-                })
+                data.append(
+                    {
+                        "y": col,
+                        "type": "violin",
+                        "name": name,
+                        "box": {"visible": True},
+                        "meanline": {"visible": True},
+                        "points": opts.get("boxpoints", "outliers"),
+                    }
+                )
             else:
-                data.append({
-                    "y": col,
-                    "type": "box",
-                    "name": name,
-                    "boxpoints": opts.get("boxpoints", "outliers"),
-                })
+                data.append(
+                    {
+                        "y": col,
+                        "type": "box",
+                        "name": name,
+                        "boxpoints": opts.get("boxpoints", "outliers"),
+                    }
+                )
 
         return self._send(
             {
