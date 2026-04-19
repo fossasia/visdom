@@ -184,7 +184,7 @@ class Application(tornado.web.Application):
             else:
                 state[eid] = LazyEnvData(env_path_file)
 
-        if "main" not in state and "main.json" not in env_jsons:
+        if "main" not in state:
             state["main"] = {"jsons": {}, "reload": {}}
             serialize_env(state, ["main"], env_path=self.env_path)
 
