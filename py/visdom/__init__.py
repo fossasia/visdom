@@ -1006,12 +1006,27 @@ class Visdom(object):
         _assert_opts(opts)
 
         if svgfile is not None:
-            svgstr = str(loadfile(svgfile))
+            if svgfile.startswith("http"):
+                import requests
+                response = requests.get(svgfile, headers={"User-Agent": "Mozilla/5.0"})
+                response.raise_for_status()
+                svgstr = response.text
+            else:
+                with open(svgfile, "r", encoding="utf-8") as f:
+                    svgstr = f.read()
 
         assert svgstr is not None, "should specify SVG string or filename"
-        svg = re.search("<svg .+</svg>", svgstr, re.DOTALL)
-        assert svg is not None, "could not parse SVG string"
-        return self.text(text=svg.group(0), win=win, env=env, opts=opts)
+
+        match = re.search(r"<svg[\s\S]*?</svg>", svgstr)
+        assert re.match is not None, "could not parse SVG string"
+
+        svg_content = match.group(0)
+        svg_content = svg_content.replace(
+            "<svg",
+            '<svg style="max-width:100%; height:auto;"'
+        )
+
+        return self.text(text=svg_content, win=win, env=env, opts=opts)
 
     def matplot(self, plot, opts=None, env=None, win=None):
         """
