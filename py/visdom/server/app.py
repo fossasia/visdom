@@ -185,6 +185,10 @@ class Application(tornado.web.Application):
                 state[eid] = LazyEnvData(env_path_file)
 
         if "main" not in state:
+            if "main.json" in env_jsons:
+                logging.warning("Failed to load 'main.json'. Reinitializing default 'main' environment.")
+            else:
+                logging.info("No existing 'main.json' found. Initializing default 'main' environment.")
             state["main"] = {"jsons": {}, "reload": {}}
             serialize_env(state, ["main"], env_path=self.env_path)
 
