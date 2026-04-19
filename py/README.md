@@ -49,7 +49,7 @@ The project is built to stay lightweight by default while still supporting deepe
 ![Visdom dashboard without warning spikes](assests/NonNan.png)
 
 ### 3) Demo video
-[Watch the demo video](assests/Demo.mp4)
+[Watch the demo video](https://github.com/user-attachments/assets/fed2d8e4-3287-40a9-a0ba-d7b28de7208b)
 
 ---
 
