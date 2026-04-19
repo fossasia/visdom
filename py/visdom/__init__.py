@@ -1018,7 +1018,7 @@ class Visdom(object):
         assert svgstr is not None, "should specify SVG string or filename"
 
         match = re.search(r"<svg[\s\S]*?</svg>", svgstr)
-        assert re.match is not None, "could not parse SVG string"
+        assert match is not None, "could not parse SVG string"
 
         svg_content = match.group(0)
         svg_content = svg_content.replace(
