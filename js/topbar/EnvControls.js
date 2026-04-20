@@ -29,7 +29,7 @@ function EnvControls(props) {
   // -------
   var slist = envList.slice();
   slist.sort();
-  var roots = Array.from(
+  var potentialRoots = Array.from(
     new Set(
       slist.map((x) => {
         return x.split('_')[0];
@@ -37,19 +37,20 @@ function EnvControls(props) {
     )
   );
 
+  var roots = potentialRoots.filter((x) => !potentialRoots.includes(x));
+
   let env_options2 = slist.map((env, idx) => {
-    if (env.split('_').length == 1) {
-      return null;
-    }
+    
+    var prefix = env.split('_')[0];
+    var hasGroup = roots.includes(prefix);
+
     return {
       key: idx + 1 + roots.length,
-      pId: roots.indexOf(env.split('_')[0]) + 1,
+      pId: hasGroup ? roots.indexOf(prefix) + 1 : 0,
       label: env,
       value: env,
     };
   });
-
-  env_options2 = env_options2.filter((x) => x != null);
 
   env_options2 = env_options2.concat(
     roots.map((x, idx) => {
