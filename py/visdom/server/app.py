@@ -195,7 +195,7 @@ class Application(tornado.web.Application):
 
         """Determines & uses the platform-specific root directory for user configurations."""
         if platform.system() == "Windows":
-            base_dir = os.getenv("APPDATA")
+            base_dir = os.getenv("APPDATA") or os.path.expanduser("~")
         elif platform.system() == "Darwin":  # osx
             base_dir = os.path.expanduser("~/Library/Preferences")
         else:
