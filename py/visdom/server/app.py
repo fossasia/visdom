@@ -195,7 +195,17 @@ class Application(tornado.web.Application):
 
         """Determines & uses the platform-specific root directory for user configurations."""
         if platform.system() == "Windows":
-            base_dir = os.getenv("APPDATA") or os.path.expanduser("~")
+            base_dir = os.getenv("APPDATA")
+
+            if not base_dir:
+               fallback = os.path.expanduser("~")
+
+               if not fallback or fallback == "~":
+                  raise RuntimeError("Unable to determine a valid base directory for Visdom configuration.")
+
+               logging.warning("APPDATA not set. Falling back to user home directory for configuration.")
+
+               base_dir = fallback
         elif platform.system() == "Darwin":  # osx
             base_dir = os.path.expanduser("~/Library/Preferences")
         else:
