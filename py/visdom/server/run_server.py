@@ -64,7 +64,7 @@ def start_server(
         print("You can navigate to http://%s:%s%s" % (hostname, port, base_url))
     else:
         print_func(port)
-    ioloop.IOLoop.instance().start()
+    ioloop.IOLoop.current().start()
     app.subs = []
     app.sources = []
 
