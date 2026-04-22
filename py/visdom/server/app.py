@@ -43,14 +43,6 @@ from visdom.server.handlers.web_handlers import (
     UpdateHandler,
     UserSettingsHandler,
 )
-from visdom.server.defaults import (
-    DEFAULT_BASE_URL,
-    DEFAULT_ENV_PATH,
-    DEFAULT_HOSTNAME,
-    DEFAULT_PORT,
-    LAYOUT_FILE,
-)
-
 
 tornado_settings = {
     "autoescape": None,
@@ -198,14 +190,19 @@ class Application(tornado.web.Application):
             base_dir = os.getenv("APPDATA")
 
             if not base_dir:
-               fallback = os.path.expanduser("~")
+                fallback = os.path.expanduser("~")
 
-               if not fallback or fallback == "~":
-                  raise RuntimeError("Unable to determine a valid base directory for Visdom configuration.")
+                if not fallback or fallback == "~":
+                    raise RuntimeError(
+                     "Unable to determine a valid base directory for Visdom "
+                     "configuration."
+                    )
+                logging.warning(
+                  "APPDATA not set. Falling back to user home directory "
+                  "for configuration."
+                )
 
-               logging.warning("APPDATA not set. Falling back to user home directory for configuration.")
-
-               base_dir = fallback
+                base_dir = fallback
         elif platform.system() == "Darwin":  # osx
             base_dir = os.path.expanduser("~/Library/Preferences")
         else:
