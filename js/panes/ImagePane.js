@@ -1,6 +1,10 @@
 /**
  * Copyright 2017-present, The Visdom Authors
  * All rights reserved.
+ *
+ * This source code is licensed under the license found in the
+ * LICENSE file in the root directory of this source tree.
+ *
  */
 
 import React, { useContext, useEffect, useRef, useState } from 'react';
@@ -17,11 +21,10 @@ function ImagePane(props) {
   const { envID, id, title, type, selected, width, height } = props;
   var { isFocused, content } = props;
 
-  // state variables
+  // state varibles
   // --------------
   const paneRef = useRef();
   const imgRef = useRef();
-
   const [view, setView] = useState({ scale: 1, tx: 0, ty: 0 });
   const [imgDim, setImgDim] = useState({ width: null, height: 0 });
   const [actualSelected, setActualSelected] = useState(props.selected);
@@ -30,11 +33,13 @@ function ImagePane(props) {
     y: 0,
     visibility: 'hidden',
   });
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [dragStart, setDragStart] = useState({
+    x: 0,
+    y: 0,
+  });
 
   // private events
-  // --------------
-
+  // -------------
   const handleDownload = () => {
     var link = document.createElement('a');
     link.download = `${title || 'visdom_image'}.jpg`;
@@ -44,10 +49,14 @@ function ImagePane(props) {
 
   const handleZoom = (ev) => {
     if (ev.altKey) {
+      //var direction = natural.checked ? -1 : 1;
       let direction = -1;
+      // Get browser independent scaling factor
       let scrollDirectionX = Math.sign(ev.deltaX);
       let scrollDirectionY = Math.sign(ev.deltaY);
-
+      // If shift is pressed only scroll sidewise (to allow scrolling
+      // to the side by keep shift pressed and using normal scrolling
+      // on the image pane)
       if (ev.shiftKey)
         setView({
           ...view,
@@ -59,27 +68,28 @@ function ImagePane(props) {
           tx: view['tx'] + scrollDirectionX * direction * 50,
           ty: view['ty'] + scrollDirectionY * direction * 50,
         });
-
       ev.stopPropagation();
       ev.preventDefault();
     } else if (ev.ctrlKey) {
+      // get the x and y offset of the pane
       let rect = paneRef.current.children[1].getBoundingClientRect();
+      // Get browser independent scaling factor
       let scrollDirectionY = Math.sign(ev.deltaY);
-
+      // Compute the coords of the mouse relative to the top left of the pane
       let xscreen = ev.clientX - rect.x;
       let yscreen = ev.clientY - rect.y;
-
+      // Compute the coords of the pixel under the mouse wrt the image top left
       let ximage = (xscreen - view['tx']) / view['scale'];
       let yimage = (yscreen - view['ty']) / view['scale'];
-
       let new_scale = view['scale'] * Math.exp(-scrollDirectionY / 10);
-
+      // Update the state.
+      // The offset is modifed such that the pixel under the mouse
+      // is the same after zooming
       setView({
         scale: new_scale,
         tx: xscreen - new_scale * ximage,
         ty: yscreen - new_scale * yimage,
       });
-
       ev.stopPropagation();
       ev.preventDefault();
     }
@@ -87,7 +97,7 @@ function ImagePane(props) {
 
   const handleDragStart = (ev) => {
     setDragStart({ x: ev.screenX, y: ev.screenY });
-    ev.dataTransfer.setDragImage(new Image(), 0, 0);
+    ev.dataTransfer.setDragImage(new Image(), 0, 0); // disables ghost image
   };
 
   const handleDragOver = (ev) => {
@@ -99,49 +109,51 @@ function ImagePane(props) {
     setDragStart({ x: ev.screenX, y: ev.screenY });
   };
 
-  /**
-   * FIX: Calculate mouse coordinates relative to actual image
-   */
   const handleMouseOver = (ev) => {
-    if (!imgRef.current || !imgDim.width || !imgDim.height) return;
-
-    const rect = imgRef.current.getBoundingClientRect();
-
-    const x = ev.clientX - rect.left;
-    const y = ev.clientY - rect.top;
-
-    const xPercent = x / rect.width;
-    const yPercent = y / rect.height;
-
-    const xImage = Math.round(xPercent * imgDim.width);
-    const yImage = Math.round(yPercent * imgDim.height);
-
+    // get the x and y offset of the pane
+    var rect = paneRef.current.children[1].getBoundingClientRect();
+    // Compute the coords of the mouse relative to the top left of the pane
+    var xscreen = ev.clientX - rect.x;
+    var yscreen = ev.clientY - rect.y;
+    // Compute the coords of the pixel under the mouse wrt the image top left
+    var ximage = Math.round((xscreen - view['tx']) / view['scale']);
+    var yimage = Math.round((yscreen - view['ty']) / view['scale']);
     setMouseLocation({
-      x: xImage,
-      y: yImage,
+      x: ximage,
+      y: yimage,
       visibility: ev.altKey ? 'visible' : 'hidden',
     });
   };
 
   const handleReset = () => {
-    setView({ scale: 1, tx: 0, ty: 0 });
+    setView({
+      scale: 1,
+      tx: 0,
+      ty: 0,
+    });
   };
 
   const updateSlider = (evt) => {
+    // TODO add history update events here! need to send these to the client
+    // with sendPaneMessage
     setActualSelected(parseInt(evt.target.value));
   };
 
   // effects
   // -------
 
+  // reset image selection upon property change
   useEffect(() => {
     setActualSelected(selected);
   }, [selected]);
 
+  // Reset the image settings when the user resizes the window. Avoid
+  // constantly resetting the zoom level when user has not zoomed.
   useEffect(() => {
     if (Math.abs(view['scale'] - 1) > Number.EPSILON) handleReset();
   }, [width, height]);
 
+  // initialize mouse events
   useEffect(() => {
     const onEvent = (event) => {
       switch (event.type) {
@@ -176,21 +188,80 @@ function ImagePane(props) {
     };
 
     EventSystem.subscribe('global.event', onEvent);
-    return () => EventSystem.unsubscribe('global.event', onEvent);
-  }, [mouseLocation, isFocused, id, envID, sendPaneMessage]);
+    return function cleanup() {
+      EventSystem.unsubscribe('global.event', onEvent);
+    };
+  }, [mouseLocation, isFocused]);
+
+  // image size/pos computation
+  // --------------------------
+
+  // Find the width/height that preserves the aspect ratio 'scaledWidth/height'
+  const computeHFromW = (scaledWidth) => {
+    return Math.ceil((imgDim.height / imgDim.width) * scaledWidth);
+  };
+  const computeWFromH = (scaledHeight) => {
+    return Math.ceil((imgDim.width / imgDim.height) * scaledHeight);
+  };
+
+  // compute image size & position
+  let candidateWidth = Math.ceil(1 + width * view['scale']);
+  let candidateHeight = Math.ceil(1 + height * view['scale']);
+  let imageContainerStyle = {
+    alignItems: 'row',
+    display: 'flex',
+    height: isNaN(candidateHeight) ? DEFAULT_HEIGHT : candidateHeight,
+    justifyContent: 'center',
+    width: isNaN(candidateWidth) ? DEFAULT_WIDTH : candidateWidth,
+  };
+
+  if (imgDim.height === null || imgDim.width === null) {
+    // Do nothing, don't change the width/height
+  } else if (candidateWidth >= candidateHeight) {
+    // If the width exceeds the height, then we use the height as the limiting
+    // factor
+    let newWidth = computeWFromH(candidateHeight);
+    // If the new width would exceed the window boundaries, we need to
+    // instead use the window width as the limiting factor
+    if (newWidth > candidateWidth) {
+      candidateHeight = computeHFromW(candidateWidth);
+      imageContainerStyle.alignItems = 'column';
+    } else {
+      candidateWidth = newWidth;
+    }
+  } else if (candidateWidth < candidateHeight) {
+    // If the height exceeds the width, then we use the width as the limiting
+    // factor
+    let newHeight = computeHFromW(candidateWidth);
+    // If the new height would exceed the window boundaries, we need to
+    // instead use the window height as the limiting factor
+    if (newHeight > candidateHeight) {
+      candidateWidth = computeWFromH(candidateHeight);
+    } else {
+      imageContainerStyle.alignItems = 'column';
+      candidateHeight = newHeight;
+    }
+  }
+
+  // During initial render cycle,
+  // Math.ceil(1 + height/width * view["scale"]) may be NaN.
+  // Set a default value here to avoid warnings, which will be updated on the
+  // next render
+
+  if (isNaN(candidateHeight)) {
+    candidateHeight = DEFAULT_HEIGHT;
+  }
+
+  if (isNaN(candidateWidth)) {
+    candidateWidth = DEFAULT_WIDTH;
+  }
 
   // rendering
   // ---------
-
-  let candidateWidth = Math.ceil(1 + width * view['scale']);
-  let candidateHeight = Math.ceil(1 + height * view['scale']);
-
-  if (isNaN(candidateHeight)) candidateHeight = DEFAULT_HEIGHT;
-  if (isNaN(candidateWidth)) candidateWidth = DEFAULT_WIDTH;
-
   let widgets = [];
   const divstyle = { left: view['tx'], top: view['ty'], position: 'absolute' };
 
+  // add image slider as widget
   if (type === 'image_history') {
     if (props.show_slider) {
       widgets.push(
@@ -212,6 +283,7 @@ function ImagePane(props) {
     content = content[actualSelected];
   }
 
+  // add caption as widget
   if (content.caption) {
     widgets.splice(
       0,
@@ -233,7 +305,7 @@ function ImagePane(props) {
       widgets={widgets}
     >
       <div style={divstyle}>
-        <div style={{ display: 'flex', justifyContent: 'center' }}>
+        <div style={imageContainerStyle}>
           <img
             className="content-image cssTransforms"
             alt={content.caption}
@@ -245,17 +317,15 @@ function ImagePane(props) {
                 width: imgRef.current.naturalWidth,
               });
             }}
-            width={candidateWidth}
-            height={candidateHeight}
+            width={candidateWidth + 'px'}
+            height={candidateHeight + 'px'}
             onDoubleClick={handleReset}
             onDragStart={handleDragStart}
             onDragOver={handleDragOver}
           />
         </div>
       </div>
-
       <p className="caption">{content.caption}</p>
-
       <span
         className="mouse_image_location"
         style={{ visibility: mouseLocation.visibility }}
