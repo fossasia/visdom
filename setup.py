@@ -13,8 +13,12 @@ from setuptools import setup, find_packages
 try:
     from importlib.metadata import version as get_metadata_version, PackageNotFoundError
 except ImportError:
-    from importlib_metadata import version as get_metadata_version, PackageNotFoundError
-
+    try:
+        from importlib_metadata import version as get_metadata_version, PackageNotFoundError
+    except ImportError:
+        raise ImportError(
+            "importlib.metadata is not available. Install 'importlib_metadata' for Python < 3.8."
+        )
 
 try:
     import torch
@@ -29,6 +33,12 @@ except Exception:
 
 
 class Dist:
+    """
+    Minimal shim for pkg_resources.Distribution.
+
+    Only the `.version` attribute is used in this codebase.
+    Other attributes from pkg_resources.Distribution are not supported.
+    """
     def __init__(self, version):
         self.version = version
 
