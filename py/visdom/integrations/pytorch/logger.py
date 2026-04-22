@@ -352,7 +352,7 @@ class VisdomDiagnosticsLogger:
             return {}
         return parameter_stats(self._model.named_parameters())
 
-    def flush(self, force: bool = False) -> None:
+    def flush(self) -> None:
         if not self._buffers:
             self._pending_points = 0
             self._last_flush = monotonic()
@@ -430,7 +430,7 @@ class VisdomDiagnosticsLogger:
             self.log_model_health(step=self._step)
             self._last_diagnostics_step = self._step
 
-        self.flush(force=True)
+        self.flush()
 
 
 VisdomLogger = VisdomDiagnosticsLogger

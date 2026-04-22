@@ -274,7 +274,7 @@ var PlotPane = (props) => {
             ) : (
               exportHistory.map((item, idx) => (
                 <div
-                  key={idx}
+                key={`${item.timestamp}-${item.format}`}
                   style={{
                     marginBottom: '10px',
                     borderBottom: '1px solid #eee',
