@@ -316,10 +316,38 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         ):
             del res["jsons"][destWid]
 
+    merged_titles = {
+        res["jsons"][wid].get("title", "")
+        for wid in res["jsons"]
+        if res["jsons"][wid].get("title", "")
+    }
+
+    for eid in sorted(envs.keys()):
+        eid_num = eidNums[eid]
+        for wid, win in envs[eid].get("jsons", {}).items():
+            win_title = win.get("title", "")
+            if win_title in merged_titles:
+                continue
+            new_wid = "{}_env_{}".format(eid, wid)
+            win_copy = copy.deepcopy(win)
+            win_copy["id"] = new_wid
+            label = "[{}] {}".format(eid_num, win_title) if win_title else "[{}]".format(eid_num)
+            win_copy["title"] = label
+            if isinstance(win_copy.get("layout"), dict):
+                win_copy["layout"]["title"] = label
+            if isinstance(win_copy.get("content"), dict) and isinstance(
+                win_copy["content"].get("layout"), dict
+            ):
+                win_copy["content"]["layout"]["title"] = label
+            win_copy["has_compare"] = True
+            res["jsons"][new_wid] = win_copy
+
     # create legend mapping environment names to environment numbers so one can
     # look it up for the new legend
     tableRows = [
-        "<tr> <td> {} </td> <td> {} </td> </tr>".format(v, eidNums[v]) for v in eidNums
+        "<tr> <th> env name </th> <th> label </th> </tr>"
+    ] + [
+        "<tr> <td> {} </td> <td> [{}] </td> </tr>".format(v, eidNums[v]) for v in eidNums
     ]
 
     tbl = """"<style>
