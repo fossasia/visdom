@@ -331,7 +331,11 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
             new_wid = "{}_env_{}".format(eid, wid)
             win_copy = copy.deepcopy(win)
             win_copy["id"] = new_wid
-            label = "[{}] {}".format(eid_num, win_title) if win_title else "[{}]".format(eid_num)
+            label = (
+                "[{}] {}".format(eid_num, win_title)
+                if win_title
+                else "[{}]".format(eid_num)
+            )
             win_copy["title"] = label
             if isinstance(win_copy.get("layout"), dict):
                 win_copy["layout"]["title"] = label
@@ -347,7 +351,8 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
     tableRows = [
         "<tr> <th> env name </th> <th> label </th> </tr>"
     ] + [
-        "<tr> <td> {} </td> <td> [{}] </td> </tr>".format(v, eidNums[v]) for v in eidNums
+        "<tr> <td> {} </td> <td> [{}] </td> </tr>".format(v, eidNums[v])
+        for v in eidNums
     ]
 
     tbl = """"<style>
