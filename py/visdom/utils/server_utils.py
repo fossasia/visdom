@@ -348,9 +348,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
 
     # create legend mapping environment names to environment numbers so one can
     # look it up for the new legend
-    tableRows = [
-        "<tr> <th> env name </th> <th> label </th> </tr>"
-    ] + [
+    tableRows = ["<tr> <th> env name </th> <th> label </th> </tr>"] + [
         "<tr> <td> {} </td> <td> [{}] </td> </tr>".format(v, eidNums[v])
         for v in eidNums
     ]
