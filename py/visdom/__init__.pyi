@@ -89,7 +89,7 @@ class Visdom:
         win: _OptStr = ...,
         env: _OptStr = ...,
         save_path: _OptStr = ...,
-        **save_kwargs: Any
+        save_kwargs: Optional[Mapping[Text, Any]] = ...,
     ) -> _SendReturn: ...
     def image(
         self, img: Tensor, win: _OptStr = ..., env: _OptStr = ..., opts: _OptOps = ...
