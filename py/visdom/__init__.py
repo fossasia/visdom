@@ -2142,9 +2142,10 @@ class Visdom(object):
                             area) instead of box glyphs. This avoids the visual
                             collision of whiskers when many series overlap.
                             (`boolean`; default = `False`)
-        - `opts.boxpoints`: show underlying data points alongside the box.
+        - `opts.boxpoints`: show underlying data points alongside the plot.
                             One of `'all'`, `'outliers'`, `'suspectedoutliers'`,
-                            or `False`. Only used when `fillarea=False`.
+                            or `False`. Used for box plots as `boxpoints` and
+                            for violin plots (`fillarea=True`) as Plotly `points`.
                             (`string`/`bool`; default = `'outliers'`)
         """
 
