@@ -54,7 +54,7 @@ jobs:
           echo "Target branch : $GITHUB_BASE_REF"
           git diff --name-only origin/$GITHUB_BASE_REF --
           echo 'jsfileschanged='$(git diff --name-only origin/$GITHUB_BASE_REF -- | grep '^js/*' | wc -l) >> $GITHUB_OUTPUT
-          echo 'Num js files changed='$(git diff --name-only origin/$GITHUB_BASE_REF -- | grep '^js/*' | wc -l)
+          echo 'Num js files changed='$(git diff --name-only origin/$GITHUB_BASE_REF -- | grep '^js/' | wc -l)
 
       - name: "Build Project (PR version)"
         run: |
