@@ -1105,19 +1105,23 @@ class Visdom(object):
                 ) from e
             raise
 
-    def plotlyplot(self, figure, win=None, env=None, save_path=None, **save_kwargs):
+    def plotlyplot(self, figure, win=None, env=None, save_path=None, save_kwargs=None):
         """
         This function draws a Plotly 'Figure' object. It does not explicitly
         take options as it assumes you have already explicitly configured the
         figure's layout.
 
         To save the figure as an image from code (without using the browser
-        download button), pass save_path (e.g. save_path="plot.png"). This
-        requires the optional 'kaleido' package (pip install kaleido).
+        download button), pass save_path (e.g. save_path="plot.png"). Optional
+        arguments for Plotly's write_image should be passed via save_kwargs,
+        e.g. save_kwargs={"width": 800, "height": 600}. This requires the
+        optional 'kaleido' package (pip install kaleido).
 
         Note: You must have the 'plotly' Python package installed to use
         this function.
         """
+        if save_kwargs is None:
+            save_kwargs = {}
         try:
             import plotly
 
