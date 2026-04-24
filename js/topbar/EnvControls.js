@@ -37,7 +37,7 @@ function EnvControls(props) {
     )
   );
 
-  var roots = potentialRoots.filter((x) => !potentialRoots.includes(x));
+  var roots = potentialRoots.filter((x) => !slist.includes(x));
 
   let env_options2 = slist.map((env, idx) => {
     
