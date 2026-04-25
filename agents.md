@@ -94,7 +94,7 @@ npm run test
 | `-eager_data_loading` | Pre-load all env JSON files on startup (vs. lazy) | `false` |
 | `-use_frontend_client_polling` | Frontend uses HTTP polling instead of WebSockets | `false` |
 
-The server sets `max_buffer_size=1024^3` (~1 GB) on the listening socket for large payloads.
+The server sets `max_buffer_size=1024**3` (~1 GB) on the listening socket for large payloads.
 
 ## Environment Variables
 
