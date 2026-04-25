@@ -405,7 +405,7 @@ Auto-responds to "please assign" / "assign me" comments explaining that the proj
   - **No console** (warn level).
   - **Plotly** declared as `readonly` global (loaded via CDN, not bundled).
   - `ignore-generated-and-nolint` plugin skips generated files.
-- **Prettier** (`.prettierrc`): default settings (empty config).
+- **Prettier** (`.prettierrc`): explicit formatting options are configured, including `singleQuote`, `semi`, and `trailingComma`.
 - **Babel** transpilation: `@babel/preset-env` + `@babel/preset-react` + `class-properties` plugin.
 - **Webpack 5** config:
   - Entry: `js/main.js`
