@@ -102,6 +102,8 @@ jobs:
           install: false
           start: visdom -port 8098 -env_path /tmp
           wait-on: 'http://localhost:8098'
+          # Timeout set to 10 minutes to allow server startup in CI environments
+          wait-on-timeout: 600
           wait-on-timeout: 600
           spec: cypress/integration/*.init.js
 
