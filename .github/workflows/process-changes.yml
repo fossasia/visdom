@@ -104,7 +104,6 @@ jobs:
           wait-on: 'http://localhost:8098'
           # Timeout set to 10 minutes to allow server startup in CI environments
           wait-on-timeout: 600
-          wait-on-timeout: 600
           spec: cypress/integration/*.init.js
 
       - uses: actions/upload-artifact@v4
