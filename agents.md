@@ -217,7 +217,7 @@ visdom/
 ├── package.json                         — Node.js deps and scripts (React 17, Webpack 5, Cypress 9, etc.)
 ├── yarn.lock                            — Yarn lockfile
 ├── .eslintrc                            — ESLint config: eslint:recommended + React + jsx-a11y + Prettier
-├── .prettierrc                          — Prettier config (empty = defaults)
+├── .prettierrc                          — Prettier config (singleQuote, semi, trailingComma, tabWidth)
 ├── .pre-commit-config.yaml              — Pre-commit hooks: Black, Prettier, whitespace, YAML, large files
 ├── test-requirements.txt                — Python test deps: matplotlib, numpy, av, torch
 ├── download.sh                          — Legacy manual script download (superseded by build.py)
