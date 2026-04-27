@@ -180,7 +180,10 @@ class Application(tornado.web.Application):
                     )
                     continue
 
-                state[eid] = {"jsons": env_data["jsons"], "reload": env_data["reload"]}
+                jsons = env_data.get("jsons", {})
+                reload_data = env_data.get("reload", {})
+
+                state[eid] = {"jsons": jsons, "reload": reload_data}
             else:
                 state[eid] = LazyEnvData(env_path_file)
 
