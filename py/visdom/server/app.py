@@ -180,9 +180,19 @@ class Application(tornado.web.Application):
                     )
                     continue
 
-                jsons = env_data.get("jsons", {})
-                reload_data = env_data.get("reload", {})
-
+                jsons = env_data.get("jsons")
+                reload_data = env_data.get("reload")
+                
+                if jsons is None or reload_data is None:
+                  logging.warning(
+                     f"Incomplete environment data in {env_path_file}, using defaults."
+                  )
+                
+                # Missing 'jsons' or 'reload' keys indicate incomplete/corrupt env data.
+                # We default to empty values to avoid crashing while still logging a warning.
+                jsons = jsons or {}
+                reload_data = reload_data or {}
+                
                 state[eid] = {"jsons": jsons, "reload": reload_data}
             else:
                 state[eid] = LazyEnvData(env_path_file)
