@@ -36,7 +36,7 @@ const ApiProvider = ({ children }) => {
   // Send a low-level message to the server
   const sendSocketMessage = (data) => {
     if (!_socket.current) {
-      // TODO: error? warn?
+      console.error('[WebSocket] Cannot send message: socket is not connected');
       return;
     }
 
@@ -51,6 +51,7 @@ const ApiProvider = ({ children }) => {
     }
 
     const _onConnect = () => {
+      console.log('[WebSocket] Connection established');
       setConnected(true);
     };
     const _onDisconnect = () => {
@@ -82,14 +83,30 @@ const ApiProvider = ({ children }) => {
 
     socket.onmessage = handleMessage;
     socket.onopen = _onConnect;
-    socket.onerror = socket.onclose = _onDisconnect;
+    socket.onopen = () => {
+      console.log('[WebSocket] Connected');
+      _onConnect();
+    };
+    
+    socket.onerror = (error) => {
+      console.error('[WebSocket] Error:', error);
+    };
+    
+    socket.onclose = (event) => {
+      console.warn('[WebSocket] Connection closed:', event);
+      console.log('[WebSocket] Attempting to reconnect...');
+      _onDisconnect();
+    };
     _socket.current = socket;
   };
 
   // Close the server connection and reset the _socket ref
   const disconnect = () => {
-    _socket.current.close();
-    _socket.current = null;
+    if (_socket.current) {
+      _socket.current.close();
+      _socket.current = null;
+      console.log('[WebSocket] Disconnected');
+}
   };
 
   // ------------------ //
