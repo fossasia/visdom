@@ -331,7 +331,7 @@ Most plotting methods support `update` parameter (`'append'`, `'replace'`, `'rem
   - `view/layouts.json` — Saved window layout positions/sizes
   - `COOKIE_SECRET` — Session cookie secret file (when auth enabled)
 - **Lazy loading:** `LazyEnvData` class (`py/visdom/utils/server_utils.py`) implements `collections.abc.Mapping` to defer JSON parsing until first access. Use `-eager_data_loading` to pre-load all envs at startup.
-- **Env naming:** `/` characters in environment names are escaped to `_` (see `escape_eid()`). Environments are hierarchically organized by the first `_` in the UI.
+- **Env naming:** `/` characters in environment names are escaped to `_` (see `escape_eid()`). Environments are hierarchically organized by the first `_` in the UI. Never use raw user input as a filename — always pass through `escape_eid()` and verify the result is within `env_path`.
 - **User CSS:** Platform-specific config directories:
   - Linux: `~/.config/visdom/style.css`
   - macOS: `~/Library/Preferences/visdom/style.css`
@@ -390,8 +390,38 @@ Auto-responds to "please assign" / "assign me" comments explaining that the proj
 
 - Follow **PEP 8**. Format with **Black** (`black py`, version `23.1`). CI enforces this.
 - **80 character** line length.
-- **Apache License header** on all new files (see existing files for template).
-- Python **>= 3.8** compatibility (uses `collections.abc` with fallback to `collections`).
+- **Apache License header** on all new files:
+
+  **Python:**
+  ```python
+  #!/usr/bin/env python3
+
+  # Copyright 2017-present, The Visdom Authors
+  # All rights reserved.
+  #
+  # This source code is licensed under the license found in the
+  # LICENSE file in the root directory of this source tree.
+  ```
+
+  **JavaScript:**
+  ```javascript
+  /**
+   * Copyright 2017-present, The Visdom Authors
+   * All rights reserved.
+   *
+   * This source code is licensed under the license found in the
+   * LICENSE file in the root directory of this source tree.
+   *
+   */
+  ```
+- Python **>= 3.8** compatibility. Every file that uses `Mapping` or `Sequence` must use this pattern:
+
+  ```python
+  try:
+      from collections.abc import Mapping, Sequence  # Python >= 3.8
+  except ImportError:
+      from collections import Mapping, Sequence  # Python <= 3.7
+  ```
 - All `Visdom` methods use `@pytorch_wrap` decorator for automatic PyTorch tensor → numpy conversion.
 - `assert` statements are used for input validation in the client (not production server paths).
 - Prefer `warnings.warn()` via `warn_once()` for deprecation and one-time warnings.
@@ -433,6 +463,216 @@ Auto-responds to "please assign" / "assign me" comments explaining that the proj
 - **CI Python versions:** 3.8, 3.9, 3.10 (matrix strategy).
 - **Regression validation:** Run `python example/demo.py` on both your branch and a clean branch, visually confirm no differences.
 - **Test dependencies:** `test-requirements.txt` (matplotlib, numpy, av, torch-cpu). CI also uses the Cypress GitHub Action.
+
+## Common Pitfalls and Gotchas
+
+AI agents **must** be aware of these project-specific traps:
+
+### Handler Initialization Pattern
+
+Every HTTP handler in `web_handlers.py` manually copies attributes from the `app` object in `initialize()`. This is **not** DRY — it's a known pattern. When adding a new handler:
+
+```python
+class MyHandler(BaseHandler):
+    def initialize(self, app):
+        self.state = app.state
+        self.subs = app.subs
+        self.sources = app.sources
+        self.port = app.port
+        self.env_path = app.env_path
+        self.login_enabled = app.login_enabled
+```
+
+Do **not** refactor this to use `self.app` without explicit approval — it would affect all existing handlers.
+
+### Mutable State in `main.js` (Frontend)
+
+The frontend `main.js` contains non-conventional React patterns (marked with `TODO` comments). Specifically:
+
+```javascript
+// Direct mutation of storeData.layout (lines ~553, ~568):
+storeData.layout = layout;  // bypasses React state
+```
+
+This is intentional for performance with `relayout()`. Do not "fix" this without understanding the full layout pipeline.
+
+### `check_auth` Decorator
+
+All HTTP handler `post()`/`get()` methods must use `@check_auth` from `server_utils.py`. Forgetting this creates an authentication bypass.
+
+### WebSocket vs Polling Duality
+
+Every socket feature must work in **both** WebSocket and polling modes. The CI tests both (`funcitonal-test` and `funcitonal-test-polling` jobs). If you add WebSocket message handling, verify it also works via the `*Wrap` polling handlers.
+
+## Security Considerations
+
+### XSS via `TextPane`
+
+`TextPane.js` renders user content using `innerHTML`. Any HTML/JS sent via `vis.text()` is rendered directly in the browser. This is **by design** (users need to embed rich HTML), but:
+- Never expose a Visdom server to untrusted networks without authentication (`-enable_login`)
+- Be cautious when accepting text content from external sources
+
+### Path Traversal in Environment Names
+
+Environment names are used to construct filesystem paths (`{env_path}/{eid}.json`). The `escape_eid()` function only replaces `/` with `_`. When adding new file operations:
+- Always sanitize environment IDs
+- Never construct paths from raw user input without validation
+- Use `os.path.join()` and verify the result is within `env_path`
+
+### Cookie Security
+
+- Passwords are **double SHA256-hashed**: `hash_password(hash_password(password))`
+- Cookie secret is stored in plaintext at `~/.visdom/COOKIE_SECRET`
+- SJCL handles client-side hashing in the browser login form
+- Never log or expose password hashes or cookie secrets
+
+### Read-Only Mode
+
+When `-readonly` is set, the `self.readonly` flag on `Application` propagates to socket handlers. The `AnySocketHandlerOrWrapper.on_message()` method returns early if `self.readonly`. Ensure any new write operations respect this flag.
+
+## State Management Internals
+
+### Server State (`py/visdom/server/app.py`)
+
+The `Application` object holds all server state:
+
+```
+app.state     = {env_id: {"jsons": {win_id: window_dict}, "reload": {...}}}
+app.subs      = {session_id: SocketHandler}     # read-only browser connections
+app.sources   = {session_id: VisSocketHandler}  # write-enabled Python client connections
+app.layouts   = "JSON string"                   # serialized view layouts
+```
+
+- **`state[eid]["jsons"]`** — Dict of window ID → window data (the actual visualization content)
+- **`state[eid]["reload"]`** — Dict of window ID → layout position (restored on page reload)
+- **`LazyEnvData`** — Wraps `state[eid]` to defer JSON parsing until first access. Implements `Mapping` but also supports `__setitem__`. When modifying state, always access through the dict interface, never check `isinstance(state[eid], LazyEnvData)` unless serializing.
+
+### Frontend State (`js/main.js`)
+
+```
+storeData.panes   = {pane_id: pane_object}   # all visible panes
+storeData.layout  = [{i, x, y, w, h, ...}]  # ReactGridLayout items
+storeMeta.envList = [env_id, ...]            # available environments
+storeMeta.layoutLists = Map(env → Map(view → Map(paneID → position)))
+```
+
+Pane updates are **batched** via `addPaneBatched()` → `processBatchedPanes()` using a 100ms `setTimeout`. This prevents re-renders for each individual window when loading environments with many panes.
+
+### Message Flow for a New Window
+
+```
+1. Python: vis.text("hello")
+2. Client: POST /events  →  {data: [{type: "text", content: "hello"}], eid: "main"}
+3. Server: PostHandler.post()  →  window(req)  →  register_window(self, p, eid)
+4. Server: broadcast(self, p, eid)  →  sends window dict to all matching subs
+5. Browser: handleMessage(evt)  →  case "window"  →  addPaneBatched(cmd)
+6. Browser: processBatchedPanes()  →  processPane()  →  setStoreData()  →  re-render
+```
+
+## Step-by-Step Recipes
+
+### Adding a New Pane Type
+
+1. **Python Client** (`py/visdom/__init__.py`):
+   - Add a new method to the `Visdom` class with `@pytorch_wrap`
+   - Format data as `{"data": [{"type": "my_type", "content": ...}], ...}`
+   - Call `self._send(msg)` to POST to `/events`
+
+2. **Server** (`py/visdom/utils/server_utils.py`):
+   - Add a new `elif ptype == "my_type":` branch in the `window()` function (around line 202)
+   - Define what fields are stored in the window dict
+
+3. **Frontend** (`js/panes/`):
+   - Create `MyPane.js` following the pattern in `TextPane.js` or `ImagePane.js`
+   - Use `forwardRef` + `React.memo` pattern from `Pane.js`
+   - Import and register in `js/settings.js` under the `PANES` dict
+
+4. **Registration** (`js/settings.js`):
+   - Add `my_type: MyPane` to the `PANES` object
+   - Add default size to `PANE_SIZE`: `my_type: [width, height]`
+
+5. **Type stubs** (`py/visdom/__init__.pyi`):
+   - Add the method signature for type checking
+
+6. **Demo** (`example/components/`):
+   - Create a demo script exercising the new pane type
+   - Import it in `example/demo.py`
+
+7. **Tests** (`cypress/integration/`):
+   - Add a Cypress test file for the new pane type
+
+### Adding a New API Endpoint
+
+1. **Handler** (`py/visdom/server/handlers/web_handlers.py`):
+   - Create a new handler class extending `BaseHandler`
+   - Implement `initialize(self, app)` copying required app attributes
+   - Implement `post()` with `@check_auth` decorator
+   - Use the `wrap_func` static method pattern if the endpoint needs polling support
+
+2. **Route** (`py/visdom/server/app.py`):
+   - Add the route to the `handlers` list in `Application.__init__()` (lines 97–116)
+   - Use the pattern: `(r"%s/my_endpoint" % self.base_url, MyHandler, {"app": self})`
+   - Place it **before** the catch-all `IndexHandler` route (must be last)
+
+3. **Client** (`py/visdom/__init__.py`):
+   - Add a method calling `self._send(msg, endpoint="my_endpoint")`
+
+### Adding a New WebSocket Command
+
+1. **Socket handler** (`py/visdom/server/handlers/socket_handlers.py`):
+   - Add `elif cmd == "my_command":` in `AnySocketHandlerOrWrapper.on_message()`
+   - Use `broadcast()` to push updates to subscribers
+   - Use `send_to_sources()` to push events to Python clients
+
+2. **Frontend** (`js/api/ApiProvider.js`):
+   - Add a `sendMyCommand` function that calls `sendSocketMessage({cmd: 'my_command', ...})`
+   - Export it via the `ApiContext.Provider` value
+
+3. **Message handling** (`js/api/ApiProvider.js`):
+   - Add a `case 'my_response':` in `handleMessage()` switch statement
+
+## Known Technical Debt
+
+Agents should be aware of these documented TODOs and architectural issues:
+
+| Location | Issue | Impact |
+|----------|-------|--------|
+| `web_handlers.py:53-58` | Handler init logic should be abstracted; env/layout parsing should move to data_model | All handlers duplicate initialization code |
+| `web_handlers.py:127` | `jsonpatch.make_patch` is not high-performance | Update operations may be slow for large windows |
+| `web_handlers.py:139` | Embeddings updates bypass the regular update flow | Embeddings are expensive to update |
+| `socket_handlers.py:44` | Client-server and visdom-server socket edges need standardization | Duplicate message handling logic |
+| `base_handlers.py:80` | No `error.html` template exists | Debug errors may not render properly |
+| `main.js:553,568` | Direct state mutation bypasses React | Non-conventional but intentional for relayout perf |
+| `ApiProvider.js:117` | Typo: `cmd.commmand` (triple 'm') in window_update detection | May cause subtle bugs (present since original code) |
+| `__init__.py:49` | Python 2 assertion still present | Could be removed (Python >= 3.8 is required) |
+| `__init__.py:767-769` | `raise_exceptions` deprecation warning references July 2018 | Stale warning, never updated |
+
+## Debugging Tips
+
+### Server-Side
+
+- **Increase logging**: `visdom -logging_level DEBUG` shows all WebSocket messages and handler activity
+- **Inspect state**: The `DataHandler` at `/win_data` can dump raw window JSON for any environment
+- **Clean state**: Use `visdom -env_path /tmp` to start with empty environments (no interference from saved data)
+- **Port conflicts**: Default port 8097 may conflict; use `-port <PORT>` to change
+
+### Frontend
+
+- **WebSocket messages**: Open browser DevTools → Network → WS tab to inspect real-time messages between browser and server
+- **React DevTools**: `react-devtools` is in `package.json` dependencies for development inspection
+- **Source maps**: `webpack.dev.js` generates source maps; use `npm run dev` for debuggable builds
+- **Plotly**: `Plotly` is a global — access it in the browser console to inspect chart state
+
+### Common Error States
+
+| Symptom | Likely Cause | Fix |
+|---------|-------------|-----|
+| Blue screen, no visualizations | CDN dependencies failed to download | Check `py/visdom/static/` for missing files; re-run `download_scripts()` or `visdom` to re-download |
+| "Socket refused connection, running socketless" | Server not running or wrong port | Start server, check port matches client config |
+| `win does not exist` on update | Window was closed or env was cleared | Check `vis.win_exists()` before updating |
+| Panes appear but layout is broken | `localStorage` has stale layout data | Clear browser localStorage or use a fresh env |
+| Visual regression test failures | Pixel differences from font rendering or timing | Compare screenshots manually; may need `test:init` re-baseline |
+| `@generated` lint errors | Accidentally modified compiled files | Discard changes to `py/visdom/static/`; let CI rebuild |
 
 ## Commits and PRs
 
@@ -555,6 +795,42 @@ Downloaded on first server run to `py/visdom/static/`:
 - react-resizable CSS, react-grid-layout CSS
 
 > **Note:** The bundled React (in `static/`) is 16.2.0 for runtime, while the webpack-compiled `main.js` is built with React 17.0.2 from `node_modules`. Both are loaded in the browser. This is a known legacy setup.
+
+## Dependency Management
+
+### Automated Updates (Dependabot)
+
+Dependabot is configured in `.github/dependabot.yml` to automatically open PRs for:
+
+| Ecosystem | Frequency | Groups |
+|-----------|-----------|--------|
+| `npm` (package.json) | Daily | Minor + patch batched together |
+| `pip` (setup.py, test-requirements.txt) | Daily | Minor + patch batched together |
+| `github-actions` (workflows) | Daily | Individual PRs |
+
+Major version bumps get individual PRs for careful review of breaking changes.
+
+### Adding a New Dependency
+
+**Python** — Add to `requirements` list in `setup.py` (line 40). Consider:
+- Is it truly necessary? Visdom keeps dependencies minimal.
+- Does it work on Python >= 3.8?
+- Is `pillow-simd` auto-detection affected? (line 50)
+
+**JavaScript** — Use `yarn add <pkg>` (updates `package.json` + `yarn.lock`). Consider:
+- Does it increase the Webpack bundle size significantly?
+- Is it tree-shakeable?
+- CDN-loaded deps (Plotly, jQuery, Bootstrap) are **not** in `package.json` — they're downloaded by `build.py`
+
+**CDN dependencies** — Managed in `py/visdom/server/build.py`. Adding new CDN deps requires updating `download_scripts()` and the corresponding `<script>` tags in the HTML template.
+
+### Version Pinning Philosophy
+
+- Python runtime deps: loosely pinned (`numpy>=1.8`, `tornado` with no pin)
+- Python dev/test deps: loosely pinned in `test-requirements.txt`
+- JS deps: caret ranges (`^17.0.2`) allowing minor/patch updates
+- Pre-commit hooks: pinned to specific versions (Black `22.10.0`, Prettier `v2.6.2`)
+- CI: Node 16, Python 3.8/3.9/3.10 matrix
 
 ## References
 
