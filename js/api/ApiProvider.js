@@ -35,8 +35,8 @@ const ApiProvider = ({ children }) => {
 
   // Send a low-level message to the server
   const sendSocketMessage = (data) => {
-    if (!_socket.current) {
-      console.error('[WebSocket] Cannot send message: socket is not connected');
+    if (!_socket.current || _socket.current.readyState !== WebSocket.OPEN) {
+      console.error('[WebSocket] Cannot send message: socket not connected');
       return;
     }
 
@@ -46,7 +46,7 @@ const ApiProvider = ({ children }) => {
 
   // Establish a connection to the server
   const connect = () => {
-    if (_socket.current) {
+    if (_socket.current && _socket.current.readyState === WebSocket.OPEN) {
       return;
     }
 
@@ -106,7 +106,7 @@ const ApiProvider = ({ children }) => {
       _socket.current.close();
       _socket.current = null;
       console.log('[WebSocket] Disconnected');
-}
+    }
   };
 
   // ------------------ //
