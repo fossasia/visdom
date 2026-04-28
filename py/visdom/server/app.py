@@ -131,6 +131,9 @@ class Application(tornado.web.Application):
                 RuntimeWarning,
             )
             return
+        layout_dir = os.path.join(self.env_path, "view")
+        ensure_dir_exists(layout_dir)
+
         layout_filepath = os.path.join(self.env_path, "view", LAYOUT_FILE)
         with open(layout_filepath, "w") as fn:
             fn.write(self.layouts)
