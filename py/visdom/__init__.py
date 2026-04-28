@@ -145,7 +145,7 @@ def _title2str(opts):
     if opts.get("title"):
         if isnum(opts.get("title")):
             title = str(opts.get("title"))
-            logger.warn("Numerical title %s has been casted to a string" % title)
+            logger.warning("Numerical title %s has been casted to a string" % title)
             opts["title"] = title
             return opts
         else:
