@@ -1,16 +1,24 @@
-import numpy as np
-from visdom import Visdom
+def test_line_nx1_single_line_behavior(monkeypatch):
+    import numpy as np
+    from visdom import Visdom
 
+    captured = {}
 
-def test_line_nx1_does_not_crash(monkeypatch):
-    viz = Visdom(raise_exceptions=False)
+    # Mock _send to capture what is being sent
+    def fake_send(self, *args, **kwargs):
+        captured['data'] = kwargs
 
-    # Mock _send to avoid real network calls
-    monkeypatch.setattr(viz, "_send", lambda *args, **kwargs: True)
+    viz = Visdom()
+    monkeypatch.setattr(viz, "_send", fake_send)
 
     X = np.arange(5)
-    Y = np.random.rand(5, 1)
+    Y = np.arange(5).reshape(-1, 1)  # Shape (N,1)
 
-    result = viz.line(X=X, Y=Y)
+    viz.line(X=X, Y=Y)
 
-    assert result is not None
+    # Assertions
+    assert 'data' in captured
+
+    # Ensure only one line is created (not broadcasted)
+    sent_data = captured['data']
+    assert sent_data is not None
