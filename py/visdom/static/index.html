@@ -51,7 +51,7 @@ LICENSE file in the root directory of this source tree.
       '{{escape(item)}}',
       {% end %}
     ];
-    var TAGS_INDEX = {% raw tags_index %};
+    var TAGS_INDEX = {% raw tags_index.replace('</', '<\\/') %};
     var ACTIVE_ENV = '{{escape(active_item)}}';
     var USER = '{{escape(user)}}';
     var USE_POLLING = ('{{wrap_socket}}' == 'True');

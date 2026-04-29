@@ -8,12 +8,18 @@ import threading
 import subprocess
 import unittest
 from visdom import Visdom
-
+import socket
 
 class TestIntegrationTags(unittest.TestCase):
+    def _get_free_port(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            sock.listen(1)
+            return sock.getsockname()[1]
+
     def setUp(self):
         self.test_dir = tempfile.mkdtemp()
-        self.port = 8098  # Use a different port than default
+        self.port = self._get_free_port()
 
         # Start visdom server in a background process with correct PYTHONPATH
         env = os.environ.copy()
@@ -28,8 +34,8 @@ class TestIntegrationTags(unittest.TestCase):
                 "-port",
                 str(self.port),
             ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             env=env,
         )
         time.sleep(3)  # Wait for server to start
@@ -37,11 +43,11 @@ class TestIntegrationTags(unittest.TestCase):
 
     def tearDown(self):
         self.server_process.terminate()
-        stdout, stderr = self.server_process.communicate()
-        print("--- SERVER STDOUT ---")
-        print(stdout.decode(errors="replace"))
-        print("--- SERVER STDERR ---")
-        print(stderr.decode(errors="replace"))
+        try:
+            self.server_process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.server_process.kill()
+            self.server_process.communicate()
         shutil.rmtree(self.test_dir)
 
     def test_set_get_tags(self):
@@ -122,7 +128,11 @@ class TestIntegrationTags(unittest.TestCase):
 
         # Shutdown server
         self.server_process.terminate()
-        self.server_process.communicate()
+        try:
+            self.server_process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.server_process.kill()
+            self.server_process.communicate()
 
         # Start new server on same port and directory
         env_vars = os.environ.copy()
@@ -137,8 +147,8 @@ class TestIntegrationTags(unittest.TestCase):
                 "-port",
                 str(self.port),
             ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             env=env_vars,
         )
         time.sleep(3)

@@ -115,8 +115,9 @@ function PropertyItem(props) {
             type="checkbox"
             checked={value}
             onChange={() => updateValue(propId, !value)}
+            aria-label={`Toggle ${propId}`}
+            style={{ margin: '0 4px' }}
           />
-          <span className="sr-only">Checkbox</span>
         </label>
       );
     case 'select':

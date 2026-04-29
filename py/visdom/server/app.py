@@ -184,7 +184,7 @@ class Application(tornado.web.Application):
                     with open(env_path_file, "r") as fn:
                         env_data = tornado.escape.json_decode(fn.read())
                 except Exception as e:
-                    logging.warn(
+                    logging.warning(
                         "Failed loading environment json: {} - {}".format(
                             env_path_file, repr(e)
                         )
@@ -208,7 +208,7 @@ class Application(tornado.web.Application):
                 with open(index_path, "r") as f:
                     return json.load(f)
             except Exception:
-                logging.warn(f"Failed to load tag index at {index_path}")
+                logging.warning(f"Failed to load tag index at {index_path}")
         return {}
 
     def save_tag_index(self):
@@ -225,7 +225,7 @@ class Application(tornado.web.Application):
         except Exception:
             import traceback
 
-            logging.warn(
+            logging.warning(
                 f"Failed to save tag index at {index_path}: {traceback.format_exc()}"
             )
 

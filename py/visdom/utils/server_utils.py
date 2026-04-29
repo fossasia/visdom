@@ -24,7 +24,7 @@ import tempfile
 import threading
 import time
 import tornado.escape
-from collections import OrderedDict, defaultdict
+from collections import OrderedDict
 
 try:
     # for after python 3.8
@@ -160,7 +160,7 @@ def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
             with _get_write_lock(env_id):
                 env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
                 if isinstance(state[env_id], LazyEnvData):
-                    data = json.dumps(state[env_id]._raw_dict)
+                    data = json.dumps(dict(state[env_id]))
                 else:
                     data = json.dumps(state[env_id])
                 atomic_save(env_path_file, data)

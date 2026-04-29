@@ -11,8 +11,8 @@ Demo script to showcase the Experiment Tagging system.
 This demo shows how to set, append, and retrieve tags for different environments.
 """
 
-import time
 from visdom import Visdom
+
 
 def run_tags_demo():
     print("Connecting to Visdom...")

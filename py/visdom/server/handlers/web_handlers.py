@@ -715,6 +715,12 @@ class TagsHandler(BaseHandler):
         )
         eid = extract_eid(args)
         tags = args.get("tags", [])
+        
+        if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
+            self.set_status(400)
+            self.write("tags must be a list of strings")
+            return
+            
         append = args.get("append", False)
 
         # Fix 8: Pre-trigger lazy load BEFORE acquiring the lock to
@@ -751,7 +757,7 @@ class TagsHandler(BaseHandler):
         # Broadcast update outside the lock to minimise hold time
         broadcast_tags(self, eid, tags_snapshot)
 
-        # Async save env to disk
+        # Save env to disk synchronously
         serialize_env(self.state, [eid], env_path=self.env_path)
 
         self.write(json.dumps(tags_snapshot))
