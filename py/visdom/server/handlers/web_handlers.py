@@ -51,6 +51,9 @@ from visdom.utils.server_utils import (
 )
 from visdom.server.handlers.base_handlers import BaseHandler
 
+MAX_TAG_LENGTH = 50
+MAX_TAGS_PER_ENV = 20
+
 
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
@@ -720,8 +723,27 @@ class TagsHandler(BaseHandler):
             self.set_status(400)
             self.write("tags must be a list of strings")
             return
+
+        for t in tags:
+            if len(t) > MAX_TAG_LENGTH:
+                self.set_status(400)
+                self.write(f"Tag too long (max {MAX_TAG_LENGTH} characters)")
+                return
             
         append = args.get("append", False)
+
+        current_tags = []
+        if append:
+            if eid in self.state:
+                current_tags = self.state[eid].get("tags", [])
+            else:
+                current_tags = self.app.tags.get(eid, [])
+
+        proposed_tags = list(OrderedDict.fromkeys(current_tags + tags))
+        if len(proposed_tags) > MAX_TAGS_PER_ENV:
+            self.set_status(400)
+            self.write(f"Too many tags for this environment (max {MAX_TAGS_PER_ENV})")
+            return
 
         # Fix 8: Pre-trigger lazy load BEFORE acquiring the lock to
         # avoid file I/O under mutex.

@@ -13,6 +13,9 @@ import ReactModal from 'react-modal';
 import ApiContext from '../api/ApiContext';
 import { MODAL_STYLE } from '../settings';
 
+const MAX_TAG_LENGTH = 50;
+const MAX_TAGS_PER_ENV = 20;
+
 function EnvModal(props) {
   const { connected } = useContext(ApiContext);
   const {
@@ -70,6 +73,15 @@ function EnvModal(props) {
 
   // rendering
   // ---------
+
+  const currentTagsList = tagText
+    .split(',')
+    .map((tag) => tag.trim())
+    .filter((tag) => tag.length > 0);
+  
+  const isTagTooLong = currentTagsList.some(tag => tag.length > MAX_TAG_LENGTH);
+  const isTooManyTags = currentTagsList.length > MAX_TAGS_PER_ENV;
+  const isInvalid = isTagTooLong || isTooManyTags;
 
   return (
     <ReactModal
@@ -153,7 +165,7 @@ function EnvModal(props) {
           disabled={!connected || saveStatus === 'saving'}
           value={tagText}
           onChange={(ev) => setTagText(ev.target.value)}
-          style={{ width: '250px' }}
+          style={{ width: '250px', borderColor: isInvalid ? '#d9534f' : '' }}
         />
         <button
           className={`btn ${
@@ -163,7 +175,7 @@ function EnvModal(props) {
               ? 'btn-danger'
               : 'btn-default'
           }`}
-          disabled={!connected || saveStatus === 'saving' || !tagEnv}
+          disabled={!connected || saveStatus === 'saving' || !tagEnv || isInvalid}
           onClick={handleTagsSave}
         >
           {saveStatus === 'saving'
@@ -175,6 +187,12 @@ function EnvModal(props) {
             : 'Update Tags'}
         </button>
       </div>
+      {isInvalid && (
+        <div style={{ color: '#d9534f', fontSize: '12px', marginTop: '5px' }}>
+          {isTagTooLong && <span>Tag exceeds maximum length of {MAX_TAG_LENGTH} characters. </span>}
+          {isTooManyTags && <span>Environment exceeds maximum limit of {MAX_TAGS_PER_ENV} tags. </span>}
+        </div>
+      )}
     </ReactModal>
   );
 }

@@ -165,5 +165,32 @@ class TestIntegrationTags(unittest.TestCase):
         self.assertCountEqual(appended, ["old_tag", "new_tag"])
 
 
+    def test_tag_constraints(self):
+        """Test that the backend enforces max tag length and max tags per env."""
+        env = "env_constraints"
+
+        # 1. Test max tag length
+        long_tag = "a" * 51
+        res = self.viz.set_tags([long_tag], env=env)
+        # Should return an error string
+        self.assertIsInstance(res, str)
+        self.assertIn("Tag too long", res)
+
+        # 2. Test max tags per env
+        many_tags = [f"tag_{i}" for i in range(21)]
+        res = self.viz.set_tags(many_tags, env=env)
+        self.assertIsInstance(res, str)
+        self.assertIn("Too many tags", res)
+
+        # 3. Test max tags per env with append
+        self.viz.set_tags([f"tag_{i}" for i in range(15)], env=env)
+        res = self.viz.set_tags([f"tag_extra_{i}" for i in range(10)], env=env, append=True)
+        self.assertIsInstance(res, str)
+        self.assertIn("Too many tags", res)
+
+        # Ensure the append did not partially succeed
+        current_tags = self.viz.get_tags(env=env)
+        self.assertEqual(len(current_tags), 15)
+
 if __name__ == "__main__":
     unittest.main()
