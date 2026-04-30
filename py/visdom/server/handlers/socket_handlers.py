@@ -27,6 +27,7 @@ from visdom.utils.shared_utils import get_rand_id
 from visdom.utils.server_utils import (
     check_auth,
     broadcast_envs,
+    broadcast_tags,
     sync_tags,
     serialize_env,
     send_to_sources,
@@ -119,11 +120,22 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
 
         elif cmd == "delete_env":
             if "eid" in msg:
-                logging.info(f"closing environment {msg['eid']}")
-                del self.state[msg["eid"]]
+                eid = msg["eid"]
+                logging.info(f"closing environment {eid}")
+                if eid in self.state:
+                    del self.state[eid]
                 if self.env_path is not None:
-                    p = os.path.join(self.env_path, "{0}.json".format(msg["eid"]))
-                    os.remove(p)
+                    p = os.path.join(self.env_path, "{0}.json".format(eid))
+                    if os.path.exists(p):
+                        os.remove(p)
+
+                # Clean up orphaned tags
+                with self.app.index_lock:
+                    if eid in self.app.tags:
+                        del self.app.tags[eid]
+                        self.app.save_tag_index()
+
+                broadcast_tags(self, eid, [])
                 broadcast_envs(self)
 
         elif cmd == "save_layouts":

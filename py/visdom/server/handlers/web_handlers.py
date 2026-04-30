@@ -413,6 +413,7 @@ class CloseHandler(BaseHandler):
 
 class DeleteEnvHandler(BaseHandler):
     def initialize(self, app):
+        self.app = app
         self.state = app.state
         self.subs = app.subs
         self.sources = app.sources
@@ -424,10 +425,20 @@ class DeleteEnvHandler(BaseHandler):
     def wrap_func(handler, args):
         eid = extract_eid(args)
         if eid is not None:
-            del handler.state[eid]
+            if eid in handler.state:
+                del handler.state[eid]
             if handler.env_path is not None:
                 p = os.path.join(handler.env_path, "{0}.json".format(eid))
-                os.remove(p)
+                if os.path.exists(p):
+                    os.remove(p)
+                    
+            # Clean up orphaned tags
+            with handler.app.index_lock:
+                if eid in handler.app.tags:
+                    del handler.app.tags[eid]
+                    handler.app.save_tag_index()
+
+            broadcast_tags(handler, eid, [])
             broadcast_envs(handler)
 
     @check_auth

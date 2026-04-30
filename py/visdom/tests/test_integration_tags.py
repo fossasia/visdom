@@ -192,5 +192,29 @@ class TestIntegrationTags(unittest.TestCase):
         current_tags = self.viz.get_tags(env=env)
         self.assertEqual(len(current_tags), 15)
 
+    def test_orphan_tag_cleanup(self):
+        """Test that deleting an environment also removes its tags from the index."""
+        env = "orphan_env_test"
+        self.viz.set_tags(["should_be_deleted"], env=env)
+        
+        # Verify it's there
+        tags_before = self.viz.get_tags(env=env)
+        self.assertEqual(tags_before, ["should_be_deleted"])
+        
+        time.sleep(0.5) # Wait for save
+        index_path = os.path.join(self.test_dir, "tags_index.json")
+        with open(index_path, "r") as f:
+            index_before = json.load(f)
+        self.assertIn(env, index_before)
+
+        # Delete it
+        self.viz.delete_env(env)
+        time.sleep(0.5)  # wait for socket message to be processed
+        
+        # Verify it's gone from tags_index.json
+        with open(index_path, "r") as f:
+            index_after = json.load(f)
+        self.assertNotIn(env, index_after)
+
 if __name__ == "__main__":
     unittest.main()
