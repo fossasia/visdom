@@ -298,3 +298,9 @@ button[title="smooth lines"] {
 button[title="smooth lines"].active {
   color: red;
 }
+
+/* Fix horizontal scrollbar for long environment tags in dropdown */
+.rc-tree-select-dropdown .rc-tree-select-tree-title {
+  white-space: normal;
+  word-break: break-word;
+}
