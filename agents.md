@@ -63,7 +63,7 @@ On first run, visdom downloads external JS/CSS/font dependencies from CDNs (Plot
 | `npm run dev` / `yarn run dev` | Build frontend (watch mode, auto-rebuild) |
 | `npm run lint` | Lint JavaScript (ESLint) |
 | `npm run lint:fix` | Lint + auto-fix JavaScript |
-| `black py` | Format Python (requires `black==23.1`) |
+| `black py` | Format Python (requires `black==22.10.0`) |
 | `pre-commit run --all-files` | Run all pre-commit hooks |
 | `npm run test:init` | Generate Cypress baseline screenshots |
 | `npm run test` | Run all Cypress tests (CLI) |
@@ -363,7 +363,7 @@ Set `offline=True` and `log_to_filename='path/to/log'` on the `Visdom` client. A
 | Job | Description |
 |-----|-------------|
 | **lint-js** | ESLint check (Node 16) |
-| **lint-py** | Black formatting check (v23.1.0 via `psf/black` action) |
+| **lint-py** | Black formatting check (v22.10.0 via `psf/black` action) |
 | **install-and-build** | Build JS from PR, upload `main.js` + `main.js.map` as artifacts |
 | **visual-regression-test-init** | Cypress `test:init` against **base branch** build (baseline screenshots) |
 | **visual-regression-test** | Cypress `screenshots.js` against **PR** build (compare to baseline) |
@@ -388,7 +388,7 @@ Auto-responds to "please assign" / "assign me" comments explaining that the proj
 
 ### Python
 
-- Follow **PEP 8**. Format with **Black** (`black py`, version `23.1`). CI enforces this.
+- Follow **PEP 8**. Format with **Black** (`black py`, version `22.10.0`). CI enforces this.
 - **80 character** line length.
 - **Apache License header** on all new files:
 
