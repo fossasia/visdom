@@ -24,3 +24,6 @@ __pycache__/
 py/visdom/static/js/layout_bin_packer.js
 py/visdom/extra_deps/**/*
 md/
+example/tags_demo.py
+py/visdom/tests/test_infrastructure.py
+py/visdom/tests/test_integration_tags.py
