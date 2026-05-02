@@ -17,6 +17,7 @@ in the previous server.py class.
 
 import copy
 import hashlib
+import html
 import json
 import logging
 import os
@@ -328,6 +329,8 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
             win_title = win.get("title", "")
             if win_title in merged_titles:
                 continue
+            if win_title:
+                merged_titles.add(win_title)
             new_wid = "{}_env_{}".format(eid, wid)
             win_copy = copy.deepcopy(win)
             win_copy["id"] = new_wid
@@ -349,7 +352,9 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
     # create legend mapping environment names to environment numbers so one can
     # look it up for the new legend
     tableRows = ["<tr> <th> env name </th> <th> label </th> </tr>"] + [
-        "<tr> <td> {} </td> <td> [{}] </td> </tr>".format(v, eidNums[v])
+        "<tr> <td> {} </td> <td> [{}] </td> </tr>".format(
+            html.escape(str(v)), eidNums[v]
+        )
         for v in eidNums
     ]
 
