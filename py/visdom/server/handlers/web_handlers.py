@@ -431,7 +431,6 @@ class DeleteEnvHandler(BaseHandler):
                 p = os.path.join(handler.env_path, "{0}.json".format(eid))
                 if os.path.exists(p):
                     os.remove(p)
-                    
             # Clean up orphaned tags
             with handler.app.index_lock:
                 if eid in handler.app.tags:
@@ -728,8 +727,7 @@ class TagsHandler(BaseHandler):
             tornado.escape.to_basestring(self.request.body)
         )
         eid = extract_eid(args)
-        tags = args.get("tags", [])
-        
+        tags = args.get("tags", [])         
         if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
             self.set_status(400)
             self.write("tags must be a list of strings")
@@ -740,7 +738,6 @@ class TagsHandler(BaseHandler):
                 self.set_status(400)
                 self.write(f"Tag too long (max {MAX_TAG_LENGTH} characters)")
                 return
-            
         append = args.get("append", False)
 
         current_tags = []

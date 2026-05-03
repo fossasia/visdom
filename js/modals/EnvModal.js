@@ -53,7 +53,7 @@ function EnvModal(props) {
   }, [tagEnv, tags, show]);
 
   const handleTagsSave = () => {
-    // 1. Data Sanitization (The Comma-Separated Trap Prevention)
+    // clean up tags
     const cleanTags = tagText
       .split(',')
       .map((tag) => tag.trim())
@@ -78,7 +78,7 @@ function EnvModal(props) {
     .split(',')
     .map((tag) => tag.trim())
     .filter((tag) => tag.length > 0);
-  
+
   const isTagTooLong = currentTagsList.some(tag => tag.length > MAX_TAG_LENGTH);
   const isTooManyTags = currentTagsList.length > MAX_TAGS_PER_ENV;
   const isInvalid = isTagTooLong || isTooManyTags;
@@ -113,7 +113,7 @@ function EnvModal(props) {
         </button>
       </div>
       <br />
-      Delete environment:
+      Delete environment selected in dropdown:
       <br />
       <div className="form-inline">
         <select
@@ -124,11 +124,13 @@ function EnvModal(props) {
             setSelectText(ev.target.value);
           }}
         >
-          {envList.map((env) => (
-            <option key={env} value={env}>
-              {env}
-            </option>
-          ))}
+          {envList.map((env) => {
+            return (
+              <option key={env} value={env}>
+                {env}
+              </option>
+            );
+          })}
         </select>
         <button
           className="btn btn-default"
@@ -168,29 +170,36 @@ function EnvModal(props) {
           style={{ width: '250px', borderColor: isInvalid ? '#d9534f' : '' }}
         />
         <button
-          className={`btn ${
-            saveStatus === 'saved'
+          className={`btn ${saveStatus === 'saved'
               ? 'btn-success'
               : saveStatus === 'error'
-              ? 'btn-danger'
-              : 'btn-default'
-          }`}
+                ? 'btn-danger'
+                : 'btn-default'
+            }`}
           disabled={!connected || saveStatus === 'saving' || !tagEnv || isInvalid}
           onClick={handleTagsSave}
         >
           {saveStatus === 'saving'
             ? 'Saving...'
             : saveStatus === 'saved'
-            ? 'Saved!'
-            : saveStatus === 'error'
-            ? 'Error!'
-            : 'Update Tags'}
+              ? 'Saved!'
+              : saveStatus === 'error'
+                ? 'Error!'
+                : 'Update Tags'}
         </button>
       </div>
       {isInvalid && (
         <div style={{ color: '#d9534f', fontSize: '12px', marginTop: '5px' }}>
-          {isTagTooLong && <span>Tag exceeds maximum length of {MAX_TAG_LENGTH} characters. </span>}
-          {isTooManyTags && <span>Environment exceeds maximum limit of {MAX_TAGS_PER_ENV} tags. </span>}
+          {isTagTooLong && (
+            <span>
+              Tag exceeds maximum length of {MAX_TAG_LENGTH} characters.{' '}
+            </span>
+          )}
+          {isTooManyTags && (
+            <span>
+              Environment exceeds maximum limit of {MAX_TAGS_PER_ENV} tags.{' '}
+            </span>
+          )}
         </div>
       )}
     </ReactModal>
