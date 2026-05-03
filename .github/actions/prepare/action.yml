@@ -54,7 +54,7 @@ runs:
           path: |
             "**/node_modules"
             "/home/runner/.cache"
-          key: ${{ runner.os }}-${{ hashFiles('**/yarn.lock') }}
+          key: ${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
       - name: "Install npm Dependencies"
         shell: bash
         run: |
