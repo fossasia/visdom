@@ -40,6 +40,7 @@ function ViewControls(props) {
       </li>
     );
   });
+  //hi
   return (
     <span>
       <span>View&nbsp;</span>
