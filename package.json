@@ -24,7 +24,9 @@
     "prettier": "^2.8.3",
     "webpack": "^5.104.1",
     "webpack-cli": "^4.10.0",
-    "webpack-merge": "^5.8.0"
+    "webpack-merge": "^5.8.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.2.0"
   },
   "scripts": {
     "dev": "webpack --watch --progress --config webpack.dev.js",
@@ -34,7 +36,17 @@
     "test:visual": "cypress run --spec './cypress/integration/screenshots.js'",
     "test": "cypress run --config ignoreTestFiles=*.init.js",
     "lint": "eslint js/.",
-    "lint:fix": "eslint --fix --ext .js,.jsx js/"
+    "lint:fix": "eslint --fix --ext .js,.jsx js/",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "js/**/*.{js,jsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "py/**/*.py": [
+      "black"
+    ]
   },
   "dependencies": {
     "assert": "^2.0.0",
