@@ -727,7 +727,7 @@ class TagsHandler(BaseHandler):
             tornado.escape.to_basestring(self.request.body)
         )
         eid = extract_eid(args)
-        tags = args.get("tags", [])         
+        tags = args.get("tags", [])
         if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
             self.set_status(400)
             self.write("tags must be a list of strings")
