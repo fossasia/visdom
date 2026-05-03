@@ -30,7 +30,7 @@ describe('Test Env Modal', () => {
 
     // fork the env at this point
     cy.get(envbutton).click();
-    cy.get(envmodal + 'input').type('_fork');
+    cy.get(envmodal + 'input').first().type('_fork');
     cy.contains('button', 'fork').click();
     cy.get('body').type('{esc}');
     cy.get('.ReactModal__Overlay').should('not.exist');
@@ -59,7 +59,7 @@ describe('Test Env Modal', () => {
   it('Remove Env', () => {
     // delete fork
     cy.get(envbutton).click();
-    cy.get(envmodal + 'select').select(env + '_fork');
+    cy.get(envmodal + 'select').first().select(env + '_fork');
     cy.contains('button', 'Delete').click();
     cy.get('body').type('{esc}');
     cy.get('.ReactModal__Overlay').should('not.exist');
