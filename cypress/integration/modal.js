@@ -16,7 +16,7 @@ describe('Test Env Modal', () => {
     cy.get(envmodal).should('not.exist');
     cy.get(envbutton).click();
     cy.get(envmodal).should('exist');
-    cy.get('body').type('{esc}');
+    cy.get(envmodal).type('{esc}');
     cy.get('.ReactModal__Overlay').should('not.exist');
     cy.get(envmodal).should('not.exist');
   });
@@ -32,7 +32,7 @@ describe('Test Env Modal', () => {
     cy.get(envbutton).click();
     cy.get(envmodal + 'input').first().type('_fork');
     cy.contains('button', 'fork').click();
-    cy.get('body').type('{esc}');
+    cy.get(envmodal).type('{esc}');
     cy.get('.ReactModal__Overlay').should('not.exist');
 
     // apply a change to the same env
@@ -61,7 +61,7 @@ describe('Test Env Modal', () => {
     cy.get(envbutton).click();
     cy.get(envmodal + 'select').first().select(env + '_fork');
     cy.contains('button', 'Delete').click();
-    cy.get('body').type('{esc}');
+    cy.get(envmodal).type('{esc}');
     cy.get('.ReactModal__Overlay').should('not.exist');
 
     // check that fork does not exist anymore
@@ -89,7 +89,7 @@ describe('Test View Modal', () => {
     cy.get(viewmodal).should('not.exist');
     cy.get(viewbutton).click();
     cy.get(viewmodal).should('exist');
-    cy.get('body').type('{esc}');
+    cy.get(viewmodal).type('{esc}');
     cy.get('.ReactModal__Overlay').should('not.exist');
     cy.get(viewmodal).should('not.exist');
   });
@@ -109,7 +109,7 @@ describe('Test View Modal', () => {
       .clear()
       .type('first');
     cy.contains('button', 'fork').click();
-    cy.get('body').type('{esc}');
+    cy.get(viewmodal).type('{esc}');
     cy.get('.ReactModal__Overlay').should('not.exist');
 
     // apply a change to the same view
@@ -129,7 +129,7 @@ describe('Test View Modal', () => {
       .clear()
       .type('second');
     cy.contains('button', 'fork').click();
-    cy.get('body').type('{esc}');
+    cy.get(viewmodal).type('{esc}');
     cy.get('.ReactModal__Overlay').should('not.exist');
 
     // check first view positions
@@ -188,14 +188,14 @@ describe('Test View Modal', () => {
     cy.contains('button', 'Delete').click();
     cy.get(viewmodal + 'select').select('second');
     cy.contains('button', 'Delete').click();
-    cy.get('body').type('{esc}');
+    cy.get(viewmodal).type('{esc}');
     cy.get('.ReactModal__Overlay').should('not.exist');
 
     // check that current view cannot be removed
     cy.get(viewbutton).click();
     cy.get(viewmodal + 'select').select('current');
     cy.contains('button', 'Delete').should('be.disabled');
-    cy.get('body').type('{esc}');
+    cy.get(viewmodal).type('{esc}');
     cy.get('.ReactModal__Overlay').should('not.exist');
   });
 });
