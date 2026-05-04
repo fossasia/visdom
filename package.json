@@ -44,7 +44,7 @@
       "eslint --fix",
       "prettier --write"
     ],
-    "py/**/*.py": [
+    "**/*.py": [
       "black"
     ]
   },
