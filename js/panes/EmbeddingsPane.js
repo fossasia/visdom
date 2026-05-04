@@ -29,9 +29,13 @@ class EmbeddingsPane extends React.Component {
 
     switch (e.type) {
       case 'keydown':
-      case 'keypress':
-        e.preventDefault();
+      case 'keypress': {
+        const tag = e.target.tagName;
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
+          e.preventDefault();
+        }
         break;
+      }
       case 'keyup':
         if (this.props.isFocused)
           this.context.sendPaneMessage(
