@@ -126,7 +126,7 @@ const ApiProvider = ({ children }) => {
       case 'layout':
       case 'layout_update':
         apiHandlers.current.onLayoutMessage({
-          cmd: cmd.data,
+          data: cmd.data,
           update: cmd.commmand == 'layout_update',
         });
         break;

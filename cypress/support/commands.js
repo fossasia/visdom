@@ -35,7 +35,12 @@ Cypress.Commands.add('run', (name, opts) => {
   if (!opts || !("asyncrun" in opts) || !opts["asyncrun"])
       cy.exec(`python example/demo.py -port 8098 -testing -run ${name} -env ${saveto} ${seed} ${argscli}`);
   else
-      cy.task('asyncrun', `python example/demo.py -testing -port 8098 -run ${name} -env ${saveto}` + seed + argscli)
+      cy.task('asyncrun', {
+          run: name,
+          env: saveto,
+          seed: (opts && "seed" in opts) ? opts["seed"] : undefined,
+          args: (opts && "args" in opts) ? opts["args"] : [],
+      })
 
   if (!opts || !("open" in opts) || opts["open"]) {
       cy.close_envs();
