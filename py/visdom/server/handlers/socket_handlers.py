@@ -123,9 +123,9 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 if self.env_path is not None:
                     p = os.path.join(self.env_path, "{0}.json".format(msg["eid"]))
                     try:
-                      os.remove(p)
+                        os.remove(p)
                     except FileNotFoundError:
-                      pass
+                        logging.warning(f"Environment file not found: {p}")
                 broadcast_envs(self)
 
         elif cmd == "save_layouts":
