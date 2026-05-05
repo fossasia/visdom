@@ -134,7 +134,8 @@ function ImagePane(props) {
   };
 
   const updateSlider = (evt) => {
-    const idx = parseInt(evt.target.value);
+    const idx = parseInt(evt.target.value, 10);
+    if (Number.isNaN(idx)) return;
     setActualSelected(idx);
     sendPaneMessage({ event_type: 'SliderMoved', index: idx }, id, envID);
   };

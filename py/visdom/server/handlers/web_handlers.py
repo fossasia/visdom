@@ -162,7 +162,9 @@ class UpdateHandler(BaseHandler):
                 selected = _coerce_image_slider_index(
                     args["data"][0]["selected"]
                 )
-                p["selected"] = min(max(0, selected), len(p["content"]) - 1)
+                selected = min(max(0, selected), len(p["content"]) - 1)
+                if p.get("selected") != selected:
+                    p["selected"] = selected
             return p
 
         pdata = p["content"]["data"]
@@ -343,6 +345,7 @@ class UpdateHandler(BaseHandler):
         is_image_slider_update = (
             isinstance(data, list)
             and len(data) > 0
+            and isinstance(data[0], dict)
             and data[0].get("type") == "image_update_selected"
         )
 

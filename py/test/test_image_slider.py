@@ -49,7 +49,7 @@ class TestImageUpdateSelected(unittest.TestCase):
                     UpdateHandler.update(self._pane(), self._args(bad_value))
 
     def test_client_payload_coerces_numpy_scalars(self):
-        viz = visdom.Visdom(send=False)
+        viz = visdom.Visdom(send=False, use_incoming_socket=False)
         msg, endpoint = viz.update_image_slider("win_a", np.int64(2))
         self.assertEqual(endpoint, "update")
         self.assertEqual(msg["win"], "win_a")
@@ -58,18 +58,18 @@ class TestImageUpdateSelected(unittest.TestCase):
         self.assertIsInstance(msg["data"][0]["content"], int)
 
     def test_client_payload_accepts_integral_float_scalars(self):
-        viz = visdom.Visdom(send=False)
+        viz = visdom.Visdom(send=False, use_incoming_socket=False)
         msg, endpoint = viz.update_image_slider("win_a", np.float32(2.0))
         self.assertEqual(endpoint, "update")
         self.assertEqual(msg["data"][0]["content"], 2)
 
     def test_client_payload_rejects_fractional_float(self):
-        viz = visdom.Visdom(send=False)
+        viz = visdom.Visdom(send=False, use_incoming_socket=False)
         with self.assertRaises(ValueError):
             viz.update_image_slider("win_a", np.float32(2.5))
 
     def test_client_payload_rejects_non_numeric_values(self):
-        viz = visdom.Visdom(send=False)
+        viz = visdom.Visdom(send=False, use_incoming_socket=False)
         for bad_value in ["2", None]:
             with self.subTest(bad_value=bad_value):
                 with self.assertRaises(TypeError):
@@ -117,6 +117,17 @@ class TestImageUpdateSelected(unittest.TestCase):
             handler.messages,
             ["image slider index must be an integer, got 1.5"],
         )
+
+    def test_client_payload_coerces_numpy_array_scalar(self):
+        viz = visdom.Visdom(send=False, use_incoming_socket=False)
+        msg, endpoint = viz.update_image_slider("win_a", np.array(2, dtype=np.int64))
+        self.assertEqual(msg["data"][0]["content"], 2)
+        self.assertIsInstance(msg["data"][0]["content"], int)
+
+    def test_client_payload_rejects_numpy_array_multielement(self):
+        viz = visdom.Visdom(send=False, use_incoming_socket=False)
+        with self.assertRaises(TypeError):
+            viz.update_image_slider("win_a", np.array([1, 2], dtype=np.int64))
 
 
 if __name__ == "__main__":
