@@ -263,6 +263,14 @@ const App = () => {
   };
 
   const onWindowMessage = ({ cmd, update }) => {
+    if (
+      selection.envIDs.length === 1 &&
+      cmd.eid !== undefined &&
+      cmd.eid !== selection.envIDs[0]
+    ) {
+      return;
+    }
+
     // If we're in compare mode and recieve an update to an environment
     // that is selected that isn't from the compare output, we need to
     // reload the compare output
