@@ -51,6 +51,28 @@ from visdom.utils.server_utils import (
 from visdom.server.handlers.base_handlers import BaseHandler
 
 
+def _coerce_image_slider_index(index):
+    """Validate slider indices received over HTTP/JSON."""
+    if isinstance(index, bool):
+        raise TypeError("image slider index must be an integer, got bool")
+
+    if isinstance(index, int):
+        return index
+
+    if isinstance(index, float):
+        if not math.isfinite(index):
+            raise ValueError("image slider index must be finite")
+        if index.is_integer():
+            return int(index)
+        raise ValueError(
+            "image slider index must be an integer, got {!r}".format(index)
+        )
+
+    raise TypeError(
+        "image slider index must be an integer, got {}".format(type(index).__name__)
+    )
+
+
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
 # TODO abstract out any direct references to the app where possible from
@@ -137,11 +159,10 @@ class UpdateHandler(BaseHandler):
                 p["content"].append(args["data"][0]["content"])
                 p["selected"] = len(p["content"]) - 1
             elif utype == "image_update_selected":
-                # Bound the update to within the dims of the array
-                selected = args["data"][0]["selected"]
-                selected_not_neg = max(0, selected)
-                selected_exists = min(len(p["content"]) - 1, selected_not_neg)
-                p["selected"] = selected_exists
+                selected = _coerce_image_slider_index(
+                    args["data"][0]["selected"]
+                )
+                p["selected"] = min(max(0, selected), len(p["content"]) - 1)
             return p
 
         pdata = p["content"]["data"]
@@ -318,6 +339,16 @@ class UpdateHandler(BaseHandler):
             return
 
         p = handler.state[eid]["jsons"][args["win"]]
+        data = args.get("data")
+        is_image_slider_update = (
+            isinstance(data, list)
+            and len(data) > 0
+            and data[0].get("type") == "image_update_selected"
+        )
+
+        if is_image_slider_update and p["type"] != "image_history":
+            handler.write("win is not image_history; was {}".format(p["type"]))
+            return
 
         if not (
             p["type"] == "text"
@@ -339,7 +370,13 @@ class UpdateHandler(BaseHandler):
             )
             return
 
-        p, diff_packet = UpdateHandler.update_packet(p, args)
+        try:
+            p, diff_packet = UpdateHandler.update_packet(p, args)
+        except (TypeError, ValueError) as exc:
+            if is_image_slider_update:
+                handler.write(str(exc))
+                return
+            raise
         # send the smaller of the patch and the updated pane
         if len(stringify(p)) <= len(stringify(diff_packet)):
             broadcast_msg = dict(p)

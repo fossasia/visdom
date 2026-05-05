@@ -119,6 +119,37 @@ def isndarray(n):
     return isinstance(n, (np.ndarray))
 
 
+def _coerce_image_slider_index(index):
+    """Normalize user-provided slider indices to a plain Python int."""
+    if isinstance(index, np.ndarray):
+        if index.size != 1:
+            raise TypeError("image slider index must be a single integer value")
+        index = index.item()
+    elif isinstance(index, np.generic):
+        index = index.item()
+
+    if isinstance(index, bool):
+        raise TypeError("image slider index must be an integer, got bool")
+
+    if isinstance(index, numbers.Integral):
+        return int(index)
+
+    if isinstance(index, numbers.Real):
+        if not math.isfinite(index):
+            raise ValueError("image slider index must be finite")
+        if float(index).is_integer():
+            return int(index)
+        raise ValueError(
+            "image slider index must be an integer, got {!r}".format(index)
+        )
+
+    raise TypeError(
+        "image slider index must be an integer, got {}".format(
+            type(index).__name__
+        )
+    )
+
+
 # Only works on (possibly nested) lists of numbers
 # TODO: Create our own JSONEncoder that automatically does this.
 #       Maybe we can port plotly's over:
@@ -1539,6 +1570,28 @@ class Visdom(object):
         return self._send(
             {
                 "data": data,
+                "win": win,
+                "eid": env,
+            },
+            endpoint="update",
+        )
+
+    @pytorch_wrap
+    def update_image_slider(self, win, index, env=None):
+        """
+        Set the displayed frame of an ``image_history`` window.
+
+        Args:
+            win (str): Window ID of an existing image_history pane.
+            index (int): Frame index to display (0-based). Clamped to valid
+                range by the server.
+            env (str, optional): Environment ID. Defaults to ``self.env``.
+        """
+        assert win is not None, "update_image_slider requires a window id"
+        index = _coerce_image_slider_index(index)
+        return self._send(
+            {
+                "data": [{"type": "image_update_selected", "content": index}],
                 "win": win,
                 "eid": env,
             },
