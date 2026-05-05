@@ -19,6 +19,7 @@ const thresholds = {
 const maxDiffPixels = {
   misc_video_tensor: 5000,
   misc_video_download: 5000,
+  misc_audio_basic: 5000,
 };
 
 describe(`Compare with previous plot screenshots`, () => {
