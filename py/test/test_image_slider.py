@@ -48,6 +48,18 @@ class TestImageUpdateSelected(unittest.TestCase):
                 with self.assertRaises(TypeError):
                     UpdateHandler.update(self._pane(), self._args(bad_value))
 
+    def test_client_rejects_bool_index(self):
+        viz = visdom.Visdom(send=False, use_incoming_socket=False)
+        with self.assertRaises(TypeError):
+            viz.update_image_slider("win_a", True)
+
+    def test_client_rejects_non_finite_float(self):
+        viz = visdom.Visdom(send=False, use_incoming_socket=False)
+        for bad_value in [float("inf"), float("-inf"), float("nan")]:
+            with self.subTest(bad_value=bad_value):
+                with self.assertRaises(ValueError):
+                    viz.update_image_slider("win_a", bad_value)
+
     def test_client_payload_coerces_numpy_scalars(self):
         viz = visdom.Visdom(send=False, use_incoming_socket=False)
         msg, endpoint = viz.update_image_slider("win_a", np.int64(2))
