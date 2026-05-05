@@ -11,6 +11,9 @@ const thresholds = {
   // the internal video player may already start by showing animated loading sign
   misc_video_tensor: 0.1,
   misc_video_download: 0.1,
+ 
+  text_basic: 0.05,
+  text_update: 0.05,
 };
 
 describe(`Compare with previous plot screenshots`, () => {
