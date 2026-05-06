@@ -143,7 +143,23 @@ def main(print_func=None):
         action="store_true",
         help="Load data from filesystem when starting server (and not lazily upon first request).",
     )
+    parser.add_argument(
+        "-download_only",
+        "--download_only",
+        default=False,
+        action="store_true",
+        help="Download all required scripts (JS, CSS, fonts) and exit "
+        "without starting the server. Useful for offline/air-gapped setups.",
+    )
     FLAGS = parser.parse_args()
+
+    if getattr(FLAGS, "download_only", False):
+        download_scripts()
+        output_func = print_func if print_func is not None else print
+        output_func("Downloaded all required scripts. Exiting.")
+        return
+
+    download_scripts()
 
     # Process base_url
     base_url = FLAGS.base_url if FLAGS.base_url != DEFAULT_BASE_URL else ""
@@ -232,8 +248,16 @@ def main(print_func=None):
 
 
 def download_scripts_and_run():
-    download_scripts()
     main()
+
+
+def download_scripts_only():
+    """Download all required scripts and exit without starting the server.
+
+    This is the entry point for the ``visdom-download`` console script.
+    """
+    download_scripts()
+    print("Downloaded all required scripts. Exiting.")
 
 
 if __name__ == "__main__":
