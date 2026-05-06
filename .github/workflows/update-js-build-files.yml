@@ -6,6 +6,7 @@ on:
         - 'js/**'
     branches:
         - master
+        - dev
 
 jobs:
   update-static-js-files:
