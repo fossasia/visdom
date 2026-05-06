@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: "Checkout Repository"
-      uses: actions/checkout@v3
+      uses: actions/checkout@v6
     - name: "Install Node"
       uses: actions/setup-node@v3
       with:
@@ -25,7 +25,7 @@ jobs:
     name: "Python Linter Check"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v6
       - uses: psf/black@26.3.0
         with:
           src: "./py"
@@ -41,7 +41,7 @@ jobs:
       jsfileschanged: ${{ steps.checkout.outputs.jsfileschanged }}
     steps:
       - name: "Checkout Repository"
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
       - uses: ./.github/actions/prepare
         with:
           loadprbuild: false
@@ -78,7 +78,7 @@ jobs:
     steps:
 
       - name: "Checkout Repository"
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
 
       - name: "Save current Head-Ref as PR-branch"
         shell: bash
@@ -116,7 +116,7 @@ jobs:
     needs: visual-regression-test-init
     steps:
       - name: "Checkout Repository"
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
       - uses: ./.github/actions/prepare
 
       - uses: actions/download-artifact@v7
@@ -147,7 +147,7 @@ jobs:
         python: ['3.8', '3.9', '3.10']
     steps:
       - name: "Checkout Repository"
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
       - uses: ./.github/actions/prepare
 
       - name: Cypress test
@@ -170,7 +170,7 @@ jobs:
     needs: install-and-build
     steps:
       - name: 'Checkout Repository'
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
       - uses: ./.github/actions/prepare
 
       - name: Cypress test
