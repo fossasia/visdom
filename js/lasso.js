@@ -82,7 +82,7 @@ export default function lasso() {
       // indicate if we are within closing distance
       if (
         distance(lassoPolygon[0],
-          lassoPolygon[lassoPolygon.length - 1]) < loseDistance
+          lassoPolygon[lassoPolygon.length - 1]) < closeDistance
       ) {
         closePath.attr('x1', point[0]).attr('y1', point[1]).attr('opacity', 1);
       } else {
