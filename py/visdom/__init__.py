@@ -144,9 +144,7 @@ def _coerce_image_slider_index(index):
         )
 
     raise TypeError(
-        "image slider index must be an integer, got {}".format(
-            type(index).__name__
-        )
+        "image slider index must be an integer, got {}".format(type(index).__name__)
     )
 
 
