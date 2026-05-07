@@ -549,18 +549,16 @@ class Visdom(object):
         return sess
 
     def register_event_handler(self, handler, target, env=None):
-    assert callable(handler), 'Event handler must be a function'
-    assert self.use_socket, 'Must be using the incoming socket to register events to web actions'
+        assert callable(handler), 'Event handler must be a function'
+        assert self.use_socket, 'Must be using the incoming socket to register events to web actions'
 
-    key = (env, target)
+        key = (env, target)
+        if key not in self.event_handlers:
+            self.event_handlers[key] = []
+        self.event_handlers[key].append(handler)
 
-    if key not in self.event_handlers:
-        self.event_handlers[key] = []
-
-    self.event_handlers[key].append(handler)
-
-    def clear_event_handlers(self, target):
-        self.event_handlers[target] = []
+    def clear_event_handlers(self, target, env=None):
+        self.event_handlers[(env, target)] = []
 
     def setup_polling(self):
         # TODO merge with setup_socket?
@@ -579,12 +577,17 @@ class Visdom(object):
                             "Visdom server failed handshake, may not "
                             "be properly connected"
                         )
-            if 'target' in message:
-                env = message.get('eid')
-                key = (env, message['target'])
+            if "target" in message:
+                env = message.get("eid")
+                key = (env, message["target"])
 
                 for handler in list(self.event_handlers.get(key, [])):
                     handler(message)
+
+                if env is not None:
+                    global_key = (None, message["target"])
+                    for handler in list(self.event_handlers.get(global_key, [])):
+                        handler(message)
 
         def on_close(ws):
             self.socket_alive = False
