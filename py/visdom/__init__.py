@@ -60,7 +60,9 @@ try:
         perplexity = (
             50
             if num_entities >= 150
-            else num_entities // 3 if num_entities >= 21 else 7
+            else num_entities // 3
+            if num_entities >= 21
+            else 7
         )
         Y = bhtsne.run_bh_tsne(
             X, initial_dims=X.shape[1], perplexity=perplexity, verbose=True
@@ -173,7 +175,10 @@ def _axisformat(xy, opts):
         "tickfont",
     ]
     if any(opts.get(xy + i) for i in fields):
-        has_ticks = (opts.get(xy + "tickmin") and opts.get(xy + "tickmax")) is not None
+        has_ticks = (
+            opts.get(xy + "tickmin") is not None
+            and opts.get(xy + "tickmax") is not None
+        )
         return {
             "type": opts.get(xy + "type"),
             "title": opts.get(xy + "label"),
@@ -203,8 +208,9 @@ def _axisformat3d(xyz, opts):
     ]
     if any(opts.get(xyz + i) for i in fields):
         has_ticks = (
-            opts.get(xyz + "tickmin") and opts.get(xyz + "tickmax")
-        ) is not None
+            opts.get(xyz + "tickmin") is not None
+            and opts.get(xyz + "tickmax") is not None
+        )
         has_step = has_ticks and opts.get(xyz + "tickstep") is not None
         return {
             "type": opts.get(xyz + "type"),
@@ -1618,7 +1624,8 @@ class Visdom(object):
             # stores the original values so the legend shows real text;
             # it is None for the integer path (trace names keep str(k)).
             if np.equal(np.mod(Y, 1), 0).all() and Y.min() >= 1:
-                labels = np.unique(Y.astype(int, copy=False))
+                Y = Y.astype(int, copy=False)
+                labels = np.unique(Y)
                 K = int(Y.max())  # largest label
                 label_values = None  # integer path: use str(k) for names
             else:
