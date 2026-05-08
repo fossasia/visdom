@@ -549,8 +549,9 @@ class Visdom(object):
         return sess
 
     def register_event_handler(self, handler, target, env=None):
-        assert callable(handler), 'Event handler must be a function'
-        assert self.use_socket, 'Must be using the incoming socket to register events to web actions'
+        assert callable(handler), "Event handler must be a function"
+        assert self.use_socket,
+         "Must be using the incoming socket to register events to web actions"
 
         key = (env, target)
         if key not in self.event_handlers:
