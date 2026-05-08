@@ -550,8 +550,9 @@ class Visdom(object):
 
     def register_event_handler(self, handler, target, env=None):
         assert callable(handler), "Event handler must be a function"
-        assert self.use_socket,
-         "Must be using the incoming socket to register events to web actions"
+        assert (
+            self.use_socket
+        ), "Must be using the incoming socket to register events to web actions"
 
         key = (env, target)
         if key not in self.event_handlers:
@@ -638,7 +639,15 @@ class Visdom(object):
                             "be properly connected"
                         )
             if "target" in message:
-                for handler in list(self.event_handlers.get(message["target"], [])):
+                env = message.get("eid")
+                key = (env, message["target"])
+
+                handlers = list(self.event_handlers.get(key, []))
+                if env is not None:
+                    global_key = (None, message["target"])
+                    handlers.extend(list(self.event_handlers.get(global_key, [])))
+
+                for handler in handlers:
                     try:
                         handler(message)
                     except Exception as e:
