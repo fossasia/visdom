@@ -176,16 +176,48 @@ describe('Test View Modal', () => {
   it('Remove additional View again', () => {
     // delete view first and second
     cy.get(viewbutton).click();
-    cy.get(viewmodal + 'select').select('first');
+    cy.get(viewmodal + 'select').eq(0).select('first');
     cy.contains('button', 'Delete').click();
-    cy.get(viewmodal + 'select').select('second');
+    cy.get(viewmodal + 'select').eq(0).select('second');
     cy.contains('button', 'Delete').click();
     cy.get(viewmodal).type('{esc}');
 
     // check that current view cannot be removed
     cy.get(viewbutton).click();
-    cy.get(viewmodal + 'select').select('current');
+    cy.get(viewmodal + 'select').eq(0).select('current');
     cy.contains('button', 'Delete').should('be.disabled');
     cy.get(viewmodal).type('{esc}');
+  });
+
+  it('View Modal copy view', () => {
+    var env_src = 'view_modal_src_' + Cypress._.random(0, 1e6);
+    var env_dest = 'view_modal_dest_' + Cypress._.random(0, 1e6);
+
+    // initialize source env
+    cy.run('text_basic', { env: env_src }).wait(500);
+    cy.run('plot_line_basic', { env: env_src, open: false }).wait(500);
+
+    // save the view in source env
+    cy.get(viewbutton).click();
+    cy.get(viewmodal + 'input').eq(0)
+      .clear()
+      .type('copy_test_layout');
+    cy.contains('button', 'fork').click();
+    cy.get(viewmodal).type('{esc}');
+
+    // initialize destination env
+    cy.run('text_basic', { env: env_dest }).wait(500);
+
+    // open view modal and copy layout
+    cy.get(viewbutton).click();
+    cy.get(viewmodal + 'select').eq(1).select(env_src); // Source Environment
+    cy.get(viewmodal + 'select').eq(2).select('copy_test_layout'); // Source Layout
+    cy.get(viewmodal + 'input').eq(1)
+      .clear()
+      .type('copied_layout'); // New Layout Name
+    cy.contains('button', 'Copy').click();
+
+    // Verify destination view changed
+    cy.get(viewselect + 'button#viewDropdown').contains('copied_layout');
   });
 });
