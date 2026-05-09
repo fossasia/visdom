@@ -239,6 +239,15 @@ def get_env_json_path(env_path, eid):
     return os.path.join(env_path, f"{eid.strip()}.json")
 
 
+def load_env_json_file(path):
+    try:
+        with open(path, "r") as fn:
+            return tornado.escape.json_decode(fn.read())
+    except (OSError, ValueError) as e:
+        logging.warning("Failed to load environment json %s: %r", path, e)
+        return None
+
+
 def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
     logging.info("comparing envs")
     eidNums = {e: str(i) for i, e in enumerate(eids)}
@@ -250,10 +259,15 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         elif env_path is not None:
             p = get_env_json_path(env_path, eid)
             if os.path.exists(p):
-                with open(p, "r") as fn:
-                    env = tornado.escape.json_decode(fn.read())
+                env = load_env_json_file(p)
+                if env is not None:
                     state[eid] = env
                     envs[eid] = env
+
+    if not envs:
+        socket.write_message(json.dumps({"command": "layout"}))
+        socket.eid = eids
+        return
 
     res = copy.deepcopy(envs[list(envs.keys())[0]])
     name2Wid = {
@@ -388,8 +402,9 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
     elif env_path is not None:
         p = get_env_json_path(env_path, eid)
         if os.path.exists(p):
-            with open(p, "r") as fn:
-                env = tornado.escape.json_decode(fn.read())
+            loaded_env = load_env_json_file(p)
+            if loaded_env is not None:
+                env = loaded_env
                 state[eid] = env
 
     if "reload" in env:

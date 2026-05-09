@@ -61,6 +61,32 @@ class ServerUtilsLazyEnvPathTests(unittest.TestCase):
         self.assertEqual(socket.eid, ["envA", "envB"])
         self.assertTrue(any("window_compare_legend" in str(message) for message in socket.messages))
 
+    def test_load_env_ignores_corrupt_json_file(self):
+        state = {}
+        socket = DummySocket()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            Path(tmpdir, "broken.json").write_text("{not valid json")
+
+            load_env(state, "broken", socket, env_path=tmpdir)
+
+        self.assertEqual(state, {})
+        self.assertEqual(socket.eid, "broken")
+        self.assertTrue(any("layout" in str(message) for message in socket.messages))
+
+    def test_compare_envs_ignores_corrupt_json_files(self):
+        state = {}
+        socket = DummySocket()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            Path(tmpdir, "broken.json").write_text("{not valid json")
+
+            compare_envs(state, ["broken"], socket, env_path=tmpdir)
+
+        self.assertEqual(state, {})
+        self.assertEqual(socket.eid, ["broken"])
+        self.assertTrue(any("layout" in str(message) for message in socket.messages))
+
 
 if __name__ == "__main__":
     unittest.main()
