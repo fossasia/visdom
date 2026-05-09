@@ -49,11 +49,12 @@ function ViewModal(props) {
     ? Array.from(allLayoutLists.get(copyEnv).keys())
     : [];
 
-    const [copyLayout, setCopyLayout] = useState(availableCopyLayouts.length > 0 ? availableCopyLayouts[0] : '');
+    const hasLayouts = availableCopyLayouts.length > 0;
+    const [copyLayout, setCopyLayout] = useState(hasLayouts ? availableCopyLayouts[0] : '');
     useEffect(() => {
-      if(availableCopyLayouts.length > 0 && !availableCopyLayouts.includes(copyLayout)){
+      if (hasLayouts && !availableCopyLayouts.includes(copyLayout)) {
         setCopyLayout(availableCopyLayouts[0]);
-      } else if(availableCopyLayouts.length === 0){
+      } else if (!hasLayouts) {
         setCopyLayout('');
       }
     }, [copyEnv, availableCopyLayouts.length]);
