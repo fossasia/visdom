@@ -51,7 +51,7 @@ export const all_screenshots = [
   'misc_plot_latex_update',
   'misc_video_tensor',
   // 'misc_video_download', // disabled to circumvent problems due to varying download speeds
-  'misc_audio_basic',
+  // 'misc_audio_basic',  // disabled due to native audio player rendering differences across platform
   // 'misc_audio_download', // disabled to circumvent problems due to varying download speeds
   'misc_arbitrary_visdom',
   'misc_getset_state',
