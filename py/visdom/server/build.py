@@ -137,6 +137,9 @@ def download_scripts(proxies=None, install_dir=None):
                 except OSError as exc:
                     logging.error("Filesystem error %s while writing %s", exc, filename)
                     download_failed = True
+            except HTTPError as exc:
+                logging.error("Error {} while downloading {}".format(exc.code, key))
+                download_failed = True
             except URLError as exc:
                 if _is_cert_verification_error(exc):
                     logging.warning(
@@ -175,9 +178,6 @@ def download_scripts(proxies=None, install_dir=None):
                         "Error {} while downloading {}".format(exc.reason, key)
                     )
                     download_failed = True
-            except HTTPError as exc:
-                logging.error("Error {} while downloading {}".format(exc.code, key))
-                download_failed = True
 
     # Download MathJax Js Files
     import requests
