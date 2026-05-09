@@ -416,6 +416,22 @@ def pytorch_wrap(f):
     return wrapped_f
 
 
+def _decode_binary_arrays(obj):
+    """Decode Plotly 6+ binary-encoded arrays back to plain Python lists."""
+    if isinstance(obj, dict):
+        if "dtype" in obj and "bdata" in obj:
+            try:
+                return np.frombuffer(
+                    base64.b64decode(obj["bdata"]), dtype=np.dtype(obj["dtype"])
+                ).tolist()
+            except Exception:
+                return obj
+        return {k: _decode_binary_arrays(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_decode_binary_arrays(v) for v in obj]
+    return obj
+
+
 class Visdom(object):
     def __init__(
         self,
@@ -1083,6 +1099,9 @@ class Visdom(object):
             figure_dict = json.loads(
                 json.dumps(figure, cls=plotly.utils.PlotlyJSONEncoder)
             )
+            # Plotly 6+ encodes large arrays as binary dicts {"dtype":..., "bdata":...}.
+            # Decode them back to plain Python lists so the frontend can render them.
+            figure_dict = _decode_binary_arrays(figure_dict)
 
             # If opts title is not added, the title is not added to the top right of the window.
             # We add the paramater to opts manually if it exists.
