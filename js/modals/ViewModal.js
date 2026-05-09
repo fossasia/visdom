@@ -18,9 +18,12 @@ function ViewModal(props) {
   const {
     activeLayout,
     layoutList,
+    envList,
+    allLayoutLists,
     onModalClose,
     onLayoutSave,
     onLayoutDelete,
+    onLayoutCopy,
     show,
   } = props;
 
@@ -34,7 +37,31 @@ function ViewModal(props) {
     setInputText(activeLayout);
     setSelectText(activeLayout);
   }, [activeLayout]);
+  
+  const [copyEnv, setCopyEnv] = useState(envList && envList.length > 0 ? envList[0]: '');
+  useEffect(() => {
+    if(envList && envList.length > 0 && !envList.includes(copyEnv)){
+      setCopyEnv(envList[0]);
+    }
+  }, [envList]);
 
+  const availableCopyLayouts = (allLayoutLists && allLayoutLists.has(copyEnv))
+    ? Array.from(allLayoutLists.get(copyEnv).keys())
+    : [];
+
+    const [copyLayout, setCopyLayout] = useState(availableCopyLayouts.length > 0 ? availableCopyLayouts[0] : '');
+    useEffect(() => {
+      if(availableCopyLayouts.length > 0 && !availableCopyLayouts.includes(copyLayout)){
+        setCopyLayout(availableCopyLayouts[0]);
+      } else if(availableCopyLayouts.length === 0){
+        setCopyLayout('');
+      }
+    }, [copyEnv, availableCopyLayouts.length]);
+
+    const [copyDestName, setCopyDestName] = useState('');
+    useEffect(() => {
+      setCopyDestName(copyLayout);
+    }, [copyLayout]);
   // rendering
   // ---------
   return (
@@ -92,6 +119,48 @@ function ViewModal(props) {
           onClick={() => onLayoutDelete(selectText)}
         >
           Delete
+        </button>
+      </div>
+      <br />
+      Copy layout view from another environment:
+      <br />
+      <div className="form-inline">
+        <select
+          className="form-control"
+          disabled={!connected}
+          value={copyEnv}
+          onChange={(ev) => setCopyEnv(ev.target.value)}
+          title="Source Environment"
+        >
+          {envList && envList.map((env) => (
+            <option key={env} value={env}>{env}</option>
+          ))}
+        </select>
+        <select
+          className="form-control"
+          disabled={!connected || !copyEnv || availableCopyLayouts.length === 0}
+          value={copyLayout}
+          onChange={(ev) => setCopyLayout(ev.target.value)}
+          title="Source Layout"
+        >
+          {availableCopyLayouts.map((view) => (
+            <option key={view} value={view}>{view}</option>
+          ))}
+        </select>
+        <input
+          className="form-control"
+          type="text"
+          value={copyDestName || ''}
+          onChange={(ev) => setCopyDestName(ev.target.value)}
+          title="New Layout Name"
+          placeholder="New Name"
+        />
+        <button
+          className="btn btn-default"
+          disabled={!connected || !copyEnv || !copyLayout || !copyDestName}
+          onClick={() => onLayoutCopy(copyEnv, copyLayout, copyDestName)}
+        >
+          Copy
         </button>
       </div>
     </ReactModal>
