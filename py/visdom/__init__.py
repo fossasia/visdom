@@ -1899,7 +1899,10 @@ class Visdom(object):
             elif X.shape[0] == Y.shape[1]:
                 X = np.tile(X, (Y.shape[0], 1))
 
-        assert X.shape == Y.shape, "X and Y should be the same shape"
+        assert X.shape == Y.shape, (
+            "X and Y should be the same shape: for 2D Y and 1D X, "
+            "len(X) must match either Y's rows or columns"
+        )
 
         opts = {} if opts is None else opts
         opts["markers"] = opts.get("markers", False)
