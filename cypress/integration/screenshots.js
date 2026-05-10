@@ -62,7 +62,7 @@ describe(`Compare with compare-view screenshots`, () => {
 
       var envs = [];
       for (var i = 0; i < num_runs; i++) {
-        var env = run + '_' + i + '_' + Cypress._.random(0, 1e6);
+        var env = run + '_' + i + '_fixed';
         cy.run(run, {
           env: env,
           open: false,
@@ -120,8 +120,8 @@ describe(`Compare with compare-view screenshots`, () => {
 describe(`Compare screenshots for plotpane functions`, () => {
   it('Compare screenshot for Line Smoothing', () => {
     var run = 'line_smoothing';
-    var env1 = run + '_1_' + Cypress._.random(0, 1e6);
-    var env2 = run + '_2_' + Cypress._.random(0, 1e6);
+    var env1 = run + '_1_fixed';
+    var env2 = run + '_2_fixed';
     cy.run('plot_line_basic', {
       env: env1,
       args: ["'Line smoothing'", 100],
@@ -133,7 +133,7 @@ describe(`Compare screenshots for plotpane functions`, () => {
       seed: 43,
     });
     cy.open_env(env1);
-    cy.get('button[title="smooth lines"]').click();
+    cy.get('button[title="smooth lines"]').first().click();
     cy.get('input[type="range"]').then(($range) => {
       const range = $range[0]; // get the DOM node
       const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
