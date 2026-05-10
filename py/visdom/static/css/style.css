@@ -1,0 +1,291 @@
+/**
+ * Copyright 2017-present, The Visdom Authors
+ * All rights reserved.
+ *
+ * This source code is licensed under the license found in the
+ * LICENSE file in the root directory of this source tree.
+ *
+ */
+
+* {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-family: "Open Sans", sans-serif;
+  font-weight: lighter;
+}
+
+body{
+   background-color: transparent;
+}
+
+html{
+   background-color: #3b5998;
+}
+
+h1 {
+   text-align: center;
+}
+
+.visdom-title {
+   font-weight: lighter;
+   font-size: 18px;
+   padding: 13px;
+}
+
+.navbar-default {
+   background-color: #F0F0F0;
+   border-color: transparent;
+}
+
+.form-inline {
+   padding: 5px;
+}
+
+.form-inline > .btn {
+   margin-right: 10px;
+   margin-left: 5px;
+}
+
+.form-inline > .form-control {
+   margin-left: 5px;
+}
+
+.navbar {min-height:30px !important;}
+
+.navbar-form {margin-top:0px !important;}
+
+.no-focus {
+  border-color: transparent;
+  box-shadow: none;
+  outline-style: none;
+}
+
+.window {
+  overflow: hidden;
+  box-sizing: border-box;
+  border: #FFF solid 1px;
+  background: white;
+  color: #3b5998;
+  height: 100%;
+  width: 100%;
+  box-shadow: rgba(0, 0, 0, 0.1) 1px 1px 5px;
+}
+
+.maximized .window {
+  border: none;
+  box-shadow: none;
+}
+
+.bar {
+  position: relative;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 14px;
+  color: #333;
+  text-align: right;
+  font-size: 11px;
+}
+
+.window.focus {
+  border-color: #dedede;
+  outline-color: #6389d8;
+  outline-width: 4px;
+  outline-style: double;
+}
+
+.bar.focus {
+  font-weight: bold;
+  background-color: #dedede;
+}
+
+.bar button {
+   font-size: 8px;
+}
+
+button {
+   font-size: 14px;
+   line-height: 14px;
+   cursor: pointer;
+   border-radius: 1px;
+   border-color:transparent;
+}
+
+button > span.glyphicon {
+    color: grey;
+}
+
+.btn:focus,.btn:active {
+   outline: none !important;
+}
+
+.bar button {
+  background: transparent;
+  margin: 0 4px;
+  float: left;
+}
+
+.content {
+  width: 100%;
+  height: calc( 100% - 14px );
+  position: absolute;
+  overflow: hidden;
+  left: 0;
+}
+
+.widgets {
+  position: absolute;
+  bottom: 0;
+  background-color: #fff;
+  width: 99.5%;
+}
+
+.grip {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 20px;
+  height: 20px;
+  cursor: se-resize;
+  background: transparent;
+  z-index: 10;
+  align: right;
+}
+
+.widget {
+  overflow-y: hidden;
+  word-wrap: break-word;
+  margin-bottom: 10px;
+}
+
+.content-image {
+  image-rendering: pixelated;
+  background-color: white;
+  margin: auto auto;
+  display: block;
+}
+
+.mouse_image_location{
+  background: white;
+  position: absolute;
+  left: 0;
+  bottom: 1px;
+  display: none;
+}
+
+.content:hover .mouse_image_location{
+  display: block;
+}
+
+.content-plot {
+  background: white;
+  font-size:10px;
+}
+
+.hidden-window {
+  visibility: hidden;
+}
+
+/* This exists to make sure that when we filter out windows, plotly
+doesn't override our desire to make them non-interactable */
+.hidden-window * {
+  pointer-events: none !important;
+}
+
+
+
+.react-grid-item.react-grid-placeholder {
+  background: white;
+}
+
+.content-text {
+  overflow-y: auto;
+  overflow-x: auto;
+  max-height: 100%;
+  max-width: 100%;
+}
+
+.vertical-line {
+  border-left: thin solid #ccc;
+}
+
+.rc-tree-select-selection--multiple {
+    max-height: 34px;
+    min-height: 34px;
+    overflow-y: scroll;
+}
+
+.rc-tree-select-selection--multiple .rc-tree-select-selection__clear {
+  right: 20px;
+}
+
+.rc-tree-select-selection {
+  border-radius: 6px 0px 0px 6px;
+}
+
+.rc-tree-select-selection--multiple .rc-tree-select-search__field__placeholder {
+    top: 8px;
+}
+
+.table-properties td {
+    border: solid 1px #dedede;
+}
+
+.table-properties td.table-properties-name {
+    padding: 0px 10px 0px 2px;
+    text-align: right;
+    background-color: #F0F0F0;
+    border-color: #dedede;
+    vertical-align: middle;
+}
+
+.table-properties td.table-properties-value {
+    padding: 0;
+    vertical-align: middle;
+    border-color: #dedede;
+}
+
+.table-properties td.table-properties-value input[type=checkbox]
+{
+    -ms-transform: scale(1.5); /* IE */
+    -moz-transform: scale(1.5); /* FF */
+    -webkit-transform: scale(1.5); /* Safari and Chrome */
+    -o-transform: scale(1.5); /* Opera */
+}
+.table-properties td input {
+    width: 100%;
+}
+
+.content-properties {
+    background-color: #ffffff;
+}
+
+.attachedWindow {
+
+    /* span the whole pane with some margin */
+    position:absolute;
+    top: 21px;
+    left: 14px;
+    right: 10px;
+    bottom: 0;
+
+    overflow-y: scroll;
+    background: rgba(255,255,255,0.8);
+    border: none;
+}
+
+button[title="properties"].active > .glyphicon {
+    color: red;
+}
+
+button[title="smooth lines"] {
+    font-size: 200%;
+    margin-top: -1px;
+    font-weight: bold;
+    color: grey;
+}
+
+button[title="smooth lines"].active {
+    color: red;
+}
