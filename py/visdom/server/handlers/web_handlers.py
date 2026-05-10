@@ -288,12 +288,7 @@ class UpdateHandler(BaseHandler):
         # Update traces
         for n, idx in enumerate(idxs):
             if all(
-                i is None
-                or (
-                    isinstance(i, (int, float))
-                    and (math.isnan(i) or math.isinf(i))
-                )
-                for i in new_data[n]["x"]
+                math.isnan(i) or math.isinf(i) or i is None for i in new_data[n]["x"]
             ):
                 continue
             # handle data for plotting
