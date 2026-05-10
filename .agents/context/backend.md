@@ -1,33 +1,26 @@
-# Backend Context
+# Backend Instructions
 
-## Python Package Structure (`py/visdom/`)
+## Key Files
 
-| Path | Purpose |
-|------|---------|
-| `__init__.py` | Visdom client class (2,594 lines, 40+ visualization methods) |
-| `__init__.pyi` | Type stubs (PEP 484) for the client API |
-| `py.typed` | PEP 561 marker |
-| `VERSION` | Version string ("0.2.4") |
-| `server/app.py` | Application class: routes, state management, user settings |
-| `server/run_server.py` | CLI entry point: arg parsing, auth setup |
-| `server/build.py` | `download_scripts()`: fetches CDN dependencies |
-| `server/defaults.py` | DEFAULT_PORT=8097, DEFAULT_ENV_PATH |
-| `server/handlers/base_handlers.py` | BaseHandler, BaseWebSocketHandler |
-| `server/handlers/web_handlers.py` | HTTP request handlers (Post, Update, Close, Env, etc.) |
-| `server/handlers/socket_handlers.py` | WebSocket handlers (read-only + write-enabled) |
-| `utils/shared_utils.py` | warn_once, get_rand_id, ensure_dir_exists |
-| `utils/server_utils.py` | check_auth, serialize_env, LazyEnvData, broadcast |
+- `py/visdom/__init__.py` — Client class (40+ viz methods). Use `@pytorch_wrap` on all new methods.
+- `py/visdom/__init__.pyi` — Type stubs. Update when changing client API.
+- `py/visdom/VERSION` — Version string. Changing on master triggers PyPI publish.
+- `py/visdom/server/app.py` — Application class, routes, state management.
+- `py/visdom/server/handlers/web_handlers.py` — HTTP handlers. Copy app attributes in `initialize()`, use `@check_auth`.
+- `py/visdom/server/handlers/socket_handlers.py` — WebSocket handlers (read-only + write-enabled).
+- `py/visdom/utils/server_utils.py` — `check_auth`, `broadcast`, `LazyEnvData`, `serialize_env`.
+- `py/visdom/server/build.py` — `download_scripts()`: fetches CDN dependencies.
 
-## Coding Standards
+## Coding Rules
 
-- Follow **PEP 8**. Format with **Black** (v23.1.0). CI enforces this.
-- **80 character** line length.
-- Python **>= 3.8** compatibility.
-- All `Visdom` methods use `@pytorch_wrap` decorator for PyTorch tensor auto-conversion.
-- Use `warnings.warn()` via `warn_once()` for deprecation warnings.
-- Use `requests.Session` for HTTP connections (lazily created).
+- Follow PEP 8, format with `black py` (v23.1.0), 80-char lines
+- Python >= 3.8 compatibility
+- Use `@pytorch_wrap` on all `Visdom` methods
+- Use `warn_once()` for deprecation warnings
 
-### License Headers
+## License Headers
+
+Add to all new files:
 
 **Python:**
 ```python
@@ -52,75 +45,23 @@
  */
 ```
 
-## Server CLI Arguments
+## Server Flags
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `-port` | Server port | `8097` |
-| `--hostname` | Server hostname | `localhost` |
-| `-base_url` | Base URL prefix | `/` |
-| `-env_path` | Environment state directory | `~/.visdom/` |
-| `-logging_level` | Logging level | `INFO` |
-| `-readonly` | Read-only mode | `false` |
-| `-enable_login` | Require authentication | `false` |
-| `-force_new_cookie` | Reset session cookie | `false` |
-| `-bind_local` | Localhost only | `false` |
-| `-eager_data_loading` | Pre-load all envs | `false` |
-| `-use_frontend_client_polling` | HTTP polling instead of WebSockets | `false` |
+`-port` (8097), `--hostname`, `-base_url`, `-env_path` (~/.visdom/), `-logging_level`, `-readonly`, `-enable_login`, `-force_new_cookie`, `-bind_local`, `-eager_data_loading`, `-use_frontend_client_polling`.
 
-## Environment Variables
+## Auth via Environment
 
-| Variable | Purpose |
-|----------|---------|
-| `VISDOM_USE_ENV_CREDENTIALS` | Set to `1` for env-based auth |
-| `VISDOM_USERNAME` | Username (when env credentials enabled) |
-| `VISDOM_PASSWORD` | Password (when env credentials enabled) |
-| `VISDOM_COOKIE` | Cookie secret fallback |
-| `HOSTNAME` | Override hostname in startup output |
+Set `VISDOM_USE_ENV_CREDENTIALS=1` with `VISDOM_USERNAME` and `VISDOM_PASSWORD`.
 
-## Python Client API
+## Client API
 
-**Connection & State:**
-`check_connection()`, `save()`, `close()`, `delete_env()`, `fork_env()`, `get_env_list()`, `win_exists()`, `get_window_data()`, `set_window_data()`, `replay_log()`, `update_window_opts()`
+POST data with `self._send(msg)`. Update with `update` param (`'append'`, `'replace'`, `'remove'`). Register callbacks with `register_event_handler()`.
 
-**Event Handling:**
-`register_event_handler()`, `clear_event_handlers()`
+Methods: `text()`, `image()`, `images()`, `audio()`, `video()`, `svg()`, `matplot()`, `plotlyplot()`, `properties()`, `embeddings()`, `scatter()`, `line()`, `bar()`, `histogram()`, `heatmap()`, `boxplot()`, `surf()`, `contour()`, `quiver()`, `stem()`, `mesh()`, `pie()`, `sunburst()`, `dual_axis_lines()`, `graph()`.
 
-**Visualizations:**
-`text()`, `image()`, `images()`, `audio()`, `video()`, `svg()`, `matplot()`, `plotlyplot()`, `properties()`, `embeddings()`
+## Dependencies
 
-**Plotting:**
-`scatter()`, `line()`, `bar()`, `histogram()`, `heatmap()`, `boxplot()`, `surf()`, `contour()`, `quiver()`, `stem()`, `mesh()`, `pie()`, `sunburst()`, `dual_axis_lines()`, `graph()`
+Runtime: numpy >= 1.8, scipy, tornado, requests, pillow, websocket-client, jsonpatch, networkx.
+Optional: torch, plotly, beautifulsoup4 + lxml, av, matplotlib.
 
-## Python Dependencies
-
-### Runtime (setup.py)
-
-| Package | Version | Purpose |
-|---------|---------|---------|
-| `numpy` | >= 1.8 | Array/tensor handling |
-| `scipy` | any | Audio waveform conversion |
-| `tornado` | any | Async web server |
-| `requests` | any | HTTP client |
-| `pillow` | any | Image processing |
-| `websocket-client` | any | WebSocket client |
-| `jsonpatch` | any | JSON Patch for updates |
-| `networkx` | any | Graph data structures |
-
-### Optional
-
-| Package | Purpose |
-|---------|---------|
-| `torch` | PyTorch tensor support |
-| `plotly` | Native Plotly Figure support |
-| `beautifulsoup4` + `lxml` | Resizable matplotlib plots |
-| `av` | Video encoding from tensors |
-| `matplotlib` | Matplotlib integration |
-
-## Dependency Management
-
-- Dependabot configured for npm, pip, and github-actions (daily)
-- Python runtime deps: loosely pinned
-- JS deps: caret ranges
-- Pre-commit hooks: pinned versions
-- Version stored in `py/visdom/VERSION` — changing on master triggers PyPI publish
+Ask before adding new dependencies. Dependabot handles daily updates.

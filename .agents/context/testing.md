@@ -1,101 +1,46 @@
-# Testing Context
+# Testing Instructions
 
-## Framework
+Cypress 9 for E2E and visual regression. No Python unit tests — validation is via demo scripts and Cypress.
 
-- **Cypress 9** for end-to-end and visual regression testing
-- **No Python unit test suite** — Python behavior validated via demo scripts and Cypress E2E tests
-
-## Test Server Setup
-
-Always use a fresh server on port `8098` with `-env_path /tmp`:
+## Run Tests
 
 ```bash
-visdom -port 8098 -env_path /tmp
+visdom -port 8098 -env_path /tmp   # Always start fresh server first
+npm run test:init                   # Generate baseline screenshots
+npm run test                        # Run all tests (CLI)
+npm run test:gui                    # Interactive GUI
+npm run test:visual                 # Visual regression only
 ```
 
-## Commands
+Always use port `8098` and `-env_path /tmp` for isolation.
 
-| Command | Purpose |
-|---------|---------|
-| `npm run test:init` | Generate Cypress baseline screenshots |
-| `npm run test` | Run all Cypress tests (CLI) |
-| `npm run test:gui` | Run Cypress tests (interactive GUI) |
-| `npm run test:visual` | Run visual regression tests only |
+## Writing Tests
 
-## Test Structure (`cypress/`)
+- Place in `cypress/integration/`, follow `basic.js`, `pane.js`, `text.js` patterns
+- Visual regression uses `pixelmatch` in `cypress/plugins/`
+- Run `test:init` before `test:visual` for baselines
 
-| Path | Purpose |
-|------|---------|
-| `integration/basic.js` | Server connection, environment selection |
-| `integration/pane.js` | Window/pane CRUD operations |
-| `integration/text.js` | Text pane functionality |
-| `integration/image.js` | Image pane operations |
-| `integration/properties.js` | Interactive property widget tests |
-| `integration/modal.js` | Modal dialog interactions |
-| `integration/misc.js` | Miscellaneous feature tests |
-| `integration/screenshots.init.js` | Baseline screenshot capture |
-| `integration/screenshots.js` | Visual regression comparison |
-| `plugins/` | Cypress plugins (pixelmatch for image comparison) |
-| `support/` | Support files and custom commands |
+## Test Files
 
-## Visual Regression
+`basic.js` (connection), `pane.js` (CRUD), `text.js`, `image.js`, `properties.js`, `modal.js`, `misc.js`, `screenshots.init.js` (baseline), `screenshots.js` (comparison).
 
-- Uses `pixelmatch` for pixel-level screenshot comparison
-- Run `npm run test:init` first to establish baseline, then `npm run test:visual`
+## CI
 
-## CI Workflow (`process-changes.yml`)
+- Python 3.8, 3.9, 3.10 matrix, both WebSocket and polling modes
+- Visual regression compares PR screenshots against base branch
+- `update-js-build-files.yml` auto-compiles JS on master
+- `pypi.yml` publishes to PyPI when VERSION changes
 
-| Job | Description |
-|-----|-------------|
-| **lint-js** | ESLint check (Node 16) |
-| **lint-py** | Black formatting check (v23.1.0) |
-| **install-and-build** | Build JS, upload artifacts |
-| **visual-regression-test-init** | Baseline screenshots against base branch |
-| **visual-regression-test** | Compare PR screenshots to baseline |
-| **functional-test (websocket)** | Cypress on Python 3.8, 3.9, 3.10 |
-| **functional-test (polling)** | Cypress with polling mode |
+## Regression Check
 
-## CI Python Versions
+Run `python example/demo.py` on your branch and a clean branch, visually confirm no differences.
 
-3.8, 3.9, 3.10 (matrix strategy)
+## Debugging
 
-## Test Dependencies
-
-`test-requirements.txt`: matplotlib, numpy, av, torch-cpu
-
-## Regression Validation
-
-Run `python example/demo.py` on both your branch and a clean branch, visually confirm no differences.
-
-## Other CI Workflows
-
-| Workflow | Trigger | Purpose |
-|----------|---------|---------|
-| `update-js-build-files.yml` | Push to master (js/** changed) | Auto-compiles main.js |
-| `pypi.yml` | Push to master (VERSION changed) | Publishes to PyPI |
-| `issue-scripts.yml` | Issue comment | Auto-responds to "assign me" comments |
-
-## Debugging Tips
-
-### Server-Side
-
-- `visdom -logging_level DEBUG` for verbose logging
-- `/win_data` endpoint to dump raw window JSON
-- `visdom -env_path /tmp` for clean state
-
-### Frontend
-
-- Browser DevTools → Network → WS tab for WebSocket messages
-- `npm run dev` for debuggable builds with source maps
-- `Plotly` is a global accessible in browser console
-
-### Common Error States
-
-| Symptom | Fix |
-|---------|-----|
-| Blue screen, no visualizations | Check `py/visdom/static/` for missing CDN files |
-| "Socket refused connection" | Start server, check port |
-| `win does not exist` on update | Check `vis.win_exists()` first |
-| Layout broken | Clear browser localStorage |
-| Visual regression failures | Re-baseline with `test:init` |
-| `@generated` lint errors | Discard changes to `py/visdom/static/` |
+- Verbose logs: `visdom -logging_level DEBUG`
+- Clean state: `visdom -env_path /tmp`
+- Raw window data: `/win_data` endpoint
+- Source maps: `npm run dev`
+- WebSocket inspection: Browser DevTools → Network → WS tab
+- Blue screen → check `py/visdom/static/` for missing CDN files
+- `@generated` lint errors → discard changes to `py/visdom/static/`
