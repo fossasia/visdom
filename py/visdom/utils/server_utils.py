@@ -317,21 +317,13 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         ):
             del res["jsons"][destWid]
 
-    merged_titles = {
-        res["jsons"][wid].get("title", "")
-        for wid in res["jsons"]
-        if res["jsons"][wid].get("title", "")
-    }
-
     for eid in sorted(envs.keys()):
         eid_num = eidNums[eid]
         for wid, win in envs[eid].get("jsons", {}).items():
             win_title = win.get("title", "")
-            if win_title in merged_titles:
-                continue
-            if win_title:
-                merged_titles.add(win_title)
             new_wid = "{}_env_{}".format(eid, wid)
+            if new_wid in res["jsons"]:
+                continue
             win_copy = copy.deepcopy(win)
             win_copy["id"] = new_wid
             label = (
