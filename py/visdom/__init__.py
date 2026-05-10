@@ -257,6 +257,30 @@ def _opts2layout(opts, is3d=False):
     return _scrub_dict(layout)
 
 
+def _decode_typed_arrays(obj):
+    """Recursively convert Plotly typed-array dicts {bdata, dtype} to plain Python lists.
+
+    Newer versions of plotly-py (>= 5.12) encode numpy arrays as a compact
+    binary format when building JSON:  {"bdata": "<base64>", "dtype": "f8"}.
+    The Plotly.js version bundled with Visdom does not recognise this format,
+    so any trace field that uses it is silently ignored by the browser — causing
+    large histograms (and any other plot whose data is a large numpy array) to
+    appear completely empty.
+
+    This function walks the decoded figure dict and converts every such object
+    back to a plain Python list so that Plotly.js can render it correctly.
+    """
+    if isinstance(obj, dict):
+        if "bdata" in obj and "dtype" in obj:
+            raw = b64.b64decode(obj["bdata"])
+            arr = np.frombuffer(raw, dtype=np.dtype(obj["dtype"]))
+            return arr.tolist()
+        return {k: _decode_typed_arrays(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_decode_typed_arrays(item) for item in obj]
+    return obj
+
+
 def _markerColorCheck(mc, X, Y, L):
     assert isndarray(mc), "mc should be a numpy ndarray"
     assert mc.shape[0] == L or (
@@ -1084,6 +1108,13 @@ class Visdom(object):
                 json.dumps(figure, cls=plotly.utils.PlotlyJSONEncoder)
             )
 
+            # Newer plotly-py versions encode numpy arrays as typed-array
+            # objects {"bdata": "<base64>", "dtype": "f8"} for efficiency.
+            # The Plotly.js bundled with Visdom does not support this format,
+            # so we convert any such objects back to plain Python lists.
+            # See: https://github.com/fossasia/visdom/issues/927
+            figure_dict = _decode_typed_arrays(figure_dict)
+
             # If opts title is not added, the title is not added to the top right of the window.
             # We add the paramater to opts manually if it exists.
             opts = dict()
@@ -1093,8 +1124,7 @@ class Visdom(object):
                 # The title is now officially under a 'text' subproperty. Previously, the property
                 # itself could also directly reference the title.
                 # Although this latter behavior is now deprecated, we support both possibilities.
-                # Docs reference: https://plot.ly/python/reference/#layout-title-text
-                opts["title"] = (
+    ``                opts["title"] = (
                     title_prop["text"] if "text" in title_prop else title_prop
                 )
 
