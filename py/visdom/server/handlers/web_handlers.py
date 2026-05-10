@@ -290,7 +290,10 @@ class UpdateHandler(BaseHandler):
             if all(math.isnan(i) or i is None for i in new_data[n]["x"]):
                 continue
             # handle data for plotting
-            for axis in ["x", "y"]:
+            axes = ["x", "y"]
+            if pdata[idx]["type"] == "scatter3d":
+                axes.append("z")
+            for axis in axes:
                 pdata[idx][axis] = (
                     (pdata[idx][axis] + new_data[n][axis])
                     if append
