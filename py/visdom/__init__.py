@@ -259,7 +259,7 @@ def _opts2layout(opts, is3d=False):
 
 def _markerColorCheck(mc, X, Y, L):
     assert isndarray(mc), "mc should be a numpy ndarray"
-    assert mc.shape[0] == L or (
+    assert mc.shape[0] >= L or (
         mc.shape[0] == X.shape[0]
         and (mc.ndim == 1 or mc.ndim == 2 and mc.shape[1] == 3)
     ), (
@@ -267,7 +267,7 @@ def _markerColorCheck(mc, X, Y, L):
         + " or `%d` or `%d x 3`, but got: %s"
     ) % (
         X.shape[0],
-        X.shape[1],
+        X.shape[0],
         L,
         L,
         "x".join(map(str, mc.shape)),
@@ -285,6 +285,10 @@ def _markerColorCheck(mc, X, Y, L):
         markercolor = ["#%02x%02x%02x" % (i[0], i[1], i[2]) for i in mc]
 
     if mc.shape[0] != X.shape[0]:
+        assert Y.max() <= mc.shape[0], (
+            "markercolor palette has %d entries but Y contains label %d; "
+            "palette must have at least max(Y) = %d entries"
+        ) % (mc.shape[0], int(Y.max()), int(Y.max()))
         markercolor = [markercolor[Y[i] - 1] for i in range(Y.shape[0])]
 
     ret = {}
