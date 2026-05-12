@@ -210,11 +210,11 @@ describe('Test View Modal', () => {
 
     // open view modal and copy layout
     cy.get(viewbutton).click();
-    cy.get(viewmodal + 'select').eq(1).select(env_src); // Source Environment
-    cy.get(viewmodal + 'select').eq(2).select('copy_test_layout'); // Source Layout
-    cy.get(viewmodal + 'input').eq(1)
+    cy.get(viewmodal + 'select[title="Source Environment"]').select(env_src);
+    cy.get(viewmodal + 'select[title="Source Layout"]').select('copy_test_layout');
+    cy.get(viewmodal + 'input[title="New Layout Name"]')
       .clear()
-      .type('copied_layout'); // New Layout Name
+      .type('copied_layout');
     cy.contains('button', 'Copy').click();
 
     // Verify destination view changed

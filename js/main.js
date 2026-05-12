@@ -705,8 +705,16 @@ const App = () => {
 
     let layoutData = srcLayoutMap.get(srcLayout);
 
+    // clone the layout map so src and dest don't share references
+    let clonedLayoutData = new Map(
+      Array.from(layoutData.entries(), ([key, value]) => [
+        key,
+        Array.isArray(value) ? [...value] : value,
+      ])
+    );
+
     let currentEnv = selection.envIDs[0];
-    layoutLists.get(currentEnv).set(destLayout, layoutData);
+    layoutLists.get(currentEnv).set(destLayout, clonedLayoutData);
 
     sendLayoutsSave(layoutLists);
 

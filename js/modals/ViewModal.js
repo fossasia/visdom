@@ -52,12 +52,12 @@ function ViewModal(props) {
     const hasLayouts = availableCopyLayouts.length > 0;
     const [copyLayout, setCopyLayout] = useState(hasLayouts ? availableCopyLayouts[0] : '');
     useEffect(() => {
-      if (hasLayouts && !availableCopyLayouts.includes(copyLayout)) {
+      if (hasLayouts) {
         setCopyLayout(availableCopyLayouts[0]);
-      } else if (!hasLayouts) {
+      } else {
         setCopyLayout('');
       }
-    }, [copyEnv, availableCopyLayouts.length]);
+    }, [copyEnv]);
 
     const [copyDestName, setCopyDestName] = useState('');
     useEffect(() => {
