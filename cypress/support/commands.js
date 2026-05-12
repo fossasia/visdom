@@ -29,23 +29,24 @@
 import '@4tw/cypress-drag-drop';
 
 Cypress.Commands.add('run', (name, opts) => {
-  var saveto = (opts && "env" in opts) ? opts["env"] : name + "_" + Cypress._.random(0, 1e6);
-  var argscli = (opts && "args" in opts) ? (' -arg '+opts["args"].join(' ')) : '';
-  var seed = (opts && "seed" in opts) ? (' -seed '+opts["seed"]) : '';
-  if (!opts || !("asyncrun" in opts) || !opts["asyncrun"])
-      cy.exec(`python example/demo.py -port 8098 -testing -run ${name} -env ${saveto} ${seed} ${argscli}`);
-  else
-      cy.task('asyncrun', {
-          run: name,
-          env: saveto,
-          seed: (opts && "seed" in opts) ? opts["seed"] : undefined,
-          args: (opts && "args" in opts) ? opts["args"] : [],
-      })
+    const pythonCmd = Cypress.env('pythonCmd') || 'python3';
+    var saveto = (opts && "env" in opts) ? opts["env"] : name + "_" + Cypress._.random(0, 1e6);
+    var argscli = (opts && "args" in opts) ? (' -arg ' + opts["args"].join(' ')) : '';
+    var seed = (opts && "seed" in opts) ? (' -seed ' + opts["seed"]) : '';
+    if (!opts || !("asyncrun" in opts) || !opts["asyncrun"])
+        cy.exec(`${pythonCmd} example/demo.py -port 8098 -testing -run ${name} -env ${saveto} ${seed} ${argscli}`);
+    else
+        cy.task('asyncrun', {
+            run: name,
+            env: saveto,
+            seed: (opts && "seed" in opts) ? opts["seed"] : undefined,
+            args: (opts && "args" in opts) ? opts["args"] : [],
+        })
 
-  if (!opts || !("open" in opts) || opts["open"]) {
-      cy.close_envs();
-      cy.open_env(saveto);
-  }
+    if (!opts || !("open" in opts) || opts["open"]) {
+        cy.close_envs();
+        cy.open_env(saveto);
+    }
 });
 
 Cypress.Commands.add('close_envs', () => {
@@ -60,6 +61,6 @@ Cypress.Commands.add('open_env', (name) => {
             cy.get(closed_group).click()
     })
     cy.get('.rc-tree-select-tree').contains(name).click()
-    cy.get('.rc-tree-select').click({force: true}) // ignore any elements that might cover the list at this point
+    cy.get('.rc-tree-select').click({ force: true }) // ignore any elements that might cover the list at this point
 });
 

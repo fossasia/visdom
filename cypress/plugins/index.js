@@ -16,7 +16,7 @@
  * @type {Cypress.PluginConfig}
  */
 // eslint-disable-next-line no-unused-vars
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const pixelmatch = require('pixelmatch');
@@ -29,10 +29,51 @@ function assertSafeToken(name, value) {
   }
 }
 
+// Detects the correct Python command for the current platform.
+function getPythonConfig() {
+  let pythonBin = 'python3'; // preferred default
+  try {
+    execSync('python3 --version', { stdio: 'ignore' });
+  } catch (e) {
+    try {
+      execSync('python --version', { stdio: 'ignore' });
+      pythonBin = 'python';
+    } catch (e2) {
+      // Neither found; keep 'python3' and let the error surface naturally
+    }
+  }
+
+  if (process.platform === 'darwin') {
+    try {
+      const translated = execSync('sysctl -n sysctl.proc_translated', {
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'ignore'],
+      }).trim();
+      if (translated === '1') {
+        return {
+          execCmd: `arch -arm64 ${pythonBin}`,
+          spawnCmd: 'arch',
+          spawnPrefix: ['-arm64', pythonBin],
+        };
+      }
+    } catch (e) {
+      // Not running under Rosetta or sysctl unavailable
+    }
+  }
+  return {
+    execCmd: pythonBin,
+    spawnCmd: pythonBin,
+    spawnPrefix: [],
+  };
+}
+
 
 module.exports = (on) => {
   // `on` is used to hook into various events Cypress emits
   // `config` is the resolved Cypress config
+
+  const pythonConfig = getPythonConfig();
+  config.env.pythonCmd = pythonConfig.execCmd;
 
   on('task', {
     asyncrun(payload) {
@@ -76,14 +117,14 @@ module.exports = (on) => {
         spawnArgs.push('-arg', ...args);
       }
 
-      const child = spawn('python', spawnArgs, {
+      const child = spawn(pythonConfig.spawnCmd, [...pythonConfig.spawnPrefix, ...spawnArgs], {
         stdio: 'ignore',
         detached: true,
       });
       child.unref();
 
       return {
-        command: 'python',
+        command: pythonConfig.execCmd,
         args: spawnArgs,
       };
     },
@@ -150,5 +191,7 @@ module.exports = (on) => {
 
     return details;
   });
+
+  return config;
 };
 
