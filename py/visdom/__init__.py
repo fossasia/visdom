@@ -742,10 +742,6 @@ class Visdom(object):
         if not self.send:
             return msg, endpoint
 
-        if self.use_socket and not self.socket_alive:
-            logger.warn("Socket not alive, switching to HTTP")
-            self.use_socket = False
-
         if "win" in msg and msg["win"] is None and create:
             msg["win"] = "window_" + get_rand_id()
 

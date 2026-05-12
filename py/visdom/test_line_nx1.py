@@ -4,21 +4,22 @@ def test_line_nx1_single_line_behavior(monkeypatch):
 
     captured = {}
 
-    # Mock _send to capture what is being sent
-    def fake_send(self, *args, **kwargs):
-        captured['data'] = kwargs
+    def fake_send(self, msg, *args, **kwargs):
+        captured["msg"] = msg
+        return True
 
-    viz = Visdom()
-    monkeypatch.setattr(viz, "_send", fake_send)
+    monkeypatch.setattr(Visdom, "_send", fake_send)
+
+    viz = Visdom(send=False, use_incoming_socket=False)
 
     X = np.arange(5)
-    Y = np.arange(5).reshape(-1, 1)  # Shape (N,1)
+    Y = np.arange(5).reshape(-1, 1)
 
     viz.line(X=X, Y=Y)
 
-    # Assertions
-    assert 'data' in captured
+    assert "msg" in captured
 
-    # Ensure only one line is created (not broadcasted)
-    sent_data = captured['data']
-    assert sent_data is not None
+    sent_data = captured["msg"]["data"]
+
+    # Ensure only one trace with N points
+    assert len(sent_data) == 5
