@@ -485,12 +485,7 @@ The following `opts` are supported:
 
 #### vis.sunburst
 This function draws a sunburst chart. It takes two inputs: `parents` and `labels` array.
-values from `parents` array is used as parents object, like it define above which sector 
-should the this sector shown. values from `labels` array is used to define sector's label 
-or you can say name. keep in mind that length of array `parents` and `labels` should be 
-equal. There is a third array that you can pass to which is `value`, it is use to show 
-a value on hovering over a sector, it is optional argument, but if you are passing it then
-keep in mind length of `value` should be equal to `parents` or `labels`.
+Values from the `parents` array define the hierarchical structure, indicating which parent sector a sector belongs to. Values from the `labels` array define the sector's label or name. Keep in mind that the `parents` and `labels` arrays must be of equal length. There is an optional third array called `value`, which is used to display a numerical value when hovering over a sector. If provided, the `value` array must be the same length as `parents` and `labels`.
 
 Following `opts` are currently supported:
 - `opts.font_size`    : define font size of label (`int`)
