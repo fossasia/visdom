@@ -490,7 +490,7 @@ should the this sector shown. values from `labels` array is used to define secto
 or you can say name. keep in mind that length of array `parents` and `labels` should be 
 equal. There is a third array that you can pass to which is `value`, it is use to show 
 a value on hovering over a sector, it is optional argument, but if you are passing it then
-keep in mind length of `values` should be equal to `parents` or `labels`.
+keep in mind length of `value` should be equal to `parents` or `labels`.
 
 Following `opts` are currently supported:
 - `opts.font_size`    : define font size of label (`int`)
