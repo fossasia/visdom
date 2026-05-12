@@ -672,7 +672,7 @@ There are two optional arguments :
 The following opts are supported:
 - `opts.height` : Height of the plot. Default : 500
 - `opts.width` : Width of the plot. Default : 500
-- `opts.directed` : whether the plot should have a arrow or not. Default : false
+- `opts.directed` : whether the plot should have an arrow or not. Default : false
 - `opts.showVertexLabels` : Whether to show vertex labels. Default : true
 - `opts.showEdgeLabels` : Whether to show edge labels. Default : false
 - `opts.scheme` : Whether all nodes should have "same" color or "different". Default : "same"
