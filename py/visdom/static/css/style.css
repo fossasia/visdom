@@ -82,10 +82,10 @@ h1 {
   top: 0;
   left: 0;
   right: 0;
-  height: 14px;
+  height: 16px;
   color: #333;
   text-align: right;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .window.focus {
@@ -101,7 +101,7 @@ h1 {
 }
 
 .bar button {
-   font-size: 8px;
+  font-size: 12px;
 }
 
 button {
@@ -122,13 +122,13 @@ button > span.glyphicon {
 
 .bar button {
   background: transparent;
-  margin: 0 4px;
+  margin: 0 5px;
   float: left;
 }
 
 .content {
   width: 100%;
-  height: calc( 100% - 14px );
+  height: calc(100% - 16px);
   position: absolute;
   overflow: hidden;
   left: 0;
