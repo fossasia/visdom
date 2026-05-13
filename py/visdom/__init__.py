@@ -285,10 +285,6 @@ def _markerColorCheck(mc, X, Y, L):
         markercolor = ["#%02x%02x%02x" % (i[0], i[1], i[2]) for i in mc]
 
     if mc.shape[0] != X.shape[0]:
-        assert Y.max() <= mc.shape[0], (
-            "markercolor palette has %d entries but Y contains label %d; "
-            "palette must have at least max(Y) = %d entries"
-        ) % (mc.shape[0], int(Y.max()), int(Y.max()))
         markercolor = [markercolor[Y[i] - 1] for i in range(Y.shape[0])]
 
     ret = {}
