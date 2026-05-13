@@ -484,7 +484,7 @@ The following `opts` are supported:
 - Tensor of size `K` and `K x 3`: Instead of having a unique color per data point, the same color is shared for all points of a particular label.
 
 #### vis.sunburst
-This function draws a sunburst chart. It takes two inputs: `labels` and `parents` array.
+This function draws a sunburst chart. It takes two input arrays: `labels` and `parents`.
 Values from the `parents` array define the hierarchical structure, indicating which parent sector a sector belongs to. Values from the `labels` array define the sector's label or name. Keep in mind that the `parents` and `labels` arrays must be of equal length. There is an optional third array called `values`, which is used to display a numerical value when hovering over a sector. If provided, the `values` array must be the same length as `parents` and `labels`.
 
 Following `opts` are currently supported:
