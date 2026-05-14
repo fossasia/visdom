@@ -44,17 +44,21 @@ const ApiProvider = ({ children }) => {
       return;
     }
 
+    let msg = null;
     try {
-      let msg = JSON.stringify(data);
+      msg = JSON.stringify(data);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[Visdom API] Failed to serialize message:', e, data);
+      return;
+    }
+
+    try {
       _socket.current.send(msg);
     } catch (e) {
       // WebSocket may be CLOSING or CLOSED state
       // eslint-disable-next-line no-console
-      console.error(
-        '[Visdom API] Failed to send message:',
-        e.message,
-        data
-      );
+      console.error('[Visdom API] Failed to send message:', e, data);
     }
   };
 
@@ -91,9 +95,9 @@ const ApiProvider = ({ children }) => {
     } else {
       ws_protocol = 'ws';
     }
-    
+
     const wsUrl = ws_protocol + '://' + url.host + correctPathname() + 'socket';
-    
+
     var socket = new WebSocket(wsUrl);
 
     socket.onmessage = handleMessage;
