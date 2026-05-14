@@ -118,7 +118,9 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 serialize_env(self.state, [self.eid], env_path=self.env_path)
 
         elif cmd == "save_all":
-            serialize_all(self.state, env_path=self.env_path)
+            tornado.ioloop.IOLoop.current().run_in_executor(
+                None, serialize_all, self.state, self.env_path
+            )
 
         elif cmd == "delete_env":
             if "eid" in msg:
