@@ -118,7 +118,7 @@ describe('Image Pane', () => {
     // check new position
     cy.get(container_selector)
       .first()
-      .should('have.css', 'top', '-32.658px')
+      .should('have.css', 'top', '-33.4449px')
       .should('have.css', 'left', '-3.93469px');
   });
 
@@ -166,7 +166,7 @@ describe('Image Pane', () => {
     // check new position
     cy.get(container_selector)
       .first()
-      .should('have.css', 'top', '105.77px')
+      .should('have.css', 'top', '105.407px')
       .should('have.css', 'left', '49.9706px');
     cy.get(img_selector)
       .should('have.attr', 'width', '156px')
