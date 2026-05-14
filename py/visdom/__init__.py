@@ -259,13 +259,6 @@ def _opts2layout(opts, is3d=False):
 
 def _markerColorCheck(mc, X, Y, L):
     assert isndarray(mc), "mc should be a numpy ndarray"
-    # Two valid shapes for mc:
-    #   Palette path  : one colour per label class → mc.shape[0] >= L (relaxed from == L
-    #                   so a shared palette larger than max(Y) is accepted; fixes #357).
-    #   Per-point path: one colour per data point  → mc.shape[0] == X.shape[0].
-    # Both paths require mc to be 1-D (alpha values) or Nx3 (RGB).
-    # Validating ndim/shape[1]==3 in both branches prevents invalid shapes such as
-    # (N, 2) from slipping past the assertion and causing later IndexError/format errors.
     assert (
         (mc.ndim == 1 and (mc.shape[0] >= L or mc.shape[0] == X.shape[0]))
         or (
@@ -1788,10 +1781,6 @@ class Visdom(object):
         assert Y.ndim == 1 or Y.ndim == 2, "Y should have 1 or 2 dim"
         assert Y.shape[-1] > 0, "must plot one line at least"
 
-        # A 2-D Y with a single column (shape Mx1) is equivalent to a 1-D Y of
-        # M points (one line). Squeezing it here prevents the subsequent tiling
-        # of X from being driven by Y.shape[1]==1, which would produce a shape
-        # mismatch when X is 1-D (fixes issues #762 and #1239).
         if Y.ndim == 2 and Y.shape[1] == 1:
             Y = Y.ravel()
 
