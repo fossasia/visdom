@@ -8,7 +8,6 @@ const ApiProvider = ({ children }) => {
   const [connected, setConnected] = useState(false);
   const [sessionInfo, setSessionInfo] = useState({ id: null, readonly: false });
   const _socket = useRef(null);
-  const _hasDisconnected = useRef(false);
   const apiHandlers = useRef(null);
 
   // ---------------- //
@@ -30,21 +29,6 @@ const ApiProvider = ({ children }) => {
     return pathname;
   };
 
-  // Extract safe metadata from message (avoids logging sensitive payload data)
-  const getSafeMessageMetadata = (data) => {
-    if (!data || typeof data !== 'object') {
-      return { type: typeof data };
-    }
-    const safeFields = ['type', 'id', 'event', 'requestId', 'win', 'eid'];
-    const metadata = {};
-    safeFields.forEach(field => {
-      if (field in data) {
-        metadata[field] = data[field];
-      }
-    });
-    return Object.keys(metadata).length > 0 ? metadata : { fields: 'unknown' };
-  };
-
   // ------------------- //
   // basic communication //
   // ------------------- //
@@ -54,9 +38,8 @@ const ApiProvider = ({ children }) => {
     if (!_socket.current) {
       // eslint-disable-next-line no-console
       console.error(
-        '[Visdom API] Cannot send message: WebSocket is not connected. ' +
-        'Message type:',
-        getSafeMessageMetadata(data)
+        '[Visdom API] Cannot send message: WebSocket is not connected.',
+        data
       );
       return;
     }
@@ -70,8 +53,7 @@ const ApiProvider = ({ children }) => {
       console.error(
         '[Visdom API] Failed to send message:',
         e.message,
-        'Message type:',
-        getSafeMessageMetadata(data)
+        data
       );
     }
   };
@@ -82,21 +64,10 @@ const ApiProvider = ({ children }) => {
       return;
     }
 
-    // Reset disconnect flag for new connection attempt
-    _hasDisconnected.current = false;
-
     const _onConnect = () => {
-      // eslint-disable-next-line no-console
-      console.log('[Visdom API] WebSocket connected');
       setConnected(true);
     };
     const _onDisconnect = () => {
-      // Prevent duplicate disconnect handling if called more than once
-      if (_hasDisconnected.current) {
-        return;
-      }
-      _hasDisconnected.current = true;
-      
       // Silent cleanup - logging handled by event handlers
       apiHandlers.current.onDisconnect(_socket);
       setConnected(false);
@@ -122,8 +93,6 @@ const ApiProvider = ({ children }) => {
     }
     
     const wsUrl = ws_protocol + '://' + url.host + correctPathname() + 'socket';
-    // eslint-disable-next-line no-console
-    console.log('[Visdom API] Attempting to connect to WebSocket:', wsUrl);
     
     var socket = new WebSocket(wsUrl);
 
@@ -146,12 +115,6 @@ const ApiProvider = ({ children }) => {
           `Code: ${event.code}`,
           `Reason: ${event.reason || '(no reason provided)'}`
         );
-      } else {
-        // eslint-disable-next-line no-console
-        console.log(
-          '[Visdom API] WebSocket closed cleanly.',
-          `Code: ${event.code}`
-        );
       }
       // Only call _onDisconnect from onclose to avoid duplicate handling
       _onDisconnect();
@@ -162,8 +125,6 @@ const ApiProvider = ({ children }) => {
   // Close the server connection and reset the _socket ref
   const disconnect = () => {
     if (_socket.current) {
-      // eslint-disable-next-line no-console
-      console.log('[Visdom API] Closing WebSocket connection');
       _socket.current.close();
       _socket.current = null;
     }
