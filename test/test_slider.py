@@ -46,7 +46,7 @@ def make_noisy(clean, noise_level):
     return noisy
 
 
-# ── Phase 1: simulate training, push one frame per epoch ──────────────────
+# ── simulate training, push one frame per epoch ──────────────────
 print("Phase 1 — logging 10 epochs...")
 for epoch in range(EPOCHS):
     gt = make_ground_truth(epoch)
@@ -66,10 +66,9 @@ for epoch in range(EPOCHS):
     time.sleep(0.3)
 
 print("\nAll epochs logged. Open http://localhost:8097 to see three panes.")
-print("Each pane now has a slider — but they move independently.\n")
 time.sleep(2)
 
-# ── Phase 2: Python steps through epochs in sync across all 3 panes ───────
+# ── Python steps through epochs in sync across all 3 panes ───────
 print("Phase 2 — Python syncing all sliders in lockstep (new API)...")
 for epoch in range(EPOCHS):
     viz.update_image_slider(WIN_INPUT, epoch)
