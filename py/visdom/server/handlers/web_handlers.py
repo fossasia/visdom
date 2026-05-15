@@ -121,12 +121,19 @@ class UpdateHandler(BaseHandler):
 
     @staticmethod
     def update_packet(p, args):
-        old_p = copy.deepcopy(p)
+        MUTABLE_KEYS = (
+            "content", "selected", "contentID", "old_content",
+            "version", "title", "width", "height", "inflate",
+        )
+        old_snapshot = {
+            k: copy.deepcopy(p[k]) if k == "content" or k == "old_content"
+            else p[k]
+            for k in MUTABLE_KEYS if k in p
+        }
         p = UpdateHandler.update(p, args)
         p["contentID"] = get_rand_id()
-        # TODO: make_patch isn't high performance.
-        # If bottlenecked we should build the patch ourselves.
-        patch = jsonpatch.make_patch(old_p, p)
+        new_snapshot = {k: p[k] for k in MUTABLE_KEYS if k in p}
+        patch = jsonpatch.make_patch(old_snapshot, new_snapshot)
         return p, patch.patch
 
     @staticmethod
