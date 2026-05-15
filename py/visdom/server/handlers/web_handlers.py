@@ -122,13 +122,20 @@ class UpdateHandler(BaseHandler):
     @staticmethod
     def update_packet(p, args):
         MUTABLE_KEYS = (
-            "content", "selected", "contentID", "old_content",
-            "version", "title", "width", "height", "inflate",
+            "content",
+            "selected",
+            "contentID",
+            "old_content",
+            "version",
+            "title",
+            "width",
+            "height",
+            "inflate",
         )
         old_snapshot = {
-            k: copy.deepcopy(p[k]) if k == "content" or k == "old_content"
-            else p[k]
-            for k in MUTABLE_KEYS if k in p
+            k: copy.deepcopy(p[k]) if k == "content" or k == "old_content" else p[k]
+            for k in MUTABLE_KEYS
+            if k in p
         }
         p = UpdateHandler.update(p, args)
         p["contentID"] = get_rand_id()
