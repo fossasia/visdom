@@ -29,6 +29,7 @@ from visdom.utils.server_utils import (
     check_auth,
     broadcast_envs,
     serialize_env,
+    serialize_all,
     send_to_sources,
     broadcast,
     escape_eid,
@@ -116,6 +117,11 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 self.state[msg["eid"]]["reload"] = msg["data"]
                 self.eid = msg["eid"]
                 serialize_env(self.state, [self.eid], env_path=self.env_path)
+
+        elif cmd == "save_all":
+            tornado.ioloop.IOLoop.current().run_in_executor(
+                None, serialize_all, self.state, self.env_path
+            )
 
         elif cmd == "delete_env":
             if "eid" in msg:
