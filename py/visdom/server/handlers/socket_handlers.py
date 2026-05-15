@@ -19,6 +19,7 @@ import logging
 import os
 import time
 import types
+from collections import deque
 
 import tornado.ioloop
 import tornado.escape
@@ -164,7 +165,7 @@ class AnySocketWrapper(AnySocketHandlerOrWrapper):
     def initialize(self, app):
         super().initialize(app)
 
-        self.messages = []
+        self.messages = deque()
         self.last_read_time = time.time()
         self.open()
         try:
@@ -202,7 +203,7 @@ class AnySocketWrapper(AnySocketHandlerOrWrapper):
     def get_messages(self):
         to_send = []
         while len(self.messages) > 0:
-            message = self.messages.pop()
+            message = self.messages.popleft()
             if isinstance(message, dict):
                 # Not all messages are being formatted the same way (JSON)
                 # TODO investigate
