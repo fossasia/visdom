@@ -17,7 +17,7 @@ jobs:
       with:
           node-version: 16
     - name: "Install Dependencies"
-      run: npm install
+      run: ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm install
     - name: "Linter Check (ESLint)"
       run: npm run lint
 
