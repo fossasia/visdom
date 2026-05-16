@@ -1120,6 +1120,10 @@ class Visdom(object):
                 opts["title"] = (
                     title_prop["text"] if "text" in title_prop else title_prop
                 )
+            if "width" in figure_dict["layout"]:
+                opts["width"] = figure_dict["layout"]["width"]
+            if "height" in figure_dict["layout"]:
+                opts["height"] = figure_dict["layout"]["height"]
 
             return self._send(
                 {
