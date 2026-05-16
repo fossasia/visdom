@@ -67,7 +67,7 @@ class Visdom:
         svgstr: _OptStr = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
-        ops: _OptOps = ...,
+        opts: _OptOps = ...,
     ) -> _SendReturn: ...
     @overload
     def svg(
@@ -75,7 +75,7 @@ class Visdom:
         svgfile: _OptStr = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
-        ops: _OptOps = ...,
+        opts: _OptOps = ...,
     ) -> _SendReturn: ...
     def matplot(
         self, plot: Any, opts: _OptOps = ..., env: _OptStr = ..., win: _OptStr = ...
@@ -120,9 +120,9 @@ class Visdom:
         Y: Optional[Tensor] = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
+        opts: _OptOps = ...,
         update: _OptStr = ...,
         name: _OptStr = ...,
-        opts: _OptOpts = ...,
     ) -> _SendReturn: ...
     def line(
         self,
