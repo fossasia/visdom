@@ -25,6 +25,7 @@ except ImportError:
 import math
 import re
 import base64
+import binascii
 import numpy as np  # type: ignore
 from PIL import Image  # type: ignore
 import base64 as b64  # type: ignore
@@ -145,7 +146,7 @@ def _title2str(opts):
     if opts.get("title"):
         if isnum(opts.get("title")):
             title = str(opts.get("title"))
-            logger.warn("Numerical title %s has been casted to a string" % title)
+            logger.warning("Numerical title %s has been cast to a string" % title)
             opts["title"] = title
             return opts
         else:
@@ -316,7 +317,7 @@ def _assert_opts(opts):
     remove_nones = ["title"]
     for to_remove in remove_nones:
         if to_remove in opts and opts[to_remove] is None:
-            logger.warn(
+            logger.warning(
                 "None-incompatible opt {} was provided None value "
                 "and was thus ignored".format(to_remove)
             )
@@ -416,6 +417,25 @@ def pytorch_wrap(f):
     return wrapped_f
 
 
+def _decode_binary_arrays(obj):
+    """Decode Plotly 6+ binary-encoded arrays back to plain Python lists."""
+    if isinstance(obj, dict):
+        if "dtype" in obj and "bdata" in obj:
+            try:
+                arr = np.frombuffer(
+                    base64.b64decode(obj["bdata"]), dtype=np.dtype(obj["dtype"])
+                )
+                if "shape" in obj:
+                    arr = arr.reshape(obj["shape"])
+                return arr.tolist()
+            except (binascii.Error, ValueError, TypeError):
+                return obj
+        return {k: _decode_binary_arrays(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_decode_binary_arrays(v) for v in obj]
+    return obj
+
+
 class Visdom(object):
     def __init__(
         self,
@@ -509,7 +529,7 @@ class Visdom(object):
         elif send and use_polling:
             self.setup_polling()
         elif send and not use_incoming_socket:
-            logger.warn(
+            logger.warning(
                 "Without the incoming socket you cannot receive events from "
                 "the server or register event handlers to your Visdom client."
             )
@@ -521,7 +541,7 @@ class Visdom(object):
             time_spent += inc
             inc *= 2
         if time_spent > 5:
-            logger.warn(
+            logger.warning(
                 "Visdom python client failed to establish socket to get "
                 "messages from the server. This feature is optional and "
                 "can be disabled by initializing Visdom with "
@@ -573,7 +593,7 @@ class Visdom(object):
                         self.socket_alive = True
                         self.socket_connection_achieved = True
                     else:
-                        logger.warn(
+                        logger.warning(
                             "Visdom server failed handshake, may not "
                             "be properly connected"
                         )
@@ -624,7 +644,7 @@ class Visdom(object):
                         self.socket_alive = True
                         self.socket_connection_achieved = True
                     else:
-                        logger.warn(
+                        logger.warning(
                             "Visdom server failed handshake, may not "
                             "be properly connected"
                         )
@@ -633,7 +653,7 @@ class Visdom(object):
                     try:
                         handler(message)
                     except Exception as e:
-                        logger.warn(
+                        logger.warning(
                             "Visdom failed to handle a handler for {}: {}"
                             "".format(message, e)
                         )
@@ -1080,9 +1100,12 @@ class Visdom(object):
             # We do a round-trip of JSON encoding and decoding to make use of
             # the Plotly JSON Encoder. The JSON encoder deals with converting
             # numpy arrays to Python lists and several other edge cases.
-            figure_dict = json.loads(
-                json.dumps(figure, cls=plotly.utils.PlotlyJSONEncoder)
-            )
+            figure_json = json.dumps(figure, cls=plotly.utils.PlotlyJSONEncoder)
+            figure_dict = json.loads(figure_json)
+            # Plotly 6+ encodes large arrays as binary dicts {"dtype":..., "bdata":...}.
+            # Decode them back to plain Python lists so the frontend can render them.
+            if '"bdata"' in figure_json:
+                figure_dict = _decode_binary_arrays(figure_dict)
 
             # If opts title is not added, the title is not added to the top right of the window.
             # We add the paramater to opts manually if it exists.
@@ -1097,6 +1120,10 @@ class Visdom(object):
                 opts["title"] = (
                     title_prop["text"] if "text" in title_prop else title_prop
                 )
+            if "width" in figure_dict["layout"]:
+                opts["width"] = figure_dict["layout"]["width"]
+            if "height" in figure_dict["layout"]:
+                opts["height"] = figure_dict["layout"]["height"]
 
             return self._send(
                 {
