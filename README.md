@@ -91,7 +91,10 @@ You can partition your visualization space with `envs`. By default, every user w
 
 You can access a specific env via url: `http://localhost.com:8097/env/main`. If your server is hosted, you can share this url so others can see your visualizations too.
 
-Environments are automatically hierarchically organized by the first `_`.
+Environments are automatically hierarchically organized by the first `_`.  
+Note that `/` characters in environment names are escaped to `_`, so both `_` and `/`
+can affect how environments appear hierarchically in the UI.
+
 
 #### Selecting Environments
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/19650074/198821299-6602d557-7a02-4b9f-b1d5-d57615cdc15c.png" width="300" /></p>
@@ -487,10 +490,10 @@ The following `opts` are supported:
 This function draws a sunburst chart. It takes two inputs: `parents` and `labels` array.
 values from `parents` array is used as parents object, like it define above which sector 
 should the this sector shown. values from `labels` array is used to define sector's label 
-or you can say name. keep in mind that lenght of array `parents` and `labels` should be 
+or you can say name. keep in mind that length of array `parents` and `labels` should be 
 equal. There is a third array that you can pass to which is `value`, it is use to show 
 a value on hovering over a sector, it is optional argument, but if you are passing it then
-keep in mind lenght of `values` should be equal to `parents` or `labels`.
+keep in mind length of `values` should be equal to `parents` or `labels`.
 
 Following `opts` are currently supported:
 - `opts.font_size`    : define font size of label (`int`)

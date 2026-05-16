@@ -13,7 +13,7 @@ import React, { useContext, useState } from 'react';
 import ApiContext from '../api/ApiContext';
 
 function EnvControls(props) {
-  const { connected, sessionInfo } = useContext(ApiContext);
+  const { connected, sessionInfo, sendSaveAll } = useContext(ApiContext);
   const readonly = sessionInfo.readonly;
   const {
     envList,
@@ -112,6 +112,16 @@ function EnvControls(props) {
           onBlur={() => setConfirmClear(false)}
         >
           <span className="glyphicon glyphicon-erase" />
+        </button>
+        <button
+          data-toggle="tooltip"
+          title="Save All Environments"
+          data-placement="bottom"
+          className="btn btn-default"
+          disabled={!(connected && !readonly)}
+          onClick={sendSaveAll}
+        >
+          <span className="glyphicon glyphicon-floppy-disk" />
         </button>
         <button
           data-toggle="tooltip"
