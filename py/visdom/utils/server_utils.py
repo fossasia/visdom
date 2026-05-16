@@ -328,7 +328,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
             win_copy = copy.deepcopy(win)
             win_copy["id"] = new_wid
             label = (
-                "[{}] {}".format(eid_num, win_title)
+                "[{}] {}".format(eid_num, html.escape(win_title))
                 if win_title
                 else "[{}]".format(eid_num)
             )
@@ -348,7 +348,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         "<tr> <td> {} </td> <td> {} </td> </tr>".format(
             html.escape(str(v)), html.escape(str(eidNums[v]))
         )
-        for v in eidNums
+        for v in sorted(eidNums)
     ]
 
     tbl = """<style>
