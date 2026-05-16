@@ -48,6 +48,10 @@ class TestImageUpdateSelected(unittest.TestCase):
                 with self.assertRaises(TypeError):
                     UpdateHandler.update(self._pane(), self._args(bad_value))
 
+    def test_server_rejects_bool_index(self):
+        with self.assertRaises(TypeError):
+            UpdateHandler.update(self._pane(), self._args(True))
+
     def test_client_rejects_bool_index(self):
         viz = visdom.Visdom(send=False, use_incoming_socket=False)
         with self.assertRaises(TypeError):

@@ -267,6 +267,7 @@ Other options are either currently unused (endpoint, ipv6) or used for internal 
 ### Basics
 Visdom offers the following basic visualization functions:
 - [`vis.image`](#visimage)    : image
+- [`vis.update_image_slider`](#visupdate_image_slider) : set visible frame of an image_history pane
 - [`vis.images`](#visimages)   : list of images
 - [`vis.text`](#vistext)     : arbitrary HTML
 - [`vis.properties`](#visproperties)     : properties grid
@@ -342,6 +343,16 @@ The following `opts` are supported:
 - `jpgquality`: JPG quality (`number` 0-100). If defined image will be saved as JPG to reduce file size. If not defined image will be saved as PNG.
 - `caption`: Caption for the image
 - `store_history`: Keep all images stored to the same window and attach a slider to the bottom that will let you select the image to view. You must always provide this opt when sending new images to an image with history.
+
+To programmatically move the slider from Python, use `vis.update_image_slider`:
+
+```python
+win = vis.image(img, opts=dict(store_history=True))
+vis.image(img2, win=win, opts=dict(store_history=True))
+vis.update_image_slider(win, index=1)  # show second frame
+```
+
+The `index` is 0-based and is clamped to the valid range by the server. NumPy integer scalars (e.g. `np.int64`) are accepted and coerced automatically. Passing a non-integer or a non-`image_history` window raises an error.
 
 > **Note** You can use alt on an image pane to view the x/y coordinates of the cursor. You can also ctrl-scroll to zoom, alt scroll to pan vertically, and alt-shift scroll to pan horizontally. Double click inside the pane to restore the image to default.
 
