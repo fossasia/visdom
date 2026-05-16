@@ -16,6 +16,7 @@ in the previous server.py class.
 
 
 import copy
+import html
 import hashlib
 import json
 import logging
@@ -319,10 +320,13 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
     # create legend mapping environment names to environment numbers so one can
     # look it up for the new legend
     tableRows = [
-        "<tr> <td> {} </td> <td> {} </td> </tr>".format(v, eidNums[v]) for v in eidNums
+        "<tr> <td> {} </td> <td> {} </td> </tr>".format(
+            html.escape(str(v)), html.escape(str(eidNums[v]))
+        )
+        for v in eidNums
     ]
 
-    tbl = """"<style>
+    tbl = """<style>
     table, th, td {{
         border: 1px solid black;
     }}
