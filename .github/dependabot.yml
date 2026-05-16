@@ -4,7 +4,7 @@ updates:
   # 1. JavaScript / npm
   - package-ecosystem: "npm"
     directory: "/"
-    target-branch: "master"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -27,7 +27,7 @@ updates:
   # 2. Python / pip
   - package-ecosystem: "pip"
     directory: "/"
-    target-branch: "master"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -50,7 +50,7 @@ updates:
   # 3. GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
-    target-branch: "master"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
       day: "monday"
