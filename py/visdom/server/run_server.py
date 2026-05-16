@@ -39,7 +39,7 @@ def start_server(
     bind_local=False,
     eager_data_loading=False,
 ):
-    print("It's Alive!")
+    logging.info("Server started")
     app = Application(
         port=port,
         base_url=base_url,
@@ -58,8 +58,7 @@ def start_server(
 
     if "HOSTNAME" in os.environ and hostname == DEFAULT_HOSTNAME:
         hostname = os.environ["HOSTNAME"]
-    else:
-        hostname = hostname
+
     if print_func is None:
         print("You can navigate to http://%s:%s%s" % (hostname, port, base_url))
     else:

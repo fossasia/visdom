@@ -490,10 +490,10 @@ The following `opts` are supported:
 This function draws a sunburst chart. It takes two inputs: `parents` and `labels` array.
 values from `parents` array is used as parents object, like it define above which sector 
 should the this sector shown. values from `labels` array is used to define sector's label 
-or you can say name. keep in mind that lenght of array `parents` and `labels` should be 
+or you can say name. keep in mind that length of array `parents` and `labels` should be 
 equal. There is a third array that you can pass to which is `value`, it is use to show 
 a value on hovering over a sector, it is optional argument, but if you are passing it then
-keep in mind lenght of `values` should be equal to `parents` or `labels`.
+keep in mind length of `values` should be equal to `parents` or `labels`.
 
 Following `opts` are currently supported:
 - `opts.font_size`    : define font size of label (`int`)
