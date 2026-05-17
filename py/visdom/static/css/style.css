@@ -202,8 +202,12 @@ doesn't override our desire to make them non-interactable */
 .content-text {
   overflow-y: auto;
   overflow-x: auto;
-  max-height: 100%;
+  height: 100%;
   max-width: 100%;
+}
+
+.content-text-scroll-view {
+  overflow-x: auto;
 }
 
 .vertical-line {
