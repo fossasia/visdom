@@ -560,7 +560,7 @@ class Visdom(object):
         self.event_handlers[key].append(handler)
 
     def clear_event_handlers(self, target, env=None):
-        self.event_handlers[(env, target)] = []
+        self.event_handlers.pop((env, target), None)
 
     def setup_polling(self):
         # TODO merge with setup_socket?
@@ -1198,7 +1198,7 @@ class Visdom(object):
                 endpoint="update",
             )
 
-        self.register_event_handler(embedding_event_handler, win)
+        self.register_event_handler(embedding_event_handler, win, env=env)
 
     def embeddings(
         self,
