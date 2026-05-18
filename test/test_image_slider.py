@@ -116,6 +116,10 @@ class TestImageUpdateSelected(unittest.TestCase):
             def __init__(self, pane):
                 self.state = {"main": {"jsons": {"image_win": pane}}}
                 self.messages = []
+                self.status = None
+
+            def set_status(self, code):
+                self.status = code
 
             def write(self, message):
                 self.messages.append(message)
