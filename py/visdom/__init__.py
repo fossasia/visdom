@@ -260,7 +260,6 @@ def _opts2layout(opts, is3d=False):
     if layout_opts is not None:
         if "plotly" in layout_opts:
             layout.update(layout_opts["plotly"])
-
     return _scrub_dict(layout)
 
 
@@ -277,7 +276,8 @@ def _markerColorCheck(mc, X, Y, L):
 
     assert valid, (
         "marker colors have to be of size `%d` or `%d x 3` "
-        + " or at least `%d` or at least `%d x 3`, but got: %s"
+        "(per-point) or at least `%d` or at least `%d x 3` "
+        "(palette), but got: %s"
     ) % (
         X.shape[0],
         X.shape[0],
@@ -1880,6 +1880,8 @@ class Visdom(object):
 
         if Y.ndim == 2 and Y.shape[1] == 1:
             Y = Y.ravel()
+            if X is not None and X.ndim == 2 and X.shape[1] == 1:
+                X = X.ravel()
 
         if X is not None:
             assert X.ndim == 1 or X.ndim == 2, "X should have 1 or 2 dim"
