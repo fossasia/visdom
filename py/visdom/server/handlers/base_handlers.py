@@ -39,7 +39,8 @@ class BaseWebSocketHandler(tornado.websocket.WebSocketHandler):
         try:
             return super().write_message(message, binary)
         except tornado.websocket.WebSocketClosedError:
-            pass
+            logging.debug("WebSocket closed before message could be sent.")
+            return None
 
 
 class BaseHandler(tornado.web.RequestHandler):

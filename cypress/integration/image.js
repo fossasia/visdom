@@ -326,6 +326,7 @@ describe('Image Pane', () => {
       .click();
 
     const downloadsFolder = Cypress.config('downloadsFolder');
-    cy.readFile(path.join(downloadsFolder, 'Random!.jpg')).should('exist');
+    cy.readFile(path.join(downloadsFolder, 'Random!_1.jpg')).should('exist');
+    cy.readFile(path.join(downloadsFolder, 'Random!_2.jpg')).should('exist');
   })
 });

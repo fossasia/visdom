@@ -295,10 +295,11 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
                 base_ptype = "image"
             if ptype != base_ptype:
                 continue
-            # Combine plots with the same window title. If plot data source was
-            # labeled "name" in the legend, rename to "envId_legend" where
-            # envId is enumeration of the selected environments (not the long
-            # environment id string). This makes plot lines more readable.
+            # Combine windows only when the shared title also maps to the same
+            # supported window type across envs. For plots, if a data source is
+            # labeled "name" in the legend, rename it to "envId_legend", where
+            # envId is the enumeration of the selected environments (not the
+            # long environment id string), to make combined plot lines readable.
             if ptype == "image":
                 if ix == 0 and destWid not in seen_dest_wids:
                     seen_dest_wids.add(destWid)
