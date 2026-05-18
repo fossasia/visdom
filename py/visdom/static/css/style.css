@@ -271,7 +271,7 @@ doesn't override our desire to make them non-interactable */
     bottom: 0;
 
     overflow-y: scroll;
-    background: rgba(255,255,255,0.8);
+    background: rgba(255, 255, 255, 1);
     border: none;
 }
 
