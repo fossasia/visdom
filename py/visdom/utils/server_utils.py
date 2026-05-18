@@ -272,7 +272,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         res["jsons"][wid + "_compare"] = res["jsons"][wid]
         res["jsons"][wid] = None
         res["jsons"].pop(wid)
-
+    seen_dest_wids = set()
     for ix, eid in enumerate(valid_eids):
         env = envs[eid]
         for wid in env.get("jsons", {}).keys():
@@ -300,13 +300,15 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
             # envId is enumeration of the selected environments (not the long
             # environment id string). This makes plot lines more readable.
             if ptype == "image":
-                if ix == 0:
+                if ix == 0 and destWid not in seen_dest_wids:
+                    seen_dest_wids.add(destWid)
                     destWidJson["has_compare"] = False
                     destWidJson["contentID"] = get_rand_id()
 
                     first_img = copy.deepcopy(destWidJson["content"])
+                    caption = first_img.get("caption")
                     first_img["caption"] = "{}_{}".format(
-                        eidNums[eid], first_img.get("caption", "image")
+                        eidNums[eid], caption if caption is not None else "image"
                     )
 
                     destWidJson["content"] = [first_img]
@@ -314,8 +316,9 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
                 else:
                     destWidJson["has_compare"] = True
                     next_img = copy.deepcopy(win["content"])
+                    caption = next_img.get("caption")
                     next_img["caption"] = "{}_{}".format(
-                        eidNums[eid], next_img.get("caption", "image")
+                        eidNums[eid], caption if caption is not None else "image"
                     )
                     destWidJson["content"].append(next_img)
             elif ptype == "plot":

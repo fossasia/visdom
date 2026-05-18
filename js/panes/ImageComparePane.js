@@ -7,13 +7,12 @@
  *
  */
 
-import React, { useRef } from 'react';
+import React from 'react';
 
 import Pane from './Pane';
 
 function ImageComparePane(props) {
   const { content, title, id } = props;
-  const paneRef = useRef();
 
   // If content isn't an array, fallback
   if (!Array.isArray(content)) {
@@ -21,20 +20,28 @@ function ImageComparePane(props) {
   }
 
   const handleDownload = () => {
-    // Download first image or combine them; simplified for now to first image
-    if (content.length > 0) {
+    content.forEach((img, index) => {
       let link = document.createElement('a');
-      link.download = `${title || 'visdom_compare'}.jpg`;
-      link.href = content[0].src;
+      
+      // Safely extract extension from data URI, default to png
+      var match = img.src.match(/data:image\/([a-zA-Z]+);/);
+      var ext = (match && match[1]) ? match[1] : 'png';
+      if (ext === 'jpeg') ext = 'jpg';
+
+      let filenameSuffix = content.length > 1 ? `_${index + 1}` : '';
+      link.download = `${title || 'visdom_compare'}${filenameSuffix}.${ext}`;
+      
+      link.href = img.src;
+      document.body.appendChild(link);
       link.click();
-    }
+      document.body.removeChild(link);
+    });
   };
 
   return (
     <Pane
       {...props}
       handleDownload={handleDownload}
-      ref={paneRef}
     >
       <div
         style={{
@@ -58,7 +65,8 @@ function ImageComparePane(props) {
                padding: '5px'
              }}
           >
-            {imgItem.caption && (
+      {/* Only show the legend if there are multiple images being compared */}
+            {content.length > 1 && imgItem.caption && (
                <span
                  className="widget"
                  style={{

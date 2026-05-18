@@ -35,6 +35,13 @@ class BaseWebSocketHandler(tornado.websocket.WebSocketHandler):
         except Exception:  # Not using secure cookies
             return None
 
+    def write_message(self, message, binary=False):
+        try:
+            return super().write_message(message, binary)
+        except tornado.websocket.WebSocketClosedError:
+            pass
+
+
 
 class BaseHandler(tornado.web.RequestHandler):
     """
