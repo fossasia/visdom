@@ -2166,9 +2166,11 @@ class Visdom(object):
         fillarea = opts.get("fillarea", False)
         _valid_boxpoints = {"all", "outliers", "suspectedoutliers", False}
         boxpoints = opts.get("boxpoints", "outliers")
-        assert boxpoints in _valid_boxpoints, (
-            "opts.boxpoints must be one of %s, got %r"
-            % (sorted([str(v) for v in _valid_boxpoints]), boxpoints)
+        assert (
+            boxpoints in _valid_boxpoints
+        ), "opts.boxpoints must be one of %s, got %r" % (
+            sorted([str(v) for v in _valid_boxpoints]),
+            boxpoints,
         )
         data = []
 
