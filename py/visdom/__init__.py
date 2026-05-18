@@ -1443,7 +1443,7 @@ class Visdom(object):
             return self.image(tensor, win, env, opts)
         if tensor.ndim == 4 and tensor.shape[1] == 1:  # single-channel images
             tensor = np.repeat(tensor, 3, 1)
-        if tensor.ndim == 4 and tensor.shape[1] == 4: 
+        if tensor.ndim == 4 and tensor.shape[1] == 4:
             pass
 
         # make 4D tensor of images into a grid
