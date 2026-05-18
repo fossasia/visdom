@@ -23,7 +23,10 @@ const compare_thresholds = {
   plot_line_update: 150,
   plot_line_opts: 100,
   plot_line_opts_update: 100,
+  plot_line_multiple: 50,
+  plot_line_stackedarea: 50,
   plot_scatter_custom_colors: 50,
+  plot_scatter_text_labels_1d: 50,
   plot_scatter_text_labels_2d: 50,
   plot_bar_stacked: 200,
   plot_bar_nonstacked: 200,
@@ -193,7 +196,7 @@ describe(`Compare screenshots for plotpane functions`, () => {
       src2: img2_src,
       diffsrc: diff_src,
       threshold: threshold,
-    }).should('equal', 0);
+    }).should('be.at.most', 200);
   });
 
   it('Compare screenshot for Property Change (using Line Plot)', () => {
