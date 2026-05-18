@@ -182,6 +182,8 @@ Install from source
 > pip install git+https://github.com/fossasia/visdom
 ```
 
+**Optional:** To save Plotly figures to image files from code (e.g. PNG/SVG) without using the browser download button, install `plotly` and `kaleido`: `pip install plotly kaleido`. See [vis.plotlyplot](#visplotlyplot) and [vis.save_plotly_figure](#visplotlyplot).
+
 ## Usage
 
 Start the server (probably in a  `screen` or `tmux`) from the command line:
@@ -312,6 +314,7 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 - [`vis.win_exists`](#viswin_exists) : check if a window already exists by id
 - [`vis.get_env_list`](#visget_env_list) : get a list of all of the environments on your server
 - [`vis.get_window_data`](#visget_window_data): get current data for a window
+- [`vis.save_plotly_figure`](#visplotlyplot): save a Plotly figure to an image file from code (no browser click)
 - [`vis.check_connection`](#vischeck_connection): check if the server is connected
 - [`vis.replay_log`](#visreplay_log): replay the actions from the provided log file
 
@@ -433,6 +436,19 @@ This function draws a Plotly `Figure` object. It does not explicitly take option
 
 > **Note** You must have the `plotly` Python package installed to use this function. It can typically be installed by running `pip install plotly`.
 
+**Saving plots as images from code (without using the browser download button):** Pass `save_path` to save the figure to a file when plotting, e.g. `vis.plotlyplot(fig, save_path="plot.png")`. You can also save a figure without displaying it using `vis.save_plotly_figure(fig, "plot.png")`. Both require the optional `kaleido` package: `pip install kaleido`.
+
+```python
+import plotly.graph_objects as go
+from visdom import Visdom
+
+viz = Visdom()
+fig = go.Figure(go.Scatter(x=[1, 2, 3], y=[4, 5, 6], mode="lines+markers"))
+
+viz.plotlyplot(fig, save_path="my_plot.png")
+viz.save_plotly_figure(fig, "my_plot.png")
+```
+
 #### vis.embeddings
 
 This function visualizes a collection of features using the [Barnes-Hut t-SNE algorithm](https://github.com/lvdmaaten/bhtsne).
@@ -490,10 +506,10 @@ The following `opts` are supported:
 This function draws a sunburst chart. It takes two inputs: `parents` and `labels` array.
 values from `parents` array is used as parents object, like it define above which sector 
 should the this sector shown. values from `labels` array is used to define sector's label 
-or you can say name. keep in mind that lenght of array `parents` and `labels` should be 
+or you can say name. keep in mind that length of array `parents` and `labels` should be 
 equal. There is a third array that you can pass to which is `value`, it is use to show 
 a value on hovering over a sector, it is optional argument, but if you are passing it then
-keep in mind lenght of `values` should be equal to `parents` or `labels`.
+keep in mind length of `values` should be equal to `parents` or `labels`.
 
 Following `opts` are currently supported:
 - `opts.font_size`    : define font size of label (`int`)

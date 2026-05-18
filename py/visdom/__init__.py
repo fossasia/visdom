@@ -25,6 +25,7 @@ except ImportError:
 import math
 import re
 import base64
+import binascii
 import numpy as np  # type: ignore
 from PIL import Image  # type: ignore
 import base64 as b64  # type: ignore
@@ -127,7 +128,7 @@ def nan2none(l):
     for idx, val in enumerate(l):
         if isinstance(val, Sequence):
             l[idx] = nan2none(l[idx])
-        elif isnum(val) and math.isnan(val):
+        elif isnum(val) and (math.isnan(val) or math.isinf(val)):
             l[idx] = None
     return l
 
@@ -145,7 +146,7 @@ def _title2str(opts):
     if opts.get("title"):
         if isnum(opts.get("title")):
             title = str(opts.get("title"))
-            logger.warn("Numerical title %s has been casted to a string" % title)
+            logger.warning("Numerical title %s has been cast to a string" % title)
             opts["title"] = title
             return opts
         else:
@@ -316,7 +317,7 @@ def _assert_opts(opts):
     remove_nones = ["title"]
     for to_remove in remove_nones:
         if to_remove in opts and opts[to_remove] is None:
-            logger.warn(
+            logger.warning(
                 "None-incompatible opt {} was provided None value "
                 "and was thus ignored".format(to_remove)
             )
@@ -416,6 +417,25 @@ def pytorch_wrap(f):
     return wrapped_f
 
 
+def _decode_binary_arrays(obj):
+    """Decode Plotly 6+ binary-encoded arrays back to plain Python lists."""
+    if isinstance(obj, dict):
+        if "dtype" in obj and "bdata" in obj:
+            try:
+                arr = np.frombuffer(
+                    base64.b64decode(obj["bdata"]), dtype=np.dtype(obj["dtype"])
+                )
+                if "shape" in obj:
+                    arr = arr.reshape(obj["shape"])
+                return arr.tolist()
+            except (binascii.Error, ValueError, TypeError):
+                return obj
+        return {k: _decode_binary_arrays(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_decode_binary_arrays(v) for v in obj]
+    return obj
+
+
 class Visdom(object):
     def __init__(
         self,
@@ -509,7 +529,7 @@ class Visdom(object):
         elif send and use_polling:
             self.setup_polling()
         elif send and not use_incoming_socket:
-            logger.warn(
+            logger.warning(
                 "Without the incoming socket you cannot receive events from "
                 "the server or register event handlers to your Visdom client."
             )
@@ -521,7 +541,7 @@ class Visdom(object):
             time_spent += inc
             inc *= 2
         if time_spent > 5:
-            logger.warn(
+            logger.warning(
                 "Visdom python client failed to establish socket to get "
                 "messages from the server. This feature is optional and "
                 "can be disabled by initializing Visdom with "
@@ -573,7 +593,7 @@ class Visdom(object):
                         self.socket_alive = True
                         self.socket_connection_achieved = True
                     else:
-                        logger.warn(
+                        logger.warning(
                             "Visdom server failed handshake, may not "
                             "be properly connected"
                         )
@@ -624,7 +644,7 @@ class Visdom(object):
                         self.socket_alive = True
                         self.socket_connection_achieved = True
                     else:
-                        logger.warn(
+                        logger.warning(
                             "Visdom server failed handshake, may not "
                             "be properly connected"
                         )
@@ -633,7 +653,7 @@ class Visdom(object):
                     try:
                         handler(message)
                     except Exception as e:
-                        logger.warn(
+                        logger.warning(
                             "Visdom failed to handle a handler for {}: {}"
                             "".format(message, e)
                         )
@@ -839,6 +859,17 @@ class Visdom(object):
             endpoint="close",
             create=False,
         )
+
+    def delete_envs(self, env_list):
+        """This function deletes a list of environments."""
+        if not isinstance(env_list, list):
+            raise TypeError("env_list must be a list of strings")
+        responses = []
+        for env in env_list:
+            if not isinstance(env, str):
+                raise TypeError(f"Environment ID must be a string, got {type(env)}")
+            responses.append(self.delete_env(env))
+        return responses
 
     def delete_env(self, env):
         """This function deletes a specific environment."""
@@ -1065,24 +1096,78 @@ class Visdom(object):
                 opts["width"] = 1.35 * int(math.ceil(float(width)))
         return self.svg(svgstr=svg, opts=opts, env=env, win=win)
 
-    def plotlyplot(self, figure, win=None, env=None):
+    def save_plotly_figure(self, figure, filepath, **kwargs):
+        """
+        Save a Plotly figure to an image file from Python (no browser click required).
+
+        This allows programmatic saving of plots that would otherwise require
+        using the "Download plot as a png" button in the Visdom UI. You can
+        build the same figure, save it to file with this method, and optionally
+        display it in Visdom with plotlyplot().
+
+        Args:
+            figure: A Plotly Figure object (e.g. from plotly.graph_objects or
+                make_subplots).
+            filepath: Path for the output file (e.g. "plot.png", "figure.svg").
+                The format is inferred from the extension (png, svg, pdf, etc.).
+            **kwargs: Optional arguments passed to Plotly's write_image (e.g.
+                width, height, scale).
+
+        Raises:
+            RuntimeError: If plotly or kaleido is not installed.
+
+        Note: Requires the 'kaleido' package for image export. Install with
+        `pip install kaleido`.
+        """
+        try:
+            import plotly
+        except ImportError:
+            raise RuntimeError(
+                "Plotly must be installed to save Plotly figures. "
+                "Install with: pip install plotly"
+            )
+        try:
+            figure.write_image(filepath, **kwargs)
+        except ValueError as e:
+            if "kaleido" in str(e).lower() or "orca" in str(e).lower():
+                raise RuntimeError(
+                    "Saving Plotly figures to image requires the 'kaleido' package. "
+                    "Install with: pip install kaleido"
+                ) from e
+            raise
+
+    def plotlyplot(self, figure, win=None, env=None, save_path=None, save_kwargs=None):
         """
         This function draws a Plotly 'Figure' object. It does not explicitly
         take options as it assumes you have already explicitly configured the
         figure's layout.
 
+        To save the figure as an image from code (without using the browser
+        download button), pass save_path (e.g. save_path="plot.png"). Optional
+        arguments for Plotly's write_image should be passed via save_kwargs,
+        e.g. save_kwargs={"width": 800, "height": 600}. This requires the
+        optional 'kaleido' package (pip install kaleido).
+
         Note: You must have the 'plotly' Python package installed to use
         this function.
         """
+        if save_kwargs is None:
+            save_kwargs = {}
         try:
             import plotly
+
+            if save_path is not None:
+                self.save_plotly_figure(figure, save_path, **save_kwargs)
 
             # We do a round-trip of JSON encoding and decoding to make use of
             # the Plotly JSON Encoder. The JSON encoder deals with converting
             # numpy arrays to Python lists and several other edge cases.
-            figure_dict = json.loads(
-                json.dumps(figure, cls=plotly.utils.PlotlyJSONEncoder)
-            )
+            figure_json = json.dumps(figure, cls=plotly.utils.PlotlyJSONEncoder)
+            figure_dict = json.loads(figure_json)
+            # Plotly 6+ encodes large arrays as binary dicts {"dtype":..., "bdata":...}.
+            # Decode them back to plain Python lists so the frontend can render them.
+            if '"bdata"' in figure_json:
+                figure_dict = _decode_binary_arrays(figure_dict)
 
             # If opts title is not added, the title is not added to the top right of the window.
             # We add the paramater to opts manually if it exists.
@@ -1097,6 +1182,10 @@ class Visdom(object):
                 opts["title"] = (
                     title_prop["text"] if "text" in title_prop else title_prop
                 )
+            if "width" in figure_dict["layout"]:
+                opts["width"] = figure_dict["layout"]["width"]
+            if "height" in figure_dict["layout"]:
+                opts["height"] = figure_dict["layout"]["height"]
 
             return self._send(
                 {
