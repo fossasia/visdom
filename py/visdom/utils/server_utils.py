@@ -14,7 +14,6 @@ At the moment, this just inherited all of the floating functions
 in the previous server.py class.
 """
 
-
 import copy
 import hashlib
 import json
@@ -38,7 +37,6 @@ from visdom.server.defaults import (
     DEFAULT_PORT,
 )
 from visdom.utils.shared_utils import warn_once, get_rand_id, get_new_window_id
-
 
 # ---- Vaguely server-security related functions ---- #
 
@@ -236,7 +234,15 @@ def gather_envs(state, env_path=DEFAULT_ENV_PATH):
 
 
 def get_env_json_path(env_path, eid):
-    return os.path.join(env_path, f"{eid.strip()}.json")
+    clean_eid = escape_eid(eid.strip()).replace(os.sep, "_")
+    if os.altsep is not None:
+        clean_eid = clean_eid.replace(os.altsep, "_")
+
+    base_path = os.path.abspath(env_path)
+    path = os.path.abspath(os.path.join(base_path, f"{clean_eid}.json"))
+    if os.path.commonpath([base_path, path]) != base_path:
+        raise ValueError(f"Invalid environment id: {eid!r}")
+    return path
 
 
 def load_env_json_file(path):
@@ -345,9 +351,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         border: 1px solid black;
     }}
     </style>
-    <table> {} </table>""".format(
-        " ".join(tableRows)
-    )
+    <table> {} </table>""".format(" ".join(tableRows))
 
     res["jsons"]["window_compare_legend"] = {
         "command": "window",

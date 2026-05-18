@@ -59,7 +59,26 @@ class ServerUtilsLazyEnvPathTests(unittest.TestCase):
 
         self.assertEqual(set(state), {"envA", "envB"})
         self.assertEqual(socket.eid, ["envA", "envB"])
-        self.assertTrue(any("window_compare_legend" in str(message) for message in socket.messages))
+        self.assertTrue(
+            any("window_compare_legend" in str(message) for message in socket.messages)
+        )
+
+    def test_load_env_does_not_traverse_outside_env_path(self):
+        state = {}
+        socket = DummySocket()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            parent = Path(tmpdir).parent
+            secret_path = parent / "secret.json"
+            secret_path.write_text(json.dumps(self.make_env("secret")))
+            try:
+                load_env(state, "../secret", socket, env_path=tmpdir)
+            finally:
+                secret_path.unlink()
+
+        self.assertEqual(state, {})
+        self.assertEqual(socket.eid, "../secret")
+        self.assertTrue(any("layout" in str(message) for message in socket.messages))
 
     def test_load_env_ignores_corrupt_json_file(self):
         state = {}
