@@ -42,7 +42,6 @@ class BaseWebSocketHandler(tornado.websocket.WebSocketHandler):
             pass
 
 
-
 class BaseHandler(tornado.web.RequestHandler):
     """
     Implements any required overriden functionality from the basic tornado
