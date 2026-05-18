@@ -137,6 +137,11 @@ function ImagePane(props) {
     const idx = parseInt(evt.target.value, 10);
     if (Number.isNaN(idx)) return;
     setActualSelected(idx);
+  };
+
+  const finalizeSlider = (evt) => {
+    const idx = parseInt(evt.target.value, 10);
+    if (Number.isNaN(idx)) return;
     sendPaneMessage({ event_type: 'SliderMoved', index: idx, pane_data: false }, id, envID);
   };
 
@@ -282,6 +287,7 @@ function ImagePane(props) {
               max={content.length - 1}
               value={actualSelected}
               onChange={updateSlider}
+              onMouseUp={finalizeSlider}
             />
             <span>&nbsp;&nbsp;{actualSelected}&nbsp;&nbsp;</span>
           </div>
