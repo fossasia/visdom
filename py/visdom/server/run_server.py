@@ -10,6 +10,7 @@
 Provides simple entrypoints to set up and run the main visdom server.
 """
 
+import atexit
 import argparse
 import getpass
 import logging
@@ -24,7 +25,7 @@ from visdom.server.defaults import (
     DEFAULT_PORT,
 )
 from visdom.server.build import download_scripts
-from visdom.utils.server_utils import hash_password, set_cookie
+from visdom.utils.server_utils import hash_password, serialize_all, set_cookie
 
 
 def start_server(
@@ -39,7 +40,7 @@ def start_server(
     bind_local=False,
     eager_data_loading=False,
 ):
-    print("It's Alive!")
+    logging.info("Server started")
     app = Application(
         port=port,
         base_url=base_url,
@@ -56,15 +57,16 @@ def start_server(
     logging.info("Application Started")
     logging.info(f"Working directory: {os.path.abspath(env_path)}")
 
+    atexit.register(serialize_all, app.state, env_path=env_path)
+
     if "HOSTNAME" in os.environ and hostname == DEFAULT_HOSTNAME:
         hostname = os.environ["HOSTNAME"]
-    else:
-        hostname = hostname
+
     if print_func is None:
         print("You can navigate to http://%s:%s%s" % (hostname, port, base_url))
     else:
         print_func(port)
-    ioloop.IOLoop.instance().start()
+    ioloop.IOLoop.current().start()
     app.subs = []
     app.sources = []
 
