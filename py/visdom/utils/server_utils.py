@@ -140,10 +140,13 @@ def serialize_all(state, env_path=DEFAULT_ENV_PATH):
 
 
 def escape_eid(eid):
-    """Replace slashes with underscores, to avoid recognizing them
-    as directories.
+    """Replace forward slashes and other problematic characters
+    with underscores and backslashes with hyphen, to avoid recognizing them as
+    directories or breaking URLs and filenames.
     """
-    return eid.replace("/", "_")
+    return (
+        eid.replace("/", "_").replace("\\", "_").replace("\n", "-").replace("\r", "-")
+    )
 
 
 def extract_eid(args):
@@ -249,12 +252,25 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         if eid in state:
             envs[eid] = state.get(eid)
         elif env_path is not None:
-            p = os.path.join(env_path, eid.strip(), ".json")
-            if os.path.exists(p):
+            safe_eid = escape_eid(eid.strip())
+            base_env_path = os.path.abspath(env_path)
+            p = os.path.abspath(
+                os.path.join(base_env_path, "{0}.json".format(safe_eid))
+            )
+            try:
+                is_safe = os.path.commonpath([p, base_env_path]) == base_env_path
+            except ValueError:
+                is_safe = False
+            if is_safe and os.path.exists(p):
                 with open(p, "r") as fn:
                     env = tornado.escape.json_decode(fn.read())
                     state[eid] = env
                     envs[eid] = env
+
+    if not envs:
+        socket.write_message(json.dumps({"command": "layout"}))
+        socket.eid = eids
+        return
 
     res = copy.deepcopy(envs[list(envs.keys())[0]])
     name2Wid = {
@@ -390,8 +406,14 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
     if eid in state:
         env = state.get(eid)
     elif env_path is not None:
-        p = os.path.join(env_path, eid.strip(), ".json")
-        if os.path.exists(p):
+        safe_eid = escape_eid(eid.strip())
+        base_env_path = os.path.abspath(env_path)
+        p = os.path.abspath(os.path.join(base_env_path, "{0}.json".format(safe_eid)))
+        try:
+            is_safe = os.path.commonpath([p, base_env_path]) == base_env_path
+        except ValueError:
+            is_safe = False
+        if is_safe and os.path.exists(p):
             with open(p, "r") as fn:
                 env = tornado.escape.json_decode(fn.read())
                 state[eid] = env
