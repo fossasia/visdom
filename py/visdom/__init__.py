@@ -1386,9 +1386,10 @@ class Visdom(object):
         buf = BytesIO()
         image_type = "png"
         imsave_args = {}
-        if "jpgquality" in opts and nchannels != 4:
+        jpgquality = opts.get("jpgquality")
+        if jpgquality is not None and nchannels != 4:
             image_type = "jpeg"
-            imsave_args["quality"] = opts["jpgquality"]
+            imsave_args["quality"] = jpgquality
 
         im.save(buf, format=image_type.upper(), **imsave_args)
 
@@ -1443,8 +1444,7 @@ class Visdom(object):
             return self.image(tensor, win, env, opts)
         if tensor.ndim == 4 and tensor.shape[1] == 1:  # single-channel images
             tensor = np.repeat(tensor, 3, 1)
-        if tensor.ndim == 4 and tensor.shape[1] == 4:
-            pass
+
 
         # make 4D tensor of images into a grid
         nmaps = tensor.shape[0]
