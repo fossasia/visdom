@@ -36,12 +36,30 @@ const ApiProvider = ({ children }) => {
   // Send a low-level message to the server
   const sendSocketMessage = (data) => {
     if (!_socket.current) {
-      // TODO: error? warn?
+      // eslint-disable-next-line no-console
+      console.error(
+        '[Visdom API] Cannot send message: WebSocket is not connected.',
+        data
+      );
       return;
     }
 
-    let msg = JSON.stringify(data);
-    return _socket.current.send(msg);
+    let msg = null;
+    try {
+      msg = JSON.stringify(data);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[Visdom API] Failed to serialize message:', e, data);
+      return;
+    }
+
+    try {
+      _socket.current.send(msg);
+    } catch (e) {
+      // WebSocket may be CLOSING or CLOSED state
+      // eslint-disable-next-line no-console
+      console.error('[Visdom API] Failed to send message:', e, data);
+    }
   };
 
   // Establish a connection to the server
@@ -54,6 +72,7 @@ const ApiProvider = ({ children }) => {
       setConnected(true);
     };
     const _onDisconnect = () => {
+      // Silent cleanup - logging handled by event handlers
       apiHandlers.current.onDisconnect(_socket);
       setConnected(false);
     };
@@ -76,20 +95,43 @@ const ApiProvider = ({ children }) => {
     } else {
       ws_protocol = 'ws';
     }
-    var socket = new WebSocket(
-      ws_protocol + '://' + url.host + correctPathname() + 'socket'
-    );
+
+    const wsUrl = ws_protocol + '://' + url.host + correctPathname() + 'socket';
+
+    var socket = new WebSocket(wsUrl);
 
     socket.onmessage = handleMessage;
     socket.onopen = _onConnect;
-    socket.onerror = socket.onclose = _onDisconnect;
+    socket.onerror = (event) => {
+      // Log error but don't call _onDisconnect here (let onclose handle it)
+      // eslint-disable-next-line no-console
+      console.error(
+        '[Visdom API] WebSocket error - the socket will likely close next',
+        event
+      );
+    };
+    socket.onclose = (event) => {
+      // Determine if this was a clean close or an error
+      if (!event.wasClean) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[Visdom API] WebSocket closed unexpectedly.',
+          `Code: ${event.code}`,
+          `Reason: ${event.reason || '(no reason provided)'}`
+        );
+      }
+      // Only call _onDisconnect from onclose to avoid duplicate handling
+      _onDisconnect();
+    };
     _socket.current = socket;
   };
 
   // Close the server connection and reset the _socket ref
   const disconnect = () => {
-    _socket.current.close();
-    _socket.current = null;
+    if (_socket.current) {
+      _socket.current.close();
+      _socket.current = null;
+    }
   };
 
   // ------------------ //
@@ -135,6 +177,7 @@ const ApiProvider = ({ children }) => {
         break;
 
       default:
+        // eslint-disable-next-line no-console
         console.error('unrecognized command', cmd);
     }
   };
@@ -236,6 +279,12 @@ const ApiProvider = ({ children }) => {
     });
   };
 
+  const sendSaveAll = () => {
+    sendSocketMessage({
+      cmd: 'save_all',
+    });
+  };
+
   // Update the pane layout item in the backend.
   const sendPaneLayoutUpdate = (
     envID,
@@ -297,6 +346,7 @@ const ApiProvider = ({ children }) => {
         sendPaneClose,
         sendPaneLayoutUpdate,
         sendPaneMessage,
+        sendSaveAll,
         sessionInfo,
         setConnected,
         toggleOnlineState,
