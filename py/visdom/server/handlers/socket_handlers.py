@@ -125,11 +125,19 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
 
         elif cmd == "delete_env":
             if "eid" in msg:
-                logging.info(f"closing environment {msg['eid']}")
-                del self.state[msg["eid"]]
+                eid = escape_eid(msg["eid"])
+                if eid == "main":
+                    return
+                logging.info(f"closing environment {eid}")
+                self.state.pop(eid, None)
                 if self.env_path is not None:
-                    p = os.path.join(self.env_path, "{0}.json".format(msg["eid"]))
-                    os.remove(p)
+                    p = os.path.join(self.env_path, "{0}.json".format(eid))
+                    try:
+                        os.remove(p)
+                    except FileNotFoundError:
+                        pass
+                    except OSError as e:
+                        logging.error(f"Failed to delete {p}: {e}")
                 broadcast_envs(self)
 
         elif cmd == "save_layouts":
@@ -208,8 +216,9 @@ class AnySocketWrapper(AnySocketHandlerOrWrapper):
 
     def get_messages(self):
         to_send = []
-        while len(self.messages) > 0:
-            message = self.messages.popleft()
+        messages = self.messages
+        self.messages = []
+        for message in messages:
             if isinstance(message, dict):
                 # Not all messages are being formatted the same way (JSON)
                 # TODO investigate
