@@ -128,7 +128,7 @@ def nan2none(l):
     for idx, val in enumerate(l):
         if isinstance(val, Sequence):
             l[idx] = nan2none(l[idx])
-        elif isnum(val) and math.isnan(val):
+        elif isnum(val) and (math.isnan(val) or math.isinf(val)):
             l[idx] = None
     return l
 
