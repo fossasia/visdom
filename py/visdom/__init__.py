@@ -2164,6 +2164,12 @@ class Visdom(object):
             ), "number of legened labels must match number of columns"
 
         fillarea = opts.get("fillarea", False)
+        _valid_boxpoints = {"all", "outliers", "suspectedoutliers", False}
+        boxpoints = opts.get("boxpoints", "outliers")
+        assert boxpoints in _valid_boxpoints, (
+            "opts.boxpoints must be one of %s, got %r"
+            % (sorted([str(v) for v in _valid_boxpoints]), boxpoints)
+        )
         data = []
 
         for k in range(X.shape[1]):
@@ -2178,7 +2184,7 @@ class Visdom(object):
                         "name": name,
                         "box": {"visible": True},
                         "meanline": {"visible": True},
-                        "points": opts.get("boxpoints", "outliers"),
+                        "points": boxpoints,
                     }
                 )
             else:
@@ -2187,7 +2193,7 @@ class Visdom(object):
                         "y": col,
                         "type": "box",
                         "name": name,
-                        "boxpoints": opts.get("boxpoints", "outliers"),
+                        "boxpoints": boxpoints,
                     }
                 )
 
