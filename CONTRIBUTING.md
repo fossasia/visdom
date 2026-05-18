@@ -68,6 +68,40 @@ own code changes, if any). In the visdom source folder, run:
 ```
 pip uninstall visdom && pip install -e .
 ```
+
+> **Note for local development**
+>
+> Running:
+>
+> ```bash
+> python -m visdom.server
+> ```
+>
+> may still import an already installed `visdom` package from
+> `site-packages` instead of the checked-out repository source.
+>
+> This can cause confusing behavior where:
+>
+> - frontend changes compile successfully
+> - rebuilt `main.js` contains updated code
+> - the server restarts normally
+> - but the UI still shows old behavior
+>
+> To verify the active source:
+>
+> ```bash
+> python -c "import visdom; print(visdom.__file__)"
+> ```
+>
+> The path should point to your local repository instead of
+> `site-packages`.
+>
+> If needed, prioritize the local source manually:
+>
+> ```bash
+> export PYTHONPATH=$PWD/py:$PYTHONPATH
+> ```
+
 For some pip installs, this approach does not always properly link the visdom
 module. In that case, try running `python setup.py install` instead.
 
