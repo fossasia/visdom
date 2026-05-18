@@ -163,8 +163,7 @@ class UpdateHandler(BaseHandler):
                     args["data"][0]["selected"]
                 )
                 selected = min(max(0, selected), len(p["content"]) - 1)
-                if p.get("selected") != selected:
-                    p["selected"] = selected
+                p["selected"] = selected
             return p
 
         pdata = p["content"]["data"]
@@ -377,6 +376,7 @@ class UpdateHandler(BaseHandler):
             p, diff_packet = UpdateHandler.update_packet(p, args)
         except (TypeError, ValueError) as exc:
             if is_image_slider_update:
+                handler.set_status(400)
                 handler.write(str(exc))
                 return
             raise

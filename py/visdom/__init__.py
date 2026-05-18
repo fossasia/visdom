@@ -1585,8 +1585,7 @@ class Visdom(object):
                 range by the server.
             env (str, optional): Environment ID. Defaults to ``self.env``.
         """
-        if win is None:
-            raise ValueError("update_image_slider requires a window id")
+        assert win is not None, "update_image_slider requires a window id"
         index = _coerce_image_slider_index(index)
         return self._send(
             {

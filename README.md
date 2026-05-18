@@ -344,7 +344,9 @@ The following `opts` are supported:
 - `caption`: Caption for the image
 - `store_history`: Keep all images stored to the same window and attach a slider to the bottom that will let you select the image to view. You must always provide this opt when sending new images to an image with history.
 
-To programmatically move the slider from Python, use `vis.update_image_slider`:
+#### vis.update_image_slider
+
+Programmatically set the visible frame of an `image_history` pane from Python:
 
 ```python
 win = vis.image(img, opts=dict(store_history=True))
