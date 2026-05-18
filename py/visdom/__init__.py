@@ -1445,7 +1445,6 @@ class Visdom(object):
         if tensor.ndim == 4 and tensor.shape[1] == 1:  # single-channel images
             tensor = np.repeat(tensor, 3, 1)
 
-
         # make 4D tensor of images into a grid
         nmaps = tensor.shape[0]
         xmaps = min(nrow, nmaps)
