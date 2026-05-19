@@ -305,6 +305,8 @@ describe('Image Pane', () => {
     const envA = 'compare_image_env_A_' + Cypress._.random(0,1e6);
     const envB = 'compare_image_env_B_' + Cypress._.random(0,1e6);
 
+    cy.close_envs();
+
     cy.run('image_basic', {env:envA, open:false, seed: 1});
     cy.run('image_basic', {env:envB, open:false, seed: 2});
 
