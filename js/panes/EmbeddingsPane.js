@@ -41,8 +41,8 @@ class EmbeddingsPane extends React.Component {
           this.context.sendPaneMessage(
             {
               event_type: 'KeyPress',
-              key: event.key,
-              key_code: event.keyCode,
+              key: e.key,
+              key_code: e.keyCode,
               pane_data: false, // No need to send the full data for this
             },
             this.props.id,
@@ -86,7 +86,7 @@ class EmbeddingsPane extends React.Component {
         pane_data: false, // No need to send the full data for this
       },
       this.props.id,
-      this.props.env
+      this.props.envID
     );
   };
 

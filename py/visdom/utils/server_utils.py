@@ -16,6 +16,7 @@ in the previous server.py class.
 
 
 import copy
+import html
 import hashlib
 import json
 import logging
@@ -119,12 +120,15 @@ def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
     env_ids = [i for i in eids if i in state]
     if env_path is not None:
         for env_id in env_ids:
+            if isinstance(state[env_id], LazyEnvData):
+                if state[env_id]._raw_dict is None:
+                    continue
+                data = json.dumps(state[env_id]._raw_dict)
+            else:
+                data = json.dumps(state[env_id])
             env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
             with open(env_path_file, "w") as fn:
-                if isinstance(state[env_id], LazyEnvData):
-                    fn.write(json.dumps(state[env_id]._raw_dict))
-                else:
-                    fn.write(json.dumps(state[env_id]))
+                fn.write(data)
     return env_ids
 
 
@@ -136,10 +140,13 @@ def serialize_all(state, env_path=DEFAULT_ENV_PATH):
 
 
 def escape_eid(eid):
-    """Replace slashes with underscores, to avoid recognizing them
-    as directories.
+    """Replace forward slashes and other problematic characters
+    with underscores and backslashes with hyphen, to avoid recognizing them as
+    directories or breaking URLs and filenames.
     """
-    return eid.replace("/", "_")
+    return (
+        eid.replace("/", "_").replace("\\", "_").replace("\n", "-").replace("\r", "-")
+    )
 
 
 def extract_eid(args):
@@ -178,6 +185,7 @@ def window(args):
     opts = args.get("opts", {})
 
     ptype = args["data"][0]["type"]
+    is_visdom_type = "content" in args["data"][0]
 
     p = {
         "command": "window",
@@ -190,7 +198,7 @@ def window(args):
         "contentID": get_rand_id(),  # to detected updated windows
     }
 
-    if ptype == "image_history":
+    if ptype == "image_history" and is_visdom_type:
         p.update(
             {
                 "content": [args["data"][0]["content"]],
@@ -199,9 +207,9 @@ def window(args):
                 "show_slider": opts.get("show_slider", True),
             }
         )
-    elif ptype in ["image", "text", "properties"]:
+    elif ptype in ["image", "text", "properties"] and is_visdom_type:
         p.update({"content": args["data"][0]["content"], "type": ptype})
-    elif ptype == "network":
+    elif ptype == "network" and is_visdom_type:
         p.update(
             {
                 "content": args["data"][0]["content"],
@@ -211,7 +219,7 @@ def window(args):
                 "showVertexLabels": opts.get("showVertexLabels", "hover"),
             }
         )
-    elif ptype in ["embeddings"]:
+    elif ptype in ["embeddings"] and is_visdom_type:
         p.update(
             {
                 "content": args["data"][0]["content"],
@@ -244,12 +252,25 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         if eid in state:
             envs[eid] = state.get(eid)
         elif env_path is not None:
-            p = os.path.join(env_path, eid.strip(), ".json")
-            if os.path.exists(p):
+            safe_eid = escape_eid(eid.strip())
+            base_env_path = os.path.abspath(env_path)
+            p = os.path.abspath(
+                os.path.join(base_env_path, "{0}.json".format(safe_eid))
+            )
+            try:
+                is_safe = os.path.commonpath([p, base_env_path]) == base_env_path
+            except ValueError:
+                is_safe = False
+            if is_safe and os.path.exists(p):
                 with open(p, "r") as fn:
                     env = tornado.escape.json_decode(fn.read())
                     state[eid] = env
                     envs[eid] = env
+
+    if not envs:
+        socket.write_message(json.dumps({"command": "layout"}))
+        socket.eid = eids
+        return
 
     res = copy.deepcopy(envs[list(envs.keys())[0]])
     name2Wid = {
@@ -319,10 +340,13 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
     # create legend mapping environment names to environment numbers so one can
     # look it up for the new legend
     tableRows = [
-        "<tr> <td> {} </td> <td> {} </td> </tr>".format(v, eidNums[v]) for v in eidNums
+        "<tr> <td> {} </td> <td> {} </td> </tr>".format(
+            html.escape(str(v)), html.escape(str(eidNums[v]))
+        )
+        for v in eidNums
     ]
 
-    tbl = """"<style>
+    tbl = """<style>
     table, th, td {{
         border: 1px solid black;
     }}
@@ -382,8 +406,14 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
     if eid in state:
         env = state.get(eid)
     elif env_path is not None:
-        p = os.path.join(env_path, eid.strip(), ".json")
-        if os.path.exists(p):
+        safe_eid = escape_eid(eid.strip())
+        base_env_path = os.path.abspath(env_path)
+        p = os.path.abspath(os.path.join(base_env_path, "{0}.json".format(safe_eid)))
+        try:
+            is_safe = os.path.commonpath([p, base_env_path]) == base_env_path
+        except ValueError:
+            is_safe = False
+        if is_safe and os.path.exists(p):
             with open(p, "r") as fn:
                 env = tornado.escape.json_decode(fn.read())
                 state[eid] = env
