@@ -121,6 +121,10 @@ class UpdateHandler(BaseHandler):
 
     @staticmethod
     def update_packet(p, args):
+        # IMPORTANT: This tuple must stay in sync with all top-level keys
+        # that UpdateHandler.update() or update_window() may mutate.
+        # If you add a new mutable field there, you MUST add it here too,
+        # otherwise the generated JSON patch will silently miss that change.
         MUTABLE_KEYS = (
             "content",
             "selected",
