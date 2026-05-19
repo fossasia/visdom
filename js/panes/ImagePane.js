@@ -159,6 +159,9 @@ function ImagePane(props) {
       switch (event.type) {
         case 'keydown':
         case 'keypress': {
+          if (!isFocused) {
+            break;
+          }
           const tag = event.target.tagName;
           if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
             event.preventDefault();
