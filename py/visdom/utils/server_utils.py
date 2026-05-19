@@ -294,7 +294,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
                     state[eid] = env
                     envs[eid] = env
             else:
-                hashed_id = hashlib.sha256(eid.encode("utf-8")).hexdigest()
+                hashed_id = hashlib.sha256(safe_eid.encode("utf-8")).hexdigest()
                 p = os.path.join(env_path, "hash_{0}.json".format(hashed_id))
                 if os.path.exists(p):
                     with open(p, "r") as fn:
@@ -453,7 +453,7 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
                 env = tornado.escape.json_decode(fn.read())
                 state[eid] = env
         else:
-            hashed_id = hashlib.sha256(eid.encode("utf-8")).hexdigest()
+            hashed_id = hashlib.sha256(safe_eid.encode("utf-8")).hexdigest()
             p = os.path.join(env_path, "hash_{0}.json".format(hashed_id))
             if os.path.exists(p):
                 with open(p, "r") as fn:
