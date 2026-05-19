@@ -150,13 +150,7 @@ def extract_eid(args):
 
 
 def update_window(p, args):
-    """Adds new args to a window if they exist.
-
-    NOTE: Any new top-level key mutated here must also be added to
-    MUTABLE_KEYS in UpdateHandler.update_packet() (web_handlers.py),
-    or the change will be silently dropped from the JSON patch sent
-    to the frontend.
-    """
+    """Adds new args to a window if they exist"""
     content = p["content"]
     layout_update = args.get("layout", {})
     for layout_name, layout_val in layout_update.items():

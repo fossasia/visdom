@@ -121,30 +121,19 @@ class UpdateHandler(BaseHandler):
 
     @staticmethod
     def update_packet(p, args):
-        # IMPORTANT: This tuple must stay in sync with all top-level keys
-        # that UpdateHandler.update() or update_window() may mutate.
-        # If you add a new mutable field there, you MUST add it here too,
-        # otherwise the generated JSON patch will silently miss that change.
-        MUTABLE_KEYS = (
-            "content",
-            "selected",
-            "contentID",
-            "old_content",
-            "version",
-            "title",
-            "width",
-            "height",
-            "inflate",
-        )
-        old_snapshot = {
-            k: copy.deepcopy(p[k]) if k == "content" or k == "old_content" else p[k]
-            for k in MUTABLE_KEYS
-            if k in p
-        }
+        # Shallow copy the packet to dynamically capture changes to top-level keys.
+        old_p = p.copy()
+        
+        # Deepcopy only the nested structures known to be mutated in-place.
+        if "content" in p:
+            old_p["content"] = copy.deepcopy(p["content"])
+        if "old_content" in p:
+            old_p["old_content"] = copy.deepcopy(p["old_content"])
+            
         p = UpdateHandler.update(p, args)
         p["contentID"] = get_rand_id()
-        new_snapshot = {k: p[k] for k in MUTABLE_KEYS if k in p}
-        patch = jsonpatch.make_patch(old_snapshot, new_snapshot)
+        
+        patch = jsonpatch.make_patch(old_p, p)
         return p, patch.patch
 
     @staticmethod
