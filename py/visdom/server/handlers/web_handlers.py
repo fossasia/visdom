@@ -123,16 +123,16 @@ class UpdateHandler(BaseHandler):
     def update_packet(p, args):
         # Shallow copy the packet to dynamically capture changes to top-level keys.
         old_p = p.copy()
-        
+
         # Deepcopy only the nested structures known to be mutated in-place.
         if "content" in p:
             old_p["content"] = copy.deepcopy(p["content"])
         if "old_content" in p:
             old_p["old_content"] = copy.deepcopy(p["old_content"])
-            
+
         p = UpdateHandler.update(p, args)
         p["contentID"] = get_rand_id()
-        
+
         patch = jsonpatch.make_patch(old_p, p)
         return p, patch.patch
 
