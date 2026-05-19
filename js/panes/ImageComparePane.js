@@ -22,15 +22,10 @@ function ImageComparePane(props) {
   const handleDownload = () => {
     content.forEach((img, index) => {
       let link = document.createElement('a');
-      
-      // Safely extract extension from data URI, default to png
-      var match = img.src.match(/data:image\/([a-zA-Z]+);/);
-      var ext = (match && match[1]) ? match[1] : 'png';
-      if (ext === 'jpeg') ext = 'jpg';
 
       let filenameSuffix = content.length > 1 ? `_${index + 1}` : '';
-      link.download = `${title || 'visdom_compare'}${filenameSuffix}.${ext}`;
-      
+      link.download = `${title || 'visdom_compare'}${filenameSuffix}.jpg`;
+
       link.href = img.src;
       document.body.appendChild(link);
       link.click();
