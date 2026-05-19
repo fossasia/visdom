@@ -315,6 +315,8 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
                     destWidJson["content"] = [first_img]
                     destWidJson["type"] = "image_compare"
                 else:
+                    if destWid not in seen_dest_wids:
+                        continue  # base image never initialised; skip
                     destWidJson["has_compare"] = True
                     next_img = copy.deepcopy(win["content"])
                     caption = next_img.get("caption")

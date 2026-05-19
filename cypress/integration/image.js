@@ -325,6 +325,7 @@ describe('Image Pane', () => {
       .find("button[title='save']")
       .click();
 
+    cy.wait(1000);
     const downloadsFolder = Cypress.config('downloadsFolder');
     cy.readFile(path.join(downloadsFolder, 'Random!_1.jpg')).should('exist');
     cy.readFile(path.join(downloadsFolder, 'Random!_2.jpg')).should('exist');
