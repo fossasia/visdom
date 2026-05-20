@@ -241,7 +241,7 @@ def gather_envs(state, env_path=DEFAULT_ENV_PATH):
     return sorted(list(set(items + list(state.keys()))))
 
 
-def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
+def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH, show_all=False):
     logging.info("comparing envs")
     eidNums = {e: str(i) for i, e in enumerate(eids)}
     env = {}
@@ -322,29 +322,30 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         ):
             del res["jsons"][destWid]
 
-    for eid in sorted(envs.keys()):
-        eid_num = eidNums[eid]
-        for wid, win in envs[eid].get("jsons", {}).items():
-            win_title = win.get("title", "")
-            new_wid = "{}_env_{}".format(eid, wid)
-            if new_wid in res["jsons"]:
-                continue
-            win_copy = copy.deepcopy(win)
-            win_copy["id"] = new_wid
-            label = (
-                "[{}] {}".format(eid_num, html.escape(win_title))
-                if win_title
-                else "[{}]".format(eid_num)
-            )
-            win_copy["title"] = label
-            if isinstance(win_copy.get("layout"), dict):
-                win_copy["layout"]["title"] = label
-            if isinstance(win_copy.get("content"), dict) and isinstance(
-                win_copy["content"].get("layout"), dict
-            ):
-                win_copy["content"]["layout"]["title"] = label
-            win_copy["has_compare"] = True
-            res["jsons"][new_wid] = win_copy
+    if show_all:
+        for eid in sorted(envs.keys()):
+            eid_num = eidNums[eid]
+            for wid, win in envs[eid].get("jsons", {}).items():
+                win_title = win.get("title", "")
+                new_wid = "{}_env_{}".format(eid, wid)
+                if new_wid in res["jsons"]:
+                    continue
+                win_copy = copy.deepcopy(win)
+                win_copy["id"] = new_wid
+                label = (
+                    "[{}] {}".format(eid_num, html.escape(win_title))
+                    if win_title
+                    else "[{}]".format(eid_num)
+                )
+                win_copy["title"] = label
+                if isinstance(win_copy.get("layout"), dict):
+                    win_copy["layout"]["title"] = label
+                if isinstance(win_copy.get("content"), dict) and isinstance(
+                    win_copy["content"].get("layout"), dict
+                ):
+                    win_copy["content"]["layout"]["title"] = label
+                win_copy["has_compare"] = True
+                res["jsons"][new_wid] = win_copy
 
     # create legend mapping environment names to environment numbers so one can
     # look it up for the new legend

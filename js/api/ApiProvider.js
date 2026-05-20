@@ -190,7 +190,7 @@ const ApiProvider = ({ children }) => {
   // ----------------//
 
   // Request environment data from the server
-  const sendEnvQuery = (envIDs) => {
+  const sendEnvQuery = (envIDs, showAll) => {
     // This kicks off a new stream of events from the socket so there's nothing
     // to handle here. We might want to surface the error state.
     if (envIDs.length == 1) {
@@ -205,6 +205,7 @@ const ApiProvider = ({ children }) => {
         correctPathname() + 'compare/' + envIDs.join('+'),
         JSON.stringify({
           sid: sessionInfo.id,
+          show_all: !!showAll,
         })
       );
     }
