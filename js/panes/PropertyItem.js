@@ -115,9 +115,8 @@ function PropertyItem(props) {
             type="checkbox"
             checked={value}
             onChange={() => updateValue(propId, !value)}
-            aria-label={`Toggle ${propId}`}
-            style={{ margin: '0 4px' }}
           />
+          &nbsp;
         </label>
       );
     case 'select':
