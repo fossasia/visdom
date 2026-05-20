@@ -87,13 +87,9 @@ class BaseHandler(tornado.web.RequestHandler):
                 return
             except Exception as e:
                 logging.error(e)
-            error_msg = (
-                str(exc_info[1]) if exc_info and exc_info[1] else "Unknown server error"
-            )
             self.set_status(status_code)
             self.write(
                 f"""
                 <h1>{status_code} - {title}</h1>
-                <p><strong>Error:</strong> {tornado.escape.xhtml_escape(error_msg)}</p>
                 """
             )
