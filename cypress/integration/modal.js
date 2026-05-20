@@ -30,9 +30,9 @@ describe('Test Env Modal', () => {
 
     // fork the env at this point
     cy.get(envbutton).click();
-    cy.get(envmodal + 'input[type="text"]').type('_fork');
+    cy.get(envmodal + 'input[type="text"]').first().type('_fork');
     cy.contains('button', 'fork').click();
-    cy.get(envmodal + 'input[type="text"]').type('{esc}');
+    cy.get(envmodal + 'input[type="text"]').first().type('{esc}');
 
     // apply a change to the same env
     cy.run('text_fork_part2', { env: env })
@@ -42,9 +42,9 @@ describe('Test Env Modal', () => {
 
     // create a second fork for batch delete testing
     cy.get(envbutton).click();
-    cy.get(envmodal + 'input[type="text"]').clear().type(env + '_fork2');
+    cy.get(envmodal + 'input[type="text"]').first().clear().type(env + '_fork2');
     cy.contains('button', 'fork').click();
-    cy.get(envmodal + 'input[type="text"]').type('{esc}');
+    cy.get(envmodal + 'input[type="text"]').first().type('{esc}');
 
     // check if fork is still the old one
     cy.close_envs();
