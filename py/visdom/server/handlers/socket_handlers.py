@@ -19,6 +19,7 @@ import logging
 import os
 import time
 import types
+from collections import deque
 
 import tornado.ioloop
 import tornado.escape
@@ -30,6 +31,7 @@ from visdom.utils.server_utils import (
     broadcast_tags,
     sync_tags,
     serialize_env,
+    serialize_all,
     send_to_sources,
     broadcast,
     escape_eid,
@@ -118,16 +120,26 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 self.eid = msg["eid"]
                 serialize_env(self.state, [self.eid], env_path=self.env_path)
 
+        elif cmd == "save_all":
+            tornado.ioloop.IOLoop.current().run_in_executor(
+                None, serialize_all, self.state, self.env_path
+            )
+
         elif cmd == "delete_env":
             if "eid" in msg:
-                eid = msg["eid"]
+                eid = escape_eid(msg["eid"])
+                if eid == "main":
+                    return
                 logging.info(f"closing environment {eid}")
-                if eid in self.state:
-                    del self.state[eid]
+                self.state.pop(eid, None)
                 if self.env_path is not None:
                     p = os.path.join(self.env_path, "{0}.json".format(eid))
-                    if os.path.exists(p):
+                    try:
                         os.remove(p)
+                    except FileNotFoundError:
+                        pass
+                    except OSError as e:
+                        logging.error(f"Failed to delete {p}: {e}")
 
                 # Clean up orphaned tags
                 with self.app.index_lock:
@@ -177,7 +189,7 @@ class AnySocketWrapper(AnySocketHandlerOrWrapper):
     def initialize(self, app):
         super().initialize(app)
 
-        self.messages = []
+        self.messages = deque()
         self.last_read_time = time.time()
         self.open()
         try:
@@ -214,8 +226,9 @@ class AnySocketWrapper(AnySocketHandlerOrWrapper):
 
     def get_messages(self):
         to_send = []
-        while len(self.messages) > 0:
-            message = self.messages.pop()
+        messages = self.messages
+        self.messages = []
+        for message in messages:
             if isinstance(message, dict):
                 # Not all messages are being formatted the same way (JSON)
                 # TODO investigate
@@ -285,7 +298,12 @@ class SocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
 
         self.write_message(
             json.dumps(
-                {"command": "register", "data": self.sid, "readonly": self.readonly}
+                {
+                    "command": "register",
+                    "data": self.sid,
+                    "readonly": self.readonly,
+                    "envList": sorted(list(self.state.keys())),
+                }
             )
         )
         self.broadcast_layouts([self])

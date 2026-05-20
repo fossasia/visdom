@@ -58,7 +58,7 @@ runs:
       - name: "Install npm Dependencies"
         shell: bash
         run: |
-          npm install
+          ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm install
 
       # load artifacts from previous runs
       - name: "Load built js-files"

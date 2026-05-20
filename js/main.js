@@ -386,8 +386,37 @@ const App = () => {
     localStorage.setItem('envIDs', JSON.stringify(selectedNodes));
     sendEnvQuery(selectedNodes);
   };
-
   const onEnvDelete = (env2delete, previousEnv) => {
+
+    if (env2delete === previousEnv) {
+      previousEnv = 'main';
+    }
+
+    setSelection((prev) => {
+      let EnvIds = prev.envIDs.filter((env) => env !== env2delete);
+      return {
+        ...prev,
+        envIDs: EnvIds,
+      };
+    });
+
+    setStoreMeta((prev) => {
+      const layoutLists = new Map(storeMeta.layoutLists);
+      layoutLists.delete(env2delete);
+      let EnvIds = selection.envIDs.filter((env) => env !== env2delete);
+      return {
+        ...prev,
+        envList: EnvIds,
+        layoutLists: layoutLists,
+      };
+    });
+
+    setStoreData((prev) => ({
+      ...prev,
+      panes: {},
+      layout: [],
+    }));
+
     sendEnvDelete(env2delete, previousEnv);
   };
 
@@ -423,7 +452,6 @@ const App = () => {
         );
       }
     }
-
     setStoreMeta((prev) => ({
       ...prev,
       envList: newEnvList,
@@ -730,7 +758,6 @@ const App = () => {
     windowSize.current.cols = cols;
     windowSize.current.width = width;
   };
-
   let panes = Object.keys(storeData.panes).map((id) => {
     let pane = storeData.panes[id];
 
