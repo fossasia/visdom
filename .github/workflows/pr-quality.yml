@@ -112,19 +112,7 @@ jobs:
                 labels: ['blocked'],
               });
             } catch (e) {
-              if (e.status === 422) {
-                await github.rest.issues.createLabel({
-                  owner: context.repo.owner,
-                  repo:  context.repo.repo,
-                  name: 'blocked', color: 'ef4444',
-                });
-                await github.rest.issues.addLabels({
-                  owner: context.repo.owner,
-                  repo:  context.repo.repo,
-                  issue_number: pr,
-                  labels: ['blocked'],
-                });
-              }
+              core.warning(`Could not add blocked label: ${e.message}`);
             }
 
             core.setFailed(`${errors.length} section(s) incomplete.`);
