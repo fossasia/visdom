@@ -87,7 +87,7 @@ function EnvModal(props) {
           <hr style={{ margin: '5px 0' }} />
 
           {envList.map((env) => (
-            <label key={env} style={{ display: 'block', fontWeight: 'normal', cursor: env === 'main' ? 'not-allowed' : 'pointer', color: env === 'main' ? '#999' : '#333' }}>
+            <label key={env} style={{ display: 'block', fontWeight: 'normal', cursor: env === 'main' ? 'not-allowed' : 'pointer', color: env === 'main' ? '#999' : '#333', wordBreak: 'break-all' }}>
               <input
                 type="checkbox"
                 style={{ marginRight: '8px' }}

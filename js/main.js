@@ -823,6 +823,7 @@ const App = () => {
       envList={storeMeta.envList}
       envSelectorStyle={{
         width: Math.max(window.innerWidth / 3, 50),
+        wordBreak: 'break-all',
       }}
       onEnvClear={closeAllPanes}
       onEnvManageButton={() => setShowEnvModal(!showEnvModal)}

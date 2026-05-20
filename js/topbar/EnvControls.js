@@ -79,6 +79,7 @@ function EnvControls(props) {
             dropdownStyle={{
               maxHeight: 900,
               overflow: 'auto',
+              wordBreak: 'break-all',
             }}
             placeholder={<i>Select environment(s)</i>}
             searchPlaceholder="search"
