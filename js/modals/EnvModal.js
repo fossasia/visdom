@@ -34,7 +34,6 @@ function EnvModal(props) {
 
   // change input / select value when activeEnv changes
   const [inputText, setInputText] = useState(activeEnv);
-  const [selectText, setSelectText] = useState(activeEnv);
   const [tagEnv, setTagEnv] = useState(activeEnv);
   const [tagText, setTagText] = useState('');
   const [saveStatus, setSaveStatus] = useState('idle'); // idle, saving, saved, error
@@ -42,7 +41,6 @@ function EnvModal(props) {
 
   useEffect(() => {
     setInputText(activeEnv);
-    setSelectText(activeEnv);
     setTagEnv(activeEnv);
     setSelectedEnvs([]);
   }, [activeEnv, show]);
