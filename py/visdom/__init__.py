@@ -61,9 +61,7 @@ try:
         perplexity = (
             50
             if num_entities >= 150
-            else num_entities // 3
-            if num_entities >= 21
-            else 7
+            else num_entities // 3 if num_entities >= 21 else 7
         )
         Y = bhtsne.run_bh_tsne(
             X, initial_dims=X.shape[1], perplexity=perplexity, verbose=True
@@ -1137,12 +1135,13 @@ class Visdom(object):
         `pip install kaleido`.
         """
         try:
-            import plotly
-        except ImportError:
+            plotly = __import__("plotly")
+        except ImportError as exc:
             raise RuntimeError(
                 "Plotly must be installed to save Plotly figures. "
                 "Install with: pip install plotly"
-            )
+            ) from exc
+        _ = plotly.__version__
         try:
             figure.write_image(filepath, **kwargs)
         except ValueError as e:
