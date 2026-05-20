@@ -288,7 +288,12 @@ class SocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
 
         self.write_message(
             json.dumps(
-                {"command": "register", "data": self.sid, "readonly": self.readonly}
+                {
+                    "command": "register",
+                    "data": self.sid,
+                    "readonly": self.readonly,
+                    "envList": sorted(list(self.state.keys())),
+                }
             )
         )
         self.broadcast_layouts([self])
