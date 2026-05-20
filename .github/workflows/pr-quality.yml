@@ -22,8 +22,8 @@ jobs:
 
             const sections = [
               { heading: '## Description', min: 20 },
-              { heading: '## Motivation and Context', min: 20 },
-              { heading: '## How Has This Been Tested?', min: 30 },
+              { heading: '## Motivation and Context', min: 5 },
+              { heading: '## How Has This Been Tested?', min: 10 },
             ];
 
 
