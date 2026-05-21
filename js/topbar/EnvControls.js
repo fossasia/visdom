@@ -70,6 +70,22 @@ function EnvControls(props) {
     })
   );
 
+  const currentIdx = envIDs.length > 0 ? slist.indexOf(envIDs[0]) : -1;
+  const hasSingleSelectedEnv = envIDs.length === 1 && currentIdx !== -1;
+  const onPrevEnv = () => {
+    if (hasSingleSelectedEnv && currentIdx > 0) {
+      onEnvSelect([slist[currentIdx - 1]]);
+    }
+  };
+  const onNextEnv = () => {
+    if (hasSingleSelectedEnv && currentIdx < slist.length - 1) {
+      onEnvSelect([slist[currentIdx + 1]]);
+    }
+  };
+  const isDisabled = !connected || readonly || !hasSingleSelectedEnv;
+  const isAtStart = isDisabled || currentIdx <= 0;
+  const isAtEnd = isDisabled || currentIdx >= slist.length - 1;
+
   // rendering
   // ---------
   return (
@@ -87,6 +103,7 @@ function EnvControls(props) {
             dropdownStyle={{
               maxHeight: 900,
               overflow: 'auto',
+              wordBreak: 'break-all',
             }}
             placeholder={<i>Select environment(s)</i>}
             searchPlaceholder="search"
@@ -103,6 +120,28 @@ function EnvControls(props) {
             dropdownMatchSelectWidth={false}
             onChange={onEnvSelect}
           />
+          {slist.length > 1 && (
+            <div className="env-arrow-wrapper">
+              <button
+                aria-label="Previous Environment"
+                className="env-arrow-btn"
+                title="Previous Environment"
+                disabled={isAtStart}
+                onClick={onPrevEnv}
+              >
+                ▲
+              </button>
+              <button
+                aria-label="Next Environment"
+                className="env-arrow-btn"
+                title="Next Environment"
+                disabled={isAtEnd}
+                onClick={onNextEnv}
+              >
+                ▼
+              </button>
+            </div>
+          )}
         </div>
         <button
           id="clear-button"

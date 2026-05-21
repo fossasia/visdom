@@ -848,6 +848,7 @@ const App = () => {
       tags={storeMeta.tags}
       envSelectorStyle={{
         width: Math.max(window.innerWidth / 3, 50),
+        wordBreak: 'break-all',
       }}
       onEnvClear={closeAllPanes}
       onEnvManageButton={() => setShowEnvModal(!showEnvModal)}
