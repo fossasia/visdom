@@ -6,6 +6,7 @@ on:
         - 'js/**'
     branches:
         - master
+        - dev
 
 jobs:
   update-static-js-files:
@@ -20,7 +21,7 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: '16'
-      - run: npm install
+      - run: ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm install
       - run: npm run build
       - run: |
           git config --local user.name "github-actions[bot]"
