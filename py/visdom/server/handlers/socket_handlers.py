@@ -19,6 +19,7 @@ import logging
 import os
 import time
 import types
+import hashlib
 from collections import deque
 
 import tornado.ioloop
@@ -132,12 +133,25 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 self.state.pop(eid, None)
                 if self.env_path is not None:
                     p = os.path.join(self.env_path, "{0}.json".format(eid))
-                    try:
-                        os.remove(p)
-                    except FileNotFoundError:
-                        pass
-                    except OSError as e:
-                        logging.error(f"Failed to delete {p}: {e}")
+                    if os.path.exists(p):
+                        try:
+                            os.remove(p)
+                        except FileNotFoundError:
+                            pass
+                        except OSError as e:
+                            logging.error(f"Failed to delete {p}: {e}")
+                    else:
+                        hashed_id = hashlib.sha256(eid.encode("utf-8")).hexdigest()
+                        p_hashed = os.path.join(
+                            self.env_path, "hash_{0}.json".format(hashed_id)
+                        )
+                        if os.path.exists(p_hashed):
+                            try:
+                                os.remove(p_hashed)
+                            except FileNotFoundError:
+                                pass
+                            except OSError as e:
+                                logging.error(f"Failed to delete {p_hashed}: {e}")
                 broadcast_envs(self)
 
         elif cmd == "save_layouts":
