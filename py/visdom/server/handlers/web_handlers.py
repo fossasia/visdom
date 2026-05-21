@@ -13,6 +13,7 @@ necessary, but defers underlying manipulations of the server's data to
 the data_model itself.
 """
 
+import hashlib
 import copy
 import getpass
 import json
@@ -287,10 +288,15 @@ class UpdateHandler(BaseHandler):
 
         # Update traces
         for n, idx in enumerate(idxs):
-            if all(math.isnan(i) or i is None for i in new_data[n]["x"]):
+            if all(
+                math.isnan(i) or math.isinf(i) or i is None for i in new_data[n]["x"]
+            ):
                 continue
             # handle data for plotting
-            for axis in ["x", "y"]:
+            axes = ["x", "y"]
+            if pdata[idx]["type"] == "scatter3d":
+                axes.append("z")
+            for axis in axes:
                 pdata[idx][axis] = (
                     (pdata[idx][axis] + new_data[n][axis])
                     if append
@@ -340,7 +346,7 @@ class UpdateHandler(BaseHandler):
             or (
                 len(p["content"]["data"]) == 0
                 or p["content"]["data"][0]["type"]
-                in ["scatter", "scattergl", "custom", "heatmap"]
+                in ["scatter", "scatter3d", "scattergl", "custom", "heatmap"]
             )
         ):
             handler.write(
@@ -417,12 +423,33 @@ class DeleteEnvHandler(BaseHandler):
 
     @staticmethod
     def wrap_func(handler, args):
-        eid = extract_eid(args)
+        eid = args.get("eid")
         if eid is not None:
-            del handler.state[eid]
+            eid = escape_eid(eid)
+            if eid == "main":
+                return
+            handler.state.pop(eid, None)
             if handler.env_path is not None:
                 p = os.path.join(handler.env_path, "{0}.json".format(eid))
-                os.remove(p)
+                if os.path.exists(p):
+                    try:
+                        os.remove(p)
+                    except FileNotFoundError:
+                        pass
+                    except OSError as e:
+                        logging.error(f"Failed to delete {p}: {e}")
+                else:
+                    hashed_id = hashlib.sha256(eid.encode("utf-8")).hexdigest()
+                    p = os.path.join(
+                        handler.env_path, "hash_{0}.json".format(hashed_id)
+                    )
+                    if os.path.exists(p):
+                        try:
+                            os.remove(p)
+                        except FileNotFoundError:
+                            pass
+                        except OSError as e:
+                            logging.error(f"Failed to delete {p}: {e}")
             broadcast_envs(handler)
 
     @check_auth
@@ -493,13 +520,8 @@ class EnvHandler(BaseHandler):
 
     @check_auth
     def get(self, eid):
-        items = gather_envs(self.state, env_path=self.env_path)
-        active = "" if eid not in items else eid
         self.render(
             "index.html",
-            user=getpass.getuser(),
-            items=items,
-            active_item=active,
             wrap_socket=self.wrap_socket,
         )
 
@@ -511,9 +533,11 @@ class EnvHandler(BaseHandler):
         if "sid" in msg_args:
             sid = msg_args["sid"]
             if sid in self.subs:
-                load_env(self.state, args, self.subs[sid], env_path=self.env_path)
+                load_env(
+                    self.state, escape_eid(args), self.subs[sid], env_path=self.env_path
+                )
         if "eid" in msg_args:
-            eid = msg_args["eid"]
+            eid = escape_eid(msg_args["eid"])
             if eid not in self.state:
                 self.state[eid] = {"jsons": {}, "reload": {}}
                 broadcast_envs(self)
@@ -530,16 +554,8 @@ class CompareHandler(BaseHandler):
 
     @check_auth
     def get(self, eids):
-        items = gather_envs(self.state)
-        eids = eids.split("+")
-        # Filter out eids that don't exist
-        eids = [x for x in eids if x in items]
-        eids = "+".join(eids)
         self.render(
             "index.html",
-            user=getpass.getuser(),
-            items=items,
-            active_item=eids,
             wrap_socket=self.wrap_socket,
         )
 
@@ -631,7 +647,6 @@ class IndexHandler(BaseHandler):
         self.wrap_socket = app.wrap_socket
 
     def get(self, args, **kwargs):
-        items = gather_envs(self.state, env_path=self.env_path)
         if (not self.login_enabled) or self.current_user:
             """self.current_user is an authenticated user provided by Tornado,
             available when we set self.get_current_user in BaseHandler,
@@ -639,12 +654,10 @@ class IndexHandler(BaseHandler):
             """
             self.render(
                 "index.html",
-                user=getpass.getuser(),
-                items=items,
-                active_item="",
                 wrap_socket=self.wrap_socket,
             )
         elif self.login_enabled:
+            items = gather_envs(self.state, env_path=self.env_path)
             self.render(
                 "login.html",
                 user=getpass.getuser(),
