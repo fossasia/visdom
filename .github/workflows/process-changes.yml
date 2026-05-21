@@ -17,7 +17,7 @@ jobs:
       with:
           node-version: 16
     - name: "Install Dependencies"
-      run: npm install
+      run: ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm install
     - name: "Linter Check (ESLint)"
       run: npm run lint
 
@@ -138,7 +138,7 @@ jobs:
           name: cypress-screenshots-visual
           path: cypress/screenshots
 
-  funcitonal-test:
+  functional-test:
     name: "Functional Test (Websocket)"
     runs-on: ubuntu-latest
     needs: install-and-build
@@ -164,7 +164,7 @@ jobs:
           name: cypress-screenshots-functional-${{ matrix.python }}
           path: cypress/screenshots
 
-  funcitonal-test-polling:
+  functional-test-polling:
     name: 'Functional Test (Polling)'
     runs-on: ubuntu-latest
     needs: install-and-build
