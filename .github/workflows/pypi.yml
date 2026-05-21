@@ -31,7 +31,7 @@ jobs:
       - name: Create Release
         if: ${{ steps.version.outputs.TAG_EXISTS == '0' }}
         id: create_release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ steps.version.outputs.TAG_NAME }}
           name: "Visdom v${{ steps.version.outputs.TAG_NAME }}"
