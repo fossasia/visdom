@@ -15,6 +15,7 @@ import logging
 import os
 import platform
 import time
+import re
 
 import tornado.web  # noqa E402: gotta install ioloop first
 import tornado.escape  # noqa E402: gotta install ioloop first
@@ -171,7 +172,11 @@ class Application(tornado.web.Application):
             eid = env_json.replace(".json", "")
             env_path_file = os.path.join(env_path, env_json)
 
-            if self.eager_data_loading:
+            is_hashed = bool(
+                re.match(r"^hash_[a-f0-9]{64}\.json$", env_json, re.IGNORECASE)
+            )
+
+            if self.eager_data_loading or is_hashed:
                 try:
                     with open(env_path_file, "r") as fn:
                         env_data = tornado.escape.json_decode(fn.read())
@@ -183,7 +188,27 @@ class Application(tornado.web.Application):
                     )
                     continue
 
-                state[eid] = {"jsons": env_data["jsons"], "reload": env_data["reload"]}
+                if is_hashed and "name" in env_data:
+                    eid = env_data["name"]
+
+                if "jsons" not in env_data or "reload" not in env_data:
+                    logging.warning(
+                        "Environment file %s is malformed or missing expected fields.",
+                        env_path_file,
+                    )
+
+                state[eid] = {
+                    "jsons": env_data.get("jsons", {}),
+                    "reload": env_data.get("reload", {}),
+                }
+
+                if is_hashed and "name" not in env_data:
+                    logging.warning(
+                        "Hashed environment json missing 'name': %s; "
+                        "falling back to filename-derived env id '%s'",
+                        env_path_file,
+                        eid,
+                    )
             else:
                 state[eid] = LazyEnvData(env_path_file)
 

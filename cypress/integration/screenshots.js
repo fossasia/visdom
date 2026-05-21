@@ -11,6 +11,9 @@ const thresholds = {
   // the internal video player may already start by showing animated loading sign
   misc_video_tensor: 0.1,
   misc_video_download: 0.1,
+  // the audio player may also show loading/buffering states differently across runs
+  misc_audio_basic: 0.1,
+  misc_audio_download: 0.1,
 };
 
 describe(`Compare with previous plot screenshots`, () => {
