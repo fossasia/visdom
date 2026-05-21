@@ -45,7 +45,7 @@ def download_scripts(proxies=None, install_dir=None):
         "%slayout-bin-packer@1.4.0/dist/layout-bin-packer.js.map"
         % b: "layout-bin-packer.js.map",
         # d3 Libraries for plotting d3 graphs!
-        "http://d3js.org/d3.v3.min.js": "d3.v3.min.js",
+        "https://d3js.org/d3.v3.min.js": "d3.v3.min.js",
         "https://d3js.org/d3-selection-multi.v1.js": "d3-selection-multi.v1.js",
         # Library to download the svg to png
         "%ssave-svg-as-png@1.4.17/lib/saveSvgAsPng.js" % b: "saveSvgAsPng.js",
