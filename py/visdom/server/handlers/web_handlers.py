@@ -13,6 +13,7 @@ necessary, but defers underlying manipulations of the server's data to
 the data_model itself.
 """
 
+import hashlib
 import copy
 import getpass
 import json
@@ -430,12 +431,25 @@ class DeleteEnvHandler(BaseHandler):
             handler.state.pop(eid, None)
             if handler.env_path is not None:
                 p = os.path.join(handler.env_path, "{0}.json".format(eid))
-                try:
-                    os.remove(p)
-                except FileNotFoundError:
-                    pass
-                except OSError as e:
-                    logging.error(f"Failed to delete {p}: {e}")
+                if os.path.exists(p):
+                    try:
+                        os.remove(p)
+                    except FileNotFoundError:
+                        pass
+                    except OSError as e:
+                        logging.error(f"Failed to delete {p}: {e}")
+                else:
+                    hashed_id = hashlib.sha256(eid.encode("utf-8")).hexdigest()
+                    p = os.path.join(
+                        handler.env_path, "hash_{0}.json".format(hashed_id)
+                    )
+                    if os.path.exists(p):
+                        try:
+                            os.remove(p)
+                        except FileNotFoundError:
+                            pass
+                        except OSError as e:
+                            logging.error(f"Failed to delete {p}: {e}")
             broadcast_envs(handler)
 
     @check_auth
