@@ -97,7 +97,7 @@ jobs:
           git checkout PR-HEAD -- ./example
 
       - name: Cypress test:init
-        uses: cypress-io/github-action@v4
+        uses: cypress-io/github-action@v7
         with:
           install: false
           start: visdom -port 8098 -env_path /tmp
@@ -125,7 +125,7 @@ jobs:
           path: cypress/screenshots_init
 
       - name: Cypress test:visual
-        uses: cypress-io/github-action@v4
+        uses: cypress-io/github-action@v7
         with:
           install: false
           start: visdom -port 8098 -env_path /tmp
@@ -151,7 +151,7 @@ jobs:
       - uses: ./.github/actions/prepare
 
       - name: Cypress test
-        uses: cypress-io/github-action@v4
+        uses: cypress-io/github-action@v7
         with:
           install: false
           start: visdom -port 8098 -env_path /tmp
@@ -174,7 +174,7 @@ jobs:
       - uses: ./.github/actions/prepare
 
       - name: Cypress test
-        uses: cypress-io/github-action@v4
+        uses: cypress-io/github-action@v7
         with:
           install: false
           start: visdom -port 8098 -env_path /tmp -use_frontend_client_polling
