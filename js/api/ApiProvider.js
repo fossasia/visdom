@@ -150,6 +150,9 @@ const ApiProvider = ({ children }) => {
           id: cmd.data,
           readonly: cmd.readonly,
         }));
+        if(cmd.envList){
+          apiHandlers.current.onEnvUpdate(cmd.envList);
+        }
         break;
       case 'pane':
       case 'window':

@@ -13,6 +13,7 @@ necessary, but defers underlying manipulations of the server's data to
 the data_model itself.
 """
 
+import hashlib
 import copy
 import getpass
 import json
@@ -430,12 +431,25 @@ class DeleteEnvHandler(BaseHandler):
             handler.state.pop(eid, None)
             if handler.env_path is not None:
                 p = os.path.join(handler.env_path, "{0}.json".format(eid))
-                try:
-                    os.remove(p)
-                except FileNotFoundError:
-                    pass
-                except OSError as e:
-                    logging.error(f"Failed to delete {p}: {e}")
+                if os.path.exists(p):
+                    try:
+                        os.remove(p)
+                    except FileNotFoundError:
+                        pass
+                    except OSError as e:
+                        logging.error(f"Failed to delete {p}: {e}")
+                else:
+                    hashed_id = hashlib.sha256(eid.encode("utf-8")).hexdigest()
+                    p = os.path.join(
+                        handler.env_path, "hash_{0}.json".format(hashed_id)
+                    )
+                    if os.path.exists(p):
+                        try:
+                            os.remove(p)
+                        except FileNotFoundError:
+                            pass
+                        except OSError as e:
+                            logging.error(f"Failed to delete {p}: {e}")
             broadcast_envs(handler)
 
     @check_auth
@@ -506,13 +520,8 @@ class EnvHandler(BaseHandler):
 
     @check_auth
     def get(self, eid):
-        items = gather_envs(self.state, env_path=self.env_path)
-        active = "" if eid not in items else eid
         self.render(
             "index.html",
-            user=getpass.getuser(),
-            items=items,
-            active_item=active,
             wrap_socket=self.wrap_socket,
         )
 
@@ -524,9 +533,11 @@ class EnvHandler(BaseHandler):
         if "sid" in msg_args:
             sid = msg_args["sid"]
             if sid in self.subs:
-                load_env(self.state, args, self.subs[sid], env_path=self.env_path)
+                load_env(
+                    self.state, escape_eid(args), self.subs[sid], env_path=self.env_path
+                )
         if "eid" in msg_args:
-            eid = msg_args["eid"]
+            eid = escape_eid(msg_args["eid"])
             if eid not in self.state:
                 self.state[eid] = {"jsons": {}, "reload": {}}
                 broadcast_envs(self)
@@ -543,16 +554,8 @@ class CompareHandler(BaseHandler):
 
     @check_auth
     def get(self, eids):
-        items = gather_envs(self.state)
-        eids = eids.split("+")
-        # Filter out eids that don't exist
-        eids = [x for x in eids if x in items]
-        eids = "+".join(eids)
         self.render(
             "index.html",
-            user=getpass.getuser(),
-            items=items,
-            active_item=eids,
             wrap_socket=self.wrap_socket,
         )
 
@@ -652,7 +655,6 @@ class IndexHandler(BaseHandler):
         self.wrap_socket = app.wrap_socket
 
     def get(self, args, **kwargs):
-        items = gather_envs(self.state, env_path=self.env_path)
         if (not self.login_enabled) or self.current_user:
             """self.current_user is an authenticated user provided by Tornado,
             available when we set self.get_current_user in BaseHandler,
@@ -660,12 +662,10 @@ class IndexHandler(BaseHandler):
             """
             self.render(
                 "index.html",
-                user=getpass.getuser(),
-                items=items,
-                active_item="",
                 wrap_socket=self.wrap_socket,
             )
         elif self.login_enabled:
+            items = gather_envs(self.state, env_path=self.env_path)
             self.render(
                 "login.html",
                 user=getpass.getuser(),
@@ -702,3 +702,8 @@ class ErrorHandler(BaseHandler):
     def get(self, text):
         error_text = text or "test error"
         raise Exception(error_text)
+
+
+class HealthHandler(BaseHandler):
+    def get(self):
+        self.write({"status": "ok"})
