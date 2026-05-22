@@ -307,12 +307,8 @@ def _markerColorCheck(mc, X, Y, L):
     return ret
 
 
-def _markerSizeCheck(ms, X, Y, K):
-    """Validate and return per-point marker sizes as a numpy array.
-
-    K is int(Y.max()), the largest label value (not the count of unique labels).
-    Labels are 1-based integers, so per-label indexing uses Y[i] - 1.
-    """
+def _markerSizeCheck(ms, X, Y):
+    """Validate and return per-point marker sizes as a numpy array."""
     if isinstance(ms, (list, tuple)):
         ms = np.array(ms, dtype=float)
     assert isndarray(ms), "markersize array should be a numpy ndarray"
@@ -320,15 +316,16 @@ def _markerSizeCheck(ms, X, Y, K):
     assert (ms > 0).all(), "all marker sizes must be positive"
 
     if ms.shape[0] == X.shape[0]:
-        
         return np.array(ms, dtype=float)
 
-    assert ms.shape[0] >= K, (
+    labels = np.unique(Y)
+    assert ms.shape[0] >= len(labels), (
         "markersize should be of size `%d` (per-point) or at least `%d` "
-        "(per-label), but got: %d" % (X.shape[0], K, ms.shape[0])
+        "(per-label), but got: %d" % (X.shape[0], len(labels), ms.shape[0])
     )
-   
-    return np.array([ms[Y[i] - 1] for i in range(len(Y))], dtype=float)
+
+    label_to_idx = {label: idx for idx, label in enumerate(labels)}
+    return np.array([ms[label_to_idx[Y[i]]] for i in range(len(Y))], dtype=float)
 
 
 def _lineColorCheck(lc, K):
@@ -1768,7 +1765,7 @@ class Visdom(object):
         if opts.get("markersize") is not None and isinstance(
             opts["markersize"], (list, tuple, np.ndarray)
         ):
-            opts["markersize"] = _markerSizeCheck(opts["markersize"], X, Y, K)
+            opts["markersize"] = _markerSizeCheck(opts["markersize"], X, Y)
 
         if opts.get("linecolor") is not None:
             opts["linecolor"] = _lineColorCheck(opts["linecolor"], K)
