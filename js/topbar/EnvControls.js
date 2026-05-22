@@ -29,38 +29,49 @@ function EnvControls(props) {
   // -------
   var slist = envList.slice();
   slist.sort();
-  var roots = Array.from(
-    new Set(
-      slist.map((x) => {
-        return x.split('_')[0];
-      })
-    )
-  );
 
-  let env_options2 = slist.map((env, idx) => {
-    if (env.split('_').length == 1) {
-      return null;
+  var childrenByPrefix = {};
+  slist.forEach((env) => {
+    var idx = env.indexOf('_');
+    if (idx > 0) {
+      var prefix = env.substring(0, idx);
+      if (!childrenByPrefix[prefix]) childrenByPrefix[prefix] = [];
+      childrenByPrefix[prefix].push(env);
     }
-    return {
-      key: idx + 1 + roots.length,
-      pId: roots.indexOf(env.split('_')[0]) + 1,
-      label: env,
-      value: env,
-    };
   });
 
-  env_options2 = env_options2.filter((x) => x != null);
+  var keyCounter = 1;
+  var env_options2 = [];
+  var parentKeys = {};
 
-  env_options2 = env_options2.concat(
-    roots.map((x, idx) => {
-      return {
-        key: idx + 1,
-        pId: 0,
-        label: x,
-        value: x,
-      };
-    })
-  );
+  Object.keys(childrenByPrefix).sort().forEach((prefix) => {
+    parentKeys[prefix] = keyCounter;
+    env_options2.push({
+      key: keyCounter++,
+      pId: 0,
+      label: prefix,
+      value: '__group__' + prefix,
+    });
+  });
+
+  slist.forEach((env) => {
+    var idx = env.indexOf('_');
+    var prefix = idx > 0 ? env.substring(0, idx) : null;
+    var parentKey = 0;
+
+    if (prefix && parentKeys[prefix] !== undefined) {
+      parentKey = parentKeys[prefix];
+    } else if (parentKeys[env] !== undefined) {
+      parentKey = parentKeys[env];
+    }
+
+    env_options2.push({
+      key: keyCounter++,
+      pId: parentKey,
+      label: env,
+      value: env,
+    });
+  });
 
   const currentIdx = envIDs.length > 0 ? slist.indexOf(envIDs[0]) : -1;
   const hasSingleSelectedEnv = envIDs.length === 1 && currentIdx !== -1;

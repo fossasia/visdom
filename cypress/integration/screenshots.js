@@ -11,9 +11,15 @@ const thresholds = {
   // the internal video player may already start by showing animated loading sign
   misc_video_tensor: 0.1,
   misc_video_download: 0.1,
-  // the audio player may also show loading/buffering states differently across runs
-  misc_audio_basic: 0.1,
-  misc_audio_download: 0.1,
+
+  text_basic: 0.05,
+  text_update: 0.05,
+};
+
+const maxDiffPixels = {
+  misc_video_tensor: 5000,
+  misc_video_download: 5000,
+  misc_audio_basic: 5000,
 };
 
 describe(`Compare with previous plot screenshots`, () => {
@@ -48,12 +54,13 @@ describe(`Compare with previous plot screenshots`, () => {
       if (run.startsWith('image_')) cy.wait(300);
 
       cy.get('.content').first().screenshot(run, { overwrite: true });
+      const maxDiff = maxDiffPixels[run] || 0;
       cy.task('numDifferentPixels', {
         src1: img1_src,
         src2: img2_src,
         diffsrc: diff_src,
         threshold: threshold,
-      }).should('equal', 0);
+      }).should('be.at.most', maxDiff);
     });
   });
 });

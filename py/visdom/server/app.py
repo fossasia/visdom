@@ -38,6 +38,7 @@ from visdom.server.handlers.web_handlers import (
     ErrorHandler,
     ExistsHandler,
     ForkEnvHandler,
+    HealthHandler,
     IndexHandler,
     PostHandler,
     SaveHandler,
@@ -113,6 +114,7 @@ class Application(tornado.web.Application):
             (r"%s/env_state" % self.base_url, EnvStateHandler, {"app": self}),
             (r"%s/fork_env" % self.base_url, ForkEnvHandler, {"app": self}),
             (r"%s/user/(.*)" % self.base_url, UserSettingsHandler, {"app": self}),
+            (r"%s/health" % self.base_url, HealthHandler),
             (r"%s(.*)" % self.base_url, IndexHandler, {"app": self}),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)
@@ -167,7 +169,7 @@ class Application(tornado.web.Application):
             )
             return {"main": {"jsons": {}, "reload": {}}}
         ensure_dir_exists(env_path)
-        env_jsons = [i for i in os.listdir(env_path) if ".json" in i]
+        env_jsons = [i for i in os.listdir(env_path) if i.endswith(".json")]
         for env_json in env_jsons:
             eid = env_json.replace(".json", "")
             env_path_file = os.path.join(env_path, env_json)
@@ -181,11 +183,10 @@ class Application(tornado.web.Application):
                     with open(env_path_file, "r") as fn:
                         env_data = tornado.escape.json_decode(fn.read())
                 except Exception as e:
-                    logging.warn(
-                        "Failed loading environment json: {} - {}".format(
-                            env_path_file, repr(e)
-                        )
+                    logging.warning(
+                        f"Failed to load environment JSON file '{env_path_file}': {e!r}"
                     )
+
                     continue
 
                 if is_hashed and "name" in env_data:

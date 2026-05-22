@@ -701,3 +701,10 @@ class ErrorHandler(BaseHandler):
             raise tornado.web.HTTPError(400, reason="Invalid status code")
 
         raise tornado.web.HTTPError(status_code)
+        error_text = text or "test error"
+        raise Exception(error_text)
+
+
+class HealthHandler(BaseHandler):
+    def get(self):
+        self.write({"status": "ok"})
