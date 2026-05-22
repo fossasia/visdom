@@ -61,9 +61,7 @@ try:
         perplexity = (
             50
             if num_entities >= 150
-            else num_entities // 3
-            if num_entities >= 21
-            else 7
+            else num_entities // 3 if num_entities >= 21 else 7
         )
         Y = bhtsne.run_bh_tsne(
             X, initial_dims=X.shape[1], perplexity=perplexity, verbose=True
@@ -1790,7 +1788,11 @@ class Visdom(object):
         trace_opts = opts.get("traceopts", {"plotly": {}})["plotly"]
         dash = opts.get("dash")
         mc = opts.get("markercolor")
-        ms = opts.get("markersize") if isinstance(opts.get("markersize"), np.ndarray) else None
+        ms = (
+            opts.get("markersize")
+            if isinstance(opts.get("markersize"), np.ndarray)
+            else None
+        )
         lc = opts.get("linecolor")
 
         for k in labels:
@@ -1818,7 +1820,11 @@ class Visdom(object):
                         "color": lc[k - 1] if lc is not None else None,
                     },
                     "marker": {
-                        "size": ms[ind].tolist() if ms is not None else opts.get("markersize"),
+                        "size": (
+                            ms[ind].tolist()
+                            if ms is not None
+                            else opts.get("markersize")
+                        ),
                         "symbol": opts.get("markersymbol"),
                         "color": mc[k] if mc is not None else None,
                         "line": {
