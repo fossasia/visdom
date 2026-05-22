@@ -26,7 +26,20 @@ function TextPane(props) {
     switch (e.type) {
       case 'keydown':
       case 'keypress':
-        e.preventDefault();
+        if (e.ctrlKey || e.metaKey) {
+          if (e.type === 'keydown' && e.key.toLowerCase() === 'c') {
+            const selectedText = window.getSelection().toString();
+            if (selectedText) {
+              if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(selectedText).catch(() => {});
+              } else {
+                document.execCommand('copy');
+              }
+            }
+          }
+        } else {
+          e.preventDefault();
+        }
         break;
       case 'keyup':
         sendPaneMessage(
