@@ -40,6 +40,21 @@ var PlotPane = (props) => {
 
   // events
   // ------
+  const isDisplayed = (el) =>
+    !!(el && el.offsetWidth > 0 && el.offsetHeight > 0);
+  useEffect(() => {
+    const plotElement = plotlyRef.current;
+    if (!plotElement) return;
+
+    const resizeObserver = new ResizeObserver(() => {
+      if (plotElement._fullLayout && isDisplayed(plotElement)) {
+        Plotly.Plots.resize(plotElement);
+      }
+    });
+
+    resizeObserver.observe(plotElement);
+    return () => resizeObserver.disconnect();
+  }, []);
   useEffect(() => {
     if (previousContent) {
       // Retain trace visibility between old and new plots
@@ -145,6 +160,11 @@ var PlotPane = (props) => {
     Plotly.react(contentID, data.concat(smooth_data), content.layout, {
       showLink: true,
       linkText: 'Edit',
+    }).then(() => {
+      const plotElement = plotlyRef.current;
+      if (plotElement && plotElement._fullLayout && isDisplayed(plotElement)) {
+        Plotly.Plots.resize(plotElement);
+      }
     });
   };
 
