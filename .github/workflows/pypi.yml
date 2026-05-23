@@ -14,7 +14,7 @@ jobs:
     name: "Deploy to PyPI"
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
       - name: Get git-tags
         run: |
           git fetch --prune --unshallow --tags
