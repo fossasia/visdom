@@ -37,6 +37,7 @@ import time
 import errno
 from io import BytesIO, StringIO
 from functools import wraps
+import html
 
 try:
     import bs4  # type: ignore
@@ -128,7 +129,7 @@ def nan2none(l):
     for idx, val in enumerate(l):
         if isinstance(val, Sequence):
             l[idx] = nan2none(l[idx])
-        elif isnum(val) and math.isnan(val):
+        elif isnum(val) and (math.isnan(val) or math.isinf(val)):
             l[idx] = None
     return l
 
@@ -180,9 +181,11 @@ def _axisformat(xy, opts):
         return {
             "type": opts.get(xy + "type"),
             "title": opts.get(xy + "label"),
-            "range": [opts.get(xy + "tickmin"), opts.get(xy + "tickmax")]
-            if has_ticks
-            else None,
+            "range": (
+                [opts.get(xy + "tickmin"), opts.get(xy + "tickmax")]
+                if has_ticks
+                else None
+            ),
             "tickvals": opts.get(xy + "tickvals"),
             "ticktext": opts.get(xy + "ticklabels"),
             "dtick": opts.get(xy + "tickstep"),
@@ -210,17 +213,21 @@ def _axisformat3d(xyz, opts):
         return {
             "type": opts.get(xyz + "type"),
             "title": opts.get(xyz + "label"),
-            "range": [opts.get(xyz + "tickmin"), opts.get(xyz + "tickmax")]
-            if has_ticks
-            else None,
+            "range": (
+                [opts.get(xyz + "tickmin"), opts.get(xyz + "tickmax")]
+                if has_ticks
+                else None
+            ),
             "tickvals": opts.get(xyz + "tickvals"),
             "ticktext": opts.get(xyz + "ticklabels"),
             "nticks": (
-                (opts.get(xyz + "tickmax") - opts.get(xyz + "tickmin"))
-                / opts.get(xyz + "tickstep")
-            )
-            if has_step
-            else None,
+                (
+                    (opts.get(xyz + "tickmax") - opts.get(xyz + "tickmin"))
+                    / opts.get(xyz + "tickstep")
+                )
+                if has_step
+                else None
+            ),
             "tickfont": opts.get(xyz + "tickfont"),
         }
 
@@ -254,21 +261,27 @@ def _opts2layout(opts, is3d=False):
     if layout_opts is not None:
         if "plotly" in layout_opts:
             layout.update(layout_opts["plotly"])
-
     return _scrub_dict(layout)
 
 
 def _markerColorCheck(mc, X, Y, L):
     assert isndarray(mc), "mc should be a numpy ndarray"
-    assert mc.shape[0] == L or (
-        mc.shape[0] == X.shape[0]
-        and (mc.ndim == 1 or mc.ndim == 2 and mc.shape[1] == 3)
-    ), (
+    if mc.ndim == 1:
+        valid = (mc.shape[0] >= L) or (mc.shape[0] == X.shape[0])
+    elif mc.ndim == 2:
+        valid = (mc.shape[1] == 3) and (
+            (mc.shape[0] >= L) or (mc.shape[0] == X.shape[0])
+        )
+    else:
+        valid = False
+
+    assert valid, (
         "marker colors have to be of size `%d` or `%d x 3` "
-        + " or `%d` or `%d x 3`, but got: %s"
+        "(per-point) or at least `%d` or at least `%d x 3` "
+        "(palette), but got: %s"
     ) % (
         X.shape[0],
-        X.shape[1],
+        X.shape[0],
         L,
         L,
         "x".join(map(str, mc.shape)),
@@ -474,8 +487,13 @@ class Visdom(object):
         ), "base_url should not end with / as it is appended automatically"
 
         self.ipv6 = ipv6
-        self.env = env
-        self.env_list = {f"{env}"}  # default env
+        self.env = (
+            env.replace("/", "_")
+            .replace("\\", "_")
+            .replace("\n", "-")
+            .replace("\r", "-")
+        )
+        self.env_list = {self.env}  # default env
         self.send = send
         self.event_handlers = {}  # Haven't registered any events
         self.socket_alive = False
@@ -1096,17 +1114,68 @@ class Visdom(object):
                 opts["width"] = 1.35 * int(math.ceil(float(width)))
         return self.svg(svgstr=svg, opts=opts, env=env, win=win)
 
-    def plotlyplot(self, figure, win=None, env=None):
+    def save_plotly_figure(self, figure, filepath, **kwargs):
+        """
+        Save a Plotly figure to an image file from Python (no browser click required).
+
+        This allows programmatic saving of plots that would otherwise require
+        using the "Download plot as a png" button in the Visdom UI. You can
+        build the same figure, save it to file with this method, and optionally
+        display it in Visdom with plotlyplot().
+
+        Args:
+            figure: A Plotly Figure object (e.g. from plotly.graph_objects or
+                make_subplots).
+            filepath: Path for the output file (e.g. "plot.png", "figure.svg").
+                The format is inferred from the extension (png, svg, pdf, etc.).
+            **kwargs: Optional arguments passed to Plotly's write_image (e.g.
+                width, height, scale).
+
+        Raises:
+            RuntimeError: If plotly or kaleido is not installed.
+
+        Note: Requires the 'kaleido' package for image export. Install with
+        `pip install kaleido`.
+        """
+        try:
+            import plotly
+        except ImportError:
+            raise RuntimeError(
+                "Plotly must be installed to save Plotly figures. "
+                "Install with: pip install plotly"
+            )
+        try:
+            figure.write_image(filepath, **kwargs)
+        except ValueError as e:
+            if "kaleido" in str(e).lower() or "orca" in str(e).lower():
+                raise RuntimeError(
+                    "Saving Plotly figures to image requires the 'kaleido' package. "
+                    "Install with: pip install kaleido"
+                ) from e
+            raise
+
+    def plotlyplot(self, figure, win=None, env=None, save_path=None, save_kwargs=None):
         """
         This function draws a Plotly 'Figure' object. It does not explicitly
         take options as it assumes you have already explicitly configured the
         figure's layout.
 
+        To save the figure as an image from code (without using the browser
+        download button), pass save_path (e.g. save_path="plot.png"). Optional
+        arguments for Plotly's write_image should be passed via save_kwargs,
+        e.g. save_kwargs={"width": 800, "height": 600}. This requires the
+        optional 'kaleido' package (pip install kaleido).
+
         Note: You must have the 'plotly' Python package installed to use
         this function.
         """
+        if save_kwargs is None:
+            save_kwargs = {}
         try:
             import plotly
+
+            if save_path is not None:
+                self.save_plotly_figure(figure, save_path, **save_kwargs)
 
             # We do a round-trip of JSON encoding and decoding to make use of
             # the Plotly JSON Encoder. The JSON encoder deals with converting
@@ -1418,6 +1487,7 @@ class Visdom(object):
         The following `opts` are supported:
 
         - `opts.sample_frequency`: sample frequency (`integer` > 0; default = 44100)
+        - `opts.caption`: caption to display below the player (`string`; optional)
         """
         opts = {} if opts is None else opts
         opts["sample_frequency"] = opts.get("sample_frequency", 44100)
@@ -1459,6 +1529,8 @@ class Visdom(object):
         )
         opts["height"] = 80
         opts["width"] = 330
+        if opts.get("caption"):
+            audiodata += "<p>%s</p>" % html.escape(str(opts["caption"]))
         return self.text(text=audiodata, win=win, env=env, opts=opts)
 
     def _encode(self, tensor, fps):
@@ -1519,6 +1591,7 @@ class Visdom(object):
         - `opts.fps`: FPS for the video (`integer` > 0; default = 25)
         - `opts.autoplay`: whether to autoplay the video when ready (`boolean`; default = `false`)
         - `opts.loop`: whether to loop the video (`boolean`; default = `false`)
+        - `opts.caption`: caption to display below the player (`string`; optional)
         """
         opts = {} if opts is None else opts
         opts["fps"] = opts.get("fps", 25)
@@ -1558,6 +1631,8 @@ class Visdom(object):
             mimetype,
             base64.b64encode(bytestr).decode("utf-8"),
         )
+        if opts.get("caption"):
+            videodata += "<p>%s</p>" % html.escape(str(opts["caption"]))
         return self.text(text=videodata, win=win, env=env, opts=opts)
 
     def update_window_opts(self, win, opts, env=None):
@@ -1710,9 +1785,9 @@ class Visdom(object):
                     "x": nan2none(X.take(0, 1)[ind].tolist()),
                     "y": nan2none(X.take(1, 1)[ind].tolist()),
                     "name": trace_name,
-                    "type": "scatter3d"
-                    if is3d
-                    else ("scattergl" if use_gl else "scatter"),
+                    "type": (
+                        "scatter3d" if is3d else ("scattergl" if use_gl else "scatter")
+                    ),
                     "mode": opts.get("mode"),
                     "text": L[ind].tolist() if L is not None else None,
                     "textposition": "right",
@@ -1814,6 +1889,11 @@ class Visdom(object):
                 assert X is not None, "must specify x-values for line update"
         assert Y.ndim == 1 or Y.ndim == 2, "Y should have 1 or 2 dim"
         assert Y.shape[-1] > 0, "must plot one line at least"
+
+        if Y.ndim == 2 and Y.shape[1] == 1:
+            Y = Y.ravel()
+            if X is not None and X.ndim == 2 and X.shape[1] == 1:
+                X = X.ravel()
 
         if X is not None:
             assert X.ndim == 1 or X.ndim == 2, "X should have 1 or 2 dim"
