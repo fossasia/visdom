@@ -141,11 +141,10 @@ const App = () => {
   // Ensure the regex filter is valid
   const getValidFilter = (filter) => {
     try {
-      'test_string'.match(filter);
+      return new RegExp(filter, 'i');
     } catch (e) {
-      filter = '';
+      return new RegExp('', 'i');
     }
-    return filter;
   };
 
   // ------------------ //
