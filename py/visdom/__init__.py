@@ -1485,25 +1485,31 @@ class Visdom(object):
     def image(self, img, win=None, env=None, opts=None):
         """
         This function draws an img. It takes as input a `CxHxW` (where C is 1, 3, or 4)
-        or `HxW` tensor `img` that contains the image. The array values can be uint8 in [0, 255]
-        or float. Float arrays are handled as follows: values in [-1, 1] are normalized to [0, 1],
-        values in [0, 1] are scaled to [0, 255], and all other ranges are clipped to [0, 255].
+        or `HxW` tensor `img` that contains the image. The array values can be uint8 in
+        [0, 255] or float. Float arrays are converted as follows: values in [0, 1] are
+        scaled to [0, 255]; all other float values are clipped to [0, 255]. Pass
+        `opts.normalize=True` to min-max scale the image to fill [0, 255] instead.
+
+        The following `opts` are supported:
+
+        - `opts.normalize`: min-max scale float image to [0, 255] (`boolean`; default = `False`)
+        - `opts.jpgquality`: quality of the JPEG image (`number` in (0, 100]; default = `None` for PNG)
+        - `opts.caption`: caption below the image (`string`; optional)
+        - `opts.store_history`: append to image history pane (`boolean`)
         """
         opts = {} if opts is None else opts
         _title2str(opts)
         _assert_opts(opts)
-        # normalize floats to uint8
         if np.issubdtype(img.dtype, np.floating):
-            img_max = img.max()
-            if img_max <= 1.0:
-                img_min = img.min()
-                if img_min < 0 and img_min >= -1.0:
-                    if img_max > img_min:
-                        img = (img - img_min) / (img_max - img_min)
-                    else:
-                        img = np.zeros_like(img)
-                    img_max = 1.0  # after normalization, new max is 1
-            img = _float_img_to_uint8(img)
+            if opts.get("normalize", False):
+                img_min, img_max = img.min(), img.max()
+                if img_max > img_min:
+                    img = (img - img_min) / (img_max - img_min) * 255.0
+                else:
+                    img = np.zeros_like(img)
+            elif img.max() <= 1.0:
+                img = img * 255.0
+            img = np.uint8(np.clip(img, 0, 255))
 
         # extract dimensions and process formats
         if img.ndim == 2:
