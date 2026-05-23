@@ -12,7 +12,6 @@ all of the required state about the currently running server.
 """
 
 import logging
-import logging
 import os
 import platform
 import time
