@@ -25,7 +25,11 @@ function TextPane(props) {
 
     switch (e.type) {
       case 'keydown':
-      case 'keypress':
+            case 'keypress': {
+        const tag = e.target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+          break;
+        }
         if (e.ctrlKey || e.metaKey) {
           if (e.type === 'keydown' && e.key.toLowerCase() === 'c') {
             const selectedText = window.getSelection().toString();
@@ -41,6 +45,7 @@ function TextPane(props) {
           e.preventDefault();
         }
         break;
+      }
       case 'keyup':
         sendPaneMessage(
           {
