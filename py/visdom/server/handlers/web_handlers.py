@@ -57,6 +57,11 @@ from visdom.server.handlers.base_handlers import BaseHandler
 # basehandler
 # TODO abstract out any direct references to the app where possible from
 # all handlers. Can instead provide accessor functions on the state?
+
+MAX_IMAGE_HISTORY = 100
+MAX_OLD_CONTENT = 50
+MAX_TEXT_LINES = 500
+
 class PostHandler(BaseHandler):
     def initialize(self, app):
         self.state = app.state
@@ -142,6 +147,9 @@ class UpdateHandler(BaseHandler):
         # Update text in window, separated by a line break
         if p["type"] == "text":
             p["content"] += "<br>" + args["data"][0]["content"]
+            lines = p["content"].split("<br>")
+            if len(lines) > MAX_TEXT_LINES:
+                p["content"] = "<br>".join(lines[-MAX_TEXT_LINES:])
             return p
         if p["type"] == "embeddings":
             # TODO embeddings updates should be handled outside of the regular
@@ -153,6 +161,8 @@ class UpdateHandler(BaseHandler):
                 p["content"]["selected"] = None
                 print(len(p["content"]["data"]))
                 p["old_content"].append(p["content"]["data"])
+                if len(p["old_content"]) > MAX_OLD_CONTENT:
+                    p["old_content"] = p["old_content"][-MAX_OLD_CONTENT:]
                 p["content"]["has_previous"] = True
                 p["content"]["data"] = args["data"]["points"]
                 print(len(p["content"]["data"]))
@@ -161,6 +171,8 @@ class UpdateHandler(BaseHandler):
             utype = args["data"][0]["type"]
             if utype == "image_history":
                 p["content"].append(args["data"][0]["content"])
+                if len(p["content"]) > MAX_IMAGE_HISTORY:
+                    p["content"] = p["content"][-MAX_IMAGE_HISTORY:]
                 p["selected"] = len(p["content"]) - 1
             elif utype == "image_update_selected":
                 # TODO implement python client function for this

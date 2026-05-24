@@ -193,7 +193,7 @@ class AnySocketWrapper(AnySocketHandlerOrWrapper):
     def initialize(self, app):
         super().initialize(app)
 
-        self.messages = deque()
+        self.messages = deque(maxlen=1000)
         self.last_read_time = time.time()
         self.open()
         try:
