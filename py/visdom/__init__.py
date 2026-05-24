@@ -579,6 +579,7 @@ class Visdom(object):
             resp = sess.post(
                 "%s:%s%s" % (self.server, self.port, self.base_url),
                 json=dict(username=self.username, password=self.password),
+                timeout=30,
             )
             if resp.status_code != requests.codes.ok:
                 raise RuntimeError("Authentication failed")
@@ -755,7 +756,7 @@ class Visdom(object):
         """
         if data is None:
             data = {}
-        r = self.session.post(url, data=data)
+        r = self.session.post(url, data=data, timeout=30)
         return r.text
 
     def _send(self, msg, endpoint="events", quiet=False, from_log=False, create=True):

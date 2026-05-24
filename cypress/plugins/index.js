@@ -29,6 +29,19 @@ function assertSafeToken(name, value) {
   }
 }
 
+const projectRoot = path.resolve(__dirname, '../..');
+
+function safeResolvePath(userPath) {
+  if (typeof userPath !== 'string') {
+    throw new Error('Path must be a string');
+  }
+  const resolved = path.resolve(projectRoot, userPath);
+  if (!resolved.startsWith(projectRoot)) {
+    throw new Error(`Path traversal detected: ${userPath}`);
+  }
+  return resolved;
+}
+
 
 module.exports = (on) => {
   // `on` is used to hook into various events Cypress emits
@@ -95,8 +108,12 @@ module.exports = (on) => {
       threshold = 0.0,
       debug = false,
     }) {
-      const img1 = PNG.sync.read(fs.readFileSync(src1));
-      const img2 = PNG.sync.read(fs.readFileSync(src2));
+      const safeSrc1 = safeResolvePath(src1);
+      const safeSrc2 = safeResolvePath(src2);
+      const safeDiffsrc = safeResolvePath(diffsrc);
+
+      const img1 = PNG.sync.read(fs.readFileSync(safeSrc1));
+      const img2 = PNG.sync.read(fs.readFileSync(safeSrc2));
 
       if (img1.width !== img2.width || img1.height !== img2.height) {
         throw new Error(
@@ -119,12 +136,12 @@ module.exports = (on) => {
         { threshold: appliedThreshold }
       );
 
-      fs.mkdirSync(path.dirname(diffsrc), { recursive: true });
-      fs.writeFileSync(diffsrc, PNG.sync.write(diff));
+      fs.mkdirSync(path.dirname(safeDiffsrc), { recursive: true });
+      fs.writeFileSync(safeDiffsrc, PNG.sync.write(diff));
 
       if (debug) {
         fs.writeFileSync(
-          `${diffsrc}.num`,
+          `${safeDiffsrc}.num`,
           `${numDiffPixels / (width * height)}`
         );
       }
@@ -140,11 +157,14 @@ module.exports = (on) => {
         `_init/${details.specName}`
       );
 
-      fs.mkdirSync(path.dirname(newPath), { recursive: true });
-      fs.renameSync(details.path, newPath);
+      const safeDetailsPath = safeResolvePath(details.path);
+      const safeNewPath = safeResolvePath(newPath);
+
+      fs.mkdirSync(path.dirname(safeNewPath), { recursive: true });
+      fs.renameSync(safeDetailsPath, safeNewPath);
 
       return {
-        path: newPath,
+        path: safeNewPath,
       };
     }
 

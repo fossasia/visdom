@@ -42,6 +42,7 @@
     "buffer": "^6.0.3",
     "css-loader": "^6.7.3",
     "d3-dispatch": "^1.0.6",
+    "dompurify": "^3.0.1",
     "d3-drag": "^1.2.5",
     "d3-polygon": "^1.0.6",
     "d3-selection": "^1.4.2",
@@ -67,5 +68,17 @@
     "url": "^0.11.0",
     "util": "^0.12.5",
     "whatwg-fetch": "^3.6.2"
+  },
+  "resolutions": {
+    "electron": "^33.4.11",
+    "ip": "^1.1.9",
+    "three": "^0.125.2",
+    "d3-color": "^3.1.0",
+    "react-devtools-core": "^4.27.3",
+    "react-devtools": "^4.27.3",
+    "@babel/traverse": "^7.26.10",
+    "@babel/runtime": "^7.26.10",
+    "postcss": "^8.5.10",
+    "got": "^11.8.5"
   }
 }

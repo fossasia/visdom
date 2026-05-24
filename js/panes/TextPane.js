@@ -9,6 +9,7 @@
 
 import React, { useContext, useEffect } from 'react';
 import ScrollToBottom from 'react-scroll-to-bottom';
+import DOMPurify from 'dompurify';
 
 import ApiContext from '../api/ApiContext';
 import EventSystem from '../EventSystem';
@@ -85,7 +86,7 @@ function TextPane(props) {
         initialScrollBehavior={initialScrollBehavior}
         mode="bottom"
       >
-        <div dangerouslySetInnerHTML={{ __html: content }} />
+        <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(content) }} />
       </ScrollToBottom>
     </Pane>
   );

@@ -146,7 +146,7 @@ def download_scripts(proxies=None, install_dir=None):
         if not os.path.exists(extracted_directory):
             os.makedirs(extracted_directory)
         if not os.path.exists(os.path.join(extracted_directory, filename)):
-            js_file = requests.get(cdnjs_url + path)
+            js_file = requests.get(cdnjs_url + path, timeout=30)
             with open(os.path.join(extracted_directory, filename), "wb+") as file:
                 file.write(js_file.content)
 

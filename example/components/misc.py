@@ -55,8 +55,8 @@ def misc_video_tensor(viz, env, args):
 def misc_video_download(viz, env, args):
     try:
         # video demo:
-        # download video from http://media.w3.org/2010/05/sintel/trailer.ogv
-        video_url = 'http://media.w3.org/2010/05/sintel/trailer.ogv'
+        # download video from https://media.w3.org/2010/05/sintel/trailer.ogv
+        video_url = 'https://media.w3.org/2010/05/sintel/trailer.ogv'
         videofile = os.path.join(tempfile.gettempdir(), 'trailer.ogv')
         urllib.request.urlretrieve(video_url, videofile)
 
@@ -72,10 +72,10 @@ def misc_audio_basic(viz, env, args):
     viz.audio(tensor=tensor, opts={'sample_frequency': 441000}, env=env)
 
 # audio demo:
-# download from http://www.externalharddrive.com/waves/animal/dolphin.wav
+# download from https://www.externalharddrive.com/waves/animal/dolphin.wav
 def misc_audio_download(viz, env, args):
     try:
-        audio_url = 'http://www.externalharddrive.com/waves/animal/dolphin.wav'
+        audio_url = 'https://www.externalharddrive.com/waves/animal/dolphin.wav'
         audiofile = os.path.join(tempfile.gettempdir(), 'dolphin.wav')
         urllib.request.urlretrieve(audio_url, audiofile)
 

@@ -18,17 +18,19 @@ LICENSE file in the root directory of this source tree.
 
     <title>Visdom Login</title>
 
+    <meta id="visdom-settings" data-base-url="{{ base_url }}">
+
     <!-- Bootstrap core CSS -->
-    <link href={{ static_url("css/bootstrap.min.css") }} rel="stylesheet">
+    <link href="{{ static_url('css/bootstrap.min.css') }}" rel="stylesheet">
 
     <!-- Custom styles for this template -->
-    <link href={{ static_url("css/login.css") }} rel="stylesheet">
+    <link href="{{ static_url('css/login.css') }}" rel="stylesheet">
 
     <!-- jQuery -->
-    <script src={{ static_url("js/jquery.min.js") }}></script>
+    <script src="{{ static_url('js/jquery.min.js') }}"></script>
 
     <!-- Hashing Password using Stanford Javascript Crypto Library-->
-    <script src={{ static_url("js/sjcl.js") }}></script>
+    <script src="{{ static_url('js/sjcl.js') }}"></script>
 
     <script>
       $(document).ready(function () {
@@ -43,13 +45,15 @@ LICENSE file in the root directory of this source tree.
                   password: sjcl.codec.hex.fromBits(password)
               };
               var dataToSend = JSON.stringify(data);
+              var settingsEl = document.getElementById('visdom-settings');
+              var baseUrl = settingsEl ? settingsEl.getAttribute('data-base-url') : '';
               $.ajax(
                       {
-                          url: '{{base_url}}',
+                          url: baseUrl,
                           type: 'POST',
                           data: dataToSend,
                           success:function() {
-                            window.location.replace("{{base_url}}")
+                            window.location.replace(baseUrl)
                           },
                           error: function () {
                             $("#errorMessage").text("Invalid Login Information");

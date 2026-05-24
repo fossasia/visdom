@@ -31,7 +31,7 @@ jobs:
       - name: Create Release
         if: ${{ steps.version.outputs.TAG_EXISTS == '0' }}
         id: create_release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@26994186c0ac3ef5cae75ac16aa32e8153525f77
         with:
           tag_name: v${{ steps.version.outputs.TAG_NAME }}
           name: "Visdom v${{ steps.version.outputs.TAG_NAME }}"
@@ -46,7 +46,7 @@ jobs:
         run: python setup.py sdist
       - name: Publish a Python distribution to PyPI
         if: ${{ steps.version.outputs.TAG_EXISTS == '0' }}
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b
         with:
             user: __token__
             password: ${{ secrets.pypi_password }}
