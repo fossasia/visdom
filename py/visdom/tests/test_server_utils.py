@@ -41,6 +41,19 @@ class ServerUtilsLazyEnvPathTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             Path(tmpdir, "demo.json").write_text(json.dumps(self.make_env("demo")))
 
+            load_env(state, "demo", socket, env_path=tmpdir)
+
+        self.assertIn("demo", state)
+        self.assertEqual(socket.eid, "demo")
+        self.assertTrue(any("layout" in str(message) for message in socket.messages))
+
+    def test_load_env_preserves_spaces_in_saved_env_filename(self):
+        state = {}
+        socket = DummySocket()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            Path(tmpdir, " demo .json").write_text(json.dumps(self.make_env("demo")))
+
             load_env(state, " demo ", socket, env_path=tmpdir)
 
         self.assertIn(" demo ", state)

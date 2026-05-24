@@ -242,7 +242,7 @@ def gather_envs(state, env_path=DEFAULT_ENV_PATH):
 
 
 def get_env_json_path(env_path, eid):
-    clean_eid = escape_eid(eid.strip()).replace(os.sep, "_")
+    clean_eid = escape_eid(eid).replace(os.sep, "_")
     if os.altsep is not None:
         clean_eid = clean_eid.replace(os.altsep, "_")
 
@@ -362,9 +362,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         border: 1px solid black;
     }}
     </style>
-    <table> {} </table>""".format(
-        " ".join(tableRows)
-    )
+    <table> {} </table>""".format(" ".join(tableRows))
 
     res["jsons"]["window_compare_legend"] = {
         "command": "window",
