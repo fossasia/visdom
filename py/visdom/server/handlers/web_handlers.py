@@ -62,6 +62,7 @@ MAX_IMAGE_HISTORY = 100
 MAX_OLD_CONTENT = 50
 MAX_TEXT_LINES = 500
 
+
 class PostHandler(BaseHandler):
     def initialize(self, app):
         self.state = app.state
