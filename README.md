@@ -242,6 +242,58 @@ If you have cloned this repository, you can run our demo showcase.
 python example/demo.py
 ```
 
+### PyTorch & PyTorch Lightning Logging Bridge
+
+Visdom includes a lightweight, pure logging bridge (`visdom.logging`) to eliminate repetitive `vis.line()` boilerplate in training loops. It respects Visdom's role as a visualization-only backend: it contains **no gradient computation, no autograd hooks, and no training logic**.
+
+#### 1. VisdomLoggingHandler (Vanilla PyTorch)
+A context manager or decorator that automatically manages window IDs, caches window configurations, and updates plots sequentially using `update='append'`.
+
+##### As a Context Manager:
+```python
+from visdom.logging import VisdomLoggingHandler
+
+# By default, logs metrics as separate lines in distinct windows
+with VisdomLoggingHandler(env="training_run") as logger:
+    for epoch in range(100):
+        # ... train model ...
+        logger.log({"loss": loss, "accuracy": accuracy, "lr": lr}, step=epoch)
+```
+
+##### As a Decorator:
+```python
+@VisdomLoggingHandler(env="training_run")
+def train(logger):
+    for epoch in range(100):
+        # ... train model ...
+        logger.log({"loss": compute_loss()}, step=epoch)
+```
+
+#### 2. VisdomLogger (PyTorch Lightning)
+If you use PyTorch Lightning, you can plug in the `VisdomLogger` directly:
+```python
+from visdom.logging import VisdomLogger
+from pytorch_lightning import Trainer
+
+logger = VisdomLogger(base_env="my_experiment")
+trainer = Trainer(logger=logger)
+trainer.fit(model, datamodule)
+```
+*Note: PyTorch Lightning is completely optional. If not installed, `VisdomLoggingHandler` and all other utilities still work normally.*
+
+#### Advanced Options:
+- **Auto-versioning**: By default, specifying a `base_env` (for `VisdomLogger`) or `env` (for `VisdomLoggingHandler`) will check the Visdom server and automatically increment versions (e.g. `run_000`, `run_001`). Set `auto_version=False` to disable.
+- **Metric Filtering**: Filter logged keys using glob patterns:
+  - `include_metrics=["loss", "val_*"]`
+  - `exclude_metrics=["debug_*"]`
+- **Text & Image Logging**: The logging handler also exposes `log_text(text)` and `log_image(img)` for convenient rich logging.
+
+You can run the demo script to see this in action:
+```bash
+# Start server first: python -m visdom.server
+python example/demo_logging.py
+```
+
 
 ## API
 For a quick introduction into the capabilities of `visdom`, have a look at the `example` directory, or read the details below.

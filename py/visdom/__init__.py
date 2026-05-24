@@ -2710,3 +2710,17 @@ class Visdom(object):
         return self._send(
             {"data": data, "win": win, "eid": env, "opts": opts}, endpoint="events"
         )
+
+
+# ------------------------------------------------------------------
+# Convenience re-exports for the logging bridge
+# ------------------------------------------------------------------
+try:
+    from visdom.logging import VisdomLoggingHandler
+except ImportError:
+    pass
+
+try:
+    from visdom.logging import VisdomLogger
+except ImportError:
+    pass
