@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from visdom.utils.server_utils import compare_envs, load_env
+from visdom.utils.server_utils import compare_envs, load_env, serialize_env
 
 
 class DummySocket:
@@ -58,6 +58,21 @@ class ServerUtilsLazyEnvPathTests(unittest.TestCase):
 
         self.assertIn(" demo ", state)
         self.assertEqual(socket.eid, " demo ")
+        self.assertTrue(any("layout" in str(message) for message in socket.messages))
+
+    def test_serialize_env_and_load_env_use_same_escaped_json_path(self):
+        state = {"foo/bar": self.make_env("escaped")}
+        socket = DummySocket()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            serialize_env(state, ["foo/bar"], env_path=tmpdir)
+            self.assertTrue(Path(tmpdir, "foo_bar.json").exists())
+
+            reloaded_state = {}
+            load_env(reloaded_state, "foo/bar", socket, env_path=tmpdir)
+
+        self.assertIn("foo/bar", reloaded_state)
+        self.assertEqual(socket.eid, "foo/bar")
         self.assertTrue(any("layout" in str(message) for message in socket.messages))
 
     def test_compare_envs_reads_each_env_from_json_files(self):

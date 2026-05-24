@@ -124,7 +124,7 @@ def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
                 data = json.dumps(state[env_id]._raw_dict)
             else:
                 data = json.dumps(state[env_id])
-            env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
+            env_path_file = get_env_json_path(env_path, env_id)
             with open(env_path_file, "w") as fn:
                 fn.write(data)
     return env_ids
