@@ -7,7 +7,7 @@
  *
  */
 
-/* global ACTIVE_ENV ENV_LIST $ Bin */
+/* global ACTIVE_ENV $ Bin */
 
 'use strict';
 
@@ -85,7 +85,7 @@ const App = () => {
 
   // data stores
   const [storeMeta, setStoreMeta] = useState({
-    envList: ENV_LIST.slice(),
+    envList: [],
     layoutLists: new Map([['main', new Map([[DEFAULT_LAYOUT, new Map()]])]]),
   });
   const [storeData, setStoreData] = useState({
@@ -111,6 +111,7 @@ const App = () => {
   const _timeoutID = useRef(null);
   const _pendingPanes = useRef([]);
   const _pendingPanesVersions = useRef({});
+  const localStorageTimer = useRef(null);
 
   // --------------------- //
   // grid helper functions //
@@ -141,11 +142,10 @@ const App = () => {
   // Ensure the regex filter is valid
   const getValidFilter = (filter) => {
     try {
-      'test_string'.match(filter);
+      return new RegExp(filter, 'i');
     } catch (e) {
-      filter = '';
+      return new RegExp('', 'i');
     }
-    return filter;
   };
 
   // ------------------ //
@@ -376,8 +376,37 @@ const App = () => {
     localStorage.setItem('envIDs', JSON.stringify(selectedNodes));
     sendEnvQuery(selectedNodes);
   };
-
   const onEnvDelete = (env2delete, previousEnv) => {
+
+    if (env2delete === previousEnv) {
+      previousEnv = 'main';
+    }
+
+    setSelection((prev) => {
+      let EnvIds = prev.envIDs.filter((env) => env !== env2delete);
+      return {
+        ...prev,
+        envIDs: EnvIds,
+      };
+    });
+
+    setStoreMeta((prev) => {
+      const layoutLists = new Map(storeMeta.layoutLists);
+      layoutLists.delete(env2delete);
+      let EnvIds = selection.envIDs.filter((env) => env !== env2delete);
+      return {
+        ...prev,
+        envList: EnvIds,
+        layoutLists: layoutLists,
+      };
+    });
+
+    setStoreData((prev) => ({
+      ...prev,
+      panes: {},
+      layout: [],
+    }));
+
     sendEnvDelete(env2delete, previousEnv);
   };
 
@@ -409,7 +438,6 @@ const App = () => {
         );
       }
     }
-
     setStoreMeta((prev) => ({
       ...prev,
       envList: newEnvList,
@@ -562,11 +590,21 @@ const App = () => {
     // for now it's important to fix relayout grossness
     storeData.layout = layout;
   };
+  const resizePaneLive = (layout) => {
+    updateLayout(layout);
+  };
   useEffect(() => {
-    storeData.layout.map((playout) => {
-      localStorage.setItem(keyLS(playout.i), JSON.stringify(playout));
-    });
-  }, [storeData]);
+    clearTimeout(localStorageTimer.current);
+    localStorageTimer.current = setTimeout(() => {
+      storeData.layout.forEach((playout) => {
+        localStorage.setItem(keyLS(playout.i), JSON.stringify(playout));
+      });
+    }, 300);
+
+    return () => {
+      clearTimeout(localStorageTimer.current);
+    };
+  }, [storeData.layout, selection.envIDs[0]]);
 
   const updateToLayout = (newLayoutID) => {
     setSelection((prev) => ({
@@ -716,7 +754,6 @@ const App = () => {
     windowSize.current.cols = cols;
     windowSize.current.width = width;
   };
-
   let panes = Object.keys(storeData.panes).map((id) => {
     let pane = storeData.panes[id];
 
@@ -804,6 +841,7 @@ const App = () => {
       envList={storeMeta.envList}
       envSelectorStyle={{
         width: Math.max(window.innerWidth / 3, 50),
+        wordBreak: 'break-all',
       }}
       onEnvClear={closeAllPanes}
       onEnvManageButton={() => setShowEnvModal(!showEnvModal)}
@@ -898,6 +936,7 @@ const App = () => {
           draggableHandle={'.bar'}
           onWidthChange={onWidthChange}
           onResizeStop={resizePane}
+          onResize={resizePaneLive}
           onDragStop={movePane}
         >
           {panes}

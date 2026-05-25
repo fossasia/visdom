@@ -29,15 +29,21 @@ describe('Test Env Modal', () => {
 
     // fork the env at this point
     cy.get(envbutton).click();
-    cy.get(envmodal + 'input').type('_fork');
+    cy.get(envmodal + 'input[type="text"]').type('_fork');
     cy.contains('button', 'fork').click();
-    cy.get(envmodal).type('{esc}');
+    cy.get(envmodal + 'input[type="text"]').type('{esc}');
 
     // apply a change to the same env
     cy.run('text_fork_part2', { env: env })
       .get('.layout .react-grid-item')
       .first()
       .contains('Changed text.');
+
+    // create a second fork for batch delete testing
+    cy.get(envbutton).click();
+    cy.get(envmodal + 'input[type="text"]').clear().type(env + '_fork2');
+    cy.contains('button', 'fork').click();
+    cy.get(envmodal + 'input[type="text"]').type('{esc}');
 
     // check if fork is still the old one
     cy.close_envs();
@@ -55,29 +61,21 @@ describe('Test Env Modal', () => {
   });
 
   it('Remove Env', () => {
-    // delete fork
+    // batch delete both forks at once
     cy.get(envbutton).click();
-    cy.get(envmodal + 'select').select(env + '_fork');
-    cy.contains('button', 'Delete').click();
-    cy.get(envmodal).type('{esc}');
+    cy.get(envmodal + 'input[type="checkbox"][value="' + env + '_fork"]').check();
+    cy.get(envmodal + 'input[type="checkbox"][value="' + env + '_fork2"]').check();
+    cy.contains('button', 'Delete Selected').click();
+    cy.get(envmodal).should('not.exist');
 
-    // check that fork does not exist anymore
+    // wait for polling cycle to deliver env_update (polling interval is 500ms)
+    cy.wait(1500);
+
+    // check that both forks do not exist anymore, but original env still exists
     cy.get('.rc-tree-select').click();
     cy.get('span[title="' + env + '"]').should('exist');
     cy.get('span[title="' + env + '_fork"]').should('not.exist');
-
-    // all windows should be closed now as well
-    // TODO: current implementation does not close windows automatically
-
-    // remove also the original env & check if it is removed from the env-list
-    // TODO: current implementation does not allow to remove unsaved envs
-    // cy.get(envbutton).click();
-    // cy.get(envmodal + 'select').select(env);
-    // cy.contains('button', 'Delete').click();
-    // cy.get(envmodal).type('{esc}');
-    // check that the env does not exist anymore
-    // cy.get('.rc-tree-select').click();
-    // cy.get('span[title="' + env + '"]').should('not.exist');
+    cy.get('span[title="' + env + '_fork2"]').should('not.exist');
   });
 });
 
