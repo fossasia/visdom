@@ -1483,26 +1483,40 @@ class Visdom(object):
         opts = {} if opts is None else opts
         _title2str(opts)
         _assert_opts(opts)
-        opts["width"] = opts.get("width", img.shape[img.ndim - 1])
-        opts["height"] = opts.get("height", img.shape[img.ndim - 2])
-
-        nchannels = img.shape[0] if img.ndim == 3 else 1
-        if nchannels == 1:
-            img = np.squeeze(img)
-            img = img[np.newaxis, :, :].repeat(3, axis=0)
-            nchannels = 3
-        assert nchannels in (3, 4), (
-            "Image must have 1, 3, or 4 channels, got %d" % nchannels
-        )
-
+        # normalize floats to uint8
         if "float" in str(img.dtype):
             img = _float_img_to_uint8(img)
 
-        img = np.transpose(img, (1, 2, 0))
-        if nchannels == 4:
-            im = Image.fromarray(img, mode="RGBA")
+        # extract dimensions and process formats
+        if img.ndim == 2:
+            # grayscale - shape(H,W)
+            nchannels = 1
+            opts["width"] = opts.get("width", img.shape[1])
+            opts["height"] = opts.get("height", img.shape[0])
+            im = Image.fromarray(img, mode="L")
+        elif img.ndim == 3:
+            nchannels = img.shape[0]
+            opts["width"] = opts.get("width", img.shape[2])
+            opts["height"] = opts.get("height", img.shape[1])
+
+            if nchannels == 1:
+                im = Image.fromarray(img[0, :, :], mode="L")
+            elif nchannels == 3:
+                img = np.transpose(img, (1, 2, 0))
+                im = Image.fromarray(img, mode="RGB")
+            elif nchannels == 4:  # RGBA (4,H,W)
+                img = np.transpose(img, (1, 2, 0))
+                im = Image.fromarray(img, mode="RGBA")
+            else:
+                raise ValueError(
+                    f"Unsupported number of image channels: {nchannels}. "
+                    "Only 1 (grayscale), 3 (RGB), or 4 (RGBA) channels are supported."
+                )
         else:
-            im = Image.fromarray(img)
+            raise ValueError(
+                f"Unsupported image dimensions: {img.ndim}. "
+                "Image tensor must be 2D (HxW) or 3D (CxHxW)."
+            )
         buf = BytesIO()
         image_type = "png"
         imsave_args = {}
