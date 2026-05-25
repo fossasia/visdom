@@ -14,8 +14,6 @@ At the moment, this just inherited all of the floating functions
 in the previous server.py class.
 """
 
-MAX_ENV_NAME_LEN = 25
-
 import copy
 import html
 import hashlib
@@ -28,6 +26,7 @@ import errno
 import tornado.escape
 from collections import OrderedDict
 
+MAX_ENV_NAME_LEN = 25
 try:
     # for after python 3.8
     from collections.abc import Mapping, Sequence
