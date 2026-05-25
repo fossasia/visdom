@@ -115,7 +115,7 @@ class TestImageRendering(unittest.TestCase):
         self.assertEqual(pil_img.mode, "L")
         # Check actual values (rounded to nearest uint8)
         arr = np.array(pil_img)
-        np.testing.assert_array_equal(arr, [[0, 127], [255, 63]])
+        np.testing.assert_array_equal(arr, [[0, 128], [255, 64]])
 
         # Float with max > 1.0 should NOT be scaled, just converted to uint8
         img_float_large = np.array([[0.0, 128.0], [255.0, 10.0]], dtype=np.float32)
@@ -123,6 +123,13 @@ class TestImageRendering(unittest.TestCase):
         pil_img_large = self._decode_image_payload(result_large)
         arr_large = np.array(pil_img_large)
         np.testing.assert_array_equal(arr_large, [[0, 128], [255, 10]])
+
+        # Float with negative or >255 values should be clipped
+        img_float_out_of_bounds = np.array([[-10.0, 120.0], [300.0, 50.6]], dtype=np.float32)
+        result_bounds = self.viz.image(img_float_out_of_bounds)
+        pil_img_bounds = self._decode_image_payload(result_bounds)
+        arr_bounds = np.array(pil_img_bounds)
+        np.testing.assert_array_equal(arr_bounds, [[0, 120], [255, 51]])
 
 
 if __name__ == "__main__":

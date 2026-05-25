@@ -1391,7 +1391,8 @@ class Visdom(object):
             # Scale if in [0.0, 1.0] range
             if img.max() <= 1.0:
                 img = img * 255.0
-            img = np.uint8(img)
+            # Clip and round to prevent integer wrap-around
+            img = np.clip(np.round(img), 0, 255).astype(np.uint8)
 
         # Resolve image layout and PIL mode
         if img.ndim == 2:
