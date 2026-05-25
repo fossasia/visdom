@@ -272,7 +272,8 @@ def gather_envs(state, env_path=DEFAULT_ENV_PATH):
 
 def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
     logging.info("comparing envs")
-    eidNums = {e: str(i) for i, e in enumerate(eids)}
+    use_env_names = all(len(eid) <= 25 for eid in eids)
+    eidNums = {e: e if use_env_names else str(i) for i, e in enumerate(eids)}
     env = {}
     envs = {}
     for eid in eids:
