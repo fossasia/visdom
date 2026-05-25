@@ -295,7 +295,7 @@ button[title="smooth lines"].active {
 }
 
 .js-plot-link-container {
-  display: none !important;
+  display: none;
 }
 
 .env-arrow-wrapper {
