@@ -40,6 +40,7 @@ from visdom.server.handlers.web_handlers import (
     ErrorHandler,
     ExistsHandler,
     ForkEnvHandler,
+    HealthHandler,
     IndexHandler,
     PostHandler,
     SaveHandler,
@@ -118,6 +119,7 @@ class Application(tornado.web.Application):
             (r"%s/fork_env" % self.base_url, ForkEnvHandler, {"app": self}),
             (r"%s/tags" % self.base_url, TagsHandler, {"app": self}),
             (r"%s/user/(.*)" % self.base_url, UserSettingsHandler, {"app": self}),
+            (r"%s/health" % self.base_url, HealthHandler),
             (r"%s(.*)" % self.base_url, IndexHandler, {"app": self}),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)
@@ -193,10 +195,9 @@ class Application(tornado.web.Application):
                         env_data = tornado.escape.json_decode(fn.read())
                 except Exception as e:
                     logging.warning(
-                        "Failed loading environment json: {} - {}".format(
-                            env_path_file, repr(e)
-                        )
+                        f"Failed to load environment JSON file '{env_path_file}': {e!r}"
                     )
+
                     continue
 
                 if is_hashed and "name" in env_data:

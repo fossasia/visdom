@@ -30,45 +30,55 @@ function EnvControls(props) {
   // -------
   var slist = envList.slice();
   slist.sort();
-  var roots = Array.from(
-    new Set(
-      slist.map((x) => {
-        return x.split('_')[0];
-      })
-    )
-  );
 
-  let env_options2 = slist.map((env, idx) => {
-    if (env.split('_').length == 1) {
-      return null;
+  var childrenByPrefix = {};
+  slist.forEach((env) => {
+    var idx = env.indexOf('_');
+    if (idx > 0) {
+      var prefix = env.substring(0, idx);
+      if (!childrenByPrefix[prefix]) childrenByPrefix[prefix] = [];
+      childrenByPrefix[prefix].push(env);
     }
+  });
+
+  var keyCounter = 1;
+  var env_options2 = [];
+  var parentKeys = {};
+
+  Object.keys(childrenByPrefix).sort().forEach((prefix) => {
+    parentKeys[prefix] = keyCounter;
+    const prefix_tags = (tags && tags[prefix]) || [];
+    const label = prefix_tags.length > 0 ? `${prefix} [${prefix_tags.join(', ')}]` : prefix;
+    env_options2.push({
+      key: keyCounter++,
+      pId: 0,
+      label: label,
+      value: '__group__' + prefix,
+    });
+  });
+
+  slist.forEach((env) => {
+    var idx = env.indexOf('_');
+    var prefix = idx > 0 ? env.substring(0, idx) : null;
+    var parentKey = 0;
+
+    if (prefix && parentKeys[prefix] !== undefined) {
+      parentKey = parentKeys[prefix];
+    } else if (parentKeys[env] !== undefined) {
+      parentKey = parentKeys[env];
+    }
+
     const env_tags = (tags && tags[env]) || [];
     const label = env_tags.length > 0 ? `${env} [${env_tags.join(', ')}]` : env;
 
-    return {
-      key: idx + 1 + roots.length,
-      pId: roots.indexOf(env.split('_')[0]) + 1,
+    env_options2.push({
+      key: keyCounter++,
+      pId: parentKey,
       label: label,
       title: label,
       value: env,
-    };
+    });
   });
-
-  env_options2 = env_options2.filter((x) => x != null);
-
-  env_options2 = env_options2.concat(
-    roots.map((x, idx) => {
-      const root_tags = (tags && tags[x]) || [];
-      const label = root_tags.length > 0 ? `${x} [${root_tags.join(', ')}]` : x;
-      return {
-        key: idx + 1,
-        pId: 0,
-        label: label,
-        title: label,
-        value: x,
-      };
-    })
-  );
 
   const currentIdx = envIDs.length > 0 ? slist.indexOf(envIDs[0]) : -1;
   const hasSingleSelectedEnv = envIDs.length === 1 && currentIdx !== -1;
