@@ -289,3 +289,8 @@ button[title="smooth lines"] {
 button[title="smooth lines"].active {
     color: red;
 }
+
+.js-plot-link-container {
+  display: none !important;
+}
+
