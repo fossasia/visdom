@@ -69,6 +69,21 @@ class TestImageRendering(unittest.TestCase):
         self.assertEqual(pil_img.mode, "L")
         self.assertEqual(pil_img.size, (100, 1))  # (W, H)
 
+    def test_size1_dimension_collapse_rgb_rgba(self):
+        # RGB case with size-1 height: shape (3, 1, 100)
+        img_rgb = np.random.randint(0, 256, (3, 1, 100), dtype=np.uint8)
+        result_rgb = self.viz.image(img_rgb)
+        pil_img_rgb = self._decode_image_payload(result_rgb)
+        self.assertEqual(pil_img_rgb.mode, "RGB")
+        self.assertEqual(pil_img_rgb.size, (100, 1))
+
+        # RGBA case with size-1 width: shape (4, 100, 1)
+        img_rgba = np.random.randint(0, 256, (4, 100, 1), dtype=np.uint8)
+        result_rgba = self.viz.image(img_rgba)
+        pil_img_rgba = self._decode_image_payload(result_rgba)
+        self.assertEqual(pil_img_rgba.mode, "RGBA")
+        self.assertEqual(pil_img_rgba.size, (1, 100))
+
     def test_invalid_dimensions(self):
         # 1D array should raise ValueError
         img_1d = np.arange(100, dtype=np.uint8)
