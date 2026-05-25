@@ -1379,21 +1379,49 @@ class Visdom(object):
         opts = {} if opts is None else opts
         _title2str(opts)
         _assert_opts(opts)
-        opts["width"] = opts.get("width", img.shape[img.ndim - 1])
-        opts["height"] = opts.get("height", img.shape[img.ndim - 2])
 
-        nchannels = img.shape[0] if img.ndim == 3 else 1
-        if nchannels == 1:
-            img = np.squeeze(img)
-            img = img[np.newaxis, :, :].repeat(3, axis=0)
+        # Validate tensor dimensions
+        if img.ndim not in (2, 3):
+            raise ValueError(
+                f"Image tensor must be 2D (H, W) or 3D (C, H, W). Got ndim={img.ndim}."
+            )
 
-        if "float" in str(img.dtype):
-            if img.max() <= 1:
+        # Early check/normalization for floating point arrays
+        if np.issubdtype(img.dtype, np.floating):
+            # Scale if in [0.0, 1.0] range
+            if img.max() <= 1.0:
                 img = img * 255.0
             img = np.uint8(img)
 
-        img = np.transpose(img, (1, 2, 0))
-        im = Image.fromarray(img)
+        # Resolve image layout and PIL mode
+        if img.ndim == 2:
+            mode = "L"
+            height, width = img.shape
+            pil_img = img
+        else:
+            nchannels = img.shape[0]
+            height, width = img.shape[1], img.shape[2]
+
+            if nchannels == 1:
+                mode = "L"
+                # Use safe slicing to avoid collapsing spatial dimensions
+                pil_img = img[0, :, :]
+            elif nchannels == 3:
+                mode = "RGB"
+                pil_img = np.transpose(img, (1, 2, 0))
+            elif nchannels == 4:
+                mode = "RGBA"
+                pil_img = np.transpose(img, (1, 2, 0))
+            else:
+                raise ValueError(
+                    f"Unsupported number of channels: {nchannels}. "
+                    "Visdom image supports 1 (grayscale), 3 (RGB), or 4 (RGBA) channels."
+                )
+
+        opts["width"] = opts.get("width", width)
+        opts["height"] = opts.get("height", height)
+
+        im = Image.fromarray(pil_img, mode=mode)
         buf = BytesIO()
         image_type = "png"
         imsave_args = {}
