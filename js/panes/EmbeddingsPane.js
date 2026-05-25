@@ -29,16 +29,20 @@ class EmbeddingsPane extends React.Component {
 
     switch (e.type) {
       case 'keydown':
-      case 'keypress':
-        e.preventDefault();
+      case 'keypress': {
+        const tag = e.target.tagName;
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
+          e.preventDefault();
+        }
         break;
+      }
       case 'keyup':
         if (this.props.isFocused)
           this.context.sendPaneMessage(
             {
               event_type: 'KeyPress',
-              key: event.key,
-              key_code: event.keyCode,
+              key: e.key,
+              key_code: e.keyCode,
               pane_data: false, // No need to send the full data for this
             },
             this.props.id,
@@ -82,7 +86,7 @@ class EmbeddingsPane extends React.Component {
         pane_data: false, // No need to send the full data for this
       },
       this.props.id,
-      this.props.env
+      this.props.envID
     );
   };
 
