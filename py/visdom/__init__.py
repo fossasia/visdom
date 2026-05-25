@@ -1476,8 +1476,8 @@ class Visdom(object):
     @pytorch_wrap
     def image(self, img, win=None, env=None, opts=None):
         """
-        This function draws an img. It takes as input an `CxHxW` or `HxW` tensor
-        `img` that contains the image. The array values can be float in [0,1] or
+        This function draws an img. It takes as input a `CxHxW` (where C is 1, 3, or 4)
+        or `HxW` tensor `img` that contains the image. The array values can be float in [0,1] or
         uint8 in [0, 255].
         """
         opts = {} if opts is None else opts
