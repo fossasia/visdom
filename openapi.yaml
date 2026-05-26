@@ -11,7 +11,7 @@ info:
     All POST endpoints accept JSON request bodies (`application/json`).
     When authentication is enabled, most endpoints require a valid session
     cookie (set via the login endpoint at `POST /`). Unauthenticated
-    requests receive a `400` status code.
+    requests receive a `401` status code.
 
 
     The server also supports WebSocket connections at `/socket` (read-only
@@ -26,14 +26,18 @@ info:
     url: https://github.com/fossasia/visdom
 
 servers:
-  - url: http://localhost:8097
-    description: Default local Visdom server
-  - url: http://localhost:8097/{base_url}
-    description: Visdom server with custom base URL prefix
+  - url: "{protocol}://{host}:{port}"
+    description: Visdom server
     variables:
-      base_url:
-        default: ""
-        description: Optional base URL prefix configured at server startup
+      protocol:
+        default: http
+        enum: [http, https]
+      host:
+        default: "0.0.0.0"
+        description: Server hostname or IP address
+      port:
+        default: "8097"
+        description: Server port
 
 tags:
   - name: Visualization
@@ -48,6 +52,9 @@ tags:
     description: HTTP polling fallbacks for WebSocket connections
   - name: System
     description: Health check and diagnostics
+
+security:
+  - cookieAuth: []
 
 paths:
   /events:
@@ -135,14 +142,16 @@ paths:
               type: object
               properties:
                 win:
-                  type: string
-                  nullable: true
+                  type:
+                    - string
+                    - "null"
                   description: >
                     Window ID to close. If null or omitted, all windows in
                     the environment are closed.
                 eid:
-                  type: string
-                  nullable: true
+                  type:
+                    - string
+                    - "null"
                   description: >
                     Environment ID. Defaults to `"main"` if omitted.
       responses:
@@ -173,8 +182,9 @@ paths:
                   type: string
                   description: Window ID to check.
                 eid:
-                  type: string
-                  nullable: true
+                  type:
+                    - string
+                    - "null"
                   description: >
                     Environment ID. Defaults to `"main"` if omitted.
       responses:
@@ -515,6 +525,8 @@ paths:
             text/css:
               schema:
                 type: string
+        "404":
+          description: Unsupported path requested.
 
   /health:
     get:
@@ -524,6 +536,7 @@ paths:
       description: >
         Returns a simple JSON object indicating the server is running.
         This endpoint does not require authentication.
+      security: []
       responses:
         "200":
           description: Server is healthy.
@@ -550,6 +563,7 @@ paths:
         Raises an exception with the provided text message. Used for
         testing error handling. This endpoint does not require
         authentication.
+      security: []
       parameters:
         - name: text
           in: path
@@ -558,6 +572,8 @@ paths:
             type: string
           description: Error message text. Defaults to `"test error"` if empty.
       responses:
+        "200":
+          description: Not returned in practice; endpoint always throws.
         "500":
           description: Server error with the specified message.
 
@@ -571,6 +587,7 @@ paths:
         the main Visdom UI (`index.html`). If authentication is enabled
         and the user is not authenticated, renders the login page
         (`login.html`).
+      security: []
       responses:
         "200":
           description: HTML page (index.html or login.html).
@@ -587,6 +604,7 @@ paths:
         credentials. The password is SHA-256 hashed on the server side
         (the client should also pre-hash once before sending). On success,
         sets a secure cookie (`user_password`). On failure, returns 400.
+      security: []
       requestBody:
         required: true
         content:
@@ -616,6 +634,57 @@ paths:
               description: Secure session cookie.
         "400":
           description: Invalid credentials.
+
+  /socket:
+    get:
+      operationId: subscribeSocket
+      tags: [Socket Polling]
+      summary: WebSocket endpoint for subscribing to visualization updates
+      description: >
+        WebSocket connection for read-only subscribers. Clients connect via
+        the WebSocket protocol (HTTP Upgrade). On connection, the server
+        sends a `register` message with the assigned socket ID, readonly
+        status, and current environment list. The server then streams
+        window updates, close events, environment updates, and layout
+        changes. Clients can send commands: `close`, `save`, `save_all`,
+        `delete_env`, `save_layouts`, `forward_to_vis`,
+        `layout_item_update`, `pop_embeddings_pane`.
+
+
+        **Note:** This is a WebSocket endpoint. OpenAPI does not natively
+        support WebSocket, so this is documented as a GET for reference.
+      responses:
+        "101":
+          description: >
+            Switching Protocols. WebSocket connection established. Server
+            sends a JSON register message with `command`, `data` (socket
+            ID), `readonly`, and `envList` fields.
+        "401":
+          description: Authentication required but not provided. Connection closed.
+
+  /vis_socket:
+    get:
+      operationId: visSourceSocket
+      tags: [Socket Polling]
+      summary: WebSocket endpoint for visualization data sources
+      description: >
+        WebSocket connection for visualization sources with write access.
+        Clients connect via the WebSocket protocol (HTTP Upgrade). On
+        connection, the server sends an `alive` message. Sources can
+        push visualization data and send commands: `echo`, `close`,
+        `save`, `save_all`, `delete_env`, `save_layouts`,
+        `forward_to_vis`, `layout_item_update`, `pop_embeddings_pane`.
+
+
+        **Note:** This is a WebSocket endpoint. OpenAPI does not natively
+        support WebSocket, so this is documented as a GET for reference.
+      responses:
+        "101":
+          description: >
+            Switching Protocols. WebSocket connection established. Server
+            sends a JSON alive message with `{"command": "alive", "data": "vis_alive"}`.
+        "401":
+          description: Authentication required but not provided. Connection closed.
 
   /socket_wrap:
     get:
@@ -657,6 +726,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SocketWrapResponse"
+        "401":
+          description: Authentication required but not provided.
 
   /vis_socket_wrap:
     post:
@@ -682,8 +753,19 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SocketWrapResponse"
+        "401":
+          description: Authentication required but not provided.
 
 components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: user_password
+      description: >
+        Session cookie set by the `POST /` login endpoint. Required when
+        the server is started with `--enable_login`.
+
   schemas:
 
     CreateWindowRequest:
@@ -709,14 +791,16 @@ components:
         opts:
           $ref: "#/components/schemas/WindowOptions"
         win:
-          type: string
-          nullable: true
+          type:
+            - string
+            - "null"
           description: >
             Window ID. If null or omitted, a new unique ID is
             auto-generated.
         eid:
-          type: string
-          nullable: true
+          type:
+            - string
+            - "null"
           description: >
             Environment ID. Defaults to `"main"` if omitted.
 
@@ -729,8 +813,9 @@ components:
           type: string
           description: Window ID to update.
         eid:
-          type: string
-          nullable: true
+          type:
+            - string
+            - "null"
           description: >
             Environment ID. Defaults to `"main"` if omitted.
         data:
@@ -749,9 +834,11 @@ components:
                   enum: [EntitySelected, RegionSelected]
                   description: Type of embeddings update.
                 selected:
+                  type:
+                    - integer
+                    - "null"
                   description: >
                     Selected entity index (for EntitySelected) or null.
-                  nullable: true
                 points:
                   type: array
                   items:
@@ -761,8 +848,9 @@ components:
                   description: >
                     Array of [x, y] points (for RegionSelected).
         name:
-          type: string
-          nullable: true
+          type:
+            - string
+            - "null"
           description: >
             Trace name to update (for scatter/line plots). When specified
             with `delete: true`, deletes that trace.
@@ -792,13 +880,15 @@ components:
       description: Request to retrieve window or environment data.
       properties:
         eid:
-          type: string
-          nullable: true
+          type:
+            - string
+            - "null"
           description: >
             Environment ID. Defaults to `"main"` if omitted.
         win:
-          type: string
-          nullable: true
+          type:
+            - string
+            - "null"
           description: >
             Window ID. If null, returns all windows in the environment.
 
@@ -808,13 +898,15 @@ components:
       description: Request to overwrite window or environment data.
       properties:
         eid:
-          type: string
-          nullable: true
+          type:
+            - string
+            - "null"
           description: >
             Environment ID. Defaults to `"main"` if omitted.
         win:
-          type: string
-          nullable: true
+          type:
+            - string
+            - "null"
           description: >
             Window ID. If null, replaces all windows in the environment.
         data:
@@ -834,8 +926,9 @@ components:
             `"query"` to retrieve pending messages; `"send"` to dispatch
             a message.
         sid:
-          type: string
-          nullable: true
+          type:
+            - string
+            - "null"
           description: >
             Socket ID from a previous create call. If null on
             `/vis_socket_wrap`, creates a new visualization source socket.
@@ -933,18 +1026,19 @@ components:
               description: Properties array (for properties type).
             - $ref: "#/components/schemas/NetworkContent"
             - $ref: "#/components/schemas/EmbeddingsContent"
-  
         x:
           type: array
           items:
-            type: number
-            nullable: true
+            type:
+              - number
+              - "null"
           description: X-axis values (Plotly trace).
         y:
           type: array
           items:
-            type: number
-            nullable: true
+            type:
+              - number
+              - "null"
           description: Y-axis values (Plotly trace).
         z:
           oneOf:
@@ -968,10 +1062,11 @@ components:
             Plotly trace mode (e.g., `"markers"`, `"lines"`,
             `"lines+markers"`, `"markers+text"`).
         text:
-          type: array
+          type:
+            - array
+            - "null"
           items:
             type: string
-          nullable: true
           description: Text labels for each data point.
         textposition:
           type: string
@@ -983,12 +1078,14 @@ components:
           type: object
           properties:
             dash:
-              type: string
-              nullable: true
+              type:
+                - string
+                - "null"
               description: Dash style (e.g., `"solid"`, `"dash"`, `"dot"`).
             color:
-              type: string
-              nullable: true
+              type:
+                - string
+                - "null"
               description: Line color.
         marker:
           $ref: "#/components/schemas/MarkerProperties"
@@ -1010,7 +1107,7 @@ components:
             - type: array
               items:
                 type: number
-          nullable: true
+            - type: "null"
           description: Marker color (single color string or array of values).
         line:
           type: object
@@ -1033,8 +1130,9 @@ components:
             Base64-encoded image data URI
             (e.g., `"data:image/png;base64,iVBOR..."`).
         caption:
-          type: string
-          nullable: true
+          type:
+            - string
+            - "null"
           description: Optional caption displayed below the image.
 
     PropertyItem:
@@ -1096,7 +1194,9 @@ components:
             maxItems: 2
           description: Array of [x, y] coordinates for each entity.
         selected:
-          nullable: true
+          type:
+            - integer
+            - "null"
           description: Index of the currently selected entity, or null.
         has_previous:
           type: boolean
@@ -1183,12 +1283,14 @@ components:
           type: string
           description: Window title displayed in the pane header.
         width:
-          type: integer
-          nullable: true
+          type:
+            - integer
+            - "null"
           description: Window width in pixels.
         height:
-          type: integer
-          nullable: true
+          type:
+            - integer
+            - "null"
           description: Window height in pixels.
         inflate:
           type: boolean
@@ -1199,8 +1301,9 @@ components:
           default: true
           description: Whether to show the image slider (image_history only).
         caption:
-          type: string
-          nullable: true
+          type:
+            - string
+            - "null"
           description: Caption text (for image, audio, and video panes).
         jpgquality:
           type: integer
@@ -1217,7 +1320,6 @@ components:
           items:
             type: string
           description: Legend names for plot traces.
-     
         markersymbol:
           type: string
           default: dot
@@ -1241,10 +1343,11 @@ components:
         linecolor:
           description: Line colors for each trace.
         textlabels:
-          type: array
+          type:
+            - array
+            - "null"
           items:
             type: string
-          nullable: true
           description: Text labels for each point in scatter plots.
         mode:
           type: string
@@ -1259,7 +1362,6 @@ components:
         fillarea:
           type: boolean
           description: If true, fill the area under lines.
-   
         columnnames:
           type: array
           items:
@@ -1275,7 +1377,6 @@ components:
           description: >
             Plotly colorscale name for heatmaps (e.g., `"Viridis"`,
             `"Electric"`).
-       
         directed:
           type: boolean
           default: false
@@ -1290,7 +1391,6 @@ components:
           enum: [hover, all]
           default: hover
           description: When to show vertex labels.
-  
         sample_frequency:
           type: integer
           default: 44100
@@ -1343,12 +1443,14 @@ components:
           type: boolean
           description: Whether content inflates to fill the pane.
         width:
-          type: integer
-          nullable: true
+          type:
+            - integer
+            - "null"
           description: Window width in pixels.
         height:
-          type: integer
-          nullable: true
+          type:
+            - integer
+            - "null"
           description: Window height in pixels.
         contentID:
           type: string
@@ -1373,7 +1475,6 @@ components:
         i:
           type: integer
           description: Position index in the environment layout.
-      
         selected:
           type: integer
           description: Currently selected image index (image_history only).
@@ -1401,52 +1502,3 @@ components:
           description: >
             Whether this window is part of an environment comparison
             (set by `/compare`).
-
-    SocketRegisterMessage:
-      type: object
-      description: >
-        Message sent to subscriber sockets on connection. Documented here
-        for reference; this is a WebSocket message, not an HTTP response.
-      properties:
-        command:
-          type: string
-          const: register
-        data:
-          type: string
-          description: The socket ID assigned to this connection.
-        readonly:
-          type: boolean
-          description: Whether the server is in read-only mode.
-        envList:
-          type: array
-          items:
-            type: string
-          description: Sorted list of all environment IDs.
-
-    SocketCommand:
-      type: object
-      description: >
-        Commands that can be sent from clients over WebSocket or via
-        polling. Documented here for reference.
-      properties:
-        cmd:
-          type: string
-          enum:
-            - close
-            - save
-            - save_all
-            - delete_env
-            - save_layouts
-            - forward_to_vis
-            - layout_item_update
-            - pop_embeddings_pane
-            - echo
-          description: Command type.
-        data:
-          description: Command-specific payload.
-        eid:
-          type: string
-          description: Environment ID (for env-scoped commands).
-        win:
-          type: string
-          description: Window ID (for window-scoped commands).
