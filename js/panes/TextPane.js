@@ -30,18 +30,7 @@ function TextPane(props) {
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
           break;
         }
-        if (e.ctrlKey || e.metaKey) {
-          if (e.type === 'keydown' && e.key.toLowerCase() === 'c') {
-            const selectedText = window.getSelection().toString();
-            if (selectedText) {
-              if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(selectedText).catch(() => {});
-              } else {
-                document.execCommand('copy');
-              }
-            }
-          }
-        } else {
+        if (!(e.ctrlKey || e.metaKey)) {
           e.preventDefault();
         }
         break;
