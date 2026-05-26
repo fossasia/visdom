@@ -111,6 +111,7 @@ const App = () => {
   const _timeoutID = useRef(null);
   const _pendingPanes = useRef([]);
   const _pendingPanesVersions = useRef({});
+  const localStorageTimer = useRef(null);
 
   // --------------------- //
   // grid helper functions //
@@ -141,11 +142,10 @@ const App = () => {
   // Ensure the regex filter is valid
   const getValidFilter = (filter) => {
     try {
-      'test_string'.match(filter);
+      return new RegExp(filter, 'i');
     } catch (e) {
-      filter = '';
+      return new RegExp('', 'i');
     }
-    return filter;
   };
 
   // ------------------ //
@@ -582,11 +582,21 @@ const App = () => {
     // for now it's important to fix relayout grossness
     storeData.layout = layout;
   };
+  const resizePaneLive = (layout) => {
+    updateLayout(layout);
+  };
   useEffect(() => {
-    storeData.layout.map((playout) => {
-      localStorage.setItem(keyLS(playout.i), JSON.stringify(playout));
-    });
-  }, [storeData]);
+    clearTimeout(localStorageTimer.current);
+    localStorageTimer.current = setTimeout(() => {
+      storeData.layout.forEach((playout) => {
+        localStorage.setItem(keyLS(playout.i), JSON.stringify(playout));
+      });
+    }, 300);
+
+    return () => {
+      clearTimeout(localStorageTimer.current);
+    };
+  }, [storeData.layout, selection.envIDs[0]]);
 
   const updateToLayout = (newLayoutID) => {
     setSelection((prev) => ({
@@ -823,6 +833,7 @@ const App = () => {
       envList={storeMeta.envList}
       envSelectorStyle={{
         width: Math.max(window.innerWidth / 3, 50),
+        wordBreak: 'break-all',
       }}
       onEnvClear={closeAllPanes}
       onEnvManageButton={() => setShowEnvModal(!showEnvModal)}
@@ -917,6 +928,7 @@ const App = () => {
           draggableHandle={'.bar'}
           onWidthChange={onWidthChange}
           onResizeStop={resizePane}
+          onResize={resizePaneLive}
           onDragStop={movePane}
         >
           {panes}
