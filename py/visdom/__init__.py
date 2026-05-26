@@ -62,9 +62,7 @@ try:
         perplexity = (
             50
             if num_entities >= 150
-            else num_entities // 3
-            if num_entities >= 21
-            else 7
+            else num_entities // 3 if num_entities >= 21 else 7
         )
         Y = bhtsne.run_bh_tsne(
             X, initial_dims=X.shape[1], perplexity=perplexity, verbose=True
@@ -1428,6 +1426,27 @@ class Visdom(object):
                 "opts": opts,
             },
             endpoint=endpoint,
+        )
+
+    def image_select(self, win, selected, env=None):
+        """
+        Set the selected frame index in an image_history window.
+
+        This function updates which frame is currently displayed in a window
+        that was created with ``opts=dict(store_history=True)`` via the
+        `image` function.
+        """
+        assert win is not None, "Must specify a window"
+        assert isinstance(selected, int), "selected must be an integer"
+
+        data = [{"type": "image_update_selected", "selected": selected}]
+        return self._send(
+            {
+                "data": data,
+                "win": win,
+                "eid": env,
+            },
+            endpoint="update",
         )
 
     @pytorch_wrap
