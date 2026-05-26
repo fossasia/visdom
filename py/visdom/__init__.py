@@ -175,7 +175,7 @@ def _axisformat(xy, opts):
         "tick",
         "tickfont",
     ]
-    if any(opts.get(xy + i) for i in fields):
+    if any(opts.get(xy + i) is not None for i in fields):
         has_ticks = (
             opts.get(xy + "tickmin") is not None
             and opts.get(xy + "tickmax") is not None
@@ -207,7 +207,7 @@ def _axisformat3d(xyz, opts):
         "tick",
         "tickfont",
     ]
-    if any(opts.get(xyz + i) for i in fields):
+    if any(opts.get(xyz + i) is not None for i in fields):
         has_ticks = (
             opts.get(xyz + "tickmin") is not None
             and opts.get(xyz + "tickmax") is not None
@@ -1729,6 +1729,7 @@ class Visdom(object):
                 K = int(Y.max())  # largest label
                 label_values = None  # integer path: use str(k) for names
             else:
+                assert np.isfinite(Y).all(), "labels must be finite (no NaN/Inf)"
                 label_values = np.unique(Y)
                 K = len(label_values)
                 Y = (np.searchsorted(label_values, Y) + 1).astype(int)
