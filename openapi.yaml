@@ -553,6 +553,8 @@ paths:
                 healthy:
                   value:
                     status: ok
+        "400":
+          description: Bad request.
 
   /error/{text}:
     get:
@@ -574,6 +576,8 @@ paths:
       responses:
         "200":
           description: Not returned in practice; endpoint always throws.
+        "400":
+          description: Bad request – invalid or missing error text.
         "500":
           description: Server error with the specified message.
 
@@ -595,6 +599,8 @@ paths:
             text/html:
               schema:
                 type: string
+        "400":
+          description: Bad request.
     post:
       operationId: login
       tags: [Authentication]
@@ -654,6 +660,8 @@ paths:
         **Note:** This is a WebSocket endpoint. OpenAPI does not natively
         support WebSocket, so this is documented as a GET for reference.
       responses:
+        "200":
+          description: Not applicable. This endpoint upgrades to WebSocket (101).
         "101":
           description: >
             Switching Protocols. WebSocket connection established. Server
@@ -679,6 +687,8 @@ paths:
         **Note:** This is a WebSocket endpoint. OpenAPI does not natively
         support WebSocket, so this is documented as a GET for reference.
       responses:
+        "200":
+          description: Not applicable. This endpoint upgrades to WebSocket (101).
         "101":
           description: >
             Switching Protocols. WebSocket connection established. Server
