@@ -154,6 +154,9 @@ var PlotPane = (props) => {
       layout.margin.t = 30;
     }
 
+    content.layout = layout;
+    layout.datarevision = (layout.datarevision || 0) + 1;
+
     // draw / redraw plot with layout-options
     Plotly.react(contentID, data.concat(smooth_data), content.layout, {
       showLink: true,
