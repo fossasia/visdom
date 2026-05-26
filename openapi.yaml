@@ -76,8 +76,8 @@ paths:
                 description: The ID of the created window.
                 examples:
                   - "window_38fa9db8e4f5b2"
-        "400":
-          description: Authentication required but not provided, or invalid request.
+        "401":
+          description: Authentication required but not provided.
 
   /update:
     post:
@@ -114,7 +114,7 @@ paths:
                   value: "win does not exist"
                 unsupported:
                   value: "win is not scatter, heatmap, custom, image_history, embeddings, or text; was bar"
-        "400":
+        "401":
           description: Authentication required but not provided.
 
   /close:
@@ -150,7 +150,7 @@ paths:
           description: >
             Window(s) closed. A close broadcast is sent to all subscribed
             clients. No body is returned.
-        "400":
+        "401":
           description: Authentication required but not provided.
 
   /win_exists:
@@ -185,7 +185,7 @@ paths:
               schema:
                 type: string
                 enum: ["true", "false"]
-        "400":
+        "401":
           description: Authentication required but not provided.
 
   /win_data:
@@ -221,7 +221,7 @@ paths:
                     additionalProperties:
                       $ref: "#/components/schemas/WindowObject"
                     description: Map of window IDs to window objects (when win is null).
-        "400":
+        "401":
           description: Authentication required but not provided.
         "500":
           description: >
@@ -264,7 +264,7 @@ paths:
                   type: string
                 examples:
                   - ["main", "experiment_1"]
-        "400":
+        "401":
           description: Authentication required but not provided.
 
   /delete_env:
@@ -295,7 +295,7 @@ paths:
           description: >
             Environment deleted (or silently ignored if `"main"`). An
             `env_update` broadcast is sent. No body returned.
-        "400":
+        "401":
           description: Authentication required but not provided.
 
   /env_state:
@@ -325,7 +325,7 @@ paths:
                   type: string
                 examples:
                   - ["main", "experiment_1", "experiment_2"]
-        "400":
+        "401":
           description: Authentication required but not provided.
 
   /fork_env:
@@ -360,7 +360,7 @@ paths:
             text/plain:
               schema:
                 type: string
-        "400":
+        "401":
           description: Authentication required but not provided.
         "500":
           description: Source environment does not exist (assertion error).
@@ -387,7 +387,7 @@ paths:
             text/html:
               schema:
                 type: string
-        "400":
+        "401":
           description: Authentication required but not provided.
     post:
       operationId: loadEnvironment
@@ -425,7 +425,7 @@ paths:
           description: >
             Environment loaded to the specified socket, or new environment
             created. No body returned.
-        "400":
+        "401":
           description: Authentication required but not provided.
 
   /compare/{eids}:
@@ -454,7 +454,7 @@ paths:
             text/html:
               schema:
                 type: string
-        "400":
+        "401":
           description: Authentication required but not provided.
     post:
       operationId: loadComparisonData
@@ -489,7 +489,7 @@ paths:
         "200":
           description: >
             Comparison data sent to the specified socket. No body returned.
-        "400":
+        "401":
           description: Authentication required but not provided.
 
   /user/{path}:
@@ -634,7 +634,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SocketWrapCreateResponse"
-        "400":
+        "401":
           description: Authentication required but not provided.
     post:
       operationId: pollSubscriberSocket
