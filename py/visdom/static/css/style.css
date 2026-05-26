@@ -294,10 +294,6 @@ button[title="smooth lines"].active {
     color: red;
 }
 
-.js-plot-link-container {
-  display: none;
-}
-
 .env-arrow-wrapper {
   position: absolute;
   top: 0;
