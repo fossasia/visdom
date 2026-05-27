@@ -136,7 +136,7 @@ module.exports = (on) => {
         width = minWidth;
         height = minHeight;
         console.warn(
-          `numDifferentPixels: cropped to ${width}x${height} (delta ${deltaW}x${deltaH}) for comparison: ${src1} vs ${src2}`
+          `image-compare: cropped to ${width}x${height} (delta ${deltaW}x${deltaH}) for comparison: ${src1} vs ${src2}`
         );
       }
 
@@ -167,7 +167,8 @@ module.exports = (on) => {
           overlapFraction,
           normalizedFraction,
         };
-        fs.writeFileSync(`${diffsrc}.num`, JSON.stringify(debugData));
+        fs.writeFileSync(`${diffsrc}.num`, String(normalizedFraction));
+        fs.writeFileSync(`${diffsrc}.num.json`, JSON.stringify(debugData));
       }
 
       return numDiffPixels;
