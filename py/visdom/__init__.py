@@ -1484,7 +1484,16 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
         # normalize floats to uint8
-        if "float" in str(img.dtype):
+        if np.issubdtype(img.dtype, np.floating):
+            img_max = img.max()
+            if img_max <= 1.0:
+                img_min = img.min()
+                if img_min < 0 and img_min >= -1.0:
+                    if img_max > img_min:
+                        img = (img - img_min) / (img_max - img_min)
+                    else:
+                        img = np.zeros_like(img)
+                    img_max = 1.0  # after normalization, new max is 1
             img = _float_img_to_uint8(img)
 
         # extract dimensions and process formats
