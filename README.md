@@ -267,7 +267,7 @@ Other options are either currently unused (endpoint, ipv6) or used for internal 
 ### Basics
 Visdom offers the following basic visualization functions:
 - [`vis.image`](#visimage)    : image
-- [`vis.update_image_slider`](#visimage) : set visible frame of an image_history pane
+- [`vis.update_image_slider`](#visupdate_image_slider) : set visible frame of an image_history pane
 - [`vis.images`](#visimages)   : list of images
 - [`vis.text`](#vistext)     : arbitrary HTML
 - [`vis.properties`](#visproperties)     : properties grid
