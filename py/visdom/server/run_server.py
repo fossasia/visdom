@@ -22,6 +22,10 @@ from visdom.server.defaults import (
     DEFAULT_BASE_URL,
     DEFAULT_ENV_PATH,
     DEFAULT_HOSTNAME,
+    DEFAULT_MAX_IMAGE_HISTORY,
+    DEFAULT_MAX_OLD_CONTENT,
+    DEFAULT_MAX_SOCKET_MESSAGES,
+    DEFAULT_MAX_TEXT_LINES,
     DEFAULT_PORT,
 )
 from visdom.server.build import download_scripts
@@ -65,6 +69,10 @@ def start_server(
     use_frontend_client_polling=False,
     bind_local=False,
     eager_data_loading=False,
+    max_image_history=DEFAULT_MAX_IMAGE_HISTORY,
+    max_old_content=DEFAULT_MAX_OLD_CONTENT,
+    max_text_lines=DEFAULT_MAX_TEXT_LINES,
+    max_socket_messages=DEFAULT_MAX_SOCKET_MESSAGES,
 ):
     logging.info("Server started")
     app = Application(
@@ -75,6 +83,10 @@ def start_server(
         user_credential=user_credential,
         use_frontend_client_polling=use_frontend_client_polling,
         eager_data_loading=eager_data_loading,
+        max_image_history=max_image_history,
+        max_old_content=max_old_content,
+        max_text_lines=max_text_lines,
+        max_socket_messages=max_socket_messages,
     )
     if bind_local:
         app.listen(port, max_buffer_size=1024**3, address="127.0.0.1")
@@ -171,6 +183,38 @@ def main(print_func=None):
         action="store_true",
         help="Load data from filesystem when starting server (and not lazily upon first request).",
     )
+    parser.add_argument(
+        "-max_image_history",
+        metavar="max_image_history",
+        type=int,
+        default=DEFAULT_MAX_IMAGE_HISTORY,
+        help="maximum number of image history entries to keep per window "
+        "(default = %d)." % DEFAULT_MAX_IMAGE_HISTORY,
+    )
+    parser.add_argument(
+        "-max_old_content",
+        metavar="max_old_content",
+        type=int,
+        default=DEFAULT_MAX_OLD_CONTENT,
+        help="maximum number of embedding undo history entries to keep "
+        "(default = %d)." % DEFAULT_MAX_OLD_CONTENT,
+    )
+    parser.add_argument(
+        "-max_text_lines",
+        metavar="max_text_lines",
+        type=int,
+        default=DEFAULT_MAX_TEXT_LINES,
+        help="maximum number of text lines to keep per window "
+        "(default = %d)." % DEFAULT_MAX_TEXT_LINES,
+    )
+    parser.add_argument(
+        "-max_socket_messages",
+        metavar="max_socket_messages",
+        type=int,
+        default=DEFAULT_MAX_SOCKET_MESSAGES,
+        help="maximum number of websocket messages to buffer per connection "
+        "(default = %d)." % DEFAULT_MAX_SOCKET_MESSAGES,
+    )
     FLAGS = parser.parse_args()
 
     # Process base_url
@@ -256,6 +300,10 @@ def main(print_func=None):
         use_frontend_client_polling=FLAGS.use_frontend_client_polling,
         bind_local=FLAGS.bind_local,
         eager_data_loading=FLAGS.eager_data_loading,
+        max_image_history=FLAGS.max_image_history,
+        max_old_content=FLAGS.max_old_content,
+        max_text_lines=FLAGS.max_text_lines,
+        max_socket_messages=FLAGS.max_socket_messages,
     )
 
 

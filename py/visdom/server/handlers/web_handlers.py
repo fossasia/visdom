@@ -58,11 +58,6 @@ from visdom.server.handlers.base_handlers import BaseHandler
 # TODO abstract out any direct references to the app where possible from
 # all handlers. Can instead provide accessor functions on the state?
 
-MAX_IMAGE_HISTORY = 100
-MAX_OLD_CONTENT = 50
-MAX_TEXT_LINES = 500
-
-
 class PostHandler(BaseHandler):
     def initialize(self, app):
         self.state = app.state
@@ -125,9 +120,12 @@ class UpdateHandler(BaseHandler):
         self.port = app.port
         self.env_path = app.env_path
         self.login_enabled = app.login_enabled
+        self.max_image_history = app.max_image_history
+        self.max_old_content = app.max_old_content
+        self.max_text_lines = app.max_text_lines
 
     @staticmethod
-    def update_packet(p, args):
+    def update_packet(p, args, max_text_lines, max_old_content, max_image_history):
         # Shallow copy the packet to dynamically capture changes to top-level keys.
         old_p = p.copy()
 
@@ -137,20 +135,22 @@ class UpdateHandler(BaseHandler):
         if "old_content" in p:
             old_p["old_content"] = copy.deepcopy(p["old_content"])
 
-        p = UpdateHandler.update(p, args)
+        p = UpdateHandler.update(
+            p, args, max_text_lines, max_old_content, max_image_history
+        )
         p["contentID"] = get_rand_id()
 
         patch = jsonpatch.make_patch(old_p, p)
         return p, patch.patch
 
     @staticmethod
-    def update(p, args):
+    def update(p, args, max_text_lines, max_old_content, max_image_history):
         # Update text in window, separated by a line break
         if p["type"] == "text":
             p["content"] += "<br>" + args["data"][0]["content"]
             lines = p["content"].split("<br>")
-            if len(lines) > MAX_TEXT_LINES:
-                p["content"] = "<br>".join(lines[-MAX_TEXT_LINES:])
+            if len(lines) > max_text_lines:
+                p["content"] = "<br>".join(lines[-max_text_lines:])
             return p
         if p["type"] == "embeddings":
             # TODO embeddings updates should be handled outside of the regular
@@ -162,8 +162,8 @@ class UpdateHandler(BaseHandler):
                 p["content"]["selected"] = None
                 print(len(p["content"]["data"]))
                 p["old_content"].append(p["content"]["data"])
-                if len(p["old_content"]) > MAX_OLD_CONTENT:
-                    p["old_content"] = p["old_content"][-MAX_OLD_CONTENT:]
+                if len(p["old_content"]) > max_old_content:
+                    p["old_content"] = p["old_content"][-max_old_content:]
                 p["content"]["has_previous"] = True
                 p["content"]["data"] = args["data"]["points"]
                 print(len(p["content"]["data"]))
@@ -172,8 +172,8 @@ class UpdateHandler(BaseHandler):
             utype = args["data"][0]["type"]
             if utype == "image_history":
                 p["content"].append(args["data"][0]["content"])
-                if len(p["content"]) > MAX_IMAGE_HISTORY:
-                    p["content"] = p["content"][-MAX_IMAGE_HISTORY:]
+                if len(p["content"]) > max_image_history:
+                    p["content"] = p["content"][-max_image_history:]
                 p["selected"] = len(p["content"]) - 1
             elif utype == "image_update_selected":
                 # TODO implement python client function for this
@@ -379,7 +379,13 @@ class UpdateHandler(BaseHandler):
             )
             return
 
-        p, diff_packet = UpdateHandler.update_packet(p, args)
+        p, diff_packet = UpdateHandler.update_packet(
+            p,
+            args,
+            handler.max_text_lines,
+            handler.max_old_content,
+            handler.max_image_history,
+        )
         # send the smaller of the patch and the updated pane
         if len(stringify(p)) <= len(stringify(diff_packet)):
             broadcast(handler, p, eid)
