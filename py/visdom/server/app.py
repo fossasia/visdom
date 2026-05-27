@@ -51,7 +51,6 @@ from visdom.server.defaults import (
     DEFAULT_HOSTNAME,
     DEFAULT_MAX_IMAGE_HISTORY,
     DEFAULT_MAX_OLD_CONTENT,
-    DEFAULT_MAX_SOCKET_MESSAGES,
     DEFAULT_MAX_TEXT_LINES,
     DEFAULT_PORT,
     LAYOUT_FILE,
@@ -80,13 +79,11 @@ class Application(tornado.web.Application):
         max_image_history=DEFAULT_MAX_IMAGE_HISTORY,
         max_old_content=DEFAULT_MAX_OLD_CONTENT,
         max_text_lines=DEFAULT_MAX_TEXT_LINES,
-        max_socket_messages=DEFAULT_MAX_SOCKET_MESSAGES,
     ):
         self.eager_data_loading = eager_data_loading
         self.max_image_history = max_image_history
         self.max_old_content = max_old_content
         self.max_text_lines = max_text_lines
-        self.max_socket_messages = max_socket_messages
         self.env_path = env_path
         self.state = self.load_state()
         self.layouts = self.load_layouts()

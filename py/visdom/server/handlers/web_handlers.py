@@ -58,6 +58,7 @@ from visdom.server.handlers.base_handlers import BaseHandler
 # TODO abstract out any direct references to the app where possible from
 # all handlers. Can instead provide accessor functions on the state?
 
+
 class PostHandler(BaseHandler):
     def initialize(self, app):
         self.state = app.state

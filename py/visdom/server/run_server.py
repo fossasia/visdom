@@ -24,7 +24,6 @@ from visdom.server.defaults import (
     DEFAULT_HOSTNAME,
     DEFAULT_MAX_IMAGE_HISTORY,
     DEFAULT_MAX_OLD_CONTENT,
-    DEFAULT_MAX_SOCKET_MESSAGES,
     DEFAULT_MAX_TEXT_LINES,
     DEFAULT_PORT,
 )
@@ -72,7 +71,6 @@ def start_server(
     max_image_history=DEFAULT_MAX_IMAGE_HISTORY,
     max_old_content=DEFAULT_MAX_OLD_CONTENT,
     max_text_lines=DEFAULT_MAX_TEXT_LINES,
-    max_socket_messages=DEFAULT_MAX_SOCKET_MESSAGES,
 ):
     logging.info("Server started")
     app = Application(
@@ -86,7 +84,6 @@ def start_server(
         max_image_history=max_image_history,
         max_old_content=max_old_content,
         max_text_lines=max_text_lines,
-        max_socket_messages=max_socket_messages,
     )
     if bind_local:
         app.listen(port, max_buffer_size=1024**3, address="127.0.0.1")
@@ -207,14 +204,6 @@ def main(print_func=None):
         help="maximum number of text lines to keep per window "
         "(default = %d)." % DEFAULT_MAX_TEXT_LINES,
     )
-    parser.add_argument(
-        "-max_socket_messages",
-        metavar="max_socket_messages",
-        type=int,
-        default=DEFAULT_MAX_SOCKET_MESSAGES,
-        help="maximum number of websocket messages to buffer per connection "
-        "(default = %d)." % DEFAULT_MAX_SOCKET_MESSAGES,
-    )
     FLAGS = parser.parse_args()
 
     # Process base_url
@@ -303,7 +292,6 @@ def main(print_func=None):
         max_image_history=FLAGS.max_image_history,
         max_old_content=FLAGS.max_old_content,
         max_text_lines=FLAGS.max_text_lines,
-        max_socket_messages=FLAGS.max_socket_messages,
     )
 
 
