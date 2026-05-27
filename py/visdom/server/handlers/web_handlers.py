@@ -343,11 +343,9 @@ class UpdateHandler(BaseHandler):
 
         p = handler.state[eid]["jsons"][args["win"]]
         data = args.get("data")
-        is_image_slider_update = (
-            isinstance(data, list)
-            and len(data) > 0
-            and isinstance(data[0], dict)
-            and data[0].get("type") == "image_update_selected"
+        is_image_slider_update = isinstance(data, list) and any(
+            isinstance(entry, dict) and entry.get("type") == "image_update_selected"
+            for entry in data
         )
 
         if is_image_slider_update and p["type"] != "image_history":

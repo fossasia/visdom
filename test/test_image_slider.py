@@ -143,6 +143,7 @@ class TestImageUpdateSelected(unittest.TestCase):
                 "data": [{"type": "image_update_selected", "content": 1.5}],
             },
         )
+        self.assertEqual(handler.status, 400)
         self.assertEqual(
             handler.messages,
             ["image slider index must be an integer, got 1.5"],
