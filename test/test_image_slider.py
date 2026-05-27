@@ -30,6 +30,11 @@ class TestImageUpdateSelected(unittest.TestCase):
         p = UpdateHandler.update(self._pane(), self._args(3))
         self.assertEqual(p["selected"], 3)
 
+    def test_empty_content_returns_unchanged(self):
+        p = {"type": "image_history", "content": [], "selected": 0}
+        result = UpdateHandler.update(p, self._args(2))
+        self.assertEqual(result["selected"], 0)
+
     def test_clamps_negative(self):
         p = UpdateHandler.update(self._pane(), self._args(-5))
         self.assertEqual(p["selected"], 0)
@@ -96,6 +101,10 @@ class TestImageUpdateSelected(unittest.TestCase):
             def __init__(self, pane):
                 self.state = {"main": {"jsons": {"plot_win": pane}}}
                 self.messages = []
+                self.status = None
+
+            def set_status(self, code):
+                self.status = code
 
             def write(self, message):
                 self.messages.append(message)
@@ -109,6 +118,7 @@ class TestImageUpdateSelected(unittest.TestCase):
                 "data": [{"type": "image_update_selected", "content": 2}],
             },
         )
+        self.assertEqual(handler.status, 400)
         self.assertEqual(handler.messages, ["win is not image_history; was plot"])
 
     def test_wrap_func_reports_invalid_slider_indices(self):

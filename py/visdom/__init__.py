@@ -1581,8 +1581,10 @@ class Visdom(object):
 
         Args:
             win (str): Window ID of an existing image_history pane.
-            index (int): Frame index to display (0-based). Clamped to valid
-                range by the server.
+            index: Frame index to display (0-based). Accepts Python integers,
+                integral floats, and NumPy integer scalars or 0-d arrays.
+                Fractional or non-finite values raise an error. Clamped to
+                the valid range by the server.
             env (str, optional): Environment ID. Defaults to ``self.env``.
         """
         assert win is not None, "update_image_slider requires a window id"

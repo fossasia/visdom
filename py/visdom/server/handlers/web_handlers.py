@@ -159,6 +159,8 @@ class UpdateHandler(BaseHandler):
                 p["content"].append(args["data"][0]["content"])
                 p["selected"] = len(p["content"]) - 1
             elif utype == "image_update_selected":
+                if not p["content"]:
+                    return p
                 selected = _coerce_image_slider_index(
                     args["data"][0]["selected"]
                 )
@@ -349,6 +351,7 @@ class UpdateHandler(BaseHandler):
         )
 
         if is_image_slider_update and p["type"] != "image_history":
+            handler.set_status(400)
             handler.write("win is not image_history; was {}".format(p["type"]))
             return
 
