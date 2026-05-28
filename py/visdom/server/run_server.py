@@ -61,7 +61,7 @@ def start_server(
     app.port = port
     server = tornado.httpserver.HTTPServer(app, max_buffer_size=1024**3)
     server.add_sockets(sockets)
-    
+
     logging.info("Application Started")
     logging.info(f"Working directory: {os.path.abspath(env_path)}")
 
