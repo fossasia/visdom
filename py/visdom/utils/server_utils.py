@@ -118,6 +118,26 @@ class LazyEnvData(Mapping):
         return len(self._raw_dict)
 
 
+def atomic_write_json(path, data):
+    """Write *data* as JSON to *path* via a temp file and atomic rename.
+
+    The temp file is placed alongside the destination so that os.replace()
+    operates within the same filesystem and is atomic on POSIX. On Windows
+    os.replace() is as safe as the platform allows.
+    """
+    tmp_path = path + ".tmp"
+    try:
+        with open(tmp_path, "w") as fn:
+            fn.write(json.dumps(data))
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
 def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
     env_ids = [i for i in eids if i in state]
     if env_path is not None:
@@ -127,12 +147,12 @@ def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
                     continue
             env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
             try:
-                with open(env_path_file, "w") as fn:
-                    if isinstance(state[env_id], LazyEnvData):
-                        state[env_id].lazy_load_data()
-                        fn.write(json.dumps(state[env_id]._raw_dict))
-                    else:
-                        fn.write(json.dumps(state[env_id]))
+                if isinstance(state[env_id], LazyEnvData):
+                    state[env_id].lazy_load_data()
+                    data_to_save = state[env_id]._raw_dict
+                else:
+                    data_to_save = state[env_id]
+                atomic_write_json(env_path_file, data_to_save)
             except OSError as e:
                 if (
                     e.errno != errno.ENAMETOOLONG
@@ -143,14 +163,13 @@ def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
                 env_path_file = os.path.join(
                     env_path, "hash_{0}.json".format(hashed_id)
                 )
-                with open(env_path_file, "w") as fn:
-                    if isinstance(state[env_id], LazyEnvData):
-                        state[env_id].lazy_load_data()
-                        data_to_save = copy.deepcopy(state[env_id]._raw_dict)
-                    else:
-                        data_to_save = copy.deepcopy(state[env_id])
-                    data_to_save["name"] = env_id
-                    fn.write(json.dumps(data_to_save))
+                if isinstance(state[env_id], LazyEnvData):
+                    state[env_id].lazy_load_data()
+                    data_to_save = copy.deepcopy(state[env_id]._raw_dict)
+                else:
+                    data_to_save = copy.deepcopy(state[env_id])
+                data_to_save["name"] = env_id
+                atomic_write_json(env_path_file, data_to_save)
 
     return env_ids
 

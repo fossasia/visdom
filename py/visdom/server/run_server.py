@@ -65,6 +65,7 @@ def start_server(
     use_frontend_client_polling=False,
     bind_local=False,
     eager_data_loading=False,
+    autosave_interval=0,
 ):
     logging.info("Server started")
     app = Application(
@@ -84,6 +85,14 @@ def start_server(
     logging.info(f"Working directory: {os.path.abspath(env_path)}")
 
     atexit.register(serialize_all, app.state, env_path=env_path)
+
+    if autosave_interval > 0 and env_path is not None:
+        autosave_cb = ioloop.PeriodicCallback(
+            lambda: serialize_all(app.state, env_path=env_path),
+            int(autosave_interval * 1000),
+        )
+        autosave_cb.start()
+        logging.info(f"Autosave enabled every {autosave_interval}s")
 
     if "HOSTNAME" in os.environ and hostname == DEFAULT_HOSTNAME:
         hostname = os.environ["HOSTNAME"]
@@ -171,6 +180,13 @@ def main(print_func=None):
         action="store_true",
         help="Load data from filesystem when starting server (and not lazily upon first request).",
     )
+    parser.add_argument(
+        "-autosave_interval",
+        metavar="autosave_interval",
+        type=float,
+        default=0,
+        help="Periodically save all environments every N seconds (0 = disabled).",
+    )
     FLAGS = parser.parse_args()
 
     # Process base_url
@@ -256,6 +272,7 @@ def main(print_func=None):
         use_frontend_client_polling=FLAGS.use_frontend_client_polling,
         bind_local=FLAGS.bind_local,
         eager_data_loading=FLAGS.eager_data_loading,
+        autosave_interval=FLAGS.autosave_interval,
     )
 
 
