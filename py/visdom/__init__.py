@@ -1409,6 +1409,10 @@ class Visdom(object):
         if nchannels == 1:
             img = np.squeeze(img)
             img = img[np.newaxis, :, :].repeat(3, axis=0)
+            nchannels = 3
+        assert nchannels in (3, 4), (
+            "Image must have 1, 3, or 4 channels, got %d" % nchannels
+        )
 
         if "float" in str(img.dtype):
             if img.max() <= 1:
@@ -1416,13 +1420,17 @@ class Visdom(object):
             img = np.uint8(img)
 
         img = np.transpose(img, (1, 2, 0))
-        im = Image.fromarray(img)
+        if nchannels == 4:
+            im = Image.fromarray(img, mode="RGBA")
+        else:
+            im = Image.fromarray(img)
         buf = BytesIO()
         image_type = "png"
         imsave_args = {}
-        if "jpgquality" in opts:
+        jpgquality = opts.get("jpgquality")
+        if jpgquality is not None and nchannels != 4:
             image_type = "jpeg"
-            imsave_args["quality"] = opts["jpgquality"]
+            imsave_args["quality"] = jpgquality
 
         im.save(buf, format=image_type.upper(), **imsave_args)
 
