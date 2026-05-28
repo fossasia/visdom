@@ -12,8 +12,14 @@ import { drag as d3drag } from 'd3-drag';
 import * as d3 from 'd3-selection';
 
 function polygonToPath(polygon) {
-  return 'M' + polygon.map((d) => d.join(',')).join('L');
-}
+  return (
+    'M' +
+    polygon
+      .map(function (d) {
+        return d.join(',');
+      })
+      .join('L')
+  );
 
 function distance(pt1, pt2) {
   return Math.hypot(pt2[0] - pt1[0], pt2[1] - pt1[1]);
@@ -55,7 +61,9 @@ export default function lasso() {
 
     function handleDragStart(event) {
       lassoPolygon = [getPoint(event, this)];
-      if (lassoPath) lassoPath.remove();
+      if (lassoPath) {
+        lassoPath.remove();
+      }
 
       lassoPath = g
         .append('path')
