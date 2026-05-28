@@ -53,13 +53,20 @@ def start_server(
         eager_data_loading=eager_data_loading,
     )
     bind_addr = "127.0.0.1" if bind_local else None
+    FAMILY = socket.AF_INET
     try:
-        sockets = tornado.netutil.bind_sockets(port, address=bind_addr)
-    except OSError:
-        logging.warning(f"Port {port} is already in use, assign a free port")
         sockets = tornado.netutil.bind_sockets(
-            0, address=bind_addr, family=socket.AF_INET
+            port, address=bind_addr, FAMILY
         )
+    except OSError:
+        if e.errno == errno.EADDRINUSE:
+            logging.warning(f"Port {port} is already in use, assign a free port")
+            sockets = tornado.netutil.bind_sockets(
+                0, address=bind_addr, FAMILY
+            )
+        else:
+            logging.error(f"Failed to bind to port {port}: {e}")
+            raise
     port = sockets[0].getsockname()[1]
     app.port = port
     server = tornado.httpserver.HTTPServer(app, max_buffer_size=1024**3)
