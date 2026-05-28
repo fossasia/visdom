@@ -56,7 +56,6 @@ from visdom.server.handlers.base_handlers import BaseHandler
 # TODO abstract out any direct references to the app where possible from
 # all handlers. Can instead provide accessor functions on the state?
 class PostHandler(BaseHandler):
-
     @check_auth
     def post(self):
         req = tornado.escape.json_decode(
@@ -78,7 +77,6 @@ class PostHandler(BaseHandler):
 
 
 class ExistsHandler(BaseHandler):
-
     @staticmethod
     def wrap_func(handler, args):
         eid = extract_eid(args)
@@ -96,7 +94,6 @@ class ExistsHandler(BaseHandler):
 
 
 class UpdateHandler(BaseHandler):
-
     @staticmethod
     def update_packet(p, args):
         # Shallow copy the packet to dynamically capture changes to top-level keys.
@@ -370,7 +367,6 @@ class UpdateHandler(BaseHandler):
 
 
 class CloseHandler(BaseHandler):
-
     @staticmethod
     def wrap_func(handler, args):
         eid = extract_eid(args)
@@ -390,7 +386,6 @@ class CloseHandler(BaseHandler):
 
 
 class DeleteEnvHandler(BaseHandler):
-
     @staticmethod
     def wrap_func(handler, args):
         eid = args.get("eid")
@@ -431,7 +426,6 @@ class DeleteEnvHandler(BaseHandler):
 
 
 class EnvStateHandler(BaseHandler):
-
     @staticmethod
     def wrap_func(handler, args):
         # TODO if an env is provided return the state of that env
@@ -447,7 +441,6 @@ class EnvStateHandler(BaseHandler):
 
 
 class ForkEnvHandler(BaseHandler):
-
     @staticmethod
     def wrap_func(handler, args):
         prev_eid = escape_eid(args.get("prev_eid"))
@@ -521,7 +514,6 @@ class CompareHandler(BaseHandler):
 
 
 class SaveHandler(BaseHandler):
-
     @staticmethod
     def wrap_func(handler, args):
         envs = args["data"]
@@ -539,7 +531,6 @@ class SaveHandler(BaseHandler):
 
 
 class DataHandler(BaseHandler):
-
     @staticmethod
     def wrap_func(handler, args):
         eid = extract_eid(args)
