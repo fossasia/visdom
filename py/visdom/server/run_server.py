@@ -15,10 +15,11 @@ import getpass
 import logging
 import os
 import sys
+import errno
+import socket
 from tornado import ioloop
 import tornado.httpserver
 import tornado.netutil
-import socket
 from visdom.server.app import Application
 from visdom.server.defaults import (
     DEFAULT_BASE_URL,
@@ -56,13 +57,13 @@ def start_server(
     FAMILY = socket.AF_INET
     try:
         sockets = tornado.netutil.bind_sockets(
-            port, address=bind_addr, FAMILY
+            port, address=bind_addr, family=FAMILY
         )
     except OSError:
         if e.errno == errno.EADDRINUSE:
             logging.warning(f"Port {port} is already in use, assign a free port")
             sockets = tornado.netutil.bind_sockets(
-                0, address=bind_addr, FAMILY
+                0, address=bind_addr, family=FAMILY
             )
         else:
             logging.error(f"Failed to bind to port {port}: {e}")
