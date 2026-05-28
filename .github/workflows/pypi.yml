@@ -38,7 +38,7 @@ jobs:
           generate_release_notes: true
       - name: Set up Python
         if: ${{ steps.version.outputs.TAG_EXISTS == '0' }}
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v6
         with:
             python-version: '3.x'
       - name: Install dependencies
