@@ -18,6 +18,7 @@ import sys
 from tornado import ioloop
 import tornado.httpserver
 import tornado.netutil
+import socket
 from visdom.server.app import Application
 from visdom.server.defaults import (
     DEFAULT_BASE_URL,
@@ -56,7 +57,9 @@ def start_server(
         sockets = tornado.netutil.bind_sockets(port, address=bind_addr)
     except OSError:
         logging.warning(f"Port {port} is already in use, assign a free port")
-        sockets = tornado.netutil.bind_sockets(0, address=bind_addr, family=_socket.AF_INET)
+        sockets = tornado.netutil.bind_sockets(
+            0, address=bind_addr, family=socket.AF_INET
+        )
     port = sockets[0].getsockname()[1]
     app.port = port
     server = tornado.httpserver.HTTPServer(app, max_buffer_size=1024**3)
