@@ -54,7 +54,7 @@ def start_server(
         eager_data_loading=eager_data_loading,
     )
     bind_addr = "127.0.0.1" if bind_local else None
-    FAMILY = socket.AF_INET if bind_local else None
+    FAMILY = socket.AF_INET if bind_local else socket.AF_UNSPEC
     try:
         sockets = tornado.netutil.bind_sockets(port, address=bind_addr, family=FAMILY)
     except OSError as e:
