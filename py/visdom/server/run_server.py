@@ -51,7 +51,7 @@ def start_server(
         use_frontend_client_polling=use_frontend_client_polling,
         eager_data_loading=eager_data_loading,
     )
-    bind_addr = "127.0.0.1" if bind_local else ""
+    bind_addr = "127.0.0.1" if bind_local else None
     try:
         sockets = tornado.netutil.bind_sockets(port, address=bind_addr)
     except OSError:
