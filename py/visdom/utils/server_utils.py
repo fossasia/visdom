@@ -24,6 +24,7 @@ import time
 import re
 import errno
 import tornado.escape
+import tornado.websocket
 from collections import OrderedDict
 
 MAX_ENV_NAME_LEN = 25
@@ -456,17 +457,22 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
 
 def broadcast_envs(handler, target_subs=None):
     if target_subs is None:
-        target_subs = handler.subs.values()
+        target_subs = list(handler.subs.values())
+    msg = json.dumps({"command": "env_update", "data": list(handler.state.keys())})
     for sub in target_subs:
-        sub.write_message(
-            json.dumps({"command": "env_update", "data": list(handler.state.keys())})
-        )
+        try:
+            sub.write_message(msg)
+        except tornado.websocket.WebSocketClosedError:
+            pass
 
 
 def send_to_sources(handler, msg):
-    target_sources = handler.sources.values()
-    for source in target_sources:
-        source.write_message(json.dumps(msg))
+    encoded = json.dumps(msg)
+    for source in list(handler.sources.values()):
+        try:
+            source.write_message(encoded)
+        except tornado.websocket.WebSocketClosedError:
+            pass
 
 
 def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
@@ -507,13 +513,19 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
 
 
 def broadcast(self, msg, eid):
-    for s in self.subs:
-        if isinstance(self.subs[s].eid, dict):
-            if eid in self.subs[s].eid:
-                self.subs[s].write_message(msg)
-        else:
-            if self.subs[s].eid == eid:
-                self.subs[s].write_message(msg)
+    for s in list(self.subs):
+        sub = self.subs.get(s)
+        if sub is None:
+            continue
+        try:
+            if isinstance(sub.eid, dict):
+                if eid in sub.eid:
+                    sub.write_message(msg)
+            else:
+                if sub.eid == eid:
+                    sub.write_message(msg)
+        except tornado.websocket.WebSocketClosedError:
+            pass
 
 
 def register_window(self, p, eid):

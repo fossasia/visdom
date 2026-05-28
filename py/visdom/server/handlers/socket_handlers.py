@@ -37,6 +37,10 @@ from visdom.utils.server_utils import (
 )
 from visdom.server.defaults import MAX_SOCKET_WAIT
 
+# Maximum number of messages buffered per polling client.
+# Oldest messages are dropped automatically once the limit is reached.
+MAX_POLLING_QUEUE = 200
+
 
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
@@ -193,7 +197,7 @@ class AnySocketWrapper(AnySocketHandlerOrWrapper):
     def initialize(self, app):
         super().initialize(app)
 
-        self.messages = deque()
+        self.messages = deque(maxlen=MAX_POLLING_QUEUE)
         self.last_read_time = time.time()
         self.open()
         try:
@@ -230,8 +234,8 @@ class AnySocketWrapper(AnySocketHandlerOrWrapper):
 
     def get_messages(self):
         to_send = []
-        messages = self.messages
-        self.messages = []
+        messages = list(self.messages)
+        self.messages.clear()
         for message in messages:
             if isinstance(message, dict):
                 # Not all messages are being formatted the same way (JSON)
@@ -257,8 +261,7 @@ class VisSocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
         self.write_message(json.dumps({"command": "alive", "data": "vis_alive"}))
 
     def on_close(self):
-        if self in list(self.sources.values()):
-            self.sources.pop(self.sid, None)
+        self.sources.pop(self.sid, None)
 
     def on_message(self, message):
         msg = tornado.escape.json_decode(tornado.escape.to_basestring(message))
@@ -323,11 +326,9 @@ class SocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
 
     def initialize(self, app):
         super().initialize(app)
-        self.broadcast_layouts()
 
     def on_close(self):
-        if self in list(self.subs.values()):
-            self.subs.pop(self.sid, None)
+        self.subs.pop(self.sid, None)
 
 
 class SocketHandler(SocketHandlerOrWrapper):
