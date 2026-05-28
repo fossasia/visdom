@@ -14,7 +14,7 @@ runs:
   using: "composite"
   steps:
       - name: "Setup Node" 
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v6
         with:
           node-version: '16'
 
@@ -62,7 +62,7 @@ runs:
 
       # load artifacts from previous runs
       - name: "Load built js-files"
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: pr-build
           path: ./py/visdom/static/js/

@@ -27,6 +27,32 @@ from visdom.server.defaults import (
 from visdom.server.build import download_scripts
 from visdom.utils.server_utils import hash_password, serialize_all, set_cookie
 
+MAX_PORT = 65535
+
+
+class PortValidationError(ValueError, argparse.ArgumentTypeError):
+    """Validation error for port values that work for argparse and callers."""
+
+
+def valid_port(value):
+    """
+    Validate that the port is an integer in the range [1, 65535].
+    Note: Port 0 is excluded for HTTP/browser use because browsers block it
+    with `ERR_UNSAFE_PORT`.
+    It raises PortValidationError so argparse preserves the custom message when
+    used as a `type=` argument, while programmatic callers can still treat it
+    as a ValueError.
+    """
+    if isinstance(value, (bool, float)):
+        raise PortValidationError(f"Port must be an integer, got: '{value}'")
+    try:
+        port = int(value)
+    except (TypeError, ValueError):
+        raise PortValidationError(f"Port must be an integer, got: '{value}'")
+    if not (1 <= port <= MAX_PORT):
+        raise PortValidationError(f"Port must be between 1 and {MAX_PORT}, got: {port}")
+    return port
+
 
 def start_server(
     port=DEFAULT_PORT,
@@ -80,7 +106,7 @@ def main(print_func=None):
     parser.add_argument(
         "-port",
         metavar="port",
-        type=int,
+        type=valid_port,
         default=DEFAULT_PORT,
         help="port to run the server on.",
     )
