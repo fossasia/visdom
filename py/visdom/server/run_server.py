@@ -55,8 +55,8 @@ def start_server(
     try:
         sockets = tornado.netutil.bind_sockets(port, address=bind_addr)
     except OSError:
-        logging.warning(f"Port {port} is already in use, letting OS assign a free port...")
-        sockets = tornado.netutil.bind_sockets(0, address=bind_addr)
+        logging.warning(f"Port {port} is already in use, assign a free port")
+        sockets = tornado.netutil.bind_sockets(0, address=bind_addr, family=_socket.AF_INET)
     port = sockets[0].getsockname()[1]
     app.port = port
     server = tornado.httpserver.HTTPServer(app, max_buffer_size=1024**3)
