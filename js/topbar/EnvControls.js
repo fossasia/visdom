@@ -26,6 +26,7 @@ function EnvControls(props) {
     onToggleShowAll,
   } = props;
   const [confirmClear, setConfirmClear] = useState(false);
+  const [expandedKeys, setExpandedKeys] = useState([]);
 
   // tree select setup
   // -------
@@ -42,16 +43,15 @@ function EnvControls(props) {
     }
   });
 
-  var keyCounter = 1;
   var env_options2 = [];
   var parentKeys = {};
 
   Object.keys(childrenByPrefix)
     .sort()
     .forEach((prefix) => {
-      parentKeys[prefix] = keyCounter;
+      parentKeys[prefix] = 'group_' + prefix;
       env_options2.push({
-        key: keyCounter++,
+        key: 'group_' + prefix,
         pId: 0,
         label: prefix,
         value: '__group__' + prefix,
@@ -70,12 +70,16 @@ function EnvControls(props) {
     }
 
     env_options2.push({
-      key: keyCounter++,
+      key: env,
       pId: parentKey,
       label: env,
       value: env,
     });
   });
+
+  const onTreeExpand = (keys) => {
+    setExpandedKeys(keys);
+  };
 
   const currentIdx = envIDs.length > 0 ? slist.indexOf(envIDs[0]) : -1;
   const hasSingleSelectedEnv = envIDs.length === 1 && currentIdx !== -1;
@@ -119,13 +123,14 @@ function EnvControls(props) {
             inputValue={null}
             value={envIDs}
             treeData={env_options2}
-            treeDefaultExpandAll
             treeNodeFilterProp="title"
             treeDataSimpleMode={{ id: 'key', rootPId: 0 }}
             treeCheckable
             showCheckedStrategy={SHOW_CHILD}
             dropdownMatchSelectWidth={false}
             onChange={onEnvSelect}
+            treeExpandedKeys={expandedKeys}
+            onTreeExpand={onTreeExpand}
           />
           {slist.length > 1 && (
             <div className="env-arrow-wrapper">
