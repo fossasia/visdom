@@ -20,6 +20,7 @@ function polygonToPath(polygon) {
       })
       .join('L')
   );
+}
 
 function distance(pt1, pt2) {
   return Math.hypot(pt2[0] - pt1[0], pt2[1] - pt1[1]);
