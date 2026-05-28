@@ -40,6 +40,7 @@ export default function lasso() {
   var closeDistance = 75;
 
   function lasso(root) {
+    // append a <g> with a rect
     var g = root.append('g').attr('class', 'lasso-group');
     var bbox = root.node().getBoundingClientRect();
     var area = g
