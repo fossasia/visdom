@@ -22,6 +22,7 @@ var PlotPane = (props) => {
   const maxsmoothvalue = 100;
   const [smoothWidgetActive, setSmoothWidgetActive] = useState(false);
   const [smoothvalue, setSmoothValue] = useState(1);
+  content.layout = content.layout || {}
   let layout = content.layout || {};
 
   // private events
@@ -153,9 +154,6 @@ var PlotPane = (props) => {
       layout.margin = layout.margin || {};
       layout.margin.t = 30;
     }
-
-    content.layout = layout;
-    layout.datarevision = (layout.datarevision || 0) + 1;
 
     // draw / redraw plot with layout-options
     Plotly.react(contentID, data.concat(smooth_data), content.layout, {
