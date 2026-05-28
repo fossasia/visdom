@@ -159,7 +159,7 @@ const ApiProvider = ({ children }) => {
       case 'window_update':
         apiHandlers.current.onWindowMessage({
           cmd: cmd,
-          update: cmd.command === 'window_update',
+          update: true,
         });
         break;
       case 'reload':
@@ -172,7 +172,7 @@ const ApiProvider = ({ children }) => {
       case 'layout_update':
         apiHandlers.current.onLayoutMessage({
           data: cmd.data,
-          update: cmd.command === 'layout_update',
+          update: true,
         });
         break;
       case 'env_update':

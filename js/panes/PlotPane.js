@@ -19,6 +19,7 @@ var PlotPane = (props) => {
   // --------------
   const plotlyRef = useRef();
   const previousContent = usePrevious(content);
+  const frameRef = useRef(null);
   const maxsmoothvalue = 100;
   const [smoothWidgetActive, setSmoothWidgetActive] = useState(false);
   const [smoothvalue, setSmoothValue] = useState(1);
@@ -104,7 +105,19 @@ var PlotPane = (props) => {
       }
     }
 
-    newPlot();
+    if (frameRef.current !== null) {
+      cancelAnimationFrame(frameRef.current);
+    }
+    frameRef.current = requestAnimationFrame(() => {
+      frameRef.current = null;
+      newPlot();
+    });
+    return () => {
+      if (frameRef.current !== null) {
+        cancelAnimationFrame(frameRef.current);
+        frameRef.current = null;
+      }
+    };
   });
 
   // rendering
@@ -146,6 +159,8 @@ var PlotPane = (props) => {
           // adapt color & transparency
           d.opacity = 0.35;
           smooth_d.opacity = 1.0;
+          smooth_d.marker = smooth_d.marker || {};
+          smooth_d.marker.line = smooth_d.marker.line || {};
           smooth_d.marker.line.color = 0;
 
           return smooth_d;
