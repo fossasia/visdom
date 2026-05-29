@@ -76,14 +76,11 @@ class Application(tornado.web.Application):
         user_credential=None,
         use_frontend_client_polling=False,
         eager_data_loading=False,
-        max_image_history=DEFAULT_MAX_IMAGE_HISTORY,
-        max_old_content=DEFAULT_MAX_OLD_CONTENT,
-        max_text_lines=DEFAULT_MAX_TEXT_LINES,
     ):
         self.eager_data_loading = eager_data_loading
-        self.max_image_history = max_image_history
-        self.max_old_content = max_old_content
-        self.max_text_lines = max_text_lines
+        self.max_image_history = DEFAULT_MAX_IMAGE_HISTORY
+        self.max_old_content = DEFAULT_MAX_OLD_CONTENT
+        self.max_text_lines = DEFAULT_MAX_TEXT_LINES
         self.env_path = env_path
         self.state = self.load_state()
         self.layouts = self.load_layouts()
