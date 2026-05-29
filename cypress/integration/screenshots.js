@@ -72,7 +72,8 @@ describe(`Compare with compare-view screenshots`, () => {
 
       var envs = [];
       for (var i = 0; i < num_runs; i++) {
-        var env = run + '_' + i + '_' + Cypress._.random(0, 1e6);
+        // Append a suffix to ensure the environment name is > 25 characters to match the baseline screenshots
+        var env = run + '_' + i + '_' + Cypress._.random(0, 1e6) + '_long_env_name_for_testing';
         cy.run(run, {
           env: env,
           open: false,
@@ -130,8 +131,9 @@ describe(`Compare with compare-view screenshots`, () => {
 describe(`Compare screenshots for plotpane functions`, () => {
   it('Compare screenshot for Line Smoothing', () => {
     var run = 'line_smoothing';
-    var env1 = run + '_1_' + Cypress._.random(0, 1e6);
-    var env2 = run + '_2_' + Cypress._.random(0, 1e6);
+   // Append a suffix to ensure the environment name is > 25 characters to match the baseline screenshots
+    var env1 = run + '_1_' + Cypress._.random(0, 1e6) + '_long_env_name_for_testing';
+    var env2 = run + '_2_' + Cypress._.random(0, 1e6) + '_long_env_name_for_testing';
     cy.run('plot_line_basic', {
       env: env1,
       args: ["'Line smoothing'", 100],
