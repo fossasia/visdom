@@ -49,21 +49,20 @@ Cypress.Commands.add('run', (name, opts) => {
 });
 
 Cypress.Commands.add('close_envs', () => {
-    cy.get('body').then($body => {
+    cy.get('body').then(($body) => {
         if ($body.find('.rc-tree-select-selection__clear').length > 0) {
-            cy.get('.rc-tree-select-selection__clear').click()
+            cy.get('.rc-tree-select-selection__clear').click({ force: true })
         }
     })
 });
 
 Cypress.Commands.add('open_env', (name) => {
-    cy.get('.rc-tree-select').click()
+    cy.get('.navbar-form .rc-tree-select').first().click()
     cy.get('.rc-tree-select-tree').then($tree => {
         var closed_group = '.rc-tree-select-tree-switcher_close'
         if ($tree.find(closed_group).length > 0)
-            cy.get(closed_group).click()
+            cy.wrap($tree).find(closed_group).click({ multiple: true })
     })
     cy.get('.rc-tree-select-tree').contains(name).click()
-    cy.get('.rc-tree-select').click({force: true}) // ignore any elements that might cover the list at this point
+    cy.get('.navbar-brand').click() // click outside to reliably close the dropdown!
 });
-

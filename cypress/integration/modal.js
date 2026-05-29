@@ -73,9 +73,15 @@ describe('Test Env Modal', () => {
 
     // check that both forks do not exist anymore, but original env still exists
     cy.get('.rc-tree-select').click();
+    cy.get('.rc-tree-select-tree').then($tree => {
+      var closed_group = '.rc-tree-select-tree-switcher_close';
+      if ($tree.find(closed_group).length > 0)
+        cy.wrap($tree).find(closed_group).click({ multiple: true });
+    });
     cy.get('span[title="' + env + '"]').should('exist');
     cy.get('span[title="' + env + '_fork"]').should('not.exist');
     cy.get('span[title="' + env + '_fork2"]').should('not.exist');
+    cy.get('.navbar-brand').click(); // close the dropdown cleanly
   });
 });
 
