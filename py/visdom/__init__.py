@@ -2749,11 +2749,11 @@ class Visdom(object):
         )
         if jitter is not None:
             assert (
-                isinstance(jitter, (int, float)) and 0 <= jitter <= 1
+                isnum(jitter) and 0 <= jitter <= 1
             ), "opts.jitter must be a float between 0 and 1"
         if bandwidth is not None:
             assert (
-                isinstance(bandwidth, (int, float)) and bandwidth > 0
+                isnum(bandwidth) and bandwidth > 0
             ), "opts.bandwidth must be a positive number"
 
         data = []
