@@ -159,7 +159,7 @@ const ApiProvider = ({ children }) => {
       case 'window_update':
         apiHandlers.current.onWindowMessage({
           cmd: cmd,
-          update: cmd.commmand == 'window_update',
+          update: cmd.command === 'window_update',
         });
         break;
       case 'reload':
@@ -172,7 +172,7 @@ const ApiProvider = ({ children }) => {
       case 'layout_update':
         apiHandlers.current.onLayoutMessage({
           data: cmd.data,
-          update: cmd.commmand == 'layout_update',
+          update: cmd.command === 'layout_update',
         });
         break;
       case 'env_update':
@@ -193,7 +193,7 @@ const ApiProvider = ({ children }) => {
   // ----------------//
 
   // Request environment data from the server
-  const sendEnvQuery = (envIDs) => {
+  const sendEnvQuery = (envIDs, showAll) => {
     // This kicks off a new stream of events from the socket so there's nothing
     // to handle here. We might want to surface the error state.
     if (envIDs.length == 1) {
@@ -208,6 +208,7 @@ const ApiProvider = ({ children }) => {
         correctPathname() + 'compare/' + envIDs.join('+'),
         JSON.stringify({
           sid: sessionInfo.id,
+          show_all: !!showAll,
         })
       );
     }

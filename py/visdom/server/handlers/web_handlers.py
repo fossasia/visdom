@@ -122,11 +122,18 @@ class UpdateHandler(BaseHandler):
 
     @staticmethod
     def update_packet(p, args):
-        old_p = copy.deepcopy(p)
+        # Shallow copy the packet to dynamically capture changes to top-level keys.
+        old_p = p.copy()
+
+        # Deepcopy only the nested structures known to be mutated in-place.
+        if "content" in p:
+            old_p["content"] = copy.deepcopy(p["content"])
+        if "old_content" in p:
+            old_p["old_content"] = copy.deepcopy(p["old_content"])
+
         p = UpdateHandler.update(p, args)
         p["contentID"] = get_rand_id()
-        # TODO: make_patch isn't high performance.
-        # If bottlenecked we should build the patch ourselves.
+
         patch = jsonpatch.make_patch(old_p, p)
         return p, patch.patch
 
@@ -561,11 +568,19 @@ class CompareHandler(BaseHandler):
 
     @check_auth
     def post(self, args):
-        sid = tornado.escape.json_decode(
+        body = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
-        )["sid"]
+        )
+        sid = body["sid"]
+        show_all = body.get("show_all", False)
         if sid in self.subs:
-            compare_envs(self.state, args.split("+"), self.subs[sid], self.env_path)
+            compare_envs(
+                self.state,
+                args.split("+"),
+                self.subs[sid],
+                self.env_path,
+                show_all=show_all,
+            )
 
 
 class SaveHandler(BaseHandler):
