@@ -14,7 +14,6 @@ At the moment, this just inherited all of the floating functions
 in the previous server.py class.
 """
 
-
 import copy
 import html
 import hashlib
@@ -27,6 +26,7 @@ import errno
 import tornado.escape
 from collections import OrderedDict
 
+MAX_ENV_NAME_LEN = 25
 try:
     # for after python 3.8
     from collections.abc import Mapping, Sequence
@@ -272,7 +272,8 @@ def gather_envs(state, env_path=DEFAULT_ENV_PATH):
 
 def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
     logging.info("comparing envs")
-    eidNums = {e: str(i) for i, e in enumerate(eids)}
+    use_env_names = all(len(str(eid)) <= MAX_ENV_NAME_LEN for eid in eids)
+    eidNums = {e: e if use_env_names else str(i) for i, e in enumerate(eids)}
     env = {}
     envs = {}
     for eid in eids:

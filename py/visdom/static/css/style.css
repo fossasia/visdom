@@ -204,6 +204,10 @@ doesn't override our desire to make them non-interactable */
   overflow-x: auto;
   height: 100%;
   max-width: 100%;
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  -ms-user-select: text;
+  user-select: text;
 }
 
 .content-text-scroll-view {
