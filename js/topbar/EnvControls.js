@@ -48,9 +48,9 @@ function EnvControls(props) {
   Object.keys(childrenByPrefix)
     .sort()
     .forEach((prefix) => {
-      parentKeys[prefix] = 'group_' + prefix;
+      parentKeys[prefix] = '__group__' + prefix;
       env_options2.push({
-        key: 'group_' + prefix,
+        key: '__group__' + prefix,
         pId: 0,
         label: prefix,
         value: '__group__' + prefix,

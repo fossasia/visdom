@@ -30,7 +30,16 @@ import '@4tw/cypress-drag-drop';
 
 Cypress.Commands.add('run', (name, opts) => {
   var saveto = (opts && "env" in opts) ? opts["env"] : name + "_" + Cypress._.random(0, 1e6);
-  var argscli = (opts && "args" in opts) ? (' -arg '+opts["args"].join(' ')) : '';
+  var argscli = '';
+  if (opts && "args" in opts) {
+      argscli = ' -arg ' + opts["args"].map(arg => {
+          let s = String(arg);
+          if (s.includes(' ') || s.includes('"') || s.includes("'")) {
+              return '"' + s.replace(/"/g, '\\"') + '"';
+          }
+          return s;
+      }).join(' ');
+  }
   var seed = (opts && "seed" in opts) ? (' -seed '+opts["seed"]) : '';
   if (!opts || !("asyncrun" in opts) || !opts["asyncrun"])
       cy.exec(`python example/demo.py -port 8098 -testing -run ${name} -env ${saveto} ${seed} ${argscli}`);
@@ -49,10 +58,10 @@ Cypress.Commands.add('run', (name, opts) => {
 });
 
 Cypress.Commands.add('close_envs', () => {
-    cy.get('body').then(($body) => {
-        const $clear = $body.find('.rc-tree-select-selection__clear');
+    cy.get('.navbar-form').then(($navbar) => {
+        const $clear = $navbar.find('.rc-tree-select-selection__clear');
         if ($clear.length > 0) {
-            cy.wrap($clear).click({ force: true });
+            cy.wrap($clear).click({ force: true, multiple: true });
         }
     });
 });
@@ -67,11 +76,17 @@ Cypress.Commands.add('expand_all_env_groups', () => {
 });
 
 Cypress.Commands.add('close_env_dropdown', () => {
-    cy.get('.navbar-brand').click();
+    cy.get('body').type('{esc}');
 });
 
 Cypress.Commands.add('open_env', (name) => {
     cy.get('.navbar-form .rc-tree-select').first().click();
+    
+    // Wait for the tree to contain either the env name (if root level) or the group name (if grouped)
+    const idx = name.indexOf('_');
+    const expectedText = idx > 0 ? name.substring(0, idx) : name;
+    cy.get('.rc-tree-select-tree').contains(expectedText).should('exist');
+    
     cy.expand_all_env_groups();
     cy.get('.rc-tree-select-tree').contains(name).click();
     cy.close_env_dropdown();
