@@ -30,7 +30,16 @@ import '@4tw/cypress-drag-drop';
 
 Cypress.Commands.add('run', (name, opts) => {
   var saveto = (opts && "env" in opts) ? opts["env"] : name + "_" + Cypress._.random(0, 1e6);
-  var argscli = (opts && "args" in opts) ? (' -arg '+opts["args"].join(' ')) : '';
+  var argscli = '';
+  if (opts && "args" in opts) {
+      argscli = ' -arg ' + opts["args"].map(arg => {
+          let s = String(arg);
+          if (s.includes(' ') || s.includes('"') || s.includes("'")) {
+              return '"' + s.replace(/"/g, '\\"') + '"';
+          }
+          return s;
+      }).join(' ');
+  }
   var seed = (opts && "seed" in opts) ? (' -seed '+opts["seed"]) : '';
   if (!opts || !("asyncrun" in opts) || !opts["asyncrun"])
       cy.exec(`python example/demo.py -port 8098 -testing -run ${name} -env ${saveto} ${seed} ${argscli}`);
@@ -49,17 +58,33 @@ Cypress.Commands.add('run', (name, opts) => {
 });
 
 Cypress.Commands.add('close_envs', () => {
-    cy.get('.rc-tree-select-selection__clear').click()
+    cy.get('.navbar-form').then(($navbar) => {
+        const $clear = $navbar.find('.rc-tree-select-selection__clear');
+        if ($clear.length > 0) {
+            cy.wrap($clear).click({ force: true, multiple: true });
+        }
+    });
+});
+
+Cypress.Commands.add('expand_all_env_groups', () => {
+    cy.get('.rc-tree-select-tree').then($tree => {
+        var closed_group = '.rc-tree-select-tree-switcher_close';
+        if ($tree.find(closed_group).length > 0) {
+            cy.get(closed_group).each($el => {
+                cy.wrap($el).click();
+            });
+        }
+    });
+});
+
+Cypress.Commands.add('close_env_dropdown', () => {
+    cy.get('.rc-tree-select').click({force: true});
 });
 
 Cypress.Commands.add('open_env', (name) => {
-    cy.get('.rc-tree-select').click()
-    cy.get('.rc-tree-select-tree').then($tree => {
-        var closed_group = '.rc-tree-select-tree-switcher_close'
-        if ($tree.find(closed_group).length > 0)
-            cy.get(closed_group).click()
-    })
-    cy.get('.rc-tree-select-tree').contains(name).click()
-    cy.get('.rc-tree-select').click({force: true}) // ignore any elements that might cover the list at this point
+    cy.get('.rc-tree-select').click();
+    cy.expand_all_env_groups();
+    cy.get('.rc-tree-select-tree').contains(name).click();
+    cy.close_env_dropdown();
 });
 
