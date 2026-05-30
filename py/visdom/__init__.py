@@ -2352,11 +2352,39 @@ class Visdom(object):
         # normalize vectors to unit length:
         if opts.get("normalize", False):
             assert (
-                isinstance(opts["normalize"], numbers.Number) and opts["normalize"] > 0
-            ), "opts.normalize should be positive number"
-            magnitude = np.sqrt(np.add(np.multiply(X, X), np.multiply(Y, Y))).max()
-            X = X / (magnitude / opts["normalize"])
-            Y = Y / (magnitude / opts["normalize"])
+                isinstance(opts["normalize"], numbers.Number)
+                and opts["normalize"] > 0
+                and np.isfinite(opts["normalize"])
+            ), "opts.normalize should be a finite positive number"
+            magnitude = np.sqrt(np.add(np.multiply(X, X), np.multiply(Y, Y)))
+            finite_mask = np.isfinite(magnitude)
+
+            if not np.any(finite_mask):
+                warnings.warn(
+                    "Skipping quiver normalization: all magnitudes are non-finite (NaN or Inf)",
+                    RuntimeWarning,
+                )
+            else:
+                max_mag = magnitude[finite_mask].max()
+
+                if max_mag <= 0:
+                    warnings.warn(
+                        "Skipping quiver normalization: max magnitude is zero",
+                        RuntimeWarning,
+                    )
+                else:
+                    scale = max_mag / opts["normalize"]
+
+                    if scale <= 0 or not np.isfinite(scale):
+                        warnings.warn(
+                            "Skipping quiver normalization: invalid scale computed",
+                            RuntimeWarning,
+                        )
+                    else:
+                        X = np.where(np.isfinite(X), X, np.nan)
+                        Y = np.where(np.isfinite(Y), Y, np.nan)
+                        X = X / scale
+                        Y = Y / scale
 
         # interleave X and Y with copies / NaNs to get lines:
         nans = np.full((X.shape[0], X.shape[1]), np.nan).flatten()
