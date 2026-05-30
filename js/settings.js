@@ -1,4 +1,5 @@
 import EmbeddingsPane from './panes/EmbeddingsPane';
+import ImageComparePane from './panes/ImageComparePane';
 import ImagePane from './panes/ImagePane';
 import NetworkPane from './panes/NetworkPane';
 import PlotPane from './panes/PlotPane';
@@ -11,6 +12,7 @@ const DEFAULT_LAYOUT = 'current';
 const PANES = {
   image: ImagePane,
   image_history: ImagePane,
+  image_compare: ImageComparePane,
   plot: PlotPane,
   text: TextPane,
   properties: PropertiesPane,
@@ -20,6 +22,7 @@ const PANES = {
 const PANE_SIZE = {
   image: [20, 20],
   image_history: [20, 20],
+  image_compare: [40, 20],
   plot: [30, 24],
   text: [20, 20],
   embeddings: [20, 20],
