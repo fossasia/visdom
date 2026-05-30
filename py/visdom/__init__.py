@@ -1892,7 +1892,9 @@ class Visdom(object):
         return self._send(data_to_send, endpoint=endpoint)
 
     @pytorch_wrap
-    def line(self, Y, X=None, Z=None, win=None, env=None, opts=None, update=None, name=None):
+    def line(
+        self, Y, X=None, Z=None, win=None, env=None, opts=None, update=None, name=None
+    ):
         """
         This function draws a line plot. It takes in an `N` or `NxM` tensor
         `Y` that specifies the values of the `M` lines (that connect `N` points)
