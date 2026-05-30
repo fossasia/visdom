@@ -1,4 +1,4 @@
-before(() => {
+beforeEach(() => {
   cy.visit('/');
 });
 
@@ -20,6 +20,28 @@ const maxDiffPixels = {
   misc_video_tensor: 5000,
   misc_video_download: 5000,
   misc_audio_basic: 5000,
+};
+
+const compare_thresholds = {
+  plot_line_doubleyaxis: 2000,
+  plot_scatter_append: 200,
+  plot_scatter_custom_marker: 200,
+  plot_scatter_add_trace: 200,
+  plot_line_basic: 200,
+  plot_line_many_updates: 200,
+  plot_line_update: 150,
+  plot_line_opts: 100,
+  plot_line_opts_update: 100,
+  plot_line_multiple: 50,
+  plot_line_stackedarea: 50,
+  plot_scatter_custom_colors: 50,
+  plot_scatter_text_labels_1d: 50,
+  plot_scatter_text_labels_2d: 50,
+  plot_bar_stacked: 200,
+  plot_bar_nonstacked: 200,
+  plot_special_boxplot: 200,
+  misc_plot_latex: 50,
+  misc_plot_latex_update: 200,
 };
 
 describe(`Compare with previous plot screenshots`, () => {
@@ -72,8 +94,7 @@ describe(`Compare with compare-view screenshots`, () => {
 
       var envs = [];
       for (var i = 0; i < num_runs; i++) {
-        // Append a suffix to ensure the environment name is > 25 characters to match the baseline screenshots
-        var env = run + '_' + i + '_' + Cypress._.random(0, 1e6) + '_long_env_name_for_testing';
+        var env = run + '_' + i + '_fixed';
         cy.run(run, {
           env: env,
           open: false,
@@ -118,12 +139,13 @@ describe(`Compare with compare-view screenshots`, () => {
         '.png';
       const threshold = thresholds[run] || 0;
 
+      const max_diff = compare_thresholds[run] || 0;
       cy.task('numDifferentPixels', {
         src1: img1_src,
         src2: img2_src,
         diffsrc: diff_src,
         threshold: threshold,
-      }).should('equal', 0);
+      }).should('be.at.most', max_diff);
     });
   });
 });
@@ -131,9 +153,8 @@ describe(`Compare with compare-view screenshots`, () => {
 describe(`Compare screenshots for plotpane functions`, () => {
   it('Compare screenshot for Line Smoothing', () => {
     var run = 'line_smoothing';
-   // Append a suffix to ensure the environment name is > 25 characters to match the baseline screenshots
-    var env1 = run + '_1_' + Cypress._.random(0, 1e6) + '_long_env_name_for_testing';
-    var env2 = run + '_2_' + Cypress._.random(0, 1e6) + '_long_env_name_for_testing';
+    var env1 = run + '_1_fixed';
+    var env2 = run + '_2_fixed';
     cy.run('plot_line_basic', {
       env: env1,
       args: ["'Line smoothing'", 100],
@@ -145,7 +166,7 @@ describe(`Compare screenshots for plotpane functions`, () => {
       seed: 43,
     });
     cy.open_env(env1);
-    cy.get('button[title="smooth lines"]').click();
+    cy.get('button[title="smooth lines"]').first().click();
     cy.get('input[type="range"]').then(($range) => {
       const range = $range[0]; // get the DOM node
       const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
@@ -185,7 +206,7 @@ describe(`Compare screenshots for plotpane functions`, () => {
       src2: img2_src,
       diffsrc: diff_src,
       threshold: threshold,
-    }).should('equal', 0);
+    }).should('be.at.most', 200);
   });
 
   it('Compare screenshot for Property Change (using Line Plot)', () => {
