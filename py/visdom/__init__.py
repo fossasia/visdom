@@ -6,7 +6,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from visdom.utils.shared_utils import get_new_window_id
+from visdom.utils.shared_utils import get_new_window_id, _coerce_image_slider_index
 from visdom import server
 import os.path
 import requests
@@ -118,34 +118,6 @@ def isnum(n):
 def isndarray(n):
     return isinstance(n, (np.ndarray))
 
-
-def _coerce_image_slider_index(index):
-    """Normalize user-provided slider indices to a plain Python int."""
-    if isinstance(index, np.ndarray):
-        if index.size != 1:
-            raise TypeError("image slider index must be a single integer value")
-        index = index.item()
-    elif isinstance(index, np.generic):
-        index = index.item()
-
-    if isinstance(index, bool):
-        raise TypeError("image slider index must be an integer, got bool")
-
-    if isinstance(index, numbers.Integral):
-        return int(index)
-
-    if isinstance(index, numbers.Real):
-        if not math.isfinite(index):
-            raise ValueError("image slider index must be finite")
-        if float(index).is_integer():
-            return int(index)
-        raise ValueError(
-            "image slider index must be an integer, got {!r}".format(index)
-        )
-
-    raise TypeError(
-        "image slider index must be an integer, got {}".format(type(index).__name__)
-    )
 
 
 # Only works on (possibly nested) lists of numbers

@@ -31,7 +31,7 @@ except ImportError:
     from collections import Mapping, Sequence
 
 import tornado.escape
-from visdom.utils.shared_utils import get_rand_id
+from visdom.utils.shared_utils import get_rand_id, _coerce_image_slider_index
 from visdom.utils.server_utils import (
     check_auth,
     extract_eid,
@@ -50,27 +50,6 @@ from visdom.utils.server_utils import (
 )
 from visdom.server.handlers.base_handlers import BaseHandler
 
-
-def _coerce_image_slider_index(index):
-    """Validate slider indices received over HTTP/JSON."""
-    if isinstance(index, bool):
-        raise TypeError("image slider index must be an integer, got bool")
-
-    if isinstance(index, int):
-        return index
-
-    if isinstance(index, float):
-        if not math.isfinite(index):
-            raise ValueError("image slider index must be finite")
-        if index.is_integer():
-            return int(index)
-        raise ValueError(
-            "image slider index must be an integer, got {!r}".format(index)
-        )
-
-    raise TypeError(
-        "image slider index must be an integer, got {}".format(type(index).__name__)
-    )
 
 
 # TODO move the logic that actually parses environments and layouts to

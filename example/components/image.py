@@ -83,7 +83,8 @@ def image_grid(viz, env, args):
 
 # image slider sync demo — one slider drives two panes
 def image_slider_sync(viz, env, args):
-    colors = [0.2, 0.4, 0.6, 0.8]
+    n_frames = 4
+    colors = np.linspace(0.2, 0.8, n_frames)
 
     win_a = None
     win_b = None
