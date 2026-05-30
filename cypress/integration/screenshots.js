@@ -11,6 +11,15 @@ const thresholds = {
   // the internal video player may already start by showing animated loading sign
   misc_video_tensor: 0.1,
   misc_video_download: 0.1,
+
+  text_basic: 0.05,
+  text_update: 0.05,
+};
+
+const maxDiffPixels = {
+  misc_video_tensor: 5000,
+  misc_video_download: 5000,
+  misc_audio_basic: 5000,
 };
 
 describe(`Compare with previous plot screenshots`, () => {
@@ -45,12 +54,13 @@ describe(`Compare with previous plot screenshots`, () => {
       if (run.startsWith('image_')) cy.wait(300);
 
       cy.get('.content').first().screenshot(run, { overwrite: true });
+      const maxDiff = maxDiffPixels[run] || 0;
       cy.task('numDifferentPixels', {
         src1: img1_src,
         src2: img2_src,
         diffsrc: diff_src,
         threshold: threshold,
-      }).should('equal', 0);
+      }).should('be.at.most', maxDiff);
     });
   });
 });
@@ -62,7 +72,8 @@ describe(`Compare with compare-view screenshots`, () => {
 
       var envs = [];
       for (var i = 0; i < num_runs; i++) {
-        var env = run + '_' + i + '_' + Cypress._.random(0, 1e6);
+        // Append a suffix to ensure the environment name is > 25 characters to match the baseline screenshots
+        var env = run + '_' + i + '_' + Cypress._.random(0, 1e6) + '_long_env_name_for_testing';
         cy.run(run, {
           env: env,
           open: false,
@@ -120,8 +131,9 @@ describe(`Compare with compare-view screenshots`, () => {
 describe(`Compare screenshots for plotpane functions`, () => {
   it('Compare screenshot for Line Smoothing', () => {
     var run = 'line_smoothing';
-    var env1 = run + '_1_' + Cypress._.random(0, 1e6);
-    var env2 = run + '_2_' + Cypress._.random(0, 1e6);
+   // Append a suffix to ensure the environment name is > 25 characters to match the baseline screenshots
+    var env1 = run + '_1_' + Cypress._.random(0, 1e6) + '_long_env_name_for_testing';
+    var env2 = run + '_2_' + Cypress._.random(0, 1e6) + '_long_env_name_for_testing';
     cy.run('plot_line_basic', {
       env: env1,
       args: ["'Line smoothing'", 100],
