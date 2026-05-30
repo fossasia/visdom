@@ -136,6 +136,7 @@ class Visdom:
         self,
         Y: Tensor,
         X: Optional[Tensor] = ...,
+        Z: Optional[Tensor] = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
         update: _OptStr = ...,
