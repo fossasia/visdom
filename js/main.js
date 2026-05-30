@@ -105,6 +105,9 @@ const App = () => {
   const [filterString, setFilterString] = useState(
     localStorage.getItem('filter') || ''
   );
+  const [showAllEnvWindows, setShowAllEnvWindows] = useState(
+    localStorage.getItem('showAllEnvWindows') === 'true'
+  );
 
   // non-triggering state variables
   const _bin = useRef(null);
@@ -271,7 +274,7 @@ const App = () => {
     // that is selected that isn't from the compare output, we need to
     // reload the compare output
     if (selection.envIDs.length > 1 && cmd.has_compare !== true) {
-      sendEnvQuery(selection.envIDs);
+      sendEnvQuery(selection.envIDs, showAllEnvWindows);
     } else if (update) {
       updateWindow(cmd);
     } else {
@@ -371,7 +374,7 @@ const App = () => {
     }));
     setFocusedPaneID(isSameEnv ? focusedPaneID : null);
     localStorage.setItem('envIDs', JSON.stringify(selectedNodes));
-    sendEnvQuery(selectedNodes);
+    sendEnvQuery(selectedNodes, showAllEnvWindows);
   };
   const onEnvDelete = (env2delete, previousEnv) => {
 
@@ -708,20 +711,20 @@ const App = () => {
 
   // ask server for envs after registration succeeded
   useEffect(() => {
-    sendEnvQuery(selection.envIDs);
+    sendEnvQuery(selection.envIDs, showAllEnvWindows);
   }, [sessionInfo]);
 
   //componentDidUpdate
   useEffect(() => {
     if (mounted.current) {
       if (selection.envIDs.length > 0) {
-        sendEnvQuery(selection.envIDs);
+        sendEnvQuery(selection.envIDs, showAllEnvWindows);
       } else {
         setSelection((prev) => ({
           ...prev,
           envIDs: ['main'],
         }));
-        sendEnvQuery(['main']);
+        sendEnvQuery(['main'], showAllEnvWindows);
       }
     }
 
@@ -843,6 +846,16 @@ const App = () => {
       onEnvClear={closeAllPanes}
       onEnvManageButton={() => setShowEnvModal(!showEnvModal)}
       onEnvSelect={onEnvSelect}
+      showAllEnvWindows={showAllEnvWindows}
+      onToggleShowAll={() => {
+        const newVal = !showAllEnvWindows;
+        setShowAllEnvWindows(newVal);
+        localStorage.setItem('showAllEnvWindows', newVal.toString());
+        if (selection.envIDs.length > 1) {
+          setStoreData((prev) => ({ ...prev, panes: {}, layout: [] }));
+          sendEnvQuery(selection.envIDs, newVal);
+        }
+      }}
     />
   );
   let viewControls = (

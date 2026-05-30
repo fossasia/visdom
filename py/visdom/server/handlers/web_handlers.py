@@ -568,11 +568,19 @@ class CompareHandler(BaseHandler):
 
     @check_auth
     def post(self, args):
-        sid = tornado.escape.json_decode(
+        body = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
-        )["sid"]
+        )
+        sid = body["sid"]
+        show_all = body.get("show_all", False)
         if sid in self.subs:
-            compare_envs(self.state, args.split("+"), self.subs[sid], self.env_path)
+            compare_envs(
+                self.state,
+                args.split("+"),
+                self.subs[sid],
+                self.env_path,
+                show_all=show_all,
+            )
 
 
 class SaveHandler(BaseHandler):
