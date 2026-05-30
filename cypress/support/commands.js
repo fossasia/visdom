@@ -50,19 +50,29 @@ Cypress.Commands.add('run', (name, opts) => {
 
 Cypress.Commands.add('close_envs', () => {
     cy.get('body').then(($body) => {
-        if ($body.find('.rc-tree-select-selection__clear').length > 0) {
-            cy.get('.rc-tree-select-selection__clear').click({ force: true })
+        const $clear = $body.find('.rc-tree-select-selection__clear');
+        if ($clear.length > 0) {
+            cy.wrap($clear).click({ force: true });
         }
-    })
+    });
+});
+
+Cypress.Commands.add('expand_all_env_groups', () => {
+    cy.get('.rc-tree-select-tree').then(($tree) => {
+        const closed_group = '.rc-tree-select-tree-switcher_close';
+        if ($tree.find(closed_group).length > 0) {
+            cy.wrap($tree).find(closed_group).click({ multiple: true });
+        }
+    });
+});
+
+Cypress.Commands.add('close_env_dropdown', () => {
+    cy.get('.navbar-brand').click();
 });
 
 Cypress.Commands.add('open_env', (name) => {
-    cy.get('.navbar-form .rc-tree-select').first().click()
-    cy.get('.rc-tree-select-tree').then($tree => {
-        var closed_group = '.rc-tree-select-tree-switcher_close'
-        if ($tree.find(closed_group).length > 0)
-            cy.wrap($tree).find(closed_group).click({ multiple: true })
-    })
-    cy.get('.rc-tree-select-tree').contains(name).click()
-    cy.get('.navbar-brand').click() // click outside to reliably close the dropdown!
+    cy.get('.navbar-form .rc-tree-select').first().click();
+    cy.expand_all_env_groups();
+    cy.get('.rc-tree-select-tree').contains(name).click();
+    cy.close_env_dropdown();
 });

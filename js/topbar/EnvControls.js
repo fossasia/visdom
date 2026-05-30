@@ -26,7 +26,6 @@ function EnvControls(props) {
     onToggleShowAll,
   } = props;
   const [confirmClear, setConfirmClear] = useState(false);
-  const [expandedKeys, setExpandedKeys] = useState([]);
 
   // tree select setup
   // -------
@@ -77,10 +76,6 @@ function EnvControls(props) {
     });
   });
 
-  const onTreeExpand = (keys) => {
-    setExpandedKeys(keys);
-  };
-
   const currentIdx = envIDs.length > 0 ? slist.indexOf(envIDs[0]) : -1;
   const hasSingleSelectedEnv = envIDs.length === 1 && currentIdx !== -1;
   const onPrevEnv = () => {
@@ -129,8 +124,7 @@ function EnvControls(props) {
             showCheckedStrategy={SHOW_CHILD}
             dropdownMatchSelectWidth={false}
             onChange={onEnvSelect}
-            treeExpandedKeys={expandedKeys}
-            onTreeExpand={onTreeExpand}
+            treeDefaultExpandedKeys={[]}
           />
           {slist.length > 1 && (
             <div className="env-arrow-wrapper">
