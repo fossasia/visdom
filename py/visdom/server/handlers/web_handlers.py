@@ -51,7 +51,6 @@ from visdom.utils.server_utils import (
 from visdom.server.handlers.base_handlers import BaseHandler
 
 
-
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
 # TODO abstract out any direct references to the app where possible from
