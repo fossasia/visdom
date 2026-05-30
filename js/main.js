@@ -114,6 +114,7 @@ const App = () => {
   const _timeoutID = useRef(null);
   const _pendingPanes = useRef([]);
   const _pendingPanesVersions = useRef({});
+  const _envReloadInFlight = useRef(false);
   const localStorageTimer = useRef(null);
 
   // --------------------- //
@@ -262,6 +263,9 @@ const App = () => {
         cmd.version == _pendingPanesVersions.current[cmd.win] + 1)
     ) {
       addPaneBatched(cmd);
+    } else if (!_envReloadInFlight.current) {
+      _envReloadInFlight.current = true;
+      sendEnvQuery(selection.envIDs);
     }
   };
 
@@ -274,6 +278,7 @@ const App = () => {
     } else if (update) {
       updateWindow(cmd);
     } else {
+      _envReloadInFlight.current = false;
       addPaneBatched(cmd);
     }
   };
