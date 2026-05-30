@@ -7,9 +7,9 @@
 # LICENSE file in the root directory of this source tree.
 
 import os
+from importlib import metadata
 from io import open
 from setuptools import setup, find_packages
-from pkg_resources import get_distribution, DistributionNotFound
 
 
 try:
@@ -26,8 +26,8 @@ except Exception:
 
 def get_dist(pkgname):
     try:
-        return get_distribution(pkgname)
-    except DistributionNotFound:
+        return metadata.distribution(pkgname)
+    except metadata.PackageNotFoundError:
         return None
 
 here = os.path.abspath(os.path.dirname(__file__))
