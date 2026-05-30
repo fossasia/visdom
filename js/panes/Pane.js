@@ -30,6 +30,7 @@ var Pane = forwardRef((props, ref) => {
   const handleZoom = props.handleZoom || (() => {});
   const handleMouseMove = props.handleMouseMove || (() => {});
   const handleClose = props.handleClose || (() => props.onClose(id));
+  const handleMetadataExport = props.handleMetadataExport || (() => {});
 
   // rendering
   // ---------
@@ -115,6 +116,14 @@ var Pane = forwardRef((props, ref) => {
         <button title="save" onClick={handleDownload}>
           {' '}
           &#8681;{' '}
+        </button>
+        <button
+          title="export metadata"
+          onClick={handleMetadataExport}
+          hidden={!props.handleMetadataExport}
+        >
+          {' '}
+          &#128196;{' '}
         </button>
         <button title="reset" onClick={handleReset} hidden={!props.handleReset}>
           {' '}
