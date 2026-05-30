@@ -1893,7 +1893,7 @@ class Visdom(object):
 
     @pytorch_wrap
     def line(
-        self, Y, X=None, Z=None, win=None, env=None, opts=None, update=None, name=None
+        self, Y, X=None, win=None, env=None, opts=None, update=None, name=None, Z=None
     ):
         """
         This function draws a line plot. It takes in an `N` or `NxM` tensor
@@ -1972,7 +1972,11 @@ class Visdom(object):
         opts["markers"] = opts.get("markers", False)
         opts["fillarea"] = opts.get("fillarea", False)
         if Z is not None and opts["fillarea"]:
-            warnings.warn("fillarea is not supported for 3D line plots")
+            warnings.warn(
+                "fillarea is not supported for 3D line plots",
+                UserWarning,
+                stacklevel=2,
+            )
             opts["fillarea"] = False
         opts["mode"] = "lines+markers" if opts.get("markers") else "lines"
 

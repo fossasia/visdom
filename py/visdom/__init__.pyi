@@ -136,12 +136,12 @@ class Visdom:
         self,
         Y: Tensor,
         X: Optional[Tensor] = ...,
-        Z: Optional[Tensor] = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
         update: _OptStr = ...,
         name: _OptStr = ...,
         opts: _OptOps = ...,
+        Z: Optional[Tensor] = ...,
     ) -> _SendReturn: ...
     def grid(
         self,
