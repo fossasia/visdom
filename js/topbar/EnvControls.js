@@ -22,6 +22,8 @@ function EnvControls(props) {
     onEnvSelect,
     onEnvClear,
     onEnvManageButton,
+    showAllEnvWindows,
+    onToggleShowAll,
   } = props;
   const [confirmClear, setConfirmClear] = useState(false);
 
@@ -183,6 +185,19 @@ function EnvControls(props) {
         >
           <span className="glyphicon glyphicon-folder-open" />
         </button>
+        {envIDs.length > 1 && (
+          <button
+            data-toggle="tooltip"
+            title="Show All Windows from All Environments"
+            data-placement="bottom"
+            className={
+              showAllEnvWindows ? 'btn btn-primary' : 'btn btn-default'
+            }
+            onClick={onToggleShowAll}
+          >
+            <span className="glyphicon glyphicon-eye-open" />
+          </button>
+        )}
       </div>
     </span>
   );
