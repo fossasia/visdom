@@ -576,11 +576,19 @@ class CompareHandler(BaseHandler):
 
     @check_auth
     def post(self, args):
-        sid = tornado.escape.json_decode(
+        body = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
-        )["sid"]
+        )
+        sid = body["sid"]
+        show_all = body.get("show_all", False)
         if sid in self.subs:
-            compare_envs(self.state, args.split("+"), self.subs[sid], self.env_path)
+            compare_envs(
+                self.state,
+                args.split("+"),
+                self.subs[sid],
+                self.env_path,
+                show_all=show_all,
+            )
 
 
 class SaveHandler(BaseHandler):
@@ -707,6 +715,15 @@ class UserSettingsHandler(BaseHandler):
 
 class ErrorHandler(BaseHandler):
     def get(self, text):
+        if not text or not text.strip().isdigit():
+            raise tornado.web.HTTPError(400, reason="Invalid status code")
+
+        status_code = int(text.strip())
+
+        if not 400 <= status_code <= 599:
+            raise tornado.web.HTTPError(400, reason="Invalid status code")
+
+        raise tornado.web.HTTPError(status_code)
         error_text = text or "test error"
         raise Exception(error_text)
 
