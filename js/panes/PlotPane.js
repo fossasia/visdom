@@ -139,6 +139,8 @@ var PlotPane = (props) => {
     Plotly.react(contentID, data.concat(smooth_data), content.layout, {
       showLink: true,
       linkText: 'Edit',
+      doubleClick: 'reset',
+      doubleClickDelay: 500,
     });
   };
 
