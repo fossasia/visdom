@@ -268,6 +268,40 @@ def _opts2layout(opts, is3d=False):
     return _scrub_dict(layout)
 
 
+def _normalize_labels(Y):
+    """
+    Normalizes arbitrary labels (int, float, string) to 1-based indices.
+    Returns:
+        Y_normalized (np.ndarray): 1-based integer labels
+        label_values (np.ndarray or None): Original unique label values, or None if Y
+                                           was already a valid set of 1-based integer labels.
+        K (int): Number of unique labels
+    """
+    Y = np.ravel(Y)
+
+    try:
+        is_integer_labels = (
+            np.issubdtype(Y.dtype, np.number)
+            and np.equal(np.mod(Y, 1), 0).all()
+            and Y.min() >= 1
+        )
+    except TypeError:
+        is_integer_labels = False
+
+    if is_integer_labels:
+        Y_normalized = Y.astype(int, copy=False)
+        K = int(Y_normalized.max())
+        label_values = None
+    else:
+        if np.issubdtype(Y.dtype, np.number):
+            assert np.isfinite(Y).all(), "labels must be finite (no NaN/Inf)"
+        label_values = np.unique(Y)
+        K = len(label_values)
+        Y_normalized = (np.searchsorted(label_values, Y) + 1).astype(int)
+
+    return Y_normalized, label_values, K
+
+
 def _markerColorCheck(mc, X, Y, L):
     assert isndarray(mc), "mc should be a numpy ndarray"
     if mc.ndim == 1:
@@ -323,14 +357,13 @@ def _markerSizeCheck(ms, X, Y):
     if ms.shape[0] == X.shape[0]:
         return np.array(ms, dtype=float)
 
-    labels = np.unique(Y)
-    assert ms.shape[0] >= len(labels), (
+    K = int(Y.max()) if len(Y) > 0 else 0
+    assert ms.shape[0] >= K, (
         "markersize should be of size `%d` (per-point) or at least `%d` "
-        "(per-label), but got: %d" % (X.shape[0], len(labels), ms.shape[0])
+        "(per-label), but got: %d" % (X.shape[0], K, ms.shape[0])
     )
 
-    label_to_idx = {label: idx for idx, label in enumerate(labels)}
-    return np.array([ms[label_to_idx[Y[i]]] for i in range(len(Y))], dtype=float)
+    return np.array([ms[Y[i] - 1] for i in range(len(Y))], dtype=float)
 
 
 def _lineColorCheck(lc, K):
@@ -1368,10 +1401,10 @@ class Visdom(object):
 
         Y = do_tsne(features)
 
-        label_set = list(set(labels))
+        labels_normalized, _, _ = _normalize_labels(labels)
         points = [
             {
-                "group": int(label_set.index(labels[i])),
+                "group": int(labels_normalized[i] - 1),
                 "name": "Entity {}".format(i),
                 "label": labels[i],
                 "position": xy,
@@ -1763,23 +1796,8 @@ class Visdom(object):
         if Y is not None:
             Y = np.ravel(Y)
             assert X.shape[0] == Y.shape[0], "sizes of X and Y should match"
-            # Float labels are supported: if Y is already a valid set of
-            # 1-based integer labels keep the existing path unchanged.
-            # Otherwise remap arbitrary values (int or float) to sequential
-            # 1-based indices via np.unique/np.searchsorted.  label_values
-            # stores the original values so the legend shows real text;
-            # it is None for the integer path (trace names keep str(k)).
-            if np.equal(np.mod(Y, 1), 0).all() and Y.min() >= 1:
-                Y = Y.astype(int, copy=False)
-                labels = np.unique(Y)
-                K = int(Y.max())  # largest label
-                label_values = None  # integer path: use str(k) for names
-            else:
-                assert np.isfinite(Y).all(), "labels must be finite (no NaN/Inf)"
-                label_values = np.unique(Y)
-                K = len(label_values)
-                Y = (np.searchsorted(label_values, Y) + 1).astype(int)
-                labels = np.arange(1, K + 1, dtype=int)
+            Y, label_values, K = _normalize_labels(Y)
+            labels = np.unique(Y)
             assert (
                 len(labels) == 1 or name is None
             ), "name should not be specified with multiple labels or lines"
