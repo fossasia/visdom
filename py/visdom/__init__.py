@@ -37,6 +37,7 @@ import time
 import errno
 from io import BytesIO, StringIO
 from functools import wraps
+import html
 
 try:
     import bs4  # type: ignore
@@ -180,9 +181,11 @@ def _axisformat(xy, opts):
         return {
             "type": opts.get(xy + "type"),
             "title": opts.get(xy + "label"),
-            "range": [opts.get(xy + "tickmin"), opts.get(xy + "tickmax")]
-            if has_ticks
-            else None,
+            "range": (
+                [opts.get(xy + "tickmin"), opts.get(xy + "tickmax")]
+                if has_ticks
+                else None
+            ),
             "tickvals": opts.get(xy + "tickvals"),
             "ticktext": opts.get(xy + "ticklabels"),
             "dtick": opts.get(xy + "tickstep"),
@@ -210,17 +213,21 @@ def _axisformat3d(xyz, opts):
         return {
             "type": opts.get(xyz + "type"),
             "title": opts.get(xyz + "label"),
-            "range": [opts.get(xyz + "tickmin"), opts.get(xyz + "tickmax")]
-            if has_ticks
-            else None,
+            "range": (
+                [opts.get(xyz + "tickmin"), opts.get(xyz + "tickmax")]
+                if has_ticks
+                else None
+            ),
             "tickvals": opts.get(xyz + "tickvals"),
             "ticktext": opts.get(xyz + "ticklabels"),
             "nticks": (
-                (opts.get(xyz + "tickmax") - opts.get(xyz + "tickmin"))
-                / opts.get(xyz + "tickstep")
-            )
-            if has_step
-            else None,
+                (
+                    (opts.get(xyz + "tickmax") - opts.get(xyz + "tickmin"))
+                    / opts.get(xyz + "tickstep")
+                )
+                if has_step
+                else None
+            ),
             "tickfont": opts.get(xyz + "tickfont"),
         }
 
@@ -254,21 +261,27 @@ def _opts2layout(opts, is3d=False):
     if layout_opts is not None:
         if "plotly" in layout_opts:
             layout.update(layout_opts["plotly"])
-
     return _scrub_dict(layout)
 
 
 def _markerColorCheck(mc, X, Y, L):
     assert isndarray(mc), "mc should be a numpy ndarray"
-    assert mc.shape[0] == L or (
-        mc.shape[0] == X.shape[0]
-        and (mc.ndim == 1 or mc.ndim == 2 and mc.shape[1] == 3)
-    ), (
+    if mc.ndim == 1:
+        valid = (mc.shape[0] >= L) or (mc.shape[0] == X.shape[0])
+    elif mc.ndim == 2:
+        valid = (mc.shape[1] == 3) and (
+            (mc.shape[0] >= L) or (mc.shape[0] == X.shape[0])
+        )
+    else:
+        valid = False
+
+    assert valid, (
         "marker colors have to be of size `%d` or `%d x 3` "
-        + " or `%d` or `%d x 3`, but got: %s"
+        "(per-point) or at least `%d` or at least `%d x 3` "
+        "(palette), but got: %s"
     ) % (
         X.shape[0],
-        X.shape[1],
+        X.shape[0],
         L,
         L,
         "x".join(map(str, mc.shape)),
@@ -293,6 +306,27 @@ def _markerColorCheck(mc, X, Y, L):
         ret[Y[k]] = ret.get(Y[k], []) + [v]
 
     return ret
+
+
+def _markerSizeCheck(ms, X, Y):
+    """Validate and return per-point marker sizes as a numpy array."""
+    if isinstance(ms, (list, tuple)):
+        ms = np.array(ms, dtype=float)
+    assert isndarray(ms), "markersize array should be a numpy ndarray"
+    assert ms.ndim == 1, "markersize array should be 1-dimensional"
+    assert (ms > 0).all(), "all marker sizes must be positive"
+
+    if ms.shape[0] == X.shape[0]:
+        return np.array(ms, dtype=float)
+
+    labels = np.unique(Y)
+    assert ms.shape[0] >= len(labels), (
+        "markersize should be of size `%d` (per-point) or at least `%d` "
+        "(per-label), but got: %d" % (X.shape[0], len(labels), ms.shape[0])
+    )
+
+    label_to_idx = {label: idx for idx, label in enumerate(labels)}
+    return np.array([ms[label_to_idx[Y[i]]] for i in range(len(Y))], dtype=float)
 
 
 def _lineColorCheck(lc, K):
@@ -335,10 +369,12 @@ def _assert_opts(opts):
     if opts.get("markersymbol"):
         assert isstr(opts.get("markersymbol")), "marker symbol should be string"
 
-    if opts.get("markersize"):
-        assert (
-            isnum(opts.get("markersize")) and opts.get("markersize") > 0
-        ), "marker size should be a positive number"
+    if opts.get("markersize") is not None:
+        ms = opts.get("markersize")
+        if isinstance(ms, (list, tuple, np.ndarray)):
+            assert all(m > 0 for m in ms), "all marker sizes must be positive"
+        else:
+            assert isnum(ms) and ms > 0, "marker size should be a positive number"
 
     if opts.get("markerborderwidth"):
         assert (
@@ -474,8 +510,13 @@ class Visdom(object):
         ), "base_url should not end with / as it is appended automatically"
 
         self.ipv6 = ipv6
-        self.env = env
-        self.env_list = {f"{env}"}  # default env
+        self.env = (
+            env.replace("/", "_")
+            .replace("\\", "_")
+            .replace("\n", "-")
+            .replace("\r", "-")
+        )
+        self.env_list = {self.env}  # default env
         self.send = send
         self.event_handlers = {}  # Haven't registered any events
         self.socket_alive = False
@@ -673,8 +714,16 @@ class Visdom(object):
             logger.error(error)
             ws.close()
 
-        def on_close(ws):
+        def on_close(ws, close_status_code=None, close_msg=None):
             self.socket_alive = False
+            if not self.socket_connection_achieved:
+                logger.warning(
+                    "WebSocket closed before connection achieved "
+                    "(close_status_code=%s). If login is enabled, "
+                    "pass username/password to Visdom().",
+                    close_status_code,
+                )
+                self.use_socket = False
 
         def run_socket(*args):
             host_scheme = urlparse(self.server).scheme
@@ -693,7 +742,7 @@ class Visdom(object):
                         on_error=on_error,
                         on_close=on_close,
                         header={
-                            "Cookie: user_password="
+                            "Cookie": "user_password="
                             + self.session.cookies.get("user_password", "")
                         },
                     )
@@ -1368,6 +1417,10 @@ class Visdom(object):
         if nchannels == 1:
             img = np.squeeze(img)
             img = img[np.newaxis, :, :].repeat(3, axis=0)
+            nchannels = 3
+        assert nchannels in (3, 4), (
+            "Image must have 1, 3, or 4 channels, got %d" % nchannels
+        )
 
         if "float" in str(img.dtype):
             if img.max() <= 1:
@@ -1375,13 +1428,17 @@ class Visdom(object):
             img = np.uint8(img)
 
         img = np.transpose(img, (1, 2, 0))
-        im = Image.fromarray(img)
+        if nchannels == 4:
+            im = Image.fromarray(img, mode="RGBA")
+        else:
+            im = Image.fromarray(img)
         buf = BytesIO()
         image_type = "png"
         imsave_args = {}
-        if "jpgquality" in opts:
+        jpgquality = opts.get("jpgquality")
+        if jpgquality is not None and nchannels != 4:
             image_type = "jpeg"
-            imsave_args["quality"] = opts["jpgquality"]
+            imsave_args["quality"] = jpgquality
 
         im.save(buf, format=image_type.upper(), **imsave_args)
 
@@ -1469,6 +1526,7 @@ class Visdom(object):
         The following `opts` are supported:
 
         - `opts.sample_frequency`: sample frequency (`integer` > 0; default = 44100)
+        - `opts.caption`: caption to display below the player (`string`; optional)
         """
         opts = {} if opts is None else opts
         opts["sample_frequency"] = opts.get("sample_frequency", 44100)
@@ -1510,6 +1568,8 @@ class Visdom(object):
         )
         opts["height"] = 80
         opts["width"] = 330
+        if opts.get("caption"):
+            audiodata += "<p>%s</p>" % html.escape(str(opts["caption"]))
         return self.text(text=audiodata, win=win, env=env, opts=opts)
 
     def _encode(self, tensor, fps):
@@ -1570,6 +1630,7 @@ class Visdom(object):
         - `opts.fps`: FPS for the video (`integer` > 0; default = 25)
         - `opts.autoplay`: whether to autoplay the video when ready (`boolean`; default = `false`)
         - `opts.loop`: whether to loop the video (`boolean`; default = `false`)
+        - `opts.caption`: caption to display below the player (`string`; optional)
         """
         opts = {} if opts is None else opts
         opts["fps"] = opts.get("fps", 25)
@@ -1609,6 +1670,8 @@ class Visdom(object):
             mimetype,
             base64.b64encode(bytestr).decode("utf-8"),
         )
+        if opts.get("caption"):
+            videodata += "<p>%s</p>" % html.escape(str(opts["caption"]))
         return self.text(text=videodata, win=win, env=env, opts=opts)
 
     def update_window_opts(self, win, opts, env=None):
@@ -1644,7 +1707,7 @@ class Visdom(object):
         The following `opts` are supported:
 
         - `opts.markersymbol`     : marker symbol (`string`; default = `'dot'`)
-        - `opts.markersize`       : marker size (`number`; default = `'10'`)
+        - `opts.markersize`       : marker size (`number` or `np.array`; default = `'10'`)
         - `opts.markercolor`      : marker color (`np.array`; default = `None`)
         - `opts.markerborderwidth`: marker border line width (`float`; default = 0.5)
         - `opts.dash`             : dash type (`np.array`; default = 'solid'`)
@@ -1722,6 +1785,11 @@ class Visdom(object):
         if opts.get("markercolor") is not None:
             opts["markercolor"] = _markerColorCheck(opts["markercolor"], X, Y, K)
 
+        if opts.get("markersize") is not None and isinstance(
+            opts["markersize"], (list, tuple, np.ndarray)
+        ):
+            opts["markersize"] = _markerSizeCheck(opts["markersize"], X, Y)
+
         if opts.get("linecolor") is not None:
             opts["linecolor"] = _lineColorCheck(opts["linecolor"], K)
 
@@ -1745,6 +1813,11 @@ class Visdom(object):
         trace_opts = opts.get("traceopts", {"plotly": {}})["plotly"]
         dash = opts.get("dash")
         mc = opts.get("markercolor")
+        ms = (
+            opts.get("markersize")
+            if isinstance(opts.get("markersize"), np.ndarray)
+            else None
+        )
         lc = opts.get("linecolor")
 
         for k in labels:
@@ -1761,9 +1834,9 @@ class Visdom(object):
                     "x": nan2none(X.take(0, 1)[ind].tolist()),
                     "y": nan2none(X.take(1, 1)[ind].tolist()),
                     "name": trace_name,
-                    "type": "scatter3d"
-                    if is3d
-                    else ("scattergl" if use_gl else "scatter"),
+                    "type": (
+                        "scatter3d" if is3d else ("scattergl" if use_gl else "scatter")
+                    ),
                     "mode": opts.get("mode"),
                     "text": L[ind].tolist() if L is not None else None,
                     "textposition": "right",
@@ -1772,7 +1845,11 @@ class Visdom(object):
                         "color": lc[k - 1] if lc is not None else None,
                     },
                     "marker": {
-                        "size": opts.get("markersize"),
+                        "size": (
+                            ms[ind].tolist()
+                            if ms is not None
+                            else opts.get("markersize")
+                        ),
                         "symbol": opts.get("markersymbol"),
                         "color": mc[k] if mc is not None else None,
                         "line": {
@@ -1796,6 +1873,8 @@ class Visdom(object):
             for marker_prop in ["markercolor"]:
                 if marker_prop in opts:
                     del opts[marker_prop]
+            if ms is not None and "markersize" in opts:
+                del opts["markersize"]
             for line_prop in ["linecolor"]:
                 if line_prop in opts:
                     del opts[line_prop]
@@ -1842,7 +1921,7 @@ class Visdom(object):
         - `opts.fillarea`    : fill area below line (`boolean`)
         - `opts.markers`     : show markers (`boolean`; default = `false`)
         - `opts.markersymbol`: marker symbol (`string`; default = `'dot'`)
-        - `opts.markersize`  : marker size (`number`; default = `'10'`)
+        - `opts.markersize`  : marker size (`number` or `np.array`; default = `'10'`)
         - `opts.linecolor`   : line colors (`np.array`; default = None)
         - `opts.dash`        : line dash type (`np.array`; default = None)
         - `opts.legend`      : `list` or `tuple` containing legend names
@@ -1865,6 +1944,11 @@ class Visdom(object):
                 assert X is not None, "must specify x-values for line update"
         assert Y.ndim == 1 or Y.ndim == 2, "Y should have 1 or 2 dim"
         assert Y.shape[-1] > 0, "must plot one line at least"
+
+        if Y.ndim == 2 and Y.shape[1] == 1:
+            Y = Y.ravel()
+            if X is not None and X.ndim == 2 and X.shape[1] == 1:
+                X = X.ravel()
 
         if X is not None:
             assert X.ndim == 1 or X.ndim == 2, "X should have 1 or 2 dim"
@@ -2268,11 +2352,39 @@ class Visdom(object):
         # normalize vectors to unit length:
         if opts.get("normalize", False):
             assert (
-                isinstance(opts["normalize"], numbers.Number) and opts["normalize"] > 0
-            ), "opts.normalize should be positive number"
-            magnitude = np.sqrt(np.add(np.multiply(X, X), np.multiply(Y, Y))).max()
-            X = X / (magnitude / opts["normalize"])
-            Y = Y / (magnitude / opts["normalize"])
+                isinstance(opts["normalize"], numbers.Number)
+                and opts["normalize"] > 0
+                and np.isfinite(opts["normalize"])
+            ), "opts.normalize should be a finite positive number"
+            magnitude = np.sqrt(np.add(np.multiply(X, X), np.multiply(Y, Y)))
+            finite_mask = np.isfinite(magnitude)
+
+            if not np.any(finite_mask):
+                warnings.warn(
+                    "Skipping quiver normalization: all magnitudes are non-finite (NaN or Inf)",
+                    RuntimeWarning,
+                )
+            else:
+                max_mag = magnitude[finite_mask].max()
+
+                if max_mag <= 0:
+                    warnings.warn(
+                        "Skipping quiver normalization: max magnitude is zero",
+                        RuntimeWarning,
+                    )
+                else:
+                    scale = max_mag / opts["normalize"]
+
+                    if scale <= 0 or not np.isfinite(scale):
+                        warnings.warn(
+                            "Skipping quiver normalization: invalid scale computed",
+                            RuntimeWarning,
+                        )
+                    else:
+                        X = np.where(np.isfinite(X), X, np.nan)
+                        Y = np.where(np.isfinite(Y), Y, np.nan)
+                        X = X / scale
+                        Y = Y / scale
 
         # interleave X and Y with copies / NaNs to get lines:
         nans = np.full((X.shape[0], X.shape[1]), np.nan).flatten()
