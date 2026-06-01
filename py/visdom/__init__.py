@@ -1732,9 +1732,7 @@ class Visdom(object):
             assert win is not None, "Must define a window to update"
 
             if update == "append":
-                if win is None:
-                    update = None
-                elif not self.offline:
+                if not self.offline:
                     exists = self.win_exists(win, env)
                     if exists is False:
                         update = None
