@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: "Checkout Repository"
-      uses: actions/checkout@v3
+      uses: actions/checkout@v6
     - name: "Install Node"
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v6
       with:
           node-version: 16
     - name: "Install Dependencies"
@@ -25,8 +25,8 @@ jobs:
     name: "Python Linter Check"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: psf/black@26.3.0
+      - uses: actions/checkout@v6
+      - uses: psf/black@26.5.1
         with:
           src: "./py"
           version: 23.1.0
@@ -41,7 +41,7 @@ jobs:
       jsfileschanged: ${{ steps.checkout.outputs.jsfileschanged }}
     steps:
       - name: "Checkout Repository"
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
       - uses: ./.github/actions/prepare
         with:
           loadprbuild: false
@@ -62,7 +62,7 @@ jobs:
         if: steps.checkout.outputs.jsfileschanged > 0
 
       - name: "Save built js-files"
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pr-build
           if-no-files-found: error
@@ -78,7 +78,7 @@ jobs:
     steps:
 
       - name: "Checkout Repository"
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
 
       - name: "Save current Head-Ref as PR-branch"
         shell: bash
@@ -97,14 +97,14 @@ jobs:
           git checkout PR-HEAD -- ./example
 
       - name: Cypress test:init
-        uses: cypress-io/github-action@v4
+        uses: cypress-io/github-action@v7
         with:
           install: false
           start: visdom -port 8098 -env_path /tmp
           wait-on: 'http://localhost:8098'
           spec: cypress/integration/*.init.js
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: cypress-init-screenshots
           path: cypress/screenshots_init
@@ -116,23 +116,23 @@ jobs:
     needs: visual-regression-test-init
     steps:
       - name: "Checkout Repository"
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
       - uses: ./.github/actions/prepare
 
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: cypress-init-screenshots
           path: cypress/screenshots_init
 
       - name: Cypress test:visual
-        uses: cypress-io/github-action@v4
+        uses: cypress-io/github-action@v7
         with:
           install: false
           start: visdom -port 8098 -env_path /tmp
           wait-on: 'http://localhost:8098'
           spec: cypress/integration/screenshots.js
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: cypress-screenshots-visual
@@ -147,18 +147,18 @@ jobs:
         python: ['3.8', '3.9', '3.10']
     steps:
       - name: "Checkout Repository"
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
       - uses: ./.github/actions/prepare
 
       - name: Cypress test
-        uses: cypress-io/github-action@v4
+        uses: cypress-io/github-action@v7
         with:
           install: false
           start: visdom -port 8098 -env_path /tmp
           wait-on: 'http://localhost:8098'
           config: ignoreTestFiles=screenshots.*
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: cypress-screenshots-functional-${{ matrix.python }}
@@ -170,18 +170,18 @@ jobs:
     needs: install-and-build
     steps:
       - name: 'Checkout Repository'
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
       - uses: ./.github/actions/prepare
 
       - name: Cypress test
-        uses: cypress-io/github-action@v4
+        uses: cypress-io/github-action@v7
         with:
           install: false
           start: visdom -port 8098 -env_path /tmp -use_frontend_client_polling
           wait-on: 'http://localhost:8098'
           config: ignoreTestFiles=screenshots.*
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: cypress-screenshots-functional-polling
