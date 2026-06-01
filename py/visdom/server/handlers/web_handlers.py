@@ -213,7 +213,7 @@ class UpdateHandler(BaseHandler):
                     if len(plot["z"][0]) != len(dz[0]):
                         logging.error(
                             "ERROR: There is a mismatch between the number of columns in existing plot ('%i') and new data ('%i')."
-                            % (len(plot["z"]), len(dz))
+                            % (len(plot["z"][0]), len(dz[0]))
                         )
                         return p
                 else:
