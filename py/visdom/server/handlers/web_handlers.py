@@ -446,7 +446,7 @@ class ForkEnvHandler(BaseHandler):
         prev_eid = escape_eid(args.get("prev_eid"))
         eid = escape_eid(args.get("eid"))
 
-        assert prev_eid in handler.state, "env to be forked doesn't exit"
+        assert prev_eid in handler.state, "env to be forked doesn't exist"
 
         handler.state[eid] = copy.deepcopy(handler.state[prev_eid])
         serialize_env(handler.state, [eid], env_path=handler.env_path)
