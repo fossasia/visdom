@@ -38,8 +38,41 @@ var PlotPane = (props) => {
     });
   };
 
+  const handleMetadataExport = () => {
+    const graph = plotlyRef.current;
+    const metadata = {
+      data: graph?.data ?? content?.data ?? [],
+      layout: graph?.layout ?? content?.layout ?? {},
+    };
+    const json = JSON.stringify(metadata, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${contentID}_metadata.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+  };
+
   // events
   // ------
+  const isDisplayed = (el) =>
+    !!(el && el.offsetWidth > 0 && el.offsetHeight > 0);
+  useEffect(() => {
+    const plotElement = plotlyRef.current;
+    if (!plotElement) return;
+
+    const resizeObserver = new ResizeObserver(() => {
+      if (plotElement._fullLayout && isDisplayed(plotElement)) {
+        Plotly.Plots.resize(plotElement);
+      }
+    });
+
+    resizeObserver.observe(plotElement);
+    return () => resizeObserver.disconnect();
+  }, []);
   useEffect(() => {
     if (previousContent) {
       // Retain trace visibility between old and new plots
@@ -139,6 +172,11 @@ var PlotPane = (props) => {
     Plotly.react(contentID, data.concat(smooth_data), content.layout, {
       showLink: true,
       linkText: 'Edit',
+    }).then(() => {
+      const plotElement = plotlyRef.current;
+      if (plotElement && plotElement._fullLayout && isDisplayed(plotElement)) {
+        Plotly.Plots.resize(plotElement);
+      }
     });
   };
 
@@ -183,6 +221,7 @@ var PlotPane = (props) => {
     <Pane
       {...props}
       handleDownload={handleDownload}
+      handleMetadataExport={handleMetadataExport}
       barwidgets={[smooth_widget_button]}
       widgets={[smooth_widget]}
       enablePropertyList

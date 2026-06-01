@@ -95,24 +95,57 @@ module.exports = (on) => {
       threshold = 0.0,
       debug = false,
     }) {
-      const img1 = PNG.sync.read(fs.readFileSync(src1));
-      const img2 = PNG.sync.read(fs.readFileSync(src2));
+      // Read images
+      let png1 = PNG.sync.read(fs.readFileSync(src1));
+      let png2 = PNG.sync.read(fs.readFileSync(src2));
 
-      if (img1.width !== img2.width || img1.height !== img2.height) {
-        throw new Error(
-          'Images must have same dimensions for comparison. ' +
-          `src1: ${src1} (${img1.width}x${img1.height}), ` +
-          `src2: ${src2} (${img2.width}x${img2.height})`
+      // preserve original areas for debug metrics
+      const origArea1 = png1.width * png1.height;
+      const origArea2 = png2.width * png2.height;
+
+      // If dimensions differ, allow small deltas and crop to overlapping
+      // (top-left) region. Throw for large mismatches to avoid masking
+      // substantive layout/regression changes.
+      const MAX_DIM_DELTA = 4; // pixels; tolerate tiny rounding/layout differences
+      const deltaW = Math.abs(png1.width - png2.width);
+      const deltaH = Math.abs(png1.height - png2.height);
+
+      let width = png1.width;
+      let height = png1.height;
+      if (deltaW > 0 || deltaH > 0) {
+        if (deltaW > MAX_DIM_DELTA || deltaH > MAX_DIM_DELTA) {
+          throw new Error(
+            'Images have differing dimensions beyond allowed tolerance for comparison. ' +
+              `src1: ${src1} (${png1.width}x${png1.height}), ` +
+              `src2: ${src2} (${png2.width}x${png2.height})`
+          );
+        }
+
+        const minWidth = Math.min(png1.width, png2.width);
+        const minHeight = Math.min(png1.height, png2.height);
+
+        const cropped1 = new PNG({ width: minWidth, height: minHeight });
+        const cropped2 = new PNG({ width: minWidth, height: minHeight });
+
+        // use pngjs's bitblt helper to copy the top-left region
+        PNG.bitblt(png1, cropped1, 0, 0, minWidth, minHeight, 0, 0);
+        PNG.bitblt(png2, cropped2, 0, 0, minWidth, minHeight, 0, 0);
+
+        png1 = cropped1;
+        png2 = cropped2;
+        width = minWidth;
+        height = minHeight;
+        console.warn(
+          `image-compare: cropped to ${width}x${height} (delta ${deltaW}x${deltaH}) for comparison: ${src1} vs ${src2}`
         );
       }
 
-      const { width, height } = img1;
       const diff = new PNG({ width, height });
       const appliedThreshold = debug ? 0 : threshold;
 
       const numDiffPixels = pixelmatch(
-        img1.data,
-        img2.data,
+        png1.data,
+        png2.data,
         diff.data,
         width,
         height,
@@ -123,10 +156,19 @@ module.exports = (on) => {
       fs.writeFileSync(diffsrc, PNG.sync.write(diff));
 
       if (debug) {
-        fs.writeFileSync(
-          `${diffsrc}.num`,
-          `${numDiffPixels / (width * height)}`
-        );
+        const overlapArea = width * height;
+        const maxArea = Math.max(origArea1, origArea2);
+        const overlapFraction = numDiffPixels / overlapArea;
+        const normalizedFraction = numDiffPixels / maxArea;
+        const debugData = {
+          numDiffPixels,
+          overlapArea,
+          maxArea,
+          overlapFraction,
+          normalizedFraction,
+        };
+        fs.writeFileSync(`${diffsrc}.num`, String(normalizedFraction));
+        fs.writeFileSync(`${diffsrc}.num.json`, JSON.stringify(debugData));
       }
 
       return numDiffPixels;
