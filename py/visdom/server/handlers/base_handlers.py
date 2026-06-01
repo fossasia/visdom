@@ -12,6 +12,7 @@ Contain the basic web request handlers that all other handlers derive from
 
 import logging
 import traceback
+import http.client
 
 import tornado.web
 import tornado.websocket
@@ -63,7 +64,8 @@ class BaseHandler(tornado.web.RequestHandler):
             logging.info(
                 "Traceback: {}".format(traceback.format_exception(*kwargs["exc_info"]))
             )
-        if self.settings.get("debug") and "exc_info" in kwargs:
+            debug = self.settings.get("debug")
+            title = http.client.responses.get(status_code, "Unknown Error")
             logging.error("rendering error page")
             exc_info = kwargs["exc_info"]
             # exc_info is a tuple consisting of:
@@ -72,13 +74,22 @@ class BaseHandler(tornado.web.RequestHandler):
             # 3. The traceback opbject
             try:
                 params = {
-                    "error": exc_info[1],
-                    "trace_info": traceback.format_exception(*exc_info),
-                    "request": self.request.__dict__,
+                    "error": exc_info[1] if debug else None,
+                    "trace_info": traceback.format_exception(*exc_info)
+                    if debug
+                    else None,
+                    "request": self.request.__dict__ if debug else None,
+                    "status_code": status_code,
+                    "title": title,
                 }
-
-                # TODO make an error.html page
                 self.render("error.html", **params)
                 logging.error("rendering complete")
+                return
             except Exception as e:
                 logging.error(e)
+            self.set_status(status_code)
+            self.write(
+                f"""
+                <h1>{status_code} - {title}</h1>
+                """
+            )

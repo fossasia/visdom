@@ -25,9 +25,16 @@ function TextPane(props) {
 
     switch (e.type) {
       case 'keydown':
-      case 'keypress':
-        e.preventDefault();
+      case 'keypress': {
+        const tag = e.target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+          break;
+        }
+        if (!(e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+        }
         break;
+      }
       case 'keyup':
         sendPaneMessage(
           {
