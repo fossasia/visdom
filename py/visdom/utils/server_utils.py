@@ -14,17 +14,20 @@ At the moment, this just inherited all of the floating functions
 in the previous server.py class.
 """
 
-
 import copy
 import html
 import hashlib
+import html
 import json
 import logging
 import os
 import time
+import re
+import errno
 import tornado.escape
 from collections import OrderedDict
 
+MAX_ENV_NAME_LEN = 25
 try:
     # for after python 3.8
     from collections.abc import Mapping, Sequence
@@ -123,12 +126,33 @@ def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
             if isinstance(state[env_id], LazyEnvData):
                 if state[env_id]._raw_dict is None:
                     continue
-                data = json.dumps(state[env_id]._raw_dict)
-            else:
-                data = json.dumps(state[env_id])
             env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
-            with open(env_path_file, "w") as fn:
-                fn.write(data)
+            try:
+                with open(env_path_file, "w") as fn:
+                    if isinstance(state[env_id], LazyEnvData):
+                        state[env_id].lazy_load_data()
+                        fn.write(json.dumps(state[env_id]._raw_dict))
+                    else:
+                        fn.write(json.dumps(state[env_id]))
+            except OSError as e:
+                if (
+                    e.errno != errno.ENAMETOOLONG
+                    and getattr(e, "winerror", None) != 206
+                ):
+                    raise
+                hashed_id = hashlib.sha256(env_id.encode("utf-8")).hexdigest()
+                env_path_file = os.path.join(
+                    env_path, "hash_{0}.json".format(hashed_id)
+                )
+                with open(env_path_file, "w") as fn:
+                    if isinstance(state[env_id], LazyEnvData):
+                        state[env_id].lazy_load_data()
+                        data_to_save = copy.deepcopy(state[env_id]._raw_dict)
+                    else:
+                        data_to_save = copy.deepcopy(state[env_id])
+                    data_to_save["name"] = env_id
+                    fn.write(json.dumps(data_to_save))
+
     return env_ids
 
 
@@ -140,10 +164,13 @@ def serialize_all(state, env_path=DEFAULT_ENV_PATH):
 
 
 def escape_eid(eid):
-    """Replace slashes with underscores, to avoid recognizing them
-    as directories.
+    """Replace forward slashes and other problematic characters
+    with underscores and backslashes with hyphen, to avoid recognizing them as
+    directories or breaking URLs and filenames.
     """
-    return eid.replace("/", "_")
+    return (
+        eid.replace("/", "_").replace("\\", "_").replace("\n", "-").replace("\r", "-")
+    )
 
 
 def extract_eid(args):
@@ -234,29 +261,56 @@ def window(args):
 
 def gather_envs(state, env_path=DEFAULT_ENV_PATH):
     if env_path is not None:
-        items = [i.replace(".json", "") for i in os.listdir(env_path) if ".json" in i]
+        items = [
+            i[:-5]
+            for i in os.listdir(env_path)
+            if i.endswith(".json") and not re.match(r"^hash_[a-fA-F0-9]{64}\.json$", i)
+        ]
     else:
         items = []
     return sorted(list(set(items + list(state.keys()))))
 
 
-def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
+def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH, show_all=False):
     logging.info("comparing envs")
-    eidNums = {e: str(i) for i, e in enumerate(eids)}
+    use_env_names = all(len(str(eid)) <= MAX_ENV_NAME_LEN for eid in eids)
+    eidNums = {e: e if use_env_names else str(i) for i, e in enumerate(eids)}
     env = {}
     envs = {}
     for eid in eids:
         if eid in state:
             envs[eid] = state.get(eid)
         elif env_path is not None:
-            p = os.path.join(env_path, eid.strip(), ".json")
-            if os.path.exists(p):
+            safe_eid = escape_eid(eid.strip())
+            base_env_path = os.path.abspath(env_path)
+            p = os.path.abspath(
+                os.path.join(base_env_path, "{0}.json".format(safe_eid))
+            )
+            try:
+                is_safe = os.path.commonpath([p, base_env_path]) == base_env_path
+            except ValueError:
+                is_safe = False
+            if is_safe and os.path.exists(p):
                 with open(p, "r") as fn:
                     env = tornado.escape.json_decode(fn.read())
                     state[eid] = env
                     envs[eid] = env
+            else:
+                hashed_id = hashlib.sha256(safe_eid.encode("utf-8")).hexdigest()
+                p = os.path.join(env_path, "hash_{0}.json".format(hashed_id))
+                if os.path.exists(p):
+                    with open(p, "r") as fn:
+                        env = tornado.escape.json_decode(fn.read())
+                        state[eid] = env
+                        envs[eid] = env
 
-    res = copy.deepcopy(envs[list(envs.keys())[0]])
+    valid_eids = [eid for eid in eids if eid in envs]
+    if not valid_eids:
+        socket.write_message(json.dumps({"command": "layout"}))
+        socket.eid = eids
+        return
+    base_eid = valid_eids[0]
+    res = copy.deepcopy(envs[base_eid])
     name2Wid = {
         res["jsons"][wid].get("title", None): wid + "_compare"
         for wid in res.get("jsons", {})
@@ -266,12 +320,13 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         res["jsons"][wid + "_compare"] = res["jsons"][wid]
         res["jsons"][wid] = None
         res["jsons"].pop(wid)
-
-    for ix, eid in enumerate(sorted(envs.keys())):
+    seen_dest_wids = set()
+    for ix, eid in enumerate(valid_eids):
         env = envs[eid]
         for wid in env.get("jsons", {}).keys():
             win = env["jsons"][wid]
-            if win.get("type", None) != "plot":
+            ptype = win.get("type", None)
+            if ptype not in ["plot", "image"]:
                 continue
             if "content" not in win:
                 continue
@@ -283,43 +338,99 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
 
             destWid = name2Wid[title]
             destWidJson = res["jsons"][destWid]
-            # Combine plots with the same window title. If plot data source was
-            # labeled "name" in the legend, rename to "envId_legend" where
-            # envId is enumeration of the selected environments (not the long
-            # environment id string). This makes plot lines more readable.
-            if ix == 0:
-                if "name" not in destWidJson["content"]["data"][0]:
-                    continue  # Skip windows with unnamed data
-                destWidJson["has_compare"] = False
-                destWidJson["content"]["layout"]["showlegend"] = True
-                destWidJson["contentID"] = get_rand_id()
-                for dataIdx, data in enumerate(destWidJson["content"]["data"]):
-                    if "name" not in data:
-                        break  # stop working with this plot, not right format
-                    destWidJson["content"]["data"][dataIdx]["name"] = "{}_{}".format(
-                        eidNums[eid], data["name"]
-                    )
-            else:
-                if "name" not in destWidJson["content"]["data"][0]:
-                    continue  # Skip windows with unnamed data
-                # has_compare will be set to True only if the window title is
-                # shared by at least 2 envs.
-                destWidJson["has_compare"] = True
-                for _dataIdx, data in enumerate(win["content"]["data"]):
-                    data = copy.deepcopy(data)
-                    if "name" not in data:
-                        destWidJson["has_compare"] = False
-                        break  # stop working with this plot, not right format
-                    data["name"] = "{}_{}".format(eidNums[eid], data["name"])
-                    destWidJson["content"]["data"].append(data)
+            base_ptype = destWidJson.get("type", None)
+            if base_ptype == "image_compare":
+                base_ptype = "image"
+            if ptype != base_ptype:
+                continue
+            # Combine windows only when the shared title also maps to the same
+            # supported window type across envs. For plots, if a data source is
+            # labeled "name" in the legend, rename it to "envId_legend", where
+            # envId is the enumeration of the selected environments (not the
+            # long environment id string), to make combined plot lines readable.
+            if ptype == "image":
+                if ix == 0 and destWid not in seen_dest_wids:
+                    seen_dest_wids.add(destWid)
+                    destWidJson["has_compare"] = False
+                    destWidJson["contentID"] = get_rand_id()
 
-    # Make sure that only plots that are shared by at least two envs are shown.
-    # Check has_compare flag
+                    first_img = copy.deepcopy(destWidJson["content"])
+                    caption = first_img.get("caption")
+                    first_img["caption"] = "{}_{}".format(
+                        eidNums[eid], caption if caption is not None else "image"
+                    )
+
+                    destWidJson["content"] = [first_img]
+                    destWidJson["type"] = "image_compare"
+                else:
+                    if destWid not in seen_dest_wids:
+                        continue  # base image never initialised; skip
+                    destWidJson["has_compare"] = True
+                    next_img = copy.deepcopy(win["content"])
+                    caption = next_img.get("caption")
+                    next_img["caption"] = "{}_{}".format(
+                        eidNums[eid], caption if caption is not None else "image"
+                    )
+                    destWidJson["content"].append(next_img)
+            elif ptype == "plot":
+                if ix == 0:
+                    if "name" not in destWidJson["content"]["data"][0]:
+                        continue  # Skip windows with unnamed data
+                    destWidJson["has_compare"] = False
+                    destWidJson["content"]["layout"]["showlegend"] = True
+                    destWidJson["contentID"] = get_rand_id()
+                    for dataIdx, data in enumerate(destWidJson["content"]["data"]):
+                        if "name" not in data:
+                            break  # stop working with this plot, not right format
+                        destWidJson["content"]["data"][dataIdx][
+                            "name"
+                        ] = "{}_{}".format(eidNums[eid], data["name"])
+                else:
+                    if "name" not in destWidJson["content"]["data"][0]:
+                        continue  # Skip windows with unnamed data
+                    # has_compare will be set to True only if the window title is
+                    # shared by at least 2 envs.
+                    destWidJson["has_compare"] = True
+                    for _dataIdx, data in enumerate(win["content"]["data"]):
+                        data = copy.deepcopy(data)
+                        if "name" not in data:
+                            destWidJson["has_compare"] = False
+                            break  # stop working with this plot, not right format
+                        data["name"] = "{}_{}".format(eidNums[eid], data["name"])
+                        destWidJson["content"]["data"].append(data)
+
+    # Make sure that only windows shared by at least two envs are shown.
+    # Check the has_compare flag for plots, image comparisons, and similar windows.
     for destWid in list(res["jsons"].keys()):
         if ("has_compare" not in res["jsons"][destWid]) or (
             not res["jsons"][destWid]["has_compare"]
         ):
             del res["jsons"][destWid]
+
+    if show_all:
+        for eid in sorted(envs.keys()):
+            eid_num = eidNums[eid]
+            for wid, win in envs[eid].get("jsons", {}).items():
+                win_title = win.get("title", "")
+                new_wid = "{}_env_{}".format(eid, wid)
+                if new_wid in res["jsons"]:
+                    continue
+                win_copy = copy.deepcopy(win)
+                win_copy["id"] = new_wid
+                label = (
+                    "[{}] {}".format(eid_num, html.escape(win_title))
+                    if win_title
+                    else "[{}]".format(eid_num)
+                )
+                win_copy["title"] = label
+                if isinstance(win_copy.get("layout"), dict):
+                    win_copy["layout"]["title"] = label
+                if isinstance(win_copy.get("content"), dict) and isinstance(
+                    win_copy["content"].get("layout"), dict
+                ):
+                    win_copy["content"]["layout"]["title"] = label
+                win_copy["has_compare"] = True
+                res["jsons"][new_wid] = win_copy
 
     # create legend mapping environment names to environment numbers so one can
     # look it up for the new legend
@@ -327,7 +438,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         "<tr> <td> {} </td> <td> {} </td> </tr>".format(
             html.escape(str(v)), html.escape(str(eidNums[v]))
         )
-        for v in eidNums
+        for v in sorted(eidNums)
     ]
 
     tbl = """<style>
@@ -390,11 +501,24 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
     if eid in state:
         env = state.get(eid)
     elif env_path is not None:
-        p = os.path.join(env_path, eid.strip(), ".json")
-        if os.path.exists(p):
+        safe_eid = escape_eid(eid.strip())
+        base_env_path = os.path.abspath(env_path)
+        p = os.path.abspath(os.path.join(base_env_path, "{0}.json".format(safe_eid)))
+        try:
+            is_safe = os.path.commonpath([p, base_env_path]) == base_env_path
+        except ValueError:
+            is_safe = False
+        if is_safe and os.path.exists(p):
             with open(p, "r") as fn:
                 env = tornado.escape.json_decode(fn.read())
                 state[eid] = env
+        else:
+            hashed_id = hashlib.sha256(safe_eid.encode("utf-8")).hexdigest()
+            p = os.path.join(env_path, "hash_{0}.json".format(hashed_id))
+            if os.path.exists(p):
+                with open(p, "r") as fn:
+                    env = tornado.escape.json_decode(fn.read())
+                    state[eid] = env
 
     if "reload" in env:
         socket.write_message(json.dumps({"command": "reload", "data": env["reload"]}))
