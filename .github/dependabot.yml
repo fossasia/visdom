@@ -4,12 +4,12 @@ updates:
   # 1. JavaScript / npm
   - package-ecosystem: "npm"
     directory: "/"
-    target-branch: "master"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
       day: "monday"
       time: "06:00"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 10
     labels:
       - "dependencies"
       - "javascript"
@@ -27,12 +27,12 @@ updates:
   # 2. Python / pip
   - package-ecosystem: "pip"
     directory: "/"
-    target-branch: "master"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
       day: "monday"
       time: "06:00"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 10
     labels:
       - "dependencies"
       - "python"
@@ -50,12 +50,12 @@ updates:
   # 3. GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
-    target-branch: "master"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
       day: "monday"
       time: "06:00"
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 15
     labels:
       - "dependencies"
       - "github-actions"

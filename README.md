@@ -99,7 +99,7 @@ can affect how environments appear hierarchically in the UI.
 #### Selecting Environments
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/19650074/198821299-6602d557-7a02-4b9f-b1d5-d57615cdc15c.png" width="300" /></p>
 
-From the main page it is possible to toggle between different environments using the environment selector. Selecting a new environment will query the server for the plots that exist in that environment. The environment selector allows for searching and filtering for the new enironment.
+From the main page it is possible to toggle between different environments using the environment selector. Selecting a new environment will query the server for the plots that exist in that environment. The environment selector allows for searching and filtering for the new environment.
 
 #### Comparing Environments
 
@@ -134,7 +134,7 @@ Once you've created a few visualizations, state is maintained. The server automa
 
 * **Fork:** If you enter a new env name, saving will create a new env -- effectively **forking** the previous env.
 
-> **Tip**: Fork an environment before you begin to make edits to ensure that your changes are saved seperately.
+> **Tip**: Fork an environment before you begin to make edits to ensure that your changes are saved separately.
 
 ### Filter
 You can use the `filter` to dynamically sift through windows present in an env -- just provide a regular expression with which to match titles of window you want to show. This can be helpful in use cases involving an env with many windows e.g. when systematically checking experimental results.
@@ -181,6 +181,8 @@ Install from source
 ```bash
 > pip install git+https://github.com/fossasia/visdom
 ```
+
+**Optional:** To save Plotly figures to image files from code (e.g. PNG/SVG) without using the browser download button, install `plotly` and `kaleido`: `pip install plotly kaleido`. See [vis.plotlyplot](#visplotlyplot) and [vis.save_plotly_figure](#visplotlyplot).
 
 ## Usage
 
@@ -312,6 +314,7 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 - [`vis.win_exists`](#viswin_exists) : check if a window already exists by id
 - [`vis.get_env_list`](#visget_env_list) : get a list of all of the environments on your server
 - [`vis.get_window_data`](#visget_window_data): get current data for a window
+- [`vis.save_plotly_figure`](#visplotlyplot): save a Plotly figure to an image file from code (no browser click)
 - [`vis.check_connection`](#vischeck_connection): check if the server is connected
 - [`vis.replay_log`](#visreplay_log): replay the actions from the provided log file
 
@@ -433,6 +436,19 @@ This function draws a Plotly `Figure` object. It does not explicitly take option
 
 > **Note** You must have the `plotly` Python package installed to use this function. It can typically be installed by running `pip install plotly`.
 
+**Saving plots as images from code (without using the browser download button):** Pass `save_path` to save the figure to a file when plotting, e.g. `vis.plotlyplot(fig, save_path="plot.png")`. You can also save a figure without displaying it using `vis.save_plotly_figure(fig, "plot.png")`. Both require the optional `kaleido` package: `pip install kaleido`.
+
+```python
+import plotly.graph_objects as go
+from visdom import Visdom
+
+viz = Visdom()
+fig = go.Figure(go.Scatter(x=[1, 2, 3], y=[4, 5, 6], mode="lines+markers"))
+
+viz.plotlyplot(fig, save_path="my_plot.png")
+viz.save_plotly_figure(fig, "my_plot.png")
+```
+
 #### vis.embeddings
 
 This function visualizes a collection of features using the [Barnes-Hut t-SNE algorithm](https://github.com/lvdmaaten/bhtsne).
@@ -487,13 +503,10 @@ The following `opts` are supported:
 - Tensor of size `K` and `K x 3`: Instead of having a unique color per data point, the same color is shared for all points of a particular label.
 
 #### vis.sunburst
-This function draws a sunburst chart. It takes two inputs: `parents` and `labels` array.
-values from `parents` array is used as parents object, like it define above which sector 
-should the this sector shown. values from `labels` array is used to define sector's label 
-or you can say name. keep in mind that lenght of array `parents` and `labels` should be 
-equal. There is a third array that you can pass to which is `value`, it is use to show 
-a value on hovering over a sector, it is optional argument, but if you are passing it then
-keep in mind lenght of `values` should be equal to `parents` or `labels`.
+This function draws a sunburst chart. It takes two input arrays: `parents` and `labels`.
+Values from the `parents` array define the hierarchical structure, indicating which parent sector a sector belongs to. Values from the `labels` array define the sector's label or name. Keep in mind that the `parents` and `labels` arrays must be of equal length. There is an optional third array called `values`, which is used to display a numerical value when hovering over a sector. If provided, the `values` array must be the same length as `parents` and `labels`.
+
+Examples: `vis.sunburst(parents, labels, opts)` or `vis.sunburst(parents, labels, values, opts)`
 
 Following `opts` are currently supported:
 - `opts.font_size`    : define font size of label (`int`)
@@ -680,10 +693,10 @@ There are two optional arguments :
 The following opts are supported:
 - `opts.height` : Height of the plot. Default : 500
 - `opts.width` : Width of the plot. Default : 500
-- `opts.directed` : whether the plot should have a arrow or not. Default : false
+- `opts.directed` : whether the plot should have an arrow or not. Default : false
 - `opts.showVertexLabels` : Whether to show vertex labels. Default : true
 - `opts.showEdgeLabels` : Whether to show edge labels. Default : false
-- `opts.scheme` : Whether all nodes shoud have "same" color or "different". Default : "same"
+- `opts.scheme` : Whether all nodes should have "same" color or "different". Default : "same"
 
 ### Customizing plots
 
@@ -741,12 +754,12 @@ This function closes a specific window. It takes input window id `win` and envir
 
 This function deletes a specified env entirely. It takes env id `eid` as input.
 
-> **Note**: `delete_env` is deletes all data for an environment and is IRREVERSIBLE. Do not use unless you absolutely want to remove an environment.
+> **Note**: `delete_env` deletes all data for an environment and is IRREVERSIBLE. Do not use unless you absolutely want to remove an environment.
 
 
 #### vis.fork_env
 
-This function forks an environment, similiar to the UI feature.
+This function forks an environment, similar to the UI feature.
 
 Arguments:
 - `prev_eid`: Environment ID that we want to fork.
