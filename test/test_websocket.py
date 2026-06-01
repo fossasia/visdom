@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
-
+# SPDX-License-Identifier: Apache-2.0
 # Copyright 2017-present, The Visdom Authors
-# All rights reserved.
-#
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
 
 import json
 import unittest
@@ -108,18 +104,23 @@ class TestPollingQueue(unittest.TestCase):
 
 class TestSubscriptionRegistration(unittest.TestCase):
     def test_duplicate_registration_is_ignored(self):
-        """open() must not register the same object twice."""
-        wrapper = _make_wrapper()
-        # The wrapper is already set up as if open() ran;
-        # manually simulate a second open() call
-        subs = wrapper.subs
-        if wrapper.sid not in subs:
-            subs[wrapper.sid] = wrapper
-        if wrapper not in list(subs.values()):
-            subs[wrapper.sid] = wrapper
+        """Calling open() twice on the same handler registers it only once."""
+        from visdom.server.handlers.socket_handlers import AnySocketHandlerOrWrapper
 
-        # Regardless of how many times we try, only one entry exists
-        self.assertEqual(len([v for v in subs.values() if v is wrapper]), 1)
+        handler = AnySocketHandlerOrWrapper.__new__(AnySocketHandlerOrWrapper)
+        handler.subs = {}
+        handler.sources = {}
+
+        with patch(
+            "visdom.server.handlers.socket_handlers.get_rand_id",
+            return_value="fixed-sid",
+        ):
+            handler.open("subs")
+            handler.open("subs")
+
+        self.assertEqual(len(handler.subs), 1)
+        self.assertIn("fixed-sid", handler.subs)
+        self.assertIs(handler.subs["fixed-sid"], handler)
 
 
 # ---------------------------------------------------------------------------
