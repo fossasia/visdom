@@ -170,8 +170,8 @@ var PlotPane = (props) => {
 
     // draw / redraw plot with layout-options
     Plotly.react(contentID, data.concat(smooth_data), content.layout, {
-      showLink: true,
-      linkText: 'Edit',
+      showLink: false,
+      displaylogo: false,
     }).then(() => {
       const plotElement = plotlyRef.current;
       if (plotElement && plotElement._fullLayout && isDisplayed(plotElement)) {
