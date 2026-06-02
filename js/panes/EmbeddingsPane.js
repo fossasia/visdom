@@ -463,7 +463,7 @@ class Scene extends React.Component {
 
   scheduleRender() {
     if (this.frameId) {
-      return; 
+      return;
     }
     this.frameId = requestAnimationFrame(this.renderFrame);
   }
