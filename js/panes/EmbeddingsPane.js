@@ -154,9 +154,8 @@ class Scene extends React.Component {
   constructor(props) {
     super(props);
 
-    this.start = this.start.bind(this);
-    this.stop = this.stop.bind(this);
-    this.animate = this.animate.bind(this);
+    this.scheduleRender = this.scheduleRender.bind(this);
+    this.renderFrame = this.renderFrame.bind(this);
   }
 
   componentDidUpdate(prevProps) {
@@ -212,10 +211,12 @@ class Scene extends React.Component {
         hoverContainer,
         circle_sprite
       );
+      this.scheduleRender();
     });
 
     view.on('mouseleave', () => {
       this.removeHighlights(hoverContainer);
+      this.scheduleRender();
     });
 
     this.raycaster = raycaster;
@@ -230,6 +231,7 @@ class Scene extends React.Component {
       let d3_transform = currentEvent.transform;
       this.lastTransform = currentEvent.transform;
       this.zoomHandler(d3_transform);
+      this.scheduleRender();
     });
     this.zoom = zoom;
 
@@ -347,7 +349,7 @@ class Scene extends React.Component {
     this.setUpMouseInteractions();
 
     this.mount.appendChild(this.renderer.domElement);
-    this.start();
+    this.scheduleRender();
   }
 
   componentWillUnmount() {
@@ -459,23 +461,25 @@ class Scene extends React.Component {
     hoverContainer.remove(...hoverContainer.children);
   }
 
-  start() {
-    if (!this.frameId) {
-      this.frameId = requestAnimationFrame(this.animate);
+  scheduleRender() {
+    if (this.frameId) {
+      return; 
+    }
+    this.frameId = requestAnimationFrame(this.renderFrame);
+  }
+
+  renderFrame() {
+    this.frameId = null;
+    if (this.renderer && this.scene && this.camera) {
+      this.renderer.render(this.scene, this.camera);
     }
   }
 
   stop() {
-    cancelAnimationFrame(this.frameId);
-  }
-
-  animate() {
-    this.renderScene();
-    this.frameId = window.requestAnimationFrame(this.animate);
-  }
-
-  renderScene() {
-    this.renderer.render(this.scene, this.camera);
+    if (this.frameId) {
+      cancelAnimationFrame(this.frameId);
+      this.frameId = null;
+    }
   }
 
   render() {
