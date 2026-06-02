@@ -1735,6 +1735,11 @@ class Visdom(object):
         - `opts.textlabels`       : text label for each point (`list`: default = `None`)
         - `opts.legend`           : `list` or `tuple` containing legend names
         """
+        if opts and opts.get("store_history") and update is not None:
+            raise ValueError(
+                "Cannot use store_history=True together with the update parameter"
+            )
+
         if update == "remove":
             assert win is not None
             assert name is not None, "A trace must be specified for deletion"
@@ -1904,9 +1909,6 @@ class Visdom(object):
                     del opts[dash]
 
         if opts.get("store_history"):
-            assert update is None, (
-                "Cannot use store_history=True together with the update parameter"
-            )
             layout = _opts2layout(opts, is3d)
             data_to_send = {
                 "data": [

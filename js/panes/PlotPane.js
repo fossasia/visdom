@@ -201,9 +201,15 @@ var PlotPane = (props) => {
   };
 
   // check if data can be smoothed
-  var contains_line_plots = content && content.data && content.data.some((data) => {
-    return data['type'] == 'scatter' && data['mode'] == 'lines';
-  });
+  var contains_line_plots =
+    content &&
+    content.data &&
+    content.data.some((data) => {
+      return (
+        data['type'] == 'scatter' &&
+        data['mode'] == 'lines'
+      );
+    });
 
   var smooth_widget_button = '';
   var smooth_widget = '';
@@ -250,7 +256,11 @@ var PlotPane = (props) => {
             value={actualSelected}
             onChange={updateHistorySlider}
           />
-          <span>&nbsp;&nbsp;{actualSelected}/{props.content.length - 1}&nbsp;&nbsp;</span>
+          <span>
+            &nbsp;&nbsp;
+            {actualSelected}/{props.content.length - 1}
+            &nbsp;&nbsp;
+          </span>
         </div>
       </div>
     );
