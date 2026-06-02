@@ -1903,6 +1903,31 @@ class Visdom(object):
                 if dash in opts:
                     del opts[dash]
 
+        if opts.get("store_history"):
+            assert update is None, (
+                "Cannot use store_history=True together with the update parameter"
+            )
+            layout = _opts2layout(opts, is3d)
+            data_to_send = {
+                "data": [
+                    {
+                        "type": "plot_history",
+                        "content": {
+                            "data": data,
+                            "layout": layout,
+                            "caption": opts.get("caption"),
+                        },
+                    }
+                ],
+                "win": win,
+                "eid": env,
+                "opts": opts,
+            }
+            endpoint = "events"
+            if win is not None and self.win_exists(win, env):
+                endpoint = "update"
+            return self._send(data_to_send, endpoint=endpoint)
+
         # Only send updates to the layout on the first plot, future updates
         # need to use `update_window_opts`
         data_to_send = {

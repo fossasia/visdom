@@ -222,7 +222,7 @@ def window(args):
         "contentID": get_rand_id(),  # to detected updated windows
     }
 
-    if ptype == "image_history" and is_visdom_type:
+    if ptype in ["image_history", "plot_history"] and is_visdom_type:
         p.update(
             {
                 "content": [args["data"][0]["content"]],
