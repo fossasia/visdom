@@ -86,7 +86,7 @@ def start_server(
         sockets = tornado.netutil.bind_sockets(port, address=bind_addr, family=family)
     except OSError as e:
         if e.errno == errno.EADDRINUSE:
-            logging.warning(f"Port {port} is already in use, assign a free port")
+            logging.warning(f"Port {port} is already in use, assigning a free port")
             sockets = tornado.netutil.bind_sockets(0, address=bind_addr, family=family)
         else:
             logging.error(f"Failed to bind to port {port}: {e}")
