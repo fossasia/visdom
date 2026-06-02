@@ -163,9 +163,8 @@ class UpdateHandler(BaseHandler):
                 p["content"].append(args["data"][0]["content"])
                 p["selected"] = len(p["content"]) - 1
             elif utype == "image_update_selected":
-                # TODO implement python client function for this
                 # Bound the update to within the dims of the array
-                selected = args["data"]
+                selected = args["data"][0]["selected"]
                 selected_not_neg = max(0, selected)
                 selected_exists = min(len(p["content"]) - 1, selected_not_neg)
                 p["selected"] = selected_exists
