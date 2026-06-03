@@ -58,10 +58,13 @@ Cypress.Commands.add('run', (name, opts) => {
 });
 
 Cypress.Commands.add('close_envs', () => {
-    cy.get('.navbar-form').then(($navbar) => {
-        const $clear = $navbar.find('.rc-tree-select-selection__clear');
-        if ($clear.length > 0) {
-            cy.wrap($clear).click({ force: true, multiple: true });
+    cy.get('body').then(($body) => {
+        const $navbar = $body.find('.navbar-form');
+        if ($navbar.length > 0) {
+            const $clear = $navbar.find('.rc-tree-select-selection__clear');
+            if ($clear.length > 0) {
+                cy.wrap($clear).click({ force: true, multiple: true });
+            }
         }
     });
 });
