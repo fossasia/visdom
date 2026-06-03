@@ -15,7 +15,7 @@ class TestImageUpdateSelected(unittest.TestCase):
         }
 
     def _args(self, index):
-        return {"data": [{"type": "image_update_selected", "content": index}]}
+        return {"data": [{"type": "image_update_selected", "selected": index}]}
 
     def _plot_pane(self):
         return {
@@ -75,14 +75,14 @@ class TestImageUpdateSelected(unittest.TestCase):
         self.assertEqual(endpoint, "update")
         self.assertEqual(msg["win"], "win_a")
         self.assertEqual(msg["data"][0]["type"], "image_update_selected")
-        self.assertEqual(msg["data"][0]["content"], 2)
-        self.assertIsInstance(msg["data"][0]["content"], int)
+        self.assertEqual(msg["data"][0]["selected"], 2)
+        self.assertIsInstance(msg["data"][0]["selected"], int)
 
     def test_client_payload_accepts_integral_float_scalars(self):
         viz = visdom.Visdom(send=False, use_incoming_socket=False)
         msg, endpoint = viz.update_image_slider("win_a", np.float32(2.0))
         self.assertEqual(endpoint, "update")
-        self.assertEqual(msg["data"][0]["content"], 2)
+        self.assertEqual(msg["data"][0]["selected"], 2)
 
     def test_client_payload_rejects_fractional_float(self):
         viz = visdom.Visdom(send=False, use_incoming_socket=False)
@@ -115,7 +115,7 @@ class TestImageUpdateSelected(unittest.TestCase):
             {
                 "win": "plot_win",
                 "eid": "main",
-                "data": [{"type": "image_update_selected", "content": 2}],
+                "data": [{"type": "image_update_selected", "selected": 2}],
             },
         )
         self.assertEqual(handler.status, 400)
@@ -140,7 +140,7 @@ class TestImageUpdateSelected(unittest.TestCase):
             {
                 "win": "image_win",
                 "eid": "main",
-                "data": [{"type": "image_update_selected", "content": 1.5}],
+                "data": [{"type": "image_update_selected", "selected": 1.5}],
             },
         )
         self.assertEqual(handler.status, 400)
@@ -152,8 +152,8 @@ class TestImageUpdateSelected(unittest.TestCase):
     def test_client_payload_coerces_numpy_array_scalar(self):
         viz = visdom.Visdom(send=False, use_incoming_socket=False)
         msg, endpoint = viz.update_image_slider("win_a", np.array(2, dtype=np.int64))
-        self.assertEqual(msg["data"][0]["content"], 2)
-        self.assertIsInstance(msg["data"][0]["content"], int)
+        self.assertEqual(msg["data"][0]["selected"], 2)
+        self.assertIsInstance(msg["data"][0]["selected"], int)
 
     def test_client_payload_rejects_numpy_array_multielement(self):
         viz = visdom.Visdom(send=False, use_incoming_socket=False)

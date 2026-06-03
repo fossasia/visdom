@@ -1562,7 +1562,7 @@ class Visdom(object):
         index = _coerce_image_slider_index(index)
         return self._send(
             {
-                "data": [{"type": "image_update_selected", "content": index}],
+                "data": [{"type": "image_update_selected", "selected": index}],
                 "win": win,
                 "eid": env,
             },

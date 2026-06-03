@@ -19,6 +19,8 @@ import uuid
 import warnings
 import os
 
+import numpy as np
+
 _seen_warnings = set()
 
 
@@ -62,6 +64,13 @@ def get_visdom_path(filename=None):
 
 def _coerce_image_slider_index(index):
     """Validate and normalize a slider index to a plain Python int."""
+    if isinstance(index, np.ndarray):
+        if index.size != 1:
+            raise TypeError("image slider index must be a single integer value")
+        index = index.item()
+    elif isinstance(index, np.generic):
+        index = index.item()
+
     if isinstance(index, bool):
         raise TypeError("image slider index must be an integer, got bool")
 
