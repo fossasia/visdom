@@ -174,6 +174,8 @@ var PlotPane = (props) => {
       linkText: 'Edit',
       doubleClick: 'reset',
       doubleClickDelay: 500,
+      showLink: false,
+      displaylogo: false,
     }).then(() => {
       const plotElement = plotlyRef.current;
       if (plotElement && plotElement._fullLayout && isDisplayed(plotElement)) {
