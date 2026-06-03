@@ -396,9 +396,9 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH, show_all=False)
                     for dataIdx, data in enumerate(destWidJson["content"]["data"]):
                         if "name" not in data:
                             break  # stop working with this plot, not right format
-                        destWidJson["content"]["data"][dataIdx]["name"] = (
-                            "{}_{}".format(eidNums[eid], data["name"])
-                        )
+                        destWidJson["content"]["data"][dataIdx][
+                            "name"
+                        ] = "{}_{}".format(eidNums[eid], data["name"])
                 else:
                     if "name" not in destWidJson["content"]["data"][0]:
                         continue  # Skip windows with unnamed data
@@ -460,7 +460,9 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH, show_all=False)
         border: 1px solid black;
     }}
     </style>
-    <table> {} </table>""".format(" ".join(tableRows))
+    <table> {} </table>""".format(
+        " ".join(tableRows)
+    )
 
     res["jsons"]["window_compare_legend"] = {
         "command": "window",
