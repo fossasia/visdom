@@ -62,9 +62,7 @@ try:
         perplexity = (
             50
             if num_entities >= 150
-            else num_entities // 3
-            if num_entities >= 21
-            else 7
+            else num_entities // 3 if num_entities >= 21 else 7
         )
         Y = bhtsne.run_bh_tsne(
             X, initial_dims=X.shape[1], perplexity=perplexity, verbose=True
@@ -473,27 +471,7 @@ def _decode_binary_arrays(obj):
 
 
 def _float_img_to_uint8(img):
-    """Convert a float image array to uint8, handling three cases:
-
-    - ``max <= 1.0``  : scale by 255 (normal [0, 1] input).
-    - ``1.0 < max <= 1.0 + eps**0.5`` : values are floating-point rounding
-      artefacts just above 1.0 (e.g. after ImageNet de-normalisation).
-      Emit a :class:`UserWarning`, clamp to [0, 1], then scale.
-    - ``max > 1.0 + eps**0.5`` : values are already in [0, 255]; clip and
-      cast directly.
-
-    ``eps`` is :func:`numpy.finfo` machine epsilon for ``img.dtype``.
-
-    Parameters
-    ----------
-    img : numpy.ndarray
-        Float array with dtype whose name contains ``"float"``.
-
-    Returns
-    -------
-    numpy.ndarray
-        ``uint8`` array with values in [0, 255].
-    """
+    """Convert a float image array to uint8."""
     tol = np.finfo(img.dtype).eps ** 0.5
     max_val = float(img.max())
     if max_val <= 1.0:
