@@ -22,7 +22,7 @@ var PlotPane = (props) => {
   const maxsmoothvalue = 100;
   const [smoothWidgetActive, setSmoothWidgetActive] = useState(false);
   const [smoothvalue, setSmoothValue] = useState(1);
-  content.layout = content.layout || {}
+  content.layout = content.layout || {};
   let layout = content.layout;
 
   // private events
