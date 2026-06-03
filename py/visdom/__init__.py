@@ -176,8 +176,11 @@ def _axisformat(xy, opts):
         "tick",
         "tickfont",
     ]
-    if any(opts.get(xy + i) for i in fields):
-        has_ticks = (opts.get(xy + "tickmin") and opts.get(xy + "tickmax")) is not None
+    if any(opts.get(xy + i) is not None for i in fields):
+        has_ticks = (
+            opts.get(xy + "tickmin") is not None
+            and opts.get(xy + "tickmax") is not None
+        )
         return {
             "type": opts.get(xy + "type"),
             "title": opts.get(xy + "label"),
@@ -205,10 +208,11 @@ def _axisformat3d(xyz, opts):
         "tick",
         "tickfont",
     ]
-    if any(opts.get(xyz + i) for i in fields):
+    if any(opts.get(xyz + i) is not None for i in fields):
         has_ticks = (
-            opts.get(xyz + "tickmin") and opts.get(xyz + "tickmax")
-        ) is not None
+            opts.get(xyz + "tickmin") is not None
+            and opts.get(xyz + "tickmax") is not None
+        )
         has_step = has_ticks and opts.get(xyz + "tickstep") is not None
         return {
             "type": opts.get(xyz + "type"),
@@ -262,6 +266,40 @@ def _opts2layout(opts, is3d=False):
         if "plotly" in layout_opts:
             layout.update(layout_opts["plotly"])
     return _scrub_dict(layout)
+
+
+def _normalize_labels(Y):
+    """
+    Normalizes arbitrary labels (int, float, string) to 1-based indices.
+    Returns:
+        Y_normalized (np.ndarray): 1-based integer labels
+        label_values (np.ndarray or None): Original unique label values, or None if Y
+                                           was already a valid set of 1-based integer labels.
+        K (int): Number of unique labels
+    """
+    Y = np.ravel(Y)
+
+    try:
+        is_integer_labels = (
+            np.issubdtype(Y.dtype, np.number)
+            and np.equal(np.mod(Y, 1), 0).all()
+            and Y.min() >= 1
+        )
+    except TypeError:
+        is_integer_labels = False
+
+    if is_integer_labels:
+        Y_normalized = Y.astype(int, copy=False)
+        K = int(Y_normalized.max())
+        label_values = None
+    else:
+        if np.issubdtype(Y.dtype, np.number):
+            assert np.isfinite(Y).all(), "labels must be finite (no NaN/Inf)"
+        label_values = np.unique(Y)
+        K = len(label_values)
+        Y_normalized = (np.searchsorted(label_values, Y) + 1).astype(int)
+
+    return Y_normalized, label_values, K
 
 
 def _markerColorCheck(mc, X, Y, L):
@@ -319,14 +357,13 @@ def _markerSizeCheck(ms, X, Y):
     if ms.shape[0] == X.shape[0]:
         return np.array(ms, dtype=float)
 
-    labels = np.unique(Y)
-    assert ms.shape[0] >= len(labels), (
+    K = int(Y.max()) if len(Y) > 0 else 0
+    assert ms.shape[0] >= K, (
         "markersize should be of size `%d` (per-point) or at least `%d` "
-        "(per-label), but got: %d" % (X.shape[0], len(labels), ms.shape[0])
+        "(per-label), but got: %d" % (X.shape[0], K, ms.shape[0])
     )
 
-    label_to_idx = {label: idx for idx, label in enumerate(labels)}
-    return np.array([ms[label_to_idx[Y[i]]] for i in range(len(Y))], dtype=float)
+    return np.array([ms[Y[i] - 1] for i in range(len(Y))], dtype=float)
 
 
 def _lineColorCheck(lc, K):
@@ -1382,10 +1419,10 @@ class Visdom(object):
 
         Y = do_tsne(features)
 
-        label_set = list(set(labels))
+        labels_normalized, _, _ = _normalize_labels(labels)
         points = [
             {
-                "group": int(label_set.index(labels[i])),
+                "group": int(labels_normalized[i] - 1),
                 "name": "Entity {}".format(i),
                 "label": labels[i],
                 "position": xy,
@@ -1798,17 +1835,16 @@ class Visdom(object):
         if Y is not None:
             Y = np.ravel(Y)
             assert X.shape[0] == Y.shape[0], "sizes of X and Y should match"
-            assert np.equal(np.mod(Y, 1), 0).all(), "labels should be integers"
-            assert Y.min() >= 1, "labels are assumed to be at least 1"
-            labels = np.unique(Y.astype(int, copy=False))
+            Y, label_values, K = _normalize_labels(Y)
+            labels = np.unique(Y)
             assert (
                 len(labels) == 1 or name is None
             ), "name should not be specified with multiple labels or lines"
-            K = int(Y.max())  # largest label
         else:
             Y = np.ones(X.shape[0], dtype=int)
             labels = np.ones(1, dtype=int)
             K = 1  # largest label
+            label_values = None  # single unlabelled trace
 
         is3d = X.shape[1] == 3
 
@@ -1867,7 +1903,12 @@ class Visdom(object):
                 elif len(labels) == 1 and name is not None:
                     trace_name = name
                 else:
-                    trace_name = str(k)
+                    # For float-remapped labels show the original value;
+                    # for integer labels keep existing str(k) behaviour.
+                    if label_values is not None:
+                        trace_name = str(label_values[k - 1])
+                    else:
+                        trace_name = str(k)
                 use_gl = opts.get("webgl", False)
                 _data = {
                     "x": nan2none(X.take(0, 1)[ind].tolist()),
