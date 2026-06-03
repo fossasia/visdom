@@ -47,21 +47,6 @@ class BaseHandler(tornado.web.RequestHandler):
         self.include_host = False
         super(BaseHandler, self).__init__(*request, **kwargs)
 
-    def set_default_headers(self):
-        super().set_default_headers()
-        self.set_header(
-            "Content-Security-Policy",
-            "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
-            "style-src 'self' 'unsafe-inline'; "
-            "connect-src 'self' ws: wss:; "
-            "img-src 'self' data: blob:; "
-            "media-src 'self' data: blob:; "
-            "font-src 'self' data:; "
-            "object-src 'none'; "
-            "base-uri 'self';",
-        )
-
     def get_current_user(self):
         """
         This method determines the self.current_user
