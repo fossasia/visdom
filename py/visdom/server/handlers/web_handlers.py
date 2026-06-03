@@ -112,24 +112,34 @@ class UpdateHandler(BaseHandler):
         return p, patch.patch
 
     @staticmethod
+    def update_embeddings_packet(p, args):
+        update_type = args["data"]["update_type"]
+        if update_type == "EntitySelected":
+            selected = args["data"]["selected"]
+            p["content"]["selected"] = selected
+            # `selected` may not exist yet on the first selection, so use "add"
+            # (which also overwrites when the key is already present).
+            return [{"op": "add", "path": "/content/selected", "value": selected}]
+        if update_type == "RegionSelected":
+            old_data = p["content"]["data"]
+            new_data = args["data"]["points"]
+            p["old_content"].append(old_data)
+            p["content"]["data"] = new_data
+            p["content"]["has_previous"] = True
+            p["content"]["selected"] = None
+            return [
+                {"op": "add", "path": "/old_content/-", "value": old_data},
+                {"op": "replace", "path": "/content/data", "value": new_data},
+                {"op": "replace", "path": "/content/has_previous", "value": True},
+                {"op": "add", "path": "/content/selected", "value": None},
+            ]
+        return []
+
+    @staticmethod
     def update(p, args):
         # Update text in window, separated by a line break
         if p["type"] == "text":
             p["content"] += "<br>" + args["data"][0]["content"]
-            return p
-        if p["type"] == "embeddings":
-            # TODO embeddings updates should be handled outside of the regular
-            # update flow, as update packets are easy to create manually and
-            # expensive to calculate otherwise
-            if args["data"]["update_type"] == "EntitySelected":
-                p["content"]["selected"] = args["data"]["selected"]
-            elif args["data"]["update_type"] == "RegionSelected":
-                p["content"]["selected"] = None
-                print(len(p["content"]["data"]))
-                p["old_content"].append(p["content"]["data"])
-                p["content"]["has_previous"] = True
-                p["content"]["data"] = args["data"]["points"]
-                print(len(p["content"]["data"]))
             return p
         if p["type"] == "image_history":
             utype = args["data"][0]["type"]
@@ -337,6 +347,19 @@ class UpdateHandler(BaseHandler):
                     else "empty"
                 )
             )
+            return
+
+        if p["type"] == "embeddings":
+            diff_packet = UpdateHandler.update_embeddings_packet(p, args)
+            broadcast_packet = {
+                "command": "window_update",
+                "win": args["win"],
+                "eid": eid,
+                "content": diff_packet,
+                "version": p.get("version", 1),
+            }
+            broadcast(handler, broadcast_packet, eid)
+            handler.write(p["id"])
             return
 
         p, diff_packet = UpdateHandler.update_packet(p, args)
