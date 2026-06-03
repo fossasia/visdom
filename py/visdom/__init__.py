@@ -1469,6 +1469,27 @@ class Visdom(object):
             endpoint=endpoint,
         )
 
+    def image_select(self, win, selected, env=None):
+        """
+        Set the selected frame index in an image_history window.
+
+        This function updates which frame is currently displayed in a window
+        that was created with ``opts=dict(store_history=True)`` via the
+        `image` function.
+        """
+        assert win is not None, "Must specify a window"
+        assert isinstance(selected, int), "selected must be an integer"
+
+        data = [{"type": "image_update_selected", "selected": selected}]
+        return self._send(
+            {
+                "data": data,
+                "win": win,
+                "eid": env,
+            },
+            endpoint="update",
+        )
+
     @pytorch_wrap
     def images(self, tensor, nrow=8, padding=2, win=None, env=None, opts=None):
         """
