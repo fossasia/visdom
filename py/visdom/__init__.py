@@ -62,7 +62,9 @@ try:
         perplexity = (
             50
             if num_entities >= 150
-            else num_entities // 3 if num_entities >= 21 else 7
+            else num_entities // 3
+            if num_entities >= 21
+            else 7
         )
         Y = bhtsne.run_bh_tsne(
             X, initial_dims=X.shape[1], perplexity=perplexity, verbose=True
@@ -512,7 +514,7 @@ def _float_img_to_uint8(img):
     tol = np.finfo(img.dtype).eps ** 0.5
     max_val = float(img.max())
     if max_val <= 1.0:
-        return np.uint8(img * 255.0)
+        return np.uint8(np.clip(img, 0.0, 1.0) * 255.0)
     if max_val <= 1.0 + tol:
         warnings.warn(
             "Image has float values slightly above 1.0 "
@@ -522,7 +524,7 @@ def _float_img_to_uint8(img):
             stacklevel=2,
         )
         return np.uint8(np.clip(img, 0.0, 1.0) * 255.0)
-    return np.uint8(np.clip(img, 0.0, 255.0))
+    return np.uint8(img)
 
 
 class Visdom(object):
