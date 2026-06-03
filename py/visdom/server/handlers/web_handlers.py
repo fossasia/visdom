@@ -798,6 +798,8 @@ class UploadEnvHandler(BaseHandler):
                 "message": f"Dashboard loaded successfully as '{new_eid}'",
             }
         )
+
+
 class HealthHandler(BaseHandler):
     def get(self):
         self.write({"status": "ok"})
