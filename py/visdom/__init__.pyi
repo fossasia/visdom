@@ -223,3 +223,10 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
+    def violin(
+        self,
+        X: Tensor,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
