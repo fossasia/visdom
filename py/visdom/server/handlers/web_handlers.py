@@ -139,9 +139,7 @@ class UpdateHandler(BaseHandler):
             elif utype == "image_update_selected":
                 if not p["content"]:
                     return p
-                selected = _coerce_image_slider_index(
-                    args["data"][0]["selected"]
-                )
+                selected = _coerce_image_slider_index(args["data"][0]["selected"])
                 selected = min(max(0, selected), len(p["content"]) - 1)
                 p["selected"] = selected
             return p
