@@ -951,6 +951,24 @@ class Visdom(object):
         else:
             return json.loads(self._send({}, endpoint="env_state", quiet=True))
 
+    def get_env_state(self, env):
+        """
+        This function returns the state of a specific environment,
+        containing all window data as a dict of {window_id: window_json}.
+
+        Returns None if the environment does not exist.
+        """
+        assert isinstance(env, str), "env should be a string"
+        if self.offline:
+            return None
+        response = self._send({"eid": env}, endpoint="env_state", quiet=True)
+        if response is False:
+            return None
+        parsed = json.loads(response)
+        if isinstance(parsed, dict) and "error" in parsed:
+            return None
+        return parsed
+
     def win_exists(self, win, env=None):
         """
         This function returns a bool indicating whether
