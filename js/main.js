@@ -873,6 +873,10 @@ const App = () => {
     });
 
     const validIds = sortedIds.filter((id) => paneData[id]);
+    if (validIds.length === 0) {
+      alert('No panes available to export.');
+      return;
+    }
 
     const html = buildExportHtml(title, paneData, validIds);
 
