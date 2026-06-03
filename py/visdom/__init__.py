@@ -2814,3 +2814,117 @@ class Visdom(object):
         return self._send(
             {"data": data, "win": win, "eid": env, "opts": opts}, endpoint="events"
         )
+
+    @pytorch_wrap
+    def violin(self, X, win=None, env=None, opts=None):
+        """
+        This function draws violin plots of the specified data. It takes
+        input `N` or `NxM` tensor `X` that specifies the `N` data values
+        of which to construct the `M` violin plots.
+
+        The following plot-specific `opts` are currently supported:
+
+        - `opts.legend` : labels for each of the columns in `X`
+        - `opts.showbox` : overlay a mini box plot inside the violin
+                                  (`bool` and default = `True`)
+        - `opts.showmeanline` : overlay the mean line (`bool` and default = `True`)
+        - `opts.points` : which raw points to show alongside the violin
+                                  One of `all`, `outliers`,
+                                  `suspectedoutliers`, or `False`
+                                  (default = `False`)
+        - `opts.jitter` : amount of jitter applied to displayed points
+                                  (`float` in `[0, 1]`, default = `0.3`)
+        - `opts.orientation` : `v` for vertical and `h` for horizontal
+                                  violins
+        - `opts.bandwidth` : bandwidth of the kernel density estimate
+                                  `None` lets Plotly choose automatically
+        - `opts.side` : which side of the centre line to draw.
+                                  One of `both` , `positive`,
+                                  or `negative`
+        """
+
+        X = np.asarray(X)
+        if X.ndim > 2:
+            X = np.squeeze(X)
+        assert X.ndim == 1 or X.ndim == 2, "X should be one or two-dimensional"
+        if X.ndim == 1:
+            X = X[:, None]
+
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        if opts.get("legend") is not None:
+            assert (
+                len(opts["legend"]) == X.shape[1]
+            ), "number of legend labels must match number of columns in X"
+
+        showbox = opts.get("showbox", True)
+        showmeanline = opts.get("showmeanline", True)
+        points = opts.get("points", False)
+        jitter = opts.get("jitter", 0.3)
+        orientation = opts.get("orientation", "v")
+        bandwidth = opts.get("bandwidth", None)
+        side = opts.get("side", "both")
+
+        assert orientation in (
+            "v",
+            "h",
+        ), "opts.orientation must be 'v' (vertical) or 'h' (horizontal)"
+        assert side in (
+            "both",
+            "positive",
+            "negative",
+        ), "opts.side must be one of 'both', 'positive', or 'negative'"
+        assert points in ("all", "outliers", "suspectedoutliers", False), (
+            "opts.points must be one of 'all', 'outliers', "
+            "'suspectedoutliers', or False"
+        )
+        if jitter is not None:
+            assert (
+                isnum(jitter) and 0 <= jitter <= 1
+            ), "opts.jitter must be a float between 0 and 1"
+        if bandwidth is not None:
+            assert (
+                isnum(bandwidth) and bandwidth > 0
+            ), "opts.bandwidth must be a positive number"
+
+        data = []
+        for k in range(X.shape[1]):
+            col_data = X.take(k, 1).tolist()
+            label = opts["legend"][k] if opts.get("legend") else "column " + str(k)
+
+            trace = {
+                "type": "violin",
+                "name": label,
+                "box": {"visible": showbox},
+                "meanline": {"visible": showmeanline},
+                "points": points,
+                "side": side,
+            }
+            if jitter is not None:
+                trace["jitter"] = jitter
+
+            if orientation == "v":
+                trace["y"] = col_data
+            else:
+                trace["x"] = col_data
+                trace["orientation"] = "h"
+
+            if bandwidth is not None:
+                trace["bandwidth"] = bandwidth
+
+            if opts.get("opacity") is not None:
+                trace["opacity"] = opts["opacity"]
+
+            data.append(trace)
+
+        return self._send(
+            {
+                "data": data,
+                "win": win,
+                "eid": env,
+                "layout": _opts2layout(opts),
+                "opts": opts,
+            }
+        )
