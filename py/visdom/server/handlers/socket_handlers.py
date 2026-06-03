@@ -182,7 +182,10 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
             if len(p["old_content"]) == 0:
                 p["content"]["has_previous"] = False
             p["contentID"] = get_rand_id()
-            broadcast(self, p, eid)
+            # Attach eid so the frontend can filter stale messages after env switch.
+            broadcast_msg = dict(p)
+            broadcast_msg["eid"] = eid
+            broadcast(self, broadcast_msg, eid)
 
 
 class AnySocketWrapper(AnySocketHandlerOrWrapper):

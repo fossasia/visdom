@@ -11,6 +11,7 @@ const basic_examples = [
     ["Surface Plot", "plot_surface_basic"],
     ["Box Plot", "plot_special_boxplot"],
     ["Quiver Plot", "plot_special_quiver"],
+    ["Violin Plot", "plot_violin_basic"],
     // ["Mesh Plot", "plot_special_mesh"], // disabled due to webgl
     ["Graph Plot", "plot_special_graph"],
     ["Matplotlib Plot", "misc_plot_matplot"],

@@ -526,7 +526,9 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
     jsons = list(env.get("jsons", {}).values())
     windows = sorted(jsons, key=lambda k: ("i" not in k, k.get("i", None)))
     for v in windows:
-        socket.write_message(v)
+        msg = dict(v)
+        msg["eid"] = eid
+        socket.write_message(msg)
 
     socket.write_message(json.dumps({"command": "layout"}))
     socket.eid = eid
@@ -558,7 +560,9 @@ def register_window(self, p, eid):
 
     env[p["id"]] = p
 
-    broadcast(self, p, eid)
+    broadcast_msg = dict(p)
+    broadcast_msg["eid"] = eid
+    broadcast(self, broadcast_msg, eid)
     if is_new_env:
         broadcast_envs(self)
     self.write(p["id"])

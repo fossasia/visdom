@@ -368,12 +368,14 @@ class UpdateHandler(BaseHandler):
         p, diff_packet = UpdateHandler.update_packet(p, args)
         # send the smaller of the patch and the updated pane
         if len(stringify(p)) <= len(stringify(diff_packet)):
-            broadcast(handler, p, eid)
+            broadcast_msg = dict(p)
+            broadcast_msg["eid"] = eid
+            broadcast(handler, broadcast_msg, eid)
         else:
             broadcast_packet = {
                 "command": "window_update",
                 "win": args["win"],
-                "env": eid,
+                "eid": eid,
                 "content": diff_packet,
                 "version": p.get("version", 1),
             }
