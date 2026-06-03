@@ -472,6 +472,44 @@ def _decode_binary_arrays(obj):
     return obj
 
 
+def _float_img_to_uint8(img):
+    """Convert a float image array to uint8, handling three cases:
+
+    - ``max <= 1.0``  : scale by 255 (normal [0, 1] input).
+    - ``1.0 < max <= 1.0 + eps**0.5`` : values are floating-point rounding
+      artefacts just above 1.0 (e.g. after ImageNet de-normalisation).
+      Emit a :class:`UserWarning`, clamp to [0, 1], then scale.
+    - ``max > 1.0 + eps**0.5`` : values are already in [0, 255]; clip and
+      cast directly.
+
+    ``eps`` is :func:`numpy.finfo` machine epsilon for ``img.dtype``.
+
+    Parameters
+    ----------
+    img : numpy.ndarray
+        Float array with dtype whose name contains ``"float"``.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``uint8`` array with values in [0, 255].
+    """
+    tol = np.finfo(img.dtype).eps ** 0.5
+    max_val = float(img.max())
+    if max_val <= 1.0:
+        return np.uint8(img * 255.0)
+    if max_val <= 1.0 + tol:
+        warnings.warn(
+            "Image has float values slightly above 1.0 "
+            "(max={:.6f}). Values will be clamped to "
+            "[0, 1] and scaled to [0, 255].".format(max_val),
+            UserWarning,
+            stacklevel=2,
+        )
+        return np.uint8(np.clip(img, 0.0, 1.0) * 255.0)
+    return np.uint8(np.clip(img, 0.0, 255.0))
+
+
 class Visdom(object):
     def __init__(
         self,
@@ -1441,9 +1479,7 @@ class Visdom(object):
         )
 
         if "float" in str(img.dtype):
-            if img.max() <= 1:
-                img = img * 255.0
-            img = np.uint8(img)
+            img = _float_img_to_uint8(img)
 
         img = np.transpose(img, (1, 2, 0))
         if nchannels == 4:
