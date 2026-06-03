@@ -429,9 +429,17 @@ class DeleteEnvHandler(BaseHandler):
 class EnvStateHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
-        # TODO if an env is provided return the state of that env
-        all_eids = list(handler.state.keys())
-        handler.write(json.dumps(all_eids))
+        eid = args.get("eid")
+        if eid is not None:
+            eid = escape_eid(str(eid))
+            if eid not in handler.state:
+                handler.set_status(404)
+                handler.write(json.dumps({"error": "env '{}' not found".format(eid)}))
+                return
+            handler.write(json.dumps(handler.state[eid]["jsons"]))
+        else:
+            all_eids = list(handler.state.keys())
+            handler.write(json.dumps(all_eids))
 
     @check_auth
     def post(self):
