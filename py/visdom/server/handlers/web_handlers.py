@@ -313,6 +313,17 @@ class UpdateHandler(BaseHandler):
         return p
 
     @staticmethod
+    def broadcast_window_update(handler, args, eid, p, diff_packet):
+        broadcast_packet = {
+            "command": "window_update",
+            "win": args["win"],
+            "eid": eid,
+            "content": diff_packet,
+            "version": p.get("version", 1),
+        }
+        broadcast(handler, broadcast_packet, eid)
+
+    @staticmethod
     def wrap_func(handler, args):
         eid = extract_eid(args)
 
@@ -351,14 +362,7 @@ class UpdateHandler(BaseHandler):
 
         if p["type"] == "embeddings":
             diff_packet = UpdateHandler.update_embeddings_packet(p, args)
-            broadcast_packet = {
-                "command": "window_update",
-                "win": args["win"],
-                "eid": eid,
-                "content": diff_packet,
-                "version": p.get("version", 1),
-            }
-            broadcast(handler, broadcast_packet, eid)
+            UpdateHandler.broadcast_window_update(handler, args, eid, p, diff_packet)
             handler.write(p["id"])
             return
 
@@ -369,14 +373,7 @@ class UpdateHandler(BaseHandler):
             broadcast_msg["eid"] = eid
             broadcast(handler, broadcast_msg, eid)
         else:
-            broadcast_packet = {
-                "command": "window_update",
-                "win": args["win"],
-                "eid": eid,
-                "content": diff_packet,
-                "version": p.get("version", 1),
-            }
-            broadcast(handler, broadcast_packet, eid)
+            UpdateHandler.broadcast_window_update(handler, args, eid, p, diff_packet)
         handler.write(p["id"])
 
     @check_auth
