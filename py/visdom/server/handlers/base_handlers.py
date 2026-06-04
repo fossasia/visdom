@@ -12,6 +12,7 @@ Contain the basic web request handlers that all other handlers derive from
 
 import logging
 import traceback
+import http.client
 
 import tornado.web
 import tornado.websocket
@@ -42,6 +43,24 @@ class BaseHandler(tornado.web.RequestHandler):
     request handlers, and contains any convenient shared logic helpers.
     """
 
+    def initialize(self, app=None):
+        """Common initialization shared by most handlers.
+
+        Copies frequently-used attributes from the application instance.
+        Subclasses that need additional attributes should call
+        ``super().initialize(app)`` and then set their own.
+
+        The ``app`` parameter defaults to ``None`` so that handlers
+        registered without an ``app`` dict (e.g. HealthHandler) still work.
+        """
+        if app is not None:
+            self.state = app.state
+            self.subs = app.subs
+            self.sources = app.sources
+            self.port = app.port
+            self.env_path = app.env_path
+            self.login_enabled = app.login_enabled
+
     def __init__(self, *request, **kwargs):
         self.include_host = False
         super(BaseHandler, self).__init__(*request, **kwargs)
@@ -63,7 +82,8 @@ class BaseHandler(tornado.web.RequestHandler):
             logging.info(
                 "Traceback: {}".format(traceback.format_exception(*kwargs["exc_info"]))
             )
-        if self.settings.get("debug") and "exc_info" in kwargs:
+            debug = self.settings.get("debug")
+            title = http.client.responses.get(status_code, "Unknown Error")
             logging.error("rendering error page")
             exc_info = kwargs["exc_info"]
             # exc_info is a tuple consisting of:
@@ -72,13 +92,22 @@ class BaseHandler(tornado.web.RequestHandler):
             # 3. The traceback opbject
             try:
                 params = {
-                    "error": exc_info[1],
-                    "trace_info": traceback.format_exception(*exc_info),
-                    "request": self.request.__dict__,
+                    "error": exc_info[1] if debug else None,
+                    "trace_info": traceback.format_exception(*exc_info)
+                    if debug
+                    else None,
+                    "request": self.request.__dict__ if debug else None,
+                    "status_code": status_code,
+                    "title": title,
                 }
-
-                # TODO make an error.html page
                 self.render("error.html", **params)
                 logging.error("rendering complete")
+                return
             except Exception as e:
                 logging.error(e)
+            self.set_status(status_code)
+            self.write(
+                f"""
+                <h1>{status_code} - {title}</h1>
+                """
+            )
