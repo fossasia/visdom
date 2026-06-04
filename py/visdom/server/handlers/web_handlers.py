@@ -53,19 +53,9 @@ from visdom.server.handlers.base_handlers import BaseHandler
 
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
-# TODO move generalized initialization logic from these handlers into the
-# basehandler
 # TODO abstract out any direct references to the app where possible from
 # all handlers. Can instead provide accessor functions on the state?
 class PostHandler(BaseHandler):
-    def initialize(self, app):
-        self.state = app.state
-        self.subs = app.subs
-        self.sources = app.sources
-        self.port = app.port
-        self.env_path = app.env_path
-        self.login_enabled = app.login_enabled
-
     @check_auth
     def post(self):
         req = tornado.escape.json_decode(
@@ -87,14 +77,6 @@ class PostHandler(BaseHandler):
 
 
 class ExistsHandler(BaseHandler):
-    def initialize(self, app):
-        self.state = app.state
-        self.subs = app.subs
-        self.sources = app.sources
-        self.port = app.port
-        self.env_path = app.env_path
-        self.login_enabled = app.login_enabled
-
     @staticmethod
     def wrap_func(handler, args):
         eid = extract_eid(args)
@@ -112,14 +94,6 @@ class ExistsHandler(BaseHandler):
 
 
 class UpdateHandler(BaseHandler):
-    def initialize(self, app):
-        self.state = app.state
-        self.subs = app.subs
-        self.sources = app.sources
-        self.port = app.port
-        self.env_path = app.env_path
-        self.login_enabled = app.login_enabled
-
     @staticmethod
     def update_packet(p, args):
         # Shallow copy the packet to dynamically capture changes to top-level keys.
@@ -295,7 +269,7 @@ class UpdateHandler(BaseHandler):
         # Update traces
         for n, idx in enumerate(idxs):
             if all(
-                math.isnan(i) or math.isinf(i) or i is None for i in new_data[n]["x"]
+                i is None or math.isnan(i) or math.isinf(i) for i in new_data[n]["x"]
             ):
                 continue
             # handle data for plotting
@@ -368,12 +342,14 @@ class UpdateHandler(BaseHandler):
         p, diff_packet = UpdateHandler.update_packet(p, args)
         # send the smaller of the patch and the updated pane
         if len(stringify(p)) <= len(stringify(diff_packet)):
-            broadcast(handler, p, eid)
+            broadcast_msg = dict(p)
+            broadcast_msg["eid"] = eid
+            broadcast(handler, broadcast_msg, eid)
         else:
             broadcast_packet = {
                 "command": "window_update",
                 "win": args["win"],
-                "env": eid,
+                "eid": eid,
                 "content": diff_packet,
                 "version": p.get("version", 1),
             }
@@ -392,14 +368,6 @@ class UpdateHandler(BaseHandler):
 
 
 class CloseHandler(BaseHandler):
-    def initialize(self, app):
-        self.state = app.state
-        self.subs = app.subs
-        self.sources = app.sources
-        self.port = app.port
-        self.env_path = app.env_path
-        self.login_enabled = app.login_enabled
-
     @staticmethod
     def wrap_func(handler, args):
         eid = extract_eid(args)
@@ -419,14 +387,6 @@ class CloseHandler(BaseHandler):
 
 
 class DeleteEnvHandler(BaseHandler):
-    def initialize(self, app):
-        self.state = app.state
-        self.subs = app.subs
-        self.sources = app.sources
-        self.port = app.port
-        self.env_path = app.env_path
-        self.login_enabled = app.login_enabled
-
     @staticmethod
     def wrap_func(handler, args):
         eid = args.get("eid")
@@ -467,16 +427,19 @@ class DeleteEnvHandler(BaseHandler):
 
 
 class EnvStateHandler(BaseHandler):
-    def initialize(self, app):
-        self.app = app
-        self.state = app.state
-        self.login_enabled = app.login_enabled
-
     @staticmethod
     def wrap_func(handler, args):
-        # TODO if an env is provided return the state of that env
-        all_eids = list(handler.state.keys())
-        handler.write(json.dumps(all_eids))
+        eid = args.get("eid")
+        if eid is not None:
+            eid = escape_eid(str(eid))
+            if eid not in handler.state:
+                handler.set_status(404)
+                handler.write(json.dumps({"error": "env '{}' not found".format(eid)}))
+                return
+            handler.write(json.dumps(handler.state[eid]["jsons"]))
+        else:
+            all_eids = list(handler.state.keys())
+            handler.write(json.dumps(all_eids))
 
     @check_auth
     def post(self):
@@ -487,21 +450,15 @@ class EnvStateHandler(BaseHandler):
 
 
 class ForkEnvHandler(BaseHandler):
-    def initialize(self, app):
-        self.app = app
-        self.state = app.state
-        self.subs = app.subs
-        self.login_enabled = app.login_enabled
-
     @staticmethod
     def wrap_func(handler, args):
         prev_eid = escape_eid(args.get("prev_eid"))
         eid = escape_eid(args.get("eid"))
 
-        assert prev_eid in handler.state, "env to be forked doesn't exit"
+        assert prev_eid in handler.state, "env to be forked doesn't exist"
 
         handler.state[eid] = copy.deepcopy(handler.state[prev_eid])
-        serialize_env(handler.state, [eid], env_path=handler.app.env_path)
+        serialize_env(handler.state, [eid], env_path=handler.env_path)
         broadcast_envs(handler)
 
         handler.write(eid)
@@ -516,12 +473,7 @@ class ForkEnvHandler(BaseHandler):
 
 class EnvHandler(BaseHandler):
     def initialize(self, app):
-        self.state = app.state
-        self.subs = app.subs
-        self.sources = app.sources
-        self.port = app.port
-        self.env_path = app.env_path
-        self.login_enabled = app.login_enabled
+        super().initialize(app)
         self.wrap_socket = app.wrap_socket
 
     @check_auth
@@ -551,11 +503,7 @@ class EnvHandler(BaseHandler):
 
 class CompareHandler(BaseHandler):
     def initialize(self, app):
-        self.state = app.state
-        self.subs = app.subs
-        self.sources = app.sources
-        self.env_path = app.env_path
-        self.login_enabled = app.login_enabled
+        super().initialize(app)
         self.wrap_socket = app.wrap_socket
 
     @check_auth
@@ -583,14 +531,6 @@ class CompareHandler(BaseHandler):
 
 
 class SaveHandler(BaseHandler):
-    def initialize(self, app):
-        self.state = app.state
-        self.subs = app.subs
-        self.sources = app.sources
-        self.port = app.port
-        self.env_path = app.env_path
-        self.login_enabled = app.login_enabled
-
     @staticmethod
     def wrap_func(handler, args):
         envs = args["data"]
@@ -608,13 +548,6 @@ class SaveHandler(BaseHandler):
 
 
 class DataHandler(BaseHandler):
-    def initialize(self, app):
-        self.state = app.state
-        self.subs = app.subs
-        self.port = app.port
-        self.env_path = app.env_path
-        self.login_enabled = app.login_enabled
-
     @staticmethod
     def wrap_func(handler, args):
         eid = extract_eid(args)
@@ -652,10 +585,7 @@ class DataHandler(BaseHandler):
 
 class IndexHandler(BaseHandler):
     def initialize(self, app):
-        self.state = app.state
-        self.port = app.port
-        self.env_path = app.env_path
-        self.login_enabled = app.login_enabled
+        super().initialize(app)
         self.user_credential = app.user_credential
         self.base_url = app.base_url if app.base_url != "" else "/"
         self.wrap_socket = app.wrap_socket
@@ -695,6 +625,7 @@ class IndexHandler(BaseHandler):
 
 class UserSettingsHandler(BaseHandler):
     def initialize(self, app):
+        super().initialize(app)
         self.user_settings = app.user_settings
 
     def get(self, path):
