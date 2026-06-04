@@ -860,6 +860,63 @@ class Visdom(object):
             create=False,
         )
 
+    @pytorch_wrap
+    def roc(self, y_true, y_score, win=None, env=None, opts=None, name=None):
+        """
+        Plot a ROC curve given true binary labels and score/probability values.
+
+        Parameters
+        - y_true: 1D array-like of binary labels (0/1 or False/True)
+        - y_score: 1D array-like of scores or probabilities for the positive class
+        - win: optional window id
+        - env: environment id
+        - opts: dict of plot options passed to `line` (title, legend, etc.)
+        - name: optional trace name
+
+        The implementation computes false positive rate (FPR) and true
+        positive rate (TPR) at different thresholds and uses the existing
+        `line` API to render the ROC curve. This keeps the code simple and
+        consistent with the rest of the codebase.
+        """
+        y_true = np.asarray(y_true)
+        y_score = np.asarray(y_score)
+        assert y_true.ndim == 1 and y_score.ndim == 1, "y_true and y_score must be 1D"
+        assert y_true.shape[0] == y_score.shape[0], "y_true and y_score must have same length"
+
+        # Ensure binary labels are 0/1
+        unique = np.unique(y_true)
+        assert set(unique.tolist()).issubset({0, 1, True, False}), "y_true must be binary (0/1)"
+        y_true = y_true.astype(int)
+
+        # Sort scores descending and compute TPR/FPR
+        desc_idx = np.argsort(-y_score)
+        y_true_sorted = y_true[desc_idx]
+        # cumulative sums of positives and negatives
+        P = y_true.sum()
+        N = y_true.shape[0] - P
+        if P == 0 or N == 0:
+            raise AssertionError("y_true must contain both positive and negative samples")
+
+        tp_cum = np.cumsum(y_true_sorted)
+        fp_cum = np.cumsum(1 - y_true_sorted)
+
+        tpr = tp_cum / float(P)
+        fpr = fp_cum / float(N)
+
+        # prepend (0,0)
+        tpr = np.concatenate(([0.0], tpr))
+        fpr = np.concatenate(([0.0], fpr))
+
+        # Make a line plot: X = fpr, Y = tpr
+        X = np.column_stack((fpr, tpr))
+        opts = {} if opts is None else opts
+        opts = dict(opts)
+        opts.setdefault("title", opts.get("title", "ROC Curve"))
+        opts.setdefault("legend", [name] if name is not None else None)
+        opts.setdefault("markers", True)
+
+        return self.line(Y=tpr, X=fpr, win=win, env=env, opts=opts, name=name)
+
     def delete_envs(self, env_list):
         """This function deletes a list of environments."""
         if not isinstance(env_list, list):
