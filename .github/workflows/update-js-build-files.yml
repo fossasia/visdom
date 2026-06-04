@@ -33,6 +33,6 @@ jobs:
           git add -f py/visdom/static/js/main.js py/visdom/static/js/main.js.map
           git diff --cached --quiet && echo "No changes to commit" && exit 0
           git commit -m "update static/js files"
-          git pull --rebase
+          git pull --rebase --autostash
           git push
 
