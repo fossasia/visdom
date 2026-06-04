@@ -299,10 +299,11 @@ button[title="smooth lines"].active {
     color: red;
 }
 
-.react-grid-item{
+.react-grid-item {
   min-height: 14px;
   min-width: fit-content;
-  
+}
+
 .env-arrow-wrapper {
   position: absolute;
   top: 0;
