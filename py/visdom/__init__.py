@@ -25,6 +25,7 @@ except ImportError:
 import math
 import re
 import base64
+import binascii
 import numpy as np  # type: ignore
 from PIL import Image  # type: ignore
 import base64 as b64  # type: ignore
@@ -36,6 +37,7 @@ import time
 import errno
 from io import BytesIO, StringIO
 from functools import wraps
+import html
 
 try:
     import bs4  # type: ignore
@@ -127,7 +129,7 @@ def nan2none(l):
     for idx, val in enumerate(l):
         if isinstance(val, Sequence):
             l[idx] = nan2none(l[idx])
-        elif isnum(val) and math.isnan(val):
+        elif isnum(val) and (math.isnan(val) or math.isinf(val)):
             l[idx] = None
     return l
 
@@ -145,7 +147,7 @@ def _title2str(opts):
     if opts.get("title"):
         if isnum(opts.get("title")):
             title = str(opts.get("title"))
-            logger.warn("Numerical title %s has been casted to a string" % title)
+            logger.warning("Numerical title %s has been cast to a string" % title)
             opts["title"] = title
             return opts
         else:
@@ -174,14 +176,19 @@ def _axisformat(xy, opts):
         "tick",
         "tickfont",
     ]
-    if any(opts.get(xy + i) for i in fields):
-        has_ticks = (opts.get(xy + "tickmin") and opts.get(xy + "tickmax")) is not None
+    if any(opts.get(xy + i) is not None for i in fields):
+        has_ticks = (
+            opts.get(xy + "tickmin") is not None
+            and opts.get(xy + "tickmax") is not None
+        )
         return {
             "type": opts.get(xy + "type"),
             "title": opts.get(xy + "label"),
-            "range": [opts.get(xy + "tickmin"), opts.get(xy + "tickmax")]
-            if has_ticks
-            else None,
+            "range": (
+                [opts.get(xy + "tickmin"), opts.get(xy + "tickmax")]
+                if has_ticks
+                else None
+            ),
             "tickvals": opts.get(xy + "tickvals"),
             "ticktext": opts.get(xy + "ticklabels"),
             "dtick": opts.get(xy + "tickstep"),
@@ -201,25 +208,30 @@ def _axisformat3d(xyz, opts):
         "tick",
         "tickfont",
     ]
-    if any(opts.get(xyz + i) for i in fields):
+    if any(opts.get(xyz + i) is not None for i in fields):
         has_ticks = (
-            opts.get(xyz + "tickmin") and opts.get(xyz + "tickmax")
-        ) is not None
+            opts.get(xyz + "tickmin") is not None
+            and opts.get(xyz + "tickmax") is not None
+        )
         has_step = has_ticks and opts.get(xyz + "tickstep") is not None
         return {
             "type": opts.get(xyz + "type"),
             "title": opts.get(xyz + "label"),
-            "range": [opts.get(xyz + "tickmin"), opts.get(xyz + "tickmax")]
-            if has_ticks
-            else None,
+            "range": (
+                [opts.get(xyz + "tickmin"), opts.get(xyz + "tickmax")]
+                if has_ticks
+                else None
+            ),
             "tickvals": opts.get(xyz + "tickvals"),
             "ticktext": opts.get(xyz + "ticklabels"),
             "nticks": (
-                (opts.get(xyz + "tickmax") - opts.get(xyz + "tickmin"))
-                / opts.get(xyz + "tickstep")
-            )
-            if has_step
-            else None,
+                (
+                    (opts.get(xyz + "tickmax") - opts.get(xyz + "tickmin"))
+                    / opts.get(xyz + "tickstep")
+                )
+                if has_step
+                else None
+            ),
             "tickfont": opts.get(xyz + "tickfont"),
         }
 
@@ -253,21 +265,61 @@ def _opts2layout(opts, is3d=False):
     if layout_opts is not None:
         if "plotly" in layout_opts:
             layout.update(layout_opts["plotly"])
-
     return _scrub_dict(layout)
+
+
+def _normalize_labels(Y):
+    """
+    Normalizes arbitrary labels (int, float, string) to 1-based indices.
+    Returns:
+        Y_normalized (np.ndarray): 1-based integer labels
+        label_values (np.ndarray or None): Original unique label values, or None if Y
+                                           was already a valid set of 1-based integer labels.
+        K (int): Number of unique labels
+    """
+    Y = np.ravel(Y)
+
+    try:
+        is_integer_labels = (
+            np.issubdtype(Y.dtype, np.number)
+            and np.equal(np.mod(Y, 1), 0).all()
+            and Y.min() >= 1
+        )
+    except TypeError:
+        is_integer_labels = False
+
+    if is_integer_labels:
+        Y_normalized = Y.astype(int, copy=False)
+        K = int(Y_normalized.max())
+        label_values = None
+    else:
+        if np.issubdtype(Y.dtype, np.number):
+            assert np.isfinite(Y).all(), "labels must be finite (no NaN/Inf)"
+        label_values = np.unique(Y)
+        K = len(label_values)
+        Y_normalized = (np.searchsorted(label_values, Y) + 1).astype(int)
+
+    return Y_normalized, label_values, K
 
 
 def _markerColorCheck(mc, X, Y, L):
     assert isndarray(mc), "mc should be a numpy ndarray"
-    assert mc.shape[0] == L or (
-        mc.shape[0] == X.shape[0]
-        and (mc.ndim == 1 or mc.ndim == 2 and mc.shape[1] == 3)
-    ), (
+    if mc.ndim == 1:
+        valid = (mc.shape[0] >= L) or (mc.shape[0] == X.shape[0])
+    elif mc.ndim == 2:
+        valid = (mc.shape[1] == 3) and (
+            (mc.shape[0] >= L) or (mc.shape[0] == X.shape[0])
+        )
+    else:
+        valid = False
+
+    assert valid, (
         "marker colors have to be of size `%d` or `%d x 3` "
-        + " or `%d` or `%d x 3`, but got: %s"
+        "(per-point) or at least `%d` or at least `%d x 3` "
+        "(palette), but got: %s"
     ) % (
         X.shape[0],
-        X.shape[1],
+        X.shape[0],
         L,
         L,
         "x".join(map(str, mc.shape)),
@@ -294,6 +346,26 @@ def _markerColorCheck(mc, X, Y, L):
     return ret
 
 
+def _markerSizeCheck(ms, X, Y):
+    """Validate and return per-point marker sizes as a numpy array."""
+    if isinstance(ms, (list, tuple)):
+        ms = np.array(ms, dtype=float)
+    assert isndarray(ms), "markersize array should be a numpy ndarray"
+    assert ms.ndim == 1, "markersize array should be 1-dimensional"
+    assert (ms > 0).all(), "all marker sizes must be positive"
+
+    if ms.shape[0] == X.shape[0]:
+        return np.array(ms, dtype=float)
+
+    K = int(Y.max()) if len(Y) > 0 else 0
+    assert ms.shape[0] >= K, (
+        "markersize should be of size `%d` (per-point) or at least `%d` "
+        "(per-label), but got: %d" % (X.shape[0], K, ms.shape[0])
+    )
+
+    return np.array([ms[Y[i] - 1] for i in range(len(Y))], dtype=float)
+
+
 def _lineColorCheck(lc, K):
     assert isndarray(lc), "lc should be a numpy ndarray"
     assert lc.shape[0] == K, "lc should be same shape as K"
@@ -316,7 +388,7 @@ def _assert_opts(opts):
     remove_nones = ["title"]
     for to_remove in remove_nones:
         if to_remove in opts and opts[to_remove] is None:
-            logger.warn(
+            logger.warning(
                 "None-incompatible opt {} was provided None value "
                 "and was thus ignored".format(to_remove)
             )
@@ -334,10 +406,12 @@ def _assert_opts(opts):
     if opts.get("markersymbol"):
         assert isstr(opts.get("markersymbol")), "marker symbol should be string"
 
-    if opts.get("markersize"):
-        assert (
-            isnum(opts.get("markersize")) and opts.get("markersize") > 0
-        ), "marker size should be a positive number"
+    if opts.get("markersize") is not None:
+        ms = opts.get("markersize")
+        if isinstance(ms, (list, tuple, np.ndarray)):
+            assert all(m > 0 for m in ms), "all marker sizes must be positive"
+        else:
+            assert isnum(ms) and ms > 0, "marker size should be a positive number"
 
     if opts.get("markerborderwidth"):
         assert (
@@ -416,6 +490,25 @@ def pytorch_wrap(f):
     return wrapped_f
 
 
+def _decode_binary_arrays(obj):
+    """Decode Plotly 6+ binary-encoded arrays back to plain Python lists."""
+    if isinstance(obj, dict):
+        if "dtype" in obj and "bdata" in obj:
+            try:
+                arr = np.frombuffer(
+                    base64.b64decode(obj["bdata"]), dtype=np.dtype(obj["dtype"])
+                )
+                if "shape" in obj:
+                    arr = arr.reshape(obj["shape"])
+                return arr.tolist()
+            except (binascii.Error, ValueError, TypeError):
+                return obj
+        return {k: _decode_binary_arrays(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_decode_binary_arrays(v) for v in obj]
+    return obj
+
+
 class Visdom(object):
     def __init__(
         self,
@@ -454,8 +547,13 @@ class Visdom(object):
         ), "base_url should not end with / as it is appended automatically"
 
         self.ipv6 = ipv6
-        self.env = env
-        self.env_list = {f"{env}"}  # default env
+        self.env = (
+            env.replace("/", "_")
+            .replace("\\", "_")
+            .replace("\n", "-")
+            .replace("\r", "-")
+        )
+        self.env_list = {self.env}  # default env
         self.send = send
         self.event_handlers = {}  # Haven't registered any events
         self.socket_alive = False
@@ -509,7 +607,7 @@ class Visdom(object):
         elif send and use_polling:
             self.setup_polling()
         elif send and not use_incoming_socket:
-            logger.warn(
+            logger.warning(
                 "Without the incoming socket you cannot receive events from "
                 "the server or register event handlers to your Visdom client."
             )
@@ -521,7 +619,7 @@ class Visdom(object):
             time_spent += inc
             inc *= 2
         if time_spent > 5:
-            logger.warn(
+            logger.warning(
                 "Visdom python client failed to establish socket to get "
                 "messages from the server. This feature is optional and "
                 "can be disabled by initializing Visdom with "
@@ -573,7 +671,7 @@ class Visdom(object):
                         self.socket_alive = True
                         self.socket_connection_achieved = True
                     else:
-                        logger.warn(
+                        logger.warning(
                             "Visdom server failed handshake, may not "
                             "be properly connected"
                         )
@@ -624,7 +722,7 @@ class Visdom(object):
                         self.socket_alive = True
                         self.socket_connection_achieved = True
                     else:
-                        logger.warn(
+                        logger.warning(
                             "Visdom server failed handshake, may not "
                             "be properly connected"
                         )
@@ -633,7 +731,7 @@ class Visdom(object):
                     try:
                         handler(message)
                     except Exception as e:
-                        logger.warn(
+                        logger.warning(
                             "Visdom failed to handle a handler for {}: {}"
                             "".format(message, e)
                         )
@@ -653,8 +751,16 @@ class Visdom(object):
             logger.error(error)
             ws.close()
 
-        def on_close(ws):
+        def on_close(ws, close_status_code=None, close_msg=None):
             self.socket_alive = False
+            if not self.socket_connection_achieved:
+                logger.warning(
+                    "WebSocket closed before connection achieved "
+                    "(close_status_code=%s). If login is enabled, "
+                    "pass username/password to Visdom().",
+                    close_status_code,
+                )
+                self.use_socket = False
 
         def run_socket(*args):
             host_scheme = urlparse(self.server).scheme
@@ -673,7 +779,7 @@ class Visdom(object):
                         on_error=on_error,
                         on_close=on_close,
                         header={
-                            "Cookie: user_password="
+                            "Cookie": "user_password="
                             + self.session.cookies.get("user_password", "")
                         },
                     )
@@ -840,6 +946,17 @@ class Visdom(object):
             create=False,
         )
 
+    def delete_envs(self, env_list):
+        """This function deletes a list of environments."""
+        if not isinstance(env_list, list):
+            raise TypeError("env_list must be a list of strings")
+        responses = []
+        for env in env_list:
+            if not isinstance(env, str):
+                raise TypeError(f"Environment ID must be a string, got {type(env)}")
+            responses.append(self.delete_env(env))
+        return responses
+
     def delete_env(self, env):
         """This function deletes a specific environment."""
         return self._send(msg={"eid": env}, endpoint="delete_env")
@@ -870,6 +987,24 @@ class Visdom(object):
             return list(self.env_list)
         else:
             return json.loads(self._send({}, endpoint="env_state", quiet=True))
+
+    def get_env_state(self, env):
+        """
+        This function returns the state of a specific environment,
+        containing all window data as a dict of {window_id: window_json}.
+
+        Returns None if the environment does not exist.
+        """
+        assert isinstance(env, str), "env should be a string"
+        if self.offline:
+            return None
+        response = self._send({"eid": env}, endpoint="env_state", quiet=True)
+        if response is False:
+            return None
+        parsed = json.loads(response)
+        if isinstance(parsed, dict) and "error" in parsed:
+            return None
+        return parsed
 
     def win_exists(self, win, env=None):
         """
@@ -1065,24 +1200,78 @@ class Visdom(object):
                 opts["width"] = 1.35 * int(math.ceil(float(width)))
         return self.svg(svgstr=svg, opts=opts, env=env, win=win)
 
-    def plotlyplot(self, figure, win=None, env=None):
+    def save_plotly_figure(self, figure, filepath, **kwargs):
+        """
+        Save a Plotly figure to an image file from Python (no browser click required).
+
+        This allows programmatic saving of plots that would otherwise require
+        using the "Download plot as a png" button in the Visdom UI. You can
+        build the same figure, save it to file with this method, and optionally
+        display it in Visdom with plotlyplot().
+
+        Args:
+            figure: A Plotly Figure object (e.g. from plotly.graph_objects or
+                make_subplots).
+            filepath: Path for the output file (e.g. "plot.png", "figure.svg").
+                The format is inferred from the extension (png, svg, pdf, etc.).
+            **kwargs: Optional arguments passed to Plotly's write_image (e.g.
+                width, height, scale).
+
+        Raises:
+            RuntimeError: If plotly or kaleido is not installed.
+
+        Note: Requires the 'kaleido' package for image export. Install with
+        `pip install kaleido`.
+        """
+        try:
+            import plotly
+        except ImportError:
+            raise RuntimeError(
+                "Plotly must be installed to save Plotly figures. "
+                "Install with: pip install plotly"
+            )
+        try:
+            figure.write_image(filepath, **kwargs)
+        except ValueError as e:
+            if "kaleido" in str(e).lower() or "orca" in str(e).lower():
+                raise RuntimeError(
+                    "Saving Plotly figures to image requires the 'kaleido' package. "
+                    "Install with: pip install kaleido"
+                ) from e
+            raise
+
+    def plotlyplot(self, figure, win=None, env=None, save_path=None, save_kwargs=None):
         """
         This function draws a Plotly 'Figure' object. It does not explicitly
         take options as it assumes you have already explicitly configured the
         figure's layout.
 
+        To save the figure as an image from code (without using the browser
+        download button), pass save_path (e.g. save_path="plot.png"). Optional
+        arguments for Plotly's write_image should be passed via save_kwargs,
+        e.g. save_kwargs={"width": 800, "height": 600}. This requires the
+        optional 'kaleido' package (pip install kaleido).
+
         Note: You must have the 'plotly' Python package installed to use
         this function.
         """
+        if save_kwargs is None:
+            save_kwargs = {}
         try:
             import plotly
+
+            if save_path is not None:
+                self.save_plotly_figure(figure, save_path, **save_kwargs)
 
             # We do a round-trip of JSON encoding and decoding to make use of
             # the Plotly JSON Encoder. The JSON encoder deals with converting
             # numpy arrays to Python lists and several other edge cases.
-            figure_dict = json.loads(
-                json.dumps(figure, cls=plotly.utils.PlotlyJSONEncoder)
-            )
+            figure_json = json.dumps(figure, cls=plotly.utils.PlotlyJSONEncoder)
+            figure_dict = json.loads(figure_json)
+            # Plotly 6+ encodes large arrays as binary dicts {"dtype":..., "bdata":...}.
+            # Decode them back to plain Python lists so the frontend can render them.
+            if '"bdata"' in figure_json:
+                figure_dict = _decode_binary_arrays(figure_dict)
 
             # If opts title is not added, the title is not added to the top right of the window.
             # We add the paramater to opts manually if it exists.
@@ -1097,6 +1286,10 @@ class Visdom(object):
                 opts["title"] = (
                     title_prop["text"] if "text" in title_prop else title_prop
                 )
+            if "width" in figure_dict["layout"]:
+                opts["width"] = figure_dict["layout"]["width"]
+            if "height" in figure_dict["layout"]:
+                opts["height"] = figure_dict["layout"]["height"]
 
             return self._send(
                 {
@@ -1226,10 +1419,10 @@ class Visdom(object):
 
         Y = do_tsne(features)
 
-        label_set = list(set(labels))
+        labels_normalized, _, _ = _normalize_labels(labels)
         points = [
             {
-                "group": int(label_set.index(labels[i])),
+                "group": int(labels_normalized[i] - 1),
                 "name": "Entity {}".format(i),
                 "label": labels[i],
                 "position": xy,
@@ -1279,6 +1472,10 @@ class Visdom(object):
         if nchannels == 1:
             img = np.squeeze(img)
             img = img[np.newaxis, :, :].repeat(3, axis=0)
+            nchannels = 3
+        assert nchannels in (3, 4), (
+            "Image must have 1, 3, or 4 channels, got %d" % nchannels
+        )
 
         if "float" in str(img.dtype):
             if img.max() <= 1:
@@ -1286,13 +1483,17 @@ class Visdom(object):
             img = np.uint8(img)
 
         img = np.transpose(img, (1, 2, 0))
-        im = Image.fromarray(img)
+        if nchannels == 4:
+            im = Image.fromarray(img, mode="RGBA")
+        else:
+            im = Image.fromarray(img)
         buf = BytesIO()
         image_type = "png"
         imsave_args = {}
-        if "jpgquality" in opts:
+        jpgquality = opts.get("jpgquality")
+        if jpgquality is not None and nchannels != 4:
             image_type = "jpeg"
-            imsave_args["quality"] = opts["jpgquality"]
+            imsave_args["quality"] = jpgquality
 
         im.save(buf, format=image_type.upper(), **imsave_args)
 
@@ -1321,6 +1522,27 @@ class Visdom(object):
                 "opts": opts,
             },
             endpoint=endpoint,
+        )
+
+    def image_select(self, win, selected, env=None):
+        """
+        Set the selected frame index in an image_history window.
+
+        This function updates which frame is currently displayed in a window
+        that was created with ``opts=dict(store_history=True)`` via the
+        `image` function.
+        """
+        assert win is not None, "Must specify a window"
+        assert isinstance(selected, int), "selected must be an integer"
+
+        data = [{"type": "image_update_selected", "selected": selected}]
+        return self._send(
+            {
+                "data": data,
+                "win": win,
+                "eid": env,
+            },
+            endpoint="update",
         )
 
     @pytorch_wrap
@@ -1380,6 +1602,7 @@ class Visdom(object):
         The following `opts` are supported:
 
         - `opts.sample_frequency`: sample frequency (`integer` > 0; default = 44100)
+        - `opts.caption`: caption to display below the player (`string`; optional)
         """
         opts = {} if opts is None else opts
         opts["sample_frequency"] = opts.get("sample_frequency", 44100)
@@ -1421,6 +1644,8 @@ class Visdom(object):
         )
         opts["height"] = 80
         opts["width"] = 330
+        if opts.get("caption"):
+            audiodata += "<p>%s</p>" % html.escape(str(opts["caption"]))
         return self.text(text=audiodata, win=win, env=env, opts=opts)
 
     def _encode(self, tensor, fps):
@@ -1481,6 +1706,7 @@ class Visdom(object):
         - `opts.fps`: FPS for the video (`integer` > 0; default = 25)
         - `opts.autoplay`: whether to autoplay the video when ready (`boolean`; default = `false`)
         - `opts.loop`: whether to loop the video (`boolean`; default = `false`)
+        - `opts.caption`: caption to display below the player (`string`; optional)
         """
         opts = {} if opts is None else opts
         opts["fps"] = opts.get("fps", 25)
@@ -1520,6 +1746,8 @@ class Visdom(object):
             mimetype,
             base64.b64encode(bytestr).decode("utf-8"),
         )
+        if opts.get("caption"):
+            videodata += "<p>%s</p>" % html.escape(str(opts["caption"]))
         return self.text(text=videodata, win=win, env=env, opts=opts)
 
     def update_window_opts(self, win, opts, env=None):
@@ -1555,7 +1783,7 @@ class Visdom(object):
         The following `opts` are supported:
 
         - `opts.markersymbol`     : marker symbol (`string`; default = `'dot'`)
-        - `opts.markersize`       : marker size (`number`; default = `'10'`)
+        - `opts.markersize`       : marker size (`number` or `np.array`; default = `'10'`)
         - `opts.markercolor`      : marker color (`np.array`; default = `None`)
         - `opts.markerborderwidth`: marker border line width (`float`; default = 0.5)
         - `opts.dash`             : dash type (`np.array`; default = 'solid'`)
@@ -1607,17 +1835,16 @@ class Visdom(object):
         if Y is not None:
             Y = np.ravel(Y)
             assert X.shape[0] == Y.shape[0], "sizes of X and Y should match"
-            assert np.equal(np.mod(Y, 1), 0).all(), "labels should be integers"
-            assert Y.min() >= 1, "labels are assumed to be at least 1"
-            labels = np.unique(Y.astype(int, copy=False))
+            Y, label_values, K = _normalize_labels(Y)
+            labels = np.unique(Y)
             assert (
                 len(labels) == 1 or name is None
             ), "name should not be specified with multiple labels or lines"
-            K = int(Y.max())  # largest label
         else:
             Y = np.ones(X.shape[0], dtype=int)
             labels = np.ones(1, dtype=int)
             K = 1  # largest label
+            label_values = None  # single unlabelled trace
 
         is3d = X.shape[1] == 3
 
@@ -1632,6 +1859,11 @@ class Visdom(object):
 
         if opts.get("markercolor") is not None:
             opts["markercolor"] = _markerColorCheck(opts["markercolor"], X, Y, K)
+
+        if opts.get("markersize") is not None and isinstance(
+            opts["markersize"], (list, tuple, np.ndarray)
+        ):
+            opts["markersize"] = _markerSizeCheck(opts["markersize"], X, Y)
 
         if opts.get("linecolor") is not None:
             opts["linecolor"] = _lineColorCheck(opts["linecolor"], K)
@@ -1656,6 +1888,11 @@ class Visdom(object):
         trace_opts = opts.get("traceopts", {"plotly": {}})["plotly"]
         dash = opts.get("dash")
         mc = opts.get("markercolor")
+        ms = (
+            opts.get("markersize")
+            if isinstance(opts.get("markersize"), np.ndarray)
+            else None
+        )
         lc = opts.get("linecolor")
 
         for k in labels:
@@ -1666,15 +1903,20 @@ class Visdom(object):
                 elif len(labels) == 1 and name is not None:
                     trace_name = name
                 else:
-                    trace_name = str(k)
+                    # For float-remapped labels show the original value;
+                    # for integer labels keep existing str(k) behaviour.
+                    if label_values is not None:
+                        trace_name = str(label_values[k - 1])
+                    else:
+                        trace_name = str(k)
                 use_gl = opts.get("webgl", False)
                 _data = {
                     "x": nan2none(X.take(0, 1)[ind].tolist()),
                     "y": nan2none(X.take(1, 1)[ind].tolist()),
                     "name": trace_name,
-                    "type": "scatter3d"
-                    if is3d
-                    else ("scattergl" if use_gl else "scatter"),
+                    "type": (
+                        "scatter3d" if is3d else ("scattergl" if use_gl else "scatter")
+                    ),
                     "mode": opts.get("mode"),
                     "text": L[ind].tolist() if L is not None else None,
                     "textposition": "right",
@@ -1683,7 +1925,11 @@ class Visdom(object):
                         "color": lc[k - 1] if lc is not None else None,
                     },
                     "marker": {
-                        "size": opts.get("markersize"),
+                        "size": (
+                            ms[ind].tolist()
+                            if ms is not None
+                            else opts.get("markersize")
+                        ),
                         "symbol": opts.get("markersymbol"),
                         "color": mc[k] if mc is not None else None,
                         "line": {
@@ -1707,6 +1953,8 @@ class Visdom(object):
             for marker_prop in ["markercolor"]:
                 if marker_prop in opts:
                     del opts[marker_prop]
+            if ms is not None and "markersize" in opts:
+                del opts["markersize"]
             for line_prop in ["linecolor"]:
                 if line_prop in opts:
                     del opts[line_prop]
@@ -1753,7 +2001,7 @@ class Visdom(object):
         - `opts.fillarea`    : fill area below line (`boolean`)
         - `opts.markers`     : show markers (`boolean`; default = `false`)
         - `opts.markersymbol`: marker symbol (`string`; default = `'dot'`)
-        - `opts.markersize`  : marker size (`number`; default = `'10'`)
+        - `opts.markersize`  : marker size (`number` or `np.array`; default = `'10'`)
         - `opts.linecolor`   : line colors (`np.array`; default = None)
         - `opts.dash`        : line dash type (`np.array`; default = None)
         - `opts.legend`      : `list` or `tuple` containing legend names
@@ -1776,6 +2024,11 @@ class Visdom(object):
                 assert X is not None, "must specify x-values for line update"
         assert Y.ndim == 1 or Y.ndim == 2, "Y should have 1 or 2 dim"
         assert Y.shape[-1] > 0, "must plot one line at least"
+
+        if Y.ndim == 2 and Y.shape[1] == 1:
+            Y = Y.ravel()
+            if X is not None and X.ndim == 2 and X.shape[1] == 1:
+                X = X.ravel()
 
         if X is not None:
             assert X.ndim == 1 or X.ndim == 2, "X should have 1 or 2 dim"
@@ -2179,11 +2432,39 @@ class Visdom(object):
         # normalize vectors to unit length:
         if opts.get("normalize", False):
             assert (
-                isinstance(opts["normalize"], numbers.Number) and opts["normalize"] > 0
-            ), "opts.normalize should be positive number"
-            magnitude = np.sqrt(np.add(np.multiply(X, X), np.multiply(Y, Y))).max()
-            X = X / (magnitude / opts["normalize"])
-            Y = Y / (magnitude / opts["normalize"])
+                isinstance(opts["normalize"], numbers.Number)
+                and opts["normalize"] > 0
+                and np.isfinite(opts["normalize"])
+            ), "opts.normalize should be a finite positive number"
+            magnitude = np.sqrt(np.add(np.multiply(X, X), np.multiply(Y, Y)))
+            finite_mask = np.isfinite(magnitude)
+
+            if not np.any(finite_mask):
+                warnings.warn(
+                    "Skipping quiver normalization: all magnitudes are non-finite (NaN or Inf)",
+                    RuntimeWarning,
+                )
+            else:
+                max_mag = magnitude[finite_mask].max()
+
+                if max_mag <= 0:
+                    warnings.warn(
+                        "Skipping quiver normalization: max magnitude is zero",
+                        RuntimeWarning,
+                    )
+                else:
+                    scale = max_mag / opts["normalize"]
+
+                    if scale <= 0 or not np.isfinite(scale):
+                        warnings.warn(
+                            "Skipping quiver normalization: invalid scale computed",
+                            RuntimeWarning,
+                        )
+                    else:
+                        X = np.where(np.isfinite(X), X, np.nan)
+                        Y = np.where(np.isfinite(Y), Y, np.nan)
+                        X = X / scale
+                        Y = Y / scale
 
         # interleave X and Y with copies / NaNs to get lines:
         nans = np.full((X.shape[0], X.shape[1]), np.nan).flatten()
@@ -2591,4 +2872,118 @@ class Visdom(object):
 
         return self._send(
             {"data": data, "win": win, "eid": env, "opts": opts}, endpoint="events"
+        )
+
+    @pytorch_wrap
+    def violin(self, X, win=None, env=None, opts=None):
+        """
+        This function draws violin plots of the specified data. It takes
+        input `N` or `NxM` tensor `X` that specifies the `N` data values
+        of which to construct the `M` violin plots.
+
+        The following plot-specific `opts` are currently supported:
+
+        - `opts.legend` : labels for each of the columns in `X`
+        - `opts.showbox` : overlay a mini box plot inside the violin
+                                  (`bool` and default = `True`)
+        - `opts.showmeanline` : overlay the mean line (`bool` and default = `True`)
+        - `opts.points` : which raw points to show alongside the violin
+                                  One of `all`, `outliers`,
+                                  `suspectedoutliers`, or `False`
+                                  (default = `False`)
+        - `opts.jitter` : amount of jitter applied to displayed points
+                                  (`float` in `[0, 1]`, default = `0.3`)
+        - `opts.orientation` : `v` for vertical and `h` for horizontal
+                                  violins
+        - `opts.bandwidth` : bandwidth of the kernel density estimate
+                                  `None` lets Plotly choose automatically
+        - `opts.side` : which side of the centre line to draw.
+                                  One of `both` , `positive`,
+                                  or `negative`
+        """
+
+        X = np.asarray(X)
+        if X.ndim > 2:
+            X = np.squeeze(X)
+        assert X.ndim == 1 or X.ndim == 2, "X should be one or two-dimensional"
+        if X.ndim == 1:
+            X = X[:, None]
+
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        if opts.get("legend") is not None:
+            assert (
+                len(opts["legend"]) == X.shape[1]
+            ), "number of legend labels must match number of columns in X"
+
+        showbox = opts.get("showbox", True)
+        showmeanline = opts.get("showmeanline", True)
+        points = opts.get("points", False)
+        jitter = opts.get("jitter", 0.3)
+        orientation = opts.get("orientation", "v")
+        bandwidth = opts.get("bandwidth", None)
+        side = opts.get("side", "both")
+
+        assert orientation in (
+            "v",
+            "h",
+        ), "opts.orientation must be 'v' (vertical) or 'h' (horizontal)"
+        assert side in (
+            "both",
+            "positive",
+            "negative",
+        ), "opts.side must be one of 'both', 'positive', or 'negative'"
+        assert points in ("all", "outliers", "suspectedoutliers", False), (
+            "opts.points must be one of 'all', 'outliers', "
+            "'suspectedoutliers', or False"
+        )
+        if jitter is not None:
+            assert (
+                isnum(jitter) and 0 <= jitter <= 1
+            ), "opts.jitter must be a float between 0 and 1"
+        if bandwidth is not None:
+            assert (
+                isnum(bandwidth) and bandwidth > 0
+            ), "opts.bandwidth must be a positive number"
+
+        data = []
+        for k in range(X.shape[1]):
+            col_data = X.take(k, 1).tolist()
+            label = opts["legend"][k] if opts.get("legend") else "column " + str(k)
+
+            trace = {
+                "type": "violin",
+                "name": label,
+                "box": {"visible": showbox},
+                "meanline": {"visible": showmeanline},
+                "points": points,
+                "side": side,
+            }
+            if jitter is not None:
+                trace["jitter"] = jitter
+
+            if orientation == "v":
+                trace["y"] = col_data
+            else:
+                trace["x"] = col_data
+                trace["orientation"] = "h"
+
+            if bandwidth is not None:
+                trace["bandwidth"] = bandwidth
+
+            if opts.get("opacity") is not None:
+                trace["opacity"] = opts["opacity"]
+
+            data.append(trace)
+
+        return self._send(
+            {
+                "data": data,
+                "win": win,
+                "eid": env,
+                "layout": _opts2layout(opts),
+                "opts": opts,
+            }
         )

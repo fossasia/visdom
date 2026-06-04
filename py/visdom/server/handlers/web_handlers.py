@@ -13,6 +13,7 @@ necessary, but defers underlying manipulations of the server's data to
 the data_model itself.
 """
 
+import hashlib
 import copy
 import getpass
 import json
@@ -52,19 +53,9 @@ from visdom.server.handlers.base_handlers import BaseHandler
 
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
-# TODO move generalized initialization logic from these handlers into the
-# basehandler
 # TODO abstract out any direct references to the app where possible from
 # all handlers. Can instead provide accessor functions on the state?
 class PostHandler(BaseHandler):
-    def initialize(self, app):
-        self.state = app.state
-        self.subs = app.subs
-        self.sources = app.sources
-        self.port = app.port
-        self.env_path = app.env_path
-        self.login_enabled = app.login_enabled
-
     @check_auth
     def post(self):
         req = tornado.escape.json_decode(
@@ -86,14 +77,6 @@ class PostHandler(BaseHandler):
 
 
 class ExistsHandler(BaseHandler):
-    def initialize(self, app):
-        self.state = app.state
-        self.subs = app.subs
-        self.sources = app.sources
-        self.port = app.port
-        self.env_path = app.env_path
-        self.login_enabled = app.login_enabled
-
     @staticmethod
     def wrap_func(handler, args):
         eid = extract_eid(args)
@@ -111,21 +94,20 @@ class ExistsHandler(BaseHandler):
 
 
 class UpdateHandler(BaseHandler):
-    def initialize(self, app):
-        self.state = app.state
-        self.subs = app.subs
-        self.sources = app.sources
-        self.port = app.port
-        self.env_path = app.env_path
-        self.login_enabled = app.login_enabled
-
     @staticmethod
     def update_packet(p, args):
-        old_p = copy.deepcopy(p)
+        # Shallow copy the packet to dynamically capture changes to top-level keys.
+        old_p = p.copy()
+
+        # Deepcopy only the nested structures known to be mutated in-place.
+        if "content" in p:
+            old_p["content"] = copy.deepcopy(p["content"])
+        if "old_content" in p:
+            old_p["old_content"] = copy.deepcopy(p["old_content"])
+
         p = UpdateHandler.update(p, args)
         p["contentID"] = get_rand_id()
-        # TODO: make_patch isn't high performance.
-        # If bottlenecked we should build the patch ourselves.
+
         patch = jsonpatch.make_patch(old_p, p)
         return p, patch.patch
 
@@ -155,9 +137,8 @@ class UpdateHandler(BaseHandler):
                 p["content"].append(args["data"][0]["content"])
                 p["selected"] = len(p["content"]) - 1
             elif utype == "image_update_selected":
-                # TODO implement python client function for this
                 # Bound the update to within the dims of the array
-                selected = args["data"]
+                selected = args["data"][0]["selected"]
                 selected_not_neg = max(0, selected)
                 selected_exists = min(len(p["content"]) - 1, selected_not_neg)
                 p["selected"] = selected_exists
@@ -205,7 +186,7 @@ class UpdateHandler(BaseHandler):
                     if len(plot["z"][0]) != len(dz[0]):
                         logging.error(
                             "ERROR: There is a mismatch between the number of columns in existing plot ('%i') and new data ('%i')."
-                            % (len(plot["z"]), len(dz))
+                            % (len(plot["z"][0]), len(dz[0]))
                         )
                         return p
                 else:
@@ -287,10 +268,15 @@ class UpdateHandler(BaseHandler):
 
         # Update traces
         for n, idx in enumerate(idxs):
-            if all(math.isnan(i) or i is None for i in new_data[n]["x"]):
+            if all(
+                i is None or math.isnan(i) or math.isinf(i) for i in new_data[n]["x"]
+            ):
                 continue
             # handle data for plotting
-            for axis in ["x", "y"]:
+            axes = ["x", "y"]
+            if pdata[idx]["type"] == "scatter3d":
+                axes.append("z")
+            for axis in axes:
                 pdata[idx][axis] = (
                     (pdata[idx][axis] + new_data[n][axis])
                     if append
@@ -340,7 +326,7 @@ class UpdateHandler(BaseHandler):
             or (
                 len(p["content"]["data"]) == 0
                 or p["content"]["data"][0]["type"]
-                in ["scatter", "scattergl", "custom", "heatmap"]
+                in ["scatter", "scatter3d", "scattergl", "custom", "heatmap"]
             )
         ):
             handler.write(
@@ -356,12 +342,14 @@ class UpdateHandler(BaseHandler):
         p, diff_packet = UpdateHandler.update_packet(p, args)
         # send the smaller of the patch and the updated pane
         if len(stringify(p)) <= len(stringify(diff_packet)):
-            broadcast(handler, p, eid)
+            broadcast_msg = dict(p)
+            broadcast_msg["eid"] = eid
+            broadcast(handler, broadcast_msg, eid)
         else:
             broadcast_packet = {
                 "command": "window_update",
                 "win": args["win"],
-                "env": eid,
+                "eid": eid,
                 "content": diff_packet,
                 "version": p.get("version", 1),
             }
@@ -380,14 +368,6 @@ class UpdateHandler(BaseHandler):
 
 
 class CloseHandler(BaseHandler):
-    def initialize(self, app):
-        self.state = app.state
-        self.subs = app.subs
-        self.sources = app.sources
-        self.port = app.port
-        self.env_path = app.env_path
-        self.login_enabled = app.login_enabled
-
     @staticmethod
     def wrap_func(handler, args):
         eid = extract_eid(args)
@@ -407,22 +387,35 @@ class CloseHandler(BaseHandler):
 
 
 class DeleteEnvHandler(BaseHandler):
-    def initialize(self, app):
-        self.state = app.state
-        self.subs = app.subs
-        self.sources = app.sources
-        self.port = app.port
-        self.env_path = app.env_path
-        self.login_enabled = app.login_enabled
-
     @staticmethod
     def wrap_func(handler, args):
-        eid = extract_eid(args)
+        eid = args.get("eid")
         if eid is not None:
-            del handler.state[eid]
+            eid = escape_eid(eid)
+            if eid == "main":
+                return
+            handler.state.pop(eid, None)
             if handler.env_path is not None:
                 p = os.path.join(handler.env_path, "{0}.json".format(eid))
-                os.remove(p)
+                if os.path.exists(p):
+                    try:
+                        os.remove(p)
+                    except FileNotFoundError:
+                        pass
+                    except OSError as e:
+                        logging.error(f"Failed to delete {p}: {e}")
+                else:
+                    hashed_id = hashlib.sha256(eid.encode("utf-8")).hexdigest()
+                    p = os.path.join(
+                        handler.env_path, "hash_{0}.json".format(hashed_id)
+                    )
+                    if os.path.exists(p):
+                        try:
+                            os.remove(p)
+                        except FileNotFoundError:
+                            pass
+                        except OSError as e:
+                            logging.error(f"Failed to delete {p}: {e}")
             broadcast_envs(handler)
 
     @check_auth
@@ -434,16 +427,19 @@ class DeleteEnvHandler(BaseHandler):
 
 
 class EnvStateHandler(BaseHandler):
-    def initialize(self, app):
-        self.app = app
-        self.state = app.state
-        self.login_enabled = app.login_enabled
-
     @staticmethod
     def wrap_func(handler, args):
-        # TODO if an env is provided return the state of that env
-        all_eids = list(handler.state.keys())
-        handler.write(json.dumps(all_eids))
+        eid = args.get("eid")
+        if eid is not None:
+            eid = escape_eid(str(eid))
+            if eid not in handler.state:
+                handler.set_status(404)
+                handler.write(json.dumps({"error": "env '{}' not found".format(eid)}))
+                return
+            handler.write(json.dumps(handler.state[eid]["jsons"]))
+        else:
+            all_eids = list(handler.state.keys())
+            handler.write(json.dumps(all_eids))
 
     @check_auth
     def post(self):
@@ -454,21 +450,15 @@ class EnvStateHandler(BaseHandler):
 
 
 class ForkEnvHandler(BaseHandler):
-    def initialize(self, app):
-        self.app = app
-        self.state = app.state
-        self.subs = app.subs
-        self.login_enabled = app.login_enabled
-
     @staticmethod
     def wrap_func(handler, args):
         prev_eid = escape_eid(args.get("prev_eid"))
         eid = escape_eid(args.get("eid"))
 
-        assert prev_eid in handler.state, "env to be forked doesn't exit"
+        assert prev_eid in handler.state, "env to be forked doesn't exist"
 
         handler.state[eid] = copy.deepcopy(handler.state[prev_eid])
-        serialize_env(handler.state, [eid], env_path=handler.app.env_path)
+        serialize_env(handler.state, [eid], env_path=handler.env_path)
         broadcast_envs(handler)
 
         handler.write(eid)
@@ -483,23 +473,13 @@ class ForkEnvHandler(BaseHandler):
 
 class EnvHandler(BaseHandler):
     def initialize(self, app):
-        self.state = app.state
-        self.subs = app.subs
-        self.sources = app.sources
-        self.port = app.port
-        self.env_path = app.env_path
-        self.login_enabled = app.login_enabled
+        super().initialize(app)
         self.wrap_socket = app.wrap_socket
 
     @check_auth
     def get(self, eid):
-        items = gather_envs(self.state, env_path=self.env_path)
-        active = "" if eid not in items else eid
         self.render(
             "index.html",
-            user=getpass.getuser(),
-            items=items,
-            active_item=active,
             wrap_socket=self.wrap_socket,
         )
 
@@ -511,9 +491,11 @@ class EnvHandler(BaseHandler):
         if "sid" in msg_args:
             sid = msg_args["sid"]
             if sid in self.subs:
-                load_env(self.state, args, self.subs[sid], env_path=self.env_path)
+                load_env(
+                    self.state, escape_eid(args), self.subs[sid], env_path=self.env_path
+                )
         if "eid" in msg_args:
-            eid = msg_args["eid"]
+            eid = escape_eid(msg_args["eid"])
             if eid not in self.state:
                 self.state[eid] = {"jsons": {}, "reload": {}}
                 broadcast_envs(self)
@@ -521,46 +503,34 @@ class EnvHandler(BaseHandler):
 
 class CompareHandler(BaseHandler):
     def initialize(self, app):
-        self.state = app.state
-        self.subs = app.subs
-        self.sources = app.sources
-        self.env_path = app.env_path
-        self.login_enabled = app.login_enabled
+        super().initialize(app)
         self.wrap_socket = app.wrap_socket
 
     @check_auth
     def get(self, eids):
-        items = gather_envs(self.state)
-        eids = eids.split("+")
-        # Filter out eids that don't exist
-        eids = [x for x in eids if x in items]
-        eids = "+".join(eids)
         self.render(
             "index.html",
-            user=getpass.getuser(),
-            items=items,
-            active_item=eids,
             wrap_socket=self.wrap_socket,
         )
 
     @check_auth
     def post(self, args):
-        sid = tornado.escape.json_decode(
+        body = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
-        )["sid"]
+        )
+        sid = body["sid"]
+        show_all = body.get("show_all", False)
         if sid in self.subs:
-            compare_envs(self.state, args.split("+"), self.subs[sid], self.env_path)
+            compare_envs(
+                self.state,
+                args.split("+"),
+                self.subs[sid],
+                self.env_path,
+                show_all=show_all,
+            )
 
 
 class SaveHandler(BaseHandler):
-    def initialize(self, app):
-        self.state = app.state
-        self.subs = app.subs
-        self.sources = app.sources
-        self.port = app.port
-        self.env_path = app.env_path
-        self.login_enabled = app.login_enabled
-
     @staticmethod
     def wrap_func(handler, args):
         envs = args["data"]
@@ -578,13 +548,6 @@ class SaveHandler(BaseHandler):
 
 
 class DataHandler(BaseHandler):
-    def initialize(self, app):
-        self.state = app.state
-        self.subs = app.subs
-        self.port = app.port
-        self.env_path = app.env_path
-        self.login_enabled = app.login_enabled
-
     @staticmethod
     def wrap_func(handler, args):
         eid = extract_eid(args)
@@ -622,16 +585,12 @@ class DataHandler(BaseHandler):
 
 class IndexHandler(BaseHandler):
     def initialize(self, app):
-        self.state = app.state
-        self.port = app.port
-        self.env_path = app.env_path
-        self.login_enabled = app.login_enabled
+        super().initialize(app)
         self.user_credential = app.user_credential
         self.base_url = app.base_url if app.base_url != "" else "/"
         self.wrap_socket = app.wrap_socket
 
     def get(self, args, **kwargs):
-        items = gather_envs(self.state, env_path=self.env_path)
         if (not self.login_enabled) or self.current_user:
             """self.current_user is an authenticated user provided by Tornado,
             available when we set self.get_current_user in BaseHandler,
@@ -639,12 +598,10 @@ class IndexHandler(BaseHandler):
             """
             self.render(
                 "index.html",
-                user=getpass.getuser(),
-                items=items,
-                active_item="",
                 wrap_socket=self.wrap_socket,
             )
         elif self.login_enabled:
+            items = gather_envs(self.state, env_path=self.env_path)
             self.render(
                 "login.html",
                 user=getpass.getuser(),
@@ -668,6 +625,7 @@ class IndexHandler(BaseHandler):
 
 class UserSettingsHandler(BaseHandler):
     def initialize(self, app):
+        super().initialize(app)
         self.user_settings = app.user_settings
 
     def get(self, path):
@@ -679,5 +637,19 @@ class UserSettingsHandler(BaseHandler):
 
 class ErrorHandler(BaseHandler):
     def get(self, text):
+        if not text or not text.strip().isdigit():
+            raise tornado.web.HTTPError(400, reason="Invalid status code")
+
+        status_code = int(text.strip())
+
+        if not 400 <= status_code <= 599:
+            raise tornado.web.HTTPError(400, reason="Invalid status code")
+
+        raise tornado.web.HTTPError(status_code)
         error_text = text or "test error"
         raise Exception(error_text)
+
+
+class HealthHandler(BaseHandler):
+    def get(self):
+        self.write({"status": "ok"})
