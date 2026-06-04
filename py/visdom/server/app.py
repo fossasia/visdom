@@ -45,12 +45,12 @@ from visdom.server.handlers.web_handlers import (
     UpdateHandler,
     UserSettingsHandler,
 )
+from visdom.server.server_state import ServerState
 from visdom.server.defaults import (
     DEFAULT_BASE_URL,
     DEFAULT_ENV_PATH,
     DEFAULT_HOSTNAME,
     DEFAULT_PORT,
-    LAYOUT_FILE,
 )
 
 
@@ -77,7 +77,6 @@ class Application(tornado.web.Application):
         self.eager_data_loading = eager_data_loading
         self.env_path = env_path
         self.state = self.load_state()
-        self.layouts = self.load_layouts()
         self.user_settings = self.load_user_settings()
         self.subs = {}
         self.sources = {}
@@ -93,6 +92,21 @@ class Application(tornado.web.Application):
             self.login_enabled = True
             with open(DEFAULT_ENV_PATH + "COOKIE_SECRET", "r") as fn:
                 tornado_settings["cookie_secret"] = fn.read()
+
+        self.server_state = ServerState(
+            self,
+            state=self.state,
+            subs=self.subs,
+            sources=self.sources,
+            env_path=self.env_path,
+            port=self.port,
+            login_enabled=self.login_enabled,
+            readonly=self.readonly,
+            user_credential=self.user_credential,
+            base_url=self.base_url,
+            wrap_socket=self.wrap_socket,
+            user_settings=self.user_settings,
+        )
 
         tornado_settings["static_url_prefix"] = self.base_url + "/static/"
         tornado_settings["debug"] = True
@@ -125,38 +139,6 @@ class Application(tornado.web.Application):
             # is currently connected to the server
             self.last_access = time.time()
         return self.last_access
-
-    def save_layouts(self):
-        if self.env_path is None:
-            warn_once(
-                "Saving and loading to disk has no effect when running with "
-                "env_path=None.",
-                RuntimeWarning,
-            )
-            return
-        layout_dir = os.path.join(self.env_path, "view")
-        ensure_dir_exists(layout_dir)
-
-        layout_filepath = os.path.join(layout_dir, LAYOUT_FILE)
-        with open(layout_filepath, "w") as fn:
-            fn.write(self.layouts)
-
-    def load_layouts(self):
-        if self.env_path is None:
-            warn_once(
-                "Saving and loading to disk has no effect when running with "
-                "env_path=None.",
-                RuntimeWarning,
-            )
-            return ""
-        layout_dir = os.path.join(self.env_path, "view")
-        layout_filepath = os.path.join(layout_dir, LAYOUT_FILE)
-        if os.path.isfile(layout_filepath):
-            with open(layout_filepath, "r") as fn:
-                return fn.read()
-        else:
-            ensure_dir_exists(layout_dir)
-            return ""
 
     def load_state(self):
         state = {}

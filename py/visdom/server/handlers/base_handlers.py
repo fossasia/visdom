@@ -17,8 +17,10 @@ import http.client
 import tornado.web
 import tornado.websocket
 
+from visdom.server.server_state import StateAccessorsMixin
 
-class BaseWebSocketHandler(tornado.websocket.WebSocketHandler):
+
+class BaseWebSocketHandler(StateAccessorsMixin, tornado.websocket.WebSocketHandler):
     """
     Implements any required overriden functionality from the basic tornado
     websocket handler. Also contains some shared logic for all WebSocketHandler
@@ -37,7 +39,7 @@ class BaseWebSocketHandler(tornado.websocket.WebSocketHandler):
             return None
 
 
-class BaseHandler(tornado.web.RequestHandler):
+class BaseHandler(StateAccessorsMixin, tornado.web.RequestHandler):
     """
     Implements any required overriden functionality from the basic tornado
     request handlers, and contains any convenient shared logic helpers.
@@ -46,20 +48,16 @@ class BaseHandler(tornado.web.RequestHandler):
     def initialize(self, app=None):
         """Common initialization shared by most handlers.
 
-        Copies frequently-used attributes from the application instance.
+        Stores the shared ``ServerState`` facade; the ``StateAccessorsMixin``
+        exposes its fields as ``self.state``, ``self.env_path``, etc.
         Subclasses that need additional attributes should call
         ``super().initialize(app)`` and then set their own.
 
         The ``app`` parameter defaults to ``None`` so that handlers
-        registered without an ``app`` dict (e.g. HealthHandler) still work.
+        registered without an ``app`` dict (e.g. HealthHandler) still work;
+        such handlers simply never touch the state accessors.
         """
-        if app is not None:
-            self.state = app.state
-            self.subs = app.subs
-            self.sources = app.sources
-            self.port = app.port
-            self.env_path = app.env_path
-            self.login_enabled = app.login_enabled
+        self.server_state = app.server_state if app is not None else None
 
     def __init__(self, *request, **kwargs):
         self.include_host = False
@@ -93,9 +91,9 @@ class BaseHandler(tornado.web.RequestHandler):
             try:
                 params = {
                     "error": exc_info[1] if debug else None,
-                    "trace_info": traceback.format_exception(*exc_info)
-                    if debug
-                    else None,
+                    "trace_info": (
+                        traceback.format_exception(*exc_info) if debug else None
+                    ),
                     "request": self.request.__dict__ if debug else None,
                     "status_code": status_code,
                     "title": title,

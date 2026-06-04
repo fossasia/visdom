@@ -53,8 +53,6 @@ from visdom.server.handlers.base_handlers import BaseHandler
 
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
-# TODO abstract out any direct references to the app where possible from
-# all handlers. Can instead provide accessor functions on the state?
 class PostHandler(BaseHandler):
     @check_auth
     def post(self):
@@ -472,10 +470,6 @@ class ForkEnvHandler(BaseHandler):
 
 
 class EnvHandler(BaseHandler):
-    def initialize(self, app):
-        super().initialize(app)
-        self.wrap_socket = app.wrap_socket
-
     @check_auth
     def get(self, eid):
         self.render(
@@ -502,10 +496,6 @@ class EnvHandler(BaseHandler):
 
 
 class CompareHandler(BaseHandler):
-    def initialize(self, app):
-        super().initialize(app)
-        self.wrap_socket = app.wrap_socket
-
     @check_auth
     def get(self, eids):
         self.render(
@@ -586,9 +576,9 @@ class DataHandler(BaseHandler):
 class IndexHandler(BaseHandler):
     def initialize(self, app):
         super().initialize(app)
-        self.user_credential = app.user_credential
-        self.base_url = app.base_url if app.base_url != "" else "/"
-        self.wrap_socket = app.wrap_socket
+        self.base_url = (
+            self.server_state.base_url if self.server_state.base_url != "" else "/"
+        )
 
     def get(self, args, **kwargs):
         if (not self.login_enabled) or self.current_user:
@@ -624,10 +614,6 @@ class IndexHandler(BaseHandler):
 
 
 class UserSettingsHandler(BaseHandler):
-    def initialize(self, app):
-        super().initialize(app)
-        self.user_settings = app.user_settings
-
     def get(self, path):
         if path == "style.css":
             self.set_status(200)

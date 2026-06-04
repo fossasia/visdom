@@ -42,8 +42,6 @@ from visdom.server.defaults import MAX_SOCKET_WAIT
 # new classes in the data_model folder.
 # TODO move generalized initialization logic from these handlers into the
 # basehandler
-# TODO abstract out any direct references to the app where possible from
-# all handlers. Can instead provide accessor functions on the state?
 # TODO Try to standardize the code between the client-server and
 # visdom-server socket edges.
 
@@ -70,14 +68,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
         super().__init__(*args, **kwargs)
 
     def initialize(self, app):
-        self.state = app.state
-        self.subs = app.subs
-        self.sources = app.sources
-        self.port = app.port
-        self.env_path = app.env_path
-        self.login_enabled = app.login_enabled
-        self.app = app
-        self.readonly = app.readonly
+        self.server_state = app.server_state
 
     def open(self, register_to="sources"):
         # self.sid = str(hex(int(time.time() * 10000000))[2:]) # TODO: was previously used for websockets+vis only
@@ -156,8 +147,8 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
 
         elif cmd == "save_layouts":
             if "data" in msg:
-                self.app.layouts = msg.get("data")
-                self.app.save_layouts()
+                self.server_state.set_layouts(msg.get("data"))
+                self.server_state.save_layouts()
                 self.broadcast_layouts()
 
         elif cmd == "forward_to_vis":
@@ -199,14 +190,7 @@ class AnySocketWrapper(AnySocketHandlerOrWrapper):
         self.messages = deque()
         self.last_read_time = time.time()
         self.open()
-        try:
-            if not self.app.socket_wrap_monitor.is_running():
-                self.app.socket_wrap_monitor.start()
-        except AttributeError:
-            self.app.socket_wrap_monitor = tornado.ioloop.PeriodicCallback(
-                self.socket_wrap_monitor_thread, 15000
-            )
-            self.app.socket_wrap_monitor.start()
+        self.server_state.ensure_socket_monitor(self.socket_wrap_monitor_thread)
 
     def socket_wrap_monitor_thread(self):
         if len(self.subs) > 0 or len(self.sources) > 0:
@@ -223,7 +207,7 @@ class AnySocketWrapper(AnySocketHandlerOrWrapper):
                 ):
                     sub.close()
         else:
-            self.app.socket_wrap_monitor.stop()
+            self.server_state.stop_socket_monitor()
 
     def close(self):
         self.on_close()
@@ -321,7 +305,12 @@ class SocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
             target_subs = self.subs.values()
         for sub in target_subs:
             sub.write_message(
-                json.dumps({"command": "layout_update", "data": self.app.layouts})
+                json.dumps(
+                    {
+                        "command": "layout_update",
+                        "data": self.server_state.get_layouts(),
+                    }
+                )
             )
 
     def initialize(self, app):
@@ -347,13 +336,7 @@ class SocketWrapper(SocketHandlerOrWrapper, AnySocketWrapper):
 def WrapSocketWrapper(BaseWrapper):
     class WrappedSocketWrap(BaseHandler):
         def initialize(self, app):
-            self.state = app.state
-            self.subs = app.subs
-            self.sources = app.sources
-            self.port = app.port
-            self.env_path = app.env_path
-            self.login_enabled = app.login_enabled
-            self.app = app
+            self.server_state = app.server_state
 
         def post(self):
             """Either write a message to the socket, or query what's there"""
@@ -365,8 +348,7 @@ def WrapSocketWrapper(BaseWrapper):
             sid = args.get("sid")
 
             if BaseWrapper == VisSocketWrapper and sid is None:
-                new_sub = VisSocketWrapper()
-                new_sub.initialize(self.app)
+                new_sub = self.server_state.spawn_socket(VisSocketWrapper)
                 self.write(json.dumps({"success": True, "sid": new_sub.sid}))
                 return
 
@@ -398,9 +380,9 @@ def WrapSocketWrapper(BaseWrapper):
         @check_auth
         def _get(self):
             """Create a new socket wrapper for this requester, return the id"""
-            new_sub = SocketWrapper()
-            new_sub.request = self.request
-            new_sub.initialize(self.app)
+            new_sub = self.server_state.spawn_socket(
+                SocketWrapper, request=self.request
+            )
             self.write(json.dumps({"success": True, "sid": new_sub.sid}))
 
         WrappedSocketWrap.get = _get
