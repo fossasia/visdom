@@ -13,7 +13,7 @@ inputs:
 runs:
   using: "composite"
   steps:
-      - name: "Setup Node" 
+      - name: "Setup Node"
         uses: actions/setup-node@v3
         with:
           node-version: '16'
@@ -67,5 +67,3 @@ runs:
           name: pr-build
           path: ./py/visdom/static/js/
         if: ${{ inputs.loadprbuild == 'true' }}
-
-

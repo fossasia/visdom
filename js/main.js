@@ -369,7 +369,6 @@ const App = () => {
     sendEnvQuery(selectedNodes);
   };
   const onEnvDelete = (env2delete, previousEnv) => {
-
     if (env2delete === previousEnv) {
       previousEnv = 'main';
     }

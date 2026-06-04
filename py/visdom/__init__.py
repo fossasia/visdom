@@ -881,11 +881,15 @@ class Visdom(object):
         y_true = np.asarray(y_true)
         y_score = np.asarray(y_score)
         assert y_true.ndim == 1 and y_score.ndim == 1, "y_true and y_score must be 1D"
-        assert y_true.shape[0] == y_score.shape[0], "y_true and y_score must have same length"
+        assert (
+            y_true.shape[0] == y_score.shape[0]
+        ), "y_true and y_score must have same length"
 
         # Ensure binary labels are 0/1
         unique = np.unique(y_true)
-        assert set(unique.tolist()).issubset({0, 1, True, False}), "y_true must be binary (0/1)"
+        assert set(unique.tolist()).issubset(
+            {0, 1, True, False}
+        ), "y_true must be binary (0/1)"
         y_true = y_true.astype(int)
 
         # Sort scores descending and compute TPR/FPR
@@ -895,7 +899,9 @@ class Visdom(object):
         P = y_true.sum()
         N = y_true.shape[0] - P
         if P == 0 or N == 0:
-            raise AssertionError("y_true must contain both positive and negative samples")
+            raise AssertionError(
+                "y_true must contain both positive and negative samples"
+            )
 
         tp_cum = np.cumsum(y_true_sorted)
         fp_cum = np.cumsum(1 - y_true_sorted)

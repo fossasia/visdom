@@ -291,10 +291,10 @@ describe('Image Pane', () => {
     cy.get(img_selector)
       .as('image')
       .invoke('attr', 'src')
-      .then((s) => { initialSrc = s; });
-    cy.get('@image')
-      .type('{rightArrow}'.repeat(3))
-      .type('{leftArrow}');
+      .then((s) => {
+        initialSrc = s;
+      });
+    cy.get('@image').type('{rightArrow}'.repeat(3)).type('{leftArrow}');
     cy.get('@image')
       .invoke('attr', 'src')
       .should('match', /^data:image\/png;base64,/)

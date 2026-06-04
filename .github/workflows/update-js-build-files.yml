@@ -29,4 +29,3 @@ jobs:
           git add -f py/visdom/static/js/main.js py/visdom/static/js/main.js.map
           git commit -m "update static/js files"
           git push
-

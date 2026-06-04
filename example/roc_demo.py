@@ -34,7 +34,9 @@ def main():
     rng = np.random.RandomState(0)
     y_true = rng.randint(0, 2, size=200)
     # create separable-ish scores
-    y_score = y_true * (0.6 + 0.4 * rng.rand(y_true.shape[0])) + (1 - y_true) * (0.4 * rng.rand(y_true.shape[0]))
+    y_score = y_true * (0.6 + 0.4 * rng.rand(y_true.shape[0])) + (1 - y_true) * (
+        0.4 * rng.rand(y_true.shape[0])
+    )
 
     vis = Visdom()
     # send to visdom server
