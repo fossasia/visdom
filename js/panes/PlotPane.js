@@ -79,7 +79,7 @@ var PlotPane = (props) => {
       Plotly.Plots.resize(plotlyRef.current);
     }
   }, [props.width, props.height]);
-
+  
   // rendering
   // ---------
 
