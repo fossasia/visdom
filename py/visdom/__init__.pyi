@@ -152,6 +152,15 @@ class Visdom:
         update: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
+    def roc(
+        self,
+        y_true: Tensor,
+        y_score: Tensor,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+        name: _OptStr = ...,
+    ) -> _SendReturn: ...
     def bar(
         self,
         X: Tensor,
