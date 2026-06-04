@@ -290,6 +290,7 @@ The following API is currently supported:
 - [`vis.quiver`](#visquiver)   : quiver plots
 - [`vis.mesh`](#vismesh)     : mesh plots
 - [`vis.dual_axis_lines`](#visdual_axis_lines)     : double y axis line plots
+- [`vis.roc`](#visroc)     : ROC curve plotting
 
 ### Generic Plots
 Note that the server API adheres to the Plotly convention of `data` and `layout` objects, such that you can produce your own arbitrary `Plotly` visualizations:
@@ -338,6 +339,24 @@ The following `opts` are supported:
 
 - `jpgquality`: JPG quality (`number` 0-100). If defined image will be saved as JPG to reduce file size. If not defined image will be saved as PNG.
 - `caption`: Caption for the image
+
+#### vis.roc
+Plot an ROC curve from binary labels and scores. This helper computes false-positive rate (FPR) and true-positive rate (TPR) and renders a line plot.
+
+Example usage:
+
+```python
+import visdom
+vis = visdom.Visdom()
+labels = [0, 1, 1, 0, 1]
+scores = [0.1, 0.9, 0.8, 0.3, 0.7]
+vis.roc(labels, scores, opts={'title': 'ROC Curve', 'name': 'demo'})
+```
+
+Options:
+- `title`: plot title
+- `name`: legend entry name
+
 - `store_history`: Keep all images stored to the same window and attach a slider to the bottom that will let you select the image to view. You must always provide this opt when sending new images to an image with history.
 
 > **Note** You can use alt on an image pane to view the x/y coordinates of the cursor. You can also ctrl-scroll to zoom, alt scroll to pan vertically, and alt-shift scroll to pan horizontally. Double click inside the pane to restore the image to default.
