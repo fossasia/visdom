@@ -478,10 +478,6 @@ class EnvHandler(BaseHandler):
 
     @check_auth
     def get(self, eid):
-        if "+" in eid:
-            raise tornado.web.HTTPError(
-                400, reason="Use /compare/ to compare multiple environments"
-            )
         if eid not in self.state:
             raise tornado.web.HTTPError(404, reason=f"Environment '{eid}' not found")
         self.render(
