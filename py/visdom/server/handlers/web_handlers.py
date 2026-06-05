@@ -128,7 +128,6 @@ class UpdateHandler(BaseHandler):
             p["content"]["has_previous"] = True
             p["content"]["selected"] = None
             return [
-                {"op": "add", "path": "/old_content/-", "value": old_data},
                 {"op": "replace", "path": "/content/data", "value": new_data},
                 {"op": "replace", "path": "/content/has_previous", "value": True},
                 {"op": "add", "path": "/content/selected", "value": None},
