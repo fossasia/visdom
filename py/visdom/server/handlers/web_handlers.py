@@ -597,7 +597,9 @@ class IndexHandler(BaseHandler):
             and the default value of self.current_user is None
             """
             if args not in ("", "/"):
-                raise tornado.web.HTTPError(404, reason=f"Path '{self.request.path}' not found")
+                raise tornado.web.HTTPError(
+                    404, reason=f"Path '{self.request.path}' not found"
+                )
             self.render(
                 "index.html",
                 wrap_socket=self.wrap_socket,
