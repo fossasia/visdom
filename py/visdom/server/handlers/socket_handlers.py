@@ -162,9 +162,14 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
 
         elif cmd == "forward_to_vis":
             packet = msg.get("data")
-            environment = self.state[packet["eid"]]
+            environment = self.state.get(packet["eid"])
+            if environment is None:
+                return
             if packet.get("pane_data") is not False:
-                packet["pane_data"] = environment["jsons"][packet["target"]]
+                pane = environment["jsons"].get(packet["target"])
+                if pane is None:
+                    return
+                packet["pane_data"] = pane
             send_to_sources(self, msg.get("data"))
 
         elif cmd == "layout_item_update":
