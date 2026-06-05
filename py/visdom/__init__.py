@@ -1477,8 +1477,9 @@ class Visdom(object):
     def image(self, img, win=None, env=None, opts=None):
         """
         This function draws an img. It takes as input a `CxHxW` (where C is 1, 3, or 4)
-        or `HxW` tensor `img` that contains the image. The array values can be float in [0,1] or
-        uint8 in [0, 255].
+        or `HxW` tensor `img` that contains the image. The array values can be uint8 in [0, 255]
+        or float. Float arrays are handled as follows: values in [-1, 1] are normalized to [0, 1],
+        values in [0, 1] are scaled to [0, 255], and all other ranges are clipped to [0, 255].
         """
         opts = {} if opts is None else opts
         _title2str(opts)
