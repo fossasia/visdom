@@ -568,12 +568,18 @@ class DataHandler(BaseHandler):
         else:
             # Dump data to client
             if "win" in args and args["win"] is None:
-                handler.write(json.dumps(handler.state[eid]["jsons"], cls=NanSafeEncoder))
+                handler.write(
+                    json.dumps(handler.state[eid]["jsons"], cls=NanSafeEncoder)
+                )
             else:
                 assert (
                     args["win"] in handler.state[eid]["jsons"]
                 ), "Window {} doesn't exist in env {}".format(args["win"], eid)
-                handler.write(json.dumps(handler.state[eid]["jsons"][args["win"]], cls=NanSafeEncoder))
+                handler.write(
+                    json.dumps(
+                        handler.state[eid]["jsons"][args["win"]], cls=NanSafeEncoder
+                    )
+                )
 
     @check_auth
     def post(self):
