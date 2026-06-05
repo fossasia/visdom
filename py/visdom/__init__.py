@@ -113,29 +113,7 @@ def isndarray(n):
     return isinstance(n, (np.ndarray))
 
 
-class NanSafeEncoder(json.JSONEncoder):
-    """JSON encoder that converts NaN and Inf float values to None.
-
-    Standard JSON does not support NaN/Inf. This encoder handles them
-    automatically so callers don't need manual nan2none() preprocessing.
-    """
-
-    def encode(self, o):
-        return super().encode(_sanitize_nans(o))
-
-    def iterencode(self, o, _one_shot=False):
-        return super().iterencode(_sanitize_nans(o), _one_shot=_one_shot)
-
-
-def _sanitize_nans(obj):
-    """Recursively replace NaN/Inf floats with None in nested structures."""
-    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
-        return None
-    if isinstance(obj, dict):
-        return {k: _sanitize_nans(v) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple)):
-        return [_sanitize_nans(v) for v in obj]
-    return obj
+from visdom.utils.shared_utils import NanSafeEncoder, _sanitize_nans
 
 
 # TODO: In appropriate places, we need to change many numpy calls to use
@@ -1186,7 +1164,7 @@ class Visdom(object):
 
                     six.raise_from(ImportError("No module named 'lxml'"), e)
                 height = soup.svg.attrs.pop("height", None)
-                width = soup.svg.attrs.pop("width", None)·
+                width = soup.svg.attrs.pop("width", None)
                 svg = str(soup)
         else:
             height = None

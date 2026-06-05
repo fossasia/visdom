@@ -2,6 +2,8 @@ import json
 import math
 import unittest
 
+import numpy as np
+
 from visdom import NanSafeEncoder, _sanitize_nans
 
 
@@ -62,6 +64,15 @@ class TestSanitizeNans(unittest.TestCase):
     def test_empty_structures(self):
         self.assertEqual(_sanitize_nans([]), [])
         self.assertEqual(_sanitize_nans({}), {})
+
+    def test_numpy_float32_nan(self):
+        self.assertIsNone(_sanitize_nans(np.float32("nan")))
+
+    def test_numpy_float32_inf(self):
+        self.assertIsNone(_sanitize_nans(np.float32("inf")))
+
+    def test_numpy_float64_nan(self):
+        self.assertIsNone(_sanitize_nans(np.float64("nan")))
 
 
 class TestNanSafeEncoder(unittest.TestCase):
