@@ -162,18 +162,26 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
 
         elif cmd == "forward_to_vis":
             packet = msg.get("data")
-            environment = self.state.get(packet["eid"])
+            eid = packet.get("eid")
+            target = packet.get("target")
+            if eid is None or target is None:
+                logging.warning(
+                    f"forward_to_vis: malformed packet (eid={eid!r},"
+                    f" target={target!r}), dropping event"
+                )
+                return
+            environment = self.state.get(eid)
             if environment is None:
                 logging.warning(
-                    f"forward_to_vis: env {packet['eid']!r} not found, dropping event"
+                    f"forward_to_vis: env {eid!r} not found, dropping event"
                 )
                 return
             if packet.get("pane_data") is not False:
-                pane = environment["jsons"].get(packet["target"])
+                pane = environment["jsons"].get(target)
                 if pane is None:
                     logging.warning(
-                        f"forward_to_vis: pane {packet['target']!r} not found"
-                        f" in env {packet['eid']!r}, dropping event"
+                        f"forward_to_vis: pane {target!r} not found"
+                        f" in env {eid!r}, dropping event"
                     )
                     return
                 packet["pane_data"] = pane
