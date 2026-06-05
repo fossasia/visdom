@@ -114,12 +114,17 @@ class UpdateHandler(BaseHandler):
     @staticmethod
     def update_embeddings_packet(p, args):
         update_type = args["data"]["update_type"]
+        content_id = get_rand_id()
         if update_type == "EntitySelected":
             selected = args["data"]["selected"]
             p["content"]["selected"] = selected
+            p["contentID"] = content_id
             # `selected` may not exist yet on the first selection, so use "add"
             # (which also overwrites when the key is already present).
-            return [{"op": "add", "path": "/content/selected", "value": selected}]
+            return [
+                {"op": "add", "path": "/content/selected", "value": selected},
+                {"op": "replace", "path": "/contentID", "value": content_id},
+            ]
         if update_type == "RegionSelected":
             old_data = p["content"]["data"]
             new_data = args["data"]["points"]
@@ -127,10 +132,12 @@ class UpdateHandler(BaseHandler):
             p["content"]["data"] = new_data
             p["content"]["has_previous"] = True
             p["content"]["selected"] = None
+            p["contentID"] = content_id
             return [
                 {"op": "replace", "path": "/content/data", "value": new_data},
                 {"op": "replace", "path": "/content/has_previous", "value": True},
                 {"op": "add", "path": "/content/selected", "value": None},
+                {"op": "replace", "path": "/contentID", "value": content_id},
             ]
         return []
 
