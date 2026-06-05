@@ -162,6 +162,11 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
 
         elif cmd == "forward_to_vis":
             packet = msg.get("data")
+            if not isinstance(packet, dict):
+                logging.warning(
+                    f"forward_to_vis: expected dict payload, got {type(packet).__name__!r}, dropping event"
+                )
+                return
             eid = packet.get("eid")
             target = packet.get("target")
             if eid is None or target is None:
