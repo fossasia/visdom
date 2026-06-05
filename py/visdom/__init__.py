@@ -120,11 +120,6 @@ class NanSafeEncoder(json.JSONEncoder):
     automatically so callers don't need manual nan2none() preprocessing.
     """
 
-    def default(self, obj):
-        if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
-            return None
-        return super().default(obj)
-
     def encode(self, o):
         return super().encode(_sanitize_nans(o))
 
@@ -1191,7 +1186,7 @@ class Visdom(object):
 
                     six.raise_from(ImportError("No module named 'lxml'"), e)
                 height = soup.svg.attrs.pop("height", None)
-                width = soup.svg.attrs.pop("width", None)
+                width = soup.svg.attrs.pop("width", None)·
                 svg = str(soup)
         else:
             height = None
