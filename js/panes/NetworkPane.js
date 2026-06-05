@@ -10,7 +10,7 @@
 // ignoring errors due to statically loaded d3 and saveSvgAsPng
 /* eslint-disable no-undef */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 import Pane from './Pane';
 
@@ -24,12 +24,31 @@ function NetworkPane(props) {
     _height,
   } = props;
 
+  const containerRef = useRef(null);
+  const timeoutRef = useRef(null);
+  const [downloadError, setDownloadError] = useState(null);
+
   // private events
   // --------------
   const handleDownload = () => {
-    saveSvgAsPng(document.getElementsByTagName('svg')[0], 'plot.png', {
-      scale: 2,
-      backgroundColor: '#FFFFFF',
+    const svg = containerRef.current?.querySelector('svg');
+
+    if (!svg) {
+      setDownloadError('Graph is not ready yet. Please try again.');
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      timeoutRef.current = setTimeout(() => {
+        setDownloadError(null);
+      }, 3000);
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      saveSvgAsPng(svg, 'plot.png', {
+        scale: 2,
+        backgroundColor: '#FFFFFF',
+      });
     });
   };
 
@@ -39,6 +58,14 @@ function NetworkPane(props) {
   // initialize d3
   useEffect(() => {
     CreateNetwork(content);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
   }, []);
 
   const CreateNetwork = (graph) => {
@@ -51,17 +78,18 @@ function NetworkPane(props) {
       .linkDistance(120)
       .size([width, height]);
     var svg = d3
-      .select('.Network_Div')
+      .select(containerRef.current)
       .select('svg')
       .attr('viewBox', '0 0 ' + width + ' ' + height)
       .attr('preserveAspectRatio', 'xMinYMin meet')
-      .classed('.svg-content', true);
+      .classed('svg-content', true);
     if (svg.empty()) {
       svg = d3
-        .select('.Network_Div')
+        .select(containerRef.current)
         .append('svg')
         .attr('viewBox', '0 0 ' + width + ' ' + height)
-        .attr('preserveAspectRatio', 'xMinYMin meet');
+        .attr('preserveAspectRatio', 'xMinYMin meet')
+        .classed('svg-content', true);
     }
 
     if (directed) {
@@ -211,8 +239,13 @@ function NetworkPane(props) {
 
   return (
     <Pane {...props} handleDownload={handleDownload}>
+    {downloadError && (
+      <div className="error-message">
+        {downloadError}
+      </div>
+    )}
       <div
-        id="Network_Div"
+        ref={containerRef}
         style={{ height: '100%', width: '100%', flex: 1 }}
         className="Network_Div"
       />
