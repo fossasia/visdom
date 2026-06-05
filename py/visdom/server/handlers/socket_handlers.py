@@ -21,6 +21,7 @@ import time
 import types
 import hashlib
 from collections import deque
+from enum import Enum
 
 import tornado.ioloop
 import tornado.escape
@@ -344,6 +345,26 @@ class SocketWrapper(SocketHandlerOrWrapper, AnySocketWrapper):
         pass
 
 
+class SocketFailureReason(Enum):
+    """Failure reason codes for the HTTP polling socket protocol."""
+
+    CONNECTION_CLOSED = "closed"
+    MISSING_MESSAGE = "no msg"
+    INVALID_MESSAGE_TYPE = "invalid"
+
+    @property
+    def description(self):
+        _descriptions = {
+            "closed": "Socket connection not found or already closed",
+            "no msg": "Send request missing required 'message' field",
+            "invalid": "Unrecognized message_type",
+        }
+        return _descriptions[self.value]
+
+    def to_failure_response(self):
+        return {"success": False, "reason": self.value, "detail": self.description}
+
+
 def WrapSocketWrapper(BaseWrapper):
     class WrappedSocketWrap(BaseHandler):
         def initialize(self, app):
@@ -357,7 +378,6 @@ def WrapSocketWrapper(BaseWrapper):
 
         def post(self):
             """Either write a message to the socket, or query what's there"""
-            # TODO formalize failure reasons
             args = tornado.escape.json_decode(
                 tornado.escape.to_basestring(self.request.body)
             )
@@ -374,24 +394,34 @@ def WrapSocketWrapper(BaseWrapper):
                 self.subs if BaseWrapper == SocketWrapper else self.sources
             ).get(sid)
 
-            # ensure a wrapper still exists for this connection
             if socket_wrap is None:
-                self.write(json.dumps({"success": False, "reason": "closed"}))
+                self.write(
+                    json.dumps(
+                        SocketFailureReason.CONNECTION_CLOSED.to_failure_response()
+                    )
+                )
                 return
 
-            # handle the requests
             if msg_type == "query":
                 messages = socket_wrap.get_messages()
                 self.write(json.dumps({"success": True, "messages": messages}))
             elif msg_type == "send":
                 msg = args.get("message")
                 if msg is None:
-                    self.write(json.dumps({"success": False, "reason": "no msg"}))
+                    self.write(
+                        json.dumps(
+                            SocketFailureReason.MISSING_MESSAGE.to_failure_response()
+                        )
+                    )
                 else:
                     socket_wrap.on_message(msg)
                     self.write(json.dumps({"success": True}))
             else:
-                self.write(json.dumps({"success": False, "reason": "invalid"}))
+                self.write(
+                    json.dumps(
+                        SocketFailureReason.INVALID_MESSAGE_TYPE.to_failure_response()
+                    )
+                )
 
     if BaseWrapper == SocketWrapper:
 
