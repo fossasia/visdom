@@ -49,7 +49,11 @@ Cypress.Commands.add('run', (name, opts) => {
 });
 
 Cypress.Commands.add('close_envs', () => {
-    cy.get('.rc-tree-select-selection__clear').click()
+    cy.get('body').then($body => {
+        if ($body.find('.rc-tree-select-selection__clear').length > 0) {
+            cy.get('.rc-tree-select-selection__clear').click()
+        }
+    })
 });
 
 Cypress.Commands.add('open_env', (name) => {
