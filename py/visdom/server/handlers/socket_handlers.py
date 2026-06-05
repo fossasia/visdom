@@ -164,10 +164,17 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
             packet = msg.get("data")
             environment = self.state.get(packet["eid"])
             if environment is None:
+                logging.warning(
+                    f"forward_to_vis: env {packet['eid']!r} not found, dropping event"
+                )
                 return
             if packet.get("pane_data") is not False:
                 pane = environment["jsons"].get(packet["target"])
                 if pane is None:
+                    logging.warning(
+                        f"forward_to_vis: pane {packet['target']!r} not found"
+                        f" in env {packet['eid']!r}, dropping event"
+                    )
                     return
                 packet["pane_data"] = pane
             send_to_sources(self, msg.get("data"))
