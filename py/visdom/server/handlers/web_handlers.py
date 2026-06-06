@@ -503,9 +503,12 @@ class EnvHandler(BaseHandler):
         if "sid" in msg_args:
             sid = msg_args["sid"]
             if sid in self.subs:
-                load_env(
-                    self.state, escape_eid(args), self.subs[sid], env_path=self.env_path
-                )
+                try:
+                    load_env(
+                        self.state, escape_eid(args), self.subs[sid], env_path=self.env_path
+                    )
+                except ValueError as e:
+                    raise tornado.web.HTTPError(400, reason="Could not load environment invalid environment JSON format")
         if "eid" in msg_args:
             eid = escape_eid(msg_args["eid"])
             if eid not in self.state:
