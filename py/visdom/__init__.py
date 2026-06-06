@@ -59,13 +59,12 @@ try:
         num_entities = len(X)
 
         # the number of entities provided must be at least 3x the perplexity
-        perplexity = (
-            50
-            if num_entities >= 150
-            else num_entities // 3
-            if num_entities >= 21
-            else 7
-        )
+        if num_entities >= 150:
+            perplexity = 50
+        elif num_entities >= 21:
+            perplexity = num_entities // 3
+        else:
+            perplexity = 7
         Y = bhtsne.run_bh_tsne(
             X, initial_dims=X.shape[1], perplexity=perplexity, verbose=True
         )
@@ -112,7 +111,7 @@ def isstr(s):
 
 
 def isnum(n):
-    return isinstance(n, numbers.Number)
+    return isinstance(n, numbers.Number) and not isinstance(n, bool)
 
 
 def isndarray(n):
@@ -444,7 +443,7 @@ def _assert_opts(opts):
         assert isnum(opts.get("fps")), "fps should be a number"
         assert opts.get("fps") > 0, "fps must be greater than 0"
 
-    if opts.get("title"):
+    if "title" in opts and opts.get("title") is not None:
         assert isstr(opts.get("title")), "title should be a string"
 
 
