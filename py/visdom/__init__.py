@@ -1476,33 +1476,57 @@ class Visdom(object):
     @pytorch_wrap
     def image(self, img, win=None, env=None, opts=None):
         """
-        This function draws an img. It takes as input an `CxHxW` or `HxW` tensor
-        `img` that contains the image. The array values can be float in [0,1] or
-        uint8 in [0, 255].
+        This function draws an img. It takes as input a `CxHxW` (where C is 1, 3, or 4)
+        or `HxW` tensor `img` that contains the image. The array values can be uint8 in [0, 255]
+        or float. Float arrays are handled as follows: values in [-1, 1] are normalized to [0, 1],
+        values in [0, 1] are scaled to [0, 255], and all other ranges are clipped to [0, 255].
         """
         opts = {} if opts is None else opts
         _title2str(opts)
         _assert_opts(opts)
-        opts["width"] = opts.get("width", img.shape[img.ndim - 1])
-        opts["height"] = opts.get("height", img.shape[img.ndim - 2])
-
-        nchannels = img.shape[0] if img.ndim == 3 else 1
-        if nchannels == 1:
-            img = np.squeeze(img)
-            img = img[np.newaxis, :, :].repeat(3, axis=0)
-            nchannels = 3
-        assert nchannels in (3, 4), (
-            "Image must have 1, 3, or 4 channels, got %d" % nchannels
-        )
-
-        if "float" in str(img.dtype):
+        # normalize floats to uint8
+        if np.issubdtype(img.dtype, np.floating):
+            img_max = img.max()
+            if img_max <= 1.0:
+                img_min = img.min()
+                if img_min < 0 and img_min >= -1.0:
+                    if img_max > img_min:
+                        img = (img - img_min) / (img_max - img_min)
+                    else:
+                        img = np.zeros_like(img)
+                    img_max = 1.0  # after normalization, new max is 1
             img = _float_img_to_uint8(img)
 
-        img = np.transpose(img, (1, 2, 0))
-        if nchannels == 4:
-            im = Image.fromarray(img, mode="RGBA")
+        # extract dimensions and process formats
+        if img.ndim == 2:
+            # grayscale - shape(H,W)
+            nchannels = 1
+            opts["width"] = opts.get("width", img.shape[1])
+            opts["height"] = opts.get("height", img.shape[0])
+            im = Image.fromarray(img, mode="L")
+        elif img.ndim == 3:
+            nchannels = img.shape[0]
+            opts["width"] = opts.get("width", img.shape[2])
+            opts["height"] = opts.get("height", img.shape[1])
+
+            if nchannels == 1:
+                im = Image.fromarray(img[0, :, :], mode="L")
+            elif nchannels == 3:
+                img = np.transpose(img, (1, 2, 0))
+                im = Image.fromarray(img, mode="RGB")
+            elif nchannels == 4:  # RGBA (4,H,W)
+                img = np.transpose(img, (1, 2, 0))
+                im = Image.fromarray(img, mode="RGBA")
+            else:
+                raise ValueError(
+                    f"Unsupported number of image channels: {nchannels}. "
+                    "Only 1 (grayscale), 3 (RGB), or 4 (RGBA) channels are supported."
+                )
         else:
-            im = Image.fromarray(img)
+            raise ValueError(
+                f"Unsupported image dimensions: {img.ndim}. "
+                "Image tensor must be 2D (HxW) or 3D (CxHxW)."
+            )
         buf = BytesIO()
         image_type = "png"
         imsave_args = {}
