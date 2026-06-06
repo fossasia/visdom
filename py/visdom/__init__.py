@@ -508,6 +508,25 @@ def _decode_binary_arrays(obj):
     return obj
 
 
+def _float_img_to_uint8(img):
+    """Convert a float image array to uint8."""
+    # Tolerance needs floor to also safely address float64 images.
+    tol = max(1e-6, np.finfo(img.dtype).eps ** 0.5)
+    max_val = float(img.max())
+    if max_val <= 1.0:
+        return np.uint8(np.clip(img, 0.0, 1.0) * 255.0)
+    if max_val <= 1.0 + tol:
+        warnings.warn(
+            "Image has float values slightly above 1.0 "
+            "(max={:.6f}). Values will be clamped to "
+            "[0, 1] and scaled to [0, 255].".format(max_val),
+            UserWarning,
+            stacklevel=2,
+        )
+        return np.uint8(np.clip(img, 0.0, 1.0) * 255.0)
+    return np.uint8(img)
+
+
 class Visdom(object):
     def __init__(
         self,
@@ -1477,9 +1496,7 @@ class Visdom(object):
         )
 
         if "float" in str(img.dtype):
-            if img.max() <= 1:
-                img = img * 255.0
-            img = np.uint8(img)
+            img = _float_img_to_uint8(img)
 
         img = np.transpose(img, (1, 2, 0))
         if nchannels == 4:
