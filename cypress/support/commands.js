@@ -70,16 +70,16 @@ Cypress.Commands.add('close_envs', () => {
 });
 
 Cypress.Commands.add('expand_all_env_groups', () => {
-    cy.get('.rc-tree-select-tree').then(($tree) => {
+    cy.get('body').then(($body) => {
         const closed_group = '.rc-tree-select-tree-switcher_close';
-        if ($tree.find(closed_group).length > 0) {
-            cy.wrap($tree).find(closed_group).click({ multiple: true });
+        if ($body.find(closed_group).length > 0) {
+            cy.get(closed_group).click({ multiple: true });
         }
     });
 });
 
 Cypress.Commands.add('close_env_dropdown', () => {
-    cy.get('body').type('{esc}');
+    cy.get('body').type('{esc}', { force: true });
 });
 
 Cypress.Commands.add('open_env', (name) => {
