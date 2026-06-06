@@ -59,13 +59,12 @@ try:
         num_entities = len(X)
 
         # the number of entities provided must be at least 3x the perplexity
-        perplexity = (
-            50
-            if num_entities >= 150
-            else num_entities // 3
-            if num_entities >= 21
-            else 7
-        )
+        if num_entities >= 150:
+            perplexity = 50
+        elif num_entities >= 21:
+            perplexity = num_entities // 3
+        else:
+            perplexity = 7
         Y = bhtsne.run_bh_tsne(
             X, initial_dims=X.shape[1], perplexity=perplexity, verbose=True
         )
@@ -112,7 +111,7 @@ def isstr(s):
 
 
 def isnum(n):
-    return isinstance(n, numbers.Number)
+    return isinstance(n, numbers.Number) and not isinstance(n, bool)
 
 
 def isndarray(n):
@@ -176,8 +175,11 @@ def _axisformat(xy, opts):
         "tick",
         "tickfont",
     ]
-    if any(opts.get(xy + i) for i in fields):
-        has_ticks = (opts.get(xy + "tickmin") and opts.get(xy + "tickmax")) is not None
+    if any(opts.get(xy + i) is not None for i in fields):
+        has_ticks = (
+            opts.get(xy + "tickmin") is not None
+            and opts.get(xy + "tickmax") is not None
+        )
         return {
             "type": opts.get(xy + "type"),
             "title": opts.get(xy + "label"),
@@ -205,10 +207,11 @@ def _axisformat3d(xyz, opts):
         "tick",
         "tickfont",
     ]
-    if any(opts.get(xyz + i) for i in fields):
+    if any(opts.get(xyz + i) is not None for i in fields):
         has_ticks = (
-            opts.get(xyz + "tickmin") and opts.get(xyz + "tickmax")
-        ) is not None
+            opts.get(xyz + "tickmin") is not None
+            and opts.get(xyz + "tickmax") is not None
+        )
         has_step = has_ticks and opts.get(xyz + "tickstep") is not None
         return {
             "type": opts.get(xyz + "type"),
@@ -262,6 +265,40 @@ def _opts2layout(opts, is3d=False):
         if "plotly" in layout_opts:
             layout.update(layout_opts["plotly"])
     return _scrub_dict(layout)
+
+
+def _normalize_labels(Y):
+    """
+    Normalizes arbitrary labels (int, float, string) to 1-based indices.
+    Returns:
+        Y_normalized (np.ndarray): 1-based integer labels
+        label_values (np.ndarray or None): Original unique label values, or None if Y
+                                           was already a valid set of 1-based integer labels.
+        K (int): Number of unique labels
+    """
+    Y = np.ravel(Y)
+
+    try:
+        is_integer_labels = (
+            np.issubdtype(Y.dtype, np.number)
+            and np.equal(np.mod(Y, 1), 0).all()
+            and Y.min() >= 1
+        )
+    except TypeError:
+        is_integer_labels = False
+
+    if is_integer_labels:
+        Y_normalized = Y.astype(int, copy=False)
+        K = int(Y_normalized.max())
+        label_values = None
+    else:
+        if np.issubdtype(Y.dtype, np.number):
+            assert np.isfinite(Y).all(), "labels must be finite (no NaN/Inf)"
+        label_values = np.unique(Y)
+        K = len(label_values)
+        Y_normalized = (np.searchsorted(label_values, Y) + 1).astype(int)
+
+    return Y_normalized, label_values, K
 
 
 def _markerColorCheck(mc, X, Y, L):
@@ -319,14 +356,13 @@ def _markerSizeCheck(ms, X, Y):
     if ms.shape[0] == X.shape[0]:
         return np.array(ms, dtype=float)
 
-    labels = np.unique(Y)
-    assert ms.shape[0] >= len(labels), (
+    K = int(Y.max()) if len(Y) > 0 else 0
+    assert ms.shape[0] >= K, (
         "markersize should be of size `%d` (per-point) or at least `%d` "
-        "(per-label), but got: %d" % (X.shape[0], len(labels), ms.shape[0])
+        "(per-label), but got: %d" % (X.shape[0], K, ms.shape[0])
     )
 
-    label_to_idx = {label: idx for idx, label in enumerate(labels)}
-    return np.array([ms[label_to_idx[Y[i]]] for i in range(len(Y))], dtype=float)
+    return np.array([ms[Y[i] - 1] for i in range(len(Y))], dtype=float)
 
 
 def _lineColorCheck(lc, K):
@@ -407,7 +443,7 @@ def _assert_opts(opts):
         assert isnum(opts.get("fps")), "fps should be a number"
         assert opts.get("fps") > 0, "fps must be greater than 0"
 
-    if opts.get("title"):
+    if "title" in opts and opts.get("title") is not None:
         assert isstr(opts.get("title")), "title should be a string"
 
 
@@ -470,6 +506,25 @@ def _decode_binary_arrays(obj):
     if isinstance(obj, list):
         return [_decode_binary_arrays(v) for v in obj]
     return obj
+
+
+def _float_img_to_uint8(img):
+    """Convert a float image array to uint8."""
+    # Tolerance needs floor to also safely address float64 images.
+    tol = max(1e-6, np.finfo(img.dtype).eps ** 0.5)
+    max_val = float(img.max())
+    if max_val <= 1.0:
+        return np.uint8(np.clip(img, 0.0, 1.0) * 255.0)
+    if max_val <= 1.0 + tol:
+        warnings.warn(
+            "Image has float values slightly above 1.0 "
+            "(max={:.6f}). Values will be clamped to "
+            "[0, 1] and scaled to [0, 255].".format(max_val),
+            UserWarning,
+            stacklevel=2,
+        )
+        return np.uint8(np.clip(img, 0.0, 1.0) * 255.0)
+    return np.uint8(img)
 
 
 class Visdom(object):
@@ -951,6 +1006,24 @@ class Visdom(object):
         else:
             return json.loads(self._send({}, endpoint="env_state", quiet=True))
 
+    def get_env_state(self, env):
+        """
+        This function returns the state of a specific environment,
+        containing all window data as a dict of {window_id: window_json}.
+
+        Returns None if the environment does not exist.
+        """
+        assert isinstance(env, str), "env should be a string"
+        if self.offline:
+            return None
+        response = self._send({"eid": env}, endpoint="env_state", quiet=True)
+        if response is False:
+            return None
+        parsed = json.loads(response)
+        if isinstance(parsed, dict) and "error" in parsed:
+            return None
+        return parsed
+
     def win_exists(self, win, env=None):
         """
         This function returns a bool indicating whether
@@ -1364,10 +1437,10 @@ class Visdom(object):
 
         Y = do_tsne(features)
 
-        label_set = list(set(labels))
+        labels_normalized, _, _ = _normalize_labels(labels)
         points = [
             {
-                "group": int(label_set.index(labels[i])),
+                "group": int(labels_normalized[i] - 1),
                 "name": "Entity {}".format(i),
                 "label": labels[i],
                 "position": xy,
@@ -1423,9 +1496,7 @@ class Visdom(object):
         )
 
         if "float" in str(img.dtype):
-            if img.max() <= 1:
-                img = img * 255.0
-            img = np.uint8(img)
+            img = _float_img_to_uint8(img)
 
         img = np.transpose(img, (1, 2, 0))
         if nchannels == 4:
@@ -1785,17 +1856,16 @@ class Visdom(object):
         if Y is not None:
             Y = np.ravel(Y)
             assert X.shape[0] == Y.shape[0], "sizes of X and Y should match"
-            assert np.equal(np.mod(Y, 1), 0).all(), "labels should be integers"
-            assert Y.min() >= 1, "labels are assumed to be at least 1"
-            labels = np.unique(Y.astype(int, copy=False))
+            Y, label_values, K = _normalize_labels(Y)
+            labels = np.unique(Y)
             assert (
                 len(labels) == 1 or name is None
             ), "name should not be specified with multiple labels or lines"
-            K = int(Y.max())  # largest label
         else:
             Y = np.ones(X.shape[0], dtype=int)
             labels = np.ones(1, dtype=int)
             K = 1  # largest label
+            label_values = None  # single unlabelled trace
 
         is3d = X.shape[1] == 3
 
@@ -1854,7 +1924,12 @@ class Visdom(object):
                 elif len(labels) == 1 and name is not None:
                     trace_name = name
                 else:
-                    trace_name = str(k)
+                    # For float-remapped labels show the original value;
+                    # for integer labels keep existing str(k) behaviour.
+                    if label_values is not None:
+                        trace_name = str(label_values[k - 1])
+                    else:
+                        trace_name = str(k)
                 use_gl = opts.get("webgl", False)
                 _data = {
                     "x": nan2none(X.take(0, 1)[ind].tolist()),
@@ -2840,4 +2915,118 @@ class Visdom(object):
 
         return self._send(
             {"data": data, "win": win, "eid": env, "opts": opts}, endpoint="events"
+        )
+
+    @pytorch_wrap
+    def violin(self, X, win=None, env=None, opts=None):
+        """
+        This function draws violin plots of the specified data. It takes
+        input `N` or `NxM` tensor `X` that specifies the `N` data values
+        of which to construct the `M` violin plots.
+
+        The following plot-specific `opts` are currently supported:
+
+        - `opts.legend` : labels for each of the columns in `X`
+        - `opts.showbox` : overlay a mini box plot inside the violin
+                                  (`bool` and default = `True`)
+        - `opts.showmeanline` : overlay the mean line (`bool` and default = `True`)
+        - `opts.points` : which raw points to show alongside the violin
+                                  One of `all`, `outliers`,
+                                  `suspectedoutliers`, or `False`
+                                  (default = `False`)
+        - `opts.jitter` : amount of jitter applied to displayed points
+                                  (`float` in `[0, 1]`, default = `0.3`)
+        - `opts.orientation` : `v` for vertical and `h` for horizontal
+                                  violins
+        - `opts.bandwidth` : bandwidth of the kernel density estimate
+                                  `None` lets Plotly choose automatically
+        - `opts.side` : which side of the centre line to draw.
+                                  One of `both` , `positive`,
+                                  or `negative`
+        """
+
+        X = np.asarray(X)
+        if X.ndim > 2:
+            X = np.squeeze(X)
+        assert X.ndim == 1 or X.ndim == 2, "X should be one or two-dimensional"
+        if X.ndim == 1:
+            X = X[:, None]
+
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        if opts.get("legend") is not None:
+            assert (
+                len(opts["legend"]) == X.shape[1]
+            ), "number of legend labels must match number of columns in X"
+
+        showbox = opts.get("showbox", True)
+        showmeanline = opts.get("showmeanline", True)
+        points = opts.get("points", False)
+        jitter = opts.get("jitter", 0.3)
+        orientation = opts.get("orientation", "v")
+        bandwidth = opts.get("bandwidth", None)
+        side = opts.get("side", "both")
+
+        assert orientation in (
+            "v",
+            "h",
+        ), "opts.orientation must be 'v' (vertical) or 'h' (horizontal)"
+        assert side in (
+            "both",
+            "positive",
+            "negative",
+        ), "opts.side must be one of 'both', 'positive', or 'negative'"
+        assert points in ("all", "outliers", "suspectedoutliers", False), (
+            "opts.points must be one of 'all', 'outliers', "
+            "'suspectedoutliers', or False"
+        )
+        if jitter is not None:
+            assert (
+                isnum(jitter) and 0 <= jitter <= 1
+            ), "opts.jitter must be a float between 0 and 1"
+        if bandwidth is not None:
+            assert (
+                isnum(bandwidth) and bandwidth > 0
+            ), "opts.bandwidth must be a positive number"
+
+        data = []
+        for k in range(X.shape[1]):
+            col_data = X.take(k, 1).tolist()
+            label = opts["legend"][k] if opts.get("legend") else "column " + str(k)
+
+            trace = {
+                "type": "violin",
+                "name": label,
+                "box": {"visible": showbox},
+                "meanline": {"visible": showmeanline},
+                "points": points,
+                "side": side,
+            }
+            if jitter is not None:
+                trace["jitter"] = jitter
+
+            if orientation == "v":
+                trace["y"] = col_data
+            else:
+                trace["x"] = col_data
+                trace["orientation"] = "h"
+
+            if bandwidth is not None:
+                trace["bandwidth"] = bandwidth
+
+            if opts.get("opacity") is not None:
+                trace["opacity"] = opts["opacity"]
+
+            data.append(trace)
+
+        return self._send(
+            {
+                "data": data,
+                "win": win,
+                "eid": env,
+                "layout": _opts2layout(opts),
+                "opts": opts,
+            }
         )
