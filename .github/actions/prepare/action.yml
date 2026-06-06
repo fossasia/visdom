@@ -9,11 +9,20 @@ inputs:
     description: 'use true to load the resulting build files (from previous step)'
     required: true
     default: true
+  python-version:
+    description: 'Python version to use'
+    required: false
+    default: '3.10'
 
 runs:
   using: "composite"
   steps:
-      - name: "Setup Node" 
+      - name: "Setup Python"
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ inputs['python-version'] }}
+
+      - name: "Setup Node"
         uses: actions/setup-node@v6
         with:
           node-version: '16'
