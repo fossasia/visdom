@@ -511,7 +511,8 @@ def _decode_binary_arrays(obj):
 
 def _float_img_to_uint8(img):
     """Convert a float image array to uint8."""
-    tol = np.finfo(img.dtype).eps ** 0.5
+    # Tolerance needs floor to also safely address float64 images.
+    tol = max(1e-6, np.finfo(img.dtype).eps ** 0.5)
     max_val = float(img.max())
     if max_val <= 1.0:
         return np.uint8(np.clip(img, 0.0, 1.0) * 255.0)
