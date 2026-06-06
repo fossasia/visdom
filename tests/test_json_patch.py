@@ -138,6 +138,13 @@ class TestTextPatch(unittest.TestCase):
         content_ops = [op for op in patch if op["path"] == "/content"]
         self.assertTrue(len(content_ops) > 0)
 
+    def test_text_capped_at_max_lines(self):
+        p = make_text_window("line0")
+        for i in range(1, 600):
+            p, _ = update_packet(p, {"data": [{"content": f"line{i}"}]})
+        lines = p["content"].split("<br>")
+        self.assertEqual(len(lines), DEFAULT_MAX_TEXT_LINES)
+
     def test_text_patch_is_applicable(self):
         p = make_text_window("hello")
         old_p = copy.deepcopy(p)
@@ -221,6 +228,14 @@ class TestEmbeddingsPatch(unittest.TestCase):
         paths_changed = {op["path"] for op in patch}
         self.assertIn("/content/selected", paths_changed)
 
+    def test_old_content_capped(self):
+        p = make_embeddings_window()
+        for i in range(60):
+            p, _ = update_packet(
+                p, {"data": {"update_type": "RegionSelected", "points": [[i, i + 1]]}}
+            )
+        self.assertEqual(len(p["old_content"]), DEFAULT_MAX_OLD_CONTENT)
+
     def test_region_selected_patch(self):
         p = make_embeddings_window()
         new_p, patch = update_packet(
@@ -252,6 +267,25 @@ class TestImageHistoryPatch(unittest.TestCase):
         )
         self.assertEqual(len(new_p["content"]), 2)
         self.assertEqual(new_p["selected"], 1)
+
+    def test_image_history_capped(self):
+        p = make_image_history_window()
+        for i in range(10):
+            p, _ = update_packet(
+                p,
+                {
+                    "data": [
+                        {
+                            "type": "image_history",
+                            "content": {
+                                "src": f"data:image/png;base64,IMG{i}",
+                                "caption": f"img{i}",
+                            },
+                        }
+                    ]
+                },
+            )
+        self.assertEqual(len(p["content"]), DEFAULT_MAX_IMAGE_HISTORY)
 
 
 class TestPatchGeneral(unittest.TestCase):
