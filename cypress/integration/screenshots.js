@@ -74,6 +74,8 @@ describe(`Compare with previous plot screenshots`, () => {
 
       // ImagePane requires an additional rerender for the image to adjust to the Pane size correctly
       if (run.startsWith('image_')) cy.wait(300);
+      // LaTeX plots use MathJax which renders asynchronously - wait for typesetting to finish
+      if (run.startsWith('misc_plot_latex')) cy.wait(1000);
 
       cy.get('.content').first().screenshot(run, { overwrite: true });
       const maxDiff = maxDiffPixels[run] || 0;
