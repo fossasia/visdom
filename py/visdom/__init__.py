@@ -59,13 +59,12 @@ try:
         num_entities = len(X)
 
         # the number of entities provided must be at least 3x the perplexity
-        perplexity = (
-            50
-            if num_entities >= 150
-            else num_entities // 3
-            if num_entities >= 21
-            else 7
-        )
+        if num_entities >= 150:
+            perplexity = 50
+        elif num_entities >= 21:
+            perplexity = num_entities // 3
+        else:
+            perplexity = 7
         Y = bhtsne.run_bh_tsne(
             X, initial_dims=X.shape[1], perplexity=perplexity, verbose=True
         )
@@ -112,7 +111,7 @@ def isstr(s):
 
 
 def isnum(n):
-    return isinstance(n, numbers.Number)
+    return isinstance(n, numbers.Number) and not isinstance(n, bool)
 
 
 def isndarray(n):
@@ -444,7 +443,7 @@ def _assert_opts(opts):
         assert isnum(opts.get("fps")), "fps should be a number"
         assert opts.get("fps") > 0, "fps must be greater than 0"
 
-    if opts.get("title"):
+    if "title" in opts and opts.get("title") is not None:
         assert isstr(opts.get("title")), "title should be a string"
 
 
@@ -507,6 +506,25 @@ def _decode_binary_arrays(obj):
     if isinstance(obj, list):
         return [_decode_binary_arrays(v) for v in obj]
     return obj
+
+
+def _float_img_to_uint8(img):
+    """Convert a float image array to uint8."""
+    # Tolerance needs floor to also safely address float64 images.
+    tol = max(1e-6, np.finfo(img.dtype).eps ** 0.5)
+    max_val = float(img.max())
+    if max_val <= 1.0:
+        return np.uint8(np.clip(img, 0.0, 1.0) * 255.0)
+    if max_val <= 1.0 + tol:
+        warnings.warn(
+            "Image has float values slightly above 1.0 "
+            "(max={:.6f}). Values will be clamped to "
+            "[0, 1] and scaled to [0, 255].".format(max_val),
+            UserWarning,
+            stacklevel=2,
+        )
+        return np.uint8(np.clip(img, 0.0, 1.0) * 255.0)
+    return np.uint8(img)
 
 
 class Visdom(object):
@@ -1478,9 +1496,7 @@ class Visdom(object):
         )
 
         if "float" in str(img.dtype):
-            if img.max() <= 1:
-                img = img * 255.0
-            img = np.uint8(img)
+            img = _float_img_to_uint8(img)
 
         img = np.transpose(img, (1, 2, 0))
         if nchannels == 4:
@@ -1790,6 +1806,11 @@ class Visdom(object):
         - `opts.textlabels`       : text label for each point (`list`: default = `None`)
         - `opts.legend`           : `list` or `tuple` containing legend names
         """
+        if opts and opts.get("store_history") and update is not None:
+            raise ValueError(
+                "Cannot use store_history=True together with the update parameter"
+            )
+
         if update == "remove":
             assert win is not None
             assert name is not None, "A trace must be specified for deletion"
@@ -1805,12 +1826,11 @@ class Visdom(object):
             return self._send(data_to_send, endpoint="update")
 
         elif update is not None:
-            assert win is not None, "Must define a window to update"
+            if win is None:
+                raise ValueError("Must define a window to update")
 
             if update == "append":
-                if win is None:
-                    update = None
-                elif not self.offline:
+                if not self.offline:
                     exists = self.win_exists(win, env)
                     if exists is False:
                         update = None
@@ -1961,6 +1981,28 @@ class Visdom(object):
             for dash in ["dash"]:
                 if dash in opts:
                     del opts[dash]
+
+        if opts.get("store_history"):
+            layout = _opts2layout(opts, is3d)
+            data_to_send = {
+                "data": [
+                    {
+                        "type": "plot_history",
+                        "content": {
+                            "data": data,
+                            "layout": layout,
+                            "caption": opts.get("caption"),
+                        },
+                    }
+                ],
+                "win": win,
+                "eid": env,
+                "opts": opts,
+            }
+            endpoint = "events"
+            if win is not None and self.win_exists(win, env):
+                endpoint = "update"
+            return self._send(data_to_send, endpoint=endpoint)
 
         # Only send updates to the layout on the first plot, future updates
         # need to use `update_window_opts`

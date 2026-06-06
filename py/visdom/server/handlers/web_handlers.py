@@ -143,6 +143,17 @@ class UpdateHandler(BaseHandler):
                 selected_exists = min(len(p["content"]) - 1, selected_not_neg)
                 p["selected"] = selected_exists
             return p
+        if p["type"] == "plot_history":
+            utype = args["data"][0]["type"]
+            if utype == "plot_history":
+                p["content"].append(args["data"][0]["content"])
+                p["selected"] = len(p["content"]) - 1
+            elif utype == "plot_update_selected":
+                selected = args["data"][0]["selected"]
+                selected_not_neg = max(0, selected)
+                selected_exists = min(len(p["content"]) - 1, selected_not_neg)
+                p["selected"] = selected_exists
+            return p
 
         pdata = p["content"]["data"]
 
@@ -322,6 +333,7 @@ class UpdateHandler(BaseHandler):
         if not (
             p["type"] == "text"
             or p["type"] == "image_history"
+            or p["type"] == "plot_history"
             or p["type"] == "embeddings"
             or (
                 len(p["content"]["data"]) == 0
@@ -330,7 +342,7 @@ class UpdateHandler(BaseHandler):
             )
         ):
             handler.write(
-                "win is not scatter, heatmap, custom, image_history, embeddings, or text; "
+                "win is not scatter, heatmap, custom, image_history, plot_history, embeddings, or text; "
                 "was {}".format(
                     p["content"]["data"][0]["type"]
                     if len(p["content"]["data"]) > 0
