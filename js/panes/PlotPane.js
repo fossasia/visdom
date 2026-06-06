@@ -192,6 +192,8 @@ var PlotPane = (props) => {
     Plotly.react(contentID, data.concat(smooth_data), content.layout, {
       showLink: false,
       displaylogo: false,
+      doubleClick: 'reset',
+      doubleClickDelay: 500,
     }).then(() => {
       const plotElement = plotlyRef.current;
       if (plotElement && plotElement._fullLayout && isDisplayed(plotElement)) {
