@@ -1826,12 +1826,11 @@ class Visdom(object):
             return self._send(data_to_send, endpoint="update")
 
         elif update is not None:
-            assert win is not None, "Must define a window to update"
+            if win is None:
+                raise ValueError("Must define a window to update")
 
             if update == "append":
-                if win is None:
-                    update = None
-                elif not self.offline:
+                if not self.offline:
                     exists = self.win_exists(win, env)
                     if exists is False:
                         update = None
