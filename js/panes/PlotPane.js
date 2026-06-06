@@ -287,7 +287,13 @@ var PlotPane = (props) => {
       <div
         id={contentID}
         style={{ height: '100%', width: '100%' }}
-        className="plotly-graph-div"
+        className={`plotly-graph-div${
+          content.data?.[0]?.type === 'heatmap'
+            ? ' plotly-heatmap'
+            : content.data?.[0]?.type === 'contour'
+            ? ' plotly-contour'
+            : ''
+        }`}
         ref={plotlyRef}
       />
     </Pane>
