@@ -16,7 +16,11 @@ import getpass
 import logging
 import os
 import sys
+import errno
+import socket
 from tornado import ioloop
+import tornado.httpserver
+import tornado.netutil
 from visdom.server.app import Application
 from visdom.server.defaults import (
     DEFAULT_BASE_URL,
@@ -76,10 +80,22 @@ def start_server(
         use_frontend_client_polling=use_frontend_client_polling,
         eager_data_loading=eager_data_loading,
     )
-    if bind_local:
-        app.listen(port, max_buffer_size=1024**3, address="127.0.0.1")
-    else:
-        app.listen(port, max_buffer_size=1024**3)
+    bind_addr = "127.0.0.1" if bind_local else None
+    family = socket.AF_INET if bind_local else socket.AF_UNSPEC
+    try:
+        sockets = tornado.netutil.bind_sockets(port, address=bind_addr, family=family)
+    except OSError as e:
+        if e.errno == errno.EADDRINUSE:
+            logging.warning(f"Port {port} is already in use, assigning a free port")
+            sockets = tornado.netutil.bind_sockets(0, address=bind_addr, family=family)
+        else:
+            logging.error(f"Failed to bind to port {port}: {e}")
+            raise
+    port = sockets[0].getsockname()[1]
+    app.port = port
+    server = tornado.httpserver.HTTPServer(app, max_buffer_size=1024**3)
+    server.add_sockets(sockets)
+
     logging.info("Application Started")
     logging.info(f"Working directory: {os.path.abspath(env_path)}")
 
