@@ -111,7 +111,7 @@ def main(print_func=None):
         help="port to run the server on.",
     )
     parser.add_argument(
-        "--hostname",
+        "-hostname",
         metavar="hostname",
         type=str,
         default=DEFAULT_HOSTNAME,
