@@ -302,6 +302,10 @@ button[title="smooth lines"].active {
 .react-grid-item {
   min-height: 14px;
   min-width: fit-content;
+.plotly-heatmap,
+.plotly-contour {
+  min-height: 140px;
+  min-width: 140px;
 }
 
 .env-arrow-wrapper {
