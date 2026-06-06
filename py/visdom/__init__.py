@@ -1806,6 +1806,11 @@ class Visdom(object):
         - `opts.textlabels`       : text label for each point (`list`: default = `None`)
         - `opts.legend`           : `list` or `tuple` containing legend names
         """
+        if opts and opts.get("store_history") and update is not None:
+            raise ValueError(
+                "Cannot use store_history=True together with the update parameter"
+            )
+
         if update == "remove":
             assert win is not None
             assert name is not None, "A trace must be specified for deletion"
@@ -1977,6 +1982,28 @@ class Visdom(object):
             for dash in ["dash"]:
                 if dash in opts:
                     del opts[dash]
+
+        if opts.get("store_history"):
+            layout = _opts2layout(opts, is3d)
+            data_to_send = {
+                "data": [
+                    {
+                        "type": "plot_history",
+                        "content": {
+                            "data": data,
+                            "layout": layout,
+                            "caption": opts.get("caption"),
+                        },
+                    }
+                ],
+                "win": win,
+                "eid": env,
+                "opts": opts,
+            }
+            endpoint = "events"
+            if win is not None and self.win_exists(win, env):
+                endpoint = "update"
+            return self._send(data_to_send, endpoint=endpoint)
 
         # Only send updates to the layout on the first plot, future updates
         # need to use `update_window_opts`
