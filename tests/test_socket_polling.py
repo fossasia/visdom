@@ -4,6 +4,7 @@ These are the fallback mechanisms when WebSocket is unavailable.
 """
 
 import json
+import shutil
 import tempfile
 import unittest
 
@@ -17,6 +18,10 @@ class TestSocketPolling(tornado.testing.AsyncHTTPTestCase):
     def setUp(self):
         self._tmp_dir = tempfile.mkdtemp(prefix="visdom_test_")
         super().setUp()
+
+    def tearDown(self):
+        super().tearDown()
+        shutil.rmtree(self._tmp_dir, ignore_errors=True)
 
     def get_app(self):
         return Application(
@@ -121,15 +126,21 @@ class TestSocketPolling(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(body["reason"], SocketFailureReason.CONNECTION_CLOSED.value)
 
     def test_vis_socket_wrap_invalid_message_type(self):
+        from unittest.mock import MagicMock
+
+        mock_source = MagicMock()
+        sid = "test_vis_sid"
+        self._app.sources[sid] = mock_source
         resp = self.post_json(
             "/vis_socket_wrap",
             {
-                "sid": "fake_sid",
-                "message_type": "query",
+                "sid": sid,
+                "message_type": "invalid_type",
             },
         )
         body = json.loads(resp.body)
         self.assertFalse(body["success"])
+        self.assertEqual(body["reason"], SocketFailureReason.INVALID_MESSAGE_TYPE.value)
 
     def test_failure_response_includes_detail(self):
         """Failure responses should include a human-readable 'detail' field."""

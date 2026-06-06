@@ -348,18 +348,19 @@ class SocketWrapper(SocketHandlerOrWrapper, AnySocketWrapper):
 class SocketFailureReason(Enum):
     """Failure reason codes for the HTTP polling socket protocol."""
 
-    CONNECTION_CLOSED = "closed"
-    MISSING_MESSAGE = "no msg"
-    INVALID_MESSAGE_TYPE = "invalid"
+    CONNECTION_CLOSED = ("closed", "Socket connection not found or already closed")
+    MISSING_MESSAGE = ("no msg", "Send request missing required 'message' field")
+    INVALID_MESSAGE_TYPE = ("invalid", "Unrecognized message_type")
+
+    def __new__(cls, value, description=""):
+        obj = object.__new__(cls)
+        obj._value_ = value
+        obj._description = description
+        return obj
 
     @property
     def description(self):
-        _descriptions = {
-            "closed": "Socket connection not found or already closed",
-            "no msg": "Send request missing required 'message' field",
-            "invalid": "Unrecognized message_type",
-        }
-        return _descriptions[self.value]
+        return self._description
 
     def to_failure_response(self):
         return {"success": False, "reason": self.value, "detail": self.description}
