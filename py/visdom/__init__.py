@@ -1341,11 +1341,10 @@ class Visdom(object):
                 # them via an append event
                 entity_id = event["entityId"]
                 id = event["idx"]
-                if data_getter is not None:
-                    if data_type == "html":
-                        selected = {"html": data_getter(int(id))}
-                    else:
-                        selected = {"html": "<div>No preview available</div>"}
+                if data_getter is not None and data_type == "html":
+                    selected = {"html": data_getter(int(id))}
+                else:
+                    selected = {"html": "<div>No preview available</div>"}
 
                 selected["entityId"] = entity_id
                 send_data = {"update_type": "EntitySelected", "selected": selected}
