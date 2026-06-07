@@ -8,6 +8,7 @@
  */
 
 import React, { useContext, useEffect } from 'react';
+import ScrollToBottom from 'react-scroll-to-bottom';
 
 import ApiContext from '../api/ApiContext';
 import EventSystem from '../EventSystem';
@@ -24,9 +25,16 @@ function TextPane(props) {
 
     switch (e.type) {
       case 'keydown':
-      case 'keypress':
-        e.preventDefault();
+      case 'keypress': {
+        const tag = e.target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+          break;
+        }
+        if (!(e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+        }
         break;
+      }
       case 'keyup':
         sendPaneMessage(
           {
@@ -65,11 +73,23 @@ function TextPane(props) {
   // rendering
   // ---------
 
+  const LARGE_BACKLOG_CONTENT_LENGTH = 50000;
+  const initialScrollBehavior =
+    content && content.length > LARGE_BACKLOG_CONTENT_LENGTH
+      ? 'auto'
+      : 'smooth';
+
   return (
     <Pane {...props} handleDownload={handleDownload}>
-      <div className="content-text">
+      <ScrollToBottom
+        className="content-text"
+        scrollViewClassName="content-text-scroll-view"
+        followButtonClassName="content-text-follow-button"
+        initialScrollBehavior={initialScrollBehavior}
+        mode="bottom"
+      >
         <div dangerouslySetInnerHTML={{ __html: content }} />
-      </div>
+      </ScrollToBottom>
     </Pane>
   );
 }
