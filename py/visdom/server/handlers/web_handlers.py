@@ -650,9 +650,7 @@ class IndexHandler(BaseHandler):
         salt = stored.split("$")[0]
         password = hash_password(json_obj["password"], salt=salt)
 
-        if (username == self.user_credential["username"]) and (
-            password == stored
-        ):
+        if (username == self.user_credential["username"]) and (password == stored):
             self.set_secure_cookie("user_password", username + password)
         else:
             self.set_status(400)
