@@ -1,10 +1,10 @@
 import json
-import math
 import unittest
 
 import numpy as np
 
-from visdom import NanSafeEncoder, _sanitize_nans
+from visdom import NanSafeEncoder
+from visdom.utils.shared_utils import _sanitize_nans
 
 
 class TestSanitizeNans(unittest.TestCase):
