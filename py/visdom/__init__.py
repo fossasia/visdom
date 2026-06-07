@@ -113,7 +113,7 @@ def isndarray(n):
     return isinstance(n, (np.ndarray))
 
 
-from visdom.utils.shared_utils import NanSafeEncoder, _sanitize_nans
+from visdom.utils.shared_utils import NanSafeEncoder
 
 
 # TODO: In appropriate places, we need to change many numpy calls to use
