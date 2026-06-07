@@ -55,6 +55,8 @@ from visdom.server.handlers.base_handlers import BaseHandler
 # new classes in the data_model folder.
 # TODO abstract out any direct references to the app where possible from
 # all handlers. Can instead provide accessor functions on the state?
+
+
 class PostHandler(BaseHandler):
     @check_auth
     def post(self):
@@ -95,7 +97,7 @@ class ExistsHandler(BaseHandler):
 
 class UpdateHandler(BaseHandler):
     @staticmethod
-    def update_packet(p, args):
+    def update_packet(p, args, max_text_lines, max_old_content, max_image_history):
         # Shallow copy the packet to dynamically capture changes to top-level keys.
         old_p = p.copy()
 
@@ -105,17 +107,22 @@ class UpdateHandler(BaseHandler):
         if "old_content" in p:
             old_p["old_content"] = copy.deepcopy(p["old_content"])
 
-        p = UpdateHandler.update(p, args)
+        p = UpdateHandler.update(
+            p, args, max_text_lines, max_old_content, max_image_history
+        )
         p["contentID"] = get_rand_id()
 
         patch = jsonpatch.make_patch(old_p, p)
         return p, patch.patch
 
     @staticmethod
-    def update(p, args):
+    def update(p, args, max_text_lines, max_old_content, max_image_history):
         # Update text in window, separated by a line break
         if p["type"] == "text":
             p["content"] += "<br>" + args["data"][0]["content"]
+            lines = p["content"].split("<br>")
+            if len(lines) > max_text_lines:
+                p["content"] = "<br>".join(lines[-max_text_lines:])
             return p
         if p["type"] == "embeddings":
             # TODO embeddings updates should be handled outside of the regular
@@ -127,6 +134,8 @@ class UpdateHandler(BaseHandler):
                 p["content"]["selected"] = None
                 print(len(p["content"]["data"]))
                 p["old_content"].append(p["content"]["data"])
+                if len(p["old_content"]) > max_old_content:
+                    p["old_content"] = p["old_content"][-max_old_content:]
                 p["content"]["has_previous"] = True
                 p["content"]["data"] = args["data"]["points"]
                 print(len(p["content"]["data"]))
@@ -135,9 +144,22 @@ class UpdateHandler(BaseHandler):
             utype = args["data"][0]["type"]
             if utype == "image_history":
                 p["content"].append(args["data"][0]["content"])
+                if len(p["content"]) > max_image_history:
+                    p["content"] = p["content"][-max_image_history:]
                 p["selected"] = len(p["content"]) - 1
             elif utype == "image_update_selected":
                 # Bound the update to within the dims of the array
+                selected = args["data"][0]["selected"]
+                selected_not_neg = max(0, selected)
+                selected_exists = min(len(p["content"]) - 1, selected_not_neg)
+                p["selected"] = selected_exists
+            return p
+        if p["type"] == "plot_history":
+            utype = args["data"][0]["type"]
+            if utype == "plot_history":
+                p["content"].append(args["data"][0]["content"])
+                p["selected"] = len(p["content"]) - 1
+            elif utype == "plot_update_selected":
                 selected = args["data"][0]["selected"]
                 selected_not_neg = max(0, selected)
                 selected_exists = min(len(p["content"]) - 1, selected_not_neg)
@@ -325,6 +347,7 @@ class UpdateHandler(BaseHandler):
         if not (
             p["type"] == "text"
             or p["type"] == "image_history"
+            or p["type"] == "plot_history"
             or p["type"] == "embeddings"
             or (
                 len(p["content"]["data"]) == 0
@@ -333,7 +356,7 @@ class UpdateHandler(BaseHandler):
             )
         ):
             handler.write(
-                "win is not scatter, heatmap, custom, image_history, embeddings, or text; "
+                "win is not scatter, heatmap, custom, image_history, plot_history, embeddings, or text; "
                 "was {}".format(
                     p["content"]["data"][0]["type"]
                     if len(p["content"]["data"]) > 0
@@ -342,7 +365,13 @@ class UpdateHandler(BaseHandler):
             )
             return
 
-        p, diff_packet = UpdateHandler.update_packet(p, args)
+        p, diff_packet = UpdateHandler.update_packet(
+            p,
+            args,
+            handler.max_text_lines,
+            handler.max_old_content,
+            handler.max_image_history,
+        )
         # send the smaller of the patch and the updated pane
         if len(stringify(p)) <= len(stringify(diff_packet)):
             broadcast_msg = dict(p)
@@ -599,6 +628,10 @@ class IndexHandler(BaseHandler):
             available when we set self.get_current_user in BaseHandler,
             and the default value of self.current_user is None
             """
+            if args not in ("", "/"):
+                raise tornado.web.HTTPError(
+                    404, reason=f"Path '{self.request.path}' not found"
+                )
             self.render(
                 "index.html",
                 wrap_socket=self.wrap_socket,
