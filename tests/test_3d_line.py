@@ -190,6 +190,33 @@ class TestFillareaWarning(unittest.TestCase):
                 self.assertEqual(len(fillarea_warnings), 0)
 
 
+class TestAppendWithoutZ(unittest.TestCase):
+    """Appending to a line plot without Z should produce 2D data."""
+
+    def test_append_without_z_produces_nx2(self):
+        vis = _make_vis()
+        Y = np.array([1.0, 2.0])
+        X = np.array([1.0, 2.0])
+
+        with patch.object(vis, "scatter") as mock_scatter:
+            mock_scatter.return_value = "win"
+            vis.line(Y=Y, X=X, update="append")
+            scatter_X = mock_scatter.call_args[1]["X"]
+            self.assertEqual(scatter_X.shape, (2, 2))
+
+    def test_append_with_z_produces_nx3(self):
+        vis = _make_vis()
+        Y = np.array([1.0, 2.0])
+        X = np.array([1.0, 2.0])
+        Z = np.array([1.0, 2.0])
+
+        with patch.object(vis, "scatter") as mock_scatter:
+            mock_scatter.return_value = "win"
+            vis.line(Y=Y, X=X, Z=Z, update="append")
+            scatter_X = mock_scatter.call_args[1]["X"]
+            self.assertEqual(scatter_X.shape, (2, 3))
+
+
 class TestModeOption(unittest.TestCase):
     """Mode should be set correctly for both 2D and 3D."""
 
