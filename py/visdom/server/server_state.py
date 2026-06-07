@@ -73,6 +73,18 @@ class StateAccessorsMixin:
     def user_settings(self):
         return self.server_state.user_settings
 
+    @property
+    def max_text_lines(self):
+        return self.server_state.max_text_lines
+
+    @property
+    def max_old_content(self):
+        return self.server_state.max_old_content
+
+    @property
+    def max_image_history(self):
+        return self.server_state.max_image_history
+
 
 class ServerState:
     """Single shared facade over the server's data containers, configuration,
@@ -94,6 +106,9 @@ class ServerState:
         base_url,
         wrap_socket,
         user_settings,
+        max_text_lines,
+        max_old_content,
+        max_image_history,
     ):
         # Retained solely to construct nested socket wrappers (see
         # ``spawn_socket``); handlers must not touch the app directly.
@@ -113,6 +128,9 @@ class ServerState:
         self.base_url = base_url
         self.wrap_socket = wrap_socket
         self.user_settings = user_settings
+        self.max_text_lines = max_text_lines
+        self.max_old_content = max_old_content
+        self.max_image_history = max_image_history
 
         # Runtime values that get reassigned while the server runs. These are
         # the reason this facade exists: a value copied onto a handler would go

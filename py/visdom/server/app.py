@@ -112,6 +112,9 @@ class Application(tornado.web.Application):
             base_url=self.base_url,
             wrap_socket=self.wrap_socket,
             user_settings=self.user_settings,
+            max_text_lines=self.max_text_lines,
+            max_old_content=self.max_old_content,
+            max_image_history=self.max_image_history,
         )
 
         tornado_settings["static_url_prefix"] = self.base_url + "/static/"
