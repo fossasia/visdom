@@ -147,6 +147,7 @@ class Visdom:
         name: _OptStr = ...,
         opts: _OptOps = ...,
         Z: Optional[Tensor] = ...,
+        is3d: bool = ...,
     ) -> _SendReturn: ...
     def grid(
         self,

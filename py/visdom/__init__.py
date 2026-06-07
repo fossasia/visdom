@@ -2047,7 +2047,7 @@ class Visdom(object):
 
     @pytorch_wrap
     def line(
-        self, Y, X=None, win=None, env=None, opts=None, update=None, name=None, Z=None
+        self, Y, X=None, win=None, env=None, opts=None, update=None, name=None, Z=None, is3d=False
     ):
         """
         This function draws a line plot. It takes in an `N` or `NxM` tensor
@@ -2094,6 +2094,11 @@ class Visdom(object):
                 )
             else:
                 assert X is not None, "must specify x-values for line update"
+        if is3d:
+            assert Z is not None, (
+                "Z values are required for 3D line plots. "
+                "Pass Z when creating or updating a 3D line plot."
+            )
         assert Y.ndim == 1 or Y.ndim == 2, "Y should have 1 or 2 dim"
         assert Y.shape[-1] > 0, "must plot one line at least"
 
