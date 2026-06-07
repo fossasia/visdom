@@ -1344,8 +1344,8 @@ class Visdom(object):
                 if data_getter is not None:
                     if data_type == "html":
                         selected = {"html": data_getter(int(id))}
-                else:
-                    selected = {"html": "<div>No preview available</div>"}
+                    else:
+                        selected = {"html": "<div>No preview available</div>"}
 
                 selected["entityId"] = entity_id
                 send_data = {"update_type": "EntitySelected", "selected": selected}
