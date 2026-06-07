@@ -2047,7 +2047,16 @@ class Visdom(object):
 
     @pytorch_wrap
     def line(
-        self, Y, X=None, win=None, env=None, opts=None, update=None, name=None, Z=None, is3d=False
+        self,
+        Y,
+        X=None,
+        win=None,
+        env=None,
+        opts=None,
+        update=None,
+        name=None,
+        Z=None,
+        is3d=False,
     ):
         """
         This function draws a line plot. It takes in an `N` or `NxM` tensor
