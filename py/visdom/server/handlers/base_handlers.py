@@ -60,6 +60,9 @@ class BaseHandler(tornado.web.RequestHandler):
             self.port = app.port
             self.env_path = app.env_path
             self.login_enabled = app.login_enabled
+            self.max_text_lines = app.max_text_lines
+            self.max_old_content = app.max_old_content
+            self.max_image_history = app.max_image_history
 
     def __init__(self, *request, **kwargs):
         self.include_host = False
@@ -93,9 +96,9 @@ class BaseHandler(tornado.web.RequestHandler):
             try:
                 params = {
                     "error": exc_info[1] if debug else None,
-                    "trace_info": traceback.format_exception(*exc_info)
-                    if debug
-                    else None,
+                    "trace_info": (
+                        traceback.format_exception(*exc_info) if debug else None
+                    ),
                     "request": self.request.__dict__ if debug else None,
                     "status_code": status_code,
                     "title": title,
