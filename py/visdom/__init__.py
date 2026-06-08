@@ -664,17 +664,19 @@ class Visdom(object):
         self._session = sess
         return sess
 
-    def register_event_handler(self, handler, target):
+    def register_event_handler(self, handler, target, env=None):
         assert callable(handler), "Event handler must be a function"
-        assert self.use_socket, (
-            "Must be using the incoming socket to " "register events to web actions"
-        )
-        if target not in self.event_handlers:
-            self.event_handlers[target] = []
-        self.event_handlers[target].append(handler)
+        assert (
+            self.use_socket
+        ), "Must be using the incoming socket to register events to web actions"
 
-    def clear_event_handlers(self, target):
-        self.event_handlers[target] = []
+        key = (env, target)
+        if key not in self.event_handlers:
+            self.event_handlers[key] = []
+        self.event_handlers[key].append(handler)
+
+    def clear_event_handlers(self, target, env=None):
+        self.event_handlers.pop((env, target), None)
 
     def setup_polling(self):
         # TODO merge with setup_socket?
@@ -694,8 +696,16 @@ class Visdom(object):
                             "be properly connected"
                         )
             if "target" in message:
-                for handler in list(self.event_handlers.get(message["target"], [])):
+                env = message.get("eid")
+                key = (env, message["target"])
+
+                for handler in list(self.event_handlers.get(key, [])):
                     handler(message)
+
+                if env is not None:
+                    global_key = (None, message["target"])
+                    for handler in list(self.event_handlers.get(global_key, [])):
+                        handler(message)
 
         def on_close(ws):
             self.socket_alive = False
@@ -745,7 +755,15 @@ class Visdom(object):
                             "be properly connected"
                         )
             if "target" in message:
-                for handler in list(self.event_handlers.get(message["target"], [])):
+                env = message.get("eid")
+                key = (env, message["target"])
+
+                handlers = list(self.event_handlers.get(key, []))
+                if env is not None:
+                    global_key = (None, message["target"])
+                    handlers.extend(list(self.event_handlers.get(global_key, [])))
+
+                for handler in handlers:
                     try:
                         handler(message)
                     except Exception as e:
@@ -1391,7 +1409,7 @@ class Visdom(object):
                 endpoint="update",
             )
 
-        self.register_event_handler(embedding_event_handler, win)
+        self.register_event_handler(embedding_event_handler, win, env=env)
 
     def embeddings(
         self,
