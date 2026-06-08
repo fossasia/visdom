@@ -41,7 +41,7 @@
     "browserify-zlib": "^0.2.0",
     "buffer": "^6.0.3",
     "css-loader": "^6.7.3",
-    "d3-dispatch": "^1.0.6",
+    "d3-dispatch": "^3.0.1",
     "d3-drag": "^1.2.5",
     "d3-polygon": "^1.0.6",
     "d3-selection": "^1.4.2",
