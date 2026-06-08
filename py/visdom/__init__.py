@@ -16,12 +16,6 @@ import websocket  # type: ignore
 import json
 import hashlib
 
-try:
-    # for after python 3.8
-    from collections.abc import Sequence
-except ImportError:
-    # for python 3.7 and below
-    from collections import Sequence
 import math
 import re
 import base64
@@ -118,19 +112,11 @@ def isndarray(n):
     return isinstance(n, (np.ndarray))
 
 
-# Only works on (possibly nested) lists of numbers
-# TODO: Create our own JSONEncoder that automatically does this.
-#       Maybe we can port plotly's over:
-#       https://github.com/plotly/plotly.py/blob/81629273ff6d7a30257a42572ed0e4e6ad436009/_plotly_utils/utils.py#L16
-# TODO: Also, in appropriate places, we need to change many numpy calls to use
+from visdom.utils.shared_utils import NanSafeEncoder
+
+
+# TODO: In appropriate places, we need to change many numpy calls to use
 #       nan-aware ones, e.g., `X.max` => `np.nanmax(X)`.
-def nan2none(l):
-    for idx, val in enumerate(l):
-        if isinstance(val, Sequence):
-            l[idx] = nan2none(l[idx])
-        elif isnum(val) and (math.isnan(val) or math.isinf(val)):
-            l[idx] = None
-    return l
 
 
 def loadfile(filename):
@@ -664,17 +650,19 @@ class Visdom(object):
         self._session = sess
         return sess
 
-    def register_event_handler(self, handler, target):
+    def register_event_handler(self, handler, target, env=None):
         assert callable(handler), "Event handler must be a function"
-        assert self.use_socket, (
-            "Must be using the incoming socket to " "register events to web actions"
-        )
-        if target not in self.event_handlers:
-            self.event_handlers[target] = []
-        self.event_handlers[target].append(handler)
+        assert (
+            self.use_socket
+        ), "Must be using the incoming socket to register events to web actions"
 
-    def clear_event_handlers(self, target):
-        self.event_handlers[target] = []
+        key = (env, target)
+        if key not in self.event_handlers:
+            self.event_handlers[key] = []
+        self.event_handlers[key].append(handler)
+
+    def clear_event_handlers(self, target, env=None):
+        self.event_handlers.pop((env, target), None)
 
     def setup_polling(self):
         # TODO merge with setup_socket?
@@ -694,8 +682,16 @@ class Visdom(object):
                             "be properly connected"
                         )
             if "target" in message:
-                for handler in list(self.event_handlers.get(message["target"], [])):
+                env = message.get("eid")
+                key = (env, message["target"])
+
+                for handler in list(self.event_handlers.get(key, [])):
                     handler(message)
+
+                if env is not None:
+                    global_key = (None, message["target"])
+                    for handler in list(self.event_handlers.get(global_key, [])):
+                        handler(message)
 
         def on_close(ws):
             self.socket_alive = False
@@ -745,7 +741,15 @@ class Visdom(object):
                             "be properly connected"
                         )
             if "target" in message:
-                for handler in list(self.event_handlers.get(message["target"], [])):
+                env = message.get("eid")
+                key = (env, message["target"])
+
+                handlers = list(self.event_handlers.get(key, []))
+                if env is not None:
+                    global_key = (None, message["target"])
+                    handlers.extend(list(self.event_handlers.get(global_key, [])))
+
+                for handler in handlers:
                     try:
                         handler(message)
                     except Exception as e:
@@ -828,7 +832,8 @@ class Visdom(object):
                             [
                                 endpoint,
                                 msg,
-                            ]
+                            ],
+                            cls=NanSafeEncoder,
                         )
                         + "\n"
                     )
@@ -881,7 +886,7 @@ class Visdom(object):
                 "{0}:{1}{2}/{3}".format(
                     self.server, self.port, self.base_url, endpoint
                 ),
-                data=json.dumps(msg),
+                data=json.dumps(msg, cls=NanSafeEncoder),
             )
         except (requests.RequestException, requests.ConnectionError, requests.Timeout):
             if self.raise_exceptions:
@@ -1391,7 +1396,7 @@ class Visdom(object):
                 endpoint="update",
             )
 
-        self.register_event_handler(embedding_event_handler, win)
+        self.register_event_handler(embedding_event_handler, win, env=env)
 
     def embeddings(
         self,
@@ -1955,8 +1960,8 @@ class Visdom(object):
                         trace_name = str(k)
                 use_gl = opts.get("webgl", False)
                 _data = {
-                    "x": nan2none(X.take(0, 1)[ind].tolist()),
-                    "y": nan2none(X.take(1, 1)[ind].tolist()),
+                    "x": X.take(0, 1)[ind].tolist(),
+                    "y": X.take(1, 1)[ind].tolist(),
                     "name": trace_name,
                     "type": (
                         "scatter3d" if is3d else ("scattergl" if use_gl else "scatter")
@@ -2240,7 +2245,7 @@ class Visdom(object):
 
         data = [
             {
-                "z": nan2none(X.tolist()),
+                "z": X.tolist(),
                 "x": opts.get("columnnames"),
                 "y": opts.get("rownames"),
                 "zmin": opts.get("xmin"),
