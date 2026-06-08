@@ -24,7 +24,7 @@
     "prettier": "^2.8.3",
     "webpack": "^5.107.2",
     "webpack-cli": "^4.10.0",
-    "webpack-merge": "^5.8.0"
+    "webpack-merge": "^6.0.1"
   },
   "scripts": {
     "dev": "webpack --watch --progress --config webpack.dev.js",
