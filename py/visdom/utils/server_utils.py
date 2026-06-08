@@ -74,9 +74,14 @@ def set_cookie(value=None):
         cookie_file.write(cookie_secret)
 
 
-def hash_password(password):
-    """Hashing Password with SHA-256"""
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+def hash_password(password, salt=None):
+    """Hash password using PBKDF2-HMAC-SHA256 with a random salt."""
+    if salt is None:
+        salt = os.urandom(32)
+    elif isinstance(salt, str):
+        salt = bytes.fromhex(salt)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 100000)
+    return salt.hex() + "$" + dk.hex()
 
 
 # ------- File management helprs ----- #

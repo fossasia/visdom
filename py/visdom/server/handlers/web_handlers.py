@@ -646,11 +646,11 @@ class IndexHandler(BaseHandler):
     def post(self, arg, **kwargs):
         json_obj = tornado.escape.json_decode(self.request.body)
         username = json_obj["username"]
-        password = hash_password(json_obj["password"])
+        stored = self.user_credential["password"]
+        salt = stored.split("$")[0]
+        password = hash_password(json_obj["password"], salt=salt)
 
-        if (username == self.user_credential["username"]) and (
-            password == self.user_credential["password"]
-        ):
+        if (username == self.user_credential["username"]) and (password == stored):
             self.set_secure_cookie("user_password", username + password)
         else:
             self.set_status(400)
