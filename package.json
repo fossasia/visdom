@@ -14,7 +14,7 @@
     "babel-loader": "^8.3.0",
     "cypress": "^9.7.0",
     "eslint": "^7.32.0",
-    "eslint-config-prettier": "^8.6.0",
+    "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-cypress": "^2.12.1",
     "eslint-plugin-ignore-generated-and-nolint": "^1.0.0",
     "eslint-plugin-jsx-a11y": "^6.10.2",
