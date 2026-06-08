@@ -80,6 +80,15 @@ def run_demo(viz, env, args):
     plot_bar_stacked(viz, env, args)
     plot_bar_nonstacked(viz, env, args)
     plot_bar_histogram(viz, env, args)
+
+    # 2D histogram
+    hist2d_x = np.concatenate([np.random.randn(10000) - 1.5, np.random.randn(10000) + 1.5])
+    hist2d_y = np.concatenate([np.random.randn(10000) - 1.5, np.random.randn(10000) + 1.5])
+    viz.histogram2d(
+        X=hist2d_x, Y=hist2d_y, env=env,
+        opts=dict(title='2D Histogram (density)', xnumbins=40, ynumbins=40),
+    )
+
     plot_bar_piechart(viz, env, args)
 
     # ============= #
