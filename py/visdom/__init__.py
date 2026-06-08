@@ -2051,13 +2051,28 @@ class Visdom(object):
         return self._send(data_to_send, endpoint=endpoint)
 
     @pytorch_wrap
-    def line(self, Y, X=None, win=None, env=None, opts=None, update=None, name=None):
+    def line(
+        self,
+        Y,
+        X=None,
+        win=None,
+        env=None,
+        opts=None,
+        update=None,
+        name=None,
+        Z=None,
+        is3d=False,
+    ):
         """
         This function draws a line plot. It takes in an `N` or `NxM` tensor
         `Y` that specifies the values of the `M` lines (that connect `N` points)
         to plot. It also takes an optional `X` tensor that specifies the
         corresponding x-axis values; `X` can be an `N` tensor (in which case all
         lines will share the same x-axis values) or have the same size as `Y`.
+
+        For 3D line plots, an optional `Z` tensor can be provided with the same
+        size as `Y` (or as an `N` tensor shared across lines). When `Z` is
+        provided, the plot is rendered as a 3D line plot.
 
         `update` can be used to efficiently update the data of an existing line.
         Use 'append' to append data, 'replace' to use new data, and 'remove' to
@@ -2069,7 +2084,7 @@ class Visdom(object):
 
         The following `opts` are supported:
 
-        - `opts.fillarea`    : fill area below line (`boolean`)
+        - `opts.fillarea`    : fill area below line (`boolean`; not supported for 3D)
         - `opts.markers`     : show markers (`boolean`; default = `false`)
         - `opts.markersymbol`: marker symbol (`string`; default = `'dot'`)
         - `opts.markersize`  : marker size (`number` or `np.array`; default = `'10'`)
@@ -2093,13 +2108,23 @@ class Visdom(object):
                 )
             else:
                 assert X is not None, "must specify x-values for line update"
+        if is3d:
+            assert Z is not None, (
+                "Z values are required for 3D line plots. "
+                "Pass Z when creating or updating a 3D line plot."
+            )
         assert Y.ndim == 1 or Y.ndim == 2, "Y should have 1 or 2 dim"
         assert Y.shape[-1] > 0, "must plot one line at least"
+
+        if Z is not None:
+            assert Z.ndim == 1 or Z.ndim == 2, "Z should have 1 or 2 dim"
 
         if Y.ndim == 2 and Y.shape[1] == 1:
             Y = Y.ravel()
             if X is not None and X.ndim == 2 and X.shape[1] == 1:
                 X = X.ravel()
+            if Z is not None and Z.ndim == 2 and Z.shape[1] == 1:
+                Z = Z.ravel()
 
         if X is not None:
             assert X.ndim == 1 or X.ndim == 2, "X should have 1 or 2 dim"
@@ -2109,20 +2134,38 @@ class Visdom(object):
         if Y.ndim == 2 and X.ndim == 1:
             X = np.tile(X, (Y.shape[1], 1)).transpose()
 
+        if Z is not None and Y.ndim == 2 and Z.ndim == 1:
+            Z = np.tile(Z, (Y.shape[1], 1)).transpose()
+
         assert X.shape == Y.shape, "X and Y should be the same shape"
+        if Z is not None:
+            assert Z.shape == Y.shape, "Z and Y should be the same shape"
 
         opts = {} if opts is None else opts
         opts["markers"] = opts.get("markers", False)
         opts["fillarea"] = opts.get("fillarea", False)
+        if Z is not None and opts["fillarea"]:
+            warnings.warn(
+                "fillarea is not supported for 3D line plots",
+                UserWarning,
+                stacklevel=2,
+            )
+            opts["fillarea"] = False
         opts["mode"] = "lines+markers" if opts.get("markers") else "lines"
 
         _title2str(opts)
         _assert_opts(opts)
 
         if Y.ndim == 1:
-            linedata = np.column_stack((X, Y))
+            if Z is not None:
+                linedata = np.column_stack((X, Y, Z))
+            else:
+                linedata = np.column_stack((X, Y))
         else:
-            linedata = np.column_stack((X.ravel(order="F"), Y.ravel(order="F")))
+            cols = [X.ravel(order="F"), Y.ravel(order="F")]
+            if Z is not None:
+                cols.append(Z.ravel(order="F"))
+            linedata = np.column_stack(cols)
 
         labels = None
         if Y.ndim == 2:
