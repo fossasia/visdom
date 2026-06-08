@@ -15,7 +15,7 @@
     "cypress": "^9.7.0",
     "eslint": "^7.32.0",
     "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-cypress": "^2.12.1",
+    "eslint-plugin-cypress": "^3.6.0",
     "eslint-plugin-ignore-generated-and-nolint": "^1.0.0",
     "eslint-plugin-jsx-a11y": "^6.10.2",
     "eslint-plugin-react": "^7.37.5",
