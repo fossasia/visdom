@@ -4831,10 +4831,10 @@ prepend-http@^2.0.0:
   resolved "https://registry.npmjs.org/prepend-http/-/prepend-http-2.0.0.tgz"
   integrity sha512-ravE6m9Atw9Z/jjttRUZ+clIXogdghyZAuWJ3qEzjT+jI/dL1ifAqhZeC5VHzQp1MSt1+jxKkFNemj/iO7tVUA==
 
-prettier@^2.8.3:
-  version "2.8.4"
-  resolved "https://registry.npmjs.org/prettier/-/prettier-2.8.4.tgz"
-  integrity sha512-vIS4Rlc2FNh0BySk3Wkd6xmwxB0FpOndW5fisM5H8hsZSxU2VWVB5CWIkIjWvrHjIhxk2g3bfMKM87zNTrZddw==
+prettier@^3.8.3:
+  version "3.8.3"
+  resolved "https://registry.yarnpkg.com/prettier/-/prettier-3.8.3.tgz#560f2de55bf01b4c0503bc629d5df99b9a1d09b0"
+  integrity sha512-7igPTM53cGHMW8xWuVTydi2KO233VFiTNyF5hLJqpilHfmn8C8gPf+PS7dUT64YcXFbiMGZxS9pCSxL/Dxm/Jw==
 
 pretty-bytes@^5.6.0:
   version "5.6.0"
