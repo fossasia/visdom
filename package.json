@@ -14,7 +14,7 @@
     "babel-loader": "^8.3.0",
     "cypress": "^9.7.0",
     "eslint": "^7.32.0",
-    "eslint-config-prettier": "^8.6.0",
+    "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-cypress": "^2.12.1",
     "eslint-plugin-ignore-generated-and-nolint": "^1.0.0",
     "eslint-plugin-jsx-a11y": "^6.10.2",
@@ -24,7 +24,7 @@
     "prettier": "^2.8.3",
     "webpack": "^5.107.2",
     "webpack-cli": "^4.10.0",
-    "webpack-merge": "^5.8.0"
+    "webpack-merge": "^6.0.1"
   },
   "scripts": {
     "dev": "webpack --watch --progress --config webpack.dev.js",
@@ -41,7 +41,7 @@
     "browserify-zlib": "^0.2.0",
     "buffer": "^6.0.3",
     "css-loader": "^6.7.3",
-    "d3-dispatch": "^1.0.6",
+    "d3-dispatch": "^3.0.1",
     "d3-drag": "^1.2.5",
     "d3-polygon": "^1.0.6",
     "d3-selection": "^1.4.2",
