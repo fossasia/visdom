@@ -51,7 +51,7 @@ The UI begins as a blank slate – you can populate it with plots, images, and t
 
 The python Visdom implementation supports callbacks on a window. The demo shows an example of this in the form of an editable text pad. The functionality of these callbacks allows the Visdom object to receive and react to events that happen in the frontend.
 
-You can subscribe a window to events by adding a function to the event handlers dict for the window id you want to subscribe by calling `viz.register_event_handler(handler, win_id)` with your handler and the window id. Multiple handlers can be registered to the same window. You can remove all event handlers from a window using `viz.clear_event_handlers(win_id)`. When an event occurs to that window, your callbacks will be called on a dict containing:
+You can subscribe a window to events by adding a function to the event handlers dict for the window id you want to subscribe by calling `viz.register_event_handler(handler, win_id, env=None)` with your handler, the window id, and an optional environment name. Specifying the environment name prevents event handlers from firing across different environments with the same window id. Multiple handlers can be registered to the same window. You can remove event handlers from a window using `viz.clear_event_handlers(win_id, env=None)`. When an event occurs to that window, your callbacks will be called on a dict containing:
 
  - `event_type`: one of the below event types
  - `pane_data`: all of the stored contents for that window including layout and content.
