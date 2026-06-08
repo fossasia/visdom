@@ -31,7 +31,7 @@ except ImportError:
     from collections import Mapping, Sequence
 
 import tornado.escape
-from visdom.utils.shared_utils import get_rand_id
+from visdom.utils.shared_utils import get_rand_id, NanSafeEncoder
 from visdom.utils.server_utils import (
     check_auth,
     extract_eid,
@@ -465,7 +465,7 @@ class EnvStateHandler(BaseHandler):
                 handler.set_status(404)
                 handler.write(json.dumps({"error": "env '{}' not found".format(eid)}))
                 return
-            handler.write(json.dumps(handler.state[eid]["jsons"]))
+            handler.write(json.dumps(handler.state[eid]["jsons"], cls=NanSafeEncoder))
         else:
             all_eids = list(handler.state.keys())
             handler.write(json.dumps(all_eids))
@@ -597,12 +597,18 @@ class DataHandler(BaseHandler):
         else:
             # Dump data to client
             if "win" in args and args["win"] is None:
-                handler.write(json.dumps(handler.state[eid]["jsons"]))
+                handler.write(
+                    json.dumps(handler.state[eid]["jsons"], cls=NanSafeEncoder)
+                )
             else:
                 assert (
                     args["win"] in handler.state[eid]["jsons"]
                 ), "Window {} doesn't exist in env {}".format(args["win"], eid)
-                handler.write(json.dumps(handler.state[eid]["jsons"][args["win"]]))
+                handler.write(
+                    json.dumps(
+                        handler.state[eid]["jsons"][args["win"]], cls=NanSafeEncoder
+                    )
+                )
 
     @check_auth
     def post(self):

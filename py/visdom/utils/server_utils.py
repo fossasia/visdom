@@ -41,7 +41,12 @@ from visdom.server.defaults import (
     DEFAULT_HOSTNAME,
     DEFAULT_PORT,
 )
-from visdom.utils.shared_utils import warn_once, get_rand_id, get_new_window_id
+from visdom.utils.shared_utils import (
+    warn_once,
+    get_rand_id,
+    get_new_window_id,
+    NanSafeEncoder,
+)
 
 
 # ---- Vaguely server-security related functions ---- #
@@ -136,9 +141,11 @@ def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
                 with open(env_path_file, "w") as fn:
                     if isinstance(state[env_id], LazyEnvData):
                         state[env_id].lazy_load_data()
-                        fn.write(json.dumps(state[env_id]._raw_dict))
+                        fn.write(
+                            json.dumps(state[env_id]._raw_dict, cls=NanSafeEncoder)
+                        )
                     else:
-                        fn.write(json.dumps(state[env_id]))
+                        fn.write(json.dumps(state[env_id], cls=NanSafeEncoder))
             except OSError as e:
                 if (
                     e.errno != errno.ENAMETOOLONG
@@ -156,7 +163,7 @@ def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
                     else:
                         data_to_save = copy.deepcopy(state[env_id])
                     data_to_save["name"] = env_id
-                    fn.write(json.dumps(data_to_save))
+                    fn.write(json.dumps(data_to_save, cls=NanSafeEncoder))
 
     return env_ids
 
