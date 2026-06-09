@@ -50,6 +50,8 @@ class Visdom:
         self, win: _OptStr = ..., env: _OptStr = ...
     ) -> _SendReturn: ...
     def delete_env(self, env: Text) -> _SendReturn: ...
+    def get_env_list(self) -> List[Text]: ...
+    def get_env_state(self, env: Text) -> Optional[Mapping[Text, Any]]: ...
     def win_exists(self, win: Text, env: _OptStr = ...) -> Optional[bool]: ...
     def check_connection(self) -> bool: ...
     def replay_log(self, log_filename: Text) -> None: ...
@@ -67,7 +69,7 @@ class Visdom:
         svgstr: _OptStr = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
-        ops: _OptOps = ...,
+        opts: _OptOps = ...,
     ) -> _SendReturn: ...
     @overload
     def svg(
@@ -75,16 +77,27 @@ class Visdom:
         svgfile: _OptStr = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
-        ops: _OptOps = ...,
+        opts: _OptOps = ...,
     ) -> _SendReturn: ...
     def matplot(
         self, plot: Any, opts: _OptOps = ..., env: _OptStr = ..., win: _OptStr = ...
     ) -> _SendReturn: ...
+    def save_plotly_figure(
+        self, figure: Any, filepath: Text, **kwargs: Any
+    ) -> None: ...
     def plotlyplot(
-        self, figure: Any, win: _OptStr = ..., env: _OptStr = ...
+        self,
+        figure: Any,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        save_path: _OptStr = ...,
+        save_kwargs: Optional[Mapping[Text, Any]] = ...,
     ) -> _SendReturn: ...
     def image(
         self, img: Tensor, win: _OptStr = ..., env: _OptStr = ..., opts: _OptOps = ...
+    ) -> _SendReturn: ...
+    def image_select(
+        self, win: Text, selected: int, env: _OptStr = ...
     ) -> _SendReturn: ...
     def images(
         self,
@@ -120,9 +133,9 @@ class Visdom:
         Y: Optional[Tensor] = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
+        opts: _OptOps = ...,
         update: _OptStr = ...,
         name: _OptStr = ...,
-        opts: _OptOpts = ...,
     ) -> _SendReturn: ...
     def line(
         self,
@@ -133,6 +146,8 @@ class Visdom:
         update: _OptStr = ...,
         name: _OptStr = ...,
         opts: _OptOps = ...,
+        Z: Optional[Tensor] = ...,
+        is3d: bool = ...,
     ) -> _SendReturn: ...
     def grid(
         self,
@@ -206,6 +221,13 @@ class Visdom:
         edges: List,
         edgeLabels: List,
         nodeLabels: List,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
+    def violin(
+        self,
+        X: Tensor,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
