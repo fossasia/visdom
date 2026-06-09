@@ -331,8 +331,6 @@ const ApiProvider = ({ children }) => {
     $.ajaxSetup({
       error: () => (window.location.href = correctPathname() + 'error/500'),
     });
-    connect();
-    return () => disconnect();
   }, []);
 
   // connect on mount, disconnect on unmount
