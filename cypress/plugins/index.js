@@ -19,7 +19,7 @@
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const pixelmatch = require('pixelmatch');
+const pixelmatch = require('pixelmatch').default || require('pixelmatch');
 const PNG = require('pngjs').PNG;
 
 function assertSafeToken(name, value) {
@@ -149,7 +149,7 @@ module.exports = (on) => {
         diff.data,
         width,
         height,
-        { threshold: appliedThreshold }
+        { threshold: appliedThreshold, checkerboard: false }
       );
 
       fs.mkdirSync(path.dirname(diffsrc), { recursive: true });
