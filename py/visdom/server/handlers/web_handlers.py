@@ -31,7 +31,7 @@ except ImportError:
     from collections import Mapping, Sequence
 
 import tornado.escape
-from visdom.utils.shared_utils import get_rand_id
+from visdom.utils.shared_utils import get_rand_id, NanSafeEncoder
 from visdom.utils.server_utils import (
     check_auth,
     extract_eid,
@@ -55,6 +55,8 @@ from visdom.server.handlers.base_handlers import BaseHandler
 # new classes in the data_model folder.
 # TODO abstract out any direct references to the app where possible from
 # all handlers. Can instead provide accessor functions on the state?
+
+
 class PostHandler(BaseHandler):
     @check_auth
     def post(self):
@@ -95,7 +97,7 @@ class ExistsHandler(BaseHandler):
 
 class UpdateHandler(BaseHandler):
     @staticmethod
-    def update_packet(p, args):
+    def update_packet(p, args, max_text_lines, max_old_content, max_image_history):
         # Shallow copy the packet to dynamically capture changes to top-level keys.
         old_p = p.copy()
 
@@ -105,17 +107,22 @@ class UpdateHandler(BaseHandler):
         if "old_content" in p:
             old_p["old_content"] = copy.deepcopy(p["old_content"])
 
-        p = UpdateHandler.update(p, args)
+        p = UpdateHandler.update(
+            p, args, max_text_lines, max_old_content, max_image_history
+        )
         p["contentID"] = get_rand_id()
 
         patch = jsonpatch.make_patch(old_p, p)
         return p, patch.patch
 
     @staticmethod
-    def update(p, args):
+    def update(p, args, max_text_lines, max_old_content, max_image_history):
         # Update text in window, separated by a line break
         if p["type"] == "text":
             p["content"] += "<br>" + args["data"][0]["content"]
+            lines = p["content"].split("<br>")
+            if len(lines) > max_text_lines:
+                p["content"] = "<br>".join(lines[-max_text_lines:])
             return p
         if p["type"] == "embeddings":
             # TODO embeddings updates should be handled outside of the regular
@@ -127,6 +134,8 @@ class UpdateHandler(BaseHandler):
                 p["content"]["selected"] = None
                 print(len(p["content"]["data"]))
                 p["old_content"].append(p["content"]["data"])
+                if len(p["old_content"]) > max_old_content:
+                    p["old_content"] = p["old_content"][-max_old_content:]
                 p["content"]["has_previous"] = True
                 p["content"]["data"] = args["data"]["points"]
                 print(len(p["content"]["data"]))
@@ -135,6 +144,8 @@ class UpdateHandler(BaseHandler):
             utype = args["data"][0]["type"]
             if utype == "image_history":
                 p["content"].append(args["data"][0]["content"])
+                if len(p["content"]) > max_image_history:
+                    p["content"] = p["content"][-max_image_history:]
                 p["selected"] = len(p["content"]) - 1
             elif utype == "image_update_selected":
                 # Bound the update to within the dims of the array
@@ -351,7 +362,13 @@ class UpdateHandler(BaseHandler):
             )
             return
 
-        p, diff_packet = UpdateHandler.update_packet(p, args)
+        p, diff_packet = UpdateHandler.update_packet(
+            p,
+            args,
+            handler.max_text_lines,
+            handler.max_old_content,
+            handler.max_image_history,
+        )
         # send the smaller of the patch and the updated pane
         if len(stringify(p)) <= len(stringify(diff_packet)):
             broadcast_msg = dict(p)
@@ -448,7 +465,7 @@ class EnvStateHandler(BaseHandler):
                 handler.set_status(404)
                 handler.write(json.dumps({"error": "env '{}' not found".format(eid)}))
                 return
-            handler.write(json.dumps(handler.state[eid]["jsons"]))
+            handler.write(json.dumps(handler.state[eid]["jsons"], cls=NanSafeEncoder))
         else:
             all_eids = list(handler.state.keys())
             handler.write(json.dumps(all_eids))
@@ -580,12 +597,18 @@ class DataHandler(BaseHandler):
         else:
             # Dump data to client
             if "win" in args and args["win"] is None:
-                handler.write(json.dumps(handler.state[eid]["jsons"]))
+                handler.write(
+                    json.dumps(handler.state[eid]["jsons"], cls=NanSafeEncoder)
+                )
             else:
                 assert (
                     args["win"] in handler.state[eid]["jsons"]
                 ), "Window {} doesn't exist in env {}".format(args["win"], eid)
-                handler.write(json.dumps(handler.state[eid]["jsons"][args["win"]]))
+                handler.write(
+                    json.dumps(
+                        handler.state[eid]["jsons"][args["win"]], cls=NanSafeEncoder
+                    )
+                )
 
     @check_auth
     def post(self):
@@ -629,11 +652,11 @@ class IndexHandler(BaseHandler):
     def post(self, arg, **kwargs):
         json_obj = tornado.escape.json_decode(self.request.body)
         username = json_obj["username"]
-        password = hash_password(json_obj["password"])
+        stored = self.user_credential["password"]
+        salt = stored.split("$")[0]
+        password = hash_password(json_obj["password"], salt=salt)
 
-        if (username == self.user_credential["username"]) and (
-            password == self.user_credential["password"]
-        ):
+        if (username == self.user_credential["username"]) and (password == stored):
             self.set_secure_cookie("user_password", username + password)
         else:
             self.set_status(400)

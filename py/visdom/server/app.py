@@ -49,6 +49,9 @@ from visdom.server.defaults import (
     DEFAULT_BASE_URL,
     DEFAULT_ENV_PATH,
     DEFAULT_HOSTNAME,
+    DEFAULT_MAX_IMAGE_HISTORY,
+    DEFAULT_MAX_OLD_CONTENT,
+    DEFAULT_MAX_TEXT_LINES,
     DEFAULT_PORT,
     LAYOUT_FILE,
 )
@@ -75,6 +78,9 @@ class Application(tornado.web.Application):
         eager_data_loading=False,
     ):
         self.eager_data_loading = eager_data_loading
+        self.max_image_history = DEFAULT_MAX_IMAGE_HISTORY
+        self.max_old_content = DEFAULT_MAX_OLD_CONTENT
+        self.max_text_lines = DEFAULT_MAX_TEXT_LINES
         self.env_path = env_path
         self.state = self.load_state()
         self.layouts = self.load_layouts()
