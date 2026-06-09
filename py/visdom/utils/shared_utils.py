@@ -13,9 +13,13 @@ helper functions.
 """
 
 import importlib
+import json
+import math
 import uuid
 import warnings
 import os
+
+import numpy as np
 
 _seen_warnings = set()
 
@@ -56,3 +60,28 @@ def get_visdom_path(filename=None):
     if filename is None:
         return cwd
     return os.path.join(cwd, filename)
+
+
+def _sanitize_nans(obj):
+    """Recursively replace NaN/Inf floats with None in nested structures."""
+    if isinstance(obj, (float, np.floating)) and (math.isnan(obj) or math.isinf(obj)):
+        return None
+    if isinstance(obj, dict):
+        return {k: _sanitize_nans(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_nans(v) for v in obj]
+    return obj
+
+
+class NanSafeEncoder(json.JSONEncoder):
+    """JSON encoder that converts NaN and Inf float values to None.
+
+    Standard JSON does not support NaN/Inf. This encoder handles them
+    automatically so callers don't need manual nan2none() preprocessing.
+    """
+
+    def encode(self, o):
+        return super().encode(_sanitize_nans(o))
+
+    def iterencode(self, o, _one_shot=False):
+        return super().iterencode(_sanitize_nans(o), _one_shot=_one_shot)

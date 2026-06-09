@@ -6,10 +6,9 @@ updates:
     directory: "/"
     target-branch: "dev"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
       time: "06:00"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 25
     labels:
       - "dependencies"
       - "javascript"
@@ -29,10 +28,9 @@ updates:
     directory: "/"
     target-branch: "dev"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
       time: "06:00"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 25
     labels:
       - "dependencies"
       - "python"
@@ -52,10 +50,9 @@ updates:
     directory: "/"
     target-branch: "dev"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
       time: "06:00"
-    open-pull-requests-limit: 15
+    open-pull-requests-limit: 25
     labels:
       - "dependencies"
       - "github-actions"
