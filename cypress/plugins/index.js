@@ -149,7 +149,7 @@ module.exports = (on) => {
         diff.data,
         width,
         height,
-        { threshold: appliedThreshold, checkerboard: false }
+        { threshold: appliedThreshold }
       );
 
       fs.mkdirSync(path.dirname(diffsrc), { recursive: true });
