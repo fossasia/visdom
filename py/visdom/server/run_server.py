@@ -13,6 +13,7 @@ Provides simple entrypoints to set up and run the main visdom server.
 import atexit
 import argparse
 import getpass
+import hashlib
 import logging
 import os
 import sys
@@ -232,9 +233,10 @@ def main(print_func=None):
             username = input("Please input your username: ")
             password = getpass.getpass(prompt="Please input your password: ")
 
+        client_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
         user_credential = {
             "username": username,
-            "password": hash_password(hash_password(password)),
+            "password": hash_password(client_hash),
         }
 
         need_to_set_cookie = (
