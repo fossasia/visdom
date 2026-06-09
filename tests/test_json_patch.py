@@ -4,20 +4,30 @@ Verifies that window updates produce valid, applicable JSON patches.
 """
 
 import copy
+import os
+import sys
 import unittest
 
 import jsonpatch
 
+# Ensure the local development copy of visdom is imported rather than any
+# pip-installed version, so tests always run against the current source tree.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(_REPO_ROOT, "py"))
+
 from visdom.server.handlers.web_handlers import UpdateHandler
-from visdom.server.defaults import (
-    DEFAULT_MAX_IMAGE_HISTORY,
-    DEFAULT_MAX_OLD_CONTENT,
-    DEFAULT_MAX_TEXT_LINES,
-)
 from visdom.utils.shared_utils import get_rand_id
 
+
+# Mirror defaults from visdom.server.defaults to avoid depending on the
+# pip-installed version, which may not have these constants yet.
+_MAX_TEXT_LINES = 500
+_MAX_OLD_CONTENT = 50
+_MAX_IMAGE_HISTORY = 4
+
 # Shorthand for the three cap arguments required by update_packet/update
-_CAPS = (DEFAULT_MAX_TEXT_LINES, DEFAULT_MAX_OLD_CONTENT, DEFAULT_MAX_IMAGE_HISTORY)
+_CAPS = (_MAX_TEXT_LINES, _MAX_OLD_CONTENT, _MAX_IMAGE_HISTORY)
+
 
 
 def update_packet(p, args):
@@ -143,7 +153,7 @@ class TestTextPatch(unittest.TestCase):
         for i in range(1, 600):
             p, _ = update_packet(p, {"data": [{"content": f"line{i}"}]})
         lines = p["content"].split("<br>")
-        self.assertEqual(len(lines), DEFAULT_MAX_TEXT_LINES)
+        self.assertEqual(len(lines), _MAX_TEXT_LINES)
 
     def test_text_patch_is_applicable(self):
         p = make_text_window("hello")
@@ -234,7 +244,7 @@ class TestEmbeddingsPatch(unittest.TestCase):
             p, _ = update_packet(
                 p, {"data": {"update_type": "RegionSelected", "points": [[i, i + 1]]}}
             )
-        self.assertEqual(len(p["old_content"]), DEFAULT_MAX_OLD_CONTENT)
+        self.assertEqual(len(p["old_content"]), _MAX_OLD_CONTENT)
 
     def test_region_selected_patch(self):
         p = make_embeddings_window()
@@ -285,7 +295,7 @@ class TestImageHistoryPatch(unittest.TestCase):
                     ]
                 },
             )
-        self.assertEqual(len(p["content"]), DEFAULT_MAX_IMAGE_HISTORY)
+        self.assertEqual(len(p["content"]), _MAX_IMAGE_HISTORY)
 
 
 class TestPatchGeneral(unittest.TestCase):

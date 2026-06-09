@@ -5,11 +5,38 @@ Covers the server-side update logic, window creation, and the
 store_history + update mutual exclusion in the client.
 """
 
+import os
+import sys
 import unittest
+
+# Ensure the local development copy of visdom is imported rather than any
+# pip-installed version, so tests always run against the current source tree.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(_REPO_ROOT, "py"))
 
 from visdom.server.handlers.web_handlers import UpdateHandler
 from visdom.utils.server_utils import window as make_window
 from visdom.utils.shared_utils import get_rand_id
+
+
+# Mirror defaults from visdom.server.defaults to avoid depending on the
+# pip-installed version, which may not have these constants yet.
+_MAX_TEXT_LINES = 500
+_MAX_OLD_CONTENT = 50
+_MAX_IMAGE_HISTORY = 4
+
+
+
+def _update(p, args):
+    """Wrapper that supplies default cap arguments to UpdateHandler.update."""
+    return UpdateHandler.update(
+        p,
+        args,
+        _MAX_TEXT_LINES,
+        _MAX_OLD_CONTENT,
+        _MAX_IMAGE_HISTORY,
+    )
+
 
 
 def _make_plot_history_window(frames=None):
@@ -50,7 +77,7 @@ class TestPlotHistoryAppend(unittest.TestCase):
 
     def test_append_single_frame(self):
         p = _make_plot_history_window()
-        p = UpdateHandler.update(p, _plot_history_append_args())
+        p = _update(p, _plot_history_append_args())
         self.assertEqual(len(p["content"]), 2)
         self.assertEqual(p["selected"], 1)
 
@@ -58,14 +85,14 @@ class TestPlotHistoryAppend(unittest.TestCase):
         p = _make_plot_history_window()
         for i in range(5):
             frame = {"data": [{"type": "scatter", "x": [i], "y": [i]}], "layout": {}}
-            p = UpdateHandler.update(p, _plot_history_append_args(frame))
+            p = _update(p, _plot_history_append_args(frame))
         self.assertEqual(len(p["content"]), 6)
         self.assertEqual(p["selected"], 5)
 
     def test_selected_always_points_to_latest(self):
         p = _make_plot_history_window()
         for i in range(3):
-            p = UpdateHandler.update(p, _plot_history_append_args())
+            p = _update(p, _plot_history_append_args())
         self.assertEqual(p["selected"], len(p["content"]) - 1)
 
     def test_appended_frame_content_preserved(self):
@@ -75,7 +102,7 @@ class TestPlotHistoryAppend(unittest.TestCase):
             "layout": {"title": "frame2"},
             "caption": "second frame",
         }
-        p = UpdateHandler.update(p, _plot_history_append_args(frame))
+        p = _update(p, _plot_history_append_args(frame))
         self.assertEqual(p["content"][-1], frame)
 
 
@@ -89,26 +116,26 @@ class TestPlotHistoryUpdateSelected(unittest.TestCase):
             {"data": [], "layout": {}},
         ]
         p = _make_plot_history_window(frames)
-        p = UpdateHandler.update(p, _plot_update_selected_args(1))
+        p = _update(p, _plot_update_selected_args(1))
         self.assertEqual(p["selected"], 1)
 
     def test_select_first_frame(self):
         frames = [{"data": [], "layout": {}} for _ in range(3)]
         p = _make_plot_history_window(frames)
         p["selected"] = 2
-        p = UpdateHandler.update(p, _plot_update_selected_args(0))
+        p = _update(p, _plot_update_selected_args(0))
         self.assertEqual(p["selected"], 0)
 
     def test_negative_index_clamped_to_zero(self):
         frames = [{"data": [], "layout": {}} for _ in range(3)]
         p = _make_plot_history_window(frames)
-        p = UpdateHandler.update(p, _plot_update_selected_args(-5))
+        p = _update(p, _plot_update_selected_args(-5))
         self.assertEqual(p["selected"], 0)
 
     def test_overflow_index_clamped_to_last(self):
         frames = [{"data": [], "layout": {}} for _ in range(3)]
         p = _make_plot_history_window(frames)
-        p = UpdateHandler.update(p, _plot_update_selected_args(100))
+        p = _update(p, _plot_update_selected_args(100))
         self.assertEqual(p["selected"], 2)
 
 
@@ -174,7 +201,7 @@ class TestPlotHistoryDoesNotAffectOtherTypes(unittest.TestCase):
             "contentID": get_rand_id(),
         }
         args = {"data": [{"type": "image_history", "content": {"src": "img2"}}]}
-        p = UpdateHandler.update(p, args)
+        p = _update(p, args)
         self.assertEqual(len(p["content"]), 2)
         self.assertEqual(p["selected"], 1)
 
