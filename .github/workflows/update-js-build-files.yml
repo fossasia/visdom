@@ -26,13 +26,14 @@ jobs:
         with:
           node-version: '16'
       - run: ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm install
-      - run: npm run build
       - run: |
+          git fetch origin ${{ github.ref_name }}
+          git reset --hard origin/${{ github.ref_name }}
+          npm run build
           git config --local user.name "github-actions[bot]"
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git add -f py/visdom/static/js/main.js py/visdom/static/js/main.js.map
           git diff --cached --quiet && echo "No changes to commit" && exit 0
           git commit -m "update static/js files"
-          git pull --rebase --autostash
           git push
 
