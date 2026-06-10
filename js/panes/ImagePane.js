@@ -25,7 +25,7 @@ function ImagePane(props) {
   // --------------
   const paneRef = useRef();
   const imgRef = useRef();
-  const mouseLocationRef = useRef({ x: 0, y: 0 });
+  const mouseLocationRef = useRef({ x: null, y: null });
   const [view, setView] = useState({ scale: 1, tx: 0, ty: 0 });
   const [imgDim, setImgDim] = useState({ width: null, height: 0 });
   const [actualSelected, setActualSelected] = useState(props.selected);
