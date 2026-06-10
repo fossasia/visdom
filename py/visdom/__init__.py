@@ -2866,7 +2866,7 @@ class Visdom(object):
             "yaxis2": {
                 "title": trace2["name"],
                 "titlefont": {
-                    "color": opts.get("color_title_y2", "rgb(148, 103, 0189)")
+                    "color": opts.get("color_title_y2", "rgb(148, 103, 189)")
                 },
                 "tickfont": {"color": opts.get("color_tick_y2", "rgb(148, 103, 189)")},
                 "overlaying": "y",
