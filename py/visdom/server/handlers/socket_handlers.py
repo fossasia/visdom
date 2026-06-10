@@ -348,22 +348,35 @@ class SocketWrapper(SocketHandlerOrWrapper, AnySocketWrapper):
 class SocketFailureReason(Enum):
     """Failure reason codes for the HTTP polling socket protocol."""
 
-    CONNECTION_CLOSED = ("closed", "Socket connection not found or already closed")
-    MISSING_MESSAGE = ("no msg", "Send request missing required 'message' field")
-    INVALID_MESSAGE_TYPE = ("invalid", "Unrecognized message_type")
+    CONNECTION_CLOSED = (
+        "closed",
+        "No active socket found for the given sid; "
+        "it may have been closed or never existed",
+    )
+    MISSING_MESSAGE = (
+        "no msg",
+        "POST body must include a 'message' field when message_type is 'send'",
+    )
+    INVALID_MESSAGE_TYPE = (
+        "invalid",
+        "Unrecognized message_type; expected 'query' or 'send'",
+    )
 
-    def __new__(cls, value, description=""):
+    def __new__(cls, value, detail=""):
         obj = object.__new__(cls)
         obj._value_ = value
-        obj._description = description
+        obj._detail = detail
         return obj
 
     @property
-    def description(self):
-        return self._description
+    def detail(self):
+        return self._detail
 
-    def to_failure_response(self):
-        return {"success": False, "reason": self.value, "detail": self.description}
+    def to_failure_response(self, message=""):
+        resp = {"success": False, "reason": self.value, "detail": self.detail}
+        if message:
+            resp["message"] = message
+        return resp
 
 
 def WrapSocketWrapper(BaseWrapper):
@@ -398,7 +411,9 @@ def WrapSocketWrapper(BaseWrapper):
             if socket_wrap is None:
                 self.write(
                     json.dumps(
-                        SocketFailureReason.CONNECTION_CLOSED.to_failure_response()
+                        SocketFailureReason.CONNECTION_CLOSED.to_failure_response(
+                            f"sid={sid!r}"
+                        )
                     )
                 )
                 return
@@ -420,7 +435,9 @@ def WrapSocketWrapper(BaseWrapper):
             else:
                 self.write(
                     json.dumps(
-                        SocketFailureReason.INVALID_MESSAGE_TYPE.to_failure_response()
+                        SocketFailureReason.INVALID_MESSAGE_TYPE.to_failure_response(
+                            f"message_type={msg_type!r}"
+                        )
                     )
                 )
 
