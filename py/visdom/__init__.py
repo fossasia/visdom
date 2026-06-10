@@ -1468,9 +1468,11 @@ class Visdom(object):
         This function draws an img. It takes as input a `CxHxW` (where C is 1, 3, or 4)
         or `HxW` tensor `img` that contains the image. The array values can be uint8 in
         [0, 255] or float. Float arrays are converted as follows: images whose
-        full range is within [0, 1] are scaled to [0, 255]; all other float
-        values are clipped to [0, 255]. Pass
-        `opts.normalize=True` to min-max scale the image to fill [0, 255] instead.
+        full range is within [0, 1] are scaled to [0, 255]; images whose full
+        range is within [-1, 1] but includes negative values are mapped from
+        [-1, 1] to [0, 255]; all other float values are clipped to [0, 255].
+        Pass `opts.normalize=True` to min-max scale the image to fill [0, 255]
+        instead.
 
         The following `opts` are supported:
 
@@ -1491,6 +1493,8 @@ class Visdom(object):
                     img = np.zeros_like(img)
             elif img_min >= 0.0 and img_max <= 1.0:
                 img = img * 255.0
+            elif img_min >= -1.0 and img_max <= 1.0:
+                img = (img + 1.0) / 2.0 * 255.0
             img = np.uint8(np.clip(img, 0, 255))
 
         # extract dimensions and process formats
