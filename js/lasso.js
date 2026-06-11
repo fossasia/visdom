@@ -23,7 +23,7 @@ function polygonToPath(polygon) {
 }
 
 function distance(pt1, pt2) {
-  return Math.hypot(pt2[0] - pt1[0], pt2[1] - pt1[1]);
+  return Math.sqrt(Math.pow(pt2[0] - pt1[0], 2) + Math.pow(pt2[1] - pt1[1], 2));
 }
 
 export default function lasso() {
