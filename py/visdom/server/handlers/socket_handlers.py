@@ -35,7 +35,13 @@ from visdom.utils.server_utils import (
     broadcast,
     escape_eid,
 )
-from visdom.server.defaults import MAX_SOCKET_WAIT
+from visdom.server.defaults import MAX_SOCKET_WAIT, DEFAULT_MAX_UNDO_HISTORY
+
+
+def _ensure_deleted_stack(handler, eid):
+    """Ensure a deleted-pane deque exists for the given environment."""
+    if eid not in handler.deleted_stacks:
+        handler.deleted_stacks[eid] = deque(maxlen=DEFAULT_MAX_UNDO_HISTORY)
 
 
 # TODO move the logic that actually parses environments and layouts to
@@ -78,6 +84,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
         self.login_enabled = app.login_enabled
         self.app = app
         self.readonly = app.readonly
+        self.deleted_stacks = app.deleted_stacks
 
     def open(self, register_to="sources"):
         # self.sid = str(hex(int(time.time() * 10000000))[2:]) # TODO: was previously used for websockets+vis only
@@ -101,14 +108,29 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
         elif cmd == "close":
             if "data" in msg and "eid" in msg:
                 logging.info(f"closing window {msg['data']}")
-                p_data = self.state[msg["eid"]]["jsons"].pop(msg["data"], None)
+                eid = msg["eid"]
+                p_data = self.state[eid]["jsons"].pop(msg["data"], None)
+                if p_data is not None:
+                    _ensure_deleted_stack(self, eid)
+                    self.deleted_stacks[eid].append((msg["data"], p_data))
                 event = {
                     "event_type": "close",
                     "target": msg["data"],
-                    "eid": msg["eid"],
+                    "eid": eid,
                     "pane_data": p_data,
                 }
                 send_to_sources(self, event)
+
+        elif cmd == "undo":
+            if "eid" in msg:
+                eid = msg["eid"]
+                deleted = self.deleted_stacks.get(eid)
+                if deleted:
+                    win_id, p_data = deleted.pop()
+                    self.state[eid]["jsons"][win_id] = p_data
+                    broadcast_msg = dict(p_data)
+                    broadcast_msg["eid"] = eid
+                    broadcast(self, broadcast_msg, eid)
 
         elif cmd == "save":
             # save localStorage window metadata
@@ -131,6 +153,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     return
                 logging.info(f"closing environment {eid}")
                 self.state.pop(eid, None)
+                self.deleted_stacks.pop(eid, None)
                 if self.env_path is not None:
                     p = os.path.join(self.env_path, "{0}.json".format(eid))
                     if os.path.exists(p):

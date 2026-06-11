@@ -20,6 +20,7 @@ function ViewControls(props) {
     onViewManageButton,
     onRepackButton,
     onViewChange,
+    onUndoButton,
   } = props;
 
   // rendering
@@ -80,6 +81,19 @@ function ViewControls(props) {
           onClick={onViewManageButton}
         >
           <span className="glyphicon glyphicon-folder-open" />
+        </button>
+        <button
+          data-toggle="tooltip"
+          title="Undo Close"
+          data-placement="bottom"
+          className="btn btn-default"
+          disabled={!(connected && envIDs.length > 0 && !readonly)}
+          onClick={onUndoButton}
+        >
+          <span
+            className="glyphicon glyphicon-share-alt"
+            style={{ transform: 'scaleX(-1)' }}
+          />
         </button>
       </div>
     </span>

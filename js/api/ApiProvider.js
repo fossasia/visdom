@@ -264,6 +264,13 @@ const ApiProvider = ({ children }) => {
     });
   };
 
+  const sendUndo = (envID) => {
+    sendSocketMessage({
+      cmd: 'undo',
+      eid: envID,
+    });
+  };
+
   // Send request to delete an environment
   const sendEnvDelete = (envID, previousEnv) => {
     sendSocketMessage({
@@ -351,6 +358,7 @@ const ApiProvider = ({ children }) => {
         sendPaneLayoutUpdate,
         sendPaneMessage,
         sendSaveAll,
+        sendUndo,
         sessionInfo,
         setConnected,
         toggleOnlineState,

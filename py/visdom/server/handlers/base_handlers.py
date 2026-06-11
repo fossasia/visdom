@@ -63,6 +63,7 @@ class BaseHandler(tornado.web.RequestHandler):
             self.max_text_lines = app.max_text_lines
             self.max_old_content = app.max_old_content
             self.max_image_history = app.max_image_history
+            self.deleted_stacks = app.deleted_stacks
 
     def __init__(self, *request, **kwargs):
         self.include_host = False

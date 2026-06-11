@@ -30,6 +30,7 @@ from visdom.server.handlers.socket_handlers import (
 )
 from visdom.server.handlers.web_handlers import (
     CloseHandler,
+    UndoHandler,
     CompareHandler,
     DataHandler,
     DeleteEnvHandler,
@@ -85,6 +86,7 @@ class Application(tornado.web.Application):
         self.state = self.load_state()
         self.layouts = self.load_layouts()
         self.user_settings = self.load_user_settings()
+        self.deleted_stacks = {}
         self.subs = {}
         self.sources = {}
         self.port = port
@@ -106,6 +108,7 @@ class Application(tornado.web.Application):
             (r"%s/events" % self.base_url, PostHandler, {"app": self}),
             (r"%s/update" % self.base_url, UpdateHandler, {"app": self}),
             (r"%s/close" % self.base_url, CloseHandler, {"app": self}),
+            (r"%s/undo" % self.base_url, UndoHandler, {"app": self}),
             (r"%s/socket" % self.base_url, SocketHandler, {"app": self}),
             (r"%s/socket_wrap" % self.base_url, SocketWrap, {"app": self}),
             (r"%s/vis_socket" % self.base_url, VisSocketHandler, {"app": self}),

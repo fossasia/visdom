@@ -70,6 +70,7 @@ const App = () => {
     sendEnvSave,
     sendLayoutsSave,
     sendPaneClose,
+    sendUndo,
     sendPaneLayoutUpdate,
     sessionInfo,
     toggleOnlineState,
@@ -877,6 +878,7 @@ const App = () => {
       }}
       onViewChange={updateToLayout}
       onViewManageButton={() => setShowViewModal(!showViewModal)}
+      onUndoButton={() => sendUndo(selection.envIDs[0])}
     />
   );
   let filterControl = (

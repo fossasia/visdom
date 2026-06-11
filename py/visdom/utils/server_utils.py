@@ -25,7 +25,7 @@ import time
 import re
 import errno
 import tornado.escape
-from collections import OrderedDict
+from collections import OrderedDict, deque
 
 MAX_ENV_NAME_LEN = 25
 try:
@@ -39,6 +39,7 @@ from visdom.server.defaults import (
     DEFAULT_BASE_URL,
     DEFAULT_ENV_PATH,
     DEFAULT_HOSTNAME,
+    DEFAULT_MAX_UNDO_HISTORY,
     DEFAULT_PORT,
 )
 from visdom.utils.shared_utils import (
@@ -562,6 +563,8 @@ def register_window(self, p, eid):
     if eid not in self.state:
         is_new_env = True
         self.state[eid] = {"jsons": {}, "reload": {}}
+        if hasattr(self, "deleted_stacks") and eid not in self.deleted_stacks:
+            self.deleted_stacks[eid] = deque(maxlen=DEFAULT_MAX_UNDO_HISTORY)
 
     env = self.state[eid]["jsons"]
 

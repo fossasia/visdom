@@ -21,7 +21,7 @@ import jsonpatch
 import logging
 import math
 import os
-from collections import OrderedDict
+from collections import OrderedDict, deque
 
 try:
     # for after python 3.8
@@ -49,6 +49,13 @@ from visdom.utils.server_utils import (
     stringify,
 )
 from visdom.server.handlers.base_handlers import BaseHandler
+from visdom.server.defaults import DEFAULT_MAX_UNDO_HISTORY
+
+
+def _ensure_deleted_stack(handler, eid):
+    """Ensure a deleted-pane deque exists for the given environment."""
+    if eid not in handler.deleted_stacks:
+        handler.deleted_stacks[eid] = deque(maxlen=DEFAULT_MAX_UNDO_HISTORY)
 
 
 # TODO move the logic that actually parses environments and layouts to
@@ -404,8 +411,31 @@ class CloseHandler(BaseHandler):
 
         keys = list(handler.state[eid]["jsons"].keys()) if win is None else [win]
         for win in keys:
-            handler.state[eid]["jsons"].pop(win, None)
+            p_data = handler.state[eid]["jsons"].pop(win, None)
+            if p_data is not None:
+                _ensure_deleted_stack(handler, eid)
+                handler.deleted_stacks[eid].append((win, p_data))
             broadcast(handler, json.dumps({"command": "close", "data": win}), eid)
+
+    @check_auth
+    def post(self):
+        args = tornado.escape.json_decode(
+            tornado.escape.to_basestring(self.request.body)
+        )
+        self.wrap_func(self, args)
+
+
+class UndoHandler(BaseHandler):
+    @staticmethod
+    def wrap_func(handler, args):
+        eid = extract_eid(args)
+        deleted = handler.deleted_stacks.get(eid)
+        if deleted:
+            win_id, p_data = deleted.pop()
+            handler.state[eid]["jsons"][win_id] = p_data
+            broadcast_msg = dict(p_data)
+            broadcast_msg["eid"] = eid
+            broadcast(handler, broadcast_msg, eid)
 
     @check_auth
     def post(self):
@@ -424,6 +454,7 @@ class DeleteEnvHandler(BaseHandler):
             if eid == "main":
                 return
             handler.state.pop(eid, None)
+            handler.deleted_stacks.pop(eid, None)
             if handler.env_path is not None:
                 p = os.path.join(handler.env_path, "{0}.json".format(eid))
                 if os.path.exists(p):
@@ -529,6 +560,7 @@ class EnvHandler(BaseHandler):
             eid = escape_eid(msg_args["eid"])
             if eid not in self.state:
                 self.state[eid] = {"jsons": {}, "reload": {}}
+                _ensure_deleted_stack(self, eid)
                 broadcast_envs(self)
 
 
@@ -594,6 +626,7 @@ class DataHandler(BaseHandler):
 
             if eid not in handler.state:
                 handler.state[eid] = {"jsons": {}, "reload": {}}
+                _ensure_deleted_stack(handler, eid)
 
             if "win" in args and args["win"] is None:
                 handler.state[eid]["jsons"] = data
