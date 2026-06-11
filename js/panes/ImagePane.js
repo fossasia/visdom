@@ -25,6 +25,7 @@ function ImagePane(props) {
   // --------------
   const paneRef = useRef();
   const imgRef = useRef();
+  const mouseLocationRef = useRef({ x: null, y: null });
   const [view, setView] = useState({ scale: 1, tx: 0, ty: 0 });
   const [imgDim, setImgDim] = useState({ width: null, height: 0 });
   const [actualSelected, setActualSelected] = useState(props.selected);
@@ -110,19 +111,23 @@ function ImagePane(props) {
   };
 
   const handleMouseOver = (ev) => {
-    // get the x and y offset of the pane
     var rect = paneRef.current.children[1].getBoundingClientRect();
-    // Compute the coords of the mouse relative to the top left of the pane
     var xscreen = ev.clientX - rect.x;
     var yscreen = ev.clientY - rect.y;
-    // Compute the coords of the pixel under the mouse wrt the image top left
     var ximage = Math.round((xscreen - view['tx']) / view['scale']);
     var yimage = Math.round((yscreen - view['ty']) / view['scale']);
-    setMouseLocation({
-      x: ximage,
-      y: yimage,
-      visibility: ev.altKey ? 'visible' : 'hidden',
-    });
+    mouseLocationRef.current = { x: ximage, y: yimage };
+    if (!ev.altKey) {
+      if (mouseLocation.visibility !== 'hidden') {
+        setMouseLocation({ x: 0, y: 0, visibility: 'hidden' });
+      }
+      return;
+    }
+    setMouseLocation((prev) =>
+      prev.x === ximage && prev.y === yimage
+        ? prev
+        : { x: ximage, y: yimage, visibility: 'visible' }
+    );
   };
 
   const handleReset = () => {
@@ -185,7 +190,7 @@ function ImagePane(props) {
             sendPaneMessage(
               {
                 event_type: 'Click',
-                image_coord: mouseLocation,
+                image_coord: mouseLocationRef.current,
               },
               id,
               envID
@@ -198,7 +203,7 @@ function ImagePane(props) {
     return function cleanup() {
       EventSystem.unsubscribe('global.event', onEvent);
     };
-  }, [mouseLocation, isFocused]);
+  }, [isFocused]);
 
   // image size/pos computation
   // --------------------------

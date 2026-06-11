@@ -16,12 +16,6 @@ import websocket  # type: ignore
 import json
 import hashlib
 
-try:
-    # for after python 3.8
-    from collections.abc import Sequence
-except ImportError:
-    # for python 3.7 and below
-    from collections import Sequence
 import math
 import re
 import base64
@@ -118,19 +112,11 @@ def isndarray(n):
     return isinstance(n, (np.ndarray))
 
 
-# Only works on (possibly nested) lists of numbers
-# TODO: Create our own JSONEncoder that automatically does this.
-#       Maybe we can port plotly's over:
-#       https://github.com/plotly/plotly.py/blob/81629273ff6d7a30257a42572ed0e4e6ad436009/_plotly_utils/utils.py#L16
-# TODO: Also, in appropriate places, we need to change many numpy calls to use
+from visdom.utils.shared_utils import NanSafeEncoder
+
+
+# TODO: In appropriate places, we need to change many numpy calls to use
 #       nan-aware ones, e.g., `X.max` => `np.nanmax(X)`.
-def nan2none(l):
-    for idx, val in enumerate(l):
-        if isinstance(val, Sequence):
-            l[idx] = nan2none(l[idx])
-        elif isnum(val) and (math.isnan(val) or math.isinf(val)):
-            l[idx] = None
-    return l
 
 
 def loadfile(filename):
@@ -193,6 +179,7 @@ def _axisformat(xy, opts):
             "dtick": opts.get(xy + "tickstep"),
             "showticklabels": opts.get(xy + "tick"),
             "tickfont": opts.get(xy + "tickfont"),
+            "automargin": opts.get("tight_layout", False) or None,
         }
 
 
@@ -236,14 +223,15 @@ def _axisformat3d(xyz, opts):
 
 
 def _opts2layout(opts, is3d=False):
+    tight = opts.get("tight_layout", False)
     layout = {
         "showlegend": opts.get("showlegend", "legend" in opts),
         "title": opts.get("title"),
         "margin": {
-            "l": opts.get("marginleft", 0 if is3d else 60),
-            "r": opts.get("marginright", 60),
-            "t": opts.get("margintop", 20 if is3d else 60),
-            "b": opts.get("marginbottom", 0 if is3d else 60),
+            "l": opts.get("marginleft", 0 if (is3d or tight) else 60),
+            "r": opts.get("marginright", 0 if tight else 60),
+            "t": opts.get("margintop", 20 if is3d else (30 if tight else 60)),
+            "b": opts.get("marginbottom", 0 if (is3d or tight) else 60),
         },
     }
 
@@ -664,17 +652,19 @@ class Visdom(object):
         self._session = sess
         return sess
 
-    def register_event_handler(self, handler, target):
+    def register_event_handler(self, handler, target, env=None):
         assert callable(handler), "Event handler must be a function"
-        assert self.use_socket, (
-            "Must be using the incoming socket to " "register events to web actions"
-        )
-        if target not in self.event_handlers:
-            self.event_handlers[target] = []
-        self.event_handlers[target].append(handler)
+        assert (
+            self.use_socket
+        ), "Must be using the incoming socket to register events to web actions"
 
-    def clear_event_handlers(self, target):
-        self.event_handlers[target] = []
+        key = (env, target)
+        if key not in self.event_handlers:
+            self.event_handlers[key] = []
+        self.event_handlers[key].append(handler)
+
+    def clear_event_handlers(self, target, env=None):
+        self.event_handlers.pop((env, target), None)
 
     def setup_polling(self):
         # TODO merge with setup_socket?
@@ -694,8 +684,16 @@ class Visdom(object):
                             "be properly connected"
                         )
             if "target" in message:
-                for handler in list(self.event_handlers.get(message["target"], [])):
+                env = message.get("eid")
+                key = (env, message["target"])
+
+                for handler in list(self.event_handlers.get(key, [])):
                     handler(message)
+
+                if env is not None:
+                    global_key = (None, message["target"])
+                    for handler in list(self.event_handlers.get(global_key, [])):
+                        handler(message)
 
         def on_close(ws):
             self.socket_alive = False
@@ -745,7 +743,15 @@ class Visdom(object):
                             "be properly connected"
                         )
             if "target" in message:
-                for handler in list(self.event_handlers.get(message["target"], [])):
+                env = message.get("eid")
+                key = (env, message["target"])
+
+                handlers = list(self.event_handlers.get(key, []))
+                if env is not None:
+                    global_key = (None, message["target"])
+                    handlers.extend(list(self.event_handlers.get(global_key, [])))
+
+                for handler in handlers:
                     try:
                         handler(message)
                     except Exception as e:
@@ -828,7 +834,8 @@ class Visdom(object):
                             [
                                 endpoint,
                                 msg,
-                            ]
+                            ],
+                            cls=NanSafeEncoder,
                         )
                         + "\n"
                     )
@@ -881,7 +888,7 @@ class Visdom(object):
                 "{0}:{1}{2}/{3}".format(
                     self.server, self.port, self.base_url, endpoint
                 ),
-                data=json.dumps(msg),
+                data=json.dumps(msg, cls=NanSafeEncoder),
             )
         except (requests.RequestException, requests.ConnectionError, requests.Timeout):
             if self.raise_exceptions:
@@ -1341,9 +1348,8 @@ class Visdom(object):
                 # them via an append event
                 entity_id = event["entityId"]
                 id = event["idx"]
-                if data_getter is not None:
-                    if data_type == "html":
-                        selected = {"html": data_getter(int(id))}
+                if data_getter is not None and data_type == "html":
+                    selected = {"html": data_getter(int(id))}
                 else:
                     selected = {"html": "<div>No preview available</div>"}
 
@@ -1358,6 +1364,8 @@ class Visdom(object):
                     },
                     endpoint="update",
                 )
+                return
+
             elif event["event_type"] == "RegionSelected":
                 # lasso events give us a subset of the data to re-run tsne on
                 # so we generate
@@ -1391,7 +1399,7 @@ class Visdom(object):
                 endpoint="update",
             )
 
-        self.register_event_handler(embedding_event_handler, win)
+        self.register_event_handler(embedding_event_handler, win, env=env)
 
     def embeddings(
         self,
@@ -1955,8 +1963,8 @@ class Visdom(object):
                         trace_name = str(k)
                 use_gl = opts.get("webgl", False)
                 _data = {
-                    "x": nan2none(X.take(0, 1)[ind].tolist()),
-                    "y": nan2none(X.take(1, 1)[ind].tolist()),
+                    "x": X.take(0, 1)[ind].tolist(),
+                    "y": X.take(1, 1)[ind].tolist(),
                     "name": trace_name,
                     "type": (
                         "scatter3d" if is3d else ("scattergl" if use_gl else "scatter")
@@ -2046,13 +2054,28 @@ class Visdom(object):
         return self._send(data_to_send, endpoint=endpoint)
 
     @pytorch_wrap
-    def line(self, Y, X=None, win=None, env=None, opts=None, update=None, name=None):
+    def line(
+        self,
+        Y,
+        X=None,
+        win=None,
+        env=None,
+        opts=None,
+        update=None,
+        name=None,
+        Z=None,
+        is3d=False,
+    ):
         """
         This function draws a line plot. It takes in an `N` or `NxM` tensor
         `Y` that specifies the values of the `M` lines (that connect `N` points)
         to plot. It also takes an optional `X` tensor that specifies the
         corresponding x-axis values; `X` can be an `N` tensor (in which case all
         lines will share the same x-axis values) or have the same size as `Y`.
+
+        For 3D line plots, an optional `Z` tensor can be provided with the same
+        size as `Y` (or as an `N` tensor shared across lines). When `Z` is
+        provided, the plot is rendered as a 3D line plot.
 
         `update` can be used to efficiently update the data of an existing line.
         Use 'append' to append data, 'replace' to use new data, and 'remove' to
@@ -2064,7 +2087,7 @@ class Visdom(object):
 
         The following `opts` are supported:
 
-        - `opts.fillarea`    : fill area below line (`boolean`)
+        - `opts.fillarea`    : fill area below line (`boolean`; not supported for 3D)
         - `opts.markers`     : show markers (`boolean`; default = `false`)
         - `opts.markersymbol`: marker symbol (`string`; default = `'dot'`)
         - `opts.markersize`  : marker size (`number` or `np.array`; default = `'10'`)
@@ -2088,13 +2111,23 @@ class Visdom(object):
                 )
             else:
                 assert X is not None, "must specify x-values for line update"
+        if is3d:
+            assert Z is not None, (
+                "Z values are required for 3D line plots. "
+                "Pass Z when creating or updating a 3D line plot."
+            )
         assert Y.ndim == 1 or Y.ndim == 2, "Y should have 1 or 2 dim"
         assert Y.shape[-1] > 0, "must plot one line at least"
+
+        if Z is not None:
+            assert Z.ndim == 1 or Z.ndim == 2, "Z should have 1 or 2 dim"
 
         if Y.ndim == 2 and Y.shape[1] == 1:
             Y = Y.ravel()
             if X is not None and X.ndim == 2 and X.shape[1] == 1:
                 X = X.ravel()
+            if Z is not None and Z.ndim == 2 and Z.shape[1] == 1:
+                Z = Z.ravel()
 
         if X is not None:
             assert X.ndim == 1 or X.ndim == 2, "X should have 1 or 2 dim"
@@ -2104,20 +2137,38 @@ class Visdom(object):
         if Y.ndim == 2 and X.ndim == 1:
             X = np.tile(X, (Y.shape[1], 1)).transpose()
 
+        if Z is not None and Y.ndim == 2 and Z.ndim == 1:
+            Z = np.tile(Z, (Y.shape[1], 1)).transpose()
+
         assert X.shape == Y.shape, "X and Y should be the same shape"
+        if Z is not None:
+            assert Z.shape == Y.shape, "Z and Y should be the same shape"
 
         opts = {} if opts is None else opts
         opts["markers"] = opts.get("markers", False)
         opts["fillarea"] = opts.get("fillarea", False)
+        if Z is not None and opts["fillarea"]:
+            warnings.warn(
+                "fillarea is not supported for 3D line plots",
+                UserWarning,
+                stacklevel=2,
+            )
+            opts["fillarea"] = False
         opts["mode"] = "lines+markers" if opts.get("markers") else "lines"
 
         _title2str(opts)
         _assert_opts(opts)
 
         if Y.ndim == 1:
-            linedata = np.column_stack((X, Y))
+            if Z is not None:
+                linedata = np.column_stack((X, Y, Z))
+            else:
+                linedata = np.column_stack((X, Y))
         else:
-            linedata = np.column_stack((X.ravel(order="F"), Y.ravel(order="F")))
+            cols = [X.ravel(order="F"), Y.ravel(order="F")]
+            if Z is not None:
+                cols.append(Z.ravel(order="F"))
+            linedata = np.column_stack(cols)
 
         labels = None
         if Y.ndim == 2:
@@ -2197,7 +2248,7 @@ class Visdom(object):
 
         data = [
             {
-                "z": nan2none(X.tolist()),
+                "z": X.tolist(),
                 "x": opts.get("columnnames"),
                 "y": opts.get("rownames"),
                 "zmin": opts.get("xmin"),
@@ -2818,7 +2869,7 @@ class Visdom(object):
             "yaxis2": {
                 "title": trace2["name"],
                 "titlefont": {
-                    "color": opts.get("color_title_y2", "rgb(148, 103, 0189)")
+                    "color": opts.get("color_title_y2", "rgb(148, 103, 189)")
                 },
                 "tickfont": {"color": opts.get("color_tick_y2", "rgb(148, 103, 189)")},
                 "overlaying": "y",
