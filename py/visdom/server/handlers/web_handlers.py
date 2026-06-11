@@ -507,6 +507,8 @@ class EnvHandler(BaseHandler):
 
     @check_auth
     def get(self, eid):
+        if eid not in self.state:
+            raise tornado.web.HTTPError(404, reason=f"Environment '{eid}' not found")
         self.render(
             "index.html",
             wrap_socket=self.wrap_socket,
@@ -537,6 +539,11 @@ class CompareHandler(BaseHandler):
 
     @check_auth
     def get(self, eids):
+        for eid in eids.split("+"):
+            if eid not in self.state:
+                raise tornado.web.HTTPError(
+                    404, reason=f"Environment '{eid}' not found"
+                )
         self.render(
             "index.html",
             wrap_socket=self.wrap_socket,
