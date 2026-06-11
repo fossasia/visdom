@@ -26,12 +26,6 @@ function distance(pt1, pt2) {
   return Math.hypot(pt2[0] - pt1[0], pt2[1] - pt1[1]);
 }
 
-function getPoint(event, node) {
-  return d3.pointer
-    ? d3.pointer(event, node)
-    : d3.mouse(node);
-}
-
 export default function lasso() {
   var dispatch = d3dispatch('start', 'end');
 
@@ -62,7 +56,7 @@ export default function lasso() {
     var closePath;
 
     function handleDragStart(event) {
-      lassoPolygon = [getPoint(event, this)];
+      lassoPolygon = [d3.pointer(event, this)];
       if (lassoPath) {
         lassoPath.remove();
       }
@@ -91,7 +85,7 @@ export default function lasso() {
       // If reset() was called mid-drag, bail out safely.
       if (!lassoPolygon || !lassoPath || !closePath) return;
 
-      var point = getPoint(event, this);
+      var point = d3.pointer(event, this);
       lassoPolygon.push(point);
       lassoPath.attr('d', polygonToPath(lassoPolygon));
 

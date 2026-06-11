@@ -8,7 +8,7 @@
  */
 
 import { polygonContains } from 'd3-polygon';
-import { event as currentEvent, mouse, select } from 'd3-selection';
+import { pointer, select } from 'd3-selection';
 import * as d3 from 'd3-zoom';
 import debounce from 'debounce';
 import React from 'react';
@@ -202,9 +202,9 @@ class Scene extends React.Component {
     let hoverContainer = new THREE.Object3D();
     scene.add(hoverContainer);
 
-    view.on('mousemove', () => {
+    view.on('mousemove', (event) => {
       if (!this.props.interactive) return;
-      let [mouseX, mouseY] = mouse(view.node());
+      let [mouseX, mouseY] = pointer(event, view.node());
       let mouse_position = [mouseX, mouseY];
       this.checkIntersects(
         mouse_position,
@@ -225,10 +225,10 @@ class Scene extends React.Component {
     let zoom = d3
       .zoom()
       .scaleExtent([this.getScaleFromZ(far), this.getScaleFromZ(near) - 1]);
-    zoom.on('zoom', () => {
+    zoom.on('zoom', (event) => {
       if (!this.props.interactive) return;
-      let d3_transform = currentEvent.transform;
-      this.lastTransform = currentEvent.transform;
+      let d3_transform = event.transform;
+      this.lastTransform = event.transform;
       this.zoomHandler(d3_transform);
     });
     this.zoom = zoom;
