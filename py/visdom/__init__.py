@@ -1346,9 +1346,8 @@ class Visdom(object):
                 # them via an append event
                 entity_id = event["entityId"]
                 id = event["idx"]
-                if data_getter is not None:
-                    if data_type == "html":
-                        selected = {"html": data_getter(int(id))}
+                if data_getter is not None and data_type == "html":
+                    selected = {"html": data_getter(int(id))}
                 else:
                     selected = {"html": "<div>No preview available</div>"}
 
@@ -1363,6 +1362,8 @@ class Visdom(object):
                     },
                     endpoint="update",
                 )
+                return
+
             elif event["event_type"] == "RegionSelected":
                 # lasso events give us a subset of the data to re-run tsne on
                 # so we generate
