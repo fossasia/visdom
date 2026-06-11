@@ -102,6 +102,7 @@ h1 {
 
 .bar button {
    font-size: 8px;
+   padding-right: 6px;
 }
 
 button {
@@ -296,6 +297,11 @@ button[title="smooth lines"] {
 
 button[title="smooth lines"].active {
     color: red;
+}
+
+.react-grid-item {
+  min-height: 14px;
+  min-width: fit-content;
 }
 
 .plotly-heatmap,
