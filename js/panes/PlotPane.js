@@ -13,15 +13,30 @@ import Pane from './Pane';
 const { sgg } = require('ml-savitzky-golay-generalized');
 
 var PlotPane = (props) => {
-  const { contentID, content } = props;
+  const { contentID, type, selected } = props;
+  const isHistory = type === 'plot_history';
 
-  // state varibles
+  // state variables
   // --------------
   const plotlyRef = useRef();
-  const previousContent = usePrevious(content);
   const maxsmoothvalue = 100;
   const [smoothWidgetActive, setSmoothWidgetActive] = useState(false);
   const [smoothvalue, setSmoothValue] = useState(1);
+  const [actualSelected, setActualSelected] = useState(
+    isHistory ? (selected || 0) : 0
+  );
+
+  const content = isHistory
+    ? props.content[Math.min(actualSelected, props.content.length - 1)]
+    : props.content;
+
+  const previousContent = usePrevious(content);
+
+  useEffect(() => {
+    if (isHistory && selected !== undefined) {
+      setActualSelected(selected);
+    }
+  }, [selected]);
 
   // private events
   // -------------
@@ -38,10 +53,47 @@ var PlotPane = (props) => {
     });
   };
 
+  const handleMetadataExport = () => {
+    const graph = plotlyRef.current;
+    const metadata = {
+      data: graph?.data ?? content?.data ?? [],
+      layout: graph?.layout ?? content?.layout ?? {},
+    };
+    const json = JSON.stringify(metadata, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${contentID}_metadata.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+  };
+
+  const updateHistorySlider = (ev) => {
+    setActualSelected(parseInt(ev.target.value));
+  };
+
   // events
   // ------
+  const isDisplayed = (el) =>
+    !!(el && el.offsetWidth > 0 && el.offsetHeight > 0);
   useEffect(() => {
-    if (previousContent) {
+    const plotElement = plotlyRef.current;
+    if (!plotElement) return;
+
+    const resizeObserver = new ResizeObserver(() => {
+      if (plotElement._fullLayout && isDisplayed(plotElement)) {
+        Plotly.Plots.resize(plotElement);
+      }
+    });
+
+    resizeObserver.observe(plotElement);
+    return () => resizeObserver.disconnect();
+  }, []);
+  useEffect(() => {
+    if (previousContent && content) {
       // Retain trace visibility between old and new plots
       let trace_visibility_by_name = {};
       let trace_idx = null;
@@ -78,6 +130,7 @@ var PlotPane = (props) => {
   // ---------
 
   const newPlot = () => {
+    if (!content || !content.data) return;
     var data = content.data;
 
     // add smoothed line plots for existing line plots
@@ -133,19 +186,32 @@ var PlotPane = (props) => {
         });
 
     // required for Plotly.react to register the update
-    content.layout.datarevision = props.version;
+    content.layout.datarevision = props.version + '_' + actualSelected;
 
     // draw / redraw plot with layout-options
     Plotly.react(contentID, data.concat(smooth_data), content.layout, {
-      showLink: true,
-      linkText: 'Edit',
+      showLink: false,
+      displaylogo: false,
+      doubleClick: 'reset',
+      doubleClickDelay: 500,
+    }).then(() => {
+      const plotElement = plotlyRef.current;
+      if (plotElement && plotElement._fullLayout && isDisplayed(plotElement)) {
+        Plotly.Plots.resize(plotElement);
+      }
     });
   };
 
   // check if data can be smoothed
-  var contains_line_plots = content.data.some((data) => {
-    return data['type'] == 'scatter' && data['mode'] == 'lines';
-  });
+  var contains_line_plots =
+    content &&
+    content.data &&
+    content.data.some((data) => {
+      return (
+        data['type'] == 'scatter' &&
+        data['mode'] == 'lines'
+      );
+    });
 
   var smooth_widget_button = '';
   var smooth_widget = '';
@@ -179,18 +245,57 @@ var PlotPane = (props) => {
     }
   }
 
+  var history_widget = '';
+  if (isHistory && props.show_slider && props.content.length > 1) {
+    history_widget = (
+      <div className="widget" key="history_slider">
+        <div style={{ display: 'flex' }}>
+          <span>Frame:&nbsp;&nbsp;</span>
+          <input
+            type="range"
+            min="0"
+            max={props.content.length - 1}
+            value={actualSelected}
+            onChange={updateHistorySlider}
+          />
+          <span>
+            &nbsp;&nbsp;
+            {actualSelected}/{props.content.length - 1}
+            &nbsp;&nbsp;
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  var caption_widget = '';
+  if (isHistory && content && content.caption) {
+    caption_widget = (
+      <span className="widget" key="plot_caption">
+        {content.caption}
+      </span>
+    );
+  }
+
   return (
     <Pane
       {...props}
       handleDownload={handleDownload}
+      handleMetadataExport={handleMetadataExport}
       barwidgets={[smooth_widget_button]}
-      widgets={[smooth_widget]}
+      widgets={[history_widget, caption_widget, smooth_widget]}
       enablePropertyList
     >
       <div
         id={contentID}
         style={{ height: '100%', width: '100%' }}
-        className="plotly-graph-div"
+        className={`plotly-graph-div${
+          content.data?.[0]?.type === 'heatmap'
+            ? ' plotly-heatmap'
+            : content.data?.[0]?.type === 'contour'
+            ? ' plotly-contour'
+            : ''
+        }`}
         ref={plotlyRef}
       />
     </Pane>
