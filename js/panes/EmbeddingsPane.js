@@ -211,7 +211,6 @@ class Scene extends React.Component {
         hoverContainer,
         circle_sprite
       );
-      this.scheduleRender();
     });
 
     view.on('mouseleave', () => {
@@ -412,9 +411,11 @@ class Scene extends React.Component {
       let datum = this.generated_points[index];
       this.highlightPoint(datum, hoverContainer, circle_sprite);
       this.showTooltip(mouse_position, datum);
-    } else {
+      this.scheduleRender();
+    } else if (hoverContainer.children.length > 0) {
       this.removeHighlights(hoverContainer);
       this.hideTooltip();
+      this.scheduleRender();
     }
   }
 
