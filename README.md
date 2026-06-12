@@ -87,7 +87,7 @@ Click the button again to close the property list.
 <summary><b>Environments</b></summary>
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/19650074/198821281-ea1cea1a-66c3-495e-be52-cd0f1a3300f7.png" width="300" /></p>
 
-You can partition your visualization space with `envs`. By default, every user will have an env called `main`. New envs can be created in the UI or programmatically. The state of envs is chronically saved. Environments are able to keep entirely different pools of plots.
+You can partition your visualization space with `envs`. By default, every user will have an env called `main`. New envs can be created in the UI or programmatically. The state of envs is persistently saved. Environments are able to keep entirely different pools of plots.
 
 You can access a specific env via url: `http://localhost:8097/env/main`. If your server is hosted, you can share this url so others can see your visualizations too.
 
@@ -209,7 +209,7 @@ The following options can be provided to the server:
 4. `-env_path` : The path to the serialized session to reload.
 5. `-logging_level` : Logging level (default = INFO). Accepts both standard text and numeric logging values.
 6. `-readonly` : Flag to start server in readonly mode.
-7. `-enable_login` : Flag to setup authentication for the sever, requiring a username and password to login.
+7. `-enable_login` : Flag to setup authentication for the server, requiring a username and password to login.
 8. `-force_new_cookie` : Flag to reset the secure cookie used by the server, invalidating current login cookies.
 Requires `-enable_login`.
 9. `-bind_local` : Flag to make the server accessible only from localhost.
@@ -469,7 +469,7 @@ This function saves the `envs` that are alive on the visdom server. It takes inp
 ### Plotting
 Further details on the wrapped plotting functions are given below.
 
-The exact inputs into the plotting functions vary, although most of them take as input a tensor `X` than contains the data and an (optional) tensor `Y` that contains optional data variables (such as labels or timestamps). All plotting functions take as input an optional `win` that can be used to plot into a specific window; each plotting function also returns the `win` of the window it plotted in. One can also specify the `env`  to which the visualization should be added.
+The exact inputs into the plotting functions vary, although most of them take as input a tensor `X` that contains the data and an (optional) tensor `Y` that contains optional data variables (such as labels or timestamps). All plotting functions take as input an optional `win` that can be used to plot into a specific window; each plotting function also returns the `win` of the window it plotted in. One can also specify the `env`  to which the visualization should be added.
 
 #### vis.scatter
 
