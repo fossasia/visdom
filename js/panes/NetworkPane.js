@@ -57,8 +57,9 @@ function NetworkPane(props) {
 
   // initialize d3
   useEffect(() => {
+    d3.select(containerRef.current).selectAll('*').remove();
     CreateNetwork(content);
-  }, []);
+  }, [content, directed, showEdgeLabels, showVertexLabels]);
 
   useEffect(() => {
     return () => {
