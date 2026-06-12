@@ -277,7 +277,7 @@ Visdom offers the following basic visualization functions:
 - [`vis.save`](#vissave)     : serialize state server-side
 
 ### Plotting
-We have wrapped several common plot types to make creating basic visualizations easily. These visualizations are powered by [Plotly](https://plot.ly/).
+We have wrapped several common plot types to make creating basic visualizations easily. These visualizations are powered by [Plotly](https://plotly.com/).
 
 The following API is currently supported:
 - [`vis.scatter`](#visscatter)  : 2D or 3D scatter plots
