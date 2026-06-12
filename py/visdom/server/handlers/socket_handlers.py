@@ -18,7 +18,6 @@ import json
 import logging
 import os
 import time
-import types
 import hashlib
 from collections import deque
 
@@ -284,7 +283,6 @@ class VisSocketWrapper(VisSocketHandlerOrWrapper, AnySocketWrapper):
     # this ignores tornados initialization
     def __init__(self):
         self.polling = True
-        pass
 
 
 class SocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
@@ -341,7 +339,6 @@ class SocketWrapper(SocketHandlerOrWrapper, AnySocketWrapper):
     # this ignores tornados initialization
     def __init__(self):
         self.polling = True
-        pass
 
 
 def WrapSocketWrapper(BaseWrapper):
