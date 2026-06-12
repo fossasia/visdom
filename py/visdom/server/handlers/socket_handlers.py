@@ -117,9 +117,10 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
             # save localStorage window metadata
             if "data" in msg and "eid" in msg:
                 msg["eid"] = escape_eid(msg["eid"])
-                if msg.get("prev_eid") not in self.state:
+                prev_eid = escape_eid(msg["prev_eid"]) if msg.get("prev_eid") else None
+                if prev_eid not in self.state:
                     return
-                self.state[msg["eid"]] = copy.deepcopy(self.state[msg["prev_eid"]])
+                self.state[msg["eid"]] = copy.deepcopy(self.state[prev_eid])
                 self.state[msg["eid"]]["reload"] = msg["data"]
                 self.eid = msg["eid"]
                 serialize_env(self.state, [self.eid], env_path=self.env_path)
@@ -207,13 +208,30 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
         elif cmd == "pop_embeddings_pane":
             packet = msg.get("data")
             if not isinstance(packet, dict):
+                logging.warning(
+                    f"pop_embeddings_pane: expected dict payload,"
+                    f" got {type(packet).__name__!r}, dropping event"
+                )
                 return
             eid = packet.get("eid")
             win = packet.get("target")
             if eid is None or win is None:
+                logging.warning(
+                    f"pop_embeddings_pane: malformed packet"
+                    f" (eid={eid!r}, target={win!r}), dropping event"
+                )
                 return
             env = self.state.get(eid)
-            if env is None or win not in env["jsons"]:
+            if env is None:
+                logging.warning(
+                    f"pop_embeddings_pane: env {eid!r} not found, dropping event"
+                )
+                return
+            if win not in env["jsons"]:
+                logging.warning(
+                    f"pop_embeddings_pane: pane {win!r} not found"
+                    f" in env {eid!r}, dropping event"
+                )
                 return
             p = env["jsons"][win]
             p["content"]["selected"] = None
