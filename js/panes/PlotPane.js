@@ -185,11 +185,12 @@ var PlotPane = (props) => {
           d.opacity = 1.0;
         });
 
-    const layout = content.layout || (content.layout = {});
     // required for Plotly.react to register the update
+    const layout = content.layout || (content.layout = {});
     content.layout.datarevision = props.version + '_' + actualSelected;
     layout.margin = layout.margin || {};
-    
+
+    // Adjust top margin and title position
     if (layout.title) {
       if (typeof layout.title === 'string') {
         layout.title = { text: layout.title };
