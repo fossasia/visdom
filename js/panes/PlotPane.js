@@ -22,8 +22,6 @@ var PlotPane = (props) => {
   const maxsmoothvalue = 100;
   const [smoothWidgetActive, setSmoothWidgetActive] = useState(false);
   const [smoothvalue, setSmoothValue] = useState(1);
-  content.layout = content.layout || {};
-  
   const [actualSelected, setActualSelected] = useState(
     isHistory ? (selected || 0) : 0
   );
@@ -189,7 +187,8 @@ var PlotPane = (props) => {
 
     // required for Plotly.react to register the update
     content.layout.datarevision = props.version + '_' + actualSelected;
-
+    const layout = content.layout || (content.layout = {});
+    
     if (layout.title) {
       if (typeof layout.title === 'string') {
         layout.title = { text: layout.title };
