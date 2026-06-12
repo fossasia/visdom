@@ -22,8 +22,8 @@ var PlotPane = (props) => {
   const maxsmoothvalue = 100;
   const [smoothWidgetActive, setSmoothWidgetActive] = useState(false);
   const [smoothvalue, setSmoothValue] = useState(1);
-  // content.layout = content.layout || {};
-  // let layout = content.layout;
+  content.layout = content.layout || {};
+  let layout = content.layout || {};
   const [actualSelected, setActualSelected] = useState(
     isHistory ? (selected || 0) : 0
   );
