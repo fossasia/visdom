@@ -188,14 +188,12 @@ var PlotPane = (props) => {
     // required for Plotly.react to register the update
     content.layout.datarevision = props.version + '_' + actualSelected;
     const layout = content.layout || (content.layout = {});
+    layout.margin = layout.margin || {};
     
     if (layout.title) {
       if (typeof layout.title === 'string') {
         layout.title = { text: layout.title };
       }
-
-      layout.margin = layout.margin || {};
-
       if (layout.title.text) {
         layout.margin.t = 65;
         layout.title.y = 0.9;
@@ -203,7 +201,6 @@ var PlotPane = (props) => {
         layout.margin.t = 30;
       }
     } else {
-      layout.margin = layout.margin || {};
       layout.margin.t = 30;
     }
 
