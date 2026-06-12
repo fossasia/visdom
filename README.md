@@ -89,7 +89,7 @@ Click the button again to close the property list.
 
 You can partition your visualization space with `envs`. By default, every user will have an env called `main`. New envs can be created in the UI or programmatically. The state of envs is chronically saved. Environments are able to keep entirely different pools of plots.
 
-You can access a specific env via url: `http://localhost.com:8097/env/main`. If your server is hosted, you can share this url so others can see your visualizations too.
+You can access a specific env via url: `http://localhost:8097/env/main`. If your server is hosted, you can share this url so others can see your visualizations too.
 
 Environments are automatically hierarchically organized by the first `_`.  
 Note that `/` characters in environment names are escaped to `_`, so both `_` and `/`
