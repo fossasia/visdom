@@ -185,9 +185,9 @@ var PlotPane = (props) => {
           d.opacity = 1.0;
         });
 
+    const layout = content.layout || (content.layout = {});
     // required for Plotly.react to register the update
     content.layout.datarevision = props.version + '_' + actualSelected;
-    const layout = content.layout || (content.layout = {});
     layout.margin = layout.margin || {};
     
     if (layout.title) {
