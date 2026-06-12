@@ -190,23 +190,23 @@ var PlotPane = (props) => {
     // required for Plotly.react to register the update
     content.layout.datarevision = props.version + '_' + actualSelected;
 
-    // if (layout.title) {
-    //   if (typeof layout.title === 'string') {
-    //     layout.title = { text: layout.title };
-    //   }
+    if (layout.title) {
+      if (typeof layout.title === 'string') {
+        layout.title = { text: layout.title };
+      }
 
-    //   layout.margin = layout.margin || {};
+      layout.margin = layout.margin || {};
 
-    //   if (layout.title.text) {
-    //     layout.margin.t = 65;
-    //     layout.title.y = 0.9;
-    //   } else {
-    //     layout.margin.t = 30;
-    //   }
-    // } else {
-    //   layout.margin = layout.margin || {};
-    //   layout.margin.t = 30;
-    // }
+      if (layout.title.text) {
+        layout.margin.t = 65;
+        layout.title.y = 0.9;
+      } else {
+        layout.margin.t = 30;
+      }
+    } else {
+      layout.margin = layout.margin || {};
+      layout.margin.t = 30;
+    }
 
     // draw / redraw plot with layout-options
     Plotly.react(contentID, data.concat(smooth_data), content.layout, {
