@@ -21,6 +21,60 @@ const basic_examples = [
     ["Properties Pane", "properties_basic"]
 ];
 
+describe('Compare Mode', () => {
+    it('receives live updates from compared environments', () => {
+        const title = 'CompareLiveUpdate' + Cypress._.random(0, 1e6);
+        const win = 'compare_live_update';
+        const envA = 'compare_live_A_' + Cypress._.random(0, 1e6);
+        const envB = 'compare_live_B_' + Cypress._.random(0, 1e6);
+
+        const comparePlot = () => cy
+            .get('.layout .window')
+            .contains(title)
+            .parents('.window')
+            .find('.js-plotly-plot');
+
+        const assertTraceLength = (env, length) => {
+            comparePlot().should(($plot) => {
+                const trace = $plot[0].data.find((item) =>
+                    item.name.startsWith(env + '_')
+                );
+                expect(trace).to.exist;
+                expect(trace.x).to.have.length(length);
+            });
+        };
+
+        cy.close_envs();
+
+        cy.run('plot_line_live_update', {
+            env: envA,
+            open: false,
+            args: [title, win, '0'],
+        });
+        cy.run('plot_line_live_update', {
+            env: envB,
+            open: false,
+            args: [title, win, '10'],
+        });
+
+        cy.open_env(envA);
+        cy.open_env(envB);
+
+        cy.get('.layout .window').should('have.length', 2);
+        assertTraceLength(envA, 2);
+        assertTraceLength(envB, 2);
+
+        cy.run('plot_line_live_update', {
+            env: envA,
+            open: false,
+            args: [title, win, '0', 'append'],
+        });
+
+        assertTraceLength(envA, 3);
+        assertTraceLength(envB, 2);
+    });
+});
+
 basic_examples.forEach( (setting) => {
     const [ type, basic_example ] = setting;
     describe(`Test Pane Actions on ${type}`, () => {
@@ -169,5 +223,3 @@ describe('Test Pane Filter', () => {
         .should('have.length', 2);
   })
 })
-
-

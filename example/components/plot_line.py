@@ -5,6 +5,31 @@ def plot_line_basic(viz, env, args):
     num = int(args[1]) if len(args) > 1 else 10
     viz.line(Y=np.random.rand(num), opts=dict(showlegend=True, title=title), env=env)
 
+
+def plot_line_live_update(viz, env, args):
+    title = args[0] if len(args) > 0 else "CompareLiveUpdate"
+    win = args[1] if len(args) > 1 else "compare_live_update"
+    offset = float(args[2]) if len(args) > 2 else 0
+    append = len(args) > 3 and args[3] == "append"
+
+    if append:
+        viz.line(
+            X=np.array([2]),
+            Y=np.array([offset + 2]),
+            win=win,
+            update="append",
+            env=env,
+        )
+    else:
+        viz.line(
+            X=np.array([0, 1]),
+            Y=np.array([offset, offset + 1]),
+            win=win,
+            opts=dict(showlegend=True, title=title),
+            env=env,
+        )
+
+
 def plot_line_multiple(viz, env, args):
     title = args[0] if len(args) > 0 else None
     Y = np.linspace(-5, 5, 100)
