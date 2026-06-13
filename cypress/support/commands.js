@@ -48,11 +48,24 @@ Cypress.Commands.add('run', (name, opts) => {
   }
 });
 
-Cypress.Commands.add('close_envs', () => {
-    cy.get('body').then($body => {
+const clearEnvSelection = (remainingAttempts = 4) => {
+    return cy.get('body').then($body => {
         if ($body.find('.rc-tree-select-selection__clear').length > 0) {
-            cy.get('.rc-tree-select-selection__clear').click()
+            return cy
+                .get('.rc-tree-select-selection__clear')
+                .click({force: true})
         }
+        if (remainingAttempts > 0) {
+            return cy.wait(250).then(() => {
+                return clearEnvSelection(remainingAttempts - 1)
+            })
+        }
+    })
+}
+
+Cypress.Commands.add('close_envs', () => {
+    return cy.get('.rc-tree-select', {timeout: 10000}).then(() => {
+        return clearEnvSelection()
     })
 });
 
