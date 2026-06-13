@@ -22,6 +22,17 @@ import Pane from './Pane';
 const SCALE_RADIUS = 2000;
 
 class EmbeddingsPane extends React.Component {
+  shouldComponentUpdate(nextProps) {
+    if (this.props.contentID !== nextProps.contentID) return true;
+    if (
+      Math.round(this.props.height) !== Math.round(nextProps.height) ||
+      Math.round(this.props.width) !== Math.round(nextProps.width)
+    )
+      return true;
+    if (this.props.isFocused !== nextProps.isFocused) return true;
+    return false;
+  }
+
   onEvent = (e) => {
     if (!this.props.isFocused) {
       return;
@@ -156,6 +167,18 @@ class Scene extends React.Component {
 
     this.scheduleRender = this.scheduleRender.bind(this);
     this.renderFrame = this.renderFrame.bind(this);
+  }
+
+  shouldComponentUpdate(nextProps, nextState) {
+    return (
+      nextProps.content.data !== this.props.content.data ||
+      nextProps.content.data.length !== this.props.content.data.length ||
+      Math.round(nextProps.height) !== Math.round(this.props.height) ||
+      Math.round(nextProps.width) !== Math.round(this.props.width) ||
+      nextProps.interactive !== this.props.interactive ||
+      nextState.detailsLoading !== this.state.detailsLoading ||
+      nextState.selectMode !== this.state.selectMode
+    );
   }
 
   componentDidUpdate(prevProps) {
