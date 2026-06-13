@@ -94,7 +94,11 @@ describe(`Compare with compare-view screenshots`, () => {
 
       var envs = [];
       for (var i = 0; i < num_runs; i++) {
-        var env = run + '_' + i + '_fixed';
+        envs.push(run + '_' + i + '_fixed');
+      }
+      cy.delete_envs(envs);
+      for (var i = 0; i < num_runs; i++) {
+        var env = envs[i];
         cy.run(run, {
           env: env,
           open: false,
@@ -102,7 +106,6 @@ describe(`Compare with compare-view screenshots`, () => {
           args: [run],
           asyncrun: i != num_runs - 1,
         });
-        envs.push(env);
       }
       cy.close_envs();
       for (var i = 0; i < num_runs; i++) {
@@ -155,6 +158,7 @@ describe(`Compare screenshots for plotpane functions`, () => {
     var run = 'line_smoothing';
     var env1 = run + '_1_fixed';
     var env2 = run + '_2_fixed';
+    cy.delete_envs([env1, env2]);
     cy.run('plot_line_basic', {
       env: env1,
       args: ["'Line smoothing'", 100],

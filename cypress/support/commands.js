@@ -56,6 +56,17 @@ Cypress.Commands.add('close_envs', () => {
     })
 });
 
+Cypress.Commands.add('delete_envs', (names) => {
+    names.forEach((name) => {
+        cy.request({
+            method: 'POST',
+            url: '/delete_env',
+            body: {eid: name},
+            failOnStatusCode: false,
+        });
+    });
+});
+
 Cypress.Commands.add('open_env', (name) => {
     cy.get('.rc-tree-select').click()
     cy.get('.rc-tree-select-tree').then($tree => {
@@ -66,4 +77,3 @@ Cypress.Commands.add('open_env', (name) => {
     cy.get('.rc-tree-select-tree').contains(name).click()
     cy.get('.rc-tree-select').click({force: true}) // ignore any elements that might cover the list at this point
 });
-
