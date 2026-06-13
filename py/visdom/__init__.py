@@ -2796,6 +2796,98 @@ class Visdom(object):
         )
 
     @pytorch_wrap
+    def sankey(self, source, target, value, labels=None, win=None, env=None, opts=None):
+        """
+        This function draws a Sankey (flow) diagram. Flows are defined by three
+        equal-length arrays:
+
+        - `source`: source node index of each link (`N` array of ints)
+        - `target`: target node index of each link (`N` array of ints)
+        - `value` : magnitude of each link (`N` array of non-negative numbers)
+
+        `labels` is an optional list of node names. If omitted, nodes are
+        referenced by their index alone.
+
+        The following `opts` are supported:
+
+        - `opts.labels`     : list of node labels (alternative to the `labels` arg)
+        - `opts.pad`        : node padding in px (`number`; default = 15)
+        - `opts.thickness`  : node thickness in px (`number`; default = 20)
+        - `opts.orientation`: `'h'` (default) or `'v'`
+        - `opts.nodecolor`  : node color(s) (`string` or list of strings)
+        - `opts.linkcolor`  : link color(s) (`string` or list of strings)
+        - `opts.layoutopts` : `dict` of additional backend layout options, e.g.
+          `layoutopts = {'plotly': {'font': {'size': 10}}}`.
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        source = np.asarray(source).ravel()
+        target = np.asarray(target).ravel()
+        value = np.asarray(value).ravel()
+        assert (
+            len(source) == len(target) == len(value)
+        ), "source, target and value must have the same length"
+        assert len(value) == 0 or (value >= 0).all(), (
+            "sankey link values must be non-negative"
+        )
+
+        labels = labels if labels is not None else opts.get("labels")
+        if labels is not None and len(source) > 0:
+            num_nodes = max(int(source.max()), int(target.max())) + 1
+            assert len(labels) >= num_nodes, (
+                "labels must cover every referenced node "
+                "({} labels for {} nodes)".format(len(labels), num_nodes)
+            )
+
+        node = {"pad": opts.get("pad", 15), "thickness": opts.get("thickness", 20)}
+        if labels is not None:
+            node["label"] = list(labels)
+        if opts.get("nodecolor") is not None:
+            node["color"] = opts.get("nodecolor")
+
+        link = {
+            "source": source.astype(int).tolist(),
+            "target": target.astype(int).tolist(),
+            "value": value.tolist(),
+        }
+        if opts.get("linkcolor") is not None:
+            link["color"] = opts.get("linkcolor")
+
+        data = [
+            {
+                "type": "sankey",
+                "orientation": opts.get("orientation", "h"),
+                "node": node,
+                "link": link,
+            }
+        ]
+
+        layout = {
+            "title": opts.get("title"),
+            "margin": {
+                "l": opts.get("marginleft", 30),
+                "r": opts.get("marginright", 30),
+                "t": opts.get("margintop", 30),
+                "b": opts.get("marginbottom", 30),
+            },
+        }
+        layout_opts = opts.get("layoutopts")
+        if layout_opts is not None and "plotly" in layout_opts:
+            layout.update(layout_opts["plotly"])
+
+        return self._send(
+            {
+                "data": data,
+                "win": win,
+                "eid": env,
+                "layout": _scrub_dict(layout),
+                "opts": opts,
+            }
+        )
+
+    @pytorch_wrap
     def dual_axis_lines(self, X=None, Y1=None, Y2=None, opts=None, win=None, env=None):
         """
         This function will create a line plot using plotly with different Y-Axis.
