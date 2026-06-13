@@ -2829,9 +2829,9 @@ class Visdom(object):
         assert (
             len(source) == len(target) == len(value)
         ), "source, target and value must have the same length"
-        assert len(value) == 0 or (value >= 0).all(), (
-            "sankey link values must be non-negative"
-        )
+        assert (
+            len(value) == 0 or (value >= 0).all()
+        ), "sankey link values must be non-negative"
 
         labels = labels if labels is not None else opts.get("labels")
         if labels is not None and len(source) > 0:
