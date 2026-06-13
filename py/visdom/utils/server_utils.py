@@ -548,11 +548,15 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
 
 def broadcast(self, msg, eid):
     for s in self.subs:
-        if isinstance(self.subs[s].eid, dict):
-            if eid in self.subs[s].eid:
+        sub_eid = self.subs[s].eid
+        if isinstance(sub_eid, dict):
+            if eid in sub_eid:
+                self.subs[s].write_message(msg)
+        elif isinstance(sub_eid, (list, tuple, set)):
+            if eid in sub_eid:
                 self.subs[s].write_message(msg)
         else:
-            if self.subs[s].eid == eid:
+            if sub_eid == eid:
                 self.subs[s].write_message(msg)
 
 
