@@ -322,24 +322,20 @@ const App = () => {
     if (sessionInfo.readonly) {
       return;
     }
-    let newPanes = Object.assign({}, storeData.panes);
-    delete newPanes[paneID];
     if (!keepPosition) {
       localStorage.removeItem(keyLS(paneID));
       sendPaneClose(paneID, selection.envIDs[0]);
     }
 
     if (setState) {
-      // Make sure we remove the pane from our layout.
-      let newLayout = storeData.layout.filter(
-        (paneLayout) => paneLayout.i !== paneID
-      );
-
-      setStoreData((prev) => ({
-        ...prev,
-        layout: newLayout,
-        panes: newPanes,
-      }));
+      setStoreData((prev) => {
+        let newPanes = Object.assign({}, prev.panes);
+        delete newPanes[paneID];
+        let newLayout = prev.layout.filter(
+          (paneLayout) => paneLayout.i !== paneID
+        );
+        return { ...prev, panes: newPanes, layout: newLayout };
+      });
       setFocusedPaneID(focusedPaneID === paneID ? null : focusedPaneID);
       callbacks.current.push('relayout');
     }
