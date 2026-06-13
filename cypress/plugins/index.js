@@ -193,4 +193,3 @@ module.exports = (on) => {
     return details;
   });
 };
-
