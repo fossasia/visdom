@@ -154,6 +154,8 @@ function ViewControls(props) {
           accept=".json"
           onChange={handleUploadDashboard}
         />
+        <button
+          data-toggle="tooltip"
           title="Export as HTML"
           data-placement="bottom"
           className="btn btn-default"
