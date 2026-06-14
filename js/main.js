@@ -993,7 +993,7 @@ const App = () => {
         {viewControls}
         <span
           style={{
-            marginLeft: 'auto',
+            float: 'right',
           }}
         >
           {filterControl}
