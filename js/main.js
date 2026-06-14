@@ -31,6 +31,7 @@ import {
   PANES,
   ROW_HEIGHT,
 } from './settings';
+import buildExportHtml from './template/exportTemplate';
 import ConnectionIndicator from './topbar/ConnectionIndicator';
 import EnvControls from './topbar/EnvControls';
 import FilterControls from './topbar/FilterControls';
@@ -270,7 +271,15 @@ const App = () => {
   };
 
   const onWindowMessage = ({ cmd, update }) => {
-    // If we're in compare mode and recieve an update to an environment
+    if (
+      selection.envIDs.length === 1 &&
+      cmd.eid !== undefined &&
+      cmd.eid !== selection.envIDs[0]
+    ) {
+      return;
+    }
+
+    // If we're in compare mode and receive an update to an environment
     // that is selected that isn't from the compare output, we need to
     // reload the compare output
     if (selection.envIDs.length > 1 && cmd.has_compare !== true) {
@@ -314,24 +323,20 @@ const App = () => {
     if (sessionInfo.readonly) {
       return;
     }
-    let newPanes = Object.assign({}, storeData.panes);
-    delete newPanes[paneID];
     if (!keepPosition) {
       localStorage.removeItem(keyLS(paneID));
       sendPaneClose(paneID, selection.envIDs[0]);
     }
 
     if (setState) {
-      // Make sure we remove the pane from our layout.
-      let newLayout = storeData.layout.filter(
-        (paneLayout) => paneLayout.i !== paneID
-      );
-
-      setStoreData((prev) => ({
-        ...prev,
-        layout: newLayout,
-        panes: newPanes,
-      }));
+      setStoreData((prev) => {
+        let newPanes = Object.assign({}, prev.panes);
+        delete newPanes[paneID];
+        let newLayout = prev.layout.filter(
+          (paneLayout) => paneLayout.i !== paneID
+        );
+        return { ...prev, panes: newPanes, layout: newLayout };
+      });
       setFocusedPaneID(focusedPaneID === paneID ? null : focusedPaneID);
       callbacks.current.push('relayout');
     }
@@ -813,6 +818,72 @@ const App = () => {
       );
     }
   });
+  const escapeHtml = (str) => {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  };
+  const exportCurrentEnvToHtml = () => {
+    if (!storeData.panes || Object.keys(storeData.panes).length === 0) {
+      alert('No panes available to export.');
+      return;
+    }
+
+    const safeTs = new Date()
+      .toISOString()
+      .slice(0, 16)
+      .replace('T', '_')
+      .replace(':', '-');
+    const rawTitle = `Visdom – ${selection.envIDs.join('+')} – ${safeTs}`;
+    const title = escapeHtml(rawTitle);
+
+    const layoutMap = new Map(storeData.layout.map((l) => [l.i, l]));
+
+    const sortedIds = Object.keys(storeData.panes).sort((a, b) => {
+      const la = layoutMap.get(a);
+      const lb = layoutMap.get(b);
+      if (!la && !lb) return a.localeCompare(b);
+      if (!la) return 1;
+      if (!lb) return -1;
+      if (la.y !== lb.y) return la.y - lb.y;
+      if (la.x !== lb.x) return la.x - lb.x;
+      return a.localeCompare(b);
+    });
+
+    const paneData = {};
+    sortedIds.forEach((id) => {
+      const pane = storeData.panes[id];
+      const li = layoutMap.get(id);
+      if (!li) return;
+      paneData[id] = {
+        type: pane.type,
+        title: pane.title || pane.type,
+        content: pane.content,
+        selected: pane.selected,
+        initW: Math.max(280, Math.round(w2p(li.w))),
+        initH: Math.max(200, Math.round(h2p(li.h))),
+      };
+    });
+
+    const validIds = sortedIds.filter((id) => paneData[id]);
+
+    const html = buildExportHtml(title, paneData, validIds);
+
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `visdom_${selection.envIDs
+      .map((id) => String(id).replace(/[^a-zA-Z0-9._-]/g, '_'))
+      .join('_')}_${safeTs}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
 
   let modals = [
     <EnvModal
@@ -870,6 +941,7 @@ const App = () => {
       onViewChange={updateToLayout}
       onViewManageButton={() => setShowViewModal(!showViewModal)}
       onEnvSelect={onEnvSelect}
+      onExportHtml={exportCurrentEnvToHtml}
     />
   );
   let filterControl = (
