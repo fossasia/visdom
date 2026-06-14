@@ -2,6 +2,7 @@ const exportButton = 'button[data-original-title="Export as HTML"]';
 
 beforeEach(() => {
   cy.visit('/');
+  cy.contains('online');
 });
 
 describe('Test Export Env as HTML', () => {
