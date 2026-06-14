@@ -21,6 +21,7 @@ function ViewControls(props) {
     onRepackButton,
     onViewChange,
     onUndoButton,
+    onExportHtml,
   } = props;
 
   // rendering
@@ -94,6 +95,14 @@ function ViewControls(props) {
             className="glyphicon glyphicon-share-alt"
             style={{ transform: 'scaleX(-1)' }}
           />
+          title="Export as HTML"
+          data-placement="bottom"
+          className="btn btn-default"
+          disabled={!(connected && envIDs.length > 0)}
+          onClick={onExportHtml}
+          aria-label="Export as HTML"
+        >
+          <span className="glyphicon glyphicon-download" />
         </button>
       </div>
     </span>

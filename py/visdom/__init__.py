@@ -179,6 +179,7 @@ def _axisformat(xy, opts):
             "dtick": opts.get(xy + "tickstep"),
             "showticklabels": opts.get(xy + "tick"),
             "tickfont": opts.get(xy + "tickfont"),
+            "automargin": opts.get("tight_layout", False) or None,
         }
 
 
@@ -222,14 +223,15 @@ def _axisformat3d(xyz, opts):
 
 
 def _opts2layout(opts, is3d=False):
+    tight = opts.get("tight_layout", False)
     layout = {
         "showlegend": opts.get("showlegend", "legend" in opts),
         "title": opts.get("title"),
         "margin": {
-            "l": opts.get("marginleft", 0 if is3d else 60),
-            "r": opts.get("marginright", 60),
-            "t": opts.get("margintop", 20 if is3d else 60),
-            "b": opts.get("marginbottom", 0 if is3d else 60),
+            "l": opts.get("marginleft", 0 if (is3d or tight) else 60),
+            "r": opts.get("marginright", 0 if tight else 60),
+            "t": opts.get("margintop", 20 if is3d else (30 if tight else 60)),
+            "b": opts.get("marginbottom", 0 if (is3d or tight) else 60),
         },
     }
 
