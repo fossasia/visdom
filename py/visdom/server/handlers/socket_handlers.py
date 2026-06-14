@@ -35,14 +35,9 @@ from visdom.utils.server_utils import (
     send_to_sources,
     broadcast,
     escape_eid,
+    ensure_deleted_stack,
 )
-from visdom.server.defaults import MAX_SOCKET_WAIT, DEFAULT_MAX_UNDO_HISTORY
-
-
-def _ensure_deleted_stack(handler, eid):
-    """Ensure a deleted-pane deque exists for the given environment."""
-    if eid not in handler.deleted_stacks:
-        handler.deleted_stacks[eid] = deque(maxlen=DEFAULT_MAX_UNDO_HISTORY)
+from visdom.server.defaults import MAX_SOCKET_WAIT
 
 
 # TODO move the logic that actually parses environments and layouts to
@@ -112,7 +107,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 eid = msg["eid"]
                 p_data = self.state[eid]["jsons"].pop(msg["data"], None)
                 if p_data is not None:
-                    _ensure_deleted_stack(self, eid)
+                    ensure_deleted_stack(self, eid)
                     self.deleted_stacks[eid].append((msg["data"], p_data))
                 event = {
                     "event_type": "close",

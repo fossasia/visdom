@@ -557,14 +557,19 @@ def broadcast(self, msg, eid):
                 self.subs[s].write_message(msg)
 
 
+def ensure_deleted_stack(handler, eid):
+    """Ensure a deleted-pane deque exists for the given environment."""
+    if eid not in handler.deleted_stacks:
+        handler.deleted_stacks[eid] = deque(maxlen=DEFAULT_MAX_UNDO_HISTORY)
+
+
 def register_window(self, p, eid):
     # in case env doesn't exist
     is_new_env = False
     if eid not in self.state:
         is_new_env = True
         self.state[eid] = {"jsons": {}, "reload": {}}
-        if hasattr(self, "deleted_stacks") and eid not in self.deleted_stacks:
-            self.deleted_stacks[eid] = deque(maxlen=DEFAULT_MAX_UNDO_HISTORY)
+        ensure_deleted_stack(self, eid)
 
     env = self.state[eid]["jsons"]
 

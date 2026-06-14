@@ -88,13 +88,16 @@ function ViewControls(props) {
           title="Undo Close"
           data-placement="bottom"
           className="btn btn-default"
-          disabled={!(connected && envIDs.length > 0 && !readonly)}
+          disabled={!(connected && envIDs.length === 1 && !readonly)}
           onClick={onUndoButton}
         >
           <span
             className="glyphicon glyphicon-share-alt"
             style={{ transform: 'scaleX(-1)' }}
           />
+        </button>
+        <button
+          data-toggle="tooltip"
           title="Export as HTML"
           data-placement="bottom"
           className="btn btn-default"
