@@ -23,7 +23,7 @@ var PlotPane = (props) => {
   const [smoothWidgetActive, setSmoothWidgetActive] = useState(false);
   const [smoothvalue, setSmoothValue] = useState(1);
   const [actualSelected, setActualSelected] = useState(
-    isHistory ? (selected || 0) : 0
+    isHistory ? selected || 0 : 0
   );
 
   const content = isHistory
@@ -207,10 +207,7 @@ var PlotPane = (props) => {
     content &&
     content.data &&
     content.data.some((data) => {
-      return (
-        data['type'] == 'scatter' &&
-        data['mode'] == 'lines'
-      );
+      return data['type'] == 'scatter' && data['mode'] == 'lines';
     });
 
   var smooth_widget_button = '';
@@ -293,8 +290,8 @@ var PlotPane = (props) => {
           content.data?.[0]?.type === 'heatmap'
             ? ' plotly-heatmap'
             : content.data?.[0]?.type === 'contour'
-            ? ' plotly-contour'
-            : ''
+              ? ' plotly-contour'
+              : ''
         }`}
         ref={plotlyRef}
       />
