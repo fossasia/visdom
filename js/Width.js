@@ -89,6 +89,7 @@ var Width = (ComposedComponent) => (props) => {
   // ---------
 
   const {
+    // eslint-disable-next-line no-unused-vars
     cols: propCols,
     rowHeight,
     margin,
