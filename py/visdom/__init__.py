@@ -2834,10 +2834,12 @@ class Visdom(object):
         ), "source, target and value must have the same length"
         assert (source >= 0).all(), "sankey source indices must be non-negative"
         assert (target >= 0).all(), "sankey target indices must be non-negative"
-        assert (source == source.astype(int)).all(), \
-            "sankey source indices must be integers"
-        assert (target == target.astype(int)).all(), \
-            "sankey target indices must be integers"
+        assert (
+            source == source.astype(int)
+        ).all(), "sankey source indices must be integers"
+        assert (
+            target == target.astype(int)
+        ).all(), "sankey target indices must be integers"
         assert (value >= 0).all(), "sankey link values must be non-negative"
 
         labels = labels if labels is not None else opts.get("labels")
