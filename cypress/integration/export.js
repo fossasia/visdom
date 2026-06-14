@@ -1,4 +1,4 @@
-const exportButton = 'button[data-original-title="Export as HTML"]';
+const exportButton = 'button[aria-label="Export as HTML"]';
 
 beforeEach(() => {
   cy.visit('/');
