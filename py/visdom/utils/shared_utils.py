@@ -12,6 +12,7 @@ parts of the visdom stack. Not to be used for particularly specific
 helper functions.
 """
 
+import errno
 import importlib
 import json
 import math
@@ -51,7 +52,8 @@ def ensure_dir_exists(path):
     try:
         os.makedirs(os.path.abspath(path))
     except OSError as e1:
-        assert e1.errno == 17  # errno.EEXIST
+        if e1.errno != errno.EEXIST:
+            raise
 
 
 def get_visdom_path(filename=None):
