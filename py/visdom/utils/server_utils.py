@@ -41,7 +41,12 @@ from visdom.server.defaults import (
     DEFAULT_HOSTNAME,
     DEFAULT_PORT,
 )
-from visdom.utils.shared_utils import warn_once, get_rand_id, get_new_window_id
+from visdom.utils.shared_utils import (
+    warn_once,
+    get_rand_id,
+    get_new_window_id,
+    NanSafeEncoder,
+)
 
 
 # ---- Vaguely server-security related functions ---- #
@@ -57,7 +62,7 @@ def check_auth(f):
         # TODO this should call a shared method of the handler
         handler.last_access = time.time()
         if handler.login_enabled and not handler.current_user:
-            handler.set_status(400)
+            handler.set_status(401)
             return
         f(handler, *args, **kwargs)
 
@@ -74,9 +79,14 @@ def set_cookie(value=None):
         cookie_file.write(cookie_secret)
 
 
-def hash_password(password):
-    """Hashing Password with SHA-256"""
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+def hash_password(password, salt=None):
+    """Hash password using PBKDF2-HMAC-SHA256 with a random salt."""
+    if salt is None:
+        salt = os.urandom(32)
+    elif isinstance(salt, str):
+        salt = bytes.fromhex(salt)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 100000)
+    return salt.hex() + "$" + dk.hex()
 
 
 # ------- File management helprs ----- #
@@ -131,9 +141,11 @@ def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
                 with open(env_path_file, "w") as fn:
                     if isinstance(state[env_id], LazyEnvData):
                         state[env_id].lazy_load_data()
-                        fn.write(json.dumps(state[env_id]._raw_dict))
+                        fn.write(
+                            json.dumps(state[env_id]._raw_dict, cls=NanSafeEncoder)
+                        )
                     else:
-                        fn.write(json.dumps(state[env_id]))
+                        fn.write(json.dumps(state[env_id], cls=NanSafeEncoder))
             except OSError as e:
                 if (
                     e.errno != errno.ENAMETOOLONG
@@ -151,7 +163,7 @@ def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
                     else:
                         data_to_save = copy.deepcopy(state[env_id])
                     data_to_save["name"] = env_id
-                    fn.write(json.dumps(data_to_save))
+                    fn.write(json.dumps(data_to_save, cls=NanSafeEncoder))
 
     return env_ids
 
@@ -222,7 +234,7 @@ def window(args):
         "contentID": get_rand_id(),  # to detected updated windows
     }
 
-    if ptype == "image_history" and is_visdom_type:
+    if ptype in ["image_history", "plot_history"] and is_visdom_type:
         p.update(
             {
                 "content": [args["data"][0]["content"]],
@@ -526,7 +538,9 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
     jsons = list(env.get("jsons", {}).values())
     windows = sorted(jsons, key=lambda k: ("i" not in k, k.get("i", None)))
     for v in windows:
-        socket.write_message(v)
+        msg = dict(v)
+        msg["eid"] = eid
+        socket.write_message(msg)
 
     socket.write_message(json.dumps({"command": "layout"}))
     socket.eid = eid
@@ -558,7 +572,9 @@ def register_window(self, p, eid):
 
     env[p["id"]] = p
 
-    broadcast(self, p, eid)
+    broadcast_msg = dict(p)
+    broadcast_msg["eid"] = eid
+    broadcast(self, broadcast_msg, eid)
     if is_new_env:
         broadcast_envs(self)
     self.write(p["id"])
