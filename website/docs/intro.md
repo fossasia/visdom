@@ -5,13 +5,9 @@ description: Visdom — creating, organizing & sharing visualizations of live, r
 slug: /
 ---
 
-# Visdom
+# Introduction
 
-<div style={{textAlign: 'center'}}>
-  <img src="https://user-images.githubusercontent.com/19650074/198746195-574bb828-026f-41cb-82a9-250fcbc4e090.png" width="300" alt="Visdom Logo" />
-</div>
-
-**Creating, organizing & sharing visualizations of live, rich data.** Supports [Python](https://pypi.org/project/visdom/).
+Creating, organizing & sharing visualizations of live, rich data. Supports [Python](https://pypi.org/project/visdom/).
 
 [![GitHub Release](https://img.shields.io/github/v/release/fossasia/visdom?colorA=363a4f&colorB=a6da95&style=for-the-badge)](https://github.com/fossasia/visdom/releases)
 [![PyPI Downloads](https://img.shields.io/pypi/dd/visdom?colorA=363a4f&colorB=156df1&style=for-the-badge)](https://pypi.org/project/visdom)
