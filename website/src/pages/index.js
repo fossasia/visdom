@@ -28,18 +28,12 @@ const features = [
 
 function Hero() {
   const { siteConfig } = useDocusaurusContext();
-  const logoUrl = useBaseUrl('/img/logo.png');
   const screenshotUrl = useBaseUrl('/img/demo-dashboard.png');
 
   return (
     <header className={styles.hero}>
       <div className={styles.heroInner}>
-        <img
-          src={logoUrl}
-          alt="Visdom Logo"
-          className={styles.heroLogo}
-        />
-        <h1 className={styles.heroTitle}>{siteConfig.title}</h1>
+        <h1 className={styles.heroTitle}>{siteConfig.tagline}</h1>
         <p className={styles.heroTagline}>{siteConfig.tagline}</p>
         <div className={styles.heroCtas}>
           <Link
