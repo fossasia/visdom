@@ -33,7 +33,7 @@ function Hero() {
   return (
     <header className={styles.hero}>
       <div className={styles.heroInner}>
-        <h1 className={styles.heroTitle}>{siteConfig.tagline}</h1>
+        <h1 className={styles.heroTitle}>{siteConfig.title}</h1>
         <p className={styles.heroTagline}>{siteConfig.tagline}</p>
         <div className={styles.heroCtas}>
           <Link

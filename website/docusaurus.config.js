@@ -63,7 +63,7 @@ const config = {
       navbar: {
         title: 'Visdom',
         logo: {
-          alt: 'Visdom Logo',
+          alt: 'Visdom',
           src: 'img/logo.png',
         },
         items: [
