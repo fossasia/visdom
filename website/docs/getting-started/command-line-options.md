@@ -23,13 +23,25 @@ The following options can be provided to the server:
 
 ## Authentication
 
+:::danger Security
+By default, Visdom runs **without authentication**. Anyone who can reach the server can view and modify your environments. For any shared or production deployment, always use `-enable_login` and `-bind_local`:
+
+```bash
+visdom -enable_login -bind_local
+```
+:::
+
 When the `-enable_login` flag is provided, the server asks user to input credentials using terminal prompt. Alternatively, you can setup environment variables for non-interactive login:
 
 ```bash
-VISDOM_USERNAME=username
-VISDOM_PASSWORD=password
+VISDOM_USERNAME=<your-username>
+VISDOM_PASSWORD=<your-password>
 VISDOM_USE_ENV_CREDENTIALS=1 visdom -enable_login
 ```
+
+:::warning
+Never hardcode real credentials in scripts or commit them to version control. Use a secrets manager or environment variables set outside your codebase.
+:::
 
 This setup is useful when launching `visdom` server from a bash script or from a Jupyter notebook.
 

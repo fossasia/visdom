@@ -1,4 +1,26 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Source+Sans+3:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url('/fonts/plus-jakarta-sans-latin.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Source Sans 3';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/source-sans-3-latin.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-latin.ttf') format('truetype');
+}
 
 :root {
   --ifm-color-primary: #3b5998;
@@ -18,10 +40,10 @@
 
   --ifm-font-weight-bold: 700;
   --ifm-code-font-size: 87.5%;
-  --ifm-navbar-background-color: #1a1a2e;
-  --ifm-navbar-link-color: #e2e8f0;
-  --ifm-navbar-link-hover-color: #60b9f4;
-  --ifm-footer-background-color: #0d1117;
+  --ifm-navbar-background-color: #ffffff;
+  --ifm-navbar-link-color: #1a1a2e;
+  --ifm-navbar-link-hover-color: #3b5998;
+  --ifm-footer-background-color: #1a1a2e;
 }
 
 [data-theme='dark'] {
@@ -34,7 +56,10 @@
   --ifm-color-primary-lightest: #c5e7fb;
 
   --ifm-background-color: #0d1117;
-  --ifm-navbar-background-color: #0d1117;
+  --ifm-navbar-background-color: #161b22;
+  --ifm-navbar-link-color: #e2e8f0;
+  --ifm-navbar-link-hover-color: #60b9f4;
+  --ifm-footer-background-color: #0d1117;
 }
 
 /* Headings */
@@ -51,7 +76,7 @@ h6 {
 
 /* Navbar */
 .navbar {
-  box-shadow: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
   border-bottom: 2px solid var(--ifm-color-primary);
 }
 
@@ -59,10 +84,15 @@ h6 {
   font-family: var(--ifm-heading-font-family);
   font-weight: 800;
   letter-spacing: -0.03em;
+  color: var(--ifm-navbar-link-color);
 }
 
 .navbar__logo img {
   height: 28px;
+}
+
+[data-theme='dark'] .navbar {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
 /* Code blocks */
