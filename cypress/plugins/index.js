@@ -56,6 +56,10 @@ module.exports = (on) => {
         assertSafeToken(`args[${index}]`, arg);
       });
 
+      const pythonPath = fs.existsSync(path.resolve(__dirname, '../../.venv/bin/python'))
+        ? path.resolve(__dirname, '../../.venv/bin/python')
+        : 'python3';
+
       const spawnArgs = [
         'example/demo.py',
         '-testing',
@@ -79,14 +83,14 @@ module.exports = (on) => {
         spawnArgs.push('-arg', ...args);
       }
 
-      const child = spawn('python', spawnArgs, {
+      const child = spawn(pythonPath, spawnArgs, {
         stdio: 'ignore',
         detached: true,
       });
       child.unref();
 
       return {
-        command: 'python',
+        command: pythonPath,
         args: spawnArgs,
       };
     },

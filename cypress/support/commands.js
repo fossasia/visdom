@@ -68,7 +68,7 @@ Cypress.Commands.add('close_envs', () => {
   cy.get('body').then(($body) => {
     const $navbar = $body.find('.navbar-form');
     if ($navbar.length > 0) {
-      const $clear = $navbar.find('.rc-tree-select-selection__clear');
+      const $clear = $navbar.find('.rc-tree-select-clear');
       if ($clear.length > 0) {
         cy.wrap($clear).click({ force: true, multiple: true });
       }

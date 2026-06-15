@@ -219,22 +219,91 @@ doesn't override our desire to make them non-interactable */
   border-left: thin solid #ccc;
 }
 
-.rc-tree-select-selection--multiple {
-    max-height: 34px;
-    min-height: 34px;
-    overflow-y: auto;
+.rc-tree-select {
+  vertical-align: middle !important;
 }
 
-.rc-tree-select-selection--multiple .rc-tree-select-selection__clear {
+.rc-tree-select-multiple .rc-tree-select-selector {
+    height: 34px !important;
+    max-height: 34px !important;
+    min-height: 34px !important;
+    padding: 0px 8px !important;
+    display: flex !important;
+    align-items: center !important;
+    overflow: hidden !important;
+}
+
+.rc-tree-select-multiple .rc-tree-select-clear {
   right: 20px;
 }
 
-.rc-tree-select-selection {
-  border-radius: 6px 0px 0px 6px;
+.rc-tree-select-selector {
+  border-radius: 6px 0px 0px 6px !important;
+  border: 1px solid #ccc !important;
+  background-color: #fff !important;
+  box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.075) !important;
+  transition: border-color ease-in-out 0.15s, box-shadow ease-in-out 0.15s !important;
 }
 
-.rc-tree-select-selection--multiple .rc-tree-select-search__field__placeholder {
-    top: 8px;
+.rc-tree-select-multiple .rc-tree-select-selection-placeholder {
+  position: absolute !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  left: 8px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  line-height: 1 !important;
+  font-size: 14px !important;
+  color: #999 !important;
+}
+
+.rc-tree-select-selection-search {
+  display: inline-flex !important;
+  align-items: center !important;
+  height: 100% !important;
+  margin-left: 0 !important;
+}
+
+.rc-tree-select-selection-search-input {
+  height: 24px !important;
+  line-height: 24px !important;
+  font-size: 14px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  display: inline-block !important;
+}
+
+.rc-tree-select-selection-item {
+  background-color: #f3f3f3 !important;
+  border: 1px solid #ccc !important;
+  border-radius: 3px !important;
+  margin: 1px 4px 1px 0 !important;
+  padding: 0 6px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  height: 24px !important;
+  line-height: 22px !important;
+  font-size: 13px !important;
+  color: #333 !important;
+}
+
+.rc-tree-select-selection-item-remove {
+  margin-left: 6px !important;
+  color: #999 !important;
+  cursor: pointer !important;
+  font-size: 14px !important;
+  font-weight: bold !important;
+  display: inline-block !important;
+}
+
+.rc-tree-select-selection-item-remove:hover {
+  color: #666 !important;
+}
+
+.rc-tree-select-focused .rc-tree-select-selector {
+  border-color: #66afe9 !important;
+  outline: 0 !important;
+  box-shadow: inset 0 1px 1px rgba(0,0,0,.075), 0 0 8px rgba(102, 175, 233, .6) !important;
 }
 
 .table-properties td {

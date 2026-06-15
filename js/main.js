@@ -12,7 +12,7 @@
 'use strict';
 
 import 'fetch';
-import 'rc-tree-select/assets/index.css';
+import 'rc-tree-select/assets/index.less';
 
 import React, { useContext, useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
