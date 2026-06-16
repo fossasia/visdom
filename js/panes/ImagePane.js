@@ -21,7 +21,7 @@ function ImagePane(props) {
   const { envID, id, title, type, selected, width, height } = props;
   var { isFocused, content } = props;
 
-  // state varibles
+  // state variables
   // --------------
   const paneRef = useRef();
   const imgRef = useRef();

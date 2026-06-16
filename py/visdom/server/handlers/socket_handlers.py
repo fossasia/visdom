@@ -282,7 +282,7 @@ class VisSocketHandler(VisSocketHandlerOrWrapper):
 
 
 class VisSocketWrapper(VisSocketHandlerOrWrapper, AnySocketWrapper):
-    # this ignores tornados initialization
+    # this ignores tornado's initialization
     def __init__(self):
         self.polling = True
         pass
