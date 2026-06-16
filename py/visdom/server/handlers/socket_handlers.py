@@ -202,6 +202,10 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
             eid = msg.get("eid")
             win = msg.get("win")
             if eid is None or win is None or eid not in self.state:
+                logging.warning(
+                    f"layout_item_update: env {eid!r} or win {win!r}"
+                    f" not found, dropping event"
+                )
                 return
             self.state[eid]["reload"][win] = msg.get("data")
 
