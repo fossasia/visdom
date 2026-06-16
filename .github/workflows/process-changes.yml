@@ -15,7 +15,7 @@ jobs:
     - name: "Install Node"
       uses: actions/setup-node@v6
       with:
-          node-version: 16
+          node-version: '24'
     - name: "Install Dependencies"
       run: ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm install
     - name: "Linter Check (ESLint)"
