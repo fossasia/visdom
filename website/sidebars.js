@@ -4,10 +4,31 @@ const sidebars = {
     'intro',
     {
       type: 'category',
+      label: 'User Guide',
+      collapsed: false,
+      link: {
+        type: 'doc',
+        id: 'user-guide/quick-start',
+      },
+      items: [
+        'user-guide/creating-visualizations',
+        'user-guide/environments',
+        'user-guide/live-updates',
+        'user-guide/windows-and-layouts',
+        'user-guide/callbacks',
+        'user-guide/sharing-and-security',
+        'user-guide/pytorch-integration',
+      ],
+    },
+    {
+      type: 'category',
       label: 'Getting Started',
       collapsed: false,
+      link: {
+        type: 'doc',
+        id: 'getting-started/installation',
+      },
       items: [
-        'getting-started/installation',
         'getting-started/usage',
         'getting-started/command-line-options',
       ],
@@ -15,8 +36,12 @@ const sidebars = {
     {
       type: 'category',
       label: 'Concepts',
+      collapsed: false,
+      link: {
+        type: 'doc',
+        id: 'concepts/windows',
+      },
       items: [
-        'concepts/windows',
         'concepts/environments',
         'concepts/callbacks',
         'concepts/views-and-filters',
@@ -26,8 +51,11 @@ const sidebars = {
       type: 'category',
       label: 'API Reference',
       collapsed: false,
+      link: {
+        type: 'doc',
+        id: 'api/overview',
+      },
       items: [
-        'api/overview',
         'api/basics',
         'api/plotting',
         'api/generic-plots',

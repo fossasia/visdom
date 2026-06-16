@@ -28,7 +28,7 @@ const config = {
       attributes: {
         'http-equiv': 'Content-Security-Policy',
         content:
-          "default-src 'self'; img-src 'self' https://user-images.githubusercontent.com https://img.shields.io data:; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self';",
+          "default-src 'self'; img-src 'self' https://user-images.githubusercontent.com https://img.shields.io data:; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' blob:; worker-src 'self' blob:;",
       },
     },
   ],
@@ -38,12 +38,26 @@ const config = {
     locales: ['en'],
   },
 
+  themes: [
+    [
+      require.resolve('@easyops-cn/docusaurus-search-local'),
+      {
+        hashed: true,
+        language: ['en'],
+        indexDocs: true,
+        indexBlog: false,
+        docsRouteBasePath: '/',
+      },
+    ],
+  ],
+
   presets: [
     [
       'classic',
       /** @type {import('@docusaurus/preset-classic').Options} */
       ({
         docs: {
+          routeBasePath: '/',
           sidebarPath: require.resolve('./sidebars.js'),
           editUrl:
             'https://github.com/fossasia/visdom/tree/master/website/',
@@ -74,7 +88,7 @@ const config = {
             label: 'Docs',
           },
           {
-            to: '/docs/api/overview',
+            to: '/api/overview',
             label: 'API',
             position: 'left',
           },
@@ -98,15 +112,15 @@ const config = {
             items: [
               {
                 label: 'Getting Started',
-                to: '/docs/getting-started/installation',
+                to: '/getting-started/installation',
               },
               {
                 label: 'API Reference',
-                to: '/docs/api/overview',
+                to: '/api/overview',
               },
               {
                 label: 'Concepts',
-                to: '/docs/concepts/windows',
+                to: '/concepts/windows',
               },
             ],
           },
@@ -119,7 +133,7 @@ const config = {
               },
               {
                 label: 'Contributing',
-                to: '/docs/contributing',
+                to: '/contributing',
               },
               {
                 label: 'FOSSASIA',
@@ -154,6 +168,7 @@ const config = {
       },
       colorMode: {
         defaultMode: 'light',
+        disableSwitch: false,
         respectPrefersColorScheme: true,
       },
     }),

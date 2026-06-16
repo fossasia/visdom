@@ -18,6 +18,39 @@ The UI begins as a blank slate — you can populate it with plots, images, and t
 You can use the zoom of your browser to adjust the scale of the UI.
 :::
 
+## Window IDs
+
+Every window has an id (`win`). You can specify it when creating a plot, or let Visdom auto-generate one. Using explicit window ids is useful for updating plots:
+
+```python
+# Create a plot with an explicit window id
+vis.line(Y=[1, 2, 3], X=[1, 2, 3], win='my_loss_plot',
+         opts=dict(title='Training Loss'))
+
+# Update the same window later
+vis.line(Y=[4], X=[4], win='my_loss_plot', update='append')
+```
+
+You can check if a window exists before updating:
+
+```python
+if vis.win_exists('my_loss_plot'):
+    vis.line(Y=[new_val], X=[step], win='my_loss_plot', update='append')
+```
+
+## Programmatic Window Operations
+
+```python
+# Close a specific window
+vis.close(win='my_loss_plot')
+
+# Close all windows in the current environment
+vis.close()
+
+# Get the data stored in a window
+data = vis.get_window_data(win='my_loss_plot')
+```
+
 ## Editable Plot Parameters
 
 Use the top-right *edit* button to inspect all parameters used for a plot in the respective window. The Visdom client supports dynamic change of plot parameters as well. Just change one of the listed parameters, and the plot will be altered on-the-fly. Click the button again to close the property list.

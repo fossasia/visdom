@@ -58,3 +58,70 @@ The following `opts` are generic in the sense that they are the same for all vis
 | `opts.marginbottom` | Bottom margin (in pixels) |
 
 The other options are visualization-specific, and are described in the documentation of the individual functions.
+
+## Practical Examples
+
+### Customizing axis labels and title
+
+```python
+vis.line(
+    Y=data,
+    X=steps,
+    opts=dict(
+        title='Training Loss over Time',
+        xlabel='Epoch',
+        ylabel='Loss',
+        showlegend=True,
+        legend=['Train', 'Validation'],
+    ),
+)
+```
+
+### Using log scale
+
+```python
+vis.line(
+    Y=loss_values,
+    X=steps,
+    opts=dict(
+        title='Loss (log scale)',
+        ytype='log',
+        ylabel='Loss',
+        xlabel='Step',
+    ),
+)
+```
+
+### Custom margins and size
+
+```python
+vis.bar(
+    X=values,
+    opts=dict(
+        title='Wide Chart',
+        width=800,
+        height=400,
+        marginbottom=80,
+        rownames=long_labels,
+    ),
+)
+```
+
+### Using layoutopts for advanced Plotly configuration
+
+Many plotting functions accept `opts.layoutopts`, which is passed directly to Plotly's layout configuration:
+
+```python
+vis.line(
+    Y=data,
+    X=x,
+    opts=dict(
+        title='Advanced Layout',
+        layoutopts=dict(
+            plot_bgcolor='rgba(240,240,240,0.95)',
+            xaxis=dict(gridcolor='white'),
+            yaxis=dict(gridcolor='white'),
+        ),
+    ),
+)
+```

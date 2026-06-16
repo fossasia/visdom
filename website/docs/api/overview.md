@@ -8,6 +8,41 @@ description: Overview of the Visdom Python API
 
 For a quick introduction into the capabilities of `visdom`, have a look at the `example` directory, or read the details below.
 
+## Quick Example
+
+```python
+import visdom
+import numpy as np
+
+vis = visdom.Visdom()
+
+# Text
+vis.text('Hello Visdom!')
+
+# Image
+vis.image(np.random.rand(3, 256, 256), opts=dict(title='Random Image'))
+
+# Line plot
+X = np.linspace(0, 2 * np.pi, 100)
+vis.line(
+    Y=np.column_stack([np.sin(X), np.cos(X)]),
+    X=X,
+    opts=dict(title='Sine & Cosine', legend=['sin', 'cos']),
+)
+
+# Scatter plot
+vis.scatter(
+    X=np.random.rand(100, 2),
+    opts=dict(title='Random Scatter', markersize=5),
+)
+
+# Bar chart
+vis.bar(X=np.random.rand(5), opts=dict(rownames=['A', 'B', 'C', 'D', 'E']))
+
+# Save the environment
+vis.save(['main'])
+```
+
 ## Visdom Arguments (Python only)
 
 The python Visdom client takes the following options:
@@ -38,6 +73,8 @@ Visdom offers the following basic visualization functions:
 - [`vis.video`](./basics.md#visvideo) — videos
 - [`vis.svg`](./basics.md#vissvg) — SVG object
 - [`vis.matplot`](./basics.md#vismatplot) — matplotlib plot
+- [`vis.plotlyplot`](./basics.md#visplotlyplot) — Plotly figure
+- [`vis.embeddings`](./basics.md#visembeddings) — t-SNE embeddings
 - [`vis.save`](./basics.md#vissave) — serialize state server-side
 
 ## Plotting
@@ -55,6 +92,7 @@ We have wrapped several common plot types to make creating basic visualizations 
 - [`vis.contour`](./plotting.md#viscontour) — contour plots
 - [`vis.quiver`](./plotting.md#visquiver) — quiver plots
 - [`vis.mesh`](./plotting.md#vismesh) — mesh plots
+- [`vis.sunburst`](./plotting.md#vissunburst) — sunburst charts
 - [`vis.dual_axis_lines`](./plotting.md#visdual_axis_lines) — double y axis line plots
 
 ## Generic Plots
@@ -69,6 +107,29 @@ See [Generic Plots](./generic-plots.md) for how to produce your own arbitrary Pl
 - [`vis.win_exists`](./other-functions.md#viswin_exists) — check if a window already exists by id
 - [`vis.get_env_list`](./other-functions.md#visget_env_list) — get a list of all environments on your server
 - [`vis.get_window_data`](./other-functions.md#visget_window_data) — get current data for a window
-- [`vis.save_plotly_figure`](./basics.md#visplotlyplot) — save a Plotly figure to an image file from code
 - [`vis.check_connection`](./other-functions.md#vischeck_connection) — check if the server is connected
 - [`vis.replay_log`](./other-functions.md#visreplay_log) — replay the actions from a log file
+
+## Common Patterns
+
+### Updating existing plots
+
+Many plotting functions support an `update` parameter to append or replace data in an existing window:
+
+```python
+# Create a plot
+win = vis.line(Y=[1], X=[1], opts=dict(title='Live'))
+
+# Append new points
+vis.line(Y=[2], X=[2], win=win, update='append')
+vis.line(Y=[3], X=[3], win=win, update='append')
+```
+
+### Naming windows
+
+Use the `win` parameter to target a specific window. If a window with that id exists, it will be updated:
+
+```python
+vis.text('First message', win='my_window')
+vis.text('Updated message', win='my_window')  # replaces content
+```
