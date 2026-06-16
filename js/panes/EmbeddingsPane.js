@@ -78,16 +78,18 @@ class EmbeddingsPane extends React.Component {
   };
 
   onRegionSelection = (pointIdxs) => {
-    if (this.props.isFocused)
-      this.context.sendPaneMessage(
-        {
-          event_type: 'RegionSelected',
-          selectedIdxs: pointIdxs,
-          pane_data: false, // No need to send the full data for this
-        },
-        this.props.id,
-        this.props.envID
-      );
+    // Focus this pane so the drilled-down view (which updates the same pane id)
+    // stays focused and therefore interactive (zoom/hover) without an extra click.
+    this.props.onFocus(this.props.id);
+    this.context.sendPaneMessage(
+      {
+        event_type: 'RegionSelected',
+        selectedIdxs: pointIdxs,
+        pane_data: false, // No need to send the full data for this
+      },
+      this.props.id,
+      this.props.envID
+    );
   };
 
   // Used to pop an embeddings drilldown off of the stack
@@ -648,7 +650,6 @@ class Scene extends React.Component {
         )}
         <div
           style={{
-            opacity: this.props.interactive ? 1 : 0.2,
             width: this.props.width + 'px',
             height: this.props.height + 'px',
           }}
