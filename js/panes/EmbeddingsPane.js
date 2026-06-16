@@ -9,7 +9,7 @@
 
 import { polygonContains } from 'd3-polygon';
 import { pointer, select } from 'd3-selection';
-import * as d3 from 'd3-zoom';
+import { zoom as d3zoom, zoomIdentity } from 'd3-zoom';
 import debounce from 'debounce';
 import React from 'react';
 import * as THREE from 'three';
@@ -245,9 +245,10 @@ class Scene extends React.Component {
 
     /* ----------------------------------------------------------- */
 
-    let zoom = d3
-      .zoom()
-      .scaleExtent([this.getScaleFromZ(far), this.getScaleFromZ(near) - 1]);
+    let zoom = d3zoom().scaleExtent([
+      this.getScaleFromZ(far),
+      this.getScaleFromZ(near) - 1,
+    ]);
     zoom.on('zoom', (event) => {
       if (!this.props.interactive) return;
       let d3_transform = event.transform;
@@ -263,7 +264,7 @@ class Scene extends React.Component {
 
       if (!this.lastTransform) {
         let initial_scale = this.getScaleFromZ(far);
-        initial_transform = d3.zoomIdentity
+        initial_transform = zoomIdentity
           .translate(this.props.width / 2, this.props.height / 2)
           .scale(initial_scale);
 

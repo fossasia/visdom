@@ -9,7 +9,7 @@
 
 import { dispatch as d3dispatch } from 'd3-dispatch';
 import { drag as d3drag } from 'd3-drag';
-import * as d3 from 'd3-selection';
+import { pointer as d3pointer } from 'd3-selection';
 
 function polygonToPath(polygon) {
   return (
@@ -56,7 +56,7 @@ export default function lasso() {
     var closePath;
 
     function handleDragStart(event) {
-      lassoPolygon = [d3.pointer(event, this)];
+      lassoPolygon = [d3pointer(event, this)];
       if (lassoPath) {
         lassoPath.remove();
       }
@@ -85,7 +85,7 @@ export default function lasso() {
       // If reset() was called mid-drag, bail out safely.
       if (!lassoPolygon || !lassoPath || !closePath) return;
 
-      var point = d3.pointer(event, this);
+      var point = d3pointer(event, this);
       lassoPolygon.push(point);
       lassoPath.attr('d', polygonToPath(lassoPolygon));
 
