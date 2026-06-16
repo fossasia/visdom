@@ -78,8 +78,6 @@ class EmbeddingsPane extends React.Component {
   };
 
   onRegionSelection = (pointIdxs) => {
-    // Focus this pane so the drilled-down view (which updates the same pane id)
-    // stays focused and therefore interactive (zoom/hover) without an extra click.
     this.props.onFocus(this.props.id);
     this.context.sendPaneMessage(
       {
