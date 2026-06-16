@@ -49,6 +49,11 @@ from visdom.utils.server_utils import (
     stringify,
 )
 from visdom.server.handlers.base_handlers import BaseHandler
+from visdom.server.defaults import (
+    DEFAULT_MAX_IMAGE_HISTORY,
+    DEFAULT_MAX_OLD_CONTENT,
+    DEFAULT_MAX_TEXT_LINES,
+)
 
 
 # TODO move the logic that actually parses environments and layouts to
@@ -97,7 +102,13 @@ class ExistsHandler(BaseHandler):
 
 class UpdateHandler(BaseHandler):
     @staticmethod
-    def update_packet(p, args, max_text_lines, max_old_content, max_image_history):
+    def update_packet(
+        p,
+        args,
+        max_text_lines=DEFAULT_MAX_TEXT_LINES,
+        max_old_content=DEFAULT_MAX_OLD_CONTENT,
+        max_image_history=DEFAULT_MAX_IMAGE_HISTORY,
+    ):
         # Shallow copy the packet to dynamically capture changes to top-level keys.
         old_p = p.copy()
 
@@ -116,7 +127,13 @@ class UpdateHandler(BaseHandler):
         return p, patch.patch
 
     @staticmethod
-    def update(p, args, max_text_lines, max_old_content, max_image_history):
+    def update(
+        p,
+        args,
+        max_text_lines=DEFAULT_MAX_TEXT_LINES,
+        max_old_content=DEFAULT_MAX_OLD_CONTENT,
+        max_image_history=DEFAULT_MAX_IMAGE_HISTORY,
+    ):
         # Update text in window, separated by a line break
         if p["type"] == "text":
             p["content"] += "<br>" + args["data"][0]["content"]
