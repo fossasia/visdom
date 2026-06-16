@@ -650,6 +650,7 @@ class Scene extends React.Component {
         )}
         <div
           style={{
+            opacity: this.props.interactive ? 1 : 0.2,
             width: this.props.width + 'px',
             height: this.props.height + 'px',
           }}
