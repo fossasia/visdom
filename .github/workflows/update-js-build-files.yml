@@ -24,7 +24,7 @@ jobs:
         #   token: ${{ secrets.PAT }}
       - uses: actions/setup-node@v6
         with:
-          node-version: '16'
+          node-version: '24'
       - run: ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm install
       - run: |
           git fetch origin ${{ github.ref_name }}
