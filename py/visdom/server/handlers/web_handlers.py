@@ -50,6 +50,8 @@ from visdom.utils.server_utils import (
 )
 from visdom.server.handlers.base_handlers import BaseHandler
 
+logger = logging.getLogger(__name__)
+
 
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
@@ -73,9 +75,15 @@ class PostHandler(BaseHandler):
             )
 
         eid = extract_eid(req)
-        p = window(req)
+        pid = req.get("pid")
+        if pid is not None:
+            logger.info("Received request from PID %s for env %s", pid, eid)
 
+        p = window(req)
         register_window(self, p, eid)
+
+        if pid is not None and eid in self.state:
+            self.state[eid]["last_active_pid"] = pid
 
 
 class ExistsHandler(BaseHandler):
@@ -393,6 +401,12 @@ class UpdateHandler(BaseHandler):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
+        pid = args.get("pid")
+        if pid is not None:
+            eid = extract_eid(args)
+            logger.info("Received update from PID %s for env %s", pid, eid)
+            if eid in self.state:
+                self.state[eid]["last_active_pid"] = pid
         self.wrap_func(self, args)
 
 

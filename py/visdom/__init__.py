@@ -8,6 +8,7 @@
 
 from visdom.utils.shared_utils import get_new_window_id
 from visdom import server
+import os
 import os.path
 import requests
 import traceback
@@ -570,6 +571,7 @@ class Visdom(object):
         self.log_to_filename = log_to_filename
         self.offline = offline
         self._session = None
+        self._pid = os.getpid()
         self.proxies = proxies
         self.http_proxy_host = None
         self.http_proxy_port = None
@@ -635,8 +637,16 @@ class Visdom(object):
 
     @property
     def session(self):
-        if self._session:
+        current_pid = os.getpid()
+        if self._session and self._pid == current_pid:
             return self._session
+
+        if self._session:
+            try:
+                self._session.close()
+            except Exception:
+                pass
+        self._pid = current_pid
         logger.warning("Setting up a new session...")
         sess = requests.Session()
         if self.proxies:
@@ -848,8 +858,21 @@ class Visdom(object):
         """
         if data is None:
             data = {}
-        r = self.session.post(url, data=data)
-        return r.text
+        had_session = self._session is not None
+        try:
+            r = self.session.post(url, data=data)
+            return r.text
+        except (requests.ConnectionError, requests.Timeout):
+            if not had_session:
+                raise
+            logger.warning("Connection failed, resetting session and retrying...")
+            try:
+                self._session.close()
+            except Exception:
+                pass
+            self._session = None
+            r = self.session.post(url, data=data)
+            return r.text
 
     def _send(self, msg, endpoint="events", quiet=False, from_log=False, create=True):
         """
@@ -868,6 +891,8 @@ class Visdom(object):
 
         if msg.get("eid", None) is not None:
             self.env_list.add(msg["eid"])
+
+        msg["pid"] = self._pid
 
         # TODO investigate send use cases, then deprecate
         if not self.send:
