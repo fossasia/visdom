@@ -17,6 +17,7 @@ from components.plot_bar import plot_bar_basic, plot_bar_stacked, plot_bar_nonst
 from components.plot_surface import plot_surface_basic, plot_surface_basic_withnames, plot_surface_append, plot_surface_append_withnames, plot_surface_remove, plot_surface_remove_withnames, plot_surface_replace, plot_surface_replace_withnames, plot_surface_contour, plot_surface_3d
 from components.plot_line import plot_line_basic, plot_line_multiple, plot_line_webgl, plot_line_update_webgl, plot_line_update, plot_line_opts, plot_line_opts_update, plot_line_stackedarea, plot_line_maxsize, plot_line_doubleyaxis, plot_line_pytorch, plot_line_stem, plot_line_many_updates
 from components.plot_special import plot_special_boxplot, plot_special_quiver, plot_special_mesh, plot_special_graph
+from components.plot_roc_pr import plot_roc_curve, plot_pr_curve, plot_roc_precomputed
 from components.properties import properties_basic, properties_callbacks
 from components.misc import misc_plot_matplot, misc_plot_latex, misc_plot_latex_update, misc_video_tensor, misc_video_download, misc_audio_basic, misc_audio_download, misc_arbitrary_visdom, misc_getset_state
 from components.plot_violin import plot_violin_basic, plot_violin_multigroup, plot_violin_with_points, plot_violin_horizontal
@@ -95,6 +96,13 @@ def run_demo(viz, env, args):
     plot_surface_replace_withnames(viz, env, args)
     plot_surface_contour(viz, env, args)
     plot_surface_3d(viz, env, args)
+
+    # =============== #
+    # ROC / PR curves #
+    # =============== #
+    plot_roc_curve(viz, env, args)
+    plot_pr_curve(viz, env, args)
+    plot_roc_precomputed(viz, env, args)
 
     # ============= #
     # special plots #

@@ -266,7 +266,7 @@ def window(args):
         p["content"]["has_previous"] = False
     else:
         p["content"] = {"data": args["data"], "layout": args["layout"]}
-        p["type"] = "plot"
+        p["type"] = args.get("pane_type", "plot")
 
     return p
 

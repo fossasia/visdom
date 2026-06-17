@@ -541,6 +541,34 @@ The following `opts` are supported:
 - `opts.traceopts`   : `dict` mapping trace names or indices to `dict`s of additional options that plot.ly accepts for a trace.
 - `opts.webgl`       : use WebGL for plotting (`boolean`; default = `false`). It is faster if a plot contains too many points. Use sparingly as browsers won't allow more than a couple of WebGL contexts on a single page.
 
+#### vis.roc_curve
+This function draws a ROC curve for binary classification.
+
+It accepts either:
+- raw binary labels and scores via `y_true` and `y_score`, or
+- precomputed curve points via `fpr` and `tpr`.
+
+The following `opts` are supported:
+- `opts.title`      : plot title (`string`; default includes ROC-AUC)
+- `opts.legend`     : two legend labels for curve and baseline (`list`)
+- `opts.xlabel`     : x-axis label (`string`; default = `False Positive Rate`)
+- `opts.ylabel`     : y-axis label (`string`; default = `True Positive Rate`)
+- `opts.layoutopts` : additional backend layout options (`dict`)
+
+#### vis.pr_curve
+This function draws a precision-recall curve for binary classification.
+
+It accepts either:
+- raw binary labels and scores via `y_true` and `y_score`, or
+- precomputed curve points via `precision` and `recall`.
+
+The following `opts` are supported:
+- `opts.title`      : plot title (`string`; default includes PR-AUC)
+- `opts.legend`     : two legend labels for curve and baseline (`list`)
+- `opts.xlabel`     : x-axis label (`string`; default = `Recall`)
+- `opts.ylabel`     : y-axis label (`string`; default = `Precision`)
+- `opts.layoutopts` : additional backend layout options (`dict`)
+
 
 #### vis.stem
 This function draws a stem plot. It takes as input an `N` or `NxM` tensor
