@@ -81,6 +81,10 @@ class PostHandler(BaseHandler):
 class ExistsHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
+        if "win" not in args:
+            handler.set_status(400)
+            handler.write("missing required field: win")
+            return
         eid = extract_eid(args)
         if eid in handler.state and args["win"] in handler.state[eid]["jsons"]:
             handler.write("true")
@@ -117,6 +121,9 @@ class UpdateHandler(BaseHandler):
 
     @staticmethod
     def update(p, args, max_text_lines, max_old_content, max_image_history):
+        if "data" not in args:
+            logging.warning("update() called without 'data' in args")
+            return p
         # Update text in window, separated by a line break
         if p["type"] == "text":
             p["content"] += "<br>" + args["data"][0]["content"]
@@ -326,6 +333,14 @@ class UpdateHandler(BaseHandler):
 
     @staticmethod
     def wrap_func(handler, args):
+        if "win" not in args:
+            handler.set_status(400)
+            handler.write("missing required field: win")
+            return
+        if "data" not in args:
+            handler.set_status(400)
+            handler.write("missing required field: data")
+            return
         eid = extract_eid(args)
 
         if args["win"] not in handler.state[eid]["jsons"]:
@@ -692,8 +707,6 @@ class ErrorHandler(BaseHandler):
             raise tornado.web.HTTPError(400, reason="Invalid status code")
 
         raise tornado.web.HTTPError(status_code)
-        error_text = text or "test error"
-        raise Exception(error_text)
 
 
 class HealthHandler(BaseHandler):
