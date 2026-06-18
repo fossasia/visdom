@@ -132,7 +132,7 @@ Blindly copy-pasting AI-generated code that you cannot explain or debug is not p
 ## Pull Requests
 We actively welcome your pull requests.
 
-1. Fork the repo and create your branch from `master`.
+1. Fork the repo and create your branch from `dev`.
 2. If you've added code that should be tested, add tests.
 3. If you've changed APIs, update the documentation.
 4. Ensure the Lua and Python interfaces to Visdom are in sync.
