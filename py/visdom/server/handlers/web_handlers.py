@@ -183,8 +183,8 @@ class UpdateHandler(BaseHandler):
 
         # Delete a trace
         if args.get("delete"):
-            for idx in idxs:
-                del pdata[idx]
+            idxs_set = set(idxs)
+            p["content"]["data"] = [e for i, e in enumerate(pdata) if i not in idxs_set]
             return p
 
         # add new heatmap data if plot has been deleted previously
