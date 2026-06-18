@@ -16,12 +16,6 @@ import websocket  # type: ignore
 import json
 import hashlib
 
-try:
-    # for after python 3.8
-    from collections.abc import Sequence
-except ImportError:
-    # for python 3.7 and below
-    from collections import Sequence
 import math
 import re
 import base64
@@ -59,13 +53,12 @@ try:
         num_entities = len(X)
 
         # the number of entities provided must be at least 3x the perplexity
-        perplexity = (
-            50
-            if num_entities >= 150
-            else num_entities // 3
-            if num_entities >= 21
-            else 7
-        )
+        if num_entities >= 150:
+            perplexity = 50
+        elif num_entities >= 21:
+            perplexity = num_entities // 3
+        else:
+            perplexity = 7
         Y = bhtsne.run_bh_tsne(
             X, initial_dims=X.shape[1], perplexity=perplexity, verbose=True
         )
@@ -112,26 +105,18 @@ def isstr(s):
 
 
 def isnum(n):
-    return isinstance(n, numbers.Number)
+    return isinstance(n, numbers.Number) and not isinstance(n, bool)
 
 
 def isndarray(n):
     return isinstance(n, (np.ndarray))
 
 
-# Only works on (possibly nested) lists of numbers
-# TODO: Create our own JSONEncoder that automatically does this.
-#       Maybe we can port plotly's over:
-#       https://github.com/plotly/plotly.py/blob/81629273ff6d7a30257a42572ed0e4e6ad436009/_plotly_utils/utils.py#L16
-# TODO: Also, in appropriate places, we need to change many numpy calls to use
+from visdom.utils.shared_utils import NanSafeEncoder
+
+
+# TODO: In appropriate places, we need to change many numpy calls to use
 #       nan-aware ones, e.g., `X.max` => `np.nanmax(X)`.
-def nan2none(l):
-    for idx, val in enumerate(l):
-        if isinstance(val, Sequence):
-            l[idx] = nan2none(l[idx])
-        elif isnum(val) and (math.isnan(val) or math.isinf(val)):
-            l[idx] = None
-    return l
 
 
 def loadfile(filename):
@@ -194,6 +179,7 @@ def _axisformat(xy, opts):
             "dtick": opts.get(xy + "tickstep"),
             "showticklabels": opts.get(xy + "tick"),
             "tickfont": opts.get(xy + "tickfont"),
+            "automargin": opts.get("tight_layout", False) or None,
         }
 
 
@@ -237,14 +223,15 @@ def _axisformat3d(xyz, opts):
 
 
 def _opts2layout(opts, is3d=False):
+    tight = opts.get("tight_layout", False)
     layout = {
         "showlegend": opts.get("showlegend", "legend" in opts),
         "title": opts.get("title"),
         "margin": {
-            "l": opts.get("marginleft", 0 if is3d else 60),
-            "r": opts.get("marginright", 60),
-            "t": opts.get("margintop", 20 if is3d else 60),
-            "b": opts.get("marginbottom", 0 if is3d else 60),
+            "l": opts.get("marginleft", 0 if (is3d or tight) else 60),
+            "r": opts.get("marginright", 0 if tight else 60),
+            "t": opts.get("margintop", 20 if is3d else (30 if tight else 60)),
+            "b": opts.get("marginbottom", 0 if (is3d or tight) else 60),
         },
     }
 
@@ -444,7 +431,7 @@ def _assert_opts(opts):
         assert isnum(opts.get("fps")), "fps should be a number"
         assert opts.get("fps") > 0, "fps must be greater than 0"
 
-    if opts.get("title"):
+    if "title" in opts and opts.get("title") is not None:
         assert isstr(opts.get("title")), "title should be a string"
 
 
@@ -507,6 +494,25 @@ def _decode_binary_arrays(obj):
     if isinstance(obj, list):
         return [_decode_binary_arrays(v) for v in obj]
     return obj
+
+
+def _float_img_to_uint8(img):
+    """Convert a float image array to uint8."""
+    # Tolerance needs floor to also safely address float64 images.
+    tol = max(1e-6, np.finfo(img.dtype).eps ** 0.5)
+    max_val = float(img.max())
+    if max_val <= 1.0:
+        return np.uint8(np.clip(img, 0.0, 1.0) * 255.0)
+    if max_val <= 1.0 + tol:
+        warnings.warn(
+            "Image has float values slightly above 1.0 "
+            "(max={:.6f}). Values will be clamped to "
+            "[0, 1] and scaled to [0, 255].".format(max_val),
+            UserWarning,
+            stacklevel=2,
+        )
+        return np.uint8(np.clip(img, 0.0, 1.0) * 255.0)
+    return np.uint8(img)
 
 
 class Visdom(object):
@@ -646,17 +652,19 @@ class Visdom(object):
         self._session = sess
         return sess
 
-    def register_event_handler(self, handler, target):
+    def register_event_handler(self, handler, target, env=None):
         assert callable(handler), "Event handler must be a function"
-        assert self.use_socket, (
-            "Must be using the incoming socket to " "register events to web actions"
-        )
-        if target not in self.event_handlers:
-            self.event_handlers[target] = []
-        self.event_handlers[target].append(handler)
+        assert (
+            self.use_socket
+        ), "Must be using the incoming socket to register events to web actions"
 
-    def clear_event_handlers(self, target):
-        self.event_handlers[target] = []
+        key = (env, target)
+        if key not in self.event_handlers:
+            self.event_handlers[key] = []
+        self.event_handlers[key].append(handler)
+
+    def clear_event_handlers(self, target, env=None):
+        self.event_handlers.pop((env, target), None)
 
     def setup_polling(self):
         # TODO merge with setup_socket?
@@ -676,8 +684,16 @@ class Visdom(object):
                             "be properly connected"
                         )
             if "target" in message:
-                for handler in list(self.event_handlers.get(message["target"], [])):
+                env = message.get("eid")
+                key = (env, message["target"])
+
+                for handler in list(self.event_handlers.get(key, [])):
                     handler(message)
+
+                if env is not None:
+                    global_key = (None, message["target"])
+                    for handler in list(self.event_handlers.get(global_key, [])):
+                        handler(message)
 
         def on_close(ws):
             self.socket_alive = False
@@ -727,7 +743,15 @@ class Visdom(object):
                             "be properly connected"
                         )
             if "target" in message:
-                for handler in list(self.event_handlers.get(message["target"], [])):
+                env = message.get("eid")
+                key = (env, message["target"])
+
+                handlers = list(self.event_handlers.get(key, []))
+                if env is not None:
+                    global_key = (None, message["target"])
+                    handlers.extend(list(self.event_handlers.get(global_key, [])))
+
+                for handler in handlers:
                     try:
                         handler(message)
                     except Exception as e:
@@ -810,7 +834,8 @@ class Visdom(object):
                             [
                                 endpoint,
                                 msg,
-                            ]
+                            ],
+                            cls=NanSafeEncoder,
                         )
                         + "\n"
                     )
@@ -863,7 +888,7 @@ class Visdom(object):
                 "{0}:{1}{2}/{3}".format(
                     self.server, self.port, self.base_url, endpoint
                 ),
-                data=json.dumps(msg),
+                data=json.dumps(msg, cls=NanSafeEncoder),
             )
         except (requests.RequestException, requests.ConnectionError, requests.Timeout):
             if self.raise_exceptions:
@@ -1323,9 +1348,8 @@ class Visdom(object):
                 # them via an append event
                 entity_id = event["entityId"]
                 id = event["idx"]
-                if data_getter is not None:
-                    if data_type == "html":
-                        selected = {"html": data_getter(int(id))}
+                if data_getter is not None and data_type == "html":
+                    selected = {"html": data_getter(int(id))}
                 else:
                     selected = {"html": "<div>No preview available</div>"}
 
@@ -1340,6 +1364,8 @@ class Visdom(object):
                     },
                     endpoint="update",
                 )
+                return
+
             elif event["event_type"] == "RegionSelected":
                 # lasso events give us a subset of the data to re-run tsne on
                 # so we generate
@@ -1373,7 +1399,7 @@ class Visdom(object):
                 endpoint="update",
             )
 
-        self.register_event_handler(embedding_event_handler, win)
+        self.register_event_handler(embedding_event_handler, win, env=env)
 
     def embeddings(
         self,
@@ -1458,35 +1484,57 @@ class Visdom(object):
     @pytorch_wrap
     def image(self, img, win=None, env=None, opts=None):
         """
-        This function draws an img. It takes as input an `CxHxW` or `HxW` tensor
-        `img` that contains the image. The array values can be float in [0,1] or
-        uint8 in [0, 255].
+        This function draws an img. It takes as input a `CxHxW` (where C is 1, 3, or 4)
+        or `HxW` tensor `img` that contains the image. The array values can be uint8 in [0, 255]
+        or float. Float arrays are handled as follows: values in [-1, 1] are normalized to [0, 1],
+        values in [0, 1] are scaled to [0, 255], and all other ranges are clipped to [0, 255].
         """
         opts = {} if opts is None else opts
         _title2str(opts)
         _assert_opts(opts)
-        opts["width"] = opts.get("width", img.shape[img.ndim - 1])
-        opts["height"] = opts.get("height", img.shape[img.ndim - 2])
+        # normalize floats to uint8
+        if np.issubdtype(img.dtype, np.floating):
+            img_max = img.max()
+            if img_max <= 1.0:
+                img_min = img.min()
+                if img_min < 0 and img_min >= -1.0:
+                    if img_max > img_min:
+                        img = (img - img_min) / (img_max - img_min)
+                    else:
+                        img = np.zeros_like(img)
+                    img_max = 1.0  # after normalization, new max is 1
+            img = _float_img_to_uint8(img)
 
-        nchannels = img.shape[0] if img.ndim == 3 else 1
-        if nchannels == 1:
-            img = np.squeeze(img)
-            img = img[np.newaxis, :, :].repeat(3, axis=0)
-            nchannels = 3
-        assert nchannels in (3, 4), (
-            "Image must have 1, 3, or 4 channels, got %d" % nchannels
-        )
+        # extract dimensions and process formats
+        if img.ndim == 2:
+            # grayscale - shape(H,W)
+            nchannels = 1
+            opts["width"] = opts.get("width", img.shape[1])
+            opts["height"] = opts.get("height", img.shape[0])
+            im = Image.fromarray(img, mode="L")
+        elif img.ndim == 3:
+            nchannels = img.shape[0]
+            opts["width"] = opts.get("width", img.shape[2])
+            opts["height"] = opts.get("height", img.shape[1])
 
-        if "float" in str(img.dtype):
-            if img.max() <= 1:
-                img = img * 255.0
-            img = np.uint8(img)
-
-        img = np.transpose(img, (1, 2, 0))
-        if nchannels == 4:
-            im = Image.fromarray(img, mode="RGBA")
+            if nchannels == 1:
+                im = Image.fromarray(img[0, :, :], mode="L")
+            elif nchannels == 3:
+                img = np.transpose(img, (1, 2, 0))
+                im = Image.fromarray(img, mode="RGB")
+            elif nchannels == 4:  # RGBA (4,H,W)
+                img = np.transpose(img, (1, 2, 0))
+                im = Image.fromarray(img, mode="RGBA")
+            else:
+                raise ValueError(
+                    f"Unsupported number of image channels: {nchannels}. "
+                    "Only 1 (grayscale), 3 (RGB), or 4 (RGBA) channels are supported."
+                )
         else:
-            im = Image.fromarray(img)
+            raise ValueError(
+                f"Unsupported image dimensions: {img.ndim}. "
+                "Image tensor must be 2D (HxW) or 3D (CxHxW)."
+            )
         buf = BytesIO()
         image_type = "png"
         imsave_args = {}
@@ -1790,6 +1838,11 @@ class Visdom(object):
         - `opts.textlabels`       : text label for each point (`list`: default = `None`)
         - `opts.legend`           : `list` or `tuple` containing legend names
         """
+        if opts and opts.get("store_history") and update is not None:
+            raise ValueError(
+                "Cannot use store_history=True together with the update parameter"
+            )
+
         if update == "remove":
             assert win is not None
             assert name is not None, "A trace must be specified for deletion"
@@ -1805,12 +1858,11 @@ class Visdom(object):
             return self._send(data_to_send, endpoint="update")
 
         elif update is not None:
-            assert win is not None, "Must define a window to update"
+            if win is None:
+                raise ValueError("Must define a window to update")
 
             if update == "append":
-                if win is None:
-                    update = None
-                elif not self.offline:
+                if not self.offline:
                     exists = self.win_exists(win, env)
                     if exists is False:
                         update = None
@@ -1911,8 +1963,8 @@ class Visdom(object):
                         trace_name = str(k)
                 use_gl = opts.get("webgl", False)
                 _data = {
-                    "x": nan2none(X.take(0, 1)[ind].tolist()),
-                    "y": nan2none(X.take(1, 1)[ind].tolist()),
+                    "x": X.take(0, 1)[ind].tolist(),
+                    "y": X.take(1, 1)[ind].tolist(),
                     "name": trace_name,
                     "type": (
                         "scatter3d" if is3d else ("scattergl" if use_gl else "scatter")
@@ -1962,6 +2014,28 @@ class Visdom(object):
                 if dash in opts:
                     del opts[dash]
 
+        if opts.get("store_history"):
+            layout = _opts2layout(opts, is3d)
+            data_to_send = {
+                "data": [
+                    {
+                        "type": "plot_history",
+                        "content": {
+                            "data": data,
+                            "layout": layout,
+                            "caption": opts.get("caption"),
+                        },
+                    }
+                ],
+                "win": win,
+                "eid": env,
+                "opts": opts,
+            }
+            endpoint = "events"
+            if win is not None and self.win_exists(win, env):
+                endpoint = "update"
+            return self._send(data_to_send, endpoint=endpoint)
+
         # Only send updates to the layout on the first plot, future updates
         # need to use `update_window_opts`
         data_to_send = {
@@ -1980,13 +2054,28 @@ class Visdom(object):
         return self._send(data_to_send, endpoint=endpoint)
 
     @pytorch_wrap
-    def line(self, Y, X=None, win=None, env=None, opts=None, update=None, name=None):
+    def line(
+        self,
+        Y,
+        X=None,
+        win=None,
+        env=None,
+        opts=None,
+        update=None,
+        name=None,
+        Z=None,
+        is3d=False,
+    ):
         """
         This function draws a line plot. It takes in an `N` or `NxM` tensor
         `Y` that specifies the values of the `M` lines (that connect `N` points)
         to plot. It also takes an optional `X` tensor that specifies the
         corresponding x-axis values; `X` can be an `N` tensor (in which case all
         lines will share the same x-axis values) or have the same size as `Y`.
+
+        For 3D line plots, an optional `Z` tensor can be provided with the same
+        size as `Y` (or as an `N` tensor shared across lines). When `Z` is
+        provided, the plot is rendered as a 3D line plot.
 
         `update` can be used to efficiently update the data of an existing line.
         Use 'append' to append data, 'replace' to use new data, and 'remove' to
@@ -1998,7 +2087,7 @@ class Visdom(object):
 
         The following `opts` are supported:
 
-        - `opts.fillarea`    : fill area below line (`boolean`)
+        - `opts.fillarea`    : fill area below line (`boolean`; not supported for 3D)
         - `opts.markers`     : show markers (`boolean`; default = `false`)
         - `opts.markersymbol`: marker symbol (`string`; default = `'dot'`)
         - `opts.markersize`  : marker size (`number` or `np.array`; default = `'10'`)
@@ -2022,13 +2111,23 @@ class Visdom(object):
                 )
             else:
                 assert X is not None, "must specify x-values for line update"
+        if is3d:
+            assert Z is not None, (
+                "Z values are required for 3D line plots. "
+                "Pass Z when creating or updating a 3D line plot."
+            )
         assert Y.ndim == 1 or Y.ndim == 2, "Y should have 1 or 2 dim"
         assert Y.shape[-1] > 0, "must plot one line at least"
+
+        if Z is not None:
+            assert Z.ndim == 1 or Z.ndim == 2, "Z should have 1 or 2 dim"
 
         if Y.ndim == 2 and Y.shape[1] == 1:
             Y = Y.ravel()
             if X is not None and X.ndim == 2 and X.shape[1] == 1:
                 X = X.ravel()
+            if Z is not None and Z.ndim == 2 and Z.shape[1] == 1:
+                Z = Z.ravel()
 
         if X is not None:
             assert X.ndim == 1 or X.ndim == 2, "X should have 1 or 2 dim"
@@ -2038,20 +2137,38 @@ class Visdom(object):
         if Y.ndim == 2 and X.ndim == 1:
             X = np.tile(X, (Y.shape[1], 1)).transpose()
 
+        if Z is not None and Y.ndim == 2 and Z.ndim == 1:
+            Z = np.tile(Z, (Y.shape[1], 1)).transpose()
+
         assert X.shape == Y.shape, "X and Y should be the same shape"
+        if Z is not None:
+            assert Z.shape == Y.shape, "Z and Y should be the same shape"
 
         opts = {} if opts is None else opts
         opts["markers"] = opts.get("markers", False)
         opts["fillarea"] = opts.get("fillarea", False)
+        if Z is not None and opts["fillarea"]:
+            warnings.warn(
+                "fillarea is not supported for 3D line plots",
+                UserWarning,
+                stacklevel=2,
+            )
+            opts["fillarea"] = False
         opts["mode"] = "lines+markers" if opts.get("markers") else "lines"
 
         _title2str(opts)
         _assert_opts(opts)
 
         if Y.ndim == 1:
-            linedata = np.column_stack((X, Y))
+            if Z is not None:
+                linedata = np.column_stack((X, Y, Z))
+            else:
+                linedata = np.column_stack((X, Y))
         else:
-            linedata = np.column_stack((X.ravel(order="F"), Y.ravel(order="F")))
+            cols = [X.ravel(order="F"), Y.ravel(order="F")]
+            if Z is not None:
+                cols.append(Z.ravel(order="F"))
+            linedata = np.column_stack(cols)
 
         labels = None
         if Y.ndim == 2:
@@ -2131,7 +2248,7 @@ class Visdom(object):
 
         data = [
             {
-                "z": nan2none(X.tolist()),
+                "z": X.tolist(),
                 "x": opts.get("columnnames"),
                 "y": opts.get("rownames"),
                 "zmin": opts.get("xmin"),
@@ -2752,7 +2869,7 @@ class Visdom(object):
             "yaxis2": {
                 "title": trace2["name"],
                 "titlefont": {
-                    "color": opts.get("color_title_y2", "rgb(148, 103, 0189)")
+                    "color": opts.get("color_title_y2", "rgb(148, 103, 189)")
                 },
                 "tickfont": {"color": opts.get("color_tick_y2", "rgb(148, 103, 189)")},
                 "overlaying": "y",
