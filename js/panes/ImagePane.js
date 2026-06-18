@@ -220,7 +220,6 @@ function ImagePane(props) {
   let candidateWidth = Math.ceil(1 + width * view['scale']);
   let candidateHeight = Math.ceil(1 + height * view['scale']);
   let imageContainerStyle = {
-    alignItems: 'row',
     display: 'flex',
     height: isNaN(candidateHeight) ? DEFAULT_HEIGHT : candidateHeight,
     justifyContent: 'center',
@@ -237,7 +236,6 @@ function ImagePane(props) {
     // instead use the window width as the limiting factor
     if (newWidth > candidateWidth) {
       candidateHeight = computeHFromW(candidateWidth);
-      imageContainerStyle.alignItems = 'column';
     } else {
       candidateWidth = newWidth;
     }
@@ -250,7 +248,6 @@ function ImagePane(props) {
     if (newHeight > candidateHeight) {
       candidateWidth = computeWFromH(candidateHeight);
     } else {
-      imageContainerStyle.alignItems = 'column';
       candidateHeight = newHeight;
     }
   }
