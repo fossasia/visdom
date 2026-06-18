@@ -7,7 +7,7 @@
  *
  */
 
-/* global ACTIVE_ENV ENV_LIST $ Bin */
+/* global ACTIVE_ENV $ Bin */
 
 'use strict';
 
@@ -31,6 +31,7 @@ import {
   PANES,
   ROW_HEIGHT,
 } from './settings';
+import buildExportHtml from './template/exportTemplate';
 import ConnectionIndicator from './topbar/ConnectionIndicator';
 import EnvControls from './topbar/EnvControls';
 import FilterControls from './topbar/FilterControls';
@@ -85,7 +86,7 @@ const App = () => {
 
   // data stores
   const [storeMeta, setStoreMeta] = useState({
-    envList: ENV_LIST.slice(),
+    envList: [],
     layoutLists: new Map([['main', new Map([[DEFAULT_LAYOUT, new Map()]])]]),
   });
   const [storeData, setStoreData] = useState({
@@ -105,12 +106,17 @@ const App = () => {
   const [filterString, setFilterString] = useState(
     localStorage.getItem('filter') || ''
   );
+  const [showAllEnvWindows, setShowAllEnvWindows] = useState(
+    localStorage.getItem('showAllEnvWindows') === 'true'
+  );
 
   // non-triggering state variables
   const _bin = useRef(null);
   const _timeoutID = useRef(null);
   const _pendingPanes = useRef([]);
   const _pendingPanesVersions = useRef({});
+  const _envReloadInFlight = useRef(false);
+  const localStorageTimer = useRef(null);
 
   // --------------------- //
   // grid helper functions //
@@ -141,11 +147,10 @@ const App = () => {
   // Ensure the regex filter is valid
   const getValidFilter = (filter) => {
     try {
-      'test_string'.match(filter);
+      return new RegExp(filter, 'i');
     } catch (e) {
-      filter = '';
+      return new RegExp('', 'i');
     }
-    return filter;
   };
 
   // ------------------ //
@@ -259,18 +264,30 @@ const App = () => {
         cmd.version == _pendingPanesVersions.current[cmd.win] + 1)
     ) {
       addPaneBatched(cmd);
+    } else if (!_envReloadInFlight.current) {
+      _envReloadInFlight.current = true;
+      sendEnvQuery(selection.envIDs);
     }
   };
 
   const onWindowMessage = ({ cmd, update }) => {
-    // If we're in compare mode and recieve an update to an environment
+    if (
+      selection.envIDs.length === 1 &&
+      cmd.eid !== undefined &&
+      cmd.eid !== selection.envIDs[0]
+    ) {
+      return;
+    }
+
+    // If we're in compare mode and receive an update to an environment
     // that is selected that isn't from the compare output, we need to
     // reload the compare output
     if (selection.envIDs.length > 1 && cmd.has_compare !== true) {
-      sendEnvQuery(selection.envIDs);
+      sendEnvQuery(selection.envIDs, showAllEnvWindows);
     } else if (update) {
       updateWindow(cmd);
     } else {
+      _envReloadInFlight.current = false;
       addPaneBatched(cmd);
     }
   };
@@ -306,24 +323,20 @@ const App = () => {
     if (sessionInfo.readonly) {
       return;
     }
-    let newPanes = Object.assign({}, storeData.panes);
-    delete newPanes[paneID];
     if (!keepPosition) {
       localStorage.removeItem(keyLS(paneID));
       sendPaneClose(paneID, selection.envIDs[0]);
     }
 
     if (setState) {
-      // Make sure we remove the pane from our layout.
-      let newLayout = storeData.layout.filter(
-        (paneLayout) => paneLayout.i !== paneID
-      );
-
-      setStoreData((prev) => ({
-        ...prev,
-        layout: newLayout,
-        panes: newPanes,
-      }));
+      setStoreData((prev) => {
+        let newPanes = Object.assign({}, prev.panes);
+        delete newPanes[paneID];
+        let newLayout = prev.layout.filter(
+          (paneLayout) => paneLayout.i !== paneID
+        );
+        return { ...prev, panes: newPanes, layout: newLayout };
+      });
       setFocusedPaneID(focusedPaneID === paneID ? null : focusedPaneID);
       callbacks.current.push('relayout');
     }
@@ -366,10 +379,39 @@ const App = () => {
     }));
     setFocusedPaneID(isSameEnv ? focusedPaneID : null);
     localStorage.setItem('envIDs', JSON.stringify(selectedNodes));
-    sendEnvQuery(selectedNodes);
+    sendEnvQuery(selectedNodes, showAllEnvWindows);
   };
-
   const onEnvDelete = (env2delete, previousEnv) => {
+
+    if (env2delete === previousEnv) {
+      previousEnv = 'main';
+    }
+
+    setSelection((prev) => {
+      let EnvIds = prev.envIDs.filter((env) => env !== env2delete);
+      return {
+        ...prev,
+        envIDs: EnvIds,
+      };
+    });
+
+    setStoreMeta((prev) => {
+      const layoutLists = new Map(storeMeta.layoutLists);
+      layoutLists.delete(env2delete);
+      let EnvIds = selection.envIDs.filter((env) => env !== env2delete);
+      return {
+        ...prev,
+        envList: EnvIds,
+        layoutLists: layoutLists,
+      };
+    });
+
+    setStoreData((prev) => ({
+      ...prev,
+      panes: {},
+      layout: [],
+    }));
+
     sendEnvDelete(env2delete, previousEnv);
   };
 
@@ -401,7 +443,6 @@ const App = () => {
         );
       }
     }
-
     setStoreMeta((prev) => ({
       ...prev,
       envList: newEnvList,
@@ -554,11 +595,21 @@ const App = () => {
     // for now it's important to fix relayout grossness
     storeData.layout = layout;
   };
+  const resizePaneLive = (layout) => {
+    updateLayout(layout);
+  };
   useEffect(() => {
-    storeData.layout.map((playout) => {
-      localStorage.setItem(keyLS(playout.i), JSON.stringify(playout));
-    });
-  }, [storeData]);
+    clearTimeout(localStorageTimer.current);
+    localStorageTimer.current = setTimeout(() => {
+      storeData.layout.forEach((playout) => {
+        localStorage.setItem(keyLS(playout.i), JSON.stringify(playout));
+      });
+    }, 300);
+
+    return () => {
+      clearTimeout(localStorageTimer.current);
+    };
+  }, [storeData.layout, selection.envIDs[0]]);
 
   const updateToLayout = (newLayoutID) => {
     setSelection((prev) => ({
@@ -665,20 +716,20 @@ const App = () => {
 
   // ask server for envs after registration succeeded
   useEffect(() => {
-    sendEnvQuery(selection.envIDs);
+    sendEnvQuery(selection.envIDs, showAllEnvWindows);
   }, [sessionInfo]);
 
   //componentDidUpdate
   useEffect(() => {
     if (mounted.current) {
       if (selection.envIDs.length > 0) {
-        sendEnvQuery(selection.envIDs);
+        sendEnvQuery(selection.envIDs, showAllEnvWindows);
       } else {
         setSelection((prev) => ({
           ...prev,
           envIDs: ['main'],
         }));
-        sendEnvQuery(['main']);
+        sendEnvQuery(['main'], showAllEnvWindows);
       }
     }
 
@@ -708,7 +759,6 @@ const App = () => {
     windowSize.current.cols = cols;
     windowSize.current.width = width;
   };
-
   let panes = Object.keys(storeData.panes).map((id) => {
     let pane = storeData.panes[id];
 
@@ -768,6 +818,72 @@ const App = () => {
       );
     }
   });
+  const escapeHtml = (str) => {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  };
+  const exportCurrentEnvToHtml = () => {
+    if (!storeData.panes || Object.keys(storeData.panes).length === 0) {
+      alert('No panes available to export.');
+      return;
+    }
+
+    const safeTs = new Date()
+      .toISOString()
+      .slice(0, 16)
+      .replace('T', '_')
+      .replace(':', '-');
+    const rawTitle = `Visdom – ${selection.envIDs.join('+')} – ${safeTs}`;
+    const title = escapeHtml(rawTitle);
+
+    const layoutMap = new Map(storeData.layout.map((l) => [l.i, l]));
+
+    const sortedIds = Object.keys(storeData.panes).sort((a, b) => {
+      const la = layoutMap.get(a);
+      const lb = layoutMap.get(b);
+      if (!la && !lb) return a.localeCompare(b);
+      if (!la) return 1;
+      if (!lb) return -1;
+      if (la.y !== lb.y) return la.y - lb.y;
+      if (la.x !== lb.x) return la.x - lb.x;
+      return a.localeCompare(b);
+    });
+
+    const paneData = {};
+    sortedIds.forEach((id) => {
+      const pane = storeData.panes[id];
+      const li = layoutMap.get(id);
+      if (!li) return;
+      paneData[id] = {
+        type: pane.type,
+        title: pane.title || pane.type,
+        content: pane.content,
+        selected: pane.selected,
+        initW: Math.max(280, Math.round(w2p(li.w))),
+        initH: Math.max(200, Math.round(h2p(li.h))),
+      };
+    });
+
+    const validIds = sortedIds.filter((id) => paneData[id]);
+
+    const html = buildExportHtml(title, paneData, validIds);
+
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `visdom_${selection.envIDs
+      .map((id) => String(id).replace(/[^a-zA-Z0-9._-]/g, '_'))
+      .join('_')}_${safeTs}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
 
   let modals = [
     <EnvModal
@@ -796,10 +912,21 @@ const App = () => {
       envList={storeMeta.envList}
       envSelectorStyle={{
         width: Math.max(window.innerWidth / 3, 50),
+        wordBreak: 'break-all',
       }}
       onEnvClear={closeAllPanes}
       onEnvManageButton={() => setShowEnvModal(!showEnvModal)}
       onEnvSelect={onEnvSelect}
+      showAllEnvWindows={showAllEnvWindows}
+      onToggleShowAll={() => {
+        const newVal = !showAllEnvWindows;
+        setShowAllEnvWindows(newVal);
+        localStorage.setItem('showAllEnvWindows', newVal.toString());
+        if (selection.envIDs.length > 1) {
+          setStoreData((prev) => ({ ...prev, panes: {}, layout: [] }));
+          sendEnvQuery(selection.envIDs, newVal);
+        }
+      }}
     />
   );
   let viewControls = (
@@ -813,6 +940,7 @@ const App = () => {
       }}
       onViewChange={updateToLayout}
       onViewManageButton={() => setShowViewModal(!showViewModal)}
+      onExportHtml={exportCurrentEnvToHtml}
     />
   );
   let filterControl = (
@@ -890,6 +1018,7 @@ const App = () => {
           draggableHandle={'.bar'}
           onWidthChange={onWidthChange}
           onResizeStop={resizePane}
+          onResize={resizePaneLive}
           onDragStop={movePane}
         >
           {panes}
