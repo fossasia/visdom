@@ -19,7 +19,13 @@ class EventSystem {
       return false;
     }
 
-    queue.forEach((cb) => cb(data));
+    queue.forEach((cb) => {
+      try {
+        cb(data);
+      } catch (e) {
+        console.error('EventSystem: subscriber error', e);
+      }
+    });
 
     return true;
   }

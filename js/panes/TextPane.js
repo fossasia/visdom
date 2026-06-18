@@ -68,7 +68,7 @@ function TextPane(props) {
     return function cleanup() {
       EventSystem.unsubscribe('global.event', onEvent);
     };
-  });
+  }, [isFocused]);
 
   // rendering
   // ---------
