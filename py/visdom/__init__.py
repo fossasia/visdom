@@ -482,11 +482,16 @@ def _binary_clf_curve(y_true, y_score, pos_label=1):
     y_true = np.asarray(y_true)
     y_score = np.asarray(y_score)
 
-    assert y_true.ndim == 1, "y_true should have 1 dim"
-    assert y_score.ndim == 1, "y_score should have 1 dim"
-    assert y_true.shape[0] == y_score.shape[0], "y_true and y_score should match"
-    assert y_true.shape[0] > 0, "y_true and y_score should be non-empty"
-    assert np.all(np.isfinite(y_score)), "y_score should only contain finite values"
+    if y_true.ndim != 1:
+        raise ValueError("y_true should have 1 dim")
+    if y_score.ndim != 1:
+        raise ValueError("y_score should have 1 dim")
+    if y_true.shape[0] != y_score.shape[0]:
+        raise ValueError("y_true and y_score should match")
+    if y_true.shape[0] == 0:
+        raise ValueError("y_true and y_score should be non-empty")
+    if not np.all(np.isfinite(y_score)):
+        raise ValueError("y_score should only contain finite values")
 
     y_true = y_true == pos_label
     desc_score_indices = np.argsort(y_score, kind="mergesort")[::-1]
@@ -506,8 +511,10 @@ def _compute_roc_curve(y_true, y_score, pos_label=1):
     fps, tps = _binary_clf_curve(y_true=y_true, y_score=y_score, pos_label=pos_label)
     pos_total = float(tps[-1])
     neg_total = float(fps[-1])
-    assert pos_total > 0, "y_true has no positive samples"
-    assert neg_total > 0, "y_true has no negative samples"
+    if pos_total <= 0:
+        raise ValueError("y_true has no positive samples")
+    if neg_total <= 0:
+        raise ValueError("y_true has no negative samples")
 
     fpr = np.r_[0.0, fps / neg_total]
     tpr = np.r_[0.0, tps / pos_total]
@@ -518,7 +525,8 @@ def _compute_pr_curve(y_true, y_score, pos_label=1):
     """Compute precision-recall curve from raw labels and scores."""
     fps, tps = _binary_clf_curve(y_true=y_true, y_score=y_score, pos_label=pos_label)
     pos_total = float(tps[-1])
-    assert pos_total > 0, "y_true has no positive samples"
+    if pos_total <= 0:
+        raise ValueError("y_true has no positive samples")
 
     precision = tps / (tps + fps)
     recall = tps / pos_total
@@ -532,31 +540,39 @@ def _coerce_curve_xy(x, y, x_name, y_name):
     """Validate and sort precomputed curve arrays by x."""
     x = np.asarray(x)
     y = np.asarray(y)
-    assert x.ndim == 1, "{} should have 1 dim".format(x_name)
-    assert y.ndim == 1, "{} should have 1 dim".format(y_name)
-    assert x.shape[0] == y.shape[0], "{} and {} should match".format(x_name, y_name)
-    assert x.shape[0] > 1, "{} and {} should have at least 2 points".format(
-        x_name, y_name
-    )
+    if x.ndim != 1:
+        raise ValueError("{} should have 1 dim".format(x_name))
+    if y.ndim != 1:
+        raise ValueError("{} should have 1 dim".format(y_name))
+    if x.shape[0] != y.shape[0]:
+        raise ValueError("{} and {} should match".format(x_name, y_name))
+    if x.shape[0] <= 1:
+        raise ValueError(
+            "{} and {} should have at least 2 points".format(x_name, y_name)
+        )
 
     order = np.argsort(x, kind="mergesort")
     return x[order], y[order]
 
 
-def _assert_curve_range(values, name):
-    """Assert values are finite and within [0, 1]."""
+def _validate_curve_range(values, name):
+    """Validate that values are finite and within [0, 1]."""
     values = np.asarray(values)
-    assert np.all(np.isfinite(values)), "{} should only contain finite values".format(
-        name
-    )
-    assert np.all((values >= 0.0) & (values <= 1.0)), (
-        "{} should be within [0, 1]".format(name)
-    )
+    if not np.all(np.isfinite(values)):
+        raise ValueError("{} should only contain finite values".format(name))
+    if not np.all((values >= 0.0) & (values <= 1.0)):
+        raise ValueError("{} should be within [0, 1]".format(name))
 
 
 def _curve_legend(legend, default_legend):
     """Return user-provided legend or default 2-element list."""
     if not isinstance(legend, (tuple, list)) or len(legend) < 2:
+        if legend is not None:
+            warnings.warn(
+                "legend should be a list/tuple with at least 2 elements, "
+                "falling back to default: {}".format(default_legend),
+                UserWarning,
+            )
         return list(default_legend)
     return list(legend)
 
@@ -2303,25 +2319,26 @@ class Visdom(object):
 
         has_raw = y_true is not None or y_score is not None
         has_points = fpr is not None or tpr is not None
-        assert has_raw != has_points, (
-            "provide exactly one input mode: (y_true, y_score) or (fpr, tpr)"
-        )
+        if has_raw == has_points:
+            raise ValueError(
+                "provide exactly one input mode: (y_true, y_score) or (fpr, tpr)"
+            )
 
         if has_raw:
-            assert y_true is not None and y_score is not None, (
-                "both y_true and y_score are required"
-            )
+            if y_true is None or y_score is None:
+                raise ValueError("both y_true and y_score are required")
             fpr, tpr = _compute_roc_curve(
                 y_true=np.ravel(y_true),
                 y_score=np.ravel(y_score),
                 pos_label=pos_label,
             )
         else:
-            assert fpr is not None and tpr is not None, "both fpr and tpr are required"
+            if fpr is None or tpr is None:
+                raise ValueError("both fpr and tpr are required")
             fpr, tpr = _coerce_curve_xy(fpr, tpr, "fpr", "tpr")
 
-        _assert_curve_range(fpr, "fpr")
-        _assert_curve_range(tpr, "tpr")
+        _validate_curve_range(fpr, "fpr")
+        _validate_curve_range(tpr, "tpr")
 
         auc = _trapz_area(tpr, fpr)
 
@@ -2392,29 +2409,29 @@ class Visdom(object):
 
         has_raw = y_true is not None or y_score is not None
         has_points = precision is not None or recall is not None
-        assert has_raw != has_points, (
-            "provide exactly one input mode: (y_true, y_score) or (precision, recall)"
-        )
+        if has_raw == has_points:
+            raise ValueError(
+                "provide exactly one input mode:"
+                " (y_true, y_score) or (precision, recall)"
+            )
 
         if has_raw:
-            assert y_true is not None and y_score is not None, (
-                "both y_true and y_score are required"
-            )
+            if y_true is None or y_score is None:
+                raise ValueError("both y_true and y_score are required")
             precision, recall = _compute_pr_curve(
                 y_true=np.ravel(y_true),
                 y_score=np.ravel(y_score),
                 pos_label=pos_label,
             )
         else:
-            assert precision is not None and recall is not None, (
-                "both precision and recall are required"
-            )
+            if precision is None or recall is None:
+                raise ValueError("both precision and recall are required")
             recall, precision = _coerce_curve_xy(
                 recall, precision, "recall", "precision"
             )
 
-        _assert_curve_range(recall, "recall")
-        _assert_curve_range(precision, "precision")
+        _validate_curve_range(recall, "recall")
+        _validate_curve_range(precision, "precision")
 
         auc = _trapz_area(precision, recall)
 
