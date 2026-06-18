@@ -212,23 +212,6 @@ def update_window(p, args):
     return p
 
 
-_VALID_PANE_TYPES = frozenset(
-    {
-        "image",
-        "image_history",
-        "image_compare",
-        "plot",
-        "plot_history",
-        "roc_curve",
-        "pr_curve",
-        "text",
-        "properties",
-        "embeddings",
-        "network",
-    }
-)
-
-
 def window(args):
     """Build a window dict structure for sending to client"""
     uid = args.get("win", get_new_window_id())
@@ -283,14 +266,7 @@ def window(args):
         p["content"]["has_previous"] = False
     else:
         p["content"] = {"data": args["data"], "layout": args["layout"]}
-        pane_type = args.get("pane_type", "plot")
-        if pane_type not in _VALID_PANE_TYPES:
-            raise ValueError(
-                "Unrecognized pane_type '{}'. Must be one of: {}".format(
-                    pane_type, sorted(_VALID_PANE_TYPES)
-                )
-            )
-        p["type"] = pane_type
+        p["type"] = args.get("pane_type", "plot")
 
     return p
 
