@@ -328,6 +328,9 @@ class UpdateHandler(BaseHandler):
     def wrap_func(handler, args):
         eid = extract_eid(args)
 
+        if eid not in handler.state:
+            handler.state[eid] = {"jsons": {}, "reload": {}}
+
         if args["win"] not in handler.state[eid]["jsons"]:
             # Append to a window that doesn't exist attempts to create
             # that window
