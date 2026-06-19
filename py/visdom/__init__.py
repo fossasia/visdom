@@ -585,6 +585,13 @@ def _trapz_area(y, x):
     return float(np.trapz(y, x))
 
 
+def _average_precision(precision, recall):
+    """Compute average precision: AP = sum((R_n - R_{n-1}) * P_n)."""
+    precision = np.asarray(precision)
+    recall = np.asarray(recall)
+    return float(np.sum(np.diff(recall) * precision[1:]))
+
+
 def _decode_binary_arrays(obj):
     """Decode Plotly 6+ binary-encoded arrays back to plain Python lists."""
     if isinstance(obj, dict):
@@ -2433,7 +2440,7 @@ class Visdom(object):
         _validate_curve_range(recall, "recall")
         _validate_curve_range(precision, "precision")
 
-        auc = _trapz_area(precision, recall)
+        auc = _average_precision(precision, recall)
 
         opts = dict(opts)
         opts["xlabel"] = opts.get("xlabel", "Recall")
@@ -2441,16 +2448,13 @@ class Visdom(object):
         opts["legend"] = _curve_legend(opts.get("legend"), ["PR", "Baseline"])
         opts["title"] = opts.get("title", "PR Curve (AUC={:.4f})".format(auc))
 
-        positive_rate = None
         if has_raw:
             y_true_arr = np.ravel(np.asarray(y_true))
             positive_rate = float(np.mean(y_true_arr == pos_label))
+        else:
+            positive_rate = float(precision[0]) if float(recall[0]) == 0.0 else None
 
-        baseline = (
-            [positive_rate, positive_rate]
-            if positive_rate is not None
-            else [float(precision[-1]), float(precision[-1])]
-        )
+        baseline = [positive_rate, positive_rate] if positive_rate is not None else None
 
         data = [
             {
@@ -2460,15 +2464,18 @@ class Visdom(object):
                 "type": "scatter",
                 "mode": "lines",
             },
-            {
-                "x": [0.0, 1.0],
-                "y": baseline,
-                "name": opts["legend"][1],
-                "type": "scatter",
-                "mode": "lines",
-                "line": {"dash": "dash"},
-            },
         ]
+        if baseline is not None:
+            data.append(
+                {
+                    "x": [0.0, 1.0],
+                    "y": baseline,
+                    "name": opts["legend"][1],
+                    "type": "scatter",
+                    "mode": "lines",
+                    "line": {"dash": "dash"},
+                }
+            )
 
         return self._send(
             {
