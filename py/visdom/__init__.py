@@ -2344,9 +2344,7 @@ class Visdom(object):
         has_raw = y_true is not None or y_pred is not None
         has_matrix = cm is not None
         if has_raw == has_matrix:
-            raise ValueError(
-                "provide exactly one input mode: (y_true, y_pred) or (cm)"
-            )
+            raise ValueError("provide exactly one input mode: (y_true, y_pred) or (cm)")
 
         if has_raw:
             if y_true is None or y_pred is None:
@@ -2369,9 +2367,7 @@ class Visdom(object):
 
         valid_normalize = (None, "true", "pred", "all")
         if normalize not in valid_normalize:
-            raise ValueError(
-                "normalize must be one of: {}".format(valid_normalize)
-            )
+            raise ValueError("normalize must be one of: {}".format(valid_normalize))
 
         raw_cm = cm.copy()
         if normalize == "true":
