@@ -20,6 +20,7 @@ from components.plot_special import plot_special_boxplot, plot_special_quiver, p
 from components.properties import properties_basic, properties_callbacks
 from components.misc import misc_plot_matplot, misc_plot_latex, misc_plot_latex_update, misc_video_tensor, misc_video_download, misc_audio_basic, misc_audio_download, misc_arbitrary_visdom, misc_getset_state
 from components.plot_violin import plot_violin_basic, plot_violin_multigroup, plot_violin_with_points, plot_violin_horizontal
+from components.plot_confusion_matrix import plot_confusion_matrix_basic, plot_confusion_matrix_precomputed, plot_confusion_matrix_normalized
 
 # This demo shows all features in a single environment.
 def run_demo(viz, env, args):
@@ -95,6 +96,13 @@ def run_demo(viz, env, args):
     plot_surface_replace_withnames(viz, env, args)
     plot_surface_contour(viz, env, args)
     plot_surface_3d(viz, env, args)
+
+    # ================ #
+    # confusion matrix #
+    # ================ #
+    plot_confusion_matrix_basic(viz, env, args)
+    plot_confusion_matrix_precomputed(viz, env, args)
+    plot_confusion_matrix_normalized(viz, env, args)
 
     # ============= #
     # special plots #

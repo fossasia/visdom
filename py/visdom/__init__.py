@@ -477,6 +477,24 @@ def pytorch_wrap(f):
     return wrapped_f
 
 
+def _compute_confusion_matrix(y_true, y_pred, labels):
+    """Build an NxN confusion matrix from label vectors (numpy only)."""
+    y_true = np.asarray(y_true).ravel()
+    y_pred = np.asarray(y_pred).ravel()
+    if y_true.shape[0] != y_pred.shape[0]:
+        raise ValueError("y_true and y_pred must have the same length")
+    if y_true.shape[0] == 0:
+        raise ValueError("y_true and y_pred must be non-empty")
+
+    label_to_idx = {label: i for i, label in enumerate(labels)}
+    n = len(labels)
+    cm = np.zeros((n, n), dtype=int)
+    for t, p in zip(y_true, y_pred):
+        if t in label_to_idx and p in label_to_idx:
+            cm[label_to_idx[t], label_to_idx[p]] += 1
+    return cm
+
+
 def _decode_binary_arrays(obj):
     """Decode Plotly 6+ binary-encoded arrays back to plain Python lists."""
     if isinstance(obj, dict):
@@ -2289,6 +2307,157 @@ class Visdom(object):
             endpoint = "update"
 
         return self._send(data_to_send, endpoint=endpoint)
+
+    @pytorch_wrap
+    def confusion_matrix(
+        self,
+        y_true=None,
+        y_pred=None,
+        cm=None,
+        labels=None,
+        normalize=None,
+        win=None,
+        env=None,
+        opts=None,
+    ):
+        """
+        Draw a confusion matrix for classification evaluation.
+
+        You can either provide raw label vectors (`y_true`, `y_pred`) or a
+        precomputed confusion matrix (`cm`).
+
+        The following `opts` are supported:
+
+        - `opts.title`       : plot title (`string`; default = `Confusion Matrix`)
+        - `opts.xlabel`      : x-axis label (`string`; default = `Predicted`)
+        - `opts.ylabel`      : y-axis label (`string`; default = `Actual`)
+        - `opts.colormap`    : Plotly colorscale (`string`; default = `Blues`)
+        - `opts.showCounts`  : show raw counts in cells (`bool`; default = `True`)
+        - `opts.showPercent` : show percentages in cells (`bool`; default = `True`
+                               when normalized, `False` otherwise)
+        - `opts.layoutopts`  : additional backend layout options (`dict`)
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        has_raw = y_true is not None or y_pred is not None
+        has_matrix = cm is not None
+        if has_raw == has_matrix:
+            raise ValueError(
+                "provide exactly one input mode: (y_true, y_pred) or (cm)"
+            )
+
+        if has_raw:
+            if y_true is None or y_pred is None:
+                raise ValueError("both y_true and y_pred are required")
+            y_true = np.asarray(y_true).ravel()
+            y_pred = np.asarray(y_pred).ravel()
+            if labels is None:
+                labels = np.unique(np.concatenate([y_true, y_pred])).tolist()
+            cm = _compute_confusion_matrix(y_true, y_pred, labels)
+        else:
+            cm = np.asarray(cm)
+            if cm.ndim != 2 or cm.shape[0] != cm.shape[1]:
+                raise ValueError("cm must be a square 2D array")
+            if labels is None:
+                labels = list(range(cm.shape[0]))
+            if len(labels) != cm.shape[0]:
+                raise ValueError(
+                    "number of labels must match confusion matrix dimensions"
+                )
+
+        valid_normalize = (None, "true", "pred", "all")
+        if normalize not in valid_normalize:
+            raise ValueError(
+                "normalize must be one of: {}".format(valid_normalize)
+            )
+
+        raw_cm = cm.copy()
+        if normalize == "true":
+            row_sums = cm.sum(axis=1, keepdims=True).astype(float)
+            row_sums[row_sums == 0] = 1
+            cm = cm.astype(float) / row_sums
+        elif normalize == "pred":
+            col_sums = cm.sum(axis=0, keepdims=True).astype(float)
+            col_sums[col_sums == 0] = 1
+            cm = cm.astype(float) / col_sums
+        elif normalize == "all":
+            total = float(cm.sum())
+            cm = cm.astype(float) / total if total > 0 else cm.astype(float)
+
+        str_labels = [str(l) for l in labels]
+
+        opts = dict(opts)
+        opts["xlabel"] = opts.get("xlabel", "Predicted")
+        opts["ylabel"] = opts.get("ylabel", "Actual")
+        opts["title"] = opts.get("title", "Confusion Matrix")
+        colormap = opts.get("colormap", "Blues")
+
+        show_counts = opts.get("showCounts", True)
+        show_percent = opts.get("showPercent", normalize is not None)
+
+        data = [
+            {
+                "z": cm.tolist(),
+                "x": str_labels,
+                "y": str_labels,
+                "type": "heatmap",
+                "colorscale": colormap,
+                "showscale": True,
+            }
+        ]
+
+        annotations = []
+        max_val = float(cm.max()) if cm.size > 0 else 1.0
+        threshold = max_val / 2.0
+
+        for i in range(cm.shape[0]):
+            for j in range(cm.shape[1]):
+                cell_val = cm[i, j]
+                parts = []
+                if show_counts:
+                    parts.append(str(int(raw_cm[i, j])))
+                if show_percent:
+                    if normalize is not None:
+                        parts.append("{:.1%}".format(cell_val))
+                    else:
+                        total = float(raw_cm.sum())
+                        pct = raw_cm[i, j] / total if total > 0 else 0
+                        parts.append("{:.1%}".format(pct))
+                text = "<br>".join(parts) if parts else ""
+
+                font_color = "white" if cell_val > threshold else "black"
+
+                annotations.append(
+                    {
+                        "x": str_labels[j],
+                        "y": str_labels[i],
+                        "text": text,
+                        "showarrow": False,
+                        "font": {"color": font_color},
+                    }
+                )
+
+        layout = _opts2layout(opts)
+        layout["annotations"] = annotations
+        layout["xaxis"] = layout.get("xaxis", {})
+        layout["xaxis"]["title"] = opts["xlabel"]
+        layout["xaxis"]["side"] = "bottom"
+        layout["yaxis"] = layout.get("yaxis", {})
+        layout["yaxis"]["title"] = opts["ylabel"]
+        layout["yaxis"]["autorange"] = "reversed"
+
+        return self._send(
+            {
+                "data": data,
+                "win": win,
+                "eid": env,
+                "layout": layout,
+                "opts": opts,
+                "pane_type": "confusion_matrix",
+            }
+        )
 
     @pytorch_wrap
     def bar(self, X, Y=None, win=None, env=None, opts=None):

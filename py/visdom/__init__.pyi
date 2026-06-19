@@ -181,6 +181,17 @@ class Visdom:
     def boxplot(
         self, X: Tensor, win: _OptStr = ..., env: _OptStr = ..., opts: _OptOps = ...
     ) -> _SendReturn: ...
+    def confusion_matrix(
+        self,
+        y_true: Optional[Tensor] = ...,
+        y_pred: Optional[Tensor] = ...,
+        cm: Optional[Tensor] = ...,
+        labels: Optional[list] = ...,
+        normalize: Optional[str] = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
     def surf(
         self, X: Tensor, win: _OptStr = ..., env: _OptStr = ..., opts: _OptOps = ...
     ) -> _SendReturn: ...
