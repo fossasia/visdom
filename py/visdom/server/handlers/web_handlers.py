@@ -333,7 +333,9 @@ class UpdateHandler(BaseHandler):
     def wrap_func(handler, args):
         if "win" not in args:
             raise tornado.web.HTTPError(400, reason="missing required field: win")
-        if "data" not in args:
+        if "data" not in args and args.get("append"):
+            raise tornado.web.HTTPError(400, reason="missing required field: data")
+        if "data" not in args and "layout" not in args and "opts" not in args:
             raise tornado.web.HTTPError(400, reason="missing required field: data")
         eid = extract_eid(args)
 
