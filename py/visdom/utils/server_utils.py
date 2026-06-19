@@ -266,7 +266,9 @@ def window(args):
         p["content"]["has_previous"] = False
     else:
         p["content"] = {"data": args["data"], "layout": args["layout"]}
-        p["type"] = args.get("pane_type", "plot")
+        _allowed_pane_types = {"plot", "roc_curve", "pr_curve", "confusion_matrix"}
+        pane_type = args.get("pane_type", "plot")
+        p["type"] = pane_type if pane_type in _allowed_pane_types else "plot"
 
     return p
 

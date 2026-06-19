@@ -489,9 +489,18 @@ def _compute_confusion_matrix(y_true, y_pred, labels):
     label_to_idx = {label: i for i, label in enumerate(labels)}
     n = len(labels)
     cm = np.zeros((n, n), dtype=int)
+    skipped = 0
     for t, p in zip(y_true, y_pred):
         if t in label_to_idx and p in label_to_idx:
             cm[label_to_idx[t], label_to_idx[p]] += 1
+        else:
+            skipped += 1
+    if skipped > 0:
+        warnings.warn(
+            "{} samples had labels not in the provided labels list "
+            "and were ignored".format(skipped),
+            UserWarning,
+        )
     return cm
 
 
@@ -2337,7 +2346,7 @@ class Visdom(object):
                                when normalized, `False` otherwise)
         - `opts.layoutopts`  : additional backend layout options (`dict`)
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
 
@@ -2380,11 +2389,17 @@ class Visdom(object):
             cm = cm.astype(float) / col_sums
         elif normalize == "all":
             total = float(cm.sum())
-            cm = cm.astype(float) / total if total > 0 else cm.astype(float)
+            if total == 0:
+                warnings.warn(
+                    "confusion matrix sum is zero; normalized values will be zero",
+                    UserWarning,
+                )
+                cm = cm.astype(float)
+            else:
+                cm = cm.astype(float) / total
 
-        str_labels = [str(l) for l in labels]
+        str_labels = [str(lbl) for lbl in labels]
 
-        opts = dict(opts)
         opts["xlabel"] = opts.get("xlabel", "Predicted")
         opts["ylabel"] = opts.get("ylabel", "Actual")
         opts["title"] = opts.get("title", "Confusion Matrix")
@@ -2444,6 +2459,7 @@ class Visdom(object):
         layout["yaxis"]["title"] = opts["ylabel"]
         layout["yaxis"]["autorange"] = "reversed"
 
+        endpoint = "events"
         return self._send(
             {
                 "data": data,
@@ -2452,7 +2468,8 @@ class Visdom(object):
                 "layout": layout,
                 "opts": opts,
                 "pane_type": "confusion_matrix",
-            }
+            },
+            endpoint=endpoint,
         )
 
     @pytorch_wrap
