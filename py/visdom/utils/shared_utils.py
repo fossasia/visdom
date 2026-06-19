@@ -48,10 +48,7 @@ def get_new_window_id():
 
 def ensure_dir_exists(path):
     """Make sure the dir exists so we can write a file."""
-    try:
-        os.makedirs(os.path.abspath(path))
-    except OSError as e1:
-        assert e1.errno == 17  # errno.EEXIST
+    os.makedirs(os.path.abspath(path), exist_ok=True)
 
 
 def get_visdom_path(filename=None):
