@@ -82,9 +82,7 @@ class ExistsHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
         if "win" not in args:
-            handler.set_status(400)
-            handler.write("missing required field: win")
-            return
+            raise tornado.web.HTTPError(400, reason="missing required field: win")
         eid = extract_eid(args)
         if eid in handler.state and args["win"] in handler.state[eid]["jsons"]:
             handler.write("true")
@@ -334,13 +332,9 @@ class UpdateHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
         if "win" not in args:
-            handler.set_status(400)
-            handler.write("missing required field: win")
-            return
+            raise tornado.web.HTTPError(400, reason="missing required field: win")
         if "data" not in args:
-            handler.set_status(400)
-            handler.write("missing required field: data")
-            return
+            raise tornado.web.HTTPError(400, reason="missing required field: data")
         eid = extract_eid(args)
 
         if args["win"] not in handler.state[eid]["jsons"]:
