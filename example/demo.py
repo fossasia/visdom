@@ -18,8 +18,9 @@ from components.plot_surface import plot_surface_basic, plot_surface_basic_withn
 from components.plot_line import plot_line_basic, plot_line_multiple, plot_line_webgl, plot_line_update_webgl, plot_line_update, plot_line_opts, plot_line_opts_update, plot_line_stackedarea, plot_line_maxsize, plot_line_doubleyaxis, plot_line_pytorch, plot_line_stem, plot_line_many_updates
 from components.plot_special import plot_special_boxplot, plot_special_quiver, plot_special_mesh, plot_special_graph
 from components.properties import properties_basic, properties_callbacks
-from components.misc import misc_plot_matplot, misc_plot_latex, misc_plot_latex_update, misc_video_tensor, misc_video_download, misc_audio_basic, misc_audio_download, misc_arbitrary_visdom, misc_getset_state, misc_html_table
+from components.misc import misc_plot_matplot, misc_plot_latex, misc_plot_latex_update, misc_video_tensor, misc_video_download, misc_audio_basic, misc_audio_download, misc_arbitrary_visdom, misc_getset_state
 from components.plot_violin import plot_violin_basic, plot_violin_multigroup, plot_violin_with_points, plot_violin_horizontal
+from components.plot_html_table import html_table
 
 # This demo shows all features in a single environment.
 def run_demo(viz, env, args):
@@ -111,6 +112,12 @@ def run_demo(viz, env, args):
     plot_violin_multigroup(viz, env, args)
     plot_violin_with_points(viz, env, args)
     plot_violin_horizontal(viz, env, args)
+
+    # ========== #
+    # html table #
+    # ========== #
+
+    html_table(viz, env, args)
 
     # ==== #
     # misc #
