@@ -90,4 +90,5 @@ export const all_compareviews = [
   'plot_violin_basic',
   'misc_plot_latex',
   'misc_plot_latex_update',
+  'html_table',
 ];
