@@ -2378,7 +2378,7 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
-        minx, maxx = X.min(), X.max()
+        minx, maxx = np.nanmin(X), np.nanmax(X)
         bins = np.histogram(X, bins=opts["numbins"], range=(minx, maxx))[0]
         linrange = np.linspace(minx, maxx, opts["numbins"])
 
