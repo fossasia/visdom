@@ -101,4 +101,25 @@ def misc_getset_state(viz, env, args):
     data['content'] = 'test two'
     viz.set_window_data(json.dumps(data), env=env, win=window)
 
+#html table
+def html_table(viz, env, args):
+    headers = [
+    "name",
+    "age",
+    "position",
+    "salary"
+    ]
 
+    data = [
+        ["abc", 24, "ml eng", "90k"],
+        ["pqr", 29, "backend dev", "110k"],
+    ]
+
+    viz.table(
+        headers=headers,
+        data=data,
+        env=env,
+        opts={
+            "title": "employee table"
+        }
+    )
