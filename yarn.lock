@@ -2022,10 +2022,10 @@ check-more-types@^2.24.0:
   resolved "https://registry.npmjs.org/check-more-types/-/check-more-types-2.24.0.tgz"
   integrity sha512-Pj779qHxV2tuapviy1bSZNEL1maXr13bPYpsvSDB68HlYcYuhlDrmGd63i0JHMCLKzc7rUSNIrpdJlhVlNwrxA==
 
-cheminfo-types@^1.0.0:
-  version "1.4.0"
-  resolved "https://registry.npmjs.org/cheminfo-types/-/cheminfo-types-1.4.0.tgz"
-  integrity sha512-5KZoAdE0H6YcAvjhPLChmEXJan4S0eiueECF3MQ0wb3+xGZVBHWfrKWSZ/qrHW5I0jmY0XNP6S3y8wR2jj2nOg==
+cheminfo-types@^1.15.0:
+  version "1.15.0"
+  resolved "https://registry.yarnpkg.com/cheminfo-types/-/cheminfo-types-1.15.0.tgz#55fe93ac156391aa6e0033fcb35b2f927ceef89e"
+  integrity sha512-shv45WN2u0yN9EHH1bisNrv+fy4Cw+eLM5lOoriP67mePrwbHZ1kJqg90C8GEU7K1A8gJsicEoVZHcuBbuul/w==
 
 chrome-trace-event@^1.0.2:
   version "1.0.3"
@@ -3677,10 +3677,10 @@ ipaddr.js@^1.9.1:
   resolved "https://registry.yarnpkg.com/ipaddr.js/-/ipaddr.js-1.9.1.tgz#bff38543eeb8984825079ff3a2a8e6cbd46781b3"
   integrity sha512-0KI/607xoxSToH7GjN1FfSbLoU0+btTicjsQSWQlh/hZykN8KpmMf7uYwPW3R+akZ6R/w18ZlXSHBYXiYUPO3g==
 
-is-any-array@^2.0.0:
-  version "2.0.0"
-  resolved "https://registry.npmjs.org/is-any-array/-/is-any-array-2.0.0.tgz"
-  integrity sha512-WdPV58rT3aOWXvvyuBydnCq4S2BM1Yz8shKxlEpk/6x+GX202XRvXOycEFtNgnHVLoc46hpexPFx8Pz1/sMS0w==
+is-any-array@^3.0.0:
+  version "3.0.0"
+  resolved "https://registry.yarnpkg.com/is-any-array/-/is-any-array-3.0.0.tgz#19364d7bd888ad6c79ce169b949a6d4bd9f44f2d"
+  integrity sha512-o4h+tylWykC4BD1vaejp6gDxoM13bwW8FGuNs4yIKpj8xbBJcRxJx8vZpq0dCr7ZDEfeKjmsi/euolKhX6f/ww==
 
 is-arguments@^1.0.4:
   version "1.1.1"
@@ -4419,13 +4419,13 @@ minimist@^1.2.0, minimist@^1.2.3, minimist@^1.2.6:
   resolved "https://registry.npmjs.org/minimist/-/minimist-1.2.8.tgz"
   integrity sha512-2yyAR8qBkN3YuheJanUpWC5U3bb5osDywNB8RzDVlDwDHbocAJveqqj1u8+SVD7jkWT4yvsHCpWqqWqAxb0zCA==
 
-ml-savitzky-golay-generalized@^4.0.1:
-  version "4.0.1"
-  resolved "https://registry.npmjs.org/ml-savitzky-golay-generalized/-/ml-savitzky-golay-generalized-4.0.1.tgz"
-  integrity sha512-I3z6aEj9f+VaqoqWoTmyXOsIngOCW2JtpcZfoeqnLFFFuIyK4uXOEIRVft3XgQbbtivIvTBJKHpfxyN8sgB5vA==
+ml-savitzky-golay-generalized@^5.0.0:
+  version "5.0.0"
+  resolved "https://registry.yarnpkg.com/ml-savitzky-golay-generalized/-/ml-savitzky-golay-generalized-5.0.0.tgz#270da51f39192cfac13b7d472a33ecd9e4f4a664"
+  integrity sha512-bhUjAMUwpJDLIuu3U9EznwdqjwI4pu9j7/Qq4yqN1CQIc0jFFqKAiGveFjPqEohlgdXIyp+yhDffPh7tHvsgTw==
   dependencies:
-    cheminfo-types "^1.0.0"
-    is-any-array "^2.0.0"
+    cheminfo-types "^1.15.0"
+    is-any-array "^3.0.0"
 
 ms@^2.1.1:
   version "2.1.2"
