@@ -239,11 +239,7 @@ function NetworkPane(props) {
 
   return (
     <Pane {...props} handleDownload={handleDownload}>
-    {downloadError && (
-      <div className="error-message">
-        {downloadError}
-      </div>
-    )}
+      {downloadError && <div className="error-message">{downloadError}</div>}
       <div
         ref={containerRef}
         style={{ height: '100%', width: '100%', flex: 1 }}

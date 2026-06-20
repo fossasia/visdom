@@ -21,7 +21,7 @@
     "eslint-plugin-react": "^7.37.5",
     "pixelmatch": "^7.2.0",
     "pngjs": "^7.0.0",
-    "prettier": "^2.8.3",
+    "prettier": "^3.8.4",
     "react-devtools": "^7.0.1",
     "webpack": "^5.107.2",
     "webpack-cli": "^7.0.3",
