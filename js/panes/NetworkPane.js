@@ -64,6 +64,13 @@ function NetworkPane(props) {
     }
     d3.select(containerRef.current).selectAll('*').remove();
     CreateNetwork(content);
+
+    return () => {
+      if (forceRef.current) {
+        forceRef.current.stop();
+        forceRef.current = null;
+      }
+    };
   }, [content, directed, showEdgeLabels, showVertexLabels]);
 
   useEffect(() => {
