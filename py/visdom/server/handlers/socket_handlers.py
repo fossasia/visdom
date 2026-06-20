@@ -19,6 +19,9 @@ import logging
 import os
 import time
 import types
+import hashlib
+from collections import deque
+from enum import Enum
 
 import tornado.ioloop
 import tornado.escape
@@ -28,6 +31,7 @@ from visdom.utils.server_utils import (
     check_auth,
     broadcast_envs,
     serialize_env,
+    serialize_all,
     send_to_sources,
     broadcast,
     escape_eid,
@@ -116,13 +120,39 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 self.eid = msg["eid"]
                 serialize_env(self.state, [self.eid], env_path=self.env_path)
 
+        elif cmd == "save_all":
+            tornado.ioloop.IOLoop.current().run_in_executor(
+                None, serialize_all, self.state, self.env_path
+            )
+
         elif cmd == "delete_env":
             if "eid" in msg:
-                logging.info(f"closing environment {msg['eid']}")
-                del self.state[msg["eid"]]
+                eid = escape_eid(msg["eid"])
+                if eid == "main":
+                    return
+                logging.info(f"closing environment {eid}")
+                self.state.pop(eid, None)
                 if self.env_path is not None:
-                    p = os.path.join(self.env_path, "{0}.json".format(msg["eid"]))
-                    os.remove(p)
+                    p = os.path.join(self.env_path, "{0}.json".format(eid))
+                    if os.path.exists(p):
+                        try:
+                            os.remove(p)
+                        except FileNotFoundError:
+                            pass
+                        except OSError as e:
+                            logging.error(f"Failed to delete {p}: {e}")
+                    else:
+                        hashed_id = hashlib.sha256(eid.encode("utf-8")).hexdigest()
+                        p_hashed = os.path.join(
+                            self.env_path, "hash_{0}.json".format(hashed_id)
+                        )
+                        if os.path.exists(p_hashed):
+                            try:
+                                os.remove(p_hashed)
+                            except FileNotFoundError:
+                                pass
+                            except OSError as e:
+                                logging.error(f"Failed to delete {p_hashed}: {e}")
                 broadcast_envs(self)
 
         elif cmd == "save_layouts":
@@ -153,7 +183,10 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
             if len(p["old_content"]) == 0:
                 p["content"]["has_previous"] = False
             p["contentID"] = get_rand_id()
-            broadcast(self, p, eid)
+            # Attach eid so the frontend can filter stale messages after env switch.
+            broadcast_msg = dict(p)
+            broadcast_msg["eid"] = eid
+            broadcast(self, broadcast_msg, eid)
 
 
 class AnySocketWrapper(AnySocketHandlerOrWrapper):
@@ -164,7 +197,7 @@ class AnySocketWrapper(AnySocketHandlerOrWrapper):
     def initialize(self, app):
         super().initialize(app)
 
-        self.messages = []
+        self.messages = deque()
         self.last_read_time = time.time()
         self.open()
         try:
@@ -201,8 +234,9 @@ class AnySocketWrapper(AnySocketHandlerOrWrapper):
 
     def get_messages(self):
         to_send = []
-        while len(self.messages) > 0:
-            message = self.messages.pop()
+        messages = self.messages
+        self.messages = []
+        for message in messages:
             if isinstance(message, dict):
                 # Not all messages are being formatted the same way (JSON)
                 # TODO investigate
@@ -272,7 +306,12 @@ class SocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
 
         self.write_message(
             json.dumps(
-                {"command": "register", "data": self.sid, "readonly": self.readonly}
+                {
+                    "command": "register",
+                    "data": self.sid,
+                    "readonly": self.readonly,
+                    "envList": sorted(list(self.state.keys())),
+                }
             )
         )
         self.broadcast_layouts([self])
@@ -306,6 +345,40 @@ class SocketWrapper(SocketHandlerOrWrapper, AnySocketWrapper):
         pass
 
 
+class SocketFailureReason(Enum):
+    """Failure reason codes for the HTTP polling socket protocol."""
+
+    CONNECTION_CLOSED = (
+        "closed",
+        "No active socket found for the given sid; "
+        "it may have been closed or never existed",
+    )
+    MISSING_MESSAGE = (
+        "no msg",
+        "POST body must include a 'message' field when message_type is 'send'",
+    )
+    INVALID_MESSAGE_TYPE = (
+        "invalid",
+        "Unrecognized message_type; expected 'query' or 'send'",
+    )
+
+    def __new__(cls, value, detail=""):
+        obj = object.__new__(cls)
+        obj._value_ = value
+        obj._detail = detail
+        return obj
+
+    @property
+    def detail(self):
+        return self._detail
+
+    def to_failure_response(self, message=""):
+        resp = {"success": False, "reason": self.value, "detail": self.detail}
+        if message:
+            resp["message"] = message
+        return resp
+
+
 def WrapSocketWrapper(BaseWrapper):
     class WrappedSocketWrap(BaseHandler):
         def initialize(self, app):
@@ -319,7 +392,6 @@ def WrapSocketWrapper(BaseWrapper):
 
         def post(self):
             """Either write a message to the socket, or query what's there"""
-            # TODO formalize failure reasons
             args = tornado.escape.json_decode(
                 tornado.escape.to_basestring(self.request.body)
             )
@@ -336,24 +408,38 @@ def WrapSocketWrapper(BaseWrapper):
                 self.subs if BaseWrapper == SocketWrapper else self.sources
             ).get(sid)
 
-            # ensure a wrapper still exists for this connection
             if socket_wrap is None:
-                self.write(json.dumps({"success": False, "reason": "closed"}))
+                self.write(
+                    json.dumps(
+                        SocketFailureReason.CONNECTION_CLOSED.to_failure_response(
+                            f"sid={sid!r}"
+                        )
+                    )
+                )
                 return
 
-            # handle the requests
             if msg_type == "query":
                 messages = socket_wrap.get_messages()
                 self.write(json.dumps({"success": True, "messages": messages}))
             elif msg_type == "send":
                 msg = args.get("message")
                 if msg is None:
-                    self.write(json.dumps({"success": False, "reason": "no msg"}))
+                    self.write(
+                        json.dumps(
+                            SocketFailureReason.MISSING_MESSAGE.to_failure_response()
+                        )
+                    )
                 else:
                     socket_wrap.on_message(msg)
                     self.write(json.dumps({"success": True}))
             else:
-                self.write(json.dumps({"success": False, "reason": "invalid"}))
+                self.write(
+                    json.dumps(
+                        SocketFailureReason.INVALID_MESSAGE_TYPE.to_failure_response(
+                            f"message_type={msg_type!r}"
+                        )
+                    )
+                )
 
     if BaseWrapper == SocketWrapper:
 
