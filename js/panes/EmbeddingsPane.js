@@ -22,6 +22,17 @@ import Pane from './Pane';
 const SCALE_RADIUS = 2000;
 
 class EmbeddingsPane extends React.Component {
+  shouldComponentUpdate(nextProps) {
+    if (this.props.contentID !== nextProps.contentID) return true;
+    if (
+      Math.round(this.props.height) !== Math.round(nextProps.height) ||
+      Math.round(this.props.width) !== Math.round(nextProps.width)
+    )
+      return true;
+    if (this.props.isFocused !== nextProps.isFocused) return true;
+    return false;
+  }
+
   onEvent = (e) => {
     if (!this.props.isFocused) {
       return;
@@ -29,16 +40,20 @@ class EmbeddingsPane extends React.Component {
 
     switch (e.type) {
       case 'keydown':
-      case 'keypress':
-        e.preventDefault();
+      case 'keypress': {
+        const tag = e.target.tagName;
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
+          e.preventDefault();
+        }
         break;
+      }
       case 'keyup':
         if (this.props.isFocused)
           this.context.sendPaneMessage(
             {
               event_type: 'KeyPress',
-              key: event.key,
-              key_code: event.keyCode,
+              key: e.key,
+              key_code: e.keyCode,
               pane_data: false, // No need to send the full data for this
             },
             this.props.id,
@@ -63,16 +78,16 @@ class EmbeddingsPane extends React.Component {
   };
 
   onRegionSelection = (pointIdxs) => {
-    if (this.props.isFocused)
-      this.context.sendPaneMessage(
-        {
-          event_type: 'RegionSelected',
-          selectedIdxs: pointIdxs,
-          pane_data: false, // No need to send the full data for this
-        },
-        this.props.id,
-        this.props.envID
-      );
+    this.props.onFocus(this.props.id);
+    this.context.sendPaneMessage(
+      {
+        event_type: 'RegionSelected',
+        selectedIdxs: pointIdxs,
+        pane_data: false, // No need to send the full data for this
+      },
+      this.props.id,
+      this.props.envID
+    );
   };
 
   // Used to pop an embeddings drilldown off of the stack
@@ -82,7 +97,7 @@ class EmbeddingsPane extends React.Component {
         pane_data: false, // No need to send the full data for this
       },
       this.props.id,
-      this.props.env
+      this.props.envID
     );
   };
 
@@ -150,9 +165,20 @@ class Scene extends React.Component {
   constructor(props) {
     super(props);
 
-    this.start = this.start.bind(this);
-    this.stop = this.stop.bind(this);
-    this.animate = this.animate.bind(this);
+    this.scheduleRender = this.scheduleRender.bind(this);
+    this.renderFrame = this.renderFrame.bind(this);
+  }
+
+  shouldComponentUpdate(nextProps, nextState) {
+    return (
+      nextProps.content.data !== this.props.content.data ||
+      nextProps.content.data.length !== this.props.content.data.length ||
+      Math.round(nextProps.height) !== Math.round(this.props.height) ||
+      Math.round(nextProps.width) !== Math.round(this.props.width) ||
+      nextProps.interactive !== this.props.interactive ||
+      nextState.detailsLoading !== this.state.detailsLoading ||
+      nextState.selectMode !== this.state.selectMode
+    );
   }
 
   componentDidUpdate(prevProps) {
@@ -212,6 +238,7 @@ class Scene extends React.Component {
 
     view.on('mouseleave', () => {
       this.removeHighlights(hoverContainer);
+      this.scheduleRender();
     });
 
     this.raycaster = raycaster;
@@ -226,6 +253,7 @@ class Scene extends React.Component {
       let d3_transform = currentEvent.transform;
       this.lastTransform = currentEvent.transform;
       this.zoomHandler(d3_transform);
+      this.scheduleRender();
     });
     this.zoom = zoom;
 
@@ -279,7 +307,8 @@ class Scene extends React.Component {
       '#cccc00',
     ];
     let circle_sprite = new THREE.TextureLoader().load(
-      'https://fastforwardlabs.github.io/visualization_assets/circle-sprite.png'
+      'https://fastforwardlabs.github.io/visualization_assets/circle-sprite.png',
+      () => this.scheduleRender()
     );
 
     let fov = 40;
@@ -343,7 +372,7 @@ class Scene extends React.Component {
     this.setUpMouseInteractions();
 
     this.mount.appendChild(this.renderer.domElement);
-    this.start();
+    this.scheduleRender();
   }
 
   componentWillUnmount() {
@@ -406,9 +435,11 @@ class Scene extends React.Component {
       let datum = this.generated_points[index];
       this.highlightPoint(datum, hoverContainer, circle_sprite);
       this.showTooltip(mouse_position, datum);
-    } else {
+      this.scheduleRender();
+    } else if (hoverContainer.children.length > 0) {
       this.removeHighlights(hoverContainer);
       this.hideTooltip();
+      this.scheduleRender();
     }
   }
 
@@ -455,23 +486,25 @@ class Scene extends React.Component {
     hoverContainer.remove(...hoverContainer.children);
   }
 
-  start() {
-    if (!this.frameId) {
-      this.frameId = requestAnimationFrame(this.animate);
+  scheduleRender() {
+    if (this.frameId) {
+      return;
+    }
+    this.frameId = requestAnimationFrame(this.renderFrame);
+  }
+
+  renderFrame() {
+    this.frameId = null;
+    if (this.renderer && this.scene && this.camera) {
+      this.renderer.render(this.scene, this.camera);
     }
   }
 
   stop() {
-    cancelAnimationFrame(this.frameId);
-  }
-
-  animate() {
-    this.renderScene();
-    this.frameId = window.requestAnimationFrame(this.animate);
-  }
-
-  renderScene() {
-    this.renderer.render(this.scene, this.camera);
+    if (this.frameId) {
+      cancelAnimationFrame(this.frameId);
+      this.frameId = null;
+    }
   }
 
   render() {
