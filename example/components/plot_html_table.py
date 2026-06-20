@@ -1,16 +1,14 @@
-def html_table(viz, env, args):
+def html_table(viz, win, env):
     headers = [
-    "name",
-    "age",
-    "position",
-    "salary"
+        "name",
+        "age",
+        "position",
+        "salary"
     ]
-
     data = [
         ["abc", 24, "ml eng", "90k"],
         ["pqr", 29, "backend dev", "110k"],
     ]
-
     viz.table(
         headers=headers,
         data=data,
