@@ -1671,7 +1671,12 @@ class Visdom(object):
             audiofile = os.path.join(
                 tempfile.gettempdir(), "%s.wav" % next(tempfile._get_candidate_names())
             )
-            tensor = np.int16(tensor / np.max(np.abs(tensor)) * 32767)
+            max_val = np.max(np.abs(tensor))
+            if max_val == 0:
+                # When all zero tensor, skip normalisation to avoid divison by zero
+                tensor = np.zeros_like(tensor, dtype=np.int16)
+            else:
+                tensor = np.int16(tensor / np.max(np.abs(tensor)) * 32767)
             scipy.io.wavfile.write(audiofile, opts.get("sample_frequency"), tensor)
 
         extension = audiofile.split(".")[-1].lower()
