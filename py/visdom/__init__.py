@@ -605,12 +605,28 @@ class Visdom(object):
         # storage for data associated with specific windows
 
         # Setup for online interactions
-        self._send(
+        result = self._send(
             {
                 "eid": env,
             },
             endpoint="env/" + env,
         )
+
+        if result is False:
+            if not self.ssl_verify:
+                raise ConnectionError(
+                    "Could not connect to HTTPS server at {}:{}. "
+                    "Make sure the server is running with SSL enabled "
+                    "(-ssl_certfile and -ssl_keyfile flags).".format(
+                        self.server, self.port
+                    )
+                )
+            else:
+                raise ConnectionError(
+                    "Could not connect to server at {}:{}.".format(
+                        self.server, self.port
+                    )
+                )
 
         # when talking to a server, get a backchannel
         if send and use_incoming_socket:
