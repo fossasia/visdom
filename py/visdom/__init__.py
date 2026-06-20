@@ -10,6 +10,7 @@ from visdom.utils.shared_utils import get_new_window_id
 from visdom import server
 import os.path
 import requests
+import ssl
 import traceback
 import threading
 import websocket  # type: ignore
@@ -535,10 +536,12 @@ class Visdom(object):
         proxies=None,
         offline=False,
         use_polling=False,
+        ssl_verify=True,
     ):
         parsed_url = urlparse(server)
         if not parsed_url.scheme:
-            parsed_url = urlparse("http://{}".format(server))
+            scheme = "https" if not ssl_verify else "http"
+            parsed_url = urlparse("{}://{}".format(scheme, server))
         self.server_base_name = parsed_url.netloc
         self.server = urlunparse((parsed_url.scheme, parsed_url.netloc, "", "", "", ""))
         self.endpoint = endpoint
@@ -588,6 +591,8 @@ class Visdom(object):
         if self.username:
             assert password, "no password given for authentication"
             self.password = hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+        self.ssl_verify = ssl_verify
 
         self.win_data = {}
         if self.offline:
@@ -641,6 +646,8 @@ class Visdom(object):
         sess = requests.Session()
         if self.proxies:
             sess.proxies.update(self.proxies)
+        if not self.ssl_verify:
+            sess.verify = False
         if self.username:
             resp = sess.post(
                 "%s:%s%s" % (self.server, self.port, self.base_url),
@@ -807,11 +814,15 @@ class Visdom(object):
                             + self.session.cookies.get("user_password", "")
                         },
                     )
-                    ws.run_forever(
-                        http_proxy_host=self.http_proxy_host,
-                        http_proxy_port=self.http_proxy_port,
-                        ping_timeout=100.0,
-                    )
+                    run_forever_kwargs = {
+                        "http_proxy_host": self.http_proxy_host,
+                        "http_proxy_port": self.http_proxy_port,
+                        "ping_timeout": 100.0,
+                    }
+
+                    if ws_scheme == "wss" and not self.ssl_verify:
+                        run_forever_kwargs["sslopt"] = {"cert_reqs": ssl.CERT_NONE}
+                    ws.run_forever(**run_forever_kwargs)
                     ws.close()
                 except Exception as e:
                     logger.error("Socket had error {}, attempting restart".format(e))
