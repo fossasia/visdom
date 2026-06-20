@@ -450,11 +450,7 @@ def _to_numpy(a):
         return np.array(a)
     for kind in torch_types:
         if isinstance(a, kind):
-            # For PyTorch < 0.4 compatibility, where non-Variable
-            # tensors do not have a 'detach' method. Will be removed.
-            if hasattr(a, "detach"):
-                a = a.detach()
-            return a.cpu().numpy()
+            return a.detach().cpu().numpy()
     return a
 
 
