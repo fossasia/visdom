@@ -519,7 +519,7 @@ def _float_img_to_uint8(img):
 class Visdom(object):
     def __init__(
         self,
-        server="http://localhost",
+        server="localhost",
         endpoint="events",
         port=8097,
         base_url="/",
