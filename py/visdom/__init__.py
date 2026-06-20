@@ -3120,10 +3120,12 @@ class Visdom(object):
 
         assert isinstance(headers, list), "headers should be a list"
         assert isinstance(data, list), "data should be a list of rows"
-        assert all(isinstance(row, (list, tuple)) for row in data), \
-            "each row in data should be a list or tuple"
-        assert all(len(row) == len(headers) for row in data), \
-            "each data row must have the same number of columns as headers"
+        assert all(
+            isinstance(row, (list, tuple)) for row in data
+        ), "each row in data should be a list or tuple"
+        assert all(
+            len(row) == len(headers) for row in data
+        ), "each data row must have the same number of columns as headers"
 
         style = """
             <style>
@@ -3157,8 +3159,7 @@ class Visdom(object):
         header_html = "".join("<th>%s</th>" % html.escape(str(h)) for h in headers)
         rows_html = "".join(
             "<tr>%s</tr>"
-            % "".join(
-                "<td>%s</td>" % html.escape(str(cell)) for cell in row)
+            % "".join("<td>%s</td>" % html.escape(str(cell)) for cell in row)
             for row in data
         )
 
