@@ -100,3 +100,4 @@ def misc_getset_state(viz, env, args):
     data = json.loads(viz.get_window_data(window, env=env))
     data['content'] = 'test two'
     viz.set_window_data(json.dumps(data), env=env, win=window)
+
