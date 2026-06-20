@@ -1,0 +1,167 @@
+/**
+ * Copyright 2017-present, The Visdom Authors
+ * All rights reserved.
+ *
+ * This source code is licensed under the license found in the
+ * LICENSE file in the root directory of this source tree.
+ *
+ */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #0f1117;
+  color: #e2e8f0;
+  min-height: 100vh;
+  padding: 2rem 1rem;
+}
+
+.container {
+  max-width: 860px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.header {
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid #2d3748;
+}
+
+.header-title {
+  font-size: 18px;
+  font-weight: 500;
+  color: #f7fafc;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.header-sub {
+  font-size: 13px;
+  color: #718096;
+}
+
+.status-badge {
+  font-size: 13px;
+  font-weight: 600;
+  background: #3d1a1a;
+  color: #fc8181;
+  border: 1px solid #742a2a;
+  border-radius: 6px;
+  padding: 4px 10px;
+}
+
+
+.card {
+  background: #1a1f2e;
+  border: 1px solid #2d3748;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.card-head {
+  padding: .6rem 1rem;
+  background: #161b27;
+  border-bottom: 1px solid #2d3748;
+  font-size: 11px;
+  font-weight: 600;
+  color: #718096;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.card-body {
+  padding: 1rem;
+}
+
+.error-type {
+  font-size: 12px;
+  font-weight: 600;
+  color: #fc8181;
+  margin-bottom: 6px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+
+.error-message {
+  font-size: 15px;
+  color: #f7fafc;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.traceback {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.75;
+  color: #a0aec0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.traceback::-webkit-scrollbar {
+  width: 6px;
+}
+
+.traceback::-webkit-scrollbar-thumb {
+  background: #4a5568;
+  border-radius: 3px;
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 6px 12px;
+  font-size: 13px;
+}
+
+.info-key {
+  color: #718096;
+  font-weight: 500;
+}
+
+.info-val {
+  color: #e2e8f0;
+  font-family: monospace;
+  word-break: break-all;
+}
+
+.info-val.method {
+  color: #68d391;
+  font-weight: 600;
+}
+
+.prod-message {
+  font-size: 14px;
+  color: #a0aec0;
+  line-height: 1.7;
+}
+
+.prod-message code {
+  font-family: monospace;
+  background: #2d3748;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #e2e8f0;
+}
+
+.report-link {
+  color: red;
+  text-decoration: none;
+  font-weight: bold;
+}
+
+.report-link:hover {
+  text-decoration: underline;
+}

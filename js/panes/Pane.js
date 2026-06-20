@@ -15,6 +15,7 @@ var classNames = require('classnames');
 var Pane = forwardRef((props, ref) => {
   const { id, title, content, children, widgets, enablePropertyList } = props;
   var { barwidgets } = props;
+  barwidgets = barwidgets || [];
 
   // state varibles
   // --------------
@@ -29,6 +30,7 @@ var Pane = forwardRef((props, ref) => {
   const handleZoom = props.handleZoom || (() => {});
   const handleMouseMove = props.handleMouseMove || (() => {});
   const handleClose = props.handleClose || (() => props.onClose(id));
+  const handleMetadataExport = props.handleMetadataExport || (() => {});
 
   // rendering
   // ---------
@@ -79,7 +81,7 @@ var Pane = forwardRef((props, ref) => {
       );
     }
 
-    // properties for content.data
+    // properties for content.layout
     if (typeof content.layout == 'object') {
       propertylists.push(
         <span key="layout">
@@ -114,6 +116,14 @@ var Pane = forwardRef((props, ref) => {
         <button title="save" onClick={handleDownload}>
           {' '}
           &#8681;{' '}
+        </button>
+        <button
+          title="export metadata"
+          onClick={handleMetadataExport}
+          hidden={!props.handleMetadataExport}
+        >
+          {' '}
+          &#128196;{' '}
         </button>
         <button title="reset" onClick={handleReset} hidden={!props.handleReset}>
           {' '}
