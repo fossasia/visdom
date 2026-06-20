@@ -44,7 +44,7 @@
     "css-loader": "^6.7.3",
     "d3-dispatch": "^3.0.1",
     "d3-drag": "^1.2.5",
-    "d3-polygon": "^1.0.6",
+    "d3-polygon": "^3.0.1",
     "d3-selection": "^1.4.2",
     "d3-zoom": "^1.8.3",
     "debounce": "^3.0.0",
