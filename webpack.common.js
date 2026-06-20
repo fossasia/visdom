@@ -47,6 +47,12 @@ module.exports = {
   },
   plugins: [
     new webpack.BannerPlugin('@generated'),
+    new webpack.DefinePlugin({
+      'process.env.NODE_ENV': JSON.stringify(
+        process.env.NODE_ENV || 'production'
+      ),
+      'process.env': JSON.stringify({}),
+    }),
     // new webpack.ProvidePlugin({
     //   Buffer: ['buffer', 'Buffer']
     // })
