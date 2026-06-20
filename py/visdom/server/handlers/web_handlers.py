@@ -183,8 +183,8 @@ class UpdateHandler(BaseHandler):
 
         # Delete a trace
         if args.get("delete"):
-            for idx in idxs:
-                del pdata[idx]
+            idxs_set = set(idxs)
+            p["content"]["data"] = [e for i, e in enumerate(pdata) if i not in idxs_set]
             return p
 
         # add new heatmap data if plot has been deleted previously
@@ -327,6 +327,9 @@ class UpdateHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
         eid = extract_eid(args)
+
+        if eid not in handler.state:
+            handler.state[eid] = {"jsons": {}, "reload": {}}
 
         if args["win"] not in handler.state[eid]["jsons"]:
             # Append to a window that doesn't exist attempts to create
