@@ -57,7 +57,7 @@ export const all_screenshots = [
   'misc_arbitrary_visdom',
   'misc_getset_state',
   'properties_basic',
-  'misc_html_table',
+  'html_table',
 ];
 
 export const all_compareviews = [
