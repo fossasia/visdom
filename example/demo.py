@@ -130,7 +130,6 @@ def run_demo(viz, env, args):
     misc_audio_download(viz, env, args)
     misc_arbitrary_visdom(viz, env, args)
     misc_getset_state(viz, env, args)
-    misc_html_table(viz, env, args)
        
 if __name__ == '__main__':
     demos_list = [fn for fn in locals().keys() if fn.split("_")[0] in ["text", "image", "plot", "misc"]]
