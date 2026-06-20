@@ -1,4 +1,4 @@
-def html_table(viz, win, env):
+def html_table(viz, env, args):
     headers = [
         "name",
         "age",
