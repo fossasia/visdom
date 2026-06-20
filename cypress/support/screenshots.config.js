@@ -57,7 +57,6 @@ export const all_screenshots = [
   'misc_arbitrary_visdom',
   'misc_getset_state',
   'properties_basic',
-  'html_table',
 ];
 
 export const all_compareviews = [
@@ -90,5 +89,4 @@ export const all_compareviews = [
   'plot_violin_basic',
   'misc_plot_latex',
   'misc_plot_latex_update',
-  'html_table',
 ];
