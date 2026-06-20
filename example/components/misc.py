@@ -102,7 +102,7 @@ def misc_getset_state(viz, env, args):
     viz.set_window_data(json.dumps(data), env=env, win=window)
 
 #html table
-def html_table(viz, env, args):
+def misc_html_table(viz, env, args):
     headers = [
     "name",
     "age",
