@@ -702,12 +702,7 @@ class ErrorHandler(BaseHandler):
 
 class UploadEnvHandler(BaseHandler):
     def initialize(self, app):
-        self.state = app.state
-        self.subs = app.subs
-        self.sources = app.sources
-        self.port = app.port
-        self.env_path = app.env_path
-        self.login_enabled = app.login_enabled
+        super().initialize(app)
         self.readonly = app.readonly
 
     @check_auth
