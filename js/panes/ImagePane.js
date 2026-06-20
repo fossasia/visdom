@@ -334,7 +334,6 @@ function ImagePane(props) {
           />
         </div>
       </div>
-      <p className="caption">{content.caption}</p>
       <span
         className="mouse_image_location"
         style={{ visibility: mouseLocation.visibility }}
