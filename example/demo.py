@@ -18,7 +18,7 @@ from components.plot_surface import plot_surface_basic, plot_surface_basic_withn
 from components.plot_line import plot_line_basic, plot_line_multiple, plot_line_webgl, plot_line_update_webgl, plot_line_update, plot_line_opts, plot_line_opts_update, plot_line_stackedarea, plot_line_maxsize, plot_line_doubleyaxis, plot_line_pytorch, plot_line_stem, plot_line_many_updates
 from components.plot_special import plot_special_boxplot, plot_special_quiver, plot_special_mesh, plot_special_graph
 from components.properties import properties_basic, properties_callbacks
-from components.misc import misc_plot_matplot, misc_plot_latex, misc_plot_latex_update, misc_video_tensor, misc_video_download, misc_audio_basic, misc_audio_download, misc_arbitrary_visdom, misc_getset_state
+from components.misc import misc_plot_matplot, misc_plot_latex, misc_plot_latex_update, misc_video_tensor, misc_video_download, misc_audio_basic, misc_audio_download, misc_arbitrary_visdom, misc_getset_state, misc_html_table
 from components.plot_violin import plot_violin_basic, plot_violin_multigroup, plot_violin_with_points, plot_violin_horizontal
 
 # This demo shows all features in a single environment.
@@ -124,6 +124,7 @@ def run_demo(viz, env, args):
     misc_audio_download(viz, env, args)
     misc_arbitrary_visdom(viz, env, args)
     misc_getset_state(viz, env, args)
+    misc_html_table(viz, env, args)
        
 if __name__ == '__main__':
     demos_list = [fn for fn in locals().keys() if fn.split("_")[0] in ["text", "image", "plot", "misc"]]
