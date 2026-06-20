@@ -227,6 +227,32 @@ VISDOM_USE_ENV_CREDENTIALS=1 visdom -enable_login
 You can also use `VISDOM_COOKIE` variable to provide cookies value if the cookie file wasn't generated, or the
 flag `-force_new_cookie` was set.
 
+#### HTTPS Support
+
+To run the visdom server over HTTPS,user need to provide an SSL certificate and key file:
+
+```bash
+# Generate a self-signed certificate (for development only)
+openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
+
+# Start the server with HTTPS
+python -m visdom.server -ssl_certfile cert.pem -ssl_keyfile key.pem
+```
+
+Access the server at `https://localhost:8097`.
+
+Connect via the Python client:
+```python
+# For Production - real CA-signed certificate (default)
+vis = visdom.Visdom(server="https://myserver.com")
+
+# For Development - self signed certificate
+vis = visdom.Visdom(ssl_verify=False)
+```
+
+> **Note**: `ssl_verify=False` disables certificate verification and should only be used in development with self-signed certificates. Do not use in production.
+
+
 #### Python example
 ```python
 import visdom
