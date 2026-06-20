@@ -807,8 +807,6 @@ const App = () => {
       let filter = getValidFilter(filterString);
       let isVisible = pane.title.match(filter);
 
-      const PANE_TITLE_BAR_HEIGHT = 14;
-
       var _height = Math.round(h2p(panelayout.h));
       var _width = Math.round(w2p(panelayout.w));
 
