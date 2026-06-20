@@ -18,7 +18,8 @@ const basic_examples = [
     ["Latex Plot", "misc_plot_latex"],
     ["Video Pane", "misc_video_tensor"],
     // ["Audio Pane", "misc_audio_basic"], // bug: disabled due to inconsistent resize
-    ["Properties Pane", "properties_basic"]
+    ["Properties Pane", "properties_basic"],
+    ['HTML Table', 'html_table'],
 ];
 
 basic_examples.forEach( (setting) => {
