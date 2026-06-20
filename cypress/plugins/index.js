@@ -56,9 +56,21 @@ module.exports = (on) => {
         assertSafeToken(`args[${index}]`, arg);
       });
 
-      const pythonPath = fs.existsSync(path.resolve(__dirname, '../../.venv/bin/python'))
-        ? path.resolve(__dirname, '../../.venv/bin/python')
-        : 'python3';
+      const envPython = process.env.VISDOM_PYTHON;
+      const venvPosix = path.resolve(__dirname, '../../.venv/bin/python');
+      const venvWindows = path.resolve(
+        __dirname,
+        '../../.venv/Scripts/python.exe'
+      );
+
+      let pythonPath = 'python3';
+      if (envPython) {
+        pythonPath = envPython;
+      } else if (fs.existsSync(venvPosix)) {
+        pythonPath = venvPosix;
+      } else if (fs.existsSync(venvWindows)) {
+        pythonPath = venvWindows;
+      }
 
       const spawnArgs = [
         'example/demo.py',
