@@ -3154,13 +3154,11 @@ class Visdom(object):
             </style>
         """
 
-        header_html = "".join(
-            "<th>%s</th>" % html.escape(str(h)) for h in headers
-        )
+        header_html = "".join("<th>%s</th>" % html.escape(str(h)) for h in headers)
         rows_html = "".join(
-            "<tr>%s</tr>" % "".join(
-                "<td>%s</td>" % html.escape(str(cell)) for cell in row
-            )
+            "<tr>%s</tr>"
+            % "".join(
+                "<td>%s</td>" % html.escape(str(cell)) for cell in row)
             for row in data
         )
 
