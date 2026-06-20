@@ -450,7 +450,7 @@ def _to_numpy(a):
         return np.array(a)
     if len(torch_types) > 0:
         if isinstance(a, torch.autograd.Variable):
-            # For PyTorch < 0.4 comptability.
+            # For PyTorch < 0.4 compatibility.
             warnings.warn(
                 "Support for versions of PyTorch less than 0.4 is deprecated "
                 "and will eventually be removed.",
@@ -459,7 +459,7 @@ def _to_numpy(a):
             a = a.data
     for kind in torch_types:
         if isinstance(a, kind):
-            # For PyTorch < 0.4 comptability, where non-Variable
+            # For PyTorch < 0.4 compatibility, where non-Variable
             # tensors do not have a 'detach' method. Will be removed.
             if hasattr(a, "detach"):
                 a = a.detach()
@@ -2187,9 +2187,9 @@ class Visdom(object):
 
         `update` can be used to efficiently update the data of an existing plot
         saved to a window given by `win`. Use the value 'appendRow' to append
-        data row-wise, 'appendRow' to append data row-wise, 'appendColumn' to
-        append data column-wise, 'prependRow' to prepend data row-wise,
-        'prependColumn' to append data column-wise, 'replace' to use new data,
+        data row-wise, 'appendColumn' to append data column-wise,
+        'prependRow' to prepend data row-wise,
+        'prependColumn' to prepend data column-wise, 'replace' to use new data,
         and 'remove' to delete the plot. Using `update=appendRow` or
         `update='appendColumn'` will create a plot if it doesn't exist and
         append to the existing plot otherwise.
@@ -2410,7 +2410,7 @@ class Visdom(object):
         if opts.get("legend") is not None:
             assert (
                 len(opts["legend"]) == X.shape[1]
-            ), "number of legened labels must match number of columns"
+            ), "number of legend labels must match number of columns"
 
         data = []
         for k in range(X.shape[1]):
@@ -2698,7 +2698,7 @@ class Visdom(object):
             assert values.ndim == 1, "values should be one-dimensional"
             assert len(parents.tolist()) == len(
                 values.tolist()
-            ), "length of values should be equal to lenght of labels and parents"
+            ), "length of values should be equal to length of labels and parents"
 
             data_dict[0]["values"] = values.tolist()
 
@@ -2918,7 +2918,7 @@ class Visdom(object):
                 * `directed` : directed (True) or undirected (False) graph; False by default
                 * `showVertexLabels` : boolean , if True displays vertex labels else hides the label; "True" by default
                 * `showEdgeLabels` :  boolean , if True displays edge labels else hides the label; "False" by default
-                * `scheme` : {"same", "different"} nodes with "same" or "diffent" colors; "same" by default
+                * `scheme` : {"same", "different"} nodes with "same" or "different" colors; "same" by default
                 * `height` : height of the Pane
                 * `width` : width of the Pane
         """
