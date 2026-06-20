@@ -116,7 +116,6 @@ def run_demo(viz, env, args):
     # ========== #
     # html table #
     # ========== #
-
     html_table(viz, env, args)
 
     # ==== #
