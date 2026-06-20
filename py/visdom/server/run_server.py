@@ -119,7 +119,7 @@ def start_server(
 
     scheme = "https" if ssl_ctx else "http"
     if print_func is None:
-        print("You can navigate to http://%s:%s%s" % (scheme, hostname, port, base_url))
+        print("You can navigate to %s://%s:%s%s" % (scheme, hostname, port, base_url))
     else:
         print_func(port)
     ioloop.IOLoop.current().start()
