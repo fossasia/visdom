@@ -78,16 +78,16 @@ class EmbeddingsPane extends React.Component {
   };
 
   onRegionSelection = (pointIdxs) => {
-    if (this.props.isFocused)
-      this.context.sendPaneMessage(
-        {
-          event_type: 'RegionSelected',
-          selectedIdxs: pointIdxs,
-          pane_data: false, // No need to send the full data for this
-        },
-        this.props.id,
-        this.props.envID
-      );
+    this.props.onFocus(this.props.id);
+    this.context.sendPaneMessage(
+      {
+        event_type: 'RegionSelected',
+        selectedIdxs: pointIdxs,
+        pane_data: false, // No need to send the full data for this
+      },
+      this.props.id,
+      this.props.envID
+    );
   };
 
   // Used to pop an embeddings drilldown off of the stack
@@ -307,7 +307,8 @@ class Scene extends React.Component {
       '#cccc00',
     ];
     let circle_sprite = new THREE.TextureLoader().load(
-      'https://fastforwardlabs.github.io/visualization_assets/circle-sprite.png'
+      'https://fastforwardlabs.github.io/visualization_assets/circle-sprite.png',
+      () => this.scheduleRender()
     );
 
     let fov = 40;

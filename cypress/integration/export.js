@@ -2,6 +2,7 @@ const exportButton = 'button[aria-label="Export as HTML"]';
 
 beforeEach(() => {
   cy.visit('/');
+  cy.contains('online');
 });
 
 describe('Test Export Env as HTML', () => {
