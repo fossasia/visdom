@@ -59,7 +59,7 @@ if (ACTIVE_ENV !== '') {
 
 const App = () => {
   // -------------- //
-  // state varibles //
+  // state variables //
   // -------------- //
 
   // api variables & functions
