@@ -48,8 +48,10 @@ assert sys.version_info[0] >= 3, "To use visdom with python 2, downgrade to v0.1
 def _normalize_tsne(Y):
     xmin, xmax = min(Y[:, 0]), max(Y[:, 0])
     ymin, ymax = min(Y[:, 1]), max(Y[:, 1])
-    normx = ((Y[:, 0] - xmin) / (xmax - xmin)) * 2 - 1
-    normy = ((Y[:, 1] - ymin) / (ymax - ymin)) * 2 - 1
+    xrange = xmax - xmin
+    yrange = ymax - ymin
+    normx = ((Y[:, 0] - xmin) / xrange) * 2 - 1 if xrange > 0 else Y[:, 0]
+    normy = ((Y[:, 1] - ymin) / yrange) * 2 - 1 if yrange > 0 else Y[:, 1]
     return list(zip(normx, normy))
 
 
