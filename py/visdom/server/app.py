@@ -15,6 +15,7 @@ import logging
 import os
 import platform
 import time
+import re
 
 import tornado.web  # noqa E402: gotta install ioloop first
 import tornado.escape  # noqa E402: gotta install ioloop first
@@ -37,6 +38,7 @@ from visdom.server.handlers.web_handlers import (
     ErrorHandler,
     ExistsHandler,
     ForkEnvHandler,
+    HealthHandler,
     IndexHandler,
     PostHandler,
     SaveHandler,
@@ -47,6 +49,9 @@ from visdom.server.defaults import (
     DEFAULT_BASE_URL,
     DEFAULT_ENV_PATH,
     DEFAULT_HOSTNAME,
+    DEFAULT_MAX_IMAGE_HISTORY,
+    DEFAULT_MAX_OLD_CONTENT,
+    DEFAULT_MAX_TEXT_LINES,
     DEFAULT_PORT,
     LAYOUT_FILE,
 )
@@ -73,6 +78,9 @@ class Application(tornado.web.Application):
         eager_data_loading=False,
     ):
         self.eager_data_loading = eager_data_loading
+        self.max_image_history = DEFAULT_MAX_IMAGE_HISTORY
+        self.max_old_content = DEFAULT_MAX_OLD_CONTENT
+        self.max_text_lines = DEFAULT_MAX_TEXT_LINES
         self.env_path = env_path
         self.state = self.load_state()
         self.layouts = self.load_layouts()
@@ -112,6 +120,7 @@ class Application(tornado.web.Application):
             (r"%s/env_state" % self.base_url, EnvStateHandler, {"app": self}),
             (r"%s/fork_env" % self.base_url, ForkEnvHandler, {"app": self}),
             (r"%s/user/(.*)" % self.base_url, UserSettingsHandler, {"app": self}),
+            (r"%s/health" % self.base_url, HealthHandler),
             (r"%s(.*)" % self.base_url, IndexHandler, {"app": self}),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)
@@ -131,7 +140,10 @@ class Application(tornado.web.Application):
                 RuntimeWarning,
             )
             return
-        layout_filepath = os.path.join(self.env_path, "view", LAYOUT_FILE)
+        layout_dir = os.path.join(self.env_path, "view")
+        ensure_dir_exists(layout_dir)
+
+        layout_filepath = os.path.join(layout_dir, LAYOUT_FILE)
         with open(layout_filepath, "w") as fn:
             fn.write(self.layouts)
 
@@ -163,24 +175,47 @@ class Application(tornado.web.Application):
             )
             return {"main": {"jsons": {}, "reload": {}}}
         ensure_dir_exists(env_path)
-        env_jsons = [i for i in os.listdir(env_path) if ".json" in i]
+        env_jsons = [i for i in os.listdir(env_path) if i.endswith(".json")]
         for env_json in env_jsons:
             eid = env_json.replace(".json", "")
             env_path_file = os.path.join(env_path, env_json)
 
-            if self.eager_data_loading:
+            is_hashed = bool(
+                re.match(r"^hash_[a-f0-9]{64}\.json$", env_json, re.IGNORECASE)
+            )
+
+            if self.eager_data_loading or is_hashed:
                 try:
                     with open(env_path_file, "r") as fn:
                         env_data = tornado.escape.json_decode(fn.read())
                 except Exception as e:
-                    logging.warn(
-                        "Failed loading environment json: {} - {}".format(
-                            env_path_file, repr(e)
-                        )
+                    logging.warning(
+                        f"Failed to load environment JSON file '{env_path_file}': {e!r}"
                     )
+
                     continue
 
-                state[eid] = {"jsons": env_data["jsons"], "reload": env_data["reload"]}
+                if is_hashed and "name" in env_data:
+                    eid = env_data["name"]
+
+                if "jsons" not in env_data or "reload" not in env_data:
+                    logging.warning(
+                        "Environment file %s is malformed or missing expected fields.",
+                        env_path_file,
+                    )
+
+                state[eid] = {
+                    "jsons": env_data.get("jsons", {}),
+                    "reload": env_data.get("reload", {}),
+                }
+
+                if is_hashed and "name" not in env_data:
+                    logging.warning(
+                        "Hashed environment json missing 'name': %s; "
+                        "falling back to filename-derived env id '%s'",
+                        env_path_file,
+                        eid,
+                    )
             else:
                 state[eid] = LazyEnvData(env_path_file)
 
@@ -196,6 +231,17 @@ class Application(tornado.web.Application):
         """Determines & uses the platform-specific root directory for user configurations."""
         if platform.system() == "Windows":
             base_dir = os.getenv("APPDATA")
+
+            if not base_dir:
+                fallback = os.path.expanduser("~")
+
+                if not fallback or fallback == "~":
+                    raise RuntimeError(
+                        "Could not determine base directory for user configurations."
+                    )
+                logging.warning("APPDATA not set, falling back to base directory")
+                base_dir = fallback
+
         elif platform.system() == "Darwin":  # osx
             base_dir = os.path.expanduser("~/Library/Preferences")
         else:

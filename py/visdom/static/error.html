@@ -1,0 +1,85 @@
+<!--
+
+Copyright 2017-present, The Visdom Authors
+All rights reserved.
+
+This source code is licensed under the license found in the
+LICENSE file in the root directory of this source tree.
+
+-->
+
+{% autoescape xhtml_escape %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Visdom - Error {{ status_code }}</title>
+  <link href={{ static_url("css/error.css") }} rel="stylesheet">
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <div class="header-title">
+      <span class="status-badge">{{ status_code }}</span>
+      {{title}}
+    </div>
+    <div class="header-sub">An unhandled exception occurred</div>
+  </div>
+
+  {% if error is not None %}
+
+    <div class="card">
+      <div class="card-head">Exception</div>
+      <div class="card-body">
+        <div class="error-type">{{ type(error).__module__ }}.{{ type(error).__name__ }}</div>
+        <div class="error-message">{{ str(error) if str(error) else "(no message)" }}</div>
+      </div>
+    </div>
+
+    {% if trace_info %}
+    <div class="card">
+      <div class="card-head">Traceback</div>
+      <div class="card-body">
+        <div class="traceback">{% for line in trace_info %}{{ line }}{% end %}</div>
+      </div>
+    </div>
+    {% end %}
+
+    {% if request %}
+    <div class="card">
+      <div class="card-head">Request</div>
+      <div class="card-body">
+        <div class="info-grid">
+          <span class="info-key">Method</span>
+          <span class="info-val method">{{ request.get("method", "—") }}</span>
+          <span class="info-key">URI</span>
+          <span class="info-val">{{ request.get("uri", "—") }}</span>
+          <span class="info-key">Remote IP</span>
+          <span class="info-val">{{ request.get("remote_ip", "—") }}</span>
+          <span class="info-key">Protocol</span>
+          <span class="info-val">{{ request.get("protocol", "—") }}</span>
+        </div>
+      </div>
+    </div>
+    {% end %}
+
+  {% else %}
+    <div class="card">
+      <div class="card-head">What happened</div>
+      <div class="card-body">
+        <p class="prod-message">
+          The visdom server encountered an internal error and could not complete your request.<br><br>
+          The error has been logged. To see details, restart the server with
+          <code>debug</code> mode or check the server logs.<br><br>
+          To report an issue,
+          <a href="https://github.com/fossasia/visdom/issues" target="_blank" class="report-link">click here</a>
+        </p>
+      </div>
+    </div>
+  {% end %}
+
+</div>
+</body>
+</html>

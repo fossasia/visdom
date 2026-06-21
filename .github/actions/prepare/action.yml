@@ -9,14 +9,23 @@ inputs:
     description: 'use true to load the resulting build files (from previous step)'
     required: true
     default: true
+  python-version:
+    description: 'Python version to use'
+    required: false
+    default: '3.10'
 
 runs:
   using: "composite"
   steps:
-      - name: "Setup Node" 
-        uses: actions/setup-node@v3
+      - name: "Setup Python"
+        uses: actions/setup-python@v6
         with:
-          node-version: '16'
+          python-version: ${{ inputs['python-version'] }}
+
+      - name: "Setup Node"
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
 
       - name: "Action Settings"
         run: |
@@ -58,11 +67,11 @@ runs:
       - name: "Install npm Dependencies"
         shell: bash
         run: |
-          npm install
+          ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm install
 
       # load artifacts from previous runs
       - name: "Load built js-files"
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: pr-build
           path: ./py/visdom/static/js/

@@ -20,6 +20,7 @@ function ViewControls(props) {
     onViewManageButton,
     onRepackButton,
     onViewChange,
+    onExportHtml,
   } = props;
 
   // rendering
@@ -80,6 +81,17 @@ function ViewControls(props) {
           onClick={onViewManageButton}
         >
           <span className="glyphicon glyphicon-folder-open" />
+        </button>
+        <button
+          data-toggle="tooltip"
+          title="Export as HTML"
+          data-placement="bottom"
+          className="btn btn-default"
+          disabled={!(connected && envIDs.length > 0)}
+          onClick={onExportHtml}
+          aria-label="Export as HTML"
+        >
+          <span className="glyphicon glyphicon-download" />
         </button>
       </div>
     </span>

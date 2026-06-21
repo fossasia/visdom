@@ -19,7 +19,7 @@ from components.plot_line import plot_line_basic, plot_line_multiple, plot_line_
 from components.plot_special import plot_special_boxplot, plot_special_quiver, plot_special_mesh, plot_special_graph
 from components.properties import properties_basic, properties_callbacks
 from components.misc import misc_plot_matplot, misc_plot_latex, misc_plot_latex_update, misc_video_tensor, misc_video_download, misc_audio_basic, misc_audio_download, misc_arbitrary_visdom, misc_getset_state
-
+from components.plot_violin import plot_violin_basic, plot_violin_multigroup, plot_violin_with_points, plot_violin_horizontal
 
 # This demo shows all features in a single environment.
 def run_demo(viz, env, args):
@@ -104,6 +104,14 @@ def run_demo(viz, env, args):
     plot_special_mesh(viz, env, args)
     plot_special_graph(viz, env, args)
 
+    # ============ #
+    # violin plots #
+    # ============ #
+    plot_violin_basic(viz, env, args)
+    plot_violin_multigroup(viz, env, args)
+    plot_violin_with_points(viz, env, args)
+    plot_violin_horizontal(viz, env, args)
+
     # ==== #
     # misc #
     # ==== #
@@ -144,7 +152,7 @@ if __name__ == '__main__':
     parser.add_argument('-env', help='env name to save demo in. By default, main is used for \'-run all\' and otherwise the demo chosen using \'-run\'.', default="")
     # parser.add_argument('-env', help='The env to save the demo to.', default="main")
     parser.add_argument('-env_suffix', help='The env suffix to save the demo to.', default="")
-    parser.add_argument('-args', nargs='*', help='Additonal arguments passed to the requested demo. (Mainly to be used for automated testing).', default="")
+    parser.add_argument('-args', nargs='*', help='Additional arguments passed to the requested demo. (Mainly to be used for automated testing).', default=[""])
     parser.add_argument('-seed', help='Seed to use for random data in -testing mode. (Default: 42)', default=42)
     parser.add_argument('-testing', help='(To be mainly to be used for automated testing). If set to true, waits 10 seconds for callback actions and closes then automatically. Also this sets a random seed for consistent outcomes.', default=False, action='store_true')
     FLAGS = parser.parse_args()
@@ -158,6 +166,7 @@ if __name__ == '__main__':
     if FLAGS.run == "all":
         try:
             run_demo(viz, FLAGS.env if FLAGS.env else None, FLAGS.args)
+            print("Demo running! Check out the visualizations at {}:{}".format(FLAGS.server, FLAGS.port))
         except Exception as e:
             print(
                 "The visdom experienced an exception while running: {}\n"
