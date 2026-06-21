@@ -8,8 +8,8 @@
  */
 
 import { polygonContains } from 'd3-polygon';
-import { event as currentEvent, mouse, select } from 'd3-selection';
-import * as d3 from 'd3-zoom';
+import { pointer, select } from 'd3-selection';
+import { zoom as d3zoom, zoomIdentity } from 'd3-zoom';
 import debounce from 'debounce';
 import React from 'react';
 import * as THREE from 'three';
@@ -22,6 +22,17 @@ import Pane from './Pane';
 const SCALE_RADIUS = 2000;
 
 class EmbeddingsPane extends React.Component {
+  shouldComponentUpdate(nextProps) {
+    if (this.props.contentID !== nextProps.contentID) return true;
+    if (
+      Math.round(this.props.height) !== Math.round(nextProps.height) ||
+      Math.round(this.props.width) !== Math.round(nextProps.width)
+    )
+      return true;
+    if (this.props.isFocused !== nextProps.isFocused) return true;
+    return false;
+  }
+
   onEvent = (e) => {
     if (!this.props.isFocused) {
       return;
@@ -67,16 +78,16 @@ class EmbeddingsPane extends React.Component {
   };
 
   onRegionSelection = (pointIdxs) => {
-    if (this.props.isFocused)
-      this.context.sendPaneMessage(
-        {
-          event_type: 'RegionSelected',
-          selectedIdxs: pointIdxs,
-          pane_data: false, // No need to send the full data for this
-        },
-        this.props.id,
-        this.props.envID
-      );
+    this.props.onFocus(this.props.id);
+    this.context.sendPaneMessage(
+      {
+        event_type: 'RegionSelected',
+        selectedIdxs: pointIdxs,
+        pane_data: false, // No need to send the full data for this
+      },
+      this.props.id,
+      this.props.envID
+    );
   };
 
   // Used to pop an embeddings drilldown off of the stack
@@ -154,9 +165,20 @@ class Scene extends React.Component {
   constructor(props) {
     super(props);
 
-    this.start = this.start.bind(this);
-    this.stop = this.stop.bind(this);
-    this.animate = this.animate.bind(this);
+    this.scheduleRender = this.scheduleRender.bind(this);
+    this.renderFrame = this.renderFrame.bind(this);
+  }
+
+  shouldComponentUpdate(nextProps, nextState) {
+    return (
+      nextProps.content.data !== this.props.content.data ||
+      nextProps.content.data.length !== this.props.content.data.length ||
+      Math.round(nextProps.height) !== Math.round(this.props.height) ||
+      Math.round(nextProps.width) !== Math.round(this.props.width) ||
+      nextProps.interactive !== this.props.interactive ||
+      nextState.detailsLoading !== this.state.detailsLoading ||
+      nextState.selectMode !== this.state.selectMode
+    );
   }
 
   componentDidUpdate(prevProps) {
@@ -202,9 +224,9 @@ class Scene extends React.Component {
     let hoverContainer = new THREE.Object3D();
     scene.add(hoverContainer);
 
-    view.on('mousemove', () => {
+    view.on('mousemove', (event) => {
       if (!this.props.interactive) return;
-      let [mouseX, mouseY] = mouse(view.node());
+      let [mouseX, mouseY] = pointer(event, view.node());
       let mouse_position = [mouseX, mouseY];
       this.checkIntersects(
         mouse_position,
@@ -216,20 +238,23 @@ class Scene extends React.Component {
 
     view.on('mouseleave', () => {
       this.removeHighlights(hoverContainer);
+      this.scheduleRender();
     });
 
     this.raycaster = raycaster;
 
     /* ----------------------------------------------------------- */
 
-    let zoom = d3
-      .zoom()
-      .scaleExtent([this.getScaleFromZ(far), this.getScaleFromZ(near) - 1]);
-    zoom.on('zoom', () => {
+    let zoom = d3zoom().scaleExtent([
+      this.getScaleFromZ(far),
+      this.getScaleFromZ(near) - 1,
+    ]);
+    zoom.on('zoom', (event) => {
       if (!this.props.interactive) return;
-      let d3_transform = currentEvent.transform;
-      this.lastTransform = currentEvent.transform;
+      let d3_transform = event.transform;
+      this.lastTransform = event.transform;
       this.zoomHandler(d3_transform);
+      this.scheduleRender();
     });
     this.zoom = zoom;
 
@@ -239,7 +264,7 @@ class Scene extends React.Component {
 
       if (!this.lastTransform) {
         let initial_scale = this.getScaleFromZ(far);
-        initial_transform = d3.zoomIdentity
+        initial_transform = zoomIdentity
           .translate(this.props.width / 2, this.props.height / 2)
           .scale(initial_scale);
 
@@ -283,7 +308,8 @@ class Scene extends React.Component {
       '#cccc00',
     ];
     let circle_sprite = new THREE.TextureLoader().load(
-      'https://fastforwardlabs.github.io/visualization_assets/circle-sprite.png'
+      'https://fastforwardlabs.github.io/visualization_assets/circle-sprite.png',
+      () => this.scheduleRender()
     );
 
     let fov = 40;
@@ -347,7 +373,7 @@ class Scene extends React.Component {
     this.setUpMouseInteractions();
 
     this.mount.appendChild(this.renderer.domElement);
-    this.start();
+    this.scheduleRender();
   }
 
   componentWillUnmount() {
@@ -410,9 +436,11 @@ class Scene extends React.Component {
       let datum = this.generated_points[index];
       this.highlightPoint(datum, hoverContainer, circle_sprite);
       this.showTooltip(mouse_position, datum);
-    } else {
+      this.scheduleRender();
+    } else if (hoverContainer.children.length > 0) {
       this.removeHighlights(hoverContainer);
       this.hideTooltip();
+      this.scheduleRender();
     }
   }
 
@@ -459,23 +487,25 @@ class Scene extends React.Component {
     hoverContainer.remove(...hoverContainer.children);
   }
 
-  start() {
-    if (!this.frameId) {
-      this.frameId = requestAnimationFrame(this.animate);
+  scheduleRender() {
+    if (this.frameId) {
+      return;
+    }
+    this.frameId = requestAnimationFrame(this.renderFrame);
+  }
+
+  renderFrame() {
+    this.frameId = null;
+    if (this.renderer && this.scene && this.camera) {
+      this.renderer.render(this.scene, this.camera);
     }
   }
 
   stop() {
-    cancelAnimationFrame(this.frameId);
-  }
-
-  animate() {
-    this.renderScene();
-    this.frameId = window.requestAnimationFrame(this.animate);
-  }
-
-  renderScene() {
-    this.renderer.render(this.scene, this.camera);
+    if (this.frameId) {
+      cancelAnimationFrame(this.frameId);
+      this.frameId = null;
+    }
   }
 
   render() {

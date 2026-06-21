@@ -34,10 +34,7 @@ function ImageComparePane(props) {
   };
 
   return (
-    <Pane
-      {...props}
-      handleDownload={handleDownload}
-    >
+    <Pane {...props} handleDownload={handleDownload}>
       <div
         style={{
           display: 'flex',
@@ -46,31 +43,31 @@ function ImageComparePane(props) {
           height: '100%',
           overflowX: 'auto',
           alignItems: 'center',
-          justifyContent: 'space-around'
+          justifyContent: 'space-around',
         }}
       >
         {content.map((imgItem, idx) => (
           <div
-             key={`${id}-compare-${idx}`}
-             style={{
-               flex: 1,
-               display: 'flex',
-               flexDirection: 'column',
-               alignItems: 'center',
-               padding: '5px'
-             }}
+            key={`${id}-compare-${idx}`}
+            style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              padding: '5px',
+            }}
           >
-      {/* Only show the legend if there are multiple images being compared */}
+            {/* Show legend if comparing multiple images */}
             {content.length > 1 && imgItem.caption && (
-               <span
-                 className="widget"
-                 style={{
-                   marginBottom: '5px',
-                   fontWeight: 'bold'
-                 }}
-               >
-                 {imgItem.caption}
-               </span>
+              <span
+                className="widget"
+                style={{
+                  marginBottom: '5px',
+                  fontWeight: 'bold',
+                }}
+              >
+                {imgItem.caption}
+              </span>
             )}
             <img
               className="content-image"
@@ -79,7 +76,7 @@ function ImageComparePane(props) {
               style={{
                 maxWidth: '100%',
                 maxHeight: '100%',
-                objectFit: 'contain'
+                objectFit: 'contain',
               }}
             />
           </div>

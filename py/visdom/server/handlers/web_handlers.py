@@ -31,7 +31,7 @@ except ImportError:
     from collections import Mapping, Sequence
 
 import tornado.escape
-from visdom.utils.shared_utils import get_rand_id
+from visdom.utils.shared_utils import get_rand_id, NanSafeEncoder
 from visdom.utils.server_utils import (
     check_auth,
     extract_eid,
@@ -183,8 +183,8 @@ class UpdateHandler(BaseHandler):
 
         # Delete a trace
         if args.get("delete"):
-            for idx in idxs:
-                del pdata[idx]
+            idxs_set = set(idxs)
+            p["content"]["data"] = [e for i, e in enumerate(pdata) if i not in idxs_set]
             return p
 
         # add new heatmap data if plot has been deleted previously
@@ -328,6 +328,9 @@ class UpdateHandler(BaseHandler):
     def wrap_func(handler, args):
         eid = extract_eid(args)
 
+        if eid not in handler.state:
+            handler.state[eid] = {"jsons": {}, "reload": {}}
+
         if args["win"] not in handler.state[eid]["jsons"]:
             # Append to a window that doesn't exist attempts to create
             # that window
@@ -465,7 +468,7 @@ class EnvStateHandler(BaseHandler):
                 handler.set_status(404)
                 handler.write(json.dumps({"error": "env '{}' not found".format(eid)}))
                 return
-            handler.write(json.dumps(handler.state[eid]["jsons"]))
+            handler.write(json.dumps(handler.state[eid]["jsons"], cls=NanSafeEncoder))
         else:
             all_eids = list(handler.state.keys())
             handler.write(json.dumps(all_eids))
@@ -507,6 +510,8 @@ class EnvHandler(BaseHandler):
 
     @check_auth
     def get(self, eid):
+        if eid not in self.state:
+            raise tornado.web.HTTPError(404, reason=f"Environment '{eid}' not found")
         self.render(
             "index.html",
             wrap_socket=self.wrap_socket,
@@ -537,6 +542,11 @@ class CompareHandler(BaseHandler):
 
     @check_auth
     def get(self, eids):
+        for eid in eids.split("+"):
+            if eid not in self.state:
+                raise tornado.web.HTTPError(
+                    404, reason=f"Environment '{eid}' not found"
+                )
         self.render(
             "index.html",
             wrap_socket=self.wrap_socket,
@@ -597,12 +607,18 @@ class DataHandler(BaseHandler):
         else:
             # Dump data to client
             if "win" in args and args["win"] is None:
-                handler.write(json.dumps(handler.state[eid]["jsons"]))
+                handler.write(
+                    json.dumps(handler.state[eid]["jsons"], cls=NanSafeEncoder)
+                )
             else:
                 assert (
                     args["win"] in handler.state[eid]["jsons"]
                 ), "Window {} doesn't exist in env {}".format(args["win"], eid)
-                handler.write(json.dumps(handler.state[eid]["jsons"][args["win"]]))
+                handler.write(
+                    json.dumps(
+                        handler.state[eid]["jsons"][args["win"]], cls=NanSafeEncoder
+                    )
+                )
 
     @check_auth
     def post(self):
@@ -646,11 +662,11 @@ class IndexHandler(BaseHandler):
     def post(self, arg, **kwargs):
         json_obj = tornado.escape.json_decode(self.request.body)
         username = json_obj["username"]
-        password = hash_password(json_obj["password"])
+        stored = self.user_credential["password"]
+        salt = stored.split("$")[0]
+        password = hash_password(json_obj["password"], salt=salt)
 
-        if (username == self.user_credential["username"]) and (
-            password == self.user_credential["password"]
-        ):
+        if (username == self.user_credential["username"]) and (password == stored):
             self.set_secure_cookie("user_password", username + password)
         else:
             self.set_status(400)
