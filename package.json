@@ -41,7 +41,7 @@
     "assert": "^2.1.0",
     "browserify-zlib": "^0.2.0",
     "buffer": "^6.0.3",
-    "css-loader": "^6.7.3",
+    "css-loader": "^7.1.4",
     "d3-dispatch": "^3.0.1",
     "d3-drag": "^3.0.0",
     "d3-polygon": "^3.0.1",
