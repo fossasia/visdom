@@ -1,4 +1,5 @@
 import { POLLING_INTERVAL } from '../settings.js';
+import { dispatchMessages } from './messageUtils.js';
 
 function postData(url = ``, data = {}) {
   return fetch(url, {
@@ -74,13 +75,7 @@ class Poller {
           if (!result.success) {
             this.close();
           } else {
-            let messages = result.messages;
-            messages.forEach((msg) => {
-              // Must re-encode message as handle message expects json
-              // in this particular format from sockets
-              // TODO Could refactor message parsing out elsewhere.
-              this.onmessage({ data: msg });
-            });
+            dispatchMessages(result.messages, this.onmessage);
           }
         },
         () => {
