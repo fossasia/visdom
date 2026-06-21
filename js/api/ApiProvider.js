@@ -203,7 +203,9 @@ const ApiProvider = ({ children }) => {
           sid: sessionInfo.id,
         })
       ).fail((xhr) => {
-        document.documentElement.innerHTML = xhr.responseText;
+        document.open();
+        document.write(xhr.responseText);
+        document.close();
       });
     } else if (envIDs.length > 1) {
       $.post(
@@ -213,7 +215,9 @@ const ApiProvider = ({ children }) => {
           show_all: !!showAll,
         })
       ).fail((xhr) => {
-        document.documentElement.innerHTML = xhr.responseText;
+        document.open();
+        document.write(xhr.responseText);
+        document.close();
       });
     }
   };
