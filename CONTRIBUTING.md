@@ -48,7 +48,7 @@ confirm all dependencies are found.
 To produce visualizations, visdom uses [plotly](https://plotly.com/). Specifically,
 the client code produces a JSON-structure that is passed on to plot.ly by the
 server. This implies that, _given the right input, visdom can display any
-visualization that plot.ly supports_. You can find an up-to-date guide to plot.ly
+visualization that plot.ly supports_. You can find an up-to-date guide to plotly
 features [here](https://plotly.com/python/).
 
 The visdom exposes easy access to the most common plot.ly features, but does not
