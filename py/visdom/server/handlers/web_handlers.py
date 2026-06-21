@@ -408,7 +408,11 @@ class CloseHandler(BaseHandler):
         keys = list(handler.state[eid]["jsons"].keys()) if win is None else [win]
         for win in keys:
             handler.state[eid]["jsons"].pop(win, None)
-            broadcast(handler, json.dumps({"command": "close", "data": win}), eid)
+            broadcast(
+                handler,
+                json.dumps({"command": "close", "data": win}, cls=NanSafeEncoder),
+                eid,
+            )
 
     @check_auth
     def post(self):

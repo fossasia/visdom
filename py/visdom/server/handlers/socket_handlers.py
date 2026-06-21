@@ -253,7 +253,9 @@ class VisSocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
             self.close()
             return
         super().open("sources")
-        self.write_message(json.dumps({"command": "alive", "data": "vis_alive"}))
+        self.write_message(
+            json.dumps({"command": "alive", "data": "vis_alive"}, cls=NanSafeEncoder)
+        )
 
     def on_close(self):
         if self in list(self.sources.values()):
@@ -266,7 +268,7 @@ class VisSocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
         if cmd == "echo":
             logging.info(f"from visdom client: {message}")
             for sub in self.sources.values():
-                sub.write_message(json.dumps(msg))
+                sub.write_message(json.dumps(msg, cls=NanSafeEncoder))
             return
 
         super().on_message(message)
@@ -306,7 +308,8 @@ class SocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
                     "data": self.sid,
                     "readonly": self.readonly,
                     "envList": sorted(list(self.state.keys())),
-                }
+                },
+                cls=NanSafeEncoder,
             )
         )
         self.broadcast_layouts([self])
@@ -317,7 +320,10 @@ class SocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
             target_subs = self.subs.values()
         for sub in target_subs:
             sub.write_message(
-                json.dumps({"command": "layout_update", "data": self.app.layouts})
+                json.dumps(
+                    {"command": "layout_update", "data": self.app.layouts},
+                    cls=NanSafeEncoder,
+                )
             )
 
     def initialize(self, app):

@@ -317,7 +317,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH, show_all=False)
 
     valid_eids = [eid for eid in eids if eid in envs]
     if not valid_eids:
-        socket.write_message(json.dumps({"command": "layout"}))
+        socket.write_message(json.dumps({"command": "layout"}, cls=NanSafeEncoder))
         socket.eid = eids
         return
     base_eid = valid_eids[0]
@@ -477,14 +477,16 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH, show_all=False)
         "has_compare": True,
     }
     if "reload" in res:
-        socket.write_message(json.dumps({"command": "reload", "data": res["reload"]}))
+        socket.write_message(
+            json.dumps({"command": "reload", "data": res["reload"]}, cls=NanSafeEncoder)
+        )
 
     jsons = list(res.get("jsons", {}).values())
     windows = sorted(jsons, key=lambda k: ("i" not in k, k.get("i", None)))
     for v in windows:
         socket.write_message(json.dumps(v, cls=NanSafeEncoder))
 
-    socket.write_message(json.dumps({"command": "layout"}))
+    socket.write_message(json.dumps({"command": "layout"}, cls=NanSafeEncoder))
     socket.eid = eids
 
 
@@ -496,14 +498,17 @@ def broadcast_envs(handler, target_subs=None):
         target_subs = handler.subs.values()
     for sub in target_subs:
         sub.write_message(
-            json.dumps({"command": "env_update", "data": list(handler.state.keys())})
+            json.dumps(
+                {"command": "env_update", "data": list(handler.state.keys())},
+                cls=NanSafeEncoder,
+            )
         )
 
 
 def send_to_sources(handler, msg):
     target_sources = handler.sources.values()
     for source in target_sources:
-        source.write_message(json.dumps(msg))
+        source.write_message(json.dumps(msg, cls=NanSafeEncoder))
 
 
 def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
@@ -541,7 +546,7 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
         msg["eid"] = eid
         socket.write_message(json.dumps(msg, cls=NanSafeEncoder))
 
-    socket.write_message(json.dumps({"command": "layout"}))
+    socket.write_message(json.dumps({"command": "layout"}, cls=NanSafeEncoder))
     socket.eid = eid
 
 
