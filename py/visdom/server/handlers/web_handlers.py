@@ -559,13 +559,19 @@ class CompareHandler(BaseHandler):
         sid = body["sid"]
         show_all = body.get("show_all", False)
         if sid in self.subs:
-            compare_envs(
-                self.state,
-                args.split("+"),
-                self.subs[sid],
-                self.env_path,
-                show_all=show_all,
-            )
+            try:
+                compare_envs(
+                    self.state,
+                    args.split("+"),
+                    self.subs[sid],
+                    self.env_path,
+                    show_all=show_all,
+                )
+            except ValueError as e:
+                raise tornado.web.HTTPError(
+                    400,
+                    reason="Could not compare environments: invalid environment JSON format",
+                )
 
 
 class SaveHandler(BaseHandler):
