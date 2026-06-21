@@ -15,7 +15,6 @@ in the previous server.py class.
 """
 
 import copy
-import html
 import hashlib
 import html
 import json
@@ -483,7 +482,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH, show_all=False)
     jsons = list(res.get("jsons", {}).values())
     windows = sorted(jsons, key=lambda k: ("i" not in k, k.get("i", None)))
     for v in windows:
-        socket.write_message(v)
+        socket.write_message(json.dumps(v, cls=NanSafeEncoder))
 
     socket.write_message(json.dumps({"command": "layout"}))
     socket.eid = eids
@@ -540,7 +539,7 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
     for v in windows:
         msg = dict(v)
         msg["eid"] = eid
-        socket.write_message(msg)
+        socket.write_message(json.dumps(msg, cls=NanSafeEncoder))
 
     socket.write_message(json.dumps({"command": "layout"}))
     socket.eid = eid
@@ -574,7 +573,7 @@ def register_window(self, p, eid):
 
     broadcast_msg = dict(p)
     broadcast_msg["eid"] = eid
-    broadcast(self, broadcast_msg, eid)
+    broadcast(self, json.dumps(broadcast_msg, cls=NanSafeEncoder), eid)
     if is_new_env:
         broadcast_envs(self)
     self.write(p["id"])
