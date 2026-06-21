@@ -46,15 +46,17 @@ function EnvControls(props) {
   var env_options2 = [];
   var parentKeys = {};
 
-  Object.keys(childrenByPrefix).sort().forEach((prefix) => {
-    parentKeys[prefix] = keyCounter;
-    env_options2.push({
-      key: keyCounter++,
-      pId: 0,
-      label: prefix,
-      value: '__group__' + prefix,
+  Object.keys(childrenByPrefix)
+    .sort()
+    .forEach((prefix) => {
+      parentKeys[prefix] = keyCounter;
+      env_options2.push({
+        key: keyCounter++,
+        pId: 0,
+        label: prefix,
+        value: '__group__' + prefix,
+      });
     });
-  });
 
   slist.forEach((env) => {
     var idx = env.indexOf('_');

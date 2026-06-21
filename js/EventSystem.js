@@ -33,7 +33,7 @@ class EventSystem {
   }
 
   //  the callback parameter is optional. Without it the whole event will be
-  // removed, instead of just one subscibtion. Fine for simple implementation
+  // removed, instead of just one subscription. Fine for simple implementation
   unsubscribe(event, callback) {
     let queue = this.queue;
 

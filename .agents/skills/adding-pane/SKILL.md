@@ -44,3 +44,21 @@ Use this skill when adding a new visualization type (e.g., a new chart, widget, 
 - Follow the `forwardRef` + `React.memo` pattern for pane components
 - Import and register new panes in `js/settings.js`
 - Never manually edit compiled files in `py/visdom/static/`
+
+## Documentation
+
+- [Skill reference](references/REFERENCE.md)
+- `py/visdom/__init__.py`
+- `py/visdom/utils/server_utils.py`
+- `js/settings.js`
+- `js/panes/`
+- `AGENTS.md`
+- `CONTRIBUTING.md`
+
+## Assets
+
+- See `assets/README.md` and store templates/resources in `assets/`.
+
+## Tests
+
+- Follow the default flow in `references/TESTS.md`.
