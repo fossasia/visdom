@@ -308,8 +308,10 @@ var PlotPane = (props) => {
           content.data?.[0]?.type === 'heatmap'
             ? ' plotly-heatmap'
             : content.data?.[0]?.type === 'contour'
-              ? ' plotly-contour'
-              : ''
+            ? ' plotly-contour'
+            : content.data?.[0]?.type === 'surface'
+            ? ' plotly-surface'
+            : ''
         }`}
         ref={plotlyRef}
       />
