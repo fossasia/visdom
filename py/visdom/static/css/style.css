@@ -357,3 +357,7 @@ button[title="smooth lines"].active {
 .env-arrow-btn:hover:not(:disabled) {
   background-color: #e0e0e0;
 }
+
+.pull-right {
+  padding-right: 8px;
+}
