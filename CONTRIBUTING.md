@@ -46,12 +46,12 @@ confirm all dependencies are found.
 
 **Issue: I would like to make a plot that has feature X:**
 To produce visualizations, visdom uses [plotly](https://plotly.com/). Specifically,
-the client code produces a JSON-structure that is passed on to plot.ly by the
+the client code produces a JSON-structure that is passed on to plotly by the
 server. This implies that, _given the right input, visdom can display any
-visualization that plot.ly supports_. You can find an up-to-date guide to plotly
+visualization that plotly supports_. You can find an up-to-date guide to plotly
 features [here](https://plotly.com/python/).
 
-The visdom exposes easy access to the most common plot.ly features, but does not
+The visdom exposes easy access to the most common plotly features, but does not
 expose all of them. You are more than welcome to hack the client code producing
 the data structure (in `py/__init__.py`) to include the feature you want to use.
 All available options for each plot type are described in [the plotly manual](https://plotly.com/python/).
