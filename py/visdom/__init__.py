@@ -44,43 +44,59 @@ import sys
 
 assert sys.version_info[0] >= 3, "To use visdom with python 2, downgrade to v0.1.8.9"
 
+
+def _normalize_tsne(Y):
+    xmin, xmax = min(Y[:, 0]), max(Y[:, 0])
+    ymin, ymax = min(Y[:, 1]), max(Y[:, 1])
+    normx = ((Y[:, 0] - xmin) / (xmax - xmin)) * 2 - 1
+    normy = ((Y[:, 1] - ymin) / (ymax - ymin)) * 2 - 1
+    return list(zip(normx, normy))
+
+
+def _get_perplexity(num_entities):
+    if num_entities >= 150:
+        return 50
+    elif num_entities >= 21:
+        return num_entities // 3
+    else:
+        return 7
+
+
 try:
-    # TODO try to import https://github.com/CannyLab/tsne-cuda first? will be
-    # faster but requires more setup
-    import visdom.extra_deps.bhtsne.bhtsne as bhtsne
+    from tsnecuda import TSNE as TSNE_CUDA
 
     def do_tsne(X):
-        num_entities = len(X)
-
-        # the number of entities provided must be at least 3x the perplexity
-        if num_entities >= 150:
-            perplexity = 50
-        elif num_entities >= 21:
-            perplexity = num_entities // 3
-        else:
-            perplexity = 7
-        Y = bhtsne.run_bh_tsne(
-            X, initial_dims=X.shape[1], perplexity=perplexity, verbose=True
-        )
-        xmin, xmax = min(Y[:, 0]), max(Y[:, 0])
-        ymin, ymax = min(Y[:, 1]), max(Y[:, 1])
-        normx = ((Y[:, 0] - xmin) / (xmax - xmin)) * 2 - 1
-        normy = ((Y[:, 1] - ymin) / (ymax - ymin)) * 2 - 1
-        normY = list(zip(normx, normy))
-        return normY
+        perplexity = _get_perplexity(len(X))
+        tsne = TSNE_CUDA(n_components=2, perplexity=perplexity, verbose=True)
+        Y = tsne.fit_transform(X)
+        return _normalize_tsne(Y)
 
 except ImportError:
+    try:
+        import visdom.extra_deps.bhtsne.bhtsne as bhtsne
 
-    def do_tsne(X):
-        raise Exception(
-            "In order to use the embeddings feature, you'll "
-            "need to install a backend to support the calculation. "
-            "Currently we support the bhtsne implementation at "
-            "https://github.com/lvdmaaten/bhtsne/, and you can install "
-            "this by cloning it into the /py/visdom/extra_deps/ directory "
-            "and running the installation steps as listed on that github "
-            "in the created /py/visdom/extra_deps/bhtsne directory."
-        )
+        def do_tsne(X):
+            perplexity = _get_perplexity(len(X))
+            Y = bhtsne.run_bh_tsne(
+                X, initial_dims=X.shape[1], perplexity=perplexity, verbose=True
+            )
+            return _normalize_tsne(Y)
+
+    except ImportError:
+
+        def do_tsne(X):
+            raise Exception(
+                "In order to use the embeddings feature, you'll "
+                "need to install a backend to support the calculation. "
+                "Currently we support tsnecuda "
+                "(https://github.com/CannyLab/tsne-cuda) for GPU-accelerated "
+                "t-SNE, or the bhtsne implementation at "
+                "https://github.com/lvdmaaten/bhtsne/. Install tsnecuda via "
+                "pip install tsnecuda, or install bhtsne by cloning it into "
+                "the /py/visdom/extra_deps/ directory and running the "
+                "installation steps as listed on that github "
+                "in the created /py/visdom/extra_deps/bhtsne directory."
+            )
 
 
 here = os.path.abspath(os.path.dirname(__file__))
