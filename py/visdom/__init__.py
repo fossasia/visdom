@@ -1491,9 +1491,9 @@ class Visdom(object):
                     img = (img - img_min) / (img_max - img_min) * 255.0
                 else:
                     img = np.zeros_like(img)
-            elif img_min >= 0.0 and img_max <= 1.0 + 1e-5:
+            elif img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
                 img = img * 255.0
-            elif img_min >= -1.0 - 1e-5 and img_max <= 1.0 + 1e-5:
+            elif img_min >= -1.0 - 1e-5 and 1e-5 < img_max <= 1.0 + 1e-5:
                 img = (img + 1.0) / 2.0 * 255.0
             img = np.uint8(np.clip(img, 0, 255))
 
