@@ -415,6 +415,12 @@ describe('Image Pane', () => {
     cy.get(win_selector)
       .contains('CompareTest')
       .parents(win_selector)
+      .find('img.content-image')
+      .should('have.length', 2);
+
+    cy.get(win_selector)
+      .contains('CompareTest')
+      .parents(win_selector)
       .find("button[title='save']")
       .click();
 
