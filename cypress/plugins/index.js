@@ -88,6 +88,20 @@ module.exports = (on) => {
       };
     },
 
+    deleteFile(filePath) {
+      if (typeof filePath !== 'string') {
+        throw new Error('deleteFile requires a string file path.');
+      }
+      try {
+        fs.unlinkSync(filePath);
+      } catch (e) {
+        if (e.code !== 'ENOENT') {
+          throw e;
+        }
+      }
+      return null;
+    },
+
     numDifferentPixels({
       src1,
       src2,
