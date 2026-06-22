@@ -69,15 +69,18 @@ const PaneWrapper = ({
   defaultHeight,
 }) => {
   const { width, height, ref } = useResizeDetector();
+  const PANE_TITLE_BAR_HEIGHT = 14;
 
   const finalWidth =
     width !== undefined && width > 0 ? width - 2 : defaultWidth;
   const finalHeight =
-    height !== undefined && height > 0 ? height - 2 : defaultHeight;
+    (height !== undefined && height > 0 ? height - 2 : defaultHeight) -
+    PANE_TITLE_BAR_HEIGHT;
 
   return (
     <div ref={ref} style={{ width: '100%', height: '100%' }}>
       <Comp
+        key={pane.id}
         {...pane}
         envID={envID}
         onClose={onClose}
