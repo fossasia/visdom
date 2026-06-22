@@ -4,10 +4,9 @@ on:
   push:
     branches:
       - master
+      - dev
     paths:
       - 'website/**'
-      - 'README.md'
-      - 'CONTRIBUTING.md'
   workflow_dispatch:
 
 permissions:
