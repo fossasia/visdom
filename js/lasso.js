@@ -9,7 +9,7 @@
 
 import { dispatch as d3dispatch } from 'd3-dispatch';
 import { drag as d3drag } from 'd3-drag';
-import * as d3 from 'd3-selection';
+import { pointer as d3pointer } from 'd3-selection';
 
 function polygonToPath(polygon) {
   return (
@@ -56,8 +56,8 @@ export default function lasso() {
     var closePath;
     var closeCircle;
 
-    function handleDragStart() {
-      lassoPolygon = [d3.mouse(this)];
+    function handleDragStart(event) {
+      lassoPolygon = [d3pointer(event, this)];
       if (lassoPath) {
         lassoPath.remove();
       }
@@ -93,8 +93,11 @@ export default function lasso() {
       dispatch.call('start', lasso, lassoPolygon);
     }
 
-    function handleDrag() {
-      var point = d3.mouse(this);
+    function handleDrag(event) {
+      // If reset() was called mid-drag, bail out safely.
+      if (!lassoPolygon || !lassoPath || !closePath || !closeCircle) return;
+
+      var point = d3pointer(event, this);
       lassoPolygon.push(point);
       lassoPath.attr('d', polygonToPath(lassoPolygon));
 
@@ -106,7 +109,9 @@ export default function lasso() {
       var color = withinClose ? '#0a0' : '#0bb';
 
       lassoPath.attr('stroke', color).attr('fill', color);
-      closeCircle.attr('stroke', color).attr('opacity', withinClose ? 0.9 : 0.5);
+      closeCircle
+        .attr('stroke', color)
+        .attr('opacity', withinClose ? 0.9 : 0.5);
       if (withinClose) {
         closePath
           .attr('x1', point[0])
@@ -120,8 +125,10 @@ export default function lasso() {
 
     function handleDragEnd() {
       // remove the close path and circle
-      closePath.remove();
-      closePath = null;
+      if (closePath) {
+        closePath.remove();
+        closePath = null;
+      }
       if (closeCircle) {
         closeCircle.remove();
         closeCircle = null;
@@ -129,18 +136,23 @@ export default function lasso() {
 
       // successfully closed
       if (
+        lassoPolygon &&
+        lassoPath &&
         distance(lassoPolygon[0], lassoPolygon[lassoPolygon.length - 1]) <
-        closeDistance
+          closeDistance
       ) {
         lassoPath.attr('d', polygonToPath(lassoPolygon) + 'Z');
         dispatch.call('end', lasso, lassoPolygon);
 
         // otherwise cancel
       } else {
-        lassoPath.remove();
-        lassoPath = null;
-        lassoPolygon = null;
+        if (lassoPath) {
+          lassoPath.remove();
+          lassoPath = null;
+        }
       }
+
+      lassoPolygon = null;
     }
 
     lasso.reset = function () {
