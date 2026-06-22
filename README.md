@@ -76,8 +76,8 @@ Right now the following callback events are supported:
 
 <details>
 <summary><b>Editable Plot Parameters</b></summary>
-Use the top-right *edit*-Button to inspect all parameters used for plot in the respective window.  
-The visdom client supports dynamic change of plot parameters as well. Just change one of the listed parameters, the plot will be altered on-the-fly.  
+Use the top-right *edit*-Button to inspect all parameters used for plot in the respective window.
+The visdom client supports dynamic change of plot parameters as well. Just change one of the listed parameters, the plot will be altered on-the-fly.
 Click the button again to close the property list.
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/19650074/156751970-0915757d-8bf0-4a6d-a510-1d34a918e47a.gif" width="400" /></p>
 </details>
@@ -91,7 +91,7 @@ You can partition your visualization space with `envs`. By default, every user w
 
 You can access a specific env via url: `http://localhost:8097/env/main`. If your server is hosted, you can share this url so others can see your visualizations too.
 
-Environments are automatically hierarchically organized by the first `_`.  
+Environments are automatically hierarchically organized by the first `_`.
 Note that `/` characters in environment names are escaped to `_`, so both `_` and `/`
 can affect how environments appear hierarchically in the UI.
 
@@ -676,16 +676,16 @@ The following `opts` are supported:
 - `opts.top` :  Set the top margin of the plot
 - `opts.bottom` :  Set the bottom margin of the plot
 - `opts.right` :  Set the right margin of the plot
-- `opts.left` :  Set the left margin of the plot   
+- `opts.left` :  Set the left margin of the plot
 
-This is the image of the output:  
+This is the image of the output:
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/19650074/198822367-666cc42e-4354-4a7a-8dd3-d8ff143f885d.gif" width="400" /></p>
 
 
 ### Network Graph
 
-This function draws a graph, in which the nodes and edges are taken from a 2-D matrix of size [,2] where each row contains a source and destination node value. The numeric value used to define nodes should be strictly between (0 to n-1), where n is the number of nodes. 
- 
+This function draws a graph, in which the nodes and edges are taken from a 2-D matrix of size [,2] where each row contains a source and destination node value. The numeric value used to define nodes should be strictly between (0 to n-1), where n is the number of nodes.
+
 There are two optional arguments :
 - `edgeLabels` : list of custom edge labels. If not provided each edge gets a label, "source-destination", eg "1-2", size should be equal to size of input "edges". Optional.
 - `nodeLabels` : list of custom node labels. If not provided each node gets a label same as the numeric value defined in the "edges". size should be equal to number of nodes present. Optional.
@@ -700,7 +700,7 @@ The following opts are supported:
 
 ### Customizing plots
 
-The plotting functions take an optional `opts` table as input that can be used to change (generic or plot-specific) properties of the plots. 
+The plotting functions take an optional `opts` table as input that can be used to change (generic or plot-specific) properties of the plots.
 
 All input arguments are specified in a single table; the input arguments are matches based on the keys they have in the input table.
 
@@ -740,7 +740,7 @@ The following `opts` are generic in the sense that they are the same for all vis
 OR
 
     opts={"title":"my title", "xlabel":"x axis","ylabel":"y axis"}
-    
+
 The other options are visualization-specific, and are described in the
 documentation of the functions.
 

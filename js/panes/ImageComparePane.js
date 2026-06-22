@@ -42,44 +42,60 @@ function ImageComparePane(props) {
           width: '100%',
           height: '100%',
           overflowX: 'auto',
-          alignItems: 'center',
+          alignItems: 'stretch',
           justifyContent: 'space-around',
         }}
       >
         {content.map((imgItem, idx) => (
-          <div
+          <figure
             key={`${id}-compare-${idx}`}
+            data-testid="compare-cell"
             style={{
               flex: 1,
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
               padding: '5px',
+              minHeight: 0,
+              margin: 0,
             }}
           >
-            {/* Show legend if comparing multiple images */}
+            {/* Only show caption when comparing multiple images */}
             {content.length > 1 && imgItem.caption && (
-              <span
+              <figcaption
                 className="widget"
                 style={{
+                  flexShrink: 0,
                   marginBottom: '5px',
                   fontWeight: 'bold',
                 }}
               >
                 {imgItem.caption}
-              </span>
+              </figcaption>
             )}
-            <img
-              className="content-image"
-              alt={imgItem.caption || 'Compare Image'}
-              src={imgItem.src}
+            <div
               style={{
-                maxWidth: '100%',
-                maxHeight: '100%',
-                objectFit: 'contain',
+                flex: 1,
+                minHeight: 0,
+                position: 'relative',
+                width: '100%',
               }}
-            />
-          </div>
+            >
+              <img
+                className="content-image"
+                alt={imgItem.caption || 'Compare Image'}
+                src={imgItem.src}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'contain',
+                }}
+              />
+            </div>
+          </figure>
         ))}
       </div>
     </Pane>
