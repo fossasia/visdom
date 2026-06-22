@@ -22,6 +22,7 @@ import types
 import hashlib
 from collections import deque
 from enum import Enum
+import jsonpatch
 
 import tornado.ioloop
 import tornado.escape
@@ -166,6 +167,38 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
             environment = self.state[packet["eid"]]
             if packet.get("pane_data") is not False:
                 packet["pane_data"] = environment["jsons"][packet["target"]]
+        
+            # Synchronize image_history slider selections across connected clients.
+            # ImagePane emits an "image_update_selected" event when the local history
+            # slider changes. Update the stored selected index and broadcast the change
+            # so other clients viewing the same environment stay in sync.
+            if packet.get("event_type") == "image_update_selected":
+                win = packet["target"]
+                eid = packet["eid"]
+                p = environment["jsons"][win]
+                selected = packet.get("selected")
+                if selected is not None:
+                    selected_not_neg = max(0, selected)
+                    selected_exists = min(len(p["content"]) - 1, selected_not_neg)
+                    if p.get("selected") != selected_exists:
+                        
+                        old_p = p.copy()
+                        if "content" in p:
+                            old_p["content"] = copy.deepcopy(p["content"])
+                        if "old_content" in p:
+                            old_p["old_content"] = copy.deepcopy(p["old_content"])
+                        p["selected"] = selected_exists
+                        p["contentID"] = get_rand_id()
+                        patch = jsonpatch.make_patch(old_p, p)
+                        broadcast_packet = {
+                            "command": "window_update",
+                            "win": win,
+                            "eid": eid,
+                            "content": patch.patch,
+                            "version": p.get("version", 1),
+                        }
+                        broadcast(self, broadcast_packet, eid)
+
             send_to_sources(self, msg.get("data"))
 
         elif cmd == "layout_item_update":

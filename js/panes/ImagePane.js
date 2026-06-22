@@ -141,7 +141,16 @@ function ImagePane(props) {
   const updateSlider = (evt) => {
     // TODO add history update events here! need to send these to the client
     // with sendPaneMessage
-    setActualSelected(parseInt(evt.target.value));
+    const selected = parseInt(evt.target.value);
+    setActualSelected(selected);
+    sendPaneMessage(
+      {
+        event_type: 'image_update_selected',
+        selected: selected,
+      },
+      id,
+      envID
+    );
   };
 
   // effects
