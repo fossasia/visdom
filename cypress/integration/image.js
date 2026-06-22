@@ -331,5 +331,90 @@ describe('Image Pane', () => {
     const downloadsFolder = Cypress.config('downloadsFolder');
     cy.readFile(path.join(downloadsFolder, 'Random!_1.jpg')).should('exist');
     cy.readFile(path.join(downloadsFolder, 'Random!_2.jpg')).should('exist');
-  })
+  });
+
+  it('image_compare_basic: captions are visible and do not overlap images', () => {
+    const baseEnv = 'image_compare_basic_' + Cypress._.random(0, 1e6);
+
+    cy.run('image_compare_basic', { env: baseEnv, open: false });
+
+    cy.close_envs();
+    cy.open_env(baseEnv);
+    cy.open_env(baseEnv + '_compare');
+
+    // The compare pane should have two images
+    cy.get(win_selector)
+      .contains('CompareTest')
+      .parents(win_selector)
+      .as('comparePane');
+
+    cy.get('@comparePane')
+      .find('img.content-image')
+      .should('have.length', 2);
+
+    // Both captions must be present and visible
+    cy.get('@comparePane')
+      .find('figcaption.widget')
+      .should('have.length', 2)
+      .each(($cap) => {
+        cy.wrap($cap).should('be.visible');
+      });
+
+    // Caption text is correct
+    cy.get('@comparePane').find('figcaption.widget').eq(0).should('contain.text', 'Image A');
+    cy.get('@comparePane').find('figcaption.widget').eq(1).should('contain.text', 'Image B');
+
+    // Each caption must sit above its sibling image (no overlap):
+    // caption.bottom <= image.top (traverse from img to its cell via data-testid)
+    cy.get('@comparePane')
+      .find('img.content-image')
+      .each(($img) => {
+        const $cell = $img.closest('[data-testid="compare-cell"]');
+        const $caption = $cell.find('figcaption.widget');
+        if ($caption.length) {
+          const captionBottom = $caption[0].getBoundingClientRect().bottom;
+          const imgTop = $img[0].getBoundingClientRect().top;
+          expect(captionBottom).to.be.at.most(imgTop + 2); // 2px tolerance for rounding
+        }
+      });
+  });
+
+  it('image_compare_basic: single env shows image without compare', () => {
+    const singleEnv = 'image_compare_single_' + Cypress._.random(0, 1e6);
+
+    cy.run('image_compare_basic', { env: singleEnv });
+
+    // Only one env is open — no compare pane should be created,
+    // just a plain image pane. Scope to the CompareTest window to avoid
+    // matching unrelated images (icons, other panes, etc.)
+    cy.get(win_selector)
+      .contains('CompareTest')
+      .parents(win_selector)
+      .find('img.content-image')
+      .should('have.length', 1);
+  });
+
+  it('image_compare_basic: download produces files for both images', () => {
+    const baseEnv = 'image_compare_dl_' + Cypress._.random(0, 1e6);
+
+    cy.run('image_compare_basic', { env: baseEnv, open: false });
+
+    cy.close_envs();
+    cy.open_env(baseEnv);
+    cy.open_env(baseEnv + '_compare');
+
+    // Clear any previously downloaded files to avoid false positives from prior runs
+    const downloadsFolder = Cypress.config('downloadsFolder');
+    cy.task('deleteFile', path.join(downloadsFolder, 'CompareTest_1.jpg'));
+    cy.task('deleteFile', path.join(downloadsFolder, 'CompareTest_2.jpg'));
+
+    cy.get(win_selector)
+      .contains('CompareTest')
+      .parents(win_selector)
+      .find("button[title='save']")
+      .click();
+
+    cy.readFile(path.join(downloadsFolder, 'CompareTest_1.jpg')).should('exist');
+    cy.readFile(path.join(downloadsFolder, 'CompareTest_2.jpg')).should('exist');
+  });
 });
