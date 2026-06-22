@@ -663,7 +663,7 @@ class Visdom(object):
         if self.proxies:
             sess.proxies.update(self.proxies)
         if isinstance(self.ssl_verify, str):
-            sess.verify = self.ssl_verify   
+            sess.verify = self.ssl_verify
         elif not self.ssl_verify:
             sess.verify = False
         if self.username:
@@ -842,7 +842,7 @@ class Visdom(object):
                         if isinstance(self.ssl_verify, str):
                             run_forever_kwargs["sslopt"] = {
                                 "cert_reqs": ssl.CERT_REQUIRED,
-                                "ca_certs": self.ssl_verify
+                                "ca_certs": self.ssl_verify,
                             }
                         elif not self.ssl_verify:
                             run_forever_kwargs["sslopt"] = {"cert_reqs": ssl.CERT_NONE}
