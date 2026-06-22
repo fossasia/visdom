@@ -26,11 +26,6 @@ function EnvControls(props) {
     onToggleShowAll,
   } = props;
   const [confirmClear, setConfirmClear] = useState(false);
-  const [expandedKeys, setExpandedKeys] = useState([]);
-
-  const onTreeExpand = (keys) => {
-    setExpandedKeys(keys);
-  };
 
   // tree select setup
   // -------
@@ -129,8 +124,7 @@ function EnvControls(props) {
             showCheckedStrategy={SHOW_CHILD}
             dropdownMatchSelectWidth={false}
             onChange={onEnvSelect}
-            treeExpandedKeys={expandedKeys}
-            onTreeExpand={onTreeExpand}
+            treeDefaultExpandedKeys={[]}
           />
           {slist.length > 1 && (
             <div className="env-arrow-wrapper">
