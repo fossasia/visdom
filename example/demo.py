@@ -77,6 +77,7 @@ from components.plot_special import (
     plot_special_boxplot,
     plot_special_quiver,
     plot_special_mesh,
+    plot_special_sunburst,
     plot_special_graph,
 )
 from components.properties import properties_basic, properties_callbacks
@@ -88,6 +89,7 @@ from components.misc import (
     misc_video_download,
     misc_audio_basic,
     misc_audio_download,
+    misc_plot_plotly,
     misc_arbitrary_visdom,
     misc_getset_state,
 )
@@ -181,6 +183,7 @@ def run_demo(viz, env, args):
     plot_special_boxplot(viz, env, args)
     plot_special_quiver(viz, env, args)
     plot_special_mesh(viz, env, args)
+    plot_special_sunburst(viz, env, args)
     plot_special_graph(viz, env, args)
 
     # ============ #
@@ -201,6 +204,7 @@ def run_demo(viz, env, args):
     misc_video_download(viz, env, args)
     misc_audio_basic(viz, env, args)
     misc_audio_download(viz, env, args)
+    misc_plot_plotly(viz, env, args)
     misc_arbitrary_visdom(viz, env, args)
     misc_getset_state(viz, env, args)
 
