@@ -662,7 +662,9 @@ class Visdom(object):
         sess = requests.Session()
         if self.proxies:
             sess.proxies.update(self.proxies)
-        if not self.ssl_verify:
+        if isinstance(self.ssl_verify, str):
+            sess.verify = self.ssl_verify   
+        elif not self.ssl_verify:
             sess.verify = False
         if self.username:
             resp = sess.post(
@@ -836,8 +838,14 @@ class Visdom(object):
                         "ping_timeout": 100.0,
                     }
 
-                    if ws_scheme == "wss" and not self.ssl_verify:
-                        run_forever_kwargs["sslopt"] = {"cert_reqs": ssl.CERT_NONE}
+                    if ws_scheme == "wss":
+                        if isinstance(self.ssl_verify, str):
+                            run_forever_kwargs["sslopt"] = {
+                                "cert_reqs": ssl.CERT_REQUIRED,
+                                "ca_certs": self.ssl_verify
+                            }
+                        elif not self.ssl_verify:
+                            run_forever_kwargs["sslopt"] = {"cert_reqs": ssl.CERT_NONE}
                     ws.run_forever(**run_forever_kwargs)
                     ws.close()
                 except Exception as e:
