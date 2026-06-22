@@ -1,5 +1,6 @@
 import numpy as np
 
+
 # image compare demo
 # Creates solid-color images with matching titles in two sibling environments
 # so that opening both at once produces an image_compare pane.
@@ -14,18 +15,19 @@ def image_compare_basic(viz, env, args):
         red,
         env=env,
         opts={
-            'title': 'CompareTest',
-            'caption': 'Image A',
+            "title": "CompareTest",
+            "caption": "Image A",
         },
     )
     viz.image(
         blue,
-        env=env + '_compare',
+        env=env + "_compare",
         opts={
-            'title': 'CompareTest',
-            'caption': 'Image B',
+            "title": "CompareTest",
+            "caption": "Image B",
         },
     )
+
 
 # image demo
 def image_basic(viz, env, args):
