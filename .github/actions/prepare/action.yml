@@ -25,7 +25,7 @@ runs:
       - name: "Setup Node"
         uses: actions/setup-node@v6
         with:
-          node-version: '16'
+          node-version: '24'
 
       - name: "Action Settings"
         run: |
@@ -76,5 +76,3 @@ runs:
           name: pr-build
           path: ./py/visdom/static/js/
         if: ${{ inputs.loadprbuild == 'true' }}
-
-

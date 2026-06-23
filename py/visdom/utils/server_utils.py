@@ -90,7 +90,7 @@ def hash_password(password, salt=None):
     return salt.hex() + "$" + dk.hex()
 
 
-# ------- File management helprs ----- #
+# ------- File management helpers ----- #
 
 
 class LazyEnvData(Mapping):

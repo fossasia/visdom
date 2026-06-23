@@ -59,7 +59,7 @@ if (ACTIVE_ENV !== '') {
 
 const App = () => {
   // -------------- //
-  // state varibles //
+  // state variables //
   // -------------- //
 
   // api variables & functions
@@ -383,7 +383,6 @@ const App = () => {
     sendEnvQuery(selectedNodes, showAllEnvWindows);
   };
   const onEnvDelete = (env2delete, previousEnv) => {
-
     if (env2delete === previousEnv) {
       previousEnv = 'main';
     }
