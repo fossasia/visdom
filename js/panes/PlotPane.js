@@ -166,7 +166,7 @@ var PlotPane = (props) => {
           // adapt color & transparency
           d.opacity = 0.35;
           smooth_d.opacity = 1.0;
-          smooth_d.marker.line.color = 0;
+          if (smooth_d.marker?.line) smooth_d.marker.line.color = 0;
 
           return smooth_d;
         });
