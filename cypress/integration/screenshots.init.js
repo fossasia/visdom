@@ -14,6 +14,8 @@ describe(`Take plot screenshots`, () => {
 
       // ImagePane requires an additional rerender for the image to adjust to the Pane size correctly
       if (run.startsWith('image_')) cy.wait(300);
+      // LaTeX plots use MathJax which renders asynchronously - wait for typesetting to finish
+      if (run.startsWith('misc_plot_latex')) cy.wait(1000);
 
       cy.get('.content').screenshot(run, { overwrite: true });
     });
@@ -27,7 +29,8 @@ describe(`Take compare-view screenshots`, () => {
 
       var envs = [];
       for (var i = 0; i < num_runs; i++) {
-        var env = run + '_' + i + '_fixed';
+        // Append a suffix to ensure the environment name is > 25 characters
+        var env = run + '_' + i + '_long_env_name_for_testing';
         cy.run(run, {
           env: env,
           open: false,
@@ -52,8 +55,9 @@ describe(`Take compare-view screenshots`, () => {
 describe(`Take screenshot for PlotPane functions`, () => {
   it('Screenshot for Line Smoothing', () => {
     var run = 'line_smoothing';
-    var env1 = run + '_1_fixed';
-    var env2 = run + '_2_fixed';
+    // Append a suffix to ensure the environment name is > 25 characters
+    var env1 = run + '_1_long_env_name_for_testing';
+    var env2 = run + '_2_long_env_name_for_testing';
     cy.run('plot_line_basic', {
       env: env1,
       args: ["'Line smoothing'", 100],
