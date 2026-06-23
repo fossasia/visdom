@@ -47,9 +47,9 @@ from visdom.utils.server_utils import (
     update_window,
     hash_password,
     stringify,
+    ensure_deleted_stack,
 )
 from visdom.server.handlers.base_handlers import BaseHandler
-from visdom.utils.server_utils import ensure_deleted_stack
 
 
 # TODO move the logic that actually parses environments and layouts to

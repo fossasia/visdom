@@ -104,7 +104,9 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
         elif cmd == "close":
             if "data" in msg and "eid" in msg:
                 logging.info(f"closing window {msg['data']}")
-                eid = msg["eid"]
+                eid = escape_eid(msg["eid"])
+                if eid not in self.state:
+                    return
                 p_data = self.state[eid]["jsons"].pop(msg["data"], None)
                 if p_data is not None:
                     ensure_deleted_stack(self, eid)
@@ -119,11 +121,16 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
 
         elif cmd == "undo":
             if "eid" in msg:
-                eid = msg["eid"]
+                eid = escape_eid(msg["eid"])
+                if eid not in self.state:
+                    return
                 deleted = self.deleted_stacks.get(eid)
                 if deleted:
                     win_id, p_data = deleted.pop()
-                    self.state[eid]["jsons"][win_id] = p_data
+                    env = self.state[eid]["jsons"]
+                    max_i = max((p.get("i", -1) for p in env.values()), default=-1)
+                    p_data["i"] = max_i + 1
+                    env[win_id] = p_data
                     broadcast_msg = dict(p_data)
                     broadcast_msg["eid"] = eid
                     broadcast(self, broadcast_msg, eid)
