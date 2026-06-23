@@ -12,6 +12,20 @@ export function dispatchMessages(messages, handler) {
     return;
   }
   messages.forEach((msg) => {
+    if (msg == null) {
+      return;
+    }
+    if (typeof msg === 'string') {
+      msg = msg.replace(/\bNaN\b/g, 'null')
+        .replace(/\bInfinity\b/g, 'null')
+        .replace(/-Infinity\b/g, 'null');
+    }
+    try {
+      JSON.parse(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    } catch (e) {
+      console.warn('Skipping invalid message:', e.message);
+      return;
+    }
     handler({ data: msg });
   });
 }
