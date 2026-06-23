@@ -65,12 +65,12 @@ def _get_perplexity(num_entities):
 
 
 try:
-    from tsnecuda import TSNE as TSNE_CUDA
+    from openTSNE import TSNE as TSNE_OPEN
 
     def do_tsne(X):
         perplexity = _get_perplexity(len(X))
-        tsne = TSNE_CUDA(n_components=2, perplexity=perplexity, verbose=True)
-        Y = tsne.fit_transform(X)
+        tsne = TSNE_OPEN(n_components=2, perplexity=perplexity, verbose=True)
+        Y = tsne.fit(X)
         return _normalize_tsne(Y)
 
 except ImportError:
@@ -90,11 +90,11 @@ except ImportError:
             raise Exception(
                 "In order to use the embeddings feature, you'll "
                 "need to install a backend to support the calculation. "
-                "Currently we support tsnecuda "
-                "(https://github.com/CannyLab/tsne-cuda) for GPU-accelerated "
-                "t-SNE, or the bhtsne implementation at "
-                "https://github.com/lvdmaaten/bhtsne/. Install tsnecuda via "
-                "pip install tsnecuda, or install bhtsne by cloning it into "
+                "Currently we support openTSNE "
+                "(https://github.com/pavlin-policar/openTSNE) for "
+                "t-SNE computation, or the bhtsne implementation at "
+                "https://github.com/lvdmaaten/bhtsne/. Install openTSNE via "
+                "pip install openTSNE, or install bhtsne by cloning it into "
                 "the /py/visdom/extra_deps/ directory and running the "
                 "installation steps as listed on that github "
                 "in the created /py/visdom/extra_deps/bhtsne directory."
