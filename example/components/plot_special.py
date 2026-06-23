@@ -33,6 +33,14 @@ def plot_special_mesh(viz, env, args):
     viz.mesh(X=X, Y=Y, opts=dict(opacity=0.5), env=env)
 
 
+# sunburst (hierarchy) chart
+def plot_special_sunburst(viz, env, args):
+    labels = np.array(["A", "B", "C", "D", "E"])
+    parents = np.array(["", "A", "A", "B", "B"])
+    values = np.array([5, 3, 2, 1, 1])
+    viz.sunburst(labels, parents, values, opts=dict(title="Sunburst"), env=env)
+
+
 # plot network graph
 def plot_special_graph(viz, env, args):
     edges = [(0, 1), (0, 2), (1, 3), (1, 4), (1, 5), (4, 5)]
