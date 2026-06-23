@@ -32,10 +32,10 @@ function EnvModal(props) {
   // rendering
   // ---------
 
-  const selectableEnvs = envList.filter(env => env !== 'main');
+  const selectableEnvs = envList.filter((env) => env !== 'main');
   const selectedEnvsSet = new Set(selectedEnvs);
-  const isAllSelected = 
-    selectableEnvs.length > 0 && 
+  const isAllSelected =
+    selectableEnvs.length > 0 &&
     selectableEnvs.every((env) => selectedEnvsSet.has(env));
   return (
     <ReactModal
@@ -69,10 +69,22 @@ function EnvModal(props) {
       <br />
       Select environments to delete:
       <br />
-     <div className="form-inline">
-        <div style={{ border: '1px solid #ccc', padding: '10px', height: '140px', overflowY: 'scroll', marginBottom: '10px', width: '100%', borderRadius: '4px', backgroundColor: '#fff' }}>
-          
-          <label style={{ display: 'block', fontWeight: 'bold', cursor: 'pointer' }}>
+      <div className="form-inline">
+        <div
+          style={{
+            border: '1px solid #ccc',
+            padding: '10px',
+            height: '140px',
+            overflowY: 'scroll',
+            marginBottom: '10px',
+            width: '100%',
+            borderRadius: '4px',
+            backgroundColor: '#fff',
+          }}
+        >
+          <label
+            style={{ display: 'block', fontWeight: 'bold', cursor: 'pointer' }}
+          >
             <input
               type="checkbox"
               style={{ marginRight: '8px' }}
@@ -87,7 +99,16 @@ function EnvModal(props) {
           <hr style={{ margin: '5px 0' }} />
 
           {envList.map((env) => (
-            <label key={env} style={{ display: 'block', fontWeight: 'normal', cursor: env === 'main' ? 'not-allowed' : 'pointer', color: env === 'main' ? '#999' : '#333', wordBreak: 'break-all' }}>
+            <label
+              key={env}
+              style={{
+                display: 'block',
+                fontWeight: 'normal',
+                cursor: env === 'main' ? 'not-allowed' : 'pointer',
+                color: env === 'main' ? '#999' : '#333',
+                wordBreak: 'break-all',
+              }}
+            >
               <input
                 type="checkbox"
                 style={{ marginRight: '8px' }}
@@ -96,30 +117,37 @@ function EnvModal(props) {
                 checked={selectedEnvsSet.has(env)}
                 onChange={(ev) => {
                   if (ev.target.checked) {
-                    setSelectedEnvs((prev) => 
-                    Array.from(new Set([...prev, env]))
-                  );
+                    setSelectedEnvs((prev) =>
+                      Array.from(new Set([...prev, env]))
+                    );
                   } else {
-                    setSelectedEnvs(prev => prev.filter(e => e !== env));
+                    setSelectedEnvs((prev) => prev.filter((e) => e !== env));
                   }
                 }}
               />
-              {env} {env === 'main' && <span style={{ fontSize: '0.8em' }}>(protected)</span>}
+              {env}{' '}
+              {env === 'main' && (
+                <span style={{ fontSize: '0.8em' }}>(protected)</span>
+              )}
             </label>
           ))}
         </div>
 
         <button
           className="btn btn-default"
-          disabled={!connected || selectedEnvs.length === 0 || selectedEnvsSet.has('main')}
+          disabled={
+            !connected ||
+            selectedEnvs.length === 0 ||
+            selectedEnvsSet.has('main')
+          }
           onClick={() => {
             // push active env at last to prevent breaking the queue
-            let sortedEnvs = selectedEnvs.filter(env => env !== activeEnv);
+            let sortedEnvs = selectedEnvs.filter((env) => env !== activeEnv);
             if (selectedEnvsSet.has(activeEnv)) {
-                sortedEnvs.push(activeEnv);
+              sortedEnvs.push(activeEnv);
             }
-            sortedEnvs.forEach(env => {
-                onEnvDelete(env, activeEnv);
+            sortedEnvs.forEach((env) => {
+              onEnvDelete(env, activeEnv);
             });
             setSelectedEnvs([]);
             onModalClose();

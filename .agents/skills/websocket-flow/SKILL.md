@@ -44,3 +44,21 @@ Use this skill when adding new real-time WebSocket commands or HTTP API endpoint
 - All handlers must use `@check_auth` decorator
 - Copy required app attributes in `initialize()` — do not use `self.app`
 - Test both `functional-test` and `functional-test-polling` CI jobs
+
+## Documentation
+
+- [Skill reference](references/REFERENCE.md)
+- `py/visdom/server/app.py`
+- `py/visdom/server/handlers/socket_handlers.py`
+- `py/visdom/server/handlers/web_handlers.py`
+- `js/api/ApiProvider.js`
+- `AGENTS.md`
+- `CONTRIBUTING.md`
+
+## Assets
+
+- See `assets/README.md` and store templates/resources in `assets/`.
+
+## Tests
+
+- Follow the default flow in `references/TESTS.md`.
