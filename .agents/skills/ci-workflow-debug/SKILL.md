@@ -41,4 +41,3 @@ Use this skill when pull requests fail checks or automation jobs.
 ## Tests
 
 - Follow the default flow in `references/TESTS.md`.
-
