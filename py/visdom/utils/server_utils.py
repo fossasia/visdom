@@ -537,7 +537,7 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
                     state[eid] = env
 
     if "reload" in env:
-        socket.write_message(json.dumps({"command": "reload", "data": env["reload"]}))
+        socket.write_message(json.dumps({"command": "reload", "data": env["reload"]}, cls=NanSafeEncoder))
 
     jsons = list(env.get("jsons", {}).values())
     windows = sorted(jsons, key=lambda k: ("i" not in k, k.get("i", None)))
