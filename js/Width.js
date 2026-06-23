@@ -132,10 +132,9 @@ var Width = (ComposedComponent) => (props) => {
   };
 
   return (
-    <div ref={containerRef} style={{ width: '100%' }} >
+    <div ref={containerRef} style={{ width: '100%' }}>
       <ComposedComponent
         {...restProps}
-        ref={containerRef}
         width={width}
         gridConfig={gridConfig}
         dragConfig={dragConfig}
