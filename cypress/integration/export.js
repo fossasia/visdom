@@ -2,6 +2,7 @@ const exportButton = 'button[aria-label="Export as HTML"]';
 
 beforeEach(() => {
   cy.visit('/');
+  cy.contains('online');
 });
 
 describe('Test Export Env as HTML', () => {
@@ -16,7 +17,6 @@ describe('Test Export Env as HTML', () => {
     });
   };
 
-
   const readCapturedHtml = () => {
     return cy.window().then((win) => {
       expect(win.__exportedBlob, '__exportedBlob should be set after export').to
@@ -30,7 +30,6 @@ describe('Test Export Env as HTML', () => {
     cy.close_envs();
     cy.get(exportButton).should('be.disabled');
   });
-
 
   it('Downloads a valid HTML file when panes are available', () => {
     const env = 'export_test_' + Cypress._.random(0, 1e6);
@@ -52,7 +51,6 @@ describe('Test Export Env as HTML', () => {
     });
   });
 
-
   it('Exported HTML contains pane data for plot', () => {
     const env = 'export_content_' + Cypress._.random(0, 1e6);
     cy.run('plot_line_basic', { env });
@@ -67,7 +65,6 @@ describe('Test Export Env as HTML', () => {
       expect(html).to.include(env);
     });
   });
-
 
   it('Shows alert when all panes are closed before export', () => {
     const env = 'export_empty_' + Cypress._.random(0, 1e6);
