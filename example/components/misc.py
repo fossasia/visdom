@@ -89,6 +89,19 @@ def misc_audio_download(viz, env, args):
         print("Skipped audio example")
 
 
+# Example for an arbitrary Plotly figure
+def misc_plot_plotly(viz, env, args):
+    try:
+        import plotly.graph_objs as go
+
+        fig = go.Figure(data=[go.Bar(x=["a", "b", "c"], y=[1, 3, 2])])
+        fig.update_layout(title="Plotly figure via vis.plotlyplot")
+        viz.plotlyplot(fig, env=env)
+    except BaseException as err:
+        print("Skipped plotly example")
+        print("Error message: ", err)
+
+
 # Arbitrary visdom content
 def misc_arbitrary_visdom(viz, env, args):
     trace = dict(
