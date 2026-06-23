@@ -382,7 +382,6 @@ const App = () => {
     sendEnvQuery(selectedNodes, showAllEnvWindows);
   };
   const onEnvDelete = (env2delete, previousEnv) => {
-
     if (env2delete === previousEnv) {
       previousEnv = 'main';
     }
