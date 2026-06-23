@@ -46,22 +46,29 @@ assert sys.version_info[0] >= 3, "To use visdom with python 2, downgrade to v0.1
 
 
 def _normalize_tsne(Y):
-    xmin, xmax = min(Y[:, 0]), max(Y[:, 0])
-    ymin, ymax = min(Y[:, 1]), max(Y[:, 1])
+    Y = np.asarray(Y)
+    xmin, xmax = np.min(Y[:, 0]), np.max(Y[:, 0])
+    ymin, ymax = np.min(Y[:, 1]), np.max(Y[:, 1])
     xrange = xmax - xmin
     yrange = ymax - ymin
-    normx = ((Y[:, 0] - xmin) / xrange) * 2 - 1 if xrange > 0 else Y[:, 0]
-    normy = ((Y[:, 1] - ymin) / yrange) * 2 - 1 if yrange > 0 else Y[:, 1]
+    normx = (
+        ((Y[:, 0] - xmin) / xrange) * 2 - 1 if xrange > 0 else np.zeros_like(Y[:, 0])
+    )
+    normy = (
+        ((Y[:, 1] - ymin) / yrange) * 2 - 1 if yrange > 0 else np.zeros_like(Y[:, 1])
+    )
     return list(zip(normx, normy))
 
 
 def _get_perplexity(num_entities):
     if num_entities >= 150:
-        return 50
+        base = 50
     elif num_entities >= 21:
-        return num_entities // 3
+        base = num_entities // 3
     else:
-        return 7
+        base = 7
+    max_perplexity = max(1, (num_entities - 1) // 3)
+    return min(base, max_perplexity)
 
 
 try:
