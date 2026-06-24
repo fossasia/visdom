@@ -47,3 +47,20 @@ Use this skill when writing new Cypress tests, running visual regression tests, 
 - Run `test:init` before `test:visual` to establish baselines
 - If visual tests fail, compare screenshots manually — may be font/timing differences
 - Run `python example/demo.py` on your branch and clean branch to verify no regressions
+
+## Documentation
+
+- [Skill reference](references/REFERENCE.md)
+- `cypress/`
+- `cypress.json`
+- `.github/workflows/`
+- `AGENTS.md`
+- `CONTRIBUTING.md`
+
+## Assets
+
+- See `assets/README.md` and store templates/resources in `assets/`.
+
+## Tests
+
+- Follow the default flow in `references/TESTS.md`.
