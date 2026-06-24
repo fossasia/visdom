@@ -80,6 +80,11 @@ from components.plot_special import (
     plot_special_sunburst,
     plot_special_graph,
 )
+from components.plot_roc_pr import (
+    plot_roc_curve,
+    plot_pr_curve,
+    plot_roc_precomputed,
+)
 from components.properties import properties_basic, properties_callbacks
 from components.misc import (
     misc_plot_matplot,
