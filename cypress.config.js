@@ -75,6 +75,15 @@ module.exports = defineConfig({
           };
         },
 
+        deleteFile(filePath) {
+          try {
+            fs.unlinkSync(filePath);
+          } catch (e) {
+            if (e.code !== 'ENOENT') throw e;
+          }
+          return null;
+        },
+
         numDifferentPixels({
           src1,
           src2,
