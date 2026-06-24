@@ -24,11 +24,14 @@ const PNG = require('pngjs').PNG;
 
 function assertSafeToken(name, value) {
   const safePattern = /^[A-Za-z0-9._:-]+$/;
-  if (typeof value !== 'string' || value.length === 0 || !safePattern.test(value)) {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    !safePattern.test(value)
+  ) {
     throw new Error(`Invalid value for ${name}: ${value}`);
   }
 }
-
 
 module.exports = (on) => {
   // `on` is used to hook into various events Cypress emits
