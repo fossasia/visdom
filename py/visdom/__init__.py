@@ -892,8 +892,6 @@ class Visdom(object):
         if msg.get("eid", None) is not None:
             self.env_list.add(msg["eid"])
 
-        msg["pid"] = self._pid
-
         # TODO investigate send use cases, then deprecate
         if not self.send:
             return msg, endpoint
