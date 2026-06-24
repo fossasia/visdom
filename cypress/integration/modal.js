@@ -41,7 +41,9 @@ describe('Test Env Modal', () => {
 
     // create a second fork for batch delete testing
     cy.get(envbutton).click();
-    cy.get(envmodal + 'input[type="text"]').clear().type(env + '_fork2');
+    cy.get(envmodal + 'input[type="text"]')
+      .clear()
+      .type(env + '_fork2');
     cy.contains('button', 'fork').click();
     cy.get(envmodal + 'input[type="text"]').type('{esc}');
 
@@ -63,8 +65,12 @@ describe('Test Env Modal', () => {
   it('Remove Env', () => {
     // batch delete both forks at once
     cy.get(envbutton).click();
-    cy.get(envmodal + 'input[type="checkbox"][value="' + env + '_fork"]').check();
-    cy.get(envmodal + 'input[type="checkbox"][value="' + env + '_fork2"]').check();
+    cy.get(
+      envmodal + 'input[type="checkbox"][value="' + env + '_fork"]'
+    ).check();
+    cy.get(
+      envmodal + 'input[type="checkbox"][value="' + env + '_fork2"]'
+    ).check();
     cy.contains('button', 'Delete Selected').click();
     cy.get(envmodal).should('not.exist');
 
@@ -73,9 +79,11 @@ describe('Test Env Modal', () => {
 
     // check that both forks do not exist anymore, but original env still exists
     cy.get('.rc-tree-select').click();
+    cy.expand_all_env_groups();
     cy.get('span[title="' + env + '"]').should('exist');
     cy.get('span[title="' + env + '_fork"]').should('not.exist');
     cy.get('span[title="' + env + '_fork2"]').should('not.exist');
+    cy.close_env_dropdown();
   });
 });
 

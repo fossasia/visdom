@@ -26,7 +26,7 @@ from enum import Enum
 import tornado.ioloop
 import tornado.escape
 from visdom.server.handlers.base_handlers import BaseWebSocketHandler, BaseHandler
-from visdom.utils.shared_utils import get_rand_id
+from visdom.utils.shared_utils import get_rand_id, NanSafeEncoder
 from visdom.utils.server_utils import (
     check_auth,
     broadcast_envs,
@@ -186,7 +186,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
             # Attach eid so the frontend can filter stale messages after env switch.
             broadcast_msg = dict(p)
             broadcast_msg["eid"] = eid
-            broadcast(self, broadcast_msg, eid)
+            broadcast(self, json.dumps(broadcast_msg, cls=NanSafeEncoder), eid)
 
 
 class AnySocketWrapper(AnySocketHandlerOrWrapper):
@@ -234,13 +234,8 @@ class AnySocketWrapper(AnySocketHandlerOrWrapper):
 
     def get_messages(self):
         to_send = []
-        messages = self.messages
-        self.messages = []
-        for message in messages:
-            if isinstance(message, dict):
-                # Not all messages are being formatted the same way (JSON)
-                # TODO investigate
-                message = json.dumps(message)
+        while len(self.messages) > 0:
+            message = self.messages.popleft()
             to_send.append(message)
         self.last_read_time = time.time()
         return to_send
@@ -258,7 +253,9 @@ class VisSocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
             self.close()
             return
         super().open("sources")
-        self.write_message(json.dumps({"command": "alive", "data": "vis_alive"}))
+        self.write_message(
+            json.dumps({"command": "alive", "data": "vis_alive"}, cls=NanSafeEncoder)
+        )
 
     def on_close(self):
         if self in list(self.sources.values()):
@@ -271,7 +268,7 @@ class VisSocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
         if cmd == "echo":
             logging.info(f"from visdom client: {message}")
             for sub in self.sources.values():
-                sub.write_message(json.dumps(msg))
+                sub.write_message(json.dumps(msg, cls=NanSafeEncoder))
             return
 
         super().on_message(message)
@@ -311,7 +308,8 @@ class SocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
                     "data": self.sid,
                     "readonly": self.readonly,
                     "envList": sorted(list(self.state.keys())),
-                }
+                },
+                cls=NanSafeEncoder,
             )
         )
         self.broadcast_layouts([self])
@@ -322,7 +320,10 @@ class SocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
             target_subs = self.subs.values()
         for sub in target_subs:
             sub.write_message(
-                json.dumps({"command": "layout_update", "data": self.app.layouts})
+                json.dumps(
+                    {"command": "layout_update", "data": self.app.layouts},
+                    cls=NanSafeEncoder,
+                )
             )
 
     def initialize(self, app):

@@ -115,10 +115,24 @@ If you identified a bug, please include the following information in your bug re
 
 This information will help us to more rapidly identify the source of your issue.
 
+
+## Guidelines for Contributors
+
+### First-Time Contributors
+If you are a first-time contributor, we highly recommend starting with beginner-friendly issues. Please avoid taking up tedious tasks that involve large-scale file changes or major code refactoring. Keeping your initial contributions focused and scoped will help you get familiar with the codebase and make the review process smoother.
+
+### AI Usage Guidelines
+We welcome the use of AI tools to assist in writing, debugging, or understanding code. However, you should only submit a pull request if:
+1. You fully understand what your code changes do.
+2. You understand and can explain every single line of the code changes you make.
+
+Blindly copy-pasting AI-generated code that you cannot explain or debug is not permitted. As the contributor, you are responsible for the correctness and maintenance of the code you submit.
+
+
 ## Pull Requests
 We actively welcome your pull requests.
 
-1. Fork the repo and create your branch from `master`.
+1. Fork the repo and create your branch from `dev`.
 2. If you've added code that should be tested, add tests.
 3. If you've changed APIs, update the documentation.
 4. Ensure the Lua and Python interfaces to Visdom are in sync.
