@@ -11,7 +11,7 @@ import time
 from visdom import Visdom
 import argparse
 from components.text import text_basic, text_update, text_callbacks, text_close, text_fork_part1, text_fork_part2
-from components.image import image_basic, image_callback, image_callback2, image_save_jpeg, image_history, image_grid, image_svg
+from components.image import image_basic, image_callback, image_callback2, image_save_jpeg, image_history, image_grid, image_svg, image_compare_basic
 from components.plot_scatter import plot_scatter_basic, plot_scatter_update_opts, plot_scatter_append, plot_scatter_3d, plot_scatter_custom_marker, plot_scatter_custom_colors, plot_scatter_add_trace, plot_scatter_text_labels_1d, plot_scatter_text_labels_2d
 from components.plot_bar import plot_bar_basic, plot_bar_stacked, plot_bar_nonstacked, plot_bar_histogram, plot_bar_piechart
 from components.plot_surface import plot_surface_basic, plot_surface_basic_withnames, plot_surface_append, plot_surface_append_withnames, plot_surface_remove, plot_surface_remove_withnames, plot_surface_replace, plot_surface_replace_withnames, plot_surface_contour, plot_surface_3d
