@@ -21,15 +21,17 @@ function ImageComparePane(props) {
 
   const handleDownload = () => {
     content.forEach((img, index) => {
-      let link = document.createElement('a');
+      setTimeout(() => {
+        let link = document.createElement('a');
 
-      let filenameSuffix = content.length > 1 ? `_${index + 1}` : '';
-      link.download = `${title || 'visdom_compare'}${filenameSuffix}.jpg`;
+        let filenameSuffix = content.length > 1 ? `_${index + 1}` : '';
+        link.download = `${title || 'visdom_compare'}${filenameSuffix}.jpg`;
 
-      link.href = img.src;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+        link.href = img.src;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }, index * 300);
     });
   };
 
