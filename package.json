@@ -63,7 +63,7 @@
     "stream-browserify": "^3.0.0",
     "stream-http": "^3.2.0",
     "style-loader": "^4.0.0",
-    "three": "^0.105.2",
+    "three": "^0.184.0",
     "url": "^0.11.4",
     "util": "^0.12.5",
     "whatwg-fetch": "^3.6.20"
