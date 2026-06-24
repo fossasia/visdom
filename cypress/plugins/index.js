@@ -24,11 +24,14 @@ const PNG = require('pngjs').PNG;
 
 function assertSafeToken(name, value) {
   const safePattern = /^[A-Za-z0-9._:-]+$/;
-  if (typeof value !== 'string' || value.length === 0 || !safePattern.test(value)) {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    !safePattern.test(value)
+  ) {
     throw new Error(`Invalid value for ${name}: ${value}`);
   }
 }
-
 
 module.exports = (on) => {
   // `on` is used to hook into various events Cypress emits
@@ -86,6 +89,20 @@ module.exports = (on) => {
         command: 'python',
         args: spawnArgs,
       };
+    },
+
+    deleteFile(filePath) {
+      if (typeof filePath !== 'string') {
+        throw new Error('deleteFile requires a string file path.');
+      }
+      try {
+        fs.unlinkSync(filePath);
+      } catch (e) {
+        if (e.code !== 'ENOENT') {
+          throw e;
+        }
+      }
+      return null;
     },
 
     numDifferentPixels({
