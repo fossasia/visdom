@@ -42,16 +42,15 @@ function EnvControls(props) {
     }
   });
 
-  var keyCounter = 1;
   var env_options2 = [];
   var parentKeys = {};
 
   Object.keys(childrenByPrefix)
     .sort()
     .forEach((prefix) => {
-      parentKeys[prefix] = keyCounter;
+      parentKeys[prefix] = '__group__' + prefix;
       env_options2.push({
-        key: keyCounter++,
+        key: '__group__' + prefix,
         pId: 0,
         label: prefix,
         value: '__group__' + prefix,
@@ -70,7 +69,7 @@ function EnvControls(props) {
     }
 
     env_options2.push({
-      key: keyCounter++,
+      key: env,
       pId: parentKey,
       label: env,
       value: env,
@@ -119,13 +118,13 @@ function EnvControls(props) {
             inputValue={null}
             value={envIDs}
             treeData={env_options2}
-            treeDefaultExpandAll
             treeNodeFilterProp="title"
             treeDataSimpleMode={{ id: 'key', rootPId: 0 }}
             treeCheckable
             showCheckedStrategy={SHOW_CHILD}
             dropdownMatchSelectWidth={false}
             onChange={onEnvSelect}
+            treeDefaultExpandedKeys={[]}
           />
           {slist.length > 1 && (
             <div className="env-arrow-wrapper">
