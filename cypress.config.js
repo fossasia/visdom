@@ -19,6 +19,7 @@ module.exports = defineConfig({
     specPattern: 'cypress/integration/**/*.js',
     excludeSpecPattern: ['*.init.js'],
     supportFile: 'cypress/support/index.js',
+    testIsolation: false,
     setupNodeEvents(on) {
       on('task', {
         asyncrun(payload) {
