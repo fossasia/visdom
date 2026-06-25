@@ -85,7 +85,6 @@ class Application(tornado.web.Application):
         self.state = self.load_state()
         self.layouts = self.load_layouts()
         self.user_settings = self.load_user_settings()
-        self.deleted_stacks = {}
         self.subs = {}
         self.sources = {}
         self.port = port

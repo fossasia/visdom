@@ -35,7 +35,9 @@ from visdom.utils.server_utils import (
     send_to_sources,
     broadcast,
     escape_eid,
-    ensure_deleted_stack,
+    push_deleted,
+    pop_deleted,
+    clear_deleted,
 )
 from visdom.server.defaults import MAX_SOCKET_WAIT
 
@@ -80,7 +82,6 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
         self.login_enabled = app.login_enabled
         self.app = app
         self.readonly = app.readonly
-        self.deleted_stacks = app.deleted_stacks
 
     def open(self, register_to="sources"):
         # self.sid = str(hex(int(time.time() * 10000000))[2:]) # TODO: was previously used for websockets+vis only
@@ -109,8 +110,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     return
                 p_data = self.state[eid]["jsons"].pop(msg["data"], None)
                 if p_data is not None:
-                    ensure_deleted_stack(self, eid)
-                    self.deleted_stacks[eid].append((msg["data"], p_data))
+                    push_deleted(self.env_path, eid, msg["data"], p_data)
                 event = {
                     "event_type": "close",
                     "target": msg["data"],
@@ -124,9 +124,9 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 eid = escape_eid(msg["eid"])
                 if eid not in self.state:
                     return
-                deleted = self.deleted_stacks.get(eid)
-                if deleted:
-                    win_id, p_data = deleted.pop()
+                popped = pop_deleted(self.env_path, eid)
+                if popped:
+                    win_id, p_data = popped
                     env = self.state[eid]["jsons"]
                     max_i = max((p.get("i", -1) for p in env.values()), default=-1)
                     p_data["i"] = max_i + 1
@@ -156,7 +156,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     return
                 logging.info(f"closing environment {eid}")
                 self.state.pop(eid, None)
-                self.deleted_stacks.pop(eid, None)
+                clear_deleted(self.env_path, eid)
                 if self.env_path is not None:
                     p = os.path.join(self.env_path, "{0}.json".format(eid))
                     if os.path.exists(p):

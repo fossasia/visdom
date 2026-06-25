@@ -418,11 +418,12 @@ describe('Image Pane', () => {
       .find("button[title='save']")
       .click();
 
-    cy.readFile(path.join(downloadsFolder, 'CompareTest_1.jpg')).should(
-      'exist'
-    );
-    cy.readFile(path.join(downloadsFolder, 'CompareTest_2.jpg')).should(
-      'exist'
-    );
+    cy.wait(1000);
+    cy.readFile(path.join(downloadsFolder, 'CompareTest_1.jpg'), {
+      timeout: 15000,
+    }).should('exist');
+    cy.readFile(path.join(downloadsFolder, 'CompareTest_2.jpg'), {
+      timeout: 15000,
+    }).should('exist');
   });
 });

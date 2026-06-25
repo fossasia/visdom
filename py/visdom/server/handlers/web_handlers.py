@@ -47,7 +47,8 @@ from visdom.utils.server_utils import (
     update_window,
     hash_password,
     stringify,
-    ensure_deleted_stack,
+    push_deleted,
+    clear_deleted,
 )
 from visdom.server.handlers.base_handlers import BaseHandler
 
@@ -410,8 +411,7 @@ class CloseHandler(BaseHandler):
         for win in keys:
             p_data = handler.state[eid]["jsons"].pop(win, None)
             if p_data is not None:
-                ensure_deleted_stack(handler, eid)
-                handler.deleted_stacks[eid].append((win, p_data))
+                push_deleted(handler.env_path, eid, win, p_data)
             broadcast(handler, json.dumps({"command": "close", "data": win}), eid)
 
     @check_auth
@@ -431,7 +431,7 @@ class DeleteEnvHandler(BaseHandler):
             if eid == "main":
                 return
             handler.state.pop(eid, None)
-            handler.deleted_stacks.pop(eid, None)
+            clear_deleted(handler.env_path, eid)
             if handler.env_path is not None:
                 p = os.path.join(handler.env_path, "{0}.json".format(eid))
                 if os.path.exists(p):
