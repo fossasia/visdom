@@ -168,10 +168,10 @@ describe('Test View Modal', () => {
       .should('have.css', 'transform', `matrix(1, 0, 0, 1, 10, 10)`);
     cy.contains('.bar .pull-right', 'Line Plot')
       .closest('.react-grid-item')
-      .should('have.css', 'transform', `matrix(1, 0, 0, 1, 10, 565)`);
+      .should('have.css', 'transform', `matrix(1, 0, 0, 1, 276, 10)`);
     cy.contains('.bar .pull-right', 'Bar Plot')
       .closest('.react-grid-item')
-      .should('have.css', 'transform', `matrix(1, 0, 0, 1, 276, 10)`);
+      .should('have.css', 'transform', `matrix(1, 0, 0, 1, 10, 565)`);
 
     // check first view positions
     cy.get(viewselect + 'button#viewDropdown').click();
