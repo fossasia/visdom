@@ -1485,7 +1485,11 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
         if np.issubdtype(img.dtype, np.floating):
-            img_min, img_max = img.min(), img.max()
+            finite = img[np.isfinite(img)]
+            if finite.size > 0:
+                img_min, img_max = float(finite.min()), float(finite.max())
+            else:
+                img_min, img_max = 0.0, 0.0
             if opts.get("normalize", False):
                 if img_max > img_min:
                     img = (img - img_min) / (img_max - img_min) * 255.0
@@ -1495,6 +1499,7 @@ class Visdom(object):
                 img = img * 255.0
             elif img_min >= -1.0 - 1e-5 and img_max <= 1.0 + 1e-5:
                 img = (img + 1.0) / 2.0 * 255.0
+            img = np.nan_to_num(img, nan=0.0, posinf=255.0, neginf=0.0)
             img = np.uint8(np.clip(img, 0, 255))
 
         # extract dimensions and process formats
