@@ -95,6 +95,12 @@ jobs:
         run: |
           git checkout PR-HEAD -- ./cypress
           git checkout PR-HEAD -- ./example
+          git checkout PR-HEAD -- ./package.json
+          git checkout PR-HEAD -- ./package-lock.json
+
+      - name: "Install PR npm dependencies"
+        shell: bash
+        run: ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm install
 
       - name: Cypress test:init
         uses: cypress-io/github-action@v7
