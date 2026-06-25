@@ -16,9 +16,10 @@ import 'rc-tree-select/assets/index.less';
 
 import React, { useContext, useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
-import ReactGridLayout from 'react-grid-layout';
-const { getLayoutItem, sortLayoutItemsByRowCol: sortLayout } =
-  ReactGridLayout.utils;
+import ReactGridLayout, {
+  getLayoutItem,
+  sortLayoutItemsByRowCol as sortLayout,
+} from 'react-grid-layout';
 import { useResizeDetector } from 'react-resize-detector';
 
 import ApiContext from './api/ApiContext';
