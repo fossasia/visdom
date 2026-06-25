@@ -14,8 +14,9 @@ from setuptools import setup, find_packages
 
 try:
     import torch
+    from packaging.version import parse
 
-    if torch.__version__ < "2.0.0":
+    if parse(torch.__version__) < parse("2.0.0"):
         print(
             "[visdom] WARNING: PyTorch >= 2.0.0 is recommended for full "
             "visdom support. Detected version: " + torch.__version__
