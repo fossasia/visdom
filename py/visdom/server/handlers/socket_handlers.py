@@ -133,7 +133,11 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     env[win_id] = p_data
                     broadcast_msg = dict(p_data)
                     broadcast_msg["eid"] = eid
-                    broadcast(self, broadcast_msg, eid)
+                    broadcast(
+                        self,
+                        json.dumps(broadcast_msg, cls=NanSafeEncoder),
+                        eid,
+                    )
 
         elif cmd == "save":
             # save localStorage window metadata
