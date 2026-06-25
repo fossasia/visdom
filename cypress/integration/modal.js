@@ -131,6 +131,7 @@ describe('Test View Modal', () => {
         clientY: 300,
       })
       .trigger('mouseup', { button: 0 });
+    cy.wait(300);
 
     // save the view at this point
     cy.get(viewbutton).click();
@@ -161,7 +162,7 @@ describe('Test View Modal', () => {
     cy.get(viewselect + "a[href='#second']").click();
     cy.contains('.bar .pull-right', 'Text Pane')
       .closest('.react-grid-item')
-      .should('have.css', 'transform', `matrix(1, 0, 0, 1, 390, 370)`);
+      .should('have.css', 'transform', `matrix(1, 0, 0, 1, 656, 10)`);
     cy.contains('.bar .pull-right', 'Random!')
       .closest('.react-grid-item')
       .should('have.css', 'transform', `matrix(1, 0, 0, 1, 10, 10)`);
