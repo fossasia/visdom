@@ -96,6 +96,7 @@ jobs:
           git checkout PR-HEAD -- ./cypress
           git checkout PR-HEAD -- ./example
           git checkout PR-HEAD -- ./package.json
+          git checkout PR-HEAD -- ./cypress.config.js
 
       - name: "Install PR npm dependencies"
         shell: bash
