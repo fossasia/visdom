@@ -91,8 +91,8 @@ export default function lasso() {
 
       // indicate if we are within closing distance
       if (
-        distance(lassoPolygon[0],
-          lassoPolygon[lassoPolygon.length - 1]) < closeDistance
+        distance(lassoPolygon[0], lassoPolygon[lassoPolygon.length - 1]) <
+        closeDistance
       ) {
         closePath.attr('x1', point[0]).attr('y1', point[1]).attr('opacity', 1);
       } else {
@@ -111,8 +111,8 @@ export default function lasso() {
       if (
         lassoPolygon &&
         lassoPath &&
-        distance(lassoPolygon[0],
-          lassoPolygon[lassoPolygon.length - 1]) < closeDistance
+        distance(lassoPolygon[0], lassoPolygon[lassoPolygon.length - 1]) <
+          closeDistance
       ) {
         lassoPath.attr('d', polygonToPath(lassoPolygon) + 'Z');
         dispatch.call('end', lasso, lassoPolygon);

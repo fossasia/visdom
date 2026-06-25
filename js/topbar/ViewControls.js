@@ -55,7 +55,7 @@ function ViewControls(props) {
             aria-expanded="true"
             disabled={!(connected && envIDs.length > 0)}
           >
-            {envIDs.length > 0 == null ? 'compare' : activeLayout}
+            {envIDs.length > 1 ? 'compare' : activeLayout}
             &nbsp;
             <span className="caret" />
           </button>
