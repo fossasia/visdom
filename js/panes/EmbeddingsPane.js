@@ -326,22 +326,30 @@ class Scene extends React.Component {
       })
     );
 
-    let pointsGeometry = new THREE.Geometry();
+    let pointsGeometry = new THREE.BufferGeometry();
 
-    let colors = [];
-    for (let datum of generated_points) {
-      // Set vector coordinates from data
-      let vertex = new THREE.Vector3(datum.position[0], datum.position[1], 0);
-      pointsGeometry.vertices.push(vertex);
-      let color = new THREE.Color(color_array[datum.group]);
-      colors.push(color);
-    }
-    pointsGeometry.colors = colors;
+    const count = generated_points.length;
+    const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+    generated_points.forEach((datum, i) => {
+      positions[i * 3] = datum.position[0];
+      positions[i * 3 + 1] = datum.position[1];
+      positions[i * 3 + 2] = 0;
+      const c = new THREE.Color(color_array[datum.group]);
+      colors[i * 3] = c.r;
+      colors[i * 3 + 1] = c.g;
+      colors[i * 3 + 2] = c.b;
+    });
+    pointsGeometry.setAttribute(
+      'position',
+      new THREE.BufferAttribute(positions, 3)
+    );
+    pointsGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
     let pointsMaterial = new THREE.PointsMaterial({
       size: 6,
       sizeAttenuation: false,
-      vertexColors: THREE.VertexColors,
+      vertexColors: true,
       map: circle_sprite,
       transparent: true,
     });
@@ -465,16 +473,17 @@ class Scene extends React.Component {
   highlightPoint(datum, hoverContainer, circle_sprite) {
     this.removeHighlights(hoverContainer);
 
-    let geometry = new THREE.Geometry();
-    geometry.vertices.push(
-      new THREE.Vector3(datum.position[0], datum.position[1], 0)
-    );
-    geometry.colors = [new THREE.Color(this.color_array[datum.group])];
+    let geometry = new THREE.BufferGeometry();
+    const pos = new Float32Array([datum.position[0], datum.position[1], 0]);
+    const c = new THREE.Color(this.color_array[datum.group]);
+    const col = new Float32Array([c.r, c.g, c.b]);
+    geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(col, 3));
 
     let material = new THREE.PointsMaterial({
       size: 16,
       sizeAttenuation: false,
-      vertexColors: THREE.VertexColors,
+      vertexColors: true,
       map: circle_sprite,
       transparent: true,
     });
