@@ -16,7 +16,10 @@ import 'rc-tree-select/assets/index.css';
 
 import React, { useContext, useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
-import ReactResizeDetector from 'react-resize-detector';
+import ReactGridLayout from 'react-grid-layout';
+const { getLayoutItem, sortLayoutItemsByRowCol: sortLayout } =
+  ReactGridLayout.utils;
+import { useResizeDetector } from 'react-resize-detector';
 
 import ApiContext from './api/ApiContext';
 import ApiProvider from './api/ApiProvider';
@@ -38,11 +41,8 @@ import FilterControls from './topbar/FilterControls';
 import ViewControls from './topbar/ViewControls';
 import WidthProvider from './Width';
 
-const ReactGridLayout = require('react-grid-layout');
 const jsonpatch = require('fast-json-patch');
 const GridLayout = WidthProvider(ReactGridLayout);
-const sortLayout = ReactGridLayout.utils.sortLayoutItemsByRowCol;
-const getLayoutItem = ReactGridLayout.utils.getLayoutItem;
 
 var use_envs = null;
 if (ACTIVE_ENV !== '') {
@@ -56,6 +56,46 @@ if (ACTIVE_ENV !== '') {
 } else {
   use_envs = JSON.parse(localStorage.getItem('envIDs')) || ['main'];
 }
+
+const PaneWrapper = ({
+  Comp,
+  pane,
+  panelayout,
+  envID,
+  onClose,
+  onFocus,
+  isFocused,
+  defaultWidth,
+  defaultHeight,
+}) => {
+  const { width, height, ref } = useResizeDetector();
+  const PANE_TITLE_BAR_HEIGHT = 14;
+
+  const finalWidth =
+    width !== undefined && width > 0 ? width - 2 : defaultWidth;
+  const finalHeight =
+    (height !== undefined && height > 0 ? height - 2 : defaultHeight) -
+    PANE_TITLE_BAR_HEIGHT;
+
+  return (
+    <div ref={ref} style={{ width: '100%', height: '100%' }}>
+      <Comp
+        key={pane.id}
+        {...pane}
+        envID={envID}
+        onClose={onClose}
+        onFocus={onFocus}
+        isFocused={isFocused}
+        w={panelayout.w}
+        h={panelayout.h}
+        width={finalWidth}
+        height={finalHeight}
+        _width={finalWidth}
+        _height={finalHeight}
+      />
+    </div>
+  );
+};
 
 const App = () => {
   // -------------- //
@@ -770,29 +810,22 @@ const App = () => {
       let filter = getValidFilter(filterString);
       let isVisible = pane.title.match(filter);
 
-      const PANE_TITLE_BAR_HEIGHT = 14;
-
       var _height = Math.round(h2p(panelayout.h));
       var _width = Math.round(w2p(panelayout.w));
 
       return (
         <div key={pane.id} className={isVisible ? '' : 'hidden-window'}>
-          <ReactResizeDetector handleWidth handleHeight>
-            <Comp
-              {...pane}
-              envID={selection.envIDs[0]}
-              key={pane.id}
-              onClose={closePane}
-              onFocus={focusPane}
-              isFocused={pane.id === focusedPaneID}
-              w={panelayout.w}
-              h={panelayout.h}
-              width={w2p(panelayout.w)}
-              height={h2p(panelayout.h) - PANE_TITLE_BAR_HEIGHT}
-              _width={_width}
-              _height={_height - PANE_TITLE_BAR_HEIGHT}
-            />
-          </ReactResizeDetector>
+          <PaneWrapper
+            Comp={Comp}
+            pane={pane}
+            panelayout={panelayout}
+            envID={selection.envIDs[0]}
+            onClose={closePane}
+            onFocus={focusPane}
+            isFocused={pane.id === focusedPaneID}
+            defaultWidth={_width}
+            defaultHeight={_height}
+          />
         </div>
       );
     } catch (err) {
