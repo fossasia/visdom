@@ -102,7 +102,10 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
         elif cmd == "close":
             if "data" in msg and "eid" in msg:
                 logging.info(f"closing window {msg['data']}")
-                p_data = self.state[msg["eid"]]["jsons"].pop(msg["data"], None)
+                env = self.state.get(msg["eid"])
+                if env is None:
+                    return
+                p_data = env["jsons"].pop(msg["data"], None)
                 event = {
                     "event_type": "close",
                     "target": msg["data"],
@@ -115,7 +118,10 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
             # save localStorage window metadata
             if "data" in msg and "eid" in msg:
                 msg["eid"] = escape_eid(msg["eid"])
-                self.state[msg["eid"]] = copy.deepcopy(self.state[msg["prev_eid"]])
+                prev_eid = escape_eid(msg["prev_eid"]) if msg.get("prev_eid") else None
+                if prev_eid not in self.state:
+                    return
+                self.state[msg["eid"]] = copy.deepcopy(self.state[prev_eid])
                 self.state[msg["eid"]]["reload"] = msg["data"]
                 self.eid = msg["eid"]
                 serialize_env(self.state, [self.eid], env_path=self.env_path)
@@ -163,21 +169,76 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
 
         elif cmd == "forward_to_vis":
             packet = msg.get("data")
-            environment = self.state[packet["eid"]]
+            if not isinstance(packet, dict):
+                logging.warning(
+                    f"forward_to_vis: expected dict payload, got {type(packet).__name__!r}, dropping event"
+                )
+                return
+            eid = packet.get("eid")
+            target = packet.get("target")
+            if eid is None or target is None:
+                logging.warning(
+                    f"forward_to_vis: malformed packet (eid={eid!r},"
+                    f" target={target!r}), dropping event"
+                )
+                return
+            environment = self.state.get(eid)
+            if environment is None:
+                logging.warning(
+                    f"forward_to_vis: env {eid!r} not found, dropping event"
+                )
+                return
             if packet.get("pane_data") is not False:
-                packet["pane_data"] = environment["jsons"][packet["target"]]
+                pane = environment["jsons"].get(target)
+                if pane is None:
+                    logging.warning(
+                        f"forward_to_vis: pane {target!r} not found"
+                        f" in env {eid!r}, dropping event"
+                    )
+                    return
+                packet["pane_data"] = pane
             send_to_sources(self, msg.get("data"))
 
         elif cmd == "layout_item_update":
             eid = msg.get("eid")
             win = msg.get("win")
+            if eid is None or win is None or eid not in self.state:
+                logging.warning(
+                    f"layout_item_update: env {eid!r} or win {win!r}"
+                    f" not found, dropping event"
+                )
+                return
             self.state[eid]["reload"][win] = msg.get("data")
 
         elif cmd == "pop_embeddings_pane":
             packet = msg.get("data")
-            eid = packet["eid"]
-            win = packet["target"]
-            p = self.state[eid]["jsons"][win]
+            if not isinstance(packet, dict):
+                logging.warning(
+                    f"pop_embeddings_pane: expected dict payload,"
+                    f" got {type(packet).__name__!r}, dropping event"
+                )
+                return
+            eid = packet.get("eid")
+            win = packet.get("target")
+            if eid is None or win is None:
+                logging.warning(
+                    f"pop_embeddings_pane: malformed packet"
+                    f" (eid={eid!r}, target={win!r}), dropping event"
+                )
+                return
+            env = self.state.get(eid)
+            if env is None:
+                logging.warning(
+                    f"pop_embeddings_pane: env {eid!r} not found, dropping event"
+                )
+                return
+            if win not in env["jsons"]:
+                logging.warning(
+                    f"pop_embeddings_pane: pane {win!r} not found"
+                    f" in env {eid!r}, dropping event"
+                )
+                return
+            p = env["jsons"][win]
             p["content"]["selected"] = None
             p["content"]["data"] = p["old_content"].pop()
             if len(p["old_content"]) == 0:
