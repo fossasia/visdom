@@ -16,9 +16,10 @@ import 'rc-tree-select/assets/index.less';
 
 import React, { useContext, useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
-import ReactGridLayout from 'react-grid-layout';
-const { getLayoutItem, sortLayoutItemsByRowCol: sortLayout } =
-  ReactGridLayout.utils;
+import ReactGridLayout, {
+  getLayoutItem,
+  sortLayoutItemsByRowCol as sortLayout,
+} from 'react-grid-layout';
 import { useResizeDetector } from 'react-resize-detector';
 
 import ApiContext from './api/ApiContext';
@@ -118,7 +119,6 @@ const App = () => {
 
   // internal variables
   const mounted = useRef(false);
-  const [resizeClickHappened, setResizeClickHappened] = useState(false);
   const windowSize = useRef({
     width: 1280,
     cols: 100,
@@ -505,22 +505,6 @@ const App = () => {
   };
 
   const resizePane = (layout, oldLayoutItem, layoutItem) => {
-    // register a double click on the resize handle to reset the window size
-    if (
-      resizeClickHappened &&
-      layoutItem.w == oldLayoutItem.w &&
-      layoutItem.h == oldLayoutItem.h
-    ) {
-      let pane = storeData.panes[layoutItem.i];
-
-      // resets to default layout (same as during pane creation)
-      layoutItem.w = pane.width ? p2w(pane.width) : PANE_SIZE[pane.type][0];
-      layoutItem.h = pane.height
-        ? Math.ceil(p2h(pane.height + 14))
-        : PANE_SIZE[pane.type][1];
-      if (pane.content && pane.content.caption) layoutItem.h += 1;
-    }
-
     // update layout according to user interaction
     setSelection((prev) => ({
       ...prev,
@@ -529,15 +513,31 @@ const App = () => {
     focusPane(layoutItem.i);
     updateLayout(layout);
     sendPaneLayoutUpdate(selection.envIDs[0], layoutItem);
+  };
 
-    // register a double click in this function
-    setResizeClickHappened(true);
-    setTimeout(
-      function () {
-        setResizeClickHappened(false);
-      }.bind(this),
-      400
-    );
+  const handlePaneDoubleClick = (e, panelayout) => {
+    if (
+      e.target.className &&
+      typeof e.target.className === 'string' &&
+      e.target.className.includes('react-resizable-handle')
+    ) {
+      let pane = storeData.panes[panelayout.i];
+
+      // resets to default layout (same as during pane creation)
+      panelayout.w = pane.width ? p2w(pane.width) : PANE_SIZE[pane.type][0];
+      panelayout.h = pane.height
+        ? Math.ceil(p2h(pane.height + 14))
+        : PANE_SIZE[pane.type][1];
+      if (pane.content && pane.content.caption) panelayout.h += 1;
+
+      setSelection((prev) => ({
+        ...prev,
+        layoutID: DEFAULT_LAYOUT,
+      }));
+      focusPane(panelayout.i);
+      updateLayout(storeData.layout);
+      sendPaneLayoutUpdate(selection.envIDs[0], panelayout);
+    }
   };
 
   const movePane = (layout) => {
@@ -814,7 +814,11 @@ const App = () => {
       var _width = Math.round(w2p(panelayout.w));
 
       return (
-        <div key={pane.id} className={isVisible ? '' : 'hidden-window'}>
+        <div
+          key={pane.id}
+          className={isVisible ? '' : 'hidden-window'}
+          onDoubleClick={(e) => handlePaneDoubleClick(e, panelayout)}
+        >
           <PaneWrapper
             Comp={Comp}
             pane={pane}

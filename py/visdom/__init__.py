@@ -8,6 +8,7 @@
 
 from visdom.utils.shared_utils import get_new_window_id
 from visdom import server
+import os
 import os.path
 import requests
 import traceback
@@ -94,6 +95,9 @@ except Exception:
 logging.getLogger("requests").setLevel(logging.CRITICAL)
 logging.getLogger("urllib3").setLevel(logging.CRITICAL)
 logger = logging.getLogger(__name__)
+
+SESSION_IDLE_TIMEOUT = 600
+SESSION_IDLE_CHECK_INTERVAL = 60
 
 
 def get_rand_id():
@@ -516,6 +520,8 @@ class Visdom(object):
         proxies=None,
         offline=False,
         use_polling=False,
+        session_idle_timeout=SESSION_IDLE_TIMEOUT,
+        session_idle_check_interval=SESSION_IDLE_CHECK_INTERVAL,
     ):
         parsed_url = urlparse(server)
         if not parsed_url.scheme:
@@ -551,6 +557,11 @@ class Visdom(object):
         self.log_to_filename = log_to_filename
         self.offline = offline
         self._session = None
+        self._pid = os.getpid()
+        self._session_lock = threading.Lock()
+        self._last_post_time = time.time()
+        self.session_idle_timeout = session_idle_timeout
+        self.session_idle_check_interval = session_idle_check_interval
         self.proxies = proxies
         self.http_proxy_host = None
         self.http_proxy_port = None
@@ -598,6 +609,8 @@ class Visdom(object):
                 "Without the incoming socket you cannot receive events from "
                 "the server or register event handlers to your Visdom client."
             )
+        if send:
+            self._start_session_reaper()
         # Wait for initialization before starting
         time_spent = 0
         inc = 0.1
@@ -616,22 +629,60 @@ class Visdom(object):
 
     @property
     def session(self):
-        if self._session:
-            return self._session
-        logger.warning("Setting up a new session...")
-        sess = requests.Session()
-        if self.proxies:
-            sess.proxies.update(self.proxies)
-        if self.username:
-            resp = sess.post(
-                "%s:%s%s" % (self.server, self.port, self.base_url),
-                json=dict(username=self.username, password=self.password),
-            )
-            if resp.status_code != requests.codes.ok:
-                raise RuntimeError("Authentication failed")
-            logger.info("Authentication succeeded")
-        self._session = sess
-        return sess
+        with self._session_lock:
+            current_pid = os.getpid()
+            if self._session and self._pid == current_pid:
+                return self._session
+
+            if self._session:
+                try:
+                    self._session.close()
+                except Exception:
+                    pass
+            self._pid = current_pid
+            logger.warning("Setting up a new session...")
+            sess = requests.Session()
+            if self.proxies:
+                sess.proxies.update(self.proxies)
+            if self.username:
+                resp = sess.post(
+                    "%s:%s%s" % (self.server, self.port, self.base_url),
+                    json=dict(username=self.username, password=self.password),
+                )
+                if resp.status_code != requests.codes.ok:
+                    raise RuntimeError("Authentication failed")
+                logger.info("Authentication succeeded")
+            self._session = sess
+            return sess
+
+    def _start_session_reaper(self):
+        def run_reaper():
+            while True:
+                time.sleep(self.session_idle_check_interval)
+                idle_for = time.time() - self._last_post_time
+                if idle_for <= self.session_idle_timeout:
+                    continue
+                with self._session_lock:
+                    if (
+                        self._session is not None
+                        and time.time() - self._last_post_time
+                        > self.session_idle_timeout
+                    ):
+                        logger.info(
+                            "Closing idle visdom HTTP session after %ds of "
+                            "inactivity; it will be recreated on the next send.",
+                            int(idle_for),
+                        )
+                        try:
+                            self._session.close()
+                        except Exception:
+                            pass
+                        self._session = None
+
+        self.session_reaper_thread = threading.Thread(
+            target=run_reaper, name="Visdom-Session-Reaper", daemon=True
+        )
+        self.session_reaper_thread.start()
 
     def register_event_handler(self, handler, target, env=None):
         assert callable(handler), "Event handler must be a function"
@@ -829,8 +880,24 @@ class Visdom(object):
         """
         if data is None:
             data = {}
-        r = self.session.post(url, data=data)
-        return r.text
+        self._last_post_time = time.time()
+        had_session = self._session is not None
+        try:
+            r = self.session.post(url, data=data)
+            return r.text
+        except (requests.ConnectionError, requests.Timeout):
+            if not had_session:
+                raise
+            logger.warning("Connection failed, resetting session and retrying...")
+            with self._session_lock:
+                try:
+                    if self._session is not None:
+                        self._session.close()
+                except Exception:
+                    pass
+                self._session = None
+            r = self.session.post(url, data=data)
+            return r.text
 
     def _send(self, msg, endpoint="events", quiet=False, from_log=False, create=True):
         """
