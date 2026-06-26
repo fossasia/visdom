@@ -2873,25 +2873,12 @@ class Visdom(object):
             }
         ]
 
-        layout = {
-            "title": opts.get("title"),
-            "margin": {
-                "l": opts.get("marginleft", 30),
-                "r": opts.get("marginright", 30),
-                "t": opts.get("margintop", 30),
-                "b": opts.get("marginbottom", 30),
-            },
-        }
-        layout_opts = opts.get("layoutopts")
-        if layout_opts is not None and "plotly" in layout_opts:
-            layout.update(layout_opts["plotly"])
-
         return self._send(
             {
                 "data": data,
                 "win": win,
                 "eid": env,
-                "layout": _scrub_dict(layout),
+                "layout": _opts2layout(opts),
                 "opts": opts,
             }
         )
