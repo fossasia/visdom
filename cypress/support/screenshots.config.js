@@ -42,6 +42,9 @@ export const all_screenshots = [
   'plot_surface_replace_withnames',
   'plot_surface_contour',
   // 'plot_surface_3d', // disabled due to webgl
+  'plot_roc_curve',
+  'plot_pr_curve',
+  'plot_roc_precomputed',
   'plot_special_boxplot',
   'plot_special_quiver',
   'plot_violin_basic',
