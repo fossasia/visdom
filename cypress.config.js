@@ -17,7 +17,6 @@ module.exports = defineConfig({
     baseUrl: 'http://localhost:8098',
     video: false,
     specPattern: 'cypress/integration/**/*.js',
-    excludeSpecPattern: ['*.init.js'],
     supportFile: 'cypress/support/index.js',
     testIsolation: false,
     setupNodeEvents(on) {
