@@ -15,9 +15,14 @@ py/visdom/static/css/
 py/visdom/static/js/*.min.js
 py/visdom/static/js/*.js
 py/visdom/static/js/*.js.map
+py/visdom/static/js/*.LICENSE.txt
 py/visdom/static/js/mathjax/
 py/visdom/static/js/sjcl.js
 py/visdom/static/version.built
 __pycache__/
 py/visdom/static/js/layout_bin_packer.js
 py/visdom/extra_deps/**/*
+.venv
+venv
+test-bin
+bin

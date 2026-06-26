@@ -50,8 +50,8 @@ def download_scripts(proxies=None, install_dir=None):
         # Library to download the svg to png
         "%ssave-svg-as-png@1.4.17/lib/saveSvgAsPng.js" % b: "saveSvgAsPng.js",
         # - css
-        "%sreact-resizable@1.4.6/css/styles.css" % b: "react-resizable-styles.css",
-        "%sreact-grid-layout@0.16.3/css/styles.css" % b: "react-grid-layout-styles.css",
+        "%sreact-resizable@3.1.3/css/styles.css" % b: "react-resizable-styles.css",
+        "%sreact-grid-layout@2.2.3/css/styles.css" % b: "react-grid-layout-styles.css",
         "%scss/bootstrap.min.css" % bb: "bootstrap.min.css",
         # - fonts
         "%sclassnames@2.2.5" % b: "classnames",
