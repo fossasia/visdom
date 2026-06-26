@@ -82,6 +82,7 @@ Cypress.Commands.add('expand_all_env_groups', () => {
     if ($tree.find(closed_group).length > 0) {
       cy.get(closed_group).each(($el) => {
         cy.wrap($el).click({ force: true });
+        cy.wait(150);
       });
     }
   });
