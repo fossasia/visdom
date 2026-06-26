@@ -80,6 +80,7 @@ from components.plot_special import (
     plot_special_mesh,
     plot_special_sunburst,
     plot_special_graph,
+    plot_special_parallel_coordinates,
 )
 from components.properties import properties_basic, properties_callbacks
 from components.misc import (
