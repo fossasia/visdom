@@ -100,10 +100,18 @@ describe('Test View Modal', () => {
     var env = 'view_modal_' + Cypress._.random(0, 1e6);
 
     // initialize any env
-    cy.run('text_basic', { env: env }).wait(500);
+    cy.run('text_basic', { env: env, args: ['"Text Pane"'] }).wait(500);
     cy.run('image_basic', { env: env, open: false }).wait(500);
-    cy.run('plot_line_basic', { env: env, open: false }).wait(500);
-    cy.run('plot_bar_basic', { env: env, open: false }).wait(500);
+    cy.run('plot_line_basic', {
+      env: env,
+      open: false,
+      args: ['"Line Plot"'],
+    }).wait(500);
+    cy.run('plot_bar_basic', {
+      env: env,
+      open: false,
+      args: ['"Bar Plot"'],
+    }).wait(500);
 
     // save the view at this point
     cy.get(viewbutton).click();
@@ -114,8 +122,8 @@ describe('Test View Modal', () => {
     cy.get(viewmodal).type('{esc}');
 
     // apply a change to the same view
-    cy.get('.layout .react-grid-item')
-      .first()
+    cy.contains('.bar .pull-right', 'Text Pane')
+      .closest('.react-grid-item')
       .find('.bar')
       .trigger('mousedown', { button: 0 })
       .trigger('mousemove', {
@@ -123,6 +131,7 @@ describe('Test View Modal', () => {
         clientY: 300,
       })
       .trigger('mouseup', { button: 0 });
+    cy.wait(300);
 
     // save the view at this point
     cy.get(viewbutton).click();
@@ -135,49 +144,49 @@ describe('Test View Modal', () => {
     // check first view positions
     cy.get(viewselect + 'button#viewDropdown').click();
     cy.get(viewselect + "a[href='#first']").click();
-    cy.get('.react-grid-layout > div')
-      .eq(0)
+    cy.contains('.bar .pull-right', 'Text Pane')
+      .closest('.react-grid-item')
       .should('have.css', 'transform', `matrix(1, 0, 0, 1, 10, 10)`);
-    cy.get('.react-grid-layout > div')
-      .eq(1)
+    cy.contains('.bar .pull-right', 'Random!')
+      .closest('.react-grid-item')
       .should('have.css', 'transform', `matrix(1, 0, 0, 1, 263, 10)`);
-    cy.get('.react-grid-layout > div')
-      .eq(2)
+    cy.contains('.bar .pull-right', 'Line Plot')
+      .closest('.react-grid-item')
       .should('have.css', 'transform', `matrix(1, 0, 0, 1, 529, 10)`);
-    cy.get('.react-grid-layout > div')
-      .eq(3)
+    cy.contains('.bar .pull-right', 'Bar Plot')
+      .closest('.react-grid-item')
       .should('have.css', 'transform', `matrix(1, 0, 0, 1, 10, 565)`);
 
     // check second view positions
     cy.get(viewselect + 'button#viewDropdown').click();
     cy.get(viewselect + "a[href='#second']").click();
-    cy.get('.react-grid-layout > div')
-      .eq(0)
-      .should('have.css', 'transform', `matrix(1, 0, 0, 1, 390, 370)`);
-    cy.get('.react-grid-layout > div')
-      .eq(1)
+    cy.contains('.bar .pull-right', 'Text Pane')
+      .closest('.react-grid-item')
+      .should('have.css', 'transform', `matrix(1, 0, 0, 1, 656, 10)`);
+    cy.contains('.bar .pull-right', 'Random!')
+      .closest('.react-grid-item')
       .should('have.css', 'transform', `matrix(1, 0, 0, 1, 10, 10)`);
-    cy.get('.react-grid-layout > div')
-      .eq(2)
-      .should('have.css', 'transform', `matrix(1, 0, 0, 1, 10, 565)`);
-    cy.get('.react-grid-layout > div')
-      .eq(3)
+    cy.contains('.bar .pull-right', 'Line Plot')
+      .closest('.react-grid-item')
       .should('have.css', 'transform', `matrix(1, 0, 0, 1, 276, 10)`);
+    cy.contains('.bar .pull-right', 'Bar Plot')
+      .closest('.react-grid-item')
+      .should('have.css', 'transform', `matrix(1, 0, 0, 1, 10, 565)`);
 
     // check first view positions
     cy.get(viewselect + 'button#viewDropdown').click();
     cy.get(viewselect + "a[href='#first']").click();
-    cy.get('.react-grid-layout > div')
-      .eq(0)
+    cy.contains('.bar .pull-right', 'Text Pane')
+      .closest('.react-grid-item')
       .should('have.css', 'transform', `matrix(1, 0, 0, 1, 10, 10)`);
-    cy.get('.react-grid-layout > div')
-      .eq(1)
+    cy.contains('.bar .pull-right', 'Random!')
+      .closest('.react-grid-item')
       .should('have.css', 'transform', `matrix(1, 0, 0, 1, 263, 10)`);
-    cy.get('.react-grid-layout > div')
-      .eq(2)
+    cy.contains('.bar .pull-right', 'Line Plot')
+      .closest('.react-grid-item')
       .should('have.css', 'transform', `matrix(1, 0, 0, 1, 529, 10)`);
-    cy.get('.react-grid-layout > div')
-      .eq(3)
+    cy.contains('.bar .pull-right', 'Bar Plot')
+      .closest('.react-grid-item')
       .should('have.css', 'transform', `matrix(1, 0, 0, 1, 10, 565)`);
   });
 
