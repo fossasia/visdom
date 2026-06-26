@@ -84,7 +84,10 @@ describe(`Take screenshot for PlotPane functions`, () => {
 
   it('Screenshot for Property Change (using Line Plot)', () => {
     cy.run('plot_line_basic');
-    cy.get('button[title="properties"]').click();
+    cy.get('.layout .window').should('have.length', 1);
+    cy.get('button[title="properties"]', { timeout: 10000 })
+      .should('be.visible')
+      .click();
 
     // change some settings
     const change = (key, val) =>
@@ -111,7 +114,9 @@ describe(`Take screenshot for PlotPane functions`, () => {
     change('xaxis.type', 'log');
 
     // apply settings
-    cy.get('button[title="properties"]').click();
+    cy.get('button[title="properties"]', { timeout: 10000 })
+      .should('be.visible')
+      .click();
 
     const run = 'change-properties';
     cy.get('.content').first().screenshot(run, { overwrite: true });
