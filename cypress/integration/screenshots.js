@@ -213,6 +213,7 @@ describe(`Compare screenshots for plotpane functions`, () => {
 
   it('Compare screenshot for Property Change (using Line Plot)', () => {
     cy.run('plot_line_basic');
+    cy.get('.layout .window').should('have.length', 1);
     cy.get('button[title="properties"]').click();
 
     // change some settings
