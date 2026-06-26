@@ -219,23 +219,6 @@ doesn't override our desire to make them non-interactable */
   border-left: thin solid #ccc;
 }
 
-.rc-tree-select-selection--multiple {
-    max-height: 34px;
-    min-height: 34px;
-    overflow-y: auto;
-}
-
-.rc-tree-select-selection--multiple .rc-tree-select-selection__clear {
-  right: 20px;
-}
-
-.rc-tree-select-selection {
-  border-radius: 6px 0px 0px 6px;
-}
-
-.rc-tree-select-selection--multiple .rc-tree-select-search__field__placeholder {
-    top: 8px;
-}
 
 .table-properties td {
     border: solid 1px #dedede;

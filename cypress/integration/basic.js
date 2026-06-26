@@ -29,14 +29,14 @@ describe('Test Setup', () => {
     cy.visit('/').wait(1000);
     cy.get('.rc-tree-select [title="main"]').should('exist');
     cy.get('.rc-tree-select').contains('main').trigger('mouseover').wait(100);
-    cy.get('.rc-tree-select .rc-tree-select-selection__choice__remove').click({
+    cy.get('.rc-tree-select .rc-tree-select-selection-item-remove').click({
       force: true,
     });
     cy.get('.rc-tree-select [title="main"]').should('not.exist');
     cy.get('.rc-tree-select').click();
     cy.get('.rc-tree-select-tree').contains('main').click();
     cy.get('.rc-tree-select [title="main"]').should('exist');
-    cy.get('.rc-tree-select-selection__clear').click({ force: true }); // bug in ui: rc-tree-select should never be covered
+    cy.get('.rc-tree-select-clear').click({ force: true }); // bug in ui: rc-tree-select should never be covered
     cy.get('.rc-tree-select [title="main"]').should('not.exist');
   });
 });
