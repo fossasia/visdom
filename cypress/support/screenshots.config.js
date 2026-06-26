@@ -42,6 +42,9 @@ export const all_screenshots = [
   'plot_surface_replace_withnames',
   'plot_surface_contour',
   // 'plot_surface_3d', // disabled due to webgl
+  'plot_confusion_matrix_basic',
+  'plot_confusion_matrix_precomputed',
+  'plot_confusion_matrix_normalized',
   'plot_special_boxplot',
   'plot_special_quiver',
   'plot_violin_basic',
