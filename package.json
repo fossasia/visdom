@@ -33,7 +33,7 @@
     "test:gui": "cypress open",
     "test:init": "cypress run --spec './cypress/integration/screenshots.init.js'",
     "test:visual": "cypress run --spec './cypress/integration/screenshots.js'",
-    "test": "cypress run",
+    "test": "cypress run --config excludeSpecPattern=**/*.init.js",
     "lint": "eslint js/.",
     "lint:fix": "eslint --fix --ext .js,.jsx js/"
   },
