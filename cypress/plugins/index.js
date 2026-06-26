@@ -24,11 +24,14 @@ const PNG = require('pngjs').PNG;
 
 function assertSafeToken(name, value) {
   const safePattern = /^[A-Za-z0-9._:-]+$/;
-  if (typeof value !== 'string' || value.length === 0 || !safePattern.test(value)) {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    !safePattern.test(value)
+  ) {
     throw new Error(`Invalid value for ${name}: ${value}`);
   }
 }
-
 
 module.exports = (on) => {
   // `on` is used to hook into various events Cypress emits
@@ -53,6 +56,22 @@ module.exports = (on) => {
         assertSafeToken(`args[${index}]`, arg);
       });
 
+      const envPython = process.env.VISDOM_PYTHON;
+      const venvPosix = path.resolve(__dirname, '../../.venv/bin/python');
+      const venvWindows = path.resolve(
+        __dirname,
+        '../../.venv/Scripts/python.exe'
+      );
+
+      let pythonPath = 'python3';
+      if (envPython) {
+        pythonPath = envPython;
+      } else if (fs.existsSync(venvPosix)) {
+        pythonPath = venvPosix;
+      } else if (fs.existsSync(venvWindows)) {
+        pythonPath = venvWindows;
+      }
+
       const spawnArgs = [
         'example/demo.py',
         '-testing',
@@ -76,16 +95,30 @@ module.exports = (on) => {
         spawnArgs.push('-arg', ...args);
       }
 
-      const child = spawn('python', spawnArgs, {
+      const child = spawn(pythonPath, spawnArgs, {
         stdio: 'ignore',
         detached: true,
       });
       child.unref();
 
       return {
-        command: 'python',
+        command: pythonPath,
         args: spawnArgs,
       };
+    },
+
+    deleteFile(filePath) {
+      if (typeof filePath !== 'string') {
+        throw new Error('deleteFile requires a string file path.');
+      }
+      try {
+        fs.unlinkSync(filePath);
+      } catch (e) {
+        if (e.code !== 'ENOENT') {
+          throw e;
+        }
+      }
+      return null;
     },
 
     numDifferentPixels({
