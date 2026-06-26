@@ -305,7 +305,8 @@ button[title="smooth lines"].active {
 }
 
 .plotly-heatmap,
-.plotly-contour {
+.plotly-contour,
+.plotly-surface {
   min-height: 140px;
   min-width: 140px;
 }

@@ -59,7 +59,7 @@
     "react-grid-layout": "0.16.6",
     "react-modal": "^3.16.3",
     "react-scroll-to-bottom": "^4.2.0",
-    "react-resize-detector": "^7.1.2",
+    "react-resize-detector": "^9.1.1",
     "stream-browserify": "^3.0.0",
     "stream-http": "^3.2.0",
     "style-loader": "^4.0.0",
