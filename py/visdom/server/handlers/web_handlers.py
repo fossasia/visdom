@@ -21,14 +21,6 @@ import jsonpatch
 import logging
 import math
 import os
-from collections import OrderedDict
-
-try:
-    # for after python 3.8
-    from collections.abc import Mapping, Sequence
-except ImportError:
-    # for python 3.7 and below
-    from collections import Mapping, Sequence
 
 import tornado.escape
 from visdom.utils.shared_utils import get_rand_id, NanSafeEncoder
@@ -392,9 +384,6 @@ class UpdateHandler(BaseHandler):
 
     @check_auth
     def post(self):
-        if self.login_enabled and not self.current_user:
-            self.set_status(400)
-            return
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
@@ -701,8 +690,6 @@ class ErrorHandler(BaseHandler):
             raise tornado.web.HTTPError(400, reason="Invalid status code")
 
         raise tornado.web.HTTPError(status_code)
-        error_text = text or "test error"
-        raise Exception(error_text)
 
 
 class HealthHandler(BaseHandler):
