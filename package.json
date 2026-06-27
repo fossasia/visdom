@@ -12,7 +12,7 @@
     "@babel/preset-env": "^7.29.7",
     "@babel/preset-react": "^7.29.7",
     "babel-loader": "^10.1.1",
-    "cypress": "^9.7.0",
+    "cypress": "^15.18.0",
     "eslint": "^7.32.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-cypress": "^3.6.0",
@@ -35,7 +35,7 @@
     "test:gui": "cypress open",
     "test:init": "cypress run --spec './cypress/integration/screenshots.init.js'",
     "test:visual": "cypress run --spec './cypress/integration/screenshots.js'",
-    "test": "cypress run --config ignoreTestFiles=*.init.js",
+    "test": "cypress run --config excludeSpecPattern=**/*.init.js",
     "lint": "eslint js/.",
     "lint:fix": "eslint --fix --ext .js,.jsx js/"
   },
