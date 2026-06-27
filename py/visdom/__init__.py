@@ -1933,7 +1933,7 @@ class Visdom(object):
             # case when X is 1 dimensional and corresponding values on y-axis
             # are passed in parameter Y
             if name:
-                assert len(name) >= 0, "name of trace should be non-empty string"
+                assert len(name) > 0, "name of trace should be non-empty string"
                 assert X.ndim == 1 or X.ndim == 2, (
                     "updating by name should" "have 1-dim or 2-dim X."
                 )
