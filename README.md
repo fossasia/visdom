@@ -76,8 +76,8 @@ Right now the following callback events are supported:
 
 <details>
 <summary><b>Editable Plot Parameters</b></summary>
-Use the top-right *edit*-Button to inspect all parameters used for plot in the respective window.  
-The visdom client supports dynamic change of plot parameters as well. Just change one of the listed parameters, the plot will be altered on-the-fly.  
+Use the top-right *edit*-Button to inspect all parameters used for plot in the respective window.
+The visdom client supports dynamic change of plot parameters as well. Just change one of the listed parameters, the plot will be altered on-the-fly.
 Click the button again to close the property list.
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/19650074/156751970-0915757d-8bf0-4a6d-a510-1d34a918e47a.gif" width="400" /></p>
 </details>
@@ -91,7 +91,7 @@ You can partition your visualization space with `envs`. By default, every user w
 
 You can access a specific env via url: `http://localhost:8097/env/main`. If your server is hosted, you can share this url so others can see your visualizations too.
 
-Environments are automatically hierarchically organized by the first `_`.  
+Environments are automatically hierarchically organized by the first `_`.
 Note that `/` characters in environment names are escaped to `_`, so both `_` and `/`
 can affect how environments appear hierarchically in the UI.
 
@@ -274,6 +274,8 @@ Visdom offers the following basic visualization functions:
 - [`vis.video`](#visvideo)    : videos
 - [`vis.svg`](#vissvg)      : SVG object
 - [`vis.matplot`](#vismatplot)  : matplotlib plot
+- [`vis.plotlyplot`](#visplotlyplot)  : arbitrary Plotly figure
+- [`vis.embeddings`](#visembeddings)  : interactive embedding projection
 - [`vis.save`](#vissave)     : serialize state server-side
 
 ### Plotting
@@ -281,17 +283,22 @@ We have wrapped several common plot types to make creating basic visualizations 
 
 The following API is currently supported:
 - [`vis.scatter`](#visscatter)  : 2D or 3D scatter plots
+- [`vis.sunburst`](#vissunburst)  : sunburst (hierarchy) charts
 - [`vis.line`](#visline)     : line plots
 - [`vis.stem`](#visstem)     : stem plots
 - [`vis.heatmap`](#visheatmap)  : heatmap plots
 - [`vis.bar`](#visbar)  : bar graphs
 - [`vis.histogram`](#vishistogram) : histograms
+- [`vis.histogram2d`](#vishistogram2d) : 2D histograms (density maps)
 - [`vis.boxplot`](#visboxplot)  : boxplots
+- [`vis.violin`](#visviolin)   : violin plots
+- [`vis.pie`](#vispie)      : pie charts
 - [`vis.surf`](#vissurf)     : surface plots
 - [`vis.contour`](#viscontour)  : contour plots
 - [`vis.quiver`](#visquiver)   : quiver plots
 - [`vis.mesh`](#vismesh)     : mesh plots
 - [`vis.dual_axis_lines`](#visdual_axis_lines)     : double y axis line plots
+- [`vis.graph`](#visgraph)    : network graphs
 
 ### Generic Plots
 Note that the server API adheres to the Plotly convention of `data` and `layout` objects, such that you can produce your own arbitrary `Plotly` visualizations:
@@ -596,6 +603,19 @@ The following plot-specific `opts` are currently supported:
 - `opts.numbins`: number of bins (`number`; default = 30)
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 
+#### vis.histogram2d
+This function draws a 2D histogram (density map) of paired data. It takes as
+input two `N` tensors `X` and `Y` of equal length that hold the coordinates of
+`N` points; the points are binned into a 2D grid and each cell is colored by
+the number of points that fall in it.
+
+The following plot-specific `opts` are currently supported:
+
+- `opts.xnumbins`: number of bins along the x-axis (`number`; default lets Plotly choose)
+- `opts.ynumbins`: number of bins along the y-axis (`number`; default lets Plotly choose)
+- `opts.colormap`: colormap (`string`; default = `'Viridis'`)
+- `opts.histnorm`: normalization of the bin counts, one of `''`, `'percent'`, `'probability'`, `'density'`, or `'probability density'`
+
 #### vis.boxplot
 This function draws boxplots of the specified data. It takes as input
 an `N` or an `NxM` tensor `X` that specifies the `N` data values of which
@@ -604,6 +624,31 @@ to construct the `M` boxplots.
 The following plot-specific `opts` are currently supported:
 
 - `opts.legend`: labels for each of the columns in `X`
+- `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
+
+#### vis.violin
+This function draws violin plots of the specified data. It takes as input an
+`N` or an `NxM` tensor `X` that specifies the `N` data values of which to
+construct the `M` violin plots.
+
+The following plot-specific `opts` are currently supported:
+
+- `opts.legend`: labels for each of the columns in `X`
+- `opts.showbox`: overlay a mini box plot inside the violin (`bool`; default = `True`)
+- `opts.showmeanline`: overlay the mean line (`bool`; default = `True`)
+- `opts.points`: which raw points to show alongside the violin, one of `'all'`, `'outliers'`, `'suspectedoutliers'`, or `False` (default = `False`)
+- `opts.jitter`: amount of jitter applied to displayed points (`float` in `[0, 1]`; default = `0.3`)
+- `opts.orientation`: `'v'` for vertical or `'h'` for horizontal violins (default = `'v'`)
+- `opts.bandwidth`: bandwidth of the kernel density estimate (`None` lets Plotly choose automatically)
+- `opts.side`: which side of the centre line to draw, one of `'both'`, `'positive'`, or `'negative'` (default = `'both'`)
+
+#### vis.pie
+This function draws a pie chart based on the `N` tensor `X`. The values in
+`X` must be non-negative and define the size of each slice.
+
+The following plot-specific `opts` are currently supported:
+
+- `opts.legend`: `list` containing legend names
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 
 #### vis.surf
@@ -676,16 +721,16 @@ The following `opts` are supported:
 - `opts.top` :  Set the top margin of the plot
 - `opts.bottom` :  Set the bottom margin of the plot
 - `opts.right` :  Set the right margin of the plot
-- `opts.left` :  Set the left margin of the plot   
+- `opts.left` :  Set the left margin of the plot
 
-This is the image of the output:  
+This is the image of the output:
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/19650074/198822367-666cc42e-4354-4a7a-8dd3-d8ff143f885d.gif" width="400" /></p>
 
 
-### Network Graph
+#### vis.graph
 
-This function draws a graph, in which the nodes and edges are taken from a 2-D matrix of size [,2] where each row contains a source and destination node value. The numeric value used to define nodes should be strictly between (0 to n-1), where n is the number of nodes. 
- 
+This function draws a graph, in which the nodes and edges are taken from a 2-D matrix of size [,2] where each row contains a source and destination node value. The numeric value used to define nodes should be strictly between (0 to n-1), where n is the number of nodes.
+
 There are two optional arguments :
 - `edgeLabels` : list of custom edge labels. If not provided each edge gets a label, "source-destination", eg "1-2", size should be equal to size of input "edges". Optional.
 - `nodeLabels` : list of custom node labels. If not provided each node gets a label same as the numeric value defined in the "edges". size should be equal to number of nodes present. Optional.
@@ -700,7 +745,7 @@ The following opts are supported:
 
 ### Customizing plots
 
-The plotting functions take an optional `opts` table as input that can be used to change (generic or plot-specific) properties of the plots. 
+The plotting functions take an optional `opts` table as input that can be used to change (generic or plot-specific) properties of the plots.
 
 All input arguments are specified in a single table; the input arguments are matches based on the keys they have in the input table.
 
@@ -740,7 +785,7 @@ The following `opts` are generic in the sense that they are the same for all vis
 OR
 
     opts={"title":"my title", "xlabel":"x axis","ylabel":"y axis"}
-    
+
 The other options are visualization-specific, and are described in the
 documentation of the functions.
 
