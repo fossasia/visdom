@@ -458,7 +458,7 @@ viz.save_plotly_figure(fig, "my_plot.png")
 
 #### vis.embeddings
 
-This function visualizes a collection of features using the [Barnes-Hut t-SNE algorithm](https://github.com/lvdmaaten/bhtsne).
+This function visualizes a collection of features using t-SNE dimensionality reduction (powered by [openTSNE](https://github.com/pavlin-policar/openTSNE) or [bhtsne](https://github.com/lvdmaaten/bhtsne) as a fallback). `openTSNE` is installed automatically as a dependency of visdom, so this feature works out of the box.
 
 The function accepts the following arguments:
 - `features`: a list of tensors
