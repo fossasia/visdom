@@ -20,6 +20,7 @@ import lasso from '../lasso';
 import Pane from './Pane';
 
 const SCALE_RADIUS = 2000;
+const MIN_SELECTION = 22;
 
 class EmbeddingsPane extends React.Component {
   shouldComponentUpdate(nextProps) {
@@ -177,7 +178,8 @@ class Scene extends React.Component {
       Math.round(nextProps.width) !== Math.round(this.props.width) ||
       nextProps.interactive !== this.props.interactive ||
       nextState.detailsLoading !== this.state.detailsLoading ||
-      nextState.selectMode !== this.state.selectMode
+      nextState.selectMode !== this.state.selectMode ||
+      nextState.selectionError !== this.state.selectionError
     );
   }
 
@@ -386,6 +388,7 @@ class Scene extends React.Component {
 
   componentWillUnmount() {
     this.stop();
+    clearTimeout(this._errTimer);
     let view = select(this.renderer.domElement);
     view.on('mousemove', null);
     view.on('mouseleave', null);
@@ -465,6 +468,19 @@ class Scene extends React.Component {
   hideTooltip() {
     this.setState({ hovered: null });
   }
+
+  handleTooFew = (count) => {
+    this.setState({
+      selectionError: `Only ${count} point${
+        count === 1 ? '' : 's'
+      } selected; at least ${MIN_SELECTION} are needed to drill down.`,
+    });
+    clearTimeout(this._errTimer);
+    this._errTimer = setTimeout(
+      () => this.setState({ selectionError: null }),
+      3000
+    );
+  };
 
   sortIntersectsByDistanceToRay(intersects) {
     return [...intersects].sort((a, b) => a.distanceToRay - b.distanceToRay);
@@ -621,6 +637,19 @@ class Scene extends React.Component {
               embeddings on
             </span>
           ) : null}
+          {this.state.selectionError ? (
+            <span
+              style={{
+                backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                color: '#c00',
+                padding: 2,
+                marginLeft: 6,
+                userSelect: 'none',
+              }}
+            >
+              {this.state.selectionError}
+            </span>
+          ) : null}
         </span>
         {this.state.hovered && (
           <div
@@ -655,6 +684,7 @@ class Scene extends React.Component {
             points={this.props.content.data}
             camera={this.camera}
             onRegionSelection={this.props.onRegionSelection}
+            onTooFew={this.handleTooFew}
           />
         )}
         <div
@@ -701,7 +731,8 @@ class LassoSelection extends React.Component {
         const selected = points.filter((point) =>
           polygonContains(polygon, point.test)
         );
-        if (selected.length <= 21) {
+        if (selected.length < MIN_SELECTION) {
+          this.props.onTooFew(selected.length);
           lassoInstance.reset();
           return;
         }

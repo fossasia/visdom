@@ -452,22 +452,9 @@ except (ImportError, AttributeError):
 def _to_numpy(a):
     if isinstance(a, list):
         return np.array(a)
-    if len(torch_types) > 0:
-        if isinstance(a, torch.autograd.Variable):
-            # For PyTorch < 0.4 compatibility.
-            warnings.warn(
-                "Support for versions of PyTorch less than 0.4 is deprecated "
-                "and will eventually be removed.",
-                DeprecationWarning,
-            )
-            a = a.data
     for kind in torch_types:
         if isinstance(a, kind):
-            # For PyTorch < 0.4 compatibility, where non-Variable
-            # tensors do not have a 'detach' method. Will be removed.
-            if hasattr(a, "detach"):
-                a = a.detach()
-            return a.cpu().numpy()
+            return a.detach().cpu().numpy()
     return a
 
 
