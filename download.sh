@@ -12,8 +12,8 @@ wget https://cdnjs.cloudflare.com/ajax/libs/react-modal/3.6.1/react-modal.min.js
 
 
 mkdir -p py/static/css
-wget https://unpkg.com/react-resizable@1.4.6/css/styles.css -O py/static/css/react-resizable-styles.css
-wget https://unpkg.com/react-grid-layout@0.16.3/css/styles.css -O py/static/css/react-grid-layout-styles.css
+wget https://unpkg.com/react-resizable@3.1.3/css/styles.css -O py/static/css/react-resizable-styles.css
+wget https://unpkg.com/react-grid-layout@2.2.3/css/styles.css -O py/static/css/react-grid-layout-styles.css
 wget https://unpkg.com/bootstrap@3.3.7/dist/css/bootstrap.min.css -O py/static/css/bootstrap.min.css
 
 
