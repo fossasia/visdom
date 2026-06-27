@@ -90,7 +90,7 @@ describe('Test Env Modal', () => {
 describe('Test View Modal', () => {
   it('View Modal opens & closes', () => {
     cy.get(viewmodal).should('not.exist');
-    cy.get(viewbutton).click();
+    cy.get(viewbutton).should('not.be.disabled').click();
     cy.get(viewmodal).should('exist');
     cy.get(viewmodal).type('{esc}');
     cy.get(viewmodal).should('not.exist');
