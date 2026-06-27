@@ -760,7 +760,7 @@ class UploadEnvHandler(BaseHandler):
         uid = uuid.uuid4().hex[:8]
         new_eid = f"uploaded_{uid}"
         if filename.endswith(".json"):
-            suggested_name = filename[:-5]
+            suggested_name = escape_eid(os.path.basename(filename[:-5]))
             if suggested_name and suggested_name != "main":
                 new_eid = f"uploaded_{suggested_name}_{uid}"
 
