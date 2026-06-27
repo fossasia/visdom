@@ -76,5 +76,3 @@ runs:
           name: pr-build
           path: ./py/visdom/static/js/
         if: ${{ inputs.loadprbuild == 'true' }}
-
-
