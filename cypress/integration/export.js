@@ -26,7 +26,7 @@ describe('Test Export Env as HTML', () => {
   };
 
   it('Export button is disabled when no env is open', () => {
-    cy.get('.rc-tree-select-selection__clear').should('exist');
+    cy.get('.rc-tree-select-clear').should('exist');
     cy.close_envs();
     cy.get(exportButton).should('be.disabled');
   });

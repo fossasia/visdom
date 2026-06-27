@@ -54,6 +54,7 @@ export default function lasso() {
     var lassoPolygon;
     var lassoPath;
     var closePath;
+    var closeCircle;
 
     function handleDragStart(event) {
       lassoPolygon = [d3pointer(event, this)];
@@ -78,33 +79,59 @@ export default function lasso() {
         .attr('stroke-dasharray', '7, 4')
         .attr('opacity', 0);
 
+      closeCircle = g
+        .append('circle')
+        .attr('cx', lassoPolygon[0][0])
+        .attr('cy', lassoPolygon[0][1])
+        .attr('r', closeDistance)
+        .attr('fill', 'none')
+        .attr('stroke', '#0bb')
+        .attr('stroke-width', '1.5px')
+        .attr('stroke-dasharray', '4, 4')
+        .attr('opacity', 0.5);
+
       dispatch.call('start', lasso, lassoPolygon);
     }
 
     function handleDrag(event) {
       // If reset() was called mid-drag, bail out safely.
-      if (!lassoPolygon || !lassoPath || !closePath) return;
+      if (!lassoPolygon || !lassoPath || !closePath || !closeCircle) return;
 
       var point = d3pointer(event, this);
       lassoPolygon.push(point);
       lassoPath.attr('d', polygonToPath(lassoPolygon));
 
-      // indicate if we are within closing distance
-      if (
+      // indicate if we are within closing distance: turn green to signal
+      // "release now to close", otherwise stay cyan
+      var withinClose =
         distance(lassoPolygon[0], lassoPolygon[lassoPolygon.length - 1]) <
-        closeDistance
-      ) {
-        closePath.attr('x1', point[0]).attr('y1', point[1]).attr('opacity', 1);
+        closeDistance;
+      var color = withinClose ? '#0a0' : '#0bb';
+
+      lassoPath.attr('stroke', color).attr('fill', color);
+      closeCircle
+        .attr('stroke', color)
+        .attr('opacity', withinClose ? 0.9 : 0.5);
+      if (withinClose) {
+        closePath
+          .attr('x1', point[0])
+          .attr('y1', point[1])
+          .attr('stroke', color)
+          .attr('opacity', 1);
       } else {
         closePath.attr('opacity', 0);
       }
     }
 
     function handleDragEnd() {
-      // remove the close path
+      // remove the close path and circle
       if (closePath) {
         closePath.remove();
         closePath = null;
+      }
+      if (closeCircle) {
+        closeCircle.remove();
+        closeCircle = null;
       }
 
       // successfully closed
@@ -138,6 +165,10 @@ export default function lasso() {
       if (closePath) {
         closePath.remove();
         closePath = null;
+      }
+      if (closeCircle) {
+        closeCircle.remove();
+        closeCircle = null;
       }
     };
   }

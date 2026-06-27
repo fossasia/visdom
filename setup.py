@@ -14,12 +14,12 @@ from setuptools import setup, find_packages
 
 try:
     import torch
+    from packaging.version import parse
 
-    if torch.__version__ < "0.3.1":
+    if parse(torch.__version__) < parse("2.0.0"):
         print(
-            "[visdom] WARNING: Visdom support for pytorch less than version "
-            "0.3.1 is unsupported. Visdom will still work for other purposes "
-            "though."
+            "[visdom] WARNING: PyTorch >= 2.0.0 is recommended for full "
+            "visdom support. Detected version: " + torch.__version__
         )
 except Exception:
     pass  # User doesn't have torch

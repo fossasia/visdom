@@ -289,6 +289,7 @@ The following API is currently supported:
 - [`vis.heatmap`](#visheatmap)  : heatmap plots
 - [`vis.bar`](#visbar)  : bar graphs
 - [`vis.histogram`](#vishistogram) : histograms
+- [`vis.histogram2d`](#vishistogram2d) : 2D histograms (density maps)
 - [`vis.boxplot`](#visboxplot)  : boxplots
 - [`vis.violin`](#visviolin)   : violin plots
 - [`vis.pie`](#vispie)      : pie charts
@@ -601,6 +602,19 @@ The following plot-specific `opts` are currently supported:
 
 - `opts.numbins`: number of bins (`number`; default = 30)
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
+
+#### vis.histogram2d
+This function draws a 2D histogram (density map) of paired data. It takes as
+input two `N` tensors `X` and `Y` of equal length that hold the coordinates of
+`N` points; the points are binned into a 2D grid and each cell is colored by
+the number of points that fall in it.
+
+The following plot-specific `opts` are currently supported:
+
+- `opts.xnumbins`: number of bins along the x-axis (`number`; default lets Plotly choose)
+- `opts.ynumbins`: number of bins along the y-axis (`number`; default lets Plotly choose)
+- `opts.colormap`: colormap (`string`; default = `'Viridis'`)
+- `opts.histnorm`: normalization of the bin counts, one of `''`, `'percent'`, `'probability'`, `'density'`, or `'probability density'`
 
 #### vis.boxplot
 This function draws boxplots of the specified data. It takes as input
