@@ -2452,6 +2452,60 @@ class Visdom(object):
         return self.bar(X=bins, Y=linrange, opts=opts, win=win, env=env)
 
     @pytorch_wrap
+    def histogram2d(self, X, Y, win=None, env=None, opts=None):
+        """
+        This function draws a 2D histogram (density map) of paired data. It
+        takes two `N` tensors `X` and `Y` of equal length that hold the
+        coordinates of `N` points; the points are binned into a 2D grid and
+        each cell is colored by the number of points that fall in it.
+
+        The following plot-specific `opts` are supported:
+
+        - `opts.xnumbins`: number of bins along the x-axis
+                           (`number`; default lets Plotly choose)
+        - `opts.ynumbins`: number of bins along the y-axis
+                           (`number`; default lets Plotly choose)
+        - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
+        - `opts.histnorm`: normalization of the bin counts, one of `''`,
+                           `'percent'`, `'probability'`, `'density'`, or
+                           `'probability density'`
+        """
+
+        X = np.squeeze(np.asarray(X))
+        Y = np.squeeze(np.asarray(Y))
+        assert X.ndim == 1 and Y.ndim == 1, "X and Y should be one-dimensional"
+        assert len(X) == len(Y), "X and Y should have the same length"
+
+        opts = {} if opts is None else opts
+        opts["colormap"] = opts.get("colormap", "Viridis")
+        _title2str(opts)
+        _assert_opts(opts)
+
+        trace = {
+            "x": X.tolist(),
+            "y": Y.tolist(),
+            "type": "histogram2d",
+            "colorscale": opts.get("colormap"),
+        }
+        if opts.get("xnumbins") is not None:
+            trace["nbinsx"] = opts["xnumbins"]
+        if opts.get("ynumbins") is not None:
+            trace["nbinsy"] = opts["ynumbins"]
+        if opts.get("histnorm") is not None:
+            trace["histnorm"] = opts["histnorm"]
+
+        return self._send(
+            {
+                "data": [trace],
+                "win": win,
+                "eid": env,
+                "layout": _opts2layout(opts),
+                "opts": opts,
+            },
+            endpoint="events",
+        )
+
+    @pytorch_wrap
     def boxplot(self, X, win=None, env=None, opts=None):
         """
         This function draws boxplots of the specified data. It takes as input
