@@ -23,7 +23,7 @@ var PlotPane = (props) => {
   const [smoothWidgetActive, setSmoothWidgetActive] = useState(false);
   const [smoothvalue, setSmoothValue] = useState(1);
   const [actualSelected, setActualSelected] = useState(
-    isHistory ? (selected || 0) : 0
+    isHistory ? selected || 0 : 0
   );
 
   const content = isHistory
@@ -166,7 +166,7 @@ var PlotPane = (props) => {
           // adapt color & transparency
           d.opacity = 0.35;
           smooth_d.opacity = 1.0;
-          smooth_d.marker.line.color = 0;
+          if (smooth_d.marker?.line) smooth_d.marker.line.color = 0;
 
           return smooth_d;
         });
@@ -186,7 +186,25 @@ var PlotPane = (props) => {
         });
 
     // required for Plotly.react to register the update
+    const layout = content.layout || (content.layout = {});
     content.layout.datarevision = props.version + '_' + actualSelected;
+
+    // Adjust top margin and title position
+    layout.margin = layout.margin || {};
+
+    if (layout.title) {
+      if (typeof layout.title === 'string') {
+        layout.title = { text: layout.title };
+      }
+      if (layout.title.text) {
+        layout.margin.t = 65;
+        layout.title.y = 0.9;
+      } else {
+        layout.margin.t = 30;
+      }
+    } else {
+      layout.margin.t = 30;
+    }
 
     // draw / redraw plot with layout-options
     Plotly.react(contentID, data.concat(smooth_data), content.layout, {
@@ -207,10 +225,7 @@ var PlotPane = (props) => {
     content &&
     content.data &&
     content.data.some((data) => {
-      return (
-        data['type'] == 'scatter' &&
-        data['mode'] == 'lines'
-      );
+      return data['type'] == 'scatter' && data['mode'] == 'lines';
     });
 
   var smooth_widget_button = '';
@@ -294,6 +309,8 @@ var PlotPane = (props) => {
             ? ' plotly-heatmap'
             : content.data?.[0]?.type === 'contour'
             ? ' plotly-contour'
+            : content.data?.[0]?.type === 'surface'
+            ? ' plotly-surface'
             : ''
         }`}
         ref={plotlyRef}

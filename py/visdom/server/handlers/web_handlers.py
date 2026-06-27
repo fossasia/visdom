@@ -50,6 +50,8 @@ from visdom.utils.server_utils import (
 )
 from visdom.server.handlers.base_handlers import BaseHandler
 
+logger = logging.getLogger(__name__)
+
 
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
@@ -73,8 +75,8 @@ class PostHandler(BaseHandler):
             )
 
         eid = extract_eid(req)
-        p = window(req)
 
+        p = window(req)
         register_window(self, p, eid)
 
 
@@ -183,8 +185,8 @@ class UpdateHandler(BaseHandler):
 
         # Delete a trace
         if args.get("delete"):
-            for idx in idxs:
-                del pdata[idx]
+            idxs_set = set(idxs)
+            p["content"]["data"] = [e for i, e in enumerate(pdata) if i not in idxs_set]
             return p
 
         # add new heatmap data if plot has been deleted previously
@@ -328,6 +330,9 @@ class UpdateHandler(BaseHandler):
     def wrap_func(handler, args):
         eid = extract_eid(args)
 
+        if eid not in handler.state:
+            handler.state[eid] = {"jsons": {}, "reload": {}}
+
         if args["win"] not in handler.state[eid]["jsons"]:
             # Append to a window that doesn't exist attempts to create
             # that window
@@ -373,7 +378,7 @@ class UpdateHandler(BaseHandler):
         if len(stringify(p)) <= len(stringify(diff_packet)):
             broadcast_msg = dict(p)
             broadcast_msg["eid"] = eid
-            broadcast(handler, broadcast_msg, eid)
+            broadcast(handler, json.dumps(broadcast_msg, cls=NanSafeEncoder), eid)
         else:
             broadcast_packet = {
                 "command": "window_update",
@@ -382,7 +387,7 @@ class UpdateHandler(BaseHandler):
                 "content": diff_packet,
                 "version": p.get("version", 1),
             }
-            broadcast(handler, broadcast_packet, eid)
+            broadcast(handler, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
         handler.write(p["id"])
 
     @check_auth
@@ -405,7 +410,11 @@ class CloseHandler(BaseHandler):
         keys = list(handler.state[eid]["jsons"].keys()) if win is None else [win]
         for win in keys:
             handler.state[eid]["jsons"].pop(win, None)
-            broadcast(handler, json.dumps({"command": "close", "data": win}), eid)
+            broadcast(
+                handler,
+                json.dumps({"command": "close", "data": win}, cls=NanSafeEncoder),
+                eid,
+            )
 
     @check_auth
     def post(self):

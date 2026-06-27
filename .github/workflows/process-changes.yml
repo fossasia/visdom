@@ -11,11 +11,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: "Checkout Repository"
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
     - name: "Install Node"
       uses: actions/setup-node@v6
       with:
-          node-version: 16
+          node-version: '24'
     - name: "Install Dependencies"
       run: ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm install
     - name: "Linter Check (ESLint)"
@@ -25,7 +25,7 @@ jobs:
     name: "Python Linter Check"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: psf/black@26.5.1
         with:
           src: "./py"
@@ -41,7 +41,7 @@ jobs:
       jsfileschanged: ${{ steps.checkout.outputs.jsfileschanged }}
     steps:
       - name: "Checkout Repository"
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - uses: ./.github/actions/prepare
         with:
           loadprbuild: false
@@ -78,7 +78,7 @@ jobs:
     steps:
 
       - name: "Checkout Repository"
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: "Save current Head-Ref as PR-branch"
         shell: bash
@@ -95,11 +95,18 @@ jobs:
         run: |
           git checkout PR-HEAD -- ./cypress
           git checkout PR-HEAD -- ./example
+          git checkout PR-HEAD -- ./package.json
+          git checkout PR-HEAD -- ./cypress.config.js
+
+      - name: "Install PR npm dependencies"
+        shell: bash
+        run: ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm install
 
       - name: Cypress test:init
         uses: cypress-io/github-action@v7
         with:
           install: false
+          browser: chrome
           start: visdom -port 8098 -env_path /tmp
           wait-on: 'http://localhost:8098'
           spec: cypress/integration/*.init.js
@@ -116,7 +123,7 @@ jobs:
     needs: visual-regression-test-init
     steps:
       - name: "Checkout Repository"
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - uses: ./.github/actions/prepare
 
       - uses: actions/download-artifact@v8
@@ -128,6 +135,7 @@ jobs:
         uses: cypress-io/github-action@v7
         with:
           install: false
+          browser: chrome
           start: visdom -port 8098 -env_path /tmp
           wait-on: 'http://localhost:8098'
           spec: cypress/integration/screenshots.js
@@ -147,7 +155,7 @@ jobs:
         python: ['3.10', '3.11', '3.12']
     steps:
       - name: "Checkout Repository"
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - uses: ./.github/actions/prepare
         with:
           python-version: ${{ matrix.python }}
@@ -156,9 +164,10 @@ jobs:
         uses: cypress-io/github-action@v7
         with:
           install: false
+          browser: chrome
           start: visdom -port 8098 -env_path /tmp
           wait-on: 'http://localhost:8098'
-          config: ignoreTestFiles=screenshots.*
+          config: excludeSpecPattern=**/screenshots.*
 
       - uses: actions/upload-artifact@v7
         if: failure()
@@ -172,16 +181,17 @@ jobs:
     needs: install-and-build
     steps:
       - name: 'Checkout Repository'
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - uses: ./.github/actions/prepare
 
       - name: Cypress test
         uses: cypress-io/github-action@v7
         with:
           install: false
+          browser: chrome
           start: visdom -port 8098 -env_path /tmp -use_frontend_client_polling
           wait-on: 'http://localhost:8098'
-          config: ignoreTestFiles=screenshots.*
+          config: excludeSpecPattern=**/screenshots.*
 
       - uses: actions/upload-artifact@v7
         if: failure()
