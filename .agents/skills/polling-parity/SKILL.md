@@ -41,4 +41,3 @@ Use this skill for any real-time feature that touches transport behavior.
 ## Tests
 
 - Follow the default flow in `references/TESTS.md`.
-
