@@ -107,7 +107,7 @@ function EnvControls(props) {
             style={envSelectorStyle}
             allowClear={true}
             dropdownStyle={{
-              maxHeight: 900,
+              maxHeight: 'calc(100vh - 200px)',
               overflow: 'auto',
               wordBreak: 'break-all',
             }}
@@ -122,6 +122,7 @@ function EnvControls(props) {
             treeDataSimpleMode={{ id: 'key', rootPId: 0 }}
             treeCheckable
             showCheckedStrategy={SHOW_CHILD}
+            listHeight={2000}
             dropdownMatchSelectWidth={false}
             onChange={onEnvSelect}
             treeDefaultExpandedKeys={[]}
