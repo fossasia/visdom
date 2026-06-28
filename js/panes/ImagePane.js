@@ -21,7 +21,7 @@ function ImagePane(props) {
   const { envID, id, title, type, selected, width, height } = props;
   var { isFocused, content } = props;
 
-  // state varibles
+  // state variables
   // --------------
   const paneRef = useRef();
   const imgRef = useRef();
@@ -210,9 +210,11 @@ function ImagePane(props) {
 
   // Find the width/height that preserves the aspect ratio 'scaledWidth/height'
   const computeHFromW = (scaledWidth) => {
+    if (!imgDim.width) return 0;
     return Math.ceil((imgDim.height / imgDim.width) * scaledWidth);
   };
   const computeWFromH = (scaledHeight) => {
+    if (!imgDim.height) return 0;
     return Math.ceil((imgDim.width / imgDim.height) * scaledHeight);
   };
 
@@ -220,7 +222,6 @@ function ImagePane(props) {
   let candidateWidth = Math.ceil(1 + width * view['scale']);
   let candidateHeight = Math.ceil(1 + height * view['scale']);
   let imageContainerStyle = {
-    alignItems: 'row',
     display: 'flex',
     height: isNaN(candidateHeight) ? DEFAULT_HEIGHT : candidateHeight,
     justifyContent: 'center',
@@ -237,7 +238,6 @@ function ImagePane(props) {
     // instead use the window width as the limiting factor
     if (newWidth > candidateWidth) {
       candidateHeight = computeHFromW(candidateWidth);
-      imageContainerStyle.alignItems = 'column';
     } else {
       candidateWidth = newWidth;
     }
@@ -250,7 +250,6 @@ function ImagePane(props) {
     if (newHeight > candidateHeight) {
       candidateWidth = computeWFromH(candidateHeight);
     } else {
-      imageContainerStyle.alignItems = 'column';
       candidateHeight = newHeight;
     }
   }
@@ -337,7 +336,6 @@ function ImagePane(props) {
           />
         </div>
       </div>
-      <p className="caption">{content.caption}</p>
       <span
         className="mouse_image_location"
         style={{ visibility: mouseLocation.visibility }}

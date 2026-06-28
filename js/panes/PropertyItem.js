@@ -110,7 +110,10 @@ function PropertyItem(props) {
       );
     case 'checkbox':
       return (
-        <label className="checkbox-inline" aria-label={props.name ? `Toggle ${props.name}` : 'Toggle checkbox'}>
+        <label
+          className="checkbox-inline"
+          aria-label={props.name ? `Toggle ${props.name}` : 'Toggle checkbox'}
+        >
           <input
             type="checkbox"
             checked={value}

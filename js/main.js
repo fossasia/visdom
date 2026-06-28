@@ -12,11 +12,15 @@
 'use strict';
 
 import 'fetch';
-import 'rc-tree-select/assets/index.css';
+import 'rc-tree-select/assets/index.less';
 
 import React, { useContext, useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
-import ReactResizeDetector from 'react-resize-detector';
+import ReactGridLayout, {
+  getLayoutItem,
+  sortLayoutItemsByRowCol as sortLayout,
+} from 'react-grid-layout';
+import { useResizeDetector } from 'react-resize-detector';
 
 import ApiContext from './api/ApiContext';
 import ApiProvider from './api/ApiProvider';
@@ -38,11 +42,8 @@ import FilterControls from './topbar/FilterControls';
 import ViewControls from './topbar/ViewControls';
 import WidthProvider from './Width';
 
-const ReactGridLayout = require('react-grid-layout');
 const jsonpatch = require('fast-json-patch');
 const GridLayout = WidthProvider(ReactGridLayout);
-const sortLayout = ReactGridLayout.utils.sortLayoutItemsByRowCol;
-const getLayoutItem = ReactGridLayout.utils.getLayoutItem;
 
 var use_envs = null;
 if (ACTIVE_ENV !== '') {
@@ -57,9 +58,49 @@ if (ACTIVE_ENV !== '') {
   use_envs = JSON.parse(localStorage.getItem('envIDs')) || ['main'];
 }
 
+const PaneWrapper = ({
+  Comp,
+  pane,
+  panelayout,
+  envID,
+  onClose,
+  onFocus,
+  isFocused,
+  defaultWidth,
+  defaultHeight,
+}) => {
+  const { width, height, ref } = useResizeDetector();
+  const PANE_TITLE_BAR_HEIGHT = 14;
+
+  const finalWidth =
+    width !== undefined && width > 0 ? width - 2 : defaultWidth;
+  const finalHeight =
+    (height !== undefined && height > 0 ? height - 2 : defaultHeight) -
+    PANE_TITLE_BAR_HEIGHT;
+
+  return (
+    <div ref={ref} style={{ width: '100%', height: '100%' }}>
+      <Comp
+        key={pane.id}
+        {...pane}
+        envID={envID}
+        onClose={onClose}
+        onFocus={onFocus}
+        isFocused={isFocused}
+        w={panelayout.w}
+        h={panelayout.h}
+        width={finalWidth}
+        height={finalHeight}
+        _width={finalWidth}
+        _height={finalHeight}
+      />
+    </div>
+  );
+};
+
 const App = () => {
   // -------------- //
-  // state varibles //
+  // state variables //
   // -------------- //
 
   // api variables & functions
@@ -78,7 +119,6 @@ const App = () => {
 
   // internal variables
   const mounted = useRef(false);
-  const [resizeClickHappened, setResizeClickHappened] = useState(false);
   const windowSize = useRef({
     width: 1280,
     cols: 100,
@@ -382,7 +422,6 @@ const App = () => {
     sendEnvQuery(selectedNodes, showAllEnvWindows);
   };
   const onEnvDelete = (env2delete, previousEnv) => {
-
     if (env2delete === previousEnv) {
       previousEnv = 'main';
     }
@@ -466,22 +505,6 @@ const App = () => {
   };
 
   const resizePane = (layout, oldLayoutItem, layoutItem) => {
-    // register a double click on the resize handle to reset the window size
-    if (
-      resizeClickHappened &&
-      layoutItem.w == oldLayoutItem.w &&
-      layoutItem.h == oldLayoutItem.h
-    ) {
-      let pane = storeData.panes[layoutItem.i];
-
-      // resets to default layout (same as during pane creation)
-      layoutItem.w = pane.width ? p2w(pane.width) : PANE_SIZE[pane.type][0];
-      layoutItem.h = pane.height
-        ? Math.ceil(p2h(pane.height + 14))
-        : PANE_SIZE[pane.type][1];
-      if (pane.content && pane.content.caption) layoutItem.h += 1;
-    }
-
     // update layout according to user interaction
     setSelection((prev) => ({
       ...prev,
@@ -490,15 +513,31 @@ const App = () => {
     focusPane(layoutItem.i);
     updateLayout(layout);
     sendPaneLayoutUpdate(selection.envIDs[0], layoutItem);
+  };
 
-    // register a double click in this function
-    setResizeClickHappened(true);
-    setTimeout(
-      function () {
-        setResizeClickHappened(false);
-      }.bind(this),
-      400
-    );
+  const handlePaneDoubleClick = (e, panelayout) => {
+    if (
+      e.target.className &&
+      typeof e.target.className === 'string' &&
+      e.target.className.includes('react-resizable-handle')
+    ) {
+      let pane = storeData.panes[panelayout.i];
+
+      // resets to default layout (same as during pane creation)
+      panelayout.w = pane.width ? p2w(pane.width) : PANE_SIZE[pane.type][0];
+      panelayout.h = pane.height
+        ? Math.ceil(p2h(pane.height + 14))
+        : PANE_SIZE[pane.type][1];
+      if (pane.content && pane.content.caption) panelayout.h += 1;
+
+      setSelection((prev) => ({
+        ...prev,
+        layoutID: DEFAULT_LAYOUT,
+      }));
+      focusPane(panelayout.i);
+      updateLayout(storeData.layout);
+      sendPaneLayoutUpdate(selection.envIDs[0], panelayout);
+    }
   };
 
   const movePane = (layout) => {
@@ -771,29 +810,26 @@ const App = () => {
       let filter = getValidFilter(filterString);
       let isVisible = pane.title.match(filter);
 
-      const PANE_TITLE_BAR_HEIGHT = 14;
-
       var _height = Math.round(h2p(panelayout.h));
       var _width = Math.round(w2p(panelayout.w));
 
       return (
-        <div key={pane.id} className={isVisible ? '' : 'hidden-window'}>
-          <ReactResizeDetector handleWidth handleHeight>
-            <Comp
-              {...pane}
-              envID={selection.envIDs[0]}
-              key={pane.id}
-              onClose={closePane}
-              onFocus={focusPane}
-              isFocused={pane.id === focusedPaneID}
-              w={panelayout.w}
-              h={panelayout.h}
-              width={w2p(panelayout.w)}
-              height={h2p(panelayout.h) - PANE_TITLE_BAR_HEIGHT}
-              _width={_width}
-              _height={_height - PANE_TITLE_BAR_HEIGHT}
-            />
-          </ReactResizeDetector>
+        <div
+          key={pane.id}
+          className={isVisible ? '' : 'hidden-window'}
+          onDoubleClick={(e) => handlePaneDoubleClick(e, panelayout)}
+        >
+          <PaneWrapper
+            Comp={Comp}
+            pane={pane}
+            panelayout={panelayout}
+            envID={selection.envIDs[0]}
+            onClose={closePane}
+            onFocus={focusPane}
+            isFocused={pane.id === focusedPaneID}
+            defaultWidth={_width}
+            defaultHeight={_height}
+          />
         </div>
       );
     } catch (err) {
