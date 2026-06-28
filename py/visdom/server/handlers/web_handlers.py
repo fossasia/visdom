@@ -50,6 +50,8 @@ from visdom.utils.server_utils import (
 )
 from visdom.server.handlers.base_handlers import BaseHandler
 
+logger = logging.getLogger(__name__)
+
 
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
@@ -73,8 +75,8 @@ class PostHandler(BaseHandler):
             )
 
         eid = extract_eid(req)
-        p = window(req)
 
+        p = window(req)
         register_window(self, p, eid)
 
 
