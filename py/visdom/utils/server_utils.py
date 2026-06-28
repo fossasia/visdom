@@ -27,12 +27,7 @@ import tornado.escape
 from collections import OrderedDict
 
 MAX_ENV_NAME_LEN = 25
-try:
-    # for after python 3.8
-    from collections.abc import Mapping, Sequence
-except ImportError:
-    # for python 3.7 and below
-    from collections import Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from visdom.server.defaults import (
     LAYOUT_FILE,
     DEFAULT_BASE_URL,
