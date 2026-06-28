@@ -210,9 +210,11 @@ function ImagePane(props) {
 
   // Find the width/height that preserves the aspect ratio 'scaledWidth/height'
   const computeHFromW = (scaledWidth) => {
+    if (!imgDim.width) return 0;
     return Math.ceil((imgDim.height / imgDim.width) * scaledWidth);
   };
   const computeWFromH = (scaledHeight) => {
+    if (!imgDim.height) return 0;
     return Math.ceil((imgDim.width / imgDim.height) * scaledHeight);
   };
 
@@ -334,7 +336,6 @@ function ImagePane(props) {
           />
         </div>
       </div>
-      <p className="caption">{content.caption}</p>
       <span
         className="mouse_image_location"
         style={{ visibility: mouseLocation.visibility }}

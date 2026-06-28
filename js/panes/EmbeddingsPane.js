@@ -8,8 +8,8 @@
  */
 
 import { polygonContains } from 'd3-polygon';
-import { event as currentEvent, mouse, select } from 'd3-selection';
-import * as d3 from 'd3-zoom';
+import { pointer, select } from 'd3-selection';
+import { zoom as d3zoom, zoomIdentity } from 'd3-zoom';
 import debounce from 'debounce';
 import React from 'react';
 import * as THREE from 'three';
@@ -20,6 +20,7 @@ import lasso from '../lasso';
 import Pane from './Pane';
 
 const SCALE_RADIUS = 2000;
+const MIN_SELECTION = 22;
 
 class EmbeddingsPane extends React.Component {
   shouldComponentUpdate(nextProps) {
@@ -78,16 +79,16 @@ class EmbeddingsPane extends React.Component {
   };
 
   onRegionSelection = (pointIdxs) => {
-    if (this.props.isFocused)
-      this.context.sendPaneMessage(
-        {
-          event_type: 'RegionSelected',
-          selectedIdxs: pointIdxs,
-          pane_data: false, // No need to send the full data for this
-        },
-        this.props.id,
-        this.props.envID
-      );
+    this.props.onFocus(this.props.id);
+    this.context.sendPaneMessage(
+      {
+        event_type: 'RegionSelected',
+        selectedIdxs: pointIdxs,
+        pane_data: false, // No need to send the full data for this
+      },
+      this.props.id,
+      this.props.envID
+    );
   };
 
   // Used to pop an embeddings drilldown off of the stack
@@ -177,7 +178,8 @@ class Scene extends React.Component {
       Math.round(nextProps.width) !== Math.round(this.props.width) ||
       nextProps.interactive !== this.props.interactive ||
       nextState.detailsLoading !== this.state.detailsLoading ||
-      nextState.selectMode !== this.state.selectMode
+      nextState.selectMode !== this.state.selectMode ||
+      nextState.selectionError !== this.state.selectionError
     );
   }
 
@@ -224,9 +226,9 @@ class Scene extends React.Component {
     let hoverContainer = new THREE.Object3D();
     scene.add(hoverContainer);
 
-    view.on('mousemove', () => {
+    view.on('mousemove', (event) => {
       if (!this.props.interactive) return;
-      let [mouseX, mouseY] = mouse(view.node());
+      let [mouseX, mouseY] = pointer(event, view.node());
       let mouse_position = [mouseX, mouseY];
       this.checkIntersects(
         mouse_position,
@@ -245,13 +247,14 @@ class Scene extends React.Component {
 
     /* ----------------------------------------------------------- */
 
-    let zoom = d3
-      .zoom()
-      .scaleExtent([this.getScaleFromZ(far), this.getScaleFromZ(near) - 1]);
-    zoom.on('zoom', () => {
+    let zoom = d3zoom().scaleExtent([
+      this.getScaleFromZ(far),
+      this.getScaleFromZ(near) - 1,
+    ]);
+    zoom.on('zoom', (event) => {
       if (!this.props.interactive) return;
-      let d3_transform = currentEvent.transform;
-      this.lastTransform = currentEvent.transform;
+      let d3_transform = event.transform;
+      this.lastTransform = event.transform;
       this.zoomHandler(d3_transform);
       this.scheduleRender();
     });
@@ -263,7 +266,7 @@ class Scene extends React.Component {
 
       if (!this.lastTransform) {
         let initial_scale = this.getScaleFromZ(far);
-        initial_transform = d3.zoomIdentity
+        initial_transform = zoomIdentity
           .translate(this.props.width / 2, this.props.height / 2)
           .scale(initial_scale);
 
@@ -307,7 +310,8 @@ class Scene extends React.Component {
       '#cccc00',
     ];
     let circle_sprite = new THREE.TextureLoader().load(
-      'https://fastforwardlabs.github.io/visualization_assets/circle-sprite.png'
+      'https://fastforwardlabs.github.io/visualization_assets/circle-sprite.png',
+      () => this.scheduleRender()
     );
 
     let fov = 40;
@@ -324,22 +328,30 @@ class Scene extends React.Component {
       })
     );
 
-    let pointsGeometry = new THREE.Geometry();
+    let pointsGeometry = new THREE.BufferGeometry();
 
-    let colors = [];
-    for (let datum of generated_points) {
-      // Set vector coordinates from data
-      let vertex = new THREE.Vector3(datum.position[0], datum.position[1], 0);
-      pointsGeometry.vertices.push(vertex);
-      let color = new THREE.Color(color_array[datum.group]);
-      colors.push(color);
-    }
-    pointsGeometry.colors = colors;
+    const count = generated_points.length;
+    const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+    generated_points.forEach((datum, i) => {
+      positions[i * 3] = datum.position[0];
+      positions[i * 3 + 1] = datum.position[1];
+      positions[i * 3 + 2] = 0;
+      const c = new THREE.Color(color_array[datum.group]);
+      colors[i * 3] = c.r;
+      colors[i * 3 + 1] = c.g;
+      colors[i * 3 + 2] = c.b;
+    });
+    pointsGeometry.setAttribute(
+      'position',
+      new THREE.BufferAttribute(positions, 3)
+    );
+    pointsGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
     let pointsMaterial = new THREE.PointsMaterial({
       size: 6,
       sizeAttenuation: false,
-      vertexColors: THREE.VertexColors,
+      vertexColors: true,
       map: circle_sprite,
       transparent: true,
     });
@@ -376,6 +388,7 @@ class Scene extends React.Component {
 
   componentWillUnmount() {
     this.stop();
+    clearTimeout(this._errTimer);
     let view = select(this.renderer.domElement);
     view.on('mousemove', null);
     view.on('mouseleave', null);
@@ -456,6 +469,19 @@ class Scene extends React.Component {
     this.setState({ hovered: null });
   }
 
+  handleTooFew = (count) => {
+    this.setState({
+      selectionError: `Only ${count} point${
+        count === 1 ? '' : 's'
+      } selected; at least ${MIN_SELECTION} are needed to drill down.`,
+    });
+    clearTimeout(this._errTimer);
+    this._errTimer = setTimeout(
+      () => this.setState({ selectionError: null }),
+      3000
+    );
+  };
+
   sortIntersectsByDistanceToRay(intersects) {
     return [...intersects].sort((a, b) => a.distanceToRay - b.distanceToRay);
   }
@@ -463,16 +489,17 @@ class Scene extends React.Component {
   highlightPoint(datum, hoverContainer, circle_sprite) {
     this.removeHighlights(hoverContainer);
 
-    let geometry = new THREE.Geometry();
-    geometry.vertices.push(
-      new THREE.Vector3(datum.position[0], datum.position[1], 0)
-    );
-    geometry.colors = [new THREE.Color(this.color_array[datum.group])];
+    let geometry = new THREE.BufferGeometry();
+    const pos = new Float32Array([datum.position[0], datum.position[1], 0]);
+    const c = new THREE.Color(this.color_array[datum.group]);
+    const col = new Float32Array([c.r, c.g, c.b]);
+    geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(col, 3));
 
     let material = new THREE.PointsMaterial({
       size: 16,
       sizeAttenuation: false,
-      vertexColors: THREE.VertexColors,
+      vertexColors: true,
       map: circle_sprite,
       transparent: true,
     });
@@ -610,6 +637,19 @@ class Scene extends React.Component {
               embeddings on
             </span>
           ) : null}
+          {this.state.selectionError ? (
+            <span
+              style={{
+                backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                color: '#c00',
+                padding: 2,
+                marginLeft: 6,
+                userSelect: 'none',
+              }}
+            >
+              {this.state.selectionError}
+            </span>
+          ) : null}
         </span>
         {this.state.hovered && (
           <div
@@ -644,6 +684,7 @@ class Scene extends React.Component {
             points={this.props.content.data}
             camera={this.camera}
             onRegionSelection={this.props.onRegionSelection}
+            onTooFew={this.handleTooFew}
           />
         )}
         <div
@@ -690,7 +731,8 @@ class LassoSelection extends React.Component {
         const selected = points.filter((point) =>
           polygonContains(polygon, point.test)
         );
-        if (selected.length <= 21) {
+        if (selected.length < MIN_SELECTION) {
+          this.props.onTooFew(selected.length);
           lassoInstance.reset();
           return;
         }
