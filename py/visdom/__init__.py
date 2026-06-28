@@ -8,6 +8,7 @@
 
 from visdom.utils.shared_utils import get_new_window_id
 from visdom import server
+import os
 import os.path
 import requests
 import traceback
@@ -44,43 +45,68 @@ import sys
 
 assert sys.version_info[0] >= 3, "To use visdom with python 2, downgrade to v0.1.8.9"
 
+
+def _normalize_tsne(Y):
+    Y = np.asarray(Y)
+    xmin, xmax = np.min(Y[:, 0]), np.max(Y[:, 0])
+    ymin, ymax = np.min(Y[:, 1]), np.max(Y[:, 1])
+    xrange = xmax - xmin
+    yrange = ymax - ymin
+    normx = (
+        ((Y[:, 0] - xmin) / xrange) * 2 - 1 if xrange > 0 else np.zeros_like(Y[:, 0])
+    )
+    normy = (
+        ((Y[:, 1] - ymin) / yrange) * 2 - 1 if yrange > 0 else np.zeros_like(Y[:, 1])
+    )
+    return list(zip(normx, normy))
+
+
+def _get_perplexity(num_entities):
+    if num_entities >= 150:
+        base = 50
+    elif num_entities >= 21:
+        base = num_entities // 3
+    else:
+        base = 7
+    max_perplexity = max(1, (num_entities - 1) // 3)
+    return min(base, max_perplexity)
+
+
 try:
-    # TODO try to import https://github.com/CannyLab/tsne-cuda first? will be
-    # faster but requires more setup
-    import visdom.extra_deps.bhtsne.bhtsne as bhtsne
+    from openTSNE import TSNE as TSNE_OPEN
 
     def do_tsne(X):
-        num_entities = len(X)
-
-        # the number of entities provided must be at least 3x the perplexity
-        if num_entities >= 150:
-            perplexity = 50
-        elif num_entities >= 21:
-            perplexity = num_entities // 3
-        else:
-            perplexity = 7
-        Y = bhtsne.run_bh_tsne(
-            X, initial_dims=X.shape[1], perplexity=perplexity, verbose=True
-        )
-        xmin, xmax = min(Y[:, 0]), max(Y[:, 0])
-        ymin, ymax = min(Y[:, 1]), max(Y[:, 1])
-        normx = ((Y[:, 0] - xmin) / (xmax - xmin)) * 2 - 1
-        normy = ((Y[:, 1] - ymin) / (ymax - ymin)) * 2 - 1
-        normY = list(zip(normx, normy))
-        return normY
+        perplexity = _get_perplexity(len(X))
+        tsne = TSNE_OPEN(n_components=2, perplexity=perplexity, verbose=True)
+        Y = tsne.fit(X)
+        return _normalize_tsne(Y)
 
 except ImportError:
+    try:
+        import visdom.extra_deps.bhtsne.bhtsne as bhtsne
 
-    def do_tsne(X):
-        raise Exception(
-            "In order to use the embeddings feature, you'll "
-            "need to install a backend to support the calculation. "
-            "Currently we support the bhtsne implementation at "
-            "https://github.com/lvdmaaten/bhtsne/, and you can install "
-            "this by cloning it into the /py/visdom/extra_deps/ directory "
-            "and running the installation steps as listed on that github "
-            "in the created /py/visdom/extra_deps/bhtsne directory."
-        )
+        def do_tsne(X):
+            perplexity = _get_perplexity(len(X))
+            Y = bhtsne.run_bh_tsne(
+                X, initial_dims=X.shape[1], perplexity=perplexity, verbose=True
+            )
+            return _normalize_tsne(Y)
+
+    except ImportError:
+
+        def do_tsne(X):
+            raise Exception(
+                "In order to use the embeddings feature, you'll "
+                "need to install a backend to support the calculation. "
+                "Currently we support openTSNE "
+                "(https://github.com/pavlin-policar/openTSNE) for "
+                "t-SNE computation, or the bhtsne implementation at "
+                "https://github.com/lvdmaaten/bhtsne/. Install openTSNE via "
+                "pip install openTSNE, or install bhtsne by cloning it into "
+                "the /py/visdom/extra_deps/ directory and running the "
+                "installation steps as listed on that github "
+                "in the created /py/visdom/extra_deps/bhtsne directory."
+            )
 
 
 here = os.path.abspath(os.path.dirname(__file__))
@@ -94,6 +120,9 @@ except Exception:
 logging.getLogger("requests").setLevel(logging.CRITICAL)
 logging.getLogger("urllib3").setLevel(logging.CRITICAL)
 logger = logging.getLogger(__name__)
+
+SESSION_IDLE_TIMEOUT = 600
+SESSION_IDLE_CHECK_INTERVAL = 60
 
 
 def get_rand_id():
@@ -448,22 +477,9 @@ except (ImportError, AttributeError):
 def _to_numpy(a):
     if isinstance(a, list):
         return np.array(a)
-    if len(torch_types) > 0:
-        if isinstance(a, torch.autograd.Variable):
-            # For PyTorch < 0.4 compatibility.
-            warnings.warn(
-                "Support for versions of PyTorch less than 0.4 is deprecated "
-                "and will eventually be removed.",
-                DeprecationWarning,
-            )
-            a = a.data
     for kind in torch_types:
         if isinstance(a, kind):
-            # For PyTorch < 0.4 compatibility, where non-Variable
-            # tensors do not have a 'detach' method. Will be removed.
-            if hasattr(a, "detach"):
-                a = a.detach()
-            return a.cpu().numpy()
+            return a.detach().cpu().numpy()
     return a
 
 
@@ -496,25 +512,6 @@ def _decode_binary_arrays(obj):
     return obj
 
 
-def _float_img_to_uint8(img):
-    """Convert a float image array to uint8."""
-    # Tolerance needs floor to also safely address float64 images.
-    tol = max(1e-6, np.finfo(img.dtype).eps ** 0.5)
-    max_val = float(img.max())
-    if max_val <= 1.0:
-        return np.uint8(np.clip(img, 0.0, 1.0) * 255.0)
-    if max_val <= 1.0 + tol:
-        warnings.warn(
-            "Image has float values slightly above 1.0 "
-            "(max={:.6f}). Values will be clamped to "
-            "[0, 1] and scaled to [0, 255].".format(max_val),
-            UserWarning,
-            stacklevel=2,
-        )
-        return np.uint8(np.clip(img, 0.0, 1.0) * 255.0)
-    return np.uint8(img)
-
-
 class Visdom(object):
     def __init__(
         self,
@@ -535,6 +532,8 @@ class Visdom(object):
         proxies=None,
         offline=False,
         use_polling=False,
+        session_idle_timeout=SESSION_IDLE_TIMEOUT,
+        session_idle_check_interval=SESSION_IDLE_CHECK_INTERVAL,
     ):
         parsed_url = urlparse(server)
         if not parsed_url.scheme:
@@ -570,6 +569,11 @@ class Visdom(object):
         self.log_to_filename = log_to_filename
         self.offline = offline
         self._session = None
+        self._pid = os.getpid()
+        self._session_lock = threading.Lock()
+        self._last_post_time = time.time()
+        self.session_idle_timeout = session_idle_timeout
+        self.session_idle_check_interval = session_idle_check_interval
         self.proxies = proxies
         self.http_proxy_host = None
         self.http_proxy_port = None
@@ -617,6 +621,8 @@ class Visdom(object):
                 "Without the incoming socket you cannot receive events from "
                 "the server or register event handlers to your Visdom client."
             )
+        if send:
+            self._start_session_reaper()
         # Wait for initialization before starting
         time_spent = 0
         inc = 0.1
@@ -635,22 +641,60 @@ class Visdom(object):
 
     @property
     def session(self):
-        if self._session:
-            return self._session
-        logger.warning("Setting up a new session...")
-        sess = requests.Session()
-        if self.proxies:
-            sess.proxies.update(self.proxies)
-        if self.username:
-            resp = sess.post(
-                "%s:%s%s" % (self.server, self.port, self.base_url),
-                json=dict(username=self.username, password=self.password),
-            )
-            if resp.status_code != requests.codes.ok:
-                raise RuntimeError("Authentication failed")
-            logger.info("Authentication succeeded")
-        self._session = sess
-        return sess
+        with self._session_lock:
+            current_pid = os.getpid()
+            if self._session and self._pid == current_pid:
+                return self._session
+
+            if self._session:
+                try:
+                    self._session.close()
+                except Exception:
+                    pass
+            self._pid = current_pid
+            logger.warning("Setting up a new session...")
+            sess = requests.Session()
+            if self.proxies:
+                sess.proxies.update(self.proxies)
+            if self.username:
+                resp = sess.post(
+                    "%s:%s%s" % (self.server, self.port, self.base_url),
+                    json=dict(username=self.username, password=self.password),
+                )
+                if resp.status_code != requests.codes.ok:
+                    raise RuntimeError("Authentication failed")
+                logger.info("Authentication succeeded")
+            self._session = sess
+            return sess
+
+    def _start_session_reaper(self):
+        def run_reaper():
+            while True:
+                time.sleep(self.session_idle_check_interval)
+                idle_for = time.time() - self._last_post_time
+                if idle_for <= self.session_idle_timeout:
+                    continue
+                with self._session_lock:
+                    if (
+                        self._session is not None
+                        and time.time() - self._last_post_time
+                        > self.session_idle_timeout
+                    ):
+                        logger.info(
+                            "Closing idle visdom HTTP session after %ds of "
+                            "inactivity; it will be recreated on the next send.",
+                            int(idle_for),
+                        )
+                        try:
+                            self._session.close()
+                        except Exception:
+                            pass
+                        self._session = None
+
+        self.session_reaper_thread = threading.Thread(
+            target=run_reaper, name="Visdom-Session-Reaper", daemon=True
+        )
+        self.session_reaper_thread.start()
 
     def register_event_handler(self, handler, target, env=None):
         assert callable(handler), "Event handler must be a function"
@@ -848,8 +892,24 @@ class Visdom(object):
         """
         if data is None:
             data = {}
-        r = self.session.post(url, data=data)
-        return r.text
+        self._last_post_time = time.time()
+        had_session = self._session is not None
+        try:
+            r = self.session.post(url, data=data)
+            return r.text
+        except (requests.ConnectionError, requests.Timeout):
+            if not had_session:
+                raise
+            logger.warning("Connection failed, resetting session and retrying...")
+            with self._session_lock:
+                try:
+                    if self._session is not None:
+                        self._session.close()
+                except Exception:
+                    pass
+                self._session = None
+            r = self.session.post(url, data=data)
+            return r.text
 
     def _send(self, msg, endpoint="events", quiet=False, from_log=False, create=True):
         """
@@ -1485,25 +1545,41 @@ class Visdom(object):
     def image(self, img, win=None, env=None, opts=None):
         """
         This function draws an img. It takes as input a `CxHxW` (where C is 1, 3, or 4)
-        or `HxW` tensor `img` that contains the image. The array values can be uint8 in [0, 255]
-        or float. Float arrays are handled as follows: values in [-1, 1] are normalized to [0, 1],
-        values in [0, 1] are scaled to [0, 255], and all other ranges are clipped to [0, 255].
+        or `HxW` tensor `img` that contains the image. The array values can be uint8 in
+        [0, 255] or float. Float arrays are converted as follows: images whose
+        full range is within [0, 1] are scaled to [0, 255]; images whose full
+        range is within [-1, 1] but includes negative values are mapped from
+        [-1, 1] to [0, 255]; all other float values are clipped to [0, 255].
+        Pass `opts.normalize=True` to min-max scale the image to fill [0, 255]
+        instead.
+
+        The following `opts` are supported:
+
+        - `opts.normalize`: min-max scale float image to [0, 255] (`boolean`; default = `False`)
+        - `opts.jpgquality`: quality of the JPEG image (`number` in (0, 100]; default = `None` for PNG)
+        - `opts.caption`: caption below the image (`string`; optional)
+        - `opts.store_history`: append to image history pane (`boolean`)
         """
         opts = {} if opts is None else opts
         _title2str(opts)
         _assert_opts(opts)
-        # normalize floats to uint8
         if np.issubdtype(img.dtype, np.floating):
-            img_max = img.max()
-            if img_max <= 1.0:
-                img_min = img.min()
-                if img_min < 0 and img_min >= -1.0:
-                    if img_max > img_min:
-                        img = (img - img_min) / (img_max - img_min)
-                    else:
-                        img = np.zeros_like(img)
-                    img_max = 1.0  # after normalization, new max is 1
-            img = _float_img_to_uint8(img)
+            finite = img[np.isfinite(img)]
+            if finite.size > 0:
+                img_min, img_max = float(finite.min()), float(finite.max())
+            else:
+                img_min, img_max = 0.0, 0.0
+            if opts.get("normalize", False):
+                if img_max > img_min:
+                    img = (img - img_min) / (img_max - img_min) * 255.0
+                else:
+                    img = np.zeros_like(img)
+            elif img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
+                img = img * 255.0
+            elif img_min >= -1.0 - 1e-5 and img_max <= 1.0 + 1e-5:
+                img = (img + 1.0) / 2.0 * 255.0
+            img = np.nan_to_num(img, nan=0.0, posinf=255.0, neginf=0.0)
+            img = np.uint8(np.clip(img, 0, 255))
 
         # extract dimensions and process formats
         if img.ndim == 2:
@@ -1671,7 +1747,12 @@ class Visdom(object):
             audiofile = os.path.join(
                 tempfile.gettempdir(), "%s.wav" % next(tempfile._get_candidate_names())
             )
-            tensor = np.int16(tensor / np.max(np.abs(tensor)) * 32767)
+            max_val = np.max(np.abs(tensor))
+            if max_val == 0:
+                # When all zero tensor, skip normalisation to avoid division by zero
+                tensor = np.zeros_like(tensor, dtype=np.int16)
+            else:
+                tensor = np.int16(tensor / max_val * 32767)
             scipy.io.wavfile.write(audiofile, opts.get("sample_frequency"), tensor)
 
         extension = audiofile.split(".")[-1].lower()
@@ -1869,7 +1950,7 @@ class Visdom(object):
             # case when X is 1 dimensional and corresponding values on y-axis
             # are passed in parameter Y
             if name:
-                assert len(name) >= 0, "name of trace should be non-empty string"
+                assert len(name) > 0, "name of trace should be non-empty string"
                 assert X.ndim == 1 or X.ndim == 2, (
                     "updating by name should" "have 1-dim or 2-dim X."
                 )
@@ -2386,6 +2467,60 @@ class Visdom(object):
         linrange = np.linspace(minx, maxx, opts["numbins"])
 
         return self.bar(X=bins, Y=linrange, opts=opts, win=win, env=env)
+
+    @pytorch_wrap
+    def histogram2d(self, X, Y, win=None, env=None, opts=None):
+        """
+        This function draws a 2D histogram (density map) of paired data. It
+        takes two `N` tensors `X` and `Y` of equal length that hold the
+        coordinates of `N` points; the points are binned into a 2D grid and
+        each cell is colored by the number of points that fall in it.
+
+        The following plot-specific `opts` are supported:
+
+        - `opts.xnumbins`: number of bins along the x-axis
+                           (`number`; default lets Plotly choose)
+        - `opts.ynumbins`: number of bins along the y-axis
+                           (`number`; default lets Plotly choose)
+        - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
+        - `opts.histnorm`: normalization of the bin counts, one of `''`,
+                           `'percent'`, `'probability'`, `'density'`, or
+                           `'probability density'`
+        """
+
+        X = np.squeeze(np.asarray(X))
+        Y = np.squeeze(np.asarray(Y))
+        assert X.ndim == 1 and Y.ndim == 1, "X and Y should be one-dimensional"
+        assert len(X) == len(Y), "X and Y should have the same length"
+
+        opts = {} if opts is None else opts
+        opts["colormap"] = opts.get("colormap", "Viridis")
+        _title2str(opts)
+        _assert_opts(opts)
+
+        trace = {
+            "x": X.tolist(),
+            "y": Y.tolist(),
+            "type": "histogram2d",
+            "colorscale": opts.get("colormap"),
+        }
+        if opts.get("xnumbins") is not None:
+            trace["nbinsx"] = opts["xnumbins"]
+        if opts.get("ynumbins") is not None:
+            trace["nbinsy"] = opts["ynumbins"]
+        if opts.get("histnorm") is not None:
+            trace["histnorm"] = opts["histnorm"]
+
+        return self._send(
+            {
+                "data": [trace],
+                "win": win,
+                "eid": env,
+                "layout": _opts2layout(opts),
+                "opts": opts,
+            },
+            endpoint="events",
+        )
 
     @pytorch_wrap
     def boxplot(self, X, win=None, env=None, opts=None):
