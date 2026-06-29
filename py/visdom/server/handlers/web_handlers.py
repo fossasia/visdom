@@ -657,11 +657,8 @@ class IndexHandler(BaseHandler):
         self.user_credential = app.user_credential
         self.base_url = app.base_url if app.base_url != "" else "/"
         self.wrap_socket = app.wrap_socket
-        self.app = app
 
     def get(self, args, **kwargs):
-        items = gather_envs(self.state, env_path=self.env_path)
-        tags_index = json.dumps(getattr(self.app, "tags", {}))
         if (not self.login_enabled) or self.current_user:
             """self.current_user is an authenticated user provided by Tornado,
             available when we set self.get_current_user in BaseHandler,
@@ -673,10 +670,6 @@ class IndexHandler(BaseHandler):
                 )
             self.render(
                 "index.html",
-                user=getpass.getuser(),
-                items=items,
-                tags_index=tags_index,
-                active_item="",
                 wrap_socket=self.wrap_socket,
             )
         elif self.login_enabled:
@@ -685,7 +678,6 @@ class IndexHandler(BaseHandler):
                 "login.html",
                 user=getpass.getuser(),
                 items=items,
-                tags_index=tags_index,
                 active_item="",
                 base_url=self.base_url,
             )

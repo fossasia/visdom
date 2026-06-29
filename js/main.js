@@ -7,7 +7,7 @@
  *
  */
 
-/* global ACTIVE_ENV ENV_LIST TAGS_INDEX $ Bin */
+/* global ACTIVE_ENV $ Bin */
 
 'use strict';
 
@@ -127,8 +127,8 @@ const App = () => {
 
   // data stores
   const [storeMeta, setStoreMeta] = useState({
-    envList: ENV_LIST.slice(),
-    tags: typeof TAGS_INDEX !== 'undefined' ? TAGS_INDEX : {},
+    envList: [],
+    tags: {},
     layoutLists: new Map([['main', new Map([[DEFAULT_LAYOUT, new Map()]])]]),
   });
   const [storeData, setStoreData] = useState({
