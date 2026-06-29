@@ -294,8 +294,8 @@ class Scene extends React.Component {
     // https://blog.fastforwardlabs.com/2017/10/04/using-three-js-for-2d-data-visualization.html
     // https://codepen.io/WebSeed/pen/MEBoRq
 
-    const width = this.props.width;
-    const height = this.props.height;
+    const width = Math.max(1, this.props.width);
+    const height = Math.max(1, this.props.height);
     let radius = SCALE_RADIUS;
     let color_array = [
       '#1f78b4',
@@ -393,6 +393,8 @@ class Scene extends React.Component {
     view.on('mousemove', null);
     view.on('mouseleave', null);
     this.mount.removeChild(this.renderer.domElement);
+    this.renderer.forceContextLoss();
+    this.renderer.dispose();
   }
 
   /* utility methods */
