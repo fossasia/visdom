@@ -2962,12 +2962,12 @@ class Visdom(object):
         - `opts.right` :  Set the right margin of the plot
         - `opts.left` :  Set the left margin of the plot
         """
-        X = np.asarray(X)
-        Y1 = np.asarray(Y1)
-        Y2 = np.asarray(Y2)
         assert X is not None, "X Cannot be None"
         assert Y1 is not None, "Y1 Cannot be None"
         assert Y2 is not None, "Y2 Cannot be None"
+        X = np.asarray(X)
+        Y1 = np.asarray(Y1)
+        Y2 = np.asarray(Y2)
         assert X.shape == Y1.shape, "values of X and Y1 are not in proper shape"
         assert X.shape == Y2.shape, "values of X and Y2 are not in proper shape"
         if opts is None:
