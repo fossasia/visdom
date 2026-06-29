@@ -43,6 +43,7 @@ from visdom.server.handlers.web_handlers import (
     PostHandler,
     SaveHandler,
     UpdateHandler,
+    UploadEnvHandler,
     UserSettingsHandler,
 )
 from visdom.server.defaults import (
@@ -113,6 +114,7 @@ class Application(tornado.web.Application):
             (r"%s/env/(.*)" % self.base_url, EnvHandler, {"app": self}),
             (r"%s/compare/(.*)" % self.base_url, CompareHandler, {"app": self}),
             (r"%s/save" % self.base_url, SaveHandler, {"app": self}),
+            (r"%s/upload_env" % self.base_url, UploadEnvHandler, {"app": self}),
             (r"%s/error/(.*)" % self.base_url, ErrorHandler, {"app": self}),
             (r"%s/win_exists" % self.base_url, ExistsHandler, {"app": self}),
             (r"%s/win_data" % self.base_url, DataHandler, {"app": self}),
