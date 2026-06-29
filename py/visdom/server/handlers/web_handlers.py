@@ -145,7 +145,7 @@ class UpdateHandler(BaseHandler):
             p["contentID"] = content_id
             return [
                 {"op": "replace", "path": "/content/data", "value": new_data},
-                {"op": "replace", "path": "/content/has_previous", "value": True},
+                {"op": "add", "path": "/content/has_previous", "value": True},
                 {"op": "add", "path": "/content/selected", "value": None},
                 {"op": "replace", "path": "/contentID", "value": content_id},
             ]
