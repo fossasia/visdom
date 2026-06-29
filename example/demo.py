@@ -44,6 +44,7 @@ from components.plot_bar import (
     plot_bar_stacked,
     plot_bar_nonstacked,
     plot_bar_histogram,
+    plot_bar_histogram2d,
     plot_bar_piechart,
 )
 from components.plot_surface import (
@@ -161,6 +162,7 @@ def run_demo(viz, env, args):
     plot_bar_stacked(viz, env, args)
     plot_bar_nonstacked(viz, env, args)
     plot_bar_histogram(viz, env, args)
+    plot_bar_histogram2d(viz, env, args)
     plot_bar_piechart(viz, env, args)
 
     # ============= #
