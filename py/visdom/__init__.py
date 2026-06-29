@@ -2921,7 +2921,18 @@ class Visdom(object):
                 "({} labels for {} nodes)".format(len(labels), num_nodes)
             )
 
-        node = {"pad": opts.get("pad", 15), "thickness": opts.get("thickness", 20)}
+        pad = opts.get("pad", 15)
+        thickness = opts.get("thickness", 20)
+        orientation = opts.get("orientation", "h")
+        assert isinstance(pad, numbers.Number) and pad >= 0, (
+            "opts.pad must be a non-negative number"
+        )
+        assert isinstance(thickness, numbers.Number) and thickness > 0, (
+            "opts.thickness must be a positive number"
+        )
+        assert orientation in ("h", "v"), "opts.orientation must be 'h' or 'v'"
+
+        node = {"pad": pad, "thickness": thickness}
         if labels is not None:
             node["label"] = list(labels)
         if opts.get("nodecolor") is not None:
@@ -2938,7 +2949,7 @@ class Visdom(object):
         data = [
             {
                 "type": "sankey",
-                "orientation": opts.get("orientation", "h"),
+                "orientation": orientation,
                 "node": node,
                 "link": link,
             }
