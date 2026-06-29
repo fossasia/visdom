@@ -14,10 +14,9 @@ At the moment, this just inherited all of the floating functions
 in the previous server.py class.
 """
 
-
 import copy
-import html
 import hashlib
+import html
 import json
 import logging
 import os
@@ -29,6 +28,7 @@ import errno
 import tornado.escape
 from collections import OrderedDict
 
+MAX_ENV_NAME_LEN = 25
 try:
     # for after python 3.8
     from collections.abc import Mapping, Sequence
@@ -42,7 +42,12 @@ from visdom.server.defaults import (
     DEFAULT_HOSTNAME,
     DEFAULT_PORT,
 )
-from visdom.utils.shared_utils import warn_once, get_rand_id, get_new_window_id
+from visdom.utils.shared_utils import (
+    warn_once,
+    get_rand_id,
+    get_new_window_id,
+    NanSafeEncoder,
+)
 
 
 # ---- Vaguely server-security related functions ---- #
@@ -58,7 +63,7 @@ def check_auth(f):
         # TODO this should call a shared method of the handler
         handler.last_access = time.time()
         if handler.login_enabled and not handler.current_user:
-            handler.set_status(400)
+            handler.set_status(401)
             return
         f(handler, *args, **kwargs)
 
@@ -75,12 +80,17 @@ def set_cookie(value=None):
         cookie_file.write(cookie_secret)
 
 
-def hash_password(password):
-    """Hashing Password with SHA-256"""
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+def hash_password(password, salt=None):
+    """Hash password using PBKDF2-HMAC-SHA256 with a random salt."""
+    if salt is None:
+        salt = os.urandom(32)
+    elif isinstance(salt, str):
+        salt = bytes.fromhex(salt)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 100000)
+    return salt.hex() + "$" + dk.hex()
 
 
-# ------- File management helprs ----- #
+# ------- File management helpers ----- #
 
 
 _WRITE_LOCKS_GUARD = threading.Lock()
@@ -165,9 +175,9 @@ def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
                 if isinstance(state[env_id], LazyEnvData):
                     if state[env_id]._raw_dict is None:
                         continue
-                    data = json.dumps(dict(state[env_id]))
+                    data = json.dumps(dict(state[env_id]), cls=NanSafeEncoder)
                 else:
-                    data = json.dumps(state[env_id])
+                    data = json.dumps(state[env_id], cls=NanSafeEncoder)
                 try:
                     atomic_save(env_path_file, data)
                 except OSError as e:
@@ -186,7 +196,10 @@ def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
                     else:
                         data_to_save = copy.deepcopy(state[env_id])
                     data_to_save["name"] = env_id
-                    atomic_save(env_path_file, json.dumps(data_to_save))
+                    atomic_save(
+                        env_path_file,
+                        json.dumps(data_to_save, cls=NanSafeEncoder),
+                    )
     return env_ids
 
 
@@ -256,7 +269,7 @@ def window(args):
         "contentID": get_rand_id(),  # to detected updated windows
     }
 
-    if ptype == "image_history" and is_visdom_type:
+    if ptype in ["image_history", "plot_history"] and is_visdom_type:
         p.update(
             {
                 "content": [args["data"][0]["content"]],
@@ -307,9 +320,10 @@ def gather_envs(state, env_path=DEFAULT_ENV_PATH):
     return sorted(list(set(items + list(state.keys()))))
 
 
-def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
+def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH, show_all=False):
     logging.info("comparing envs")
-    eidNums = {e: str(i) for i, e in enumerate(eids)}
+    use_env_names = all(len(str(eid)) <= MAX_ENV_NAME_LEN for eid in eids)
+    eidNums = {e: e if use_env_names else str(i) for i, e in enumerate(eids)}
     env = {}
     envs = {}
     for eid in eids:
@@ -341,7 +355,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
 
     valid_eids = [eid for eid in eids if eid in envs]
     if not valid_eids:
-        socket.write_message(json.dumps({"command": "layout"}))
+        socket.write_message(json.dumps({"command": "layout"}, cls=NanSafeEncoder))
         socket.eid = eids
         return
     base_eid = valid_eids[0]
@@ -442,13 +456,38 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         ):
             del res["jsons"][destWid]
 
+    if show_all:
+        for eid in sorted(envs.keys()):
+            eid_num = eidNums[eid]
+            for wid, win in envs[eid].get("jsons", {}).items():
+                win_title = win.get("title", "")
+                new_wid = "{}_env_{}".format(eid, wid)
+                if new_wid in res["jsons"]:
+                    continue
+                win_copy = copy.deepcopy(win)
+                win_copy["id"] = new_wid
+                label = (
+                    "[{}] {}".format(eid_num, html.escape(win_title))
+                    if win_title
+                    else "[{}]".format(eid_num)
+                )
+                win_copy["title"] = label
+                if isinstance(win_copy.get("layout"), dict):
+                    win_copy["layout"]["title"] = label
+                if isinstance(win_copy.get("content"), dict) and isinstance(
+                    win_copy["content"].get("layout"), dict
+                ):
+                    win_copy["content"]["layout"]["title"] = label
+                win_copy["has_compare"] = True
+                res["jsons"][new_wid] = win_copy
+
     # create legend mapping environment names to environment numbers so one can
     # look it up for the new legend
     tableRows = [
         "<tr> <td> {} </td> <td> {} </td> </tr>".format(
             html.escape(str(v)), html.escape(str(eidNums[v]))
         )
-        for v in eidNums
+        for v in sorted(eidNums)
     ]
 
     tbl = """<style>
@@ -476,14 +515,16 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH):
         "has_compare": True,
     }
     if "reload" in res:
-        socket.write_message(json.dumps({"command": "reload", "data": res["reload"]}))
+        socket.write_message(
+            json.dumps({"command": "reload", "data": res["reload"]}, cls=NanSafeEncoder)
+        )
 
     jsons = list(res.get("jsons", {}).values())
     windows = sorted(jsons, key=lambda k: ("i" not in k, k.get("i", None)))
     for v in windows:
-        socket.write_message(v)
+        socket.write_message(json.dumps(v, cls=NanSafeEncoder))
 
-    socket.write_message(json.dumps({"command": "layout"}))
+    socket.write_message(json.dumps({"command": "layout"}, cls=NanSafeEncoder))
     socket.eid = eids
 
 
@@ -495,7 +536,10 @@ def broadcast_envs(handler, target_subs=None):
         target_subs = handler.subs.values()
     for sub in target_subs:
         sub.write_message(
-            json.dumps({"command": "env_update", "data": list(handler.state.keys())})
+            json.dumps(
+                {"command": "env_update", "data": list(handler.state.keys())},
+                cls=NanSafeEncoder,
+            )
         )
 
 
@@ -521,7 +565,7 @@ def sync_tags(handler, target_subs=None):
 def send_to_sources(handler, msg):
     target_sources = handler.sources.values()
     for source in target_sources:
-        source.write_message(json.dumps(msg))
+        source.write_message(json.dumps(msg, cls=NanSafeEncoder))
 
 
 def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
@@ -550,14 +594,18 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
                     state[eid] = env
 
     if "reload" in env:
-        socket.write_message(json.dumps({"command": "reload", "data": env["reload"]}))
+        socket.write_message(
+            json.dumps({"command": "reload", "data": env["reload"]}, cls=NanSafeEncoder)
+        )
 
     jsons = list(env.get("jsons", {}).values())
     windows = sorted(jsons, key=lambda k: ("i" not in k, k.get("i", None)))
     for v in windows:
-        socket.write_message(v)
+        msg = dict(v)
+        msg["eid"] = eid
+        socket.write_message(json.dumps(msg, cls=NanSafeEncoder))
 
-    socket.write_message(json.dumps({"command": "layout"}))
+    socket.write_message(json.dumps({"command": "layout"}, cls=NanSafeEncoder))
     socket.eid = eid
 
 
@@ -587,7 +635,9 @@ def register_window(self, p, eid):
 
     env[p["id"]] = p
 
-    broadcast(self, p, eid)
+    broadcast_msg = dict(p)
+    broadcast_msg["eid"] = eid
+    broadcast(self, json.dumps(broadcast_msg, cls=NanSafeEncoder), eid)
     if is_new_env:
         broadcast_envs(self)
     self.write(p["id"])

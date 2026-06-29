@@ -45,6 +45,7 @@ from visdom.server.handlers.web_handlers import (
     PostHandler,
     SaveHandler,
     UpdateHandler,
+    UploadEnvHandler,
     UserSettingsHandler,
     TagsHandler,
 )
@@ -52,6 +53,9 @@ from visdom.server.defaults import (
     DEFAULT_BASE_URL,
     DEFAULT_ENV_PATH,
     DEFAULT_HOSTNAME,
+    DEFAULT_MAX_IMAGE_HISTORY,
+    DEFAULT_MAX_OLD_CONTENT,
+    DEFAULT_MAX_TEXT_LINES,
     DEFAULT_PORT,
     LAYOUT_FILE,
 )
@@ -78,6 +82,9 @@ class Application(tornado.web.Application):
         eager_data_loading=False,
     ):
         self.eager_data_loading = eager_data_loading
+        self.max_image_history = DEFAULT_MAX_IMAGE_HISTORY
+        self.max_old_content = DEFAULT_MAX_OLD_CONTENT
+        self.max_text_lines = DEFAULT_MAX_TEXT_LINES
         self.env_path = env_path
         self.index_lock = threading.RLock()
         self.state = self.load_state()
@@ -111,6 +118,7 @@ class Application(tornado.web.Application):
             (r"%s/env/(.*)" % self.base_url, EnvHandler, {"app": self}),
             (r"%s/compare/(.*)" % self.base_url, CompareHandler, {"app": self}),
             (r"%s/save" % self.base_url, SaveHandler, {"app": self}),
+            (r"%s/upload_env" % self.base_url, UploadEnvHandler, {"app": self}),
             (r"%s/error/(.*)" % self.base_url, ErrorHandler, {"app": self}),
             (r"%s/win_exists" % self.base_url, ExistsHandler, {"app": self}),
             (r"%s/win_data" % self.base_url, DataHandler, {"app": self}),
@@ -264,6 +272,17 @@ class Application(tornado.web.Application):
         """Determines & uses the platform-specific root directory for user configurations."""
         if platform.system() == "Windows":
             base_dir = os.getenv("APPDATA")
+
+            if not base_dir:
+                fallback = os.path.expanduser("~")
+
+                if not fallback or fallback == "~":
+                    raise RuntimeError(
+                        "Could not determine base directory for user configurations."
+                    )
+                logging.warning("APPDATA not set, falling back to base directory")
+                base_dir = fallback
+
         elif platform.system() == "Darwin":  # osx
             base_dir = os.path.expanduser("~/Library/Preferences")
         else:

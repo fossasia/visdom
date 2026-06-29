@@ -106,6 +106,7 @@ h1 {
 
 .bar button {
   font-size: 8px;
+  padding-right: 6px;
 }
 
 button {
@@ -209,6 +210,10 @@ doesn't override our desire to make them non-interactable */
   overflow-x: auto;
   height: 100%;
   max-width: 100%;
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  -ms-user-select: text;
+  user-select: text;
 }
 
 .content-text-scroll-view {
@@ -284,7 +289,7 @@ doesn't override our desire to make them non-interactable */
   bottom: 0;
 
   overflow-y: scroll;
-  background: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 1);
   border: none;
 }
 
@@ -307,6 +312,18 @@ button[title="smooth lines"].active {
 .rc-tree-select-dropdown .rc-tree-select-tree-title {
   white-space: normal;
   word-break: break-word;
+}
+
+.react-grid-item {
+  min-height: 14px;
+  min-width: fit-content;
+}
+
+.plotly-heatmap,
+.plotly-contour,
+.plotly-surface {
+  min-height: 140px;
+  min-width: 140px;
 }
 
 .env-arrow-wrapper {
@@ -354,4 +371,15 @@ button[title="smooth lines"].active {
 
 .env-arrow-btn:hover:not(:disabled) {
   background-color: #e0e0e0;
+}
+
+.pull-right {
+  padding-right: 8px;
+}
+
+/* Override RGL v2 default pointer-events:none on grid-item images.
+   Visdom images are interactive (drag, zoom, click callbacks). */
+.react-grid-item img {
+  pointer-events: auto;
+  user-select: auto;
 }

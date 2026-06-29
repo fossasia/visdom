@@ -27,7 +27,10 @@ function TextPane(props) {
       case 'keydown':
       case 'keypress': {
         const tag = e.target.tagName;
-        if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+          break;
+        }
+        if (!(e.ctrlKey || e.metaKey)) {
           e.preventDefault();
         }
         break;

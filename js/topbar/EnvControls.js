@@ -23,6 +23,8 @@ function EnvControls(props) {
     onEnvSelect,
     onEnvClear,
     onEnvManageButton,
+    showAllEnvWindows,
+    onToggleShowAll,
   } = props;
   const [confirmClear, setConfirmClear] = useState(false);
 
@@ -41,21 +43,25 @@ function EnvControls(props) {
     }
   });
 
-  var keyCounter = 1;
   var env_options2 = [];
   var parentKeys = {};
 
-  Object.keys(childrenByPrefix).sort().forEach((prefix) => {
-    parentKeys[prefix] = keyCounter;
-    const prefix_tags = (tags && tags[prefix]) || [];
-    const label = prefix_tags.length > 0 ? `${prefix} [${prefix_tags.join(', ')}]` : prefix;
-    env_options2.push({
-      key: keyCounter++,
-      pId: 0,
-      label: label,
-      value: '__group__' + prefix,
+  Object.keys(childrenByPrefix)
+    .sort()
+    .forEach((prefix) => {
+      parentKeys[prefix] = '__group__' + prefix;
+      const prefix_tags = (tags && tags[prefix]) || [];
+      const label =
+        prefix_tags.length > 0
+          ? `${prefix} [${prefix_tags.join(', ')}]`
+          : prefix;
+      env_options2.push({
+        key: '__group__' + prefix,
+        pId: 0,
+        label: label,
+        value: '__group__' + prefix,
+      });
     });
-  });
 
   slist.forEach((env) => {
     var idx = env.indexOf('_');
@@ -72,7 +78,7 @@ function EnvControls(props) {
     const label = env_tags.length > 0 ? `${env} [${env_tags.join(', ')}]` : env;
 
     env_options2.push({
-      key: keyCounter++,
+      key: env,
       pId: parentKey,
       label: label,
       title: label,
@@ -111,7 +117,7 @@ function EnvControls(props) {
             style={envSelectorStyle}
             allowClear={true}
             dropdownStyle={{
-              maxHeight: 900,
+              maxHeight: 'calc(100vh - 200px)',
               overflow: 'auto',
               wordBreak: 'break-all',
             }}
@@ -122,13 +128,14 @@ function EnvControls(props) {
             inputValue={null}
             value={envIDs}
             treeData={env_options2}
-            treeDefaultExpandAll
             treeNodeFilterProp="title"
             treeDataSimpleMode={{ id: 'key', rootPId: 0 }}
             treeCheckable
             showCheckedStrategy={SHOW_CHILD}
+            listHeight={2000}
             dropdownMatchSelectWidth={false}
             onChange={onEnvSelect}
+            treeDefaultExpandedKeys={[]}
           />
           {slist.length > 1 && (
             <div className="env-arrow-wrapper">
@@ -190,6 +197,19 @@ function EnvControls(props) {
         >
           <span className="glyphicon glyphicon-folder-open" />
         </button>
+        {envIDs.length > 1 && (
+          <button
+            data-toggle="tooltip"
+            title="Show All Windows from All Environments"
+            data-placement="bottom"
+            className={
+              showAllEnvWindows ? 'btn btn-primary' : 'btn btn-default'
+            }
+            onClick={onToggleShowAll}
+          >
+            <span className="glyphicon glyphicon-eye-open" />
+          </button>
+        )}
       </div>
     </span>
   );
