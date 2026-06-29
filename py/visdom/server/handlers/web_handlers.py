@@ -101,14 +101,21 @@ class ExistsHandler(BaseHandler):
 class UpdateHandler(BaseHandler):
     @staticmethod
     def update_packet(p, args, max_text_lines, max_old_content, max_image_history):
+        if p.get("type") == "pointcloud3d":
+            return UpdateHandler._update_packet_pc3d(
+                p, args, max_text_lines, max_old_content, max_image_history
+            )
+
         # Shallow copy the packet to dynamically capture changes to top-level keys.
         old_p = p.copy()
 
-        # Deepcopy only the nested structures known to be mutated in-place.
+        # Deepcopy nested structures known to be mutated in-place.
         if "content" in p:
             old_p["content"] = copy.deepcopy(p["content"])
         if "old_content" in p:
             old_p["old_content"] = copy.deepcopy(p["old_content"])
+        if "opts" in p:
+            old_p["opts"] = copy.deepcopy(p["opts"])
 
         p = UpdateHandler.update(
             p, args, max_text_lines, max_old_content, max_image_history
@@ -117,6 +124,45 @@ class UpdateHandler(BaseHandler):
 
         patch = jsonpatch.make_patch(old_p, p)
         return p, patch.patch
+
+    @staticmethod
+    def _update_packet_pc3d(p, args, max_text_lines, max_old_content, max_image_history):
+        # Build patch manually for pointcloud3d to avoid two problems:
+        # 1. jsonpatch.make_patch on multi-MB base64 content blocks the IOLoop
+        # 2. contentID should only change when actual content changes, not on
+        #    opts-only updates (which would kill the reactive fast paths in JS)
+        old_content_id = id(p["content"])
+        old_opts = copy.deepcopy(p.get("opts", {}))
+        # Capture top-level UI keys before the update (not from opts dict, which
+        # never contains them — using opts as proxy was always-different bug).
+        old_title = p.get("title")
+        old_width = p.get("width")
+        old_height = p.get("height")
+
+        p = UpdateHandler.update(
+            p, args, max_text_lines, max_old_content, max_image_history
+        )
+
+        content_changed = id(p["content"]) != old_content_id
+        if content_changed:
+            p["contentID"] = get_rand_id()
+
+        # Increment version once for this update.
+        p["version"] += 1
+
+        patch = [{"op": "replace", "path": "/version", "value": p["version"]}]
+        if content_changed:
+            patch.append({"op": "replace", "path": "/contentID", "value": p["contentID"]})
+            patch.append({"op": "replace", "path": "/content", "value": p["content"]})
+        new_opts = p.get("opts", {})
+        if new_opts != old_opts:
+            patch.append({"op": "replace", "path": "/opts", "value": new_opts})
+        # Propagate top-level UI key changes (title, width, height).
+        for key, old_val in (("title", old_title), ("width", old_width), ("height", old_height)):
+            if key in p and p[key] != old_val:
+                patch.append({"op": "replace", "path": "/" + key, "value": p[key]})
+
+        return p, patch
 
     @staticmethod
     def update(p, args, max_text_lines, max_old_content, max_image_history):
@@ -167,6 +213,14 @@ class UpdateHandler(BaseHandler):
                 selected_not_neg = max(0, selected)
                 selected_exists = min(len(p["content"]) - 1, selected_not_neg)
                 p["selected"] = selected_exists
+            return p
+        if p["type"] == "pointcloud3d":
+            # pointcloud3d stores content as a flat payload dict (no 'data' subkey).
+            # Full content replacement: if new data is provided, swap the content.
+            new_data = args.get("data")
+            if new_data and len(new_data) > 0 and "content" in new_data[0]:
+                p["content"] = new_data[0]["content"]
+            p = update_window(p, args)
             return p
 
         pdata = p["content"]["data"]
@@ -352,6 +406,7 @@ class UpdateHandler(BaseHandler):
             or p["type"] == "image_history"
             or p["type"] == "plot_history"
             or p["type"] == "embeddings"
+            or p["type"] == "pointcloud3d"
             or (
                 len(p["content"]["data"]) == 0
                 or p["content"]["data"][0]["type"]

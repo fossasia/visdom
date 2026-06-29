@@ -512,6 +512,216 @@ def _decode_binary_arrays(obj):
     return obj
 
 
+def _float_img_to_uint8(img):
+    """Convert a float image array to uint8."""
+    # Tolerance needs floor to also safely address float64 images.
+    tol = max(1e-6, np.finfo(img.dtype).eps ** 0.5)
+    max_val = float(img.max())
+    if max_val <= 1.0:
+        return np.uint8(np.clip(img, 0.0, 1.0) * 255.0)
+    if max_val <= 1.0 + tol:
+        warnings.warn(
+            "Image has float values slightly above 1.0 "
+            "(max={:.6f}). Values will be clamped to "
+            "[0, 1] and scaled to [0, 255].".format(max_val),
+            UserWarning,
+            stacklevel=2,
+        )
+        return np.uint8(np.clip(img, 0.0, 1.0) * 255.0)
+    return np.uint8(img)
+
+
+_PC3D_HARD_MAX_POINTS = 500_000
+
+
+def _pc3d_validate_xyz(xyz):
+    try:
+        xyz = np.array(xyz, dtype=np.float64)
+    except (TypeError, ValueError):
+        raise TypeError("xyz must be array-like and numeric")
+    if xyz.ndim != 2 or xyz.shape[1] != 3:
+        raise ValueError(
+            "xyz must have shape (N, 3); got {}".format(xyz.shape)
+        )
+    if xyz.shape[0] == 0:
+        raise ValueError("xyz must contain at least one point")
+    if not np.isfinite(xyz).all():
+        raise ValueError("xyz must contain only finite values")
+    if (np.abs(xyz) > np.finfo(np.float32).max).any():
+        raise ValueError(
+            "xyz contains values exceeding float32 range "
+            "(max |value| = {:.3e}, float32 max = {:.3e}). "
+            "Scale coordinates to fit within float32 range.".format(
+                float(np.abs(xyz).max()),
+                float(np.finfo(np.float32).max),
+            )
+        )
+    return np.ascontiguousarray(xyz.astype("<f4"))
+
+
+def _pc3d_validate_rgb(rgb, N):
+    if rgb is None:
+        return None
+    try:
+        rgb = np.array(rgb)
+    except (TypeError, ValueError):
+        raise TypeError("rgb must be array-like and numeric")
+    if rgb.dtype.kind == 'b':
+        raise TypeError("rgb must be numeric, not bool")
+    if rgb.dtype.kind == 'c':
+        raise TypeError("rgb must be real-valued, not complex")
+    if not np.issubdtype(rgb.dtype, np.number):
+        raise TypeError("rgb must be array-like and numeric")
+    if rgb.ndim != 2 or rgb.shape != (N, 3):
+        raise ValueError(
+            "rgb must have shape ({}, 3); got {}".format(N, rgb.shape)
+        )
+    rgb_f = rgb.astype(float)
+    if not np.isfinite(rgb_f).all():
+        raise ValueError("rgb must contain only finite values")
+    if np.issubdtype(rgb.dtype, np.integer):
+        if rgb_f.min() < 0 or rgb_f.max() > 255:
+            raise ValueError("integer rgb values must be in [0, 255]")
+        return np.ascontiguousarray(rgb.astype(np.uint8))
+    # float dtype: detection order per spec
+    if rgb_f.min() < 0 or rgb_f.max() > 255.0:
+        raise ValueError("float rgb values must be in [0, 1] or [0, 255]")
+    if rgb_f.max() <= 1.0:
+        rgb_f = rgb_f * 255.0
+    # 1.0 < max <= 255.0: treat as [0, 255] already, just round/clip/cast
+    return np.ascontiguousarray(
+        np.round(rgb_f).clip(0, 255).astype(np.uint8)
+    )
+
+
+def _pc3d_validate_opts(opts):
+    if opts is not None and not isinstance(opts, dict):
+        raise TypeError(
+            "opts must be a dict or None; got {!r}".format(type(opts).__name__)
+        )
+    opts = opts or {}
+    if opts.get('downsample') == 'none':
+        raise ValueError(
+            "opts['downsample']='none' is not a valid value. "
+            "To disable downsampling, omit the 'downsample' key entirely."
+        )
+    markersize = opts.get('markersize', 2.0)
+    if isinstance(markersize, bool) or not isinstance(markersize, (int, float)):
+        raise TypeError("opts['markersize'] must be numeric")
+    if markersize <= 0:
+        raise ValueError("opts['markersize'] must be > 0")
+    opacity = opts.get('opacity', 1.0)
+    if isinstance(opacity, bool) or not isinstance(opacity, (int, float)):
+        raise TypeError("opts['opacity'] must be numeric")
+    if not (0.0 <= opacity <= 1.0):
+        raise ValueError("opts['opacity'] must be between 0 and 1")
+    max_points = opts.get('max_points', None)
+    downsample = opts.get('downsample', None)
+    if max_points is not None:
+        if not isinstance(max_points, int) or isinstance(max_points, bool):
+            raise TypeError("opts['max_points'] must be an integer")
+        if max_points <= 0:
+            raise ValueError("opts['max_points'] must be a positive integer")
+        if downsample == 'none':
+            raise ValueError(
+                "max_points and downsample='none' conflict; "
+                "'none' is not a valid downsample mode (use 'stride' or 'random')"
+            )
+    if downsample is not None and downsample not in ('stride', 'random'):
+        raise ValueError("opts['downsample'] must be 'stride' or 'random'")
+    show_axes = opts.get('show_axes', True)
+    if not isinstance(show_axes, bool):
+        raise TypeError(
+            "opts['show_axes'] must be a bool (True or False); "
+            "got {!r}. Pass show_axes=False (not 0) to hide axes.".format(show_axes)
+        )
+    if 'default_color' in opts:
+        dc = opts['default_color']
+        if not (isinstance(dc, (list, tuple)) and len(dc) == 3 and
+                all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                    and 0 <= v <= 255 for v in dc)):
+            raise ValueError(
+                "opts['default_color'] must be a list/tuple of 3 values in [0, 255]"
+            )
+    if 'bgcolor' in opts:
+        if not isinstance(opts['bgcolor'], str):
+            raise TypeError(
+                "opts['bgcolor'] must be a CSS color string (e.g. '#ffffff')"
+            )
+    if 'seed' in opts:
+        seed = opts['seed']
+        if seed is not None:
+            if not isinstance(seed, int) or isinstance(seed, bool):
+                raise TypeError(
+                    "opts['seed'] must be None or a non-negative integer, "
+                    "got {!r}".format(type(seed).__name__)
+                )
+            if seed < 0:
+                raise ValueError(
+                    "opts['seed'] must be a non-negative integer; got {:d}".format(seed)
+                )
+    return opts
+
+
+def _pc3d_downsample(xyz, rgb, opts):
+    N = xyz.shape[0]
+    max_points = opts.get('max_points', None)
+    if max_points is None:
+        # Suppress the performance warning when N already exceeds the hard cap
+        # (pointcloud3d will raise ValueError immediately after this call anyway,
+        # so the user cannot act on the warning).
+        if 200_000 < N <= _PC3D_HARD_MAX_POINTS:
+            warnings.warn(
+                "pointcloud3d is using inline base64 transport. "
+                "Point clouds above 200,000 points may be slow. "
+                "Use opts['max_points'] to downsample explicitly.",
+                UserWarning,
+                stacklevel=4,
+            )
+        return xyz, rgb
+    if N <= max_points:
+        return xyz, rgb
+    mode = opts.get('downsample') if opts.get('downsample') in ('stride', 'random') else 'stride'
+    if mode == 'stride':
+        idx = np.round(np.linspace(0, N - 1, max_points)).astype(int)
+    else:
+        seed = opts.get('seed', None)
+        rng = np.random.default_rng(seed)
+        idx = rng.choice(N, max_points, replace=False)
+    xyz = xyz[idx]
+    if rgb is not None:
+        rgb = rgb[idx]
+    return xyz, rgb
+
+
+def _pc3d_compute_bounds(xyz):
+    mn = xyz.min(axis=0)
+    mx = xyz.max(axis=0)
+    center = (mn + mx) / 2.0
+    dists = np.sqrt(((xyz - center) ** 2).sum(axis=1))
+    return {
+        'min': mn.tolist(),
+        'max': mx.tolist(),
+        'center': center.tolist(),
+        'radius': max(float(dists.max()), 1e-4),
+    }
+
+
+def _pc3d_encode_array(arr, dtype_str):
+    dt = np.dtype(dtype_str)
+    if dt.kind == 'f':
+        dt = dt.newbyteorder('<')
+    raw = np.ascontiguousarray(arr.astype(dt, copy=False))
+    return {
+        'dtype': dtype_str,
+        'shape': list(arr.shape),
+        'encoding': 'base64',
+        'byte_order': 'little',
+        'order': 'C',
+        'data': base64.b64encode(raw.tobytes()).decode('ascii'),
+    }
+
+
 class Visdom(object):
     def __init__(
         self,
@@ -2931,6 +3141,67 @@ class Visdom(object):
                 "layout": _opts2layout(opts),
                 "opts": opts,
             }
+        )
+
+    @pytorch_wrap
+    def pointcloud3d(self, xyz, rgb=None, win=None, env=None, opts=None):
+        """
+        Visualize a 3D point cloud using a dedicated WebGL pane.
+
+        Args:
+            xyz: Array-like of shape (N, 3). XYZ point coordinates.
+            rgb: Optional array-like of shape (N, 3). Per-point RGB colors.
+                 Supports integer [0, 255], float [0, 1], or float [0, 255].
+            win: Optional Visdom window id.
+            env: Optional Visdom environment.
+            opts: Optional dict. Keys: title, markersize (float, default 2.0),
+                  opacity (float 0-1, default 1.0), bgcolor (CSS str, default '#ffffff'),
+                  show_axes (bool, default True), default_color ([R,G,B] int, default [40,40,40]),
+                  max_points (int), downsample ('stride'|'random'), seed (int).
+
+        Returns:
+            Visdom window id (str).
+        """
+        xyz = _pc3d_validate_xyz(xyz)
+        N = xyz.shape[0]
+        if rgb is not None:
+            rgb = _pc3d_validate_rgb(rgb, N)
+        opts = _pc3d_validate_opts(opts)
+        _title2str(opts)
+        xyz, rgb = _pc3d_downsample(xyz, rgb, opts)
+        N_rendered = xyz.shape[0]
+        if N_rendered > _PC3D_HARD_MAX_POINTS:
+            raise ValueError(
+                "xyz has {:,} points after downsampling (original: {:,}); "
+                "the hard maximum is {:,}. "
+                "Use opts['max_points'] to reduce the point count.".format(
+                    N_rendered, N, _PC3D_HARD_MAX_POINTS
+                )
+            )
+        bounds = _pc3d_compute_bounds(xyz)
+        content = {
+            'version': 1,
+            'transport': 'inline_base64',
+            'xyz': _pc3d_encode_array(xyz, 'float32'),
+            'num_points_original': N,
+            'num_points_rendered': N_rendered,
+            'bounds': bounds,
+        }
+        if rgb is not None:
+            content['rgb'] = _pc3d_encode_array(rgb, 'uint8')
+        return self._send(
+            {
+                'data': [
+                    {
+                        'type': 'pointcloud3d',
+                        'content': content,
+                    }
+                ],
+                'win': win,
+                'eid': env,
+                'opts': opts,
+            },
+            endpoint='events',
         )
 
     @pytorch_wrap

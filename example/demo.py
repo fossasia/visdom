@@ -100,7 +100,7 @@ from components.plot_violin import (
     plot_violin_with_points,
     plot_violin_horizontal,
 )
-
+from components.plot_pointcloud import plot_pointcloud_basic, plot_pointcloud_rgb
 
 # This demo shows all features in a single environment.
 def run_demo(viz, env, args):
@@ -187,6 +187,12 @@ def run_demo(viz, env, args):
     plot_special_mesh(viz, env, args)
     plot_special_sunburst(viz, env, args)
     plot_special_graph(viz, env, args)
+
+    # =============== #
+    # point clouds    #
+    # =============== #
+    plot_pointcloud_basic(viz, env, args)
+    plot_pointcloud_rgb(viz, env, args)
 
     # ============ #
     # violin plots #
