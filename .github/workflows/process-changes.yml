@@ -95,11 +95,18 @@ jobs:
         run: |
           git checkout PR-HEAD -- ./cypress
           git checkout PR-HEAD -- ./example
+          git checkout PR-HEAD -- ./package.json
+          git checkout PR-HEAD -- ./cypress.config.js
+
+      - name: "Install PR npm dependencies"
+        shell: bash
+        run: ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm install
 
       - name: Cypress test:init
         uses: cypress-io/github-action@v7
         with:
           install: false
+          browser: chrome
           start: visdom -port 8098 -env_path /tmp
           wait-on: 'http://localhost:8098'
           spec: cypress/integration/*.init.js
@@ -128,6 +135,7 @@ jobs:
         uses: cypress-io/github-action@v7
         with:
           install: false
+          browser: chrome
           start: visdom -port 8098 -env_path /tmp
           wait-on: 'http://localhost:8098'
           spec: cypress/integration/screenshots.js
@@ -156,9 +164,10 @@ jobs:
         uses: cypress-io/github-action@v7
         with:
           install: false
+          browser: chrome
           start: visdom -port 8098 -env_path /tmp
           wait-on: 'http://localhost:8098'
-          config: ignoreTestFiles=screenshots.*
+          config: excludeSpecPattern=**/screenshots.*
 
       - uses: actions/upload-artifact@v7
         if: failure()
@@ -179,9 +188,10 @@ jobs:
         uses: cypress-io/github-action@v7
         with:
           install: false
+          browser: chrome
           start: visdom -port 8098 -env_path /tmp -use_frontend_client_polling
           wait-on: 'http://localhost:8098'
-          config: ignoreTestFiles=screenshots.*
+          config: excludeSpecPattern=**/screenshots.*
 
       - uses: actions/upload-artifact@v7
         if: failure()
