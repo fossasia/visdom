@@ -2995,12 +2995,12 @@ class Visdom(object):
         pad = opts.get("pad", 15)
         thickness = opts.get("thickness", 20)
         orientation = opts.get("orientation", "h")
-        assert isinstance(pad, numbers.Number) and pad >= 0, (
-            "opts.pad must be a non-negative number"
-        )
-        assert isinstance(thickness, numbers.Number) and thickness > 0, (
-            "opts.thickness must be a positive number"
-        )
+        assert (
+            isinstance(pad, numbers.Number) and pad >= 0
+        ), "opts.pad must be a non-negative number"
+        assert (
+            isinstance(thickness, numbers.Number) and thickness > 0
+        ), "opts.thickness must be a positive number"
         assert orientation in ("h", "v"), "opts.orientation must be 'h' or 'v'"
 
         node = {"pad": pad, "thickness": thickness}
