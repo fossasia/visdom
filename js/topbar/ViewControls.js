@@ -149,9 +149,11 @@ function ViewControls(props) {
             style={{ transform: 'scaleX(-1)' }}
           />
         </button>
+        <button
+          data-toggle="tooltip"
           title="Upload Dashboard JSON"
           data-placement="bottom"
-          className="btn btn-default"
+          className="btn btn-default btn-sm"
           onClick={() => fileInputRef.current && fileInputRef.current.click()}
           disabled={!(connected && !readonly)}
           aria-label="Upload JSON file"
