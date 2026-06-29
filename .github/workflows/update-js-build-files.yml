@@ -22,7 +22,7 @@ jobs:
         # see: https://stackoverflow.com/questions/57921401/push-to-origin-from-github-action/58393457#58393457
         # with:
         #   token: ${{ secrets.PAT }}
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '24'
       - run: ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm install

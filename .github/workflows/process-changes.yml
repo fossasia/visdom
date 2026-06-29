@@ -13,7 +13,7 @@ jobs:
     - name: "Checkout Repository"
       uses: actions/checkout@v7.0.0
     - name: "Install Node"
-      uses: actions/setup-node@v6
+      uses: actions/setup-node@v6.4.0
       with:
           node-version: '24'
     - name: "Install Dependencies"
