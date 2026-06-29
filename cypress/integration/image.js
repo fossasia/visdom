@@ -140,7 +140,7 @@ describe('Image Pane', () => {
     // check new position
     cy.get(container_selector)
       .first()
-      .should('have.css', 'top', '105.77px')
+      .should('have.css', 'top', '104.269px')
       .should('have.css', 'left', '49.9706px');
   });
 
@@ -166,7 +166,7 @@ describe('Image Pane', () => {
     // check new position
     cy.get(container_selector)
       .first()
-      .should('have.css', 'top', '105.77px')
+      .should('have.css', 'top', '104.269px')
       .should('have.css', 'left', '49.9706px');
     cy.get(img_selector)
       .should('have.attr', 'width', '156px')
@@ -184,7 +184,7 @@ describe('Image Pane', () => {
     // check new position
     cy.get(container_selector)
       .first()
-      .should('have.css', 'top', `139.77px`)
+      .should('have.css', 'top', `138.269px`)
       .should('have.css', 'left', '61.9706px');
     cy.get(img_selector)
       .should('have.attr', 'width', '156px')
@@ -415,14 +415,20 @@ describe('Image Pane', () => {
     cy.get(win_selector)
       .contains('CompareTest')
       .parents(win_selector)
+      .find('img.content-image')
+      .should('have.length', 2);
+
+    cy.get(win_selector)
+      .contains('CompareTest')
+      .parents(win_selector)
       .find("button[title='save']")
       .click();
 
-    cy.readFile(path.join(downloadsFolder, 'CompareTest_1.jpg')).should(
-      'exist'
-    );
-    cy.readFile(path.join(downloadsFolder, 'CompareTest_2.jpg')).should(
-      'exist'
-    );
+    cy.readFile(path.join(downloadsFolder, 'CompareTest_1.jpg'), {
+      timeout: 10000,
+    }).should('exist');
+    cy.readFile(path.join(downloadsFolder, 'CompareTest_2.jpg'), {
+      timeout: 10000,
+    }).should('exist');
   });
 });

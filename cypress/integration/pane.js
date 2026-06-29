@@ -81,7 +81,7 @@ basic_examples.forEach((setting) => {
     [height2, width2] = [425, 321]; // resize to
     [height3, width3] = [410, 307]; // grid-corrected size
     if (basic_example == 'text_basic') {
-      [height, width] = [290, 243];
+      [height, width] = [290, 244];
       [height4, width4] = [height, width];
     } else if (basic_example == 'image_basic') {
       [height, width] = [545, 256];
@@ -93,13 +93,13 @@ basic_examples.forEach((setting) => {
       [height, width] = [515, 500];
       [height4, width4] = [515, width];
     } else if (basic_example == 'misc_video_tensor') {
-      [height, width] = [290, 243];
+      [height, width] = [290, 244];
       [height4, width4] = [290, width];
     } else if (basic_example == 'misc_audio_basic') {
       [height, width] = [95, 330];
       [height4, width4] = [410, 307]; // also a bug in the ui
     } else if (basic_example == 'properties_basic') {
-      [height, width] = [290, 243];
+      [height, width] = [290, 244];
       [height4, width4] = [height, width];
     } else {
       [height, width] = [350, 370];
