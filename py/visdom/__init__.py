@@ -299,14 +299,14 @@ def _normalize_labels(Y):
         is_integer_labels = (
             np.issubdtype(Y.dtype, np.number)
             and np.equal(np.mod(Y, 1), 0).all()
-            and Y.min() >= 1
+            and np.nanmin(Y) >= 1
         )
     except TypeError:
         is_integer_labels = False
 
     if is_integer_labels:
         Y_normalized = Y.astype(int, copy=False)
-        K = int(Y_normalized.max())
+        K = int(np.nanmax(Y_normalized))
         label_values = None
     else:
         if np.issubdtype(Y.dtype, np.number):
@@ -373,7 +373,7 @@ def _markerSizeCheck(ms, X, Y):
     if ms.shape[0] == X.shape[0]:
         return np.array(ms, dtype=float)
 
-    K = int(Y.max()) if len(Y) > 0 else 0
+    K = int(np.nanmax(Y)) if len(Y) > 0 else 0
     assert ms.shape[0] >= K, (
         "markersize should be of size `%d` (per-point) or at least `%d` "
         "(per-label), but got: %d" % (X.shape[0], K, ms.shape[0])
@@ -2462,7 +2462,7 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
-        minx, maxx = X.min(), X.max()
+        minx, maxx = np.nanmin(X), np.nanmax(X)
         bins = np.histogram(X, bins=opts["numbins"], range=(minx, maxx))[0]
         linrange = np.linspace(minx, maxx, opts["numbins"])
 
@@ -2588,8 +2588,8 @@ class Visdom(object):
         assert X.ndim == 2, "X should be two-dimensional"
 
         opts = {} if opts is None else opts
-        opts["xmin"] = float(opts.get("xmin", X.min()))
-        opts["xmax"] = float(opts.get("xmax", X.max()))
+        opts["xmin"] = float(opts.get("xmin", np.nanmin(X)))
+        opts["xmax"] = float(opts.get("xmax", np.nanmax(X)))
         opts["colormap"] = opts.get("colormap", "Viridis")
         _title2str(opts)
         _assert_opts(opts)
@@ -2962,12 +2962,12 @@ class Visdom(object):
         - `opts.right` :  Set the right margin of the plot
         - `opts.left` :  Set the left margin of the plot
         """
-        X = np.asarray(X)
-        Y1 = np.asarray(Y1)
-        Y2 = np.asarray(Y2)
         assert X is not None, "X Cannot be None"
         assert Y1 is not None, "Y1 Cannot be None"
         assert Y2 is not None, "Y2 Cannot be None"
+        X = np.asarray(X)
+        Y1 = np.asarray(Y1)
+        Y2 = np.asarray(Y2)
         assert X.shape == Y1.shape, "values of X and Y1 are not in proper shape"
         assert X.shape == Y2.shape, "values of X and Y2 are not in proper shape"
         if opts is None:
