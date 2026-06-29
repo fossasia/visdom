@@ -2890,9 +2890,16 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
-        source = np.asarray(source).ravel()
-        target = np.asarray(target).ravel()
-        value = np.asarray(value).ravel()
+        source = np.asarray(source)
+        target = np.asarray(target)
+        value = np.asarray(value)
+        for name, arr in (("source", source), ("target", target), ("value", value)):
+            assert arr.ndim <= 1, "sankey {} must be 1-D, got shape {}".format(
+                name, arr.shape
+            )
+        source = source.ravel()
+        target = target.ravel()
+        value = value.ravel()
         assert (
             len(source) == len(target) == len(value)
         ), "source, target and value must have the same length"
