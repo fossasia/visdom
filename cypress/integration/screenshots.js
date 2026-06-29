@@ -102,7 +102,7 @@ describe(`Compare with compare-view screenshots`, () => {
           open: false,
           seed: 42 + i,
           args: [run],
-          asyncrun: i != num_runs - 1,
+          asyncrun: false,
         });
         envs.push(env);
       }

@@ -39,6 +39,19 @@ def plot_bar_histogram(viz, env, args):
     viz.histogram(X=np.random.rand(10000), opts=dict(numbins=20, title=title), env=env)
 
 
+# 2D histogram (density)
+def plot_bar_histogram2d(viz, env, args):
+    title = args[0] if len(args) > 0 else None
+    hist2d_x = np.concatenate([np.random.randn(10000) - 1.5, np.random.randn(10000) + 1.5])
+    hist2d_y = np.concatenate([np.random.randn(10000) - 1.5, np.random.randn(10000) + 1.5])
+    viz.histogram2d(
+        X=hist2d_x,
+        Y=hist2d_y,
+        opts=dict(title=title, xnumbins=40, ynumbins=40),
+        env=env,
+    )
+
+
 # pie chart
 def plot_bar_piechart(viz, env, args):
     title = args[0] if len(args) > 0 else None

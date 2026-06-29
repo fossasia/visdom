@@ -81,7 +81,6 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
         self.readonly = app.readonly
 
     def open(self, register_to="sources"):
-        # self.sid = str(hex(int(time.time() * 10000000))[2:]) # TODO: was previously used for websockets+vis only
         self.sid = get_rand_id()
         register_list = self.sources if register_to == "sources" else self.subs
         if self not in list(register_list.values()):

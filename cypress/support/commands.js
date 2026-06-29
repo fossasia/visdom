@@ -77,19 +77,15 @@ Cypress.Commands.add('close_envs', () => {
 });
 
 Cypress.Commands.add('expand_all_env_groups', () => {
-  const closed_group = '.rc-tree-select-tree-switcher_close';
-  const expandNext = (attemptsLeft) => {
-    if (attemptsLeft <= 0) return;
-    cy.get('.rc-tree-select-tree').then(($tree) => {
-      const closed = $tree.find(closed_group);
-      if (closed.length > 0) {
-        cy.wrap(closed.first()).click({ force: true });
-        cy.wait(150); // wait for animation
-        expandNext(attemptsLeft - 1);
-      }
-    });
-  };
-  expandNext(10);
+  cy.get('.rc-tree-select-tree').then(($tree) => {
+    const closed_group = '.rc-tree-select-tree-switcher_close';
+    if ($tree.find(closed_group).length > 0) {
+      cy.get(closed_group).each(($el) => {
+        cy.wrap($el).click({ force: true });
+        cy.wait(150);
+      });
+    }
+  });
 });
 
 Cypress.Commands.add('close_env_dropdown', () => {

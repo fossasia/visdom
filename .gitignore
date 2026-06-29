@@ -22,6 +22,10 @@ py/visdom/static/version.built
 __pycache__/
 py/visdom/static/js/layout_bin_packer.js
 py/visdom/extra_deps/**/*
+
+website/node_modules
+website/build
+website/.docusaurus
 .venv
 venv
 test-bin
