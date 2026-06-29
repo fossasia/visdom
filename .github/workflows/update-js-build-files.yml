@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     name: "Update Static JS-Files"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.0
         # > if the push needs to trigger other workflows, use a repo scoped Personal Acces Token
         # see: https://stackoverflow.com/questions/57921401/push-to-origin-from-github-action/58393457#58393457
         # with:
