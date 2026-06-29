@@ -21,6 +21,15 @@ import jsonpatch
 import logging
 import math
 import os
+import uuid
+from collections import OrderedDict
+
+try:
+    # for after python 3.8
+    from collections.abc import Mapping, Sequence
+except ImportError:
+    # for python 3.7 and below
+    from collections import Mapping, Sequence
 
 import tornado.escape
 from visdom.utils.shared_utils import get_rand_id, NanSafeEncoder
@@ -384,6 +393,9 @@ class UpdateHandler(BaseHandler):
 
     @check_auth
     def post(self):
+        if self.login_enabled and not self.current_user:
+            self.set_status(400)
+            return
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
@@ -690,6 +702,82 @@ class ErrorHandler(BaseHandler):
             raise tornado.web.HTTPError(400, reason="Invalid status code")
 
         raise tornado.web.HTTPError(status_code)
+        error_text = text or "test error"
+        raise Exception(error_text)
+
+
+class UploadEnvHandler(BaseHandler):
+    def initialize(self, app):
+        super().initialize(app)
+        self.readonly = app.readonly
+
+    @check_auth
+    def post(self):
+        # 100mb file size limit
+        MAX_SIZE = 100 * 1024 * 1024
+
+        if self.readonly:
+            self.set_status(403)
+            self.write(
+                {
+                    "success": False,
+                    "error": "Uploads are disabled while the server is in readonly mode",
+                }
+            )
+            return
+
+        if "file" not in self.request.files:
+            self.set_status(400)
+            self.write({"success": False, "error": "No file uploaded"})
+            return
+
+        file_info = self.request.files["file"][0]
+        filename = file_info["filename"]
+        body = file_info["body"]
+
+        if len(body) > MAX_SIZE:
+            self.set_status(413)
+            self.write(
+                {
+                    "success": False,
+                    "error": f"File is too large. Max {MAX_SIZE//(1024*1024)}MB",
+                }
+            )
+            return
+
+        try:
+            data = tornado.escape.json_decode(body)
+        except Exception:
+            self.set_status(400)
+            self.write({"success": False, "error": "Invalid JSON file"})
+            return
+
+        if not (isinstance(data, dict) and "jsons" in data and "reload" in data):
+            self.set_status(400)
+            self.write({"success": False, "error": "This is not a valid Visdom JSON"})
+            return
+
+        uid = uuid.uuid4().hex[:8]
+        new_eid = f"uploaded_{uid}"
+        if filename.endswith(".json"):
+            suggested_name = escape_eid(os.path.basename(filename[:-5]))
+            if suggested_name and suggested_name != "main":
+                new_eid = f"uploaded_{suggested_name}_{uid}"
+
+        self.state[new_eid] = {"jsons": data["jsons"], "reload": data["reload"]}
+
+        if self.env_path is not None:
+            serialize_env(self.state, [new_eid], env_path=self.env_path)
+
+        broadcast_envs(self)
+
+        self.write(
+            {
+                "success": True,
+                "eid": new_eid,
+                "message": f"Dashboard loaded successfully as '{new_eid}'",
+            }
+        )
 
 
 class HealthHandler(BaseHandler):

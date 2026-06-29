@@ -16,6 +16,7 @@ in the previous server.py class.
 
 import copy
 import hashlib
+import html
 import json
 import logging
 import os
@@ -32,8 +33,15 @@ try:
 except ImportError:
     # for python 3.7 and below
     from collections import Mapping, Sequence
-from visdom.server.defaults import DEFAULT_ENV_PATH
+from visdom.server.defaults import (
+    LAYOUT_FILE,
+    DEFAULT_BASE_URL,
+    DEFAULT_ENV_PATH,
+    DEFAULT_HOSTNAME,
+    DEFAULT_PORT,
+)
 from visdom.utils.shared_utils import (
+    warn_once,
     get_rand_id,
     get_new_window_id,
     NanSafeEncoder,
