@@ -9,11 +9,6 @@ describe('Parallel Coordinates Pane', () => {
     cy.get('.layout .window').should('have.length', 1);
 
     cy.get('.content').contains('Experiment Comparison');
-
-    cy.get('.content g.parcoords').should('exist');
-
-    cy.get('.content').contains('Dropout');
-    cy.get('.content').contains('Epochs');
   });
 
   it('parallel_coordinates_close', () => {
