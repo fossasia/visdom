@@ -106,7 +106,7 @@ jobs:
         uses: cypress-io/github-action@v7
         with:
           install: false
-          browser: chrome
+          browser: firefox
           start: visdom -port 8098 -env_path /tmp
           wait-on: 'http://localhost:8098'
           spec: cypress/integration/*.init.js
@@ -135,7 +135,7 @@ jobs:
         uses: cypress-io/github-action@v7
         with:
           install: false
-          browser: chrome
+          browser: firefox
           start: visdom -port 8098 -env_path /tmp
           wait-on: 'http://localhost:8098'
           spec: cypress/integration/screenshots.js
@@ -164,7 +164,6 @@ jobs:
         uses: cypress-io/github-action@v7
         with:
           install: false
-          browser: chrome
           start: visdom -port 8098 -env_path /tmp
           wait-on: 'http://localhost:8098'
           config: excludeSpecPattern=**/screenshots.*
@@ -188,7 +187,6 @@ jobs:
         uses: cypress-io/github-action@v7
         with:
           install: false
-          browser: chrome
           start: visdom -port 8098 -env_path /tmp -use_frontend_client_polling
           wait-on: 'http://localhost:8098'
           config: excludeSpecPattern=**/screenshots.*
