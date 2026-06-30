@@ -3243,7 +3243,12 @@ class Visdom(object):
     def table(self, headers, data, win=None, env=None, opts=None):
         """
         This function renders structured data as a styled HTML table.
-        It takes as input a list of column `headers` and a 2D list `data`.
+
+        - `headers`: a `list` of column header names (`string` or any
+           type convertible to `string`).
+        - `data`: a 2D `list` of row data, where each row is list or
+          `tuple` with same number of elements as `headers`. In case 
+           of empty list, a table with only header will be rendered.
 
         The following `opts` are supported:
 
