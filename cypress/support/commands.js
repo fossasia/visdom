@@ -111,5 +111,5 @@ Cypress.Commands.add('waitForPlotRender', () => {
 });
 
 Cypress.Commands.add('waitForMathJax', () => {
-  cy.wait(1200);
+  cy.wait(2000);
 });
