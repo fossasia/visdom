@@ -551,6 +551,16 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
         socket.write_message(json.dumps(msg, cls=NanSafeEncoder))
 
     socket.write_message(json.dumps({"command": "layout"}, cls=NanSafeEncoder))
+    socket.write_message(
+        json.dumps(
+            {
+                "command": "undo_state",
+                "eid": eid,
+                "count": count_deleted(env_path, eid),
+            },
+            cls=NanSafeEncoder,
+        )
+    )
     socket.eid = eid
 
 
@@ -653,6 +663,26 @@ def clear_deleted(env_path, eid):
                 os.remove(path)
             except OSError as e:
                 logging.error(f"Failed to delete undo file {path}: {e}")
+
+
+def count_deleted(env_path, eid):
+    """Return the number of closed panes available to undo for an env."""
+    if env_path is None:
+        return 0
+    return len(_read_undo(env_path, eid))
+
+
+def broadcast_undo_state(handler, eid, env_path):
+    """Tell subscribers of an env how many closed panes remain to undo."""
+    msg = json.dumps(
+        {
+            "command": "undo_state",
+            "eid": eid,
+            "count": count_deleted(env_path, eid),
+        },
+        cls=NanSafeEncoder,
+    )
+    broadcast(handler, msg, eid)
 
 
 def register_window(self, p, eid):

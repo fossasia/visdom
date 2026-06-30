@@ -38,6 +38,7 @@ from visdom.utils.server_utils import (
     push_deleted,
     pop_deleted,
     clear_deleted,
+    broadcast_undo_state,
 )
 from visdom.server.defaults import MAX_SOCKET_WAIT
 
@@ -121,6 +122,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     "pane_data": p_data,
                 }
                 send_to_sources(self, event)
+                broadcast_undo_state(self, eid, self.env_path)
 
         elif cmd == "undo":
             if "eid" in msg:
@@ -141,6 +143,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                         json.dumps(broadcast_msg, cls=NanSafeEncoder),
                         eid,
                     )
+                broadcast_undo_state(self, eid, self.env_path)
 
         elif cmd == "save":
             # save localStorage window metadata

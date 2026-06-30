@@ -21,6 +21,7 @@ function ViewControls(props) {
     onRepackButton,
     onViewChange,
     onUndoButton,
+    canUndo,
     onExportHtml,
   } = props;
 
@@ -141,7 +142,7 @@ function ViewControls(props) {
           title="Undo Close"
           data-placement="bottom"
           className="btn btn-default btn-sm"
-          disabled={!(connected && envIDs.length === 1 && !readonly)}
+          disabled={!(connected && envIDs.length === 1 && !readonly && canUndo)}
           onClick={onUndoButton}
         >
           <span

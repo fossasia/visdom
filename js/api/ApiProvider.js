@@ -178,6 +178,9 @@ const ApiProvider = ({ children }) => {
       case 'env_update':
         apiHandlers.current.onEnvUpdate(cmd.data);
         break;
+      case 'undo_state':
+        apiHandlers.current.onUndoState(cmd);
+        break;
 
       default:
         // eslint-disable-next-line no-console
