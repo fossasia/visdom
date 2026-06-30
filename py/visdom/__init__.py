@@ -43,7 +43,8 @@ except ImportError:
 
 import sys
 
-assert sys.version_info >= (3, 12), "Visdom requires Python 3.12 or newer."
+if sys.version_info < (3, 12):
+    raise RuntimeError("Visdom requires Python 3.12 or newer.")
 
 
 def _normalize_tsne(Y):
