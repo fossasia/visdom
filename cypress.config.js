@@ -13,6 +13,7 @@ function assertSafeToken(name, value) {
 }
 
 module.exports = defineConfig({
+  allowCypressEnv: false,
   e2e: {
     baseUrl: 'http://localhost:8098',
     video: false,
