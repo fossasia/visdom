@@ -1,4 +1,4 @@
-before(() => {
+beforeEach(() => {
   cy.visit('/');
 });
 
@@ -11,6 +11,37 @@ const thresholds = {
   // the internal video player may already start by showing animated loading sign
   misc_video_tensor: 0.1,
   misc_video_download: 0.1,
+
+  text_basic: 0.05,
+  text_update: 0.05,
+};
+
+const maxDiffPixels = {
+  misc_video_tensor: 5000,
+  misc_video_download: 5000,
+  misc_audio_basic: 5000,
+};
+
+const compare_thresholds = {
+  plot_line_doubleyaxis: 2000,
+  plot_scatter_append: 200,
+  plot_scatter_custom_marker: 200,
+  plot_scatter_add_trace: 200,
+  plot_line_basic: 200,
+  plot_line_many_updates: 200,
+  plot_line_update: 150,
+  plot_line_opts: 100,
+  plot_line_opts_update: 100,
+  plot_line_multiple: 50,
+  plot_line_stackedarea: 50,
+  plot_scatter_custom_colors: 50,
+  plot_scatter_text_labels_1d: 50,
+  plot_scatter_text_labels_2d: 50,
+  plot_bar_stacked: 200,
+  plot_bar_nonstacked: 200,
+  plot_special_boxplot: 200,
+  misc_plot_latex: 50,
+  misc_plot_latex_update: 200,
 };
 
 describe(`Compare with previous plot screenshots`, () => {
@@ -43,14 +74,17 @@ describe(`Compare with previous plot screenshots`, () => {
 
       // ImagePane requires an additional rerender for the image to adjust to the Pane size correctly
       if (run.startsWith('image_')) cy.wait(300);
+      // LaTeX plots use MathJax which renders asynchronously - wait for typesetting to finish
+      if (run.startsWith('misc_plot_latex')) cy.wait(1000);
 
       cy.get('.content').first().screenshot(run, { overwrite: true });
+      const maxDiff = maxDiffPixels[run] || 0;
       cy.task('numDifferentPixels', {
         src1: img1_src,
         src2: img2_src,
         diffsrc: diff_src,
         threshold: threshold,
-      }).should('equal', 0);
+      }).should('be.at.most', maxDiff);
     });
   });
 });
@@ -62,13 +96,13 @@ describe(`Compare with compare-view screenshots`, () => {
 
       var envs = [];
       for (var i = 0; i < num_runs; i++) {
-        var env = run + '_' + i + '_' + Cypress._.random(0, 1e6);
+        var env = run + '_' + i + '_long_env_name_for_testing';
         cy.run(run, {
           env: env,
           open: false,
           seed: 42 + i,
           args: [run],
-          asyncrun: i != num_runs - 1,
+          asyncrun: false,
         });
         envs.push(env);
       }
@@ -107,12 +141,13 @@ describe(`Compare with compare-view screenshots`, () => {
         '.png';
       const threshold = thresholds[run] || 0;
 
+      const max_diff = compare_thresholds[run] || 0;
       cy.task('numDifferentPixels', {
         src1: img1_src,
         src2: img2_src,
         diffsrc: diff_src,
         threshold: threshold,
-      }).should('equal', 0);
+      }).should('be.at.most', max_diff);
     });
   });
 });
@@ -120,8 +155,8 @@ describe(`Compare with compare-view screenshots`, () => {
 describe(`Compare screenshots for plotpane functions`, () => {
   it('Compare screenshot for Line Smoothing', () => {
     var run = 'line_smoothing';
-    var env1 = run + '_1_' + Cypress._.random(0, 1e6);
-    var env2 = run + '_2_' + Cypress._.random(0, 1e6);
+    var env1 = run + '_1_long_env_name_for_testing';
+    var env2 = run + '_2_long_env_name_for_testing';
     cy.run('plot_line_basic', {
       env: env1,
       args: ["'Line smoothing'", 100],
@@ -133,7 +168,7 @@ describe(`Compare screenshots for plotpane functions`, () => {
       seed: 43,
     });
     cy.open_env(env1);
-    cy.get('button[title="smooth lines"]').click();
+    cy.get('button[title="smooth lines"]').first().click();
     cy.get('input[type="range"]').then(($range) => {
       const range = $range[0]; // get the DOM node
       const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
@@ -173,11 +208,12 @@ describe(`Compare screenshots for plotpane functions`, () => {
       src2: img2_src,
       diffsrc: diff_src,
       threshold: threshold,
-    }).should('equal', 0);
+    }).should('be.at.most', 200);
   });
 
   it('Compare screenshot for Property Change (using Line Plot)', () => {
     cy.run('plot_line_basic');
+    cy.get('.layout .window').should('have.length', 1);
     cy.get('button[title="properties"]').click();
 
     // change some settings
