@@ -52,7 +52,10 @@ describe(`Compare with previous plot screenshots`, () => {
       // ImagePane requires an additional rerender for the image to adjust to the Pane size correctly
       if (run.startsWith('image_')) cy.wait(600);
       // LaTeX plots use MathJax which renders asynchronously - wait for typesetting to finish
-      if (run.startsWith('misc_plot_latex')) cy.waitForMathJax();
+      if (run.startsWith('misc_plot_latex')) {
+        cy.waitForMathJax();
+        cy.wait(800);
+      }
       cy.waitForPlotRender();
 
       const diff_src =
