@@ -103,7 +103,7 @@ basic_examples.forEach((setting) => {
       [height, width] = [290, 244];
       [height4, width4] = [height, width];
     } else if (basic_example == "html_table") {
-      [ height, width ] = [ 290, 243 ];
+      [ height, width ] = [ 290, 244 ];
       [ height4, width4 ] = [ height, width];
     } else {
       [height, width] = [350, 370];
