@@ -111,10 +111,19 @@ Cypress.Commands.add('waitForPlotRender', () => {
 });
 
 Cypress.Commands.add('waitForMathJax', () => {
-  cy.wait(2000);
-  cy.get('.content', { timeout: 10000 })
-    .first()
-    .should('be.visible')
-    .invoke('text')
-    .should('contain', '\\');
+  cy.get('.content .MathJax, .content .MathJax_Display', { timeout: 20000 })
+    .should('exist');
+  cy.window().then((win) => {
+    return new Cypress.Promise((resolve) => {
+      if (win.MathJax && win.MathJax.Hub) {
+        win.MathJax.Hub.Queue(() => resolve());
+      } else {
+        resolve();
+      }
+    });
+  });
+  cy.document().then((doc) => {
+    return cy.wrap(doc.fonts.ready, { timeout: 10000 });
+  });
+  cy.wait(300);
 });
