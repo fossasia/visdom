@@ -22,7 +22,8 @@ module.exports = defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: 1,
-  reporter: 'html',
+  outputDir: './playwright/test-results',
+  reporter: [['html', { outputFolder: 'playwright/playwright-report' }]],
   use: {
     baseURL: 'http://localhost:8098',
     trace: 'on-first-retry',

@@ -201,7 +201,7 @@ To run the predefined tests
 5. run `npm run test`
 
 **using Playwright (E2E tests)**:
-1. start a fresh visdom server instance on port `8098` using your environment's Python, i.e. `python -m visdom.server -port 8098` (make sure no other instances interfere).
+1. start a fresh visdom server instance on port `8098` using your environment's Python, i.e. `python -m visdom.server -port 8098 -env_path playwright/tmp` (make sure no other instances interfere).
 2. run `npx playwright install chromium` on first setup to install the browser.
 3. run `npm run build` *or* `npm run dev` to compile the frontend code.
 4. run the Playwright test suite: `npm run test:pw`

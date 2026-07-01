@@ -7,57 +7,38 @@
  *
  */
 
-const { execSync, spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 async function runDemo(page, name, opts = {}) {
   const saveto = opts.env || `${name}_${Math.floor(Math.random() * 1e6)}`;
 
-  let argscli = '';
-  if (opts.args) {
-    argscli =
-      ' -arg ' +
-      opts.args
-        .map((arg) => {
-          let s = String(arg);
-          if (s.includes(' ') || s.includes('"') || s.includes("'")) {
-            return '"' + s.replace(/"/g, '\\"') + '"';
-          }
-          return s;
-        })
-        .join(' ');
+  const spawnArgs = [
+    'example/demo.py',
+    '-testing',
+    '-port',
+    '8098',
+    '-run',
+    name,
+    '-env',
+    saveto,
+  ];
+  if (opts.seed !== undefined) {
+    spawnArgs.push('-seed', String(opts.seed));
   }
-  const seed = opts.seed !== undefined ? ` -seed ${opts.seed}` : '';
+  if (opts.args && opts.args.length > 0) {
+    spawnArgs.push('-arg', ...opts.args.map(String));
+  }
 
   if (opts.asyncrun) {
-    const spawnArgs = [
-      'example/demo.py',
-      '-testing',
-      '-port',
-      '8098',
-      '-run',
-      name,
-      '-env',
-      saveto,
-    ];
-    if (opts.seed !== undefined) {
-      spawnArgs.push('-seed', String(opts.seed));
-    }
-    if (opts.args && opts.args.length > 0) {
-      spawnArgs.push('-arg', ...opts.args);
-    }
-
     const child = spawn('python', spawnArgs, {
       stdio: 'ignore',
       detached: true,
     });
     child.unref();
   } else {
-    execSync(
-      `python example/demo.py -port 8098 -testing -run ${name} -env ${saveto}${seed}${argscli}`,
-      {
-        stdio: 'ignore',
-      }
-    );
+    spawnSync('python', spawnArgs, {
+      stdio: 'ignore',
+    });
   }
 
   if (opts.open === undefined || opts.open) {
