@@ -213,13 +213,15 @@ jobs:
         run: |
           visdom -port 8098 -env_path /tmp &
           for i in {1..30}; do
-            if curl -s http://localhost:8098 > /dev/null; then
+            if curl -fsS http://localhost:8098 > /dev/null; then
               echo "Visdom server is ready!"
               break
             fi
             echo "Waiting for Visdom server..."
             sleep 0.5
           done
+          # Fail the job if the server never became reachable.
+          curl -fsS http://localhost:8098 > /dev/null
 
       - name: Run Playwright tests
         run: npm run test:pw

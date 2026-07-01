@@ -23,7 +23,7 @@ test.describe('Test Setup', () => {
   });
 
   test('manual server reconnect', async ({ page }) => {
-    await page.waitForTimeout(1000);
+    await expect(page.locator('text=online').first()).toBeVisible();
     const onlineIndicator = page.locator('text=online').first();
     const offlineIndicator = page.locator('text=offline').first();
 
@@ -53,7 +53,6 @@ test.describe('Test Setup', () => {
   });
 
   test('env selection works', async ({ page }) => {
-    await page.waitForTimeout(1000);
     const mainTitle = page.locator('.rc-tree-select [title="main"]').first();
     await expect(mainTitle).toBeVisible();
 
