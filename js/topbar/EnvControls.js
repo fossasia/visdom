@@ -117,7 +117,7 @@ function EnvControls(props) {
             maxTagTextLength={1000}
             value={envIDs}
             treeData={env_options2}
-            treeNodeFilterProp="title"
+            treeNodeFilterProp="label"
             treeDataSimpleMode={{ id: 'key', rootPId: 0 }}
             treeCheckable
             showCheckedStrategy={SHOW_CHILD}
