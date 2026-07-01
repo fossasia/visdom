@@ -1,4 +1,4 @@
-before(() => {
+beforeEach(() => {
   cy.visit('/');
 });
 
@@ -14,6 +14,8 @@ describe(`Take plot screenshots`, () => {
 
       // ImagePane requires an additional rerender for the image to adjust to the Pane size correctly
       if (run.startsWith('image_')) cy.wait(300);
+      // LaTeX plots use MathJax which renders asynchronously - wait for typesetting to finish
+      if (run.startsWith('misc_plot_latex')) cy.wait(1000);
 
       cy.get('.content').screenshot(run, { overwrite: true });
     });
@@ -27,13 +29,14 @@ describe(`Take compare-view screenshots`, () => {
 
       var envs = [];
       for (var i = 0; i < num_runs; i++) {
-        var env = run + '_' + i + '_' + Cypress._.random(0, 1e6);
+        // Append a suffix to ensure the environment name is > 25 characters
+        var env = run + '_' + i + '_long_env_name_for_testing';
         cy.run(run, {
           env: env,
           open: false,
           seed: 42 + i,
           args: [run],
-          asyncrun: i != num_runs - 1,
+          asyncrun: false,
         });
         envs.push(env);
       }
@@ -52,8 +55,9 @@ describe(`Take compare-view screenshots`, () => {
 describe(`Take screenshot for PlotPane functions`, () => {
   it('Screenshot for Line Smoothing', () => {
     var run = 'line_smoothing';
-    var env1 = run + '_1_' + Cypress._.random(0, 1e6);
-    var env2 = run + '_2_' + Cypress._.random(0, 1e6);
+    // Append a suffix to ensure the environment name is > 25 characters
+    var env1 = run + '_1_long_env_name_for_testing';
+    var env2 = run + '_2_long_env_name_for_testing';
     cy.run('plot_line_basic', {
       env: env1,
       args: ["'Line smoothing'", 100],
@@ -65,7 +69,7 @@ describe(`Take screenshot for PlotPane functions`, () => {
       seed: 43,
     });
     cy.open_env(env1);
-    cy.get('button[title="smooth lines"]').click();
+    cy.get('button[title="smooth lines"]').first().click();
     cy.get('input[type="range"]').then(($range) => {
       const range = $range[0]; // get the DOM node
       const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
@@ -80,7 +84,10 @@ describe(`Take screenshot for PlotPane functions`, () => {
 
   it('Screenshot for Property Change (using Line Plot)', () => {
     cy.run('plot_line_basic');
-    cy.get('button[title="properties"]').click();
+    cy.get('.layout .window').should('have.length', 1);
+    cy.get('button[title="properties"]', { timeout: 10000 })
+      .should('be.visible')
+      .click();
 
     // change some settings
     const change = (key, val) =>
@@ -107,7 +114,9 @@ describe(`Take screenshot for PlotPane functions`, () => {
     change('xaxis.type', 'log');
 
     // apply settings
-    cy.get('button[title="properties"]').click();
+    cy.get('button[title="properties"]', { timeout: 10000 })
+      .should('be.visible')
+      .click();
 
     const run = 'change-properties';
     cy.get('.content').first().screenshot(run, { overwrite: true });
