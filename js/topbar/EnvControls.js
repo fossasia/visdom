@@ -115,7 +115,6 @@ function EnvControls(props) {
             searchPlaceholder="search"
             treeLine
             maxTagTextLength={1000}
-            inputValue={null}
             value={envIDs}
             treeData={env_options2}
             treeNodeFilterProp="title"
