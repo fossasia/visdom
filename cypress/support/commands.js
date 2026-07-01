@@ -104,3 +104,12 @@ Cypress.Commands.add('open_env', (name) => {
   cy.get('.rc-tree-select-tree').contains(name).click({ force: true });
   cy.close_env_dropdown();
 });
+
+Cypress.Commands.add('waitForPlotRender', () => {
+  cy.get('.content', { timeout: 20000 }).should('be.visible');
+  cy.wait(800);
+});
+
+Cypress.Commands.add('waitForMathJax', () => {
+  cy.wait(2000);
+});
