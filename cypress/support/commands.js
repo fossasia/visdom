@@ -112,4 +112,9 @@ Cypress.Commands.add('waitForPlotRender', () => {
 
 Cypress.Commands.add('waitForMathJax', () => {
   cy.wait(2000);
+  cy.get('.content', { timeout: 10000 })
+    .first()
+    .should('be.visible')
+    .invoke('text')
+    .should('contain', '\\');
 });
