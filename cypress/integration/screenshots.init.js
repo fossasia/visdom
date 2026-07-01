@@ -13,8 +13,10 @@ describe(`Take plot screenshots`, () => {
       cy.run(run);
 
       // ImagePane requires an additional rerender for the image to adjust to the Pane size correctly
-      if (run.startsWith('image_')) cy.wait(300);
-
+      if (run.startsWith('image_')) cy.wait(600);
+      // LaTeX plots use MathJax which renders asynchronously - wait for typesetting to finish
+      if (run.startsWith('misc_plot_latex')) cy.waitForMathJax();
+      cy.waitForPlotRender();
       cy.get('.content').screenshot(run, { overwrite: true });
     });
   });
@@ -27,13 +29,14 @@ describe(`Take compare-view screenshots`, () => {
 
       var envs = [];
       for (var i = 0; i < num_runs; i++) {
-        var env = run + '_' + i + '_fixed';
+        // Append a suffix to ensure the environment name is > 25 characters
+        var env = run + '_' + i + '_long_env_name_for_testing';
         cy.run(run, {
           env: env,
           open: false,
           seed: 42 + i,
           args: [run],
-          asyncrun: i != num_runs - 1,
+          asyncrun: false,
         });
         envs.push(env);
       }
@@ -41,7 +44,7 @@ describe(`Take compare-view screenshots`, () => {
       for (var i = 0; i < num_runs; i++) {
         cy.open_env(envs[i]);
       }
-
+      cy.waitForPlotRender();
       cy.get('.content')
         .first()
         .screenshot('compare_' + run, { overwrite: true });
@@ -52,8 +55,9 @@ describe(`Take compare-view screenshots`, () => {
 describe(`Take screenshot for PlotPane functions`, () => {
   it('Screenshot for Line Smoothing', () => {
     var run = 'line_smoothing';
-    var env1 = run + '_1_fixed';
-    var env2 = run + '_2_fixed';
+    // Append a suffix to ensure the environment name is > 25 characters
+    var env1 = run + '_1_long_env_name_for_testing';
+    var env2 = run + '_2_long_env_name_for_testing';
     cy.run('plot_line_basic', {
       env: env1,
       args: ["'Line smoothing'", 100],
@@ -75,12 +79,16 @@ describe(`Take screenshot for PlotPane functions`, () => {
       nativeInputValueSetter.call(range, 100); // set the value manually
       range.dispatchEvent(new Event('input', { value: 0, bubbles: true })); // now dispatch the event
     });
+    cy.waitForPlotRender();
     cy.get('.content').first().screenshot(run, { overwrite: true });
   });
 
   it('Screenshot for Property Change (using Line Plot)', () => {
     cy.run('plot_line_basic');
-    cy.get('button[title="properties"]').click();
+    cy.get('.layout .window').should('have.length', 1);
+    cy.get('button[title="properties"]', { timeout: 15000 })
+      .should('be.visible')
+      .click();
 
     // change some settings
     const change = (key, val) =>
@@ -107,8 +115,11 @@ describe(`Take screenshot for PlotPane functions`, () => {
     change('xaxis.type', 'log');
 
     // apply settings
-    cy.get('button[title="properties"]').click();
+    cy.get('button[title="properties"]', { timeout: 15000 })
+      .should('be.visible')
+      .click();
 
+    cy.waitForPlotRender();
     const run = 'change-properties';
     cy.get('.content').first().screenshot(run, { overwrite: true });
   });
