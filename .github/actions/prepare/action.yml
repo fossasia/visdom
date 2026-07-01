@@ -43,7 +43,7 @@ runs:
 
 
       # now cache pip
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         id: cache-pip
         with:
           path: ~/.cache/pip
@@ -57,7 +57,7 @@ runs:
           pip3 install -e .
 
       # now compile the new version
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         id: cache-npm
         with:
           path: |

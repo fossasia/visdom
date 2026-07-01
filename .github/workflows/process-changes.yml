@@ -106,9 +106,10 @@ jobs:
         uses: cypress-io/github-action@v7
         with:
           install: false
-          browser: firefox
+          browser: chrome
           start: visdom -port 8098 -env_path /tmp
           wait-on: 'http://localhost:8098'
+          env: CYPRESS_CHROME_ARGS="--disable-gpu --disable-dev-shm-usage --no-sandbox --disable-setuid-sandbox"
           spec: cypress/integration/*.init.js
 
       - uses: actions/upload-artifact@v7
@@ -135,9 +136,10 @@ jobs:
         uses: cypress-io/github-action@v7
         with:
           install: false
-          browser: firefox
+          browser: chrome
           start: visdom -port 8098 -env_path /tmp
           wait-on: 'http://localhost:8098'
+          env: CYPRESS_CHROME_ARGS="--disable-gpu --disable-dev-shm-usage --no-sandbox --disable-setuid-sandbox"
           spec: cypress/integration/screenshots.js
 
       - uses: actions/upload-artifact@v7
@@ -164,8 +166,10 @@ jobs:
         uses: cypress-io/github-action@v7
         with:
           install: false
+          browser: chrome
           start: visdom -port 8098 -env_path /tmp
           wait-on: 'http://localhost:8098'
+          env: CYPRESS_CHROME_ARGS="--disable-gpu --disable-dev-shm-usage --no-sandbox --disable-setuid-sandbox"
           config: excludeSpecPattern=**/screenshots.*
 
       - uses: actions/upload-artifact@v7
@@ -187,8 +191,10 @@ jobs:
         uses: cypress-io/github-action@v7
         with:
           install: false
+          browser: chrome
           start: visdom -port 8098 -env_path /tmp -use_frontend_client_polling
           wait-on: 'http://localhost:8098'
+          env: CYPRESS_CHROME_ARGS="--disable-gpu --disable-dev-shm-usage --no-sandbox --disable-setuid-sandbox"
           config: excludeSpecPattern=**/screenshots.*
 
       - uses: actions/upload-artifact@v7
