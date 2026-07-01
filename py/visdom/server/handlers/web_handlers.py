@@ -48,6 +48,8 @@ from visdom.utils.server_utils import (
     update_window,
     hash_password,
     stringify,
+    push_deleted,
+    clear_deleted,
 )
 from visdom.server.handlers.base_handlers import BaseHandler
 
@@ -406,12 +408,10 @@ class CloseHandler(BaseHandler):
 
         keys = list(handler.state[eid]["jsons"].keys()) if win is None else [win]
         for win in keys:
-            handler.state[eid]["jsons"].pop(win, None)
-            broadcast(
-                handler,
-                json.dumps({"command": "close", "data": win}, cls=NanSafeEncoder),
-                eid,
-            )
+            p_data = handler.state[eid]["jsons"].pop(win, None)
+            if p_data is not None:
+                push_deleted(handler.env_path, eid, win, p_data)
+            broadcast(handler, json.dumps({"command": "close", "data": win}), eid)
 
     @check_auth
     def post(self):
@@ -430,6 +430,7 @@ class DeleteEnvHandler(BaseHandler):
             if eid == "main":
                 return
             handler.state.pop(eid, None)
+            clear_deleted(handler.env_path, eid)
             if handler.env_path is not None:
                 p = os.path.join(handler.env_path, "{0}.json".format(eid))
                 if os.path.exists(p):
