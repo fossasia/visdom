@@ -44,6 +44,7 @@ export const all_screenshots = [
   // 'plot_surface_3d', // disabled due to webgl
   'plot_special_boxplot',
   'plot_special_quiver',
+  'plot_special_sankey',
   'plot_violin_basic',
   // 'plot_special_mesh', // disabled due to webgl
   // 'plot_special_graph' // disabled as representation is undeterministic
