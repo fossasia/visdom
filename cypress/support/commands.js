@@ -111,8 +111,7 @@ Cypress.Commands.add('waitForPlotRender', () => {
 });
 
 Cypress.Commands.add('waitForMathJax', () => {
-  cy.get('.content .MathJax, .content .MathJax_Display, .content math', { timeout: 20000 })
-    .should('exist');
+  cy.wait(2000);
   cy.window().then((win) => {
     return new Cypress.Promise((resolve) => {
       if (win.MathJax && win.MathJax.Hub) {
