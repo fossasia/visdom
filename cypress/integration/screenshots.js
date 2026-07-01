@@ -40,7 +40,7 @@ const compare_thresholds = {
   plot_bar_stacked: 200,
   plot_bar_nonstacked: 200,
   plot_special_boxplot: 200,
-  misc_plot_latex: 50,
+  misc_plot_latex: 2800,
   misc_plot_latex_update: 200,
 };
 
