@@ -1,0 +1,37 @@
+/**
+ * Copyright 2017-present, The Visdom Authors
+ * All rights reserved.
+ *
+ * This source code is licensed under the license found in the
+ * LICENSE file in the root directory of this source tree.
+ *
+ */
+
+const { defineConfig, devices } = require('@playwright/test');
+
+/**
+ * @see https://playwright.dev/docs/test-configuration
+ */
+module.exports = defineConfig({
+  testDir: './playwright/tests',
+  timeout: 30 * 1000,
+  expect: {
+    timeout: 5000,
+  },
+  fullyParallel: false,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 2 : 0,
+  workers: 1,
+  reporter: 'html',
+  use: {
+    baseURL: 'http://localhost:8098',
+    trace: 'on-first-retry',
+    screenshot: 'only-on-failure',
+  },
+  projects: [
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'] },
+    },
+  ],
+});

@@ -196,3 +196,37 @@ jobs:
         with:
           name: cypress-screenshots-functional-polling
           path: cypress/screenshots
+
+  playwright-test:
+    name: "Playwright Functional Test"
+    runs-on: ubuntu-latest
+    needs: install-and-build
+    steps:
+      - name: "Checkout Repository"
+        uses: actions/checkout@v7.0.0
+      - uses: ./.github/actions/prepare
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Start Visdom Server
+        run: |
+          visdom -port 8098 -env_path /tmp &
+          for i in {1..30}; do
+            if curl -s http://localhost:8098 > /dev/null; then
+              echo "Visdom server is ready!"
+              break
+            fi
+            echo "Waiting for Visdom server..."
+            sleep 0.5
+          done
+
+      - name: Run Playwright tests
+        run: npm run test:pw
+
+      - name: Upload Playwright Report
+        uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
