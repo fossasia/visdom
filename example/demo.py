@@ -100,6 +100,7 @@ from components.plot_violin import (
     plot_violin_with_points,
     plot_violin_horizontal,
 )
+from components.plot_html_table import html_table
 
 
 # This demo shows all features in a single environment.
@@ -195,6 +196,11 @@ def run_demo(viz, env, args):
     plot_violin_multigroup(viz, env, args)
     plot_violin_with_points(viz, env, args)
     plot_violin_horizontal(viz, env, args)
+
+    # ========== #
+    # html table #
+    # ========== #
+    html_table(viz, env, args)
 
     # ==== #
     # misc #

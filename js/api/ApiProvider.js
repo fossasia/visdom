@@ -336,6 +336,17 @@ const ApiProvider = ({ children }) => {
   // Effects //
   // ------- //
 
+  // Redirect for POST request errors
+  useEffect(() => {
+    $(document).on('ajaxError', () => {
+      window.location.href = correctPathname() + 'error/500';
+    });
+
+    return () => {
+      $(document).off('ajaxError');
+    };
+  }, []);
+
   // connect on mount, disconnect on unmount
   useEffect(() => {
     connect();
