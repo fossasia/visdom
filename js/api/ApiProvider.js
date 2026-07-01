@@ -178,6 +178,9 @@ const ApiProvider = ({ children }) => {
       case 'env_update':
         apiHandlers.current.onEnvUpdate(cmd.data);
         break;
+      case 'undo_state':
+        apiHandlers.current.onUndoState(cmd);
+        break;
 
       default:
         // eslint-disable-next-line no-console
@@ -260,6 +263,13 @@ const ApiProvider = ({ children }) => {
     sendSocketMessage({
       cmd: 'close',
       data: paneID,
+      eid: envID,
+    });
+  };
+
+  const sendUndo = (envID) => {
+    sendSocketMessage({
+      cmd: 'undo',
       eid: envID,
     });
   };
@@ -362,6 +372,7 @@ const ApiProvider = ({ children }) => {
         sendPaneLayoutUpdate,
         sendPaneMessage,
         sendSaveAll,
+        sendUndo,
         sessionInfo,
         setConnected,
         toggleOnlineState,
