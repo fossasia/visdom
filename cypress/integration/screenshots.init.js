@@ -13,10 +13,10 @@ describe(`Take plot screenshots`, () => {
       cy.run(run);
 
       // ImagePane requires an additional rerender for the image to adjust to the Pane size correctly
-      if (run.startsWith('image_')) cy.wait(300);
+      if (run.startsWith('image_')) cy.wait(600);
       // LaTeX plots use MathJax which renders asynchronously - wait for typesetting to finish
-      if (run.startsWith('misc_plot_latex')) cy.wait(1000);
-
+      if (run.startsWith('misc_plot_latex')) cy.waitForMathJax();
+      cy.waitForPlotRender();
       cy.get('.content').screenshot(run, { overwrite: true });
     });
   });
@@ -44,7 +44,7 @@ describe(`Take compare-view screenshots`, () => {
       for (var i = 0; i < num_runs; i++) {
         cy.open_env(envs[i]);
       }
-
+      cy.waitForPlotRender();
       cy.get('.content')
         .first()
         .screenshot('compare_' + run, { overwrite: true });
@@ -79,13 +79,14 @@ describe(`Take screenshot for PlotPane functions`, () => {
       nativeInputValueSetter.call(range, 100); // set the value manually
       range.dispatchEvent(new Event('input', { value: 0, bubbles: true })); // now dispatch the event
     });
+    cy.waitForPlotRender();
     cy.get('.content').first().screenshot(run, { overwrite: true });
   });
 
   it('Screenshot for Property Change (using Line Plot)', () => {
     cy.run('plot_line_basic');
     cy.get('.layout .window').should('have.length', 1);
-    cy.get('button[title="properties"]', { timeout: 10000 })
+    cy.get('button[title="properties"]', { timeout: 15000 })
       .should('be.visible')
       .click();
 
@@ -114,10 +115,11 @@ describe(`Take screenshot for PlotPane functions`, () => {
     change('xaxis.type', 'log');
 
     // apply settings
-    cy.get('button[title="properties"]', { timeout: 10000 })
+    cy.get('button[title="properties"]', { timeout: 15000 })
       .should('be.visible')
       .click();
 
+    cy.waitForPlotRender();
     const run = 'change-properties';
     cy.get('.content').first().screenshot(run, { overwrite: true });
   });
