@@ -3239,3 +3239,75 @@ class Visdom(object):
                 "opts": opts,
             }
         )
+
+    def table(self, headers, data, win=None, env=None, opts=None):
+        """
+        This function renders structured data as a styled HTML table.
+
+        - `headers`: a `list` of column header names (`string` or any
+           type convertible to `string`).
+        - `data`: a 2D `list` of row data, where each row is list or
+          `tuple` with same number of elements as `headers`. In case
+           of empty list, a table with only header will be rendered.
+
+        The following `opts` are supported:
+
+        - `opts.title`: title for the window (`string`; optional)
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        assert isinstance(headers, list), "headers should be a list"
+        assert isinstance(data, list), "data should be a list of rows"
+        assert all(
+            isinstance(row, (list, tuple)) for row in data
+        ), "each row in data should be a list or tuple"
+        assert all(
+            len(row) == len(headers) for row in data
+        ), "each data row must have the same number of columns as headers"
+
+        style = """
+            <style>
+            .visdom-table {
+                font-family: monospace;
+                border-collapse: collapse;
+                width: 100%;
+            }
+            .visdom-table th {
+                background-color: #2196F3;
+                color: white;
+                padding: 8px 12px;
+                text-align: left;
+            }
+            .visdom-table td {
+                padding: 6px 12px;
+                border-bottom: 1px solid #ddd;
+            }
+            .visdom-table tr:nth-child(even) td {
+                background-color: #f2f2f2;
+            }
+            .visdom-table tr:nth-child(odd) td {
+                background-color: #ffffff;
+            }
+            .visdom-table tr:hover td {
+                background-color: #ddeeff;
+            }
+            </style>
+        """
+
+        header_html = "".join("<th>%s</th>" % html.escape(str(h)) for h in headers)
+        rows_html = "".join(
+            "<tr>%s</tr>"
+            % "".join("<td>%s</td>" % html.escape(str(cell)) for cell in row)
+            for row in data
+        )
+
+        table_html = (
+            "%s<table class='visdom-table'>"
+            "<thead><tr>%s</tr></thead>"
+            "<tbody>%s</tbody>"
+            "</table>"
+        ) % (style, header_html, rows_html)
+
+        return self.text(text=table_html, win=win, env=env, opts=opts)
