@@ -435,9 +435,9 @@ const App = () => {
     });
 
     setStoreMeta((prev) => {
-      const layoutLists = new Map(storeMeta.layoutLists);
+      const layoutLists = new Map(prev.layoutLists);
       layoutLists.delete(env2delete);
-      let EnvIds = selection.envIDs.filter((env) => env !== env2delete);
+      let EnvIds = prev.envList.filter((env) => env !== env2delete);
       return {
         ...prev,
         envList: EnvIds,
@@ -445,11 +445,16 @@ const App = () => {
       };
     });
 
-    setStoreData((prev) => ({
-      ...prev,
-      panes: {},
-      layout: [],
-    }));
+    setStoreData((prev) => {
+      if (selection.envIDs.includes(env2delete)) {
+        return {
+          ...prev,
+          panes: {},
+          layout: [],
+        };
+      }
+      return prev;
+    });
 
     sendEnvDelete(env2delete, previousEnv);
   };
