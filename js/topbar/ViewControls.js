@@ -20,6 +20,8 @@ function ViewControls(props) {
     onViewManageButton,
     onRepackButton,
     onViewChange,
+    onUndoButton,
+    canUndo,
     onExportHtml,
   } = props;
 
@@ -100,7 +102,7 @@ function ViewControls(props) {
       <div className="btn-group navbar-btn" role="group" aria-label="View:">
         <div className="btn-group" role="group">
           <button
-            className="btn btn-default dropdown-toggle"
+            className="btn btn-default btn-sm dropdown-toggle"
             type="button"
             id="viewDropdown"
             data-toggle="dropdown"
@@ -120,7 +122,7 @@ function ViewControls(props) {
           data-toggle="tooltip"
           title="Repack"
           data-placement="bottom"
-          className="btn btn-default"
+          className="btn btn-default btn-sm"
           onClick={onRepackButton}
         >
           <span className="glyphicon glyphicon-th" />
@@ -129,7 +131,7 @@ function ViewControls(props) {
           data-toggle="tooltip"
           title="Manage Views"
           data-placement="bottom"
-          className="btn btn-default"
+          className="btn btn-default btn-sm"
           disabled={!(connected && envIDs.length > 0 && !readonly)}
           onClick={onViewManageButton}
         >
@@ -137,9 +139,22 @@ function ViewControls(props) {
         </button>
         <button
           data-toggle="tooltip"
+          title="Undo Close"
+          data-placement="bottom"
+          className="btn btn-default btn-sm"
+          disabled={!(connected && envIDs.length === 1 && !readonly && canUndo)}
+          onClick={onUndoButton}
+        >
+          <span
+            className="glyphicon glyphicon-share-alt"
+            style={{ transform: 'scaleX(-1)' }}
+          />
+        </button>
+        <button
+          data-toggle="tooltip"
           title="Upload Dashboard JSON"
           data-placement="bottom"
-          className="btn btn-default"
+          className="btn btn-default btn-sm"
           onClick={() => fileInputRef.current && fileInputRef.current.click()}
           disabled={!(connected && !readonly)}
           aria-label="Upload JSON file"
@@ -158,7 +173,7 @@ function ViewControls(props) {
           data-toggle="tooltip"
           title="Export as HTML"
           data-placement="bottom"
-          className="btn btn-default"
+          className="btn btn-default btn-sm"
           disabled={!(connected && envIDs.length > 0)}
           onClick={onExportHtml}
           aria-label="Export as HTML"
