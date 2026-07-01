@@ -96,7 +96,7 @@ jobs:
       - name: "Save built js-files"
         uses: actions/upload-artifact@v7
         with:
-          name: pr-build-${{ matrix.run }}
+          name: pr-build
           if-no-files-found: error
           path: |
             ./py/visdom/static/js/main.js
