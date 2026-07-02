@@ -48,8 +48,17 @@ Cypress.Commands.add('run', (name, opts) => {
   var seed = opts && 'seed' in opts ? ' -seed ' + opts['seed'] : '';
   if (!opts || !('asyncrun' in opts) || !opts['asyncrun'])
     cy.exec(
-      `python example/demo.py -port 8098 -testing -run ${name} -env ${saveto} ${seed} ${argscli}`
-    );
+      `python example/demo.py -port 8098 -testing -run ${name} -env ${saveto} ${seed} ${argscli}`,
+      { failOnNonZeroExit: false }
+    ).then((result) => {
+      if (result.code !== 0) {
+        throw new Error(
+          `demo.py exited with code ${result.code}\n` +
+            `----- STDOUT -----\n${result.stdout}\n` +
+            `----- STDERR -----\n${result.stderr}`
+        );
+      }
+    });
   else
     cy.task('asyncrun', {
       run: name,
