@@ -203,5 +203,59 @@ class TestScatter(unittest.TestCase):
         self.assertEqual(data["y"], [4.0, 5.0, 6.0])
 
 
+class TestHeatmap(unittest.TestCase):
+    def setUp(self):
+        self.viz = visdom.Visdom(send=False, use_incoming_socket=False)
+
+    def _heatmap(self, X, **kwargs):
+        sent = {}
+
+        def capture(msg, endpoint="events"):
+            sent["payload"] = msg
+            sent["endpoint"] = endpoint
+            return "win1"
+
+        with patch.object(self.viz, "_send", side_effect=capture):
+            self.viz.heatmap(X, **kwargs)
+        return sent
+
+    def test_nx_m_input(self):
+        X = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
+        sent = self._heatmap(X)
+        self.assertEqual(sent["payload"]["data"][0]["type"], "heatmap")
+
+    def test_x_not_2d_raises(self):
+        with self.assertRaises(AssertionError):
+            self.viz.heatmap(np.array([1.0, 2.0, 3.0]))
+
+    def test_invalid_update_raises(self):
+        X = np.ones((3, 3))
+        with self.assertRaises(AssertionError):
+            self.viz.heatmap(X, update="badvalue")
+
+    def test_colormap_defaults_to_viridis(self):
+        X = np.ones((2, 2))
+        sent = self._heatmap(X)
+        self.assertEqual(sent["payload"]["opts"]["colormap"], "Viridis")
+
+    def test_append_row_sets_update_dir(self):
+        X = np.ones((2, 2))
+        sent = self._heatmap(X, update="appendRow", win="w")
+        self.assertEqual(sent["payload"]["updateDir"], "appendRow")
+        self.assertTrue(sent["payload"]["append"])
+        self.assertEqual(sent["endpoint"], "update")
+
+    def test_append_column_sets_update_dir(self):
+        X = np.ones((2, 2))
+        sent = self._heatmap(X, update="appendColumn", win="w")
+        self.assertEqual(sent["payload"]["updateDir"], "appendColumn")
+        self.assertTrue(sent["payload"]["append"])
+
+    def test_replace_sets_append_false(self):
+        X = np.ones((2, 2))
+        sent = self._heatmap(X, update="replace", win="w")
+        self.assertFalse(sent["payload"]["append"])
+
+
 if __name__ == "__main__":
     unittest.main()
