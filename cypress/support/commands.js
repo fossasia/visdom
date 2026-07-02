@@ -124,5 +124,5 @@ Cypress.Commands.add('waitForMathJax', () => {
   cy.document().then((doc) => {
     return cy.wrap(doc.fonts.ready, { timeout: 10000 });
   });
-  cy.wait(300);
+  cy.wait(2000);
 });
