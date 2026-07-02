@@ -24,8 +24,9 @@ function dispatchMessages(messages, handler) {
     if (typeof msg === 'string') {
       msg = msg
         .replace(/\bNaN\b/g, 'null')
-        .replace(/\bInfinity\b/g, 'null')
-        .replace(/-Infinity\b/g, 'null');
+        .replace(/-Infinity\b/g, 'null')
+        .replace(/\bInfinity\b/g, 'null');
+
     }
     try {
       handler({ data: msg });
