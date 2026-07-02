@@ -112,6 +112,7 @@ const App = () => {
     sendEnvSave,
     sendLayoutsSave,
     sendPaneClose,
+    sendUndo,
     sendPaneLayoutUpdate,
     sessionInfo,
     toggleOnlineState,
@@ -133,6 +134,8 @@ const App = () => {
     panes: {},
     layout: [],
   });
+
+  const [undoCounts, setUndoCounts] = useState({});
 
   // user-changeable
   const [showEnvModal, setShowEnvModal] = useState(false);
@@ -341,6 +344,10 @@ const App = () => {
   const onLayoutMessage = ({ data, update }) => {
     if (update) parseLayoutsFromServer(data);
     else relayout();
+  };
+
+  const onUndoState = ({ eid, count }) => {
+    setUndoCounts((prev) => ({ ...prev, [eid]: count }));
   };
 
   const onEnvUpdate = (data) => {
@@ -976,6 +983,11 @@ const App = () => {
       }}
       onViewChange={updateToLayout}
       onViewManageButton={() => setShowViewModal(!showViewModal)}
+      canUndo={
+        selection.envIDs.length === 1 &&
+        (undoCounts[selection.envIDs[0]] || 0) > 0
+      }
+      onUndoButton={() => sendUndo(selection.envIDs[0])}
       onEnvSelect={onEnvSelect}
       onExportHtml={exportCurrentEnvToHtml}
     />
@@ -1011,6 +1023,7 @@ const App = () => {
     onReloadMessage,
     onEnvUpdate,
     onCloseMessage,
+    onUndoState,
     onDisconnect,
   };
 
