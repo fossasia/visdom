@@ -51,7 +51,7 @@ The UI begins as a blank slate – you can populate it with plots, images, and t
 
 The python Visdom implementation supports callbacks on a window. The demo shows an example of this in the form of an editable text pad. The functionality of these callbacks allows the Visdom object to receive and react to events that happen in the frontend.
 
-You can subscribe a window to events by adding a function to the event handlers dict for the window id you want to subscribe by calling `viz.register_event_handler(handler, win_id)` with your handler and the window id. Multiple handlers can be registered to the same window. You can remove all event handlers from a window using `viz.clear_event_handlers(win_id)`. When an event occurs to that window, your callbacks will be called on a dict containing:
+You can subscribe a window to events by adding a function to the event handlers dict for the window id you want to subscribe by calling `viz.register_event_handler(handler, win_id, env=None)` with your handler, the window id, and an optional environment name. Specifying the environment name prevents event handlers from firing across different environments with the same window id. Multiple handlers can be registered to the same window. You can remove event handlers from a window using `viz.clear_event_handlers(win_id, env=None)`. When an event occurs to that window, your callbacks will be called on a dict containing:
 
  - `event_type`: one of the below event types
  - `pane_data`: all of the stored contents for that window including layout and content.
@@ -76,8 +76,8 @@ Right now the following callback events are supported:
 
 <details>
 <summary><b>Editable Plot Parameters</b></summary>
-Use the top-right *edit*-Button to inspect all parameters used for plot in the respective window.  
-The visdom client supports dynamic change of plot parameters as well. Just change one of the listed parameters, the plot will be altered on-the-fly.  
+Use the top-right *edit*-Button to inspect all parameters used for plot in the respective window.
+The visdom client supports dynamic change of plot parameters as well. Just change one of the listed parameters, the plot will be altered on-the-fly.
 Click the button again to close the property list.
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/19650074/156751970-0915757d-8bf0-4a6d-a510-1d34a918e47a.gif" width="400" /></p>
 </details>
@@ -87,11 +87,11 @@ Click the button again to close the property list.
 <summary><b>Environments</b></summary>
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/19650074/198821281-ea1cea1a-66c3-495e-be52-cd0f1a3300f7.png" width="300" /></p>
 
-You can partition your visualization space with `envs`. By default, every user will have an env called `main`. New envs can be created in the UI or programmatically. The state of envs is chronically saved. Environments are able to keep entirely different pools of plots.
+You can partition your visualization space with `envs`. By default, every user will have an env called `main`. New envs can be created in the UI or programmatically. The state of envs is persistently saved. Environments are able to keep entirely different pools of plots.
 
-You can access a specific env via url: `http://localhost.com:8097/env/main`. If your server is hosted, you can share this url so others can see your visualizations too.
+You can access a specific env via url: `http://localhost:8097/env/main`. If your server is hosted, you can share this url so others can see your visualizations too.
 
-Environments are automatically hierarchically organized by the first `_`.  
+Environments are automatically hierarchically organized by the first `_`.
 Note that `/` characters in environment names are escaped to `_`, so both `_` and `/`
 can affect how environments appear hierarchically in the UI.
 
@@ -99,7 +99,7 @@ can affect how environments appear hierarchically in the UI.
 #### Selecting Environments
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/19650074/198821299-6602d557-7a02-4b9f-b1d5-d57615cdc15c.png" width="300" /></p>
 
-From the main page it is possible to toggle between different environments using the environment selector. Selecting a new environment will query the server for the plots that exist in that environment. The environment selector allows for searching and filtering for the new enironment.
+From the main page it is possible to toggle between different environments using the environment selector. Selecting a new environment will query the server for the plots that exist in that environment. The environment selector allows for searching and filtering for the new environment.
 
 #### Comparing Environments
 
@@ -134,7 +134,7 @@ Once you've created a few visualizations, state is maintained. The server automa
 
 * **Fork:** If you enter a new env name, saving will create a new env -- effectively **forking** the previous env.
 
-> **Tip**: Fork an environment before you begin to make edits to ensure that your changes are saved seperately.
+> **Tip**: Fork an environment before you begin to make edits to ensure that your changes are saved separately.
 
 ### Filter
 You can use the `filter` to dynamically sift through windows present in an env -- just provide a regular expression with which to match titles of window you want to show. This can be helpful in use cases involving an env with many windows e.g. when systematically checking experimental results.
@@ -182,6 +182,8 @@ Install from source
 > pip install git+https://github.com/fossasia/visdom
 ```
 
+**Optional:** To save Plotly figures to image files from code (e.g. PNG/SVG) without using the browser download button, install `plotly` and `kaleido`: `pip install plotly kaleido`. See [vis.plotlyplot](#visplotlyplot) and [vis.save_plotly_figure](#visplotlyplot).
+
 ## Usage
 
 Start the server (probably in a  `screen` or `tmux`) from the command line:
@@ -207,7 +209,7 @@ The following options can be provided to the server:
 4. `-env_path` : The path to the serialized session to reload.
 5. `-logging_level` : Logging level (default = INFO). Accepts both standard text and numeric logging values.
 6. `-readonly` : Flag to start server in readonly mode.
-7. `-enable_login` : Flag to setup authentication for the sever, requiring a username and password to login.
+7. `-enable_login` : Flag to setup authentication for the server, requiring a username and password to login.
 8. `-force_new_cookie` : Flag to reset the secure cookie used by the server, invalidating current login cookies.
 Requires `-enable_login`.
 9. `-bind_local` : Flag to make the server accessible only from localhost.
@@ -272,24 +274,31 @@ Visdom offers the following basic visualization functions:
 - [`vis.video`](#visvideo)    : videos
 - [`vis.svg`](#vissvg)      : SVG object
 - [`vis.matplot`](#vismatplot)  : matplotlib plot
+- [`vis.plotlyplot`](#visplotlyplot)  : arbitrary Plotly figure
+- [`vis.embeddings`](#visembeddings)  : interactive embedding projection
 - [`vis.save`](#vissave)     : serialize state server-side
 
 ### Plotting
-We have wrapped several common plot types to make creating basic visualizations easily. These visualizations are powered by [Plotly](https://plot.ly/).
+We have wrapped several common plot types to make creating basic visualizations easily. These visualizations are powered by [Plotly](https://plotly.com/).
 
 The following API is currently supported:
 - [`vis.scatter`](#visscatter)  : 2D or 3D scatter plots
+- [`vis.sunburst`](#vissunburst)  : sunburst (hierarchy) charts
 - [`vis.line`](#visline)     : line plots
 - [`vis.stem`](#visstem)     : stem plots
 - [`vis.heatmap`](#visheatmap)  : heatmap plots
 - [`vis.bar`](#visbar)  : bar graphs
 - [`vis.histogram`](#vishistogram) : histograms
+- [`vis.histogram2d`](#vishistogram2d) : 2D histograms (density maps)
 - [`vis.boxplot`](#visboxplot)  : boxplots
+- [`vis.violin`](#visviolin)   : violin plots
+- [`vis.pie`](#vispie)      : pie charts
 - [`vis.surf`](#vissurf)     : surface plots
 - [`vis.contour`](#viscontour)  : contour plots
 - [`vis.quiver`](#visquiver)   : quiver plots
 - [`vis.mesh`](#vismesh)     : mesh plots
 - [`vis.dual_axis_lines`](#visdual_axis_lines)     : double y axis line plots
+- [`vis.graph`](#visgraph)    : network graphs
 
 ### Generic Plots
 Note that the server API adheres to the Plotly convention of `data` and `layout` objects, such that you can produce your own arbitrary `Plotly` visualizations:
@@ -312,6 +321,7 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 - [`vis.win_exists`](#viswin_exists) : check if a window already exists by id
 - [`vis.get_env_list`](#visget_env_list) : get a list of all of the environments on your server
 - [`vis.get_window_data`](#visget_window_data): get current data for a window
+- [`vis.save_plotly_figure`](#visplotlyplot): save a Plotly figure to an image file from code (no browser click)
 - [`vis.check_connection`](#vischeck_connection): check if the server is connected
 - [`vis.replay_log`](#visreplay_log): replay the actions from the provided log file
 
@@ -433,9 +443,22 @@ This function draws a Plotly `Figure` object. It does not explicitly take option
 
 > **Note** You must have the `plotly` Python package installed to use this function. It can typically be installed by running `pip install plotly`.
 
+**Saving plots as images from code (without using the browser download button):** Pass `save_path` to save the figure to a file when plotting, e.g. `vis.plotlyplot(fig, save_path="plot.png")`. You can also save a figure without displaying it using `vis.save_plotly_figure(fig, "plot.png")`. Both require the optional `kaleido` package: `pip install kaleido`.
+
+```python
+import plotly.graph_objects as go
+from visdom import Visdom
+
+viz = Visdom()
+fig = go.Figure(go.Scatter(x=[1, 2, 3], y=[4, 5, 6], mode="lines+markers"))
+
+viz.plotlyplot(fig, save_path="my_plot.png")
+viz.save_plotly_figure(fig, "my_plot.png")
+```
+
 #### vis.embeddings
 
-This function visualizes a collection of features using the [Barnes-Hut t-SNE algorithm](https://github.com/lvdmaaten/bhtsne).
+This function visualizes a collection of features using t-SNE dimensionality reduction (powered by [openTSNE](https://github.com/pavlin-policar/openTSNE) or [bhtsne](https://github.com/lvdmaaten/bhtsne) as a fallback). `openTSNE` is installed automatically as a dependency of visdom, so this feature works out of the box.
 
 The function accepts the following arguments:
 - `features`: a list of tensors
@@ -453,7 +476,7 @@ This function saves the `envs` that are alive on the visdom server. It takes inp
 ### Plotting
 Further details on the wrapped plotting functions are given below.
 
-The exact inputs into the plotting functions vary, although most of them take as input a tensor `X` than contains the data and an (optional) tensor `Y` that contains optional data variables (such as labels or timestamps). All plotting functions take as input an optional `win` that can be used to plot into a specific window; each plotting function also returns the `win` of the window it plotted in. One can also specify the `env`  to which the visualization should be added.
+The exact inputs into the plotting functions vary, although most of them take as input a tensor `X` that contains the data and an (optional) tensor `Y` that contains optional data variables (such as labels or timestamps). All plotting functions take as input an optional `win` that can be used to plot into a specific window; each plotting function also returns the `win` of the window it plotted in. One can also specify the `env`  to which the visualization should be added.
 
 #### vis.scatter
 
@@ -487,13 +510,10 @@ The following `opts` are supported:
 - Tensor of size `K` and `K x 3`: Instead of having a unique color per data point, the same color is shared for all points of a particular label.
 
 #### vis.sunburst
-This function draws a sunburst chart. It takes two inputs: `parents` and `labels` array.
-values from `parents` array is used as parents object, like it define above which sector 
-should the this sector shown. values from `labels` array is used to define sector's label 
-or you can say name. keep in mind that length of array `parents` and `labels` should be 
-equal. There is a third array that you can pass to which is `value`, it is use to show 
-a value on hovering over a sector, it is optional argument, but if you are passing it then
-keep in mind length of `values` should be equal to `parents` or `labels`.
+This function draws a sunburst chart. It takes two input arrays: `parents` and `labels`.
+Values from the `parents` array define the hierarchical structure, indicating which parent sector a sector belongs to. Values from the `labels` array define the sector's label or name. Keep in mind that the `parents` and `labels` arrays must be of equal length. There is an optional third array called `values`, which is used to display a numerical value when hovering over a sector. If provided, the `values` array must be the same length as `parents` and `labels`.
+
+Examples: `vis.sunburst(parents, labels, opts)` or `vis.sunburst(parents, labels, values, opts)`
 
 Following `opts` are currently supported:
 - `opts.font_size`    : define font size of label (`int`)
@@ -583,6 +603,19 @@ The following plot-specific `opts` are currently supported:
 - `opts.numbins`: number of bins (`number`; default = 30)
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 
+#### vis.histogram2d
+This function draws a 2D histogram (density map) of paired data. It takes as
+input two `N` tensors `X` and `Y` of equal length that hold the coordinates of
+`N` points; the points are binned into a 2D grid and each cell is colored by
+the number of points that fall in it.
+
+The following plot-specific `opts` are currently supported:
+
+- `opts.xnumbins`: number of bins along the x-axis (`number`; default lets Plotly choose)
+- `opts.ynumbins`: number of bins along the y-axis (`number`; default lets Plotly choose)
+- `opts.colormap`: colormap (`string`; default = `'Viridis'`)
+- `opts.histnorm`: normalization of the bin counts, one of `''`, `'percent'`, `'probability'`, `'density'`, or `'probability density'`
+
 #### vis.boxplot
 This function draws boxplots of the specified data. It takes as input
 an `N` or an `NxM` tensor `X` that specifies the `N` data values of which
@@ -591,6 +624,31 @@ to construct the `M` boxplots.
 The following plot-specific `opts` are currently supported:
 
 - `opts.legend`: labels for each of the columns in `X`
+- `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
+
+#### vis.violin
+This function draws violin plots of the specified data. It takes as input an
+`N` or an `NxM` tensor `X` that specifies the `N` data values of which to
+construct the `M` violin plots.
+
+The following plot-specific `opts` are currently supported:
+
+- `opts.legend`: labels for each of the columns in `X`
+- `opts.showbox`: overlay a mini box plot inside the violin (`bool`; default = `True`)
+- `opts.showmeanline`: overlay the mean line (`bool`; default = `True`)
+- `opts.points`: which raw points to show alongside the violin, one of `'all'`, `'outliers'`, `'suspectedoutliers'`, or `False` (default = `False`)
+- `opts.jitter`: amount of jitter applied to displayed points (`float` in `[0, 1]`; default = `0.3`)
+- `opts.orientation`: `'v'` for vertical or `'h'` for horizontal violins (default = `'v'`)
+- `opts.bandwidth`: bandwidth of the kernel density estimate (`None` lets Plotly choose automatically)
+- `opts.side`: which side of the centre line to draw, one of `'both'`, `'positive'`, or `'negative'` (default = `'both'`)
+
+#### vis.pie
+This function draws a pie chart based on the `N` tensor `X`. The values in
+`X` must be non-negative and define the size of each slice.
+
+The following plot-specific `opts` are currently supported:
+
+- `opts.legend`: `list` containing legend names
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 
 #### vis.surf
@@ -663,16 +721,16 @@ The following `opts` are supported:
 - `opts.top` :  Set the top margin of the plot
 - `opts.bottom` :  Set the bottom margin of the plot
 - `opts.right` :  Set the right margin of the plot
-- `opts.left` :  Set the left margin of the plot   
+- `opts.left` :  Set the left margin of the plot
 
-This is the image of the output:  
+This is the image of the output:
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/19650074/198822367-666cc42e-4354-4a7a-8dd3-d8ff143f885d.gif" width="400" /></p>
 
 
-### Network Graph
+#### vis.graph
 
-This function draws a graph, in which the nodes and edges are taken from a 2-D matrix of size [,2] where each row contains a source and destination node value. The numeric value used to define nodes should be strictly between (0 to n-1), where n is the number of nodes. 
- 
+This function draws a graph, in which the nodes and edges are taken from a 2-D matrix of size [,2] where each row contains a source and destination node value. The numeric value used to define nodes should be strictly between (0 to n-1), where n is the number of nodes.
+
 There are two optional arguments :
 - `edgeLabels` : list of custom edge labels. If not provided each edge gets a label, "source-destination", eg "1-2", size should be equal to size of input "edges". Optional.
 - `nodeLabels` : list of custom node labels. If not provided each node gets a label same as the numeric value defined in the "edges". size should be equal to number of nodes present. Optional.
@@ -680,14 +738,14 @@ There are two optional arguments :
 The following opts are supported:
 - `opts.height` : Height of the plot. Default : 500
 - `opts.width` : Width of the plot. Default : 500
-- `opts.directed` : whether the plot should have a arrow or not. Default : false
+- `opts.directed` : whether the plot should have an arrow or not. Default : false
 - `opts.showVertexLabels` : Whether to show vertex labels. Default : true
 - `opts.showEdgeLabels` : Whether to show edge labels. Default : false
-- `opts.scheme` : Whether all nodes shoud have "same" color or "different". Default : "same"
+- `opts.scheme` : Whether all nodes should have "same" color or "different". Default : "same"
 
 ### Customizing plots
 
-The plotting functions take an optional `opts` table as input that can be used to change (generic or plot-specific) properties of the plots. 
+The plotting functions take an optional `opts` table as input that can be used to change (generic or plot-specific) properties of the plots.
 
 All input arguments are specified in a single table; the input arguments are matches based on the keys they have in the input table.
 
@@ -727,7 +785,7 @@ The following `opts` are generic in the sense that they are the same for all vis
 OR
 
     opts={"title":"my title", "xlabel":"x axis","ylabel":"y axis"}
-    
+
 The other options are visualization-specific, and are described in the
 documentation of the functions.
 
@@ -741,12 +799,12 @@ This function closes a specific window. It takes input window id `win` and envir
 
 This function deletes a specified env entirely. It takes env id `eid` as input.
 
-> **Note**: `delete_env` is deletes all data for an environment and is IRREVERSIBLE. Do not use unless you absolutely want to remove an environment.
+> **Note**: `delete_env` deletes all data for an environment and is IRREVERSIBLE. Do not use unless you absolutely want to remove an environment.
 
 
 #### vis.fork_env
 
-This function forks an environment, similiar to the UI feature.
+This function forks an environment, similar to the UI feature.
 
 Arguments:
 - `prev_eid`: Environment ID that we want to fork.
