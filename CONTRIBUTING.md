@@ -45,17 +45,17 @@ confirm all dependencies are found.
 
 
 **Issue: I would like to make a plot that has feature X:**
-To produce visualizations, visdom uses [plot.ly](https://plot.ly/). Specifically,
-the client code produces a JSON-structure that is passed on to plot.ly by the
+To produce visualizations, visdom uses [plotly](https://plotly.com/). Specifically,
+the client code produces a JSON-structure that is passed on to plotly by the
 server. This implies that, _given the right input, visdom can display any
-visualization that plot.ly supports_. You can find an up-to-date guide to plot.ly
-features [here](https://plot.ly/python/).
+visualization that plotly supports_. You can find an up-to-date guide to plotly
+features [here](https://plotly.com/python/).
 
-The visdom exposes easy access to the most common plot.ly features, but does not
+The visdom exposes easy access to the most common plotly features, but does not
 expose all of them. You are more than welcome to hack the client code producing
 the data structure (in `py/__init__.py`) to include the feature you want to use.
-All available options for each plot type are described in [the plot.ly manual](https://plot.ly/python/).
-You can even construct your own plot data structure from scratch, and [`_send`](https://github.com/facebookresearch/visdom/blob/master/py/__init__.py#L247)
+All available options for each plot type are described in [the plotly manual](https://plotly.com/python/).
+You can even construct your own plot data structure from scratch, and [`_send`](https://github.com/fossasia/visdom/blob/dev/py/visdom/__init__.py#L854)
 it to the visdom server directly.
 
 If you believe a feature is so generally useful that it should be exposed
@@ -115,10 +115,24 @@ If you identified a bug, please include the following information in your bug re
 
 This information will help us to more rapidly identify the source of your issue.
 
+
+## Guidelines for Contributors
+
+### First-Time Contributors
+If you are a first-time contributor, we highly recommend starting with beginner-friendly issues. Please avoid taking up tedious tasks that involve large-scale file changes or major code refactoring. Keeping your initial contributions focused and scoped will help you get familiar with the codebase and make the review process smoother.
+
+### AI Usage Guidelines
+We welcome the use of AI tools to assist in writing, debugging, or understanding code. However, you should only submit a pull request if:
+1. You fully understand what your code changes do.
+2. You understand and can explain every single line of the code changes you make.
+
+Blindly copy-pasting AI-generated code that you cannot explain or debug is not permitted. As the contributor, you are responsible for the correctness and maintenance of the code you submit.
+
+
 ## Pull Requests
 We actively welcome your pull requests.
 
-1. Fork the repo and create your branch from `master`.
+1. Fork the repo and create your branch from `dev`.
 2. If you've added code that should be tested, add tests.
 3. If you've changed APIs, update the documentation.
 4. Ensure the Lua and Python interfaces to Visdom are in sync.
