@@ -198,7 +198,6 @@ var PlotPane = (props) => {
       }
       if (layout.title.text) {
         layout.margin.t = 65;
-        layout.title.y = 0.9;
       } else {
         layout.margin.t = 30;
       }
