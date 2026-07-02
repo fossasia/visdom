@@ -11,7 +11,7 @@ class TestLine(unittest.TestCase):
     def _line(self, Y, X=None, **kwargs):
         sent = {}
 
-        def capture(msg, endpoint="events"):
+        def capture(msg, endpoint="events", **_):
             sent["payload"] = msg
             sent["endpoint"] = endpoint
             return "win1"
@@ -139,7 +139,7 @@ class TestScatter(unittest.TestCase):
     def _scatter(self, X, Y=None, **kwargs):
         sent = {}
 
-        def capture(msg, endpoint="events"):
+        def capture(msg, endpoint="events", **_):
             sent["payload"] = msg
             sent["endpoint"] = endpoint
             return "win1"
@@ -258,7 +258,7 @@ class TestHeatmap(unittest.TestCase):
     def _heatmap(self, X, **kwargs):
         sent = {}
 
-        def capture(msg, endpoint="events"):
+        def capture(msg, endpoint="events", **_):
             sent["payload"] = msg
             sent["endpoint"] = endpoint
             return "win1"
