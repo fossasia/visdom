@@ -48,8 +48,8 @@ Cypress.Commands.add('run', (name, opts) => {
   var seed = opts && 'seed' in opts ? ' -seed ' + opts['seed'] : '';
   if (!opts || !('asyncrun' in opts) || !opts['asyncrun'])
     cy.exec(
-        `python example/demo.py -port 8098 -testing -run ${name} -env ${saveto} ${seed} ${argscli}`
-      );
+      `python example/demo.py -port 8098 -testing -run ${name} -env ${saveto} ${seed} ${argscli}`
+    );
   else
     cy.task('asyncrun', {
       run: name,
