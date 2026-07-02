@@ -3035,7 +3035,7 @@ class Visdom(object):
 
     @pytorch_wrap
     def graph(
-        self, edges, edgeLabels=None, nodeLabels=None, opts=dict(), env=None, win=None
+        self, edges, edgeLabels=None, nodeLabels=None, opts=None, env=None, win=None
     ):
         """
         This function draws interactive network graphs. It takes list of edges as one of the arguments.
@@ -3057,9 +3057,10 @@ class Visdom(object):
                 * `height` : height of the Pane
                 * `width` : width of the Pane
         """
+        opts = {} if opts is None else opts
         try:
             import networkx as nx
-        except:
+        except ImportError:
             raise RuntimeError("networkx must be installed to plot Graph figures")
 
         G = nx.Graph()
