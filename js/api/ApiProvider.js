@@ -183,6 +183,7 @@ const ApiProvider = ({ children }) => {
         break;
       case 'tags_sync':
         apiHandlers.current.onTagsSync(cmd.data);
+        break;
       case 'undo_state':
         apiHandlers.current.onUndoState(cmd);
         break;
