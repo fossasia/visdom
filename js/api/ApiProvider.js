@@ -183,6 +183,8 @@ const ApiProvider = ({ children }) => {
         break;
       case 'tags_sync':
         apiHandlers.current.onTagsSync(cmd.data);
+      case 'undo_state':
+        apiHandlers.current.onUndoState(cmd);
         break;
 
       default:
@@ -265,6 +267,13 @@ const ApiProvider = ({ children }) => {
     sendSocketMessage({
       cmd: 'close',
       data: paneID,
+      eid: envID,
+    });
+  };
+
+  const sendUndo = (envID) => {
+    sendSocketMessage({
+      cmd: 'undo',
       eid: envID,
     });
   };
@@ -380,6 +389,7 @@ const ApiProvider = ({ children }) => {
         sendPaneLayoutUpdate,
         sendPaneMessage,
         sendSaveAll,
+        sendUndo,
         sessionInfo,
         setConnected,
         toggleOnlineState,

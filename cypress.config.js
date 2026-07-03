@@ -13,12 +13,23 @@ function assertSafeToken(name, value) {
 }
 
 module.exports = defineConfig({
+  allowCypressEnv: false,
   e2e: {
     baseUrl: 'http://localhost:8098',
     video: false,
     specPattern: 'cypress/integration/**/*.js',
     supportFile: 'cypress/support/index.js',
     testIsolation: false,
+  
+    defaultCommandTimeout: 15000,
+    pageLoadTimeout: 60000,
+    requestTimeout: 30000,
+    responseTimeout: 30000,
+
+    retries: {
+      runMode: 2,
+    },
+
     setupNodeEvents(on) {
       on('task', {
         asyncrun(payload) {
