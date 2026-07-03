@@ -76,6 +76,7 @@ function EnvControls(props) {
     });
   });
 
+  const validEnvIDs = envIDs.filter((env) => slist.indexOf(env) !== -1);
   const currentIdx = envIDs.length > 0 ? slist.indexOf(envIDs[0]) : -1;
   const hasSingleSelectedEnv = envIDs.length === 1 && currentIdx !== -1;
   const onPrevEnv = () => {
@@ -112,10 +113,10 @@ function EnvControls(props) {
               wordBreak: 'break-all',
             }}
             placeholder={<i>Select environment(s)</i>}
-            searchPlaceholder="search"
             treeLine
             maxTagTextLength={1000}
-            value={envIDs}
+            inputValue={null}
+            value={validEnvIDs}
             treeData={env_options2}
             treeNodeFilterProp="label"
             treeDataSimpleMode={{ id: 'key', rootPId: 0 }}
