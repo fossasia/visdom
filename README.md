@@ -297,6 +297,7 @@ The following API is currently supported:
 - [`vis.contour`](#viscontour)  : contour plots
 - [`vis.quiver`](#visquiver)   : quiver plots
 - [`vis.mesh`](#vismesh)     : mesh plots
+- [`vis.sankey`](#vissankey)   : sankey (flow) diagrams
 - [`vis.dual_axis_lines`](#visdual_axis_lines)     : double y axis line plots
 - [`vis.graph`](#visgraph)    : network graphs
 
@@ -695,6 +696,27 @@ The following `opts` are supported:
 - `opts.color`: color (`string`)
 - `opts.opacity`: opacity of polygons (`number` between 0 and 1)
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
+
+#### vis.sankey
+This function draws a Sankey (flow) diagram. Flows are defined by three
+equal-length arrays:
+
+- `source`: source node index of each link (`N` array of ints)
+- `target`: target node index of each link (`N` array of ints)
+- `value` : magnitude of each link (`N` array of non-negative numbers)
+
+`labels` is an optional list of node names. If omitted, nodes are referenced
+by their index alone.
+
+The following `opts` are supported:
+
+- `opts.labels`     : list of node labels (alternative to the `labels` arg)
+- `opts.pad`        : node padding in px (`number`; default = 15)
+- `opts.thickness`  : node thickness in px (`number`; default = 20)
+- `opts.orientation`: `'h'` (default) or `'v'`
+- `opts.nodecolor`  : node color(s) (`string` or list of strings)
+- `opts.linkcolor`  : link color(s) (`string` or list of strings)
+- `opts.layoutopts` : `dict` of any additional options that the graph backend accepts for a layout.
 
 #### vis.dual_axis_lines
 This function will create a line plot using plotly with different Y-Axis.
