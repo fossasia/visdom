@@ -43,7 +43,8 @@ except ImportError:
 
 import sys
 
-assert sys.version_info[0] >= 3, "To use visdom with python 2, downgrade to v0.1.8.9"
+if sys.version_info < (3, 12):
+    raise RuntimeError("Visdom requires Python 3.12 or newer.")
 
 
 def _normalize_tsne(Y):
@@ -1258,9 +1259,7 @@ class Visdom(object):
                 try:
                     soup = bs4.BeautifulSoup(svg, "xml")
                 except bs4.FeatureNotFound as e:
-                    import six
-
-                    six.raise_from(ImportError("No module named 'lxml'"), e)
+                    raise ImportError("No module named 'lxml'") from e
                 height = soup.svg.attrs.pop("height", None)
                 width = soup.svg.attrs.pop("width", None)
                 svg = str(soup)
@@ -1964,6 +1963,7 @@ class Visdom(object):
 
         assert X.ndim == 2, "X should have two dims"
         assert X.shape[1] == 2 or X.shape[1] == 3, "X should have 2 or 3 cols"
+        assert X.shape[0] > 0, "X should have at least one point"
 
         if Y is not None:
             Y = np.ravel(Y)
@@ -2923,6 +2923,109 @@ class Visdom(object):
                 "type": "mesh3d" if is3d else "mesh",
             }
         ]
+        return self._send(
+            {
+                "data": data,
+                "win": win,
+                "eid": env,
+                "layout": _opts2layout(opts),
+                "opts": opts,
+            }
+        )
+
+    @pytorch_wrap
+    def sankey(self, source, target, value, labels=None, win=None, env=None, opts=None):
+        """
+        This function draws a Sankey (flow) diagram. Flows are defined by three
+        equal-length arrays:
+
+        - `source`: source node index of each link (`N` array of ints)
+        - `target`: target node index of each link (`N` array of ints)
+        - `value` : magnitude of each link (`N` array of non-negative numbers)
+
+        `labels` is an optional list of node names. If omitted, nodes are
+        referenced by their index alone.
+
+        The following `opts` are supported:
+
+        - `opts.labels`     : list of node labels (alternative to the `labels` arg)
+        - `opts.pad`        : node padding in px (`number`; default = 15)
+        - `opts.thickness`  : node thickness in px (`number`; default = 20)
+        - `opts.orientation`: `'h'` (default) or `'v'`
+        - `opts.nodecolor`  : node color(s) (`string` or list of strings)
+        - `opts.linkcolor`  : link color(s) (`string` or list of strings)
+        - `opts.layoutopts` : `dict` of additional backend layout options, e.g.
+          `layoutopts = {'plotly': {'font': {'size': 10}}}`.
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        source = np.asarray(source)
+        target = np.asarray(target)
+        value = np.asarray(value)
+        for name, arr in (("source", source), ("target", target), ("value", value)):
+            assert arr.ndim <= 1, "sankey {} must be 1-D, got shape {}".format(
+                name, arr.shape
+            )
+        source = source.ravel()
+        target = target.ravel()
+        value = value.ravel()
+        assert (
+            len(source) == len(target) == len(value)
+        ), "source, target and value must have the same length"
+        assert (source >= 0).all(), "sankey source indices must be non-negative"
+        assert (target >= 0).all(), "sankey target indices must be non-negative"
+        assert (
+            source == source.astype(int)
+        ).all(), "sankey source indices must be integers"
+        assert (
+            target == target.astype(int)
+        ).all(), "sankey target indices must be integers"
+        assert (value >= 0).all(), "sankey link values must be non-negative"
+
+        labels = labels if labels is not None else opts.get("labels")
+        if labels is not None and len(source) > 0:
+            num_nodes = max(int(source.max()), int(target.max())) + 1
+            assert len(labels) >= num_nodes, (
+                "labels must cover every referenced node "
+                "({} labels for {} nodes)".format(len(labels), num_nodes)
+            )
+
+        pad = opts.get("pad", 15)
+        thickness = opts.get("thickness", 20)
+        orientation = opts.get("orientation", "h")
+        assert (
+            isinstance(pad, numbers.Number) and pad >= 0
+        ), "opts.pad must be a non-negative number"
+        assert (
+            isinstance(thickness, numbers.Number) and thickness > 0
+        ), "opts.thickness must be a positive number"
+        assert orientation in ("h", "v"), "opts.orientation must be 'h' or 'v'"
+
+        node = {"pad": pad, "thickness": thickness}
+        if labels is not None:
+            node["label"] = list(labels)
+        if opts.get("nodecolor") is not None:
+            node["color"] = opts.get("nodecolor")
+
+        link = {
+            "source": source.astype(int).tolist(),
+            "target": target.astype(int).tolist(),
+            "value": value.tolist(),
+        }
+        if opts.get("linkcolor") is not None:
+            link["color"] = opts.get("linkcolor")
+
+        data = [
+            {
+                "type": "sankey",
+                "orientation": orientation,
+                "node": node,
+                "link": link,
+            }
+        ]
+
         return self._send(
             {
                 "data": data,

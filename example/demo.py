@@ -80,6 +80,7 @@ from components.plot_special import (
     plot_special_mesh,
     plot_special_sunburst,
     plot_special_graph,
+    plot_special_sankey,
 )
 from components.properties import properties_basic, properties_callbacks
 from components.misc import (
@@ -188,6 +189,7 @@ def run_demo(viz, env, args):
     plot_special_mesh(viz, env, args)
     plot_special_sunburst(viz, env, args)
     plot_special_graph(viz, env, args)
+    plot_special_sankey(viz, env, args)
 
     # ============ #
     # violin plots #
