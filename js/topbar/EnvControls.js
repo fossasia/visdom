@@ -118,7 +118,7 @@ function EnvControls(props) {
             inputValue={null}
             value={validEnvIDs}
             treeData={env_options2}
-            treeNodeFilterProp="title"
+            treeNodeFilterProp="label"
             treeDataSimpleMode={{ id: 'key', rootPId: 0 }}
             treeCheckable
             showCheckedStrategy={SHOW_CHILD}
