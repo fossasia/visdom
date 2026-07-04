@@ -119,14 +119,6 @@ class UpdateHandler(BaseHandler):
 
     @staticmethod
     def update(p, args, max_text_lines, max_old_content, max_image_history):
-        if "data" not in args and p.get("type") in (
-            "text",
-            "embeddings",
-            "image_history",
-            "plot_history",
-        ):
-            logging.warning("update() called without 'data' in args")
-            return p
         # Update text in window, separated by a line break
         if p["type"] == "text":
             p["content"] += "<br>" + args["data"][0]["content"]
