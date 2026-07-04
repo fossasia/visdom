@@ -47,7 +47,7 @@ Always use port `8098` and `-env_path /tmp` for isolation.
 
 ## CI
 
-- `python-tests.yml` runs `pytest -m "not server"` on a Python 3.10 / 3.11 / 3.12 matrix for
+- `python-tests.yml` runs `pytest -m "not server"` on a Python 3.12 / 3.13 matrix for
   every pull request (and on push to master)
 - Visual regression compares PR screenshots against base branch
 - `update-js-build-files.yml` auto-compiles JS on master
