@@ -566,7 +566,7 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
 
 def broadcast(self, msg, eid):
     for s in self.subs:
-        if isinstance(self.subs[s].eid, dict):
+        if isinstance(self.subs[s].eid, (list, dict, set)):
             if eid in self.subs[s].eid:
                 self.subs[s].write_message(msg)
         else:
