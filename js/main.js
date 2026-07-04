@@ -45,6 +45,17 @@ import WidthProvider from './Width';
 const jsonpatch = require('fast-json-patch');
 const GridLayout = WidthProvider(ReactGridLayout);
 
+const safeJsonParse = (raw, fallback, onError) => {
+  if (raw == null || raw === '') return fallback;
+
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    if (onError) onError(e);
+    return fallback;
+  }
+};
+
 var use_envs = null;
 if (ACTIVE_ENV !== '') {
   if (ACTIVE_ENV.indexOf('+') > -1) {
@@ -55,7 +66,10 @@ if (ACTIVE_ENV !== '') {
     use_envs = [ACTIVE_ENV];
   }
 } else {
-  use_envs = JSON.parse(localStorage.getItem('envIDs')) || ['main'];
+  let storedEnvIDs = safeJsonParse(localStorage.getItem('envIDs'), null, () => {
+    localStorage.removeItem('envIDs');
+  });
+  use_envs = Array.isArray(storedEnvIDs) ? storedEnvIDs : ['main'];
 }
 
 const PaneWrapper = ({
@@ -250,7 +264,10 @@ const App = () => {
     newPanes[newPane.id] = newPane;
 
     if (!exists) {
-      let stored = JSON.parse(localStorage.getItem(keyLS(newPane.id)));
+      let layoutKey = keyLS(newPane.id);
+      let stored = safeJsonParse(localStorage.getItem(layoutKey), null, () => {
+        localStorage.removeItem(layoutKey);
+      });
       if (_bin.current == null) {
         rebin();
       }
@@ -475,7 +492,16 @@ const App = () => {
 
     let payload = {};
     Object.keys(storeData.panes).map((paneID) => {
-      payload[paneID] = JSON.parse(localStorage.getItem(keyLS(paneID)));
+      let layoutKey = keyLS(paneID);
+      let storedLayout = safeJsonParse(
+        localStorage.getItem(layoutKey),
+        null,
+        () => {
+          localStorage.removeItem(layoutKey);
+        }
+      );
+      payload[paneID] =
+        storedLayout || getLayoutItem(storeData.layout, paneID) || null;
     });
 
     sendEnvSave(env, selection.envIDs[0], payload);
@@ -682,7 +708,10 @@ const App = () => {
     if (layoutJSON.length == 0) {
       return; // Skip totally blank updates, these are empty inits
     }
-    let layoutsObj = JSON.parse(layoutJSON);
+    let layoutsObj = safeJsonParse(layoutJSON, null);
+    if (!layoutsObj) {
+      return;
+    }
     let layoutLists = new Map();
     for (let envName of Object.keys(layoutsObj)) {
       let layoutList = new Map();
