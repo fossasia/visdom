@@ -57,6 +57,8 @@
   margin: 0 !important;
   padding: 0 !important;
   display: inline-block !important;
+  /* Neutralize rc-select demo stylesheet's debug red search background */
+  background: transparent !important;
 }
 
 .rc-tree-select-selection-item {
