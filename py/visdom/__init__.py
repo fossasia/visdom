@@ -43,7 +43,8 @@ except ImportError:
 
 import sys
 
-assert sys.version_info[0] >= 3, "To use visdom with python 2, downgrade to v0.1.8.9"
+if sys.version_info < (3, 12):
+    raise RuntimeError("Visdom requires Python 3.12 or newer.")
 
 
 def _normalize_tsne(Y):
@@ -1258,9 +1259,7 @@ class Visdom(object):
                 try:
                     soup = bs4.BeautifulSoup(svg, "xml")
                 except bs4.FeatureNotFound as e:
-                    import six
-
-                    six.raise_from(ImportError("No module named 'lxml'"), e)
+                    raise ImportError("No module named 'lxml'") from e
                 height = soup.svg.attrs.pop("height", None)
                 width = soup.svg.attrs.pop("width", None)
                 svg = str(soup)
