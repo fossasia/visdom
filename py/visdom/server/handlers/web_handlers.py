@@ -24,12 +24,7 @@ import os
 import uuid
 from collections import OrderedDict
 
-try:
-    # for after python 3.8
-    from collections.abc import Mapping, Sequence
-except ImportError:
-    # for python 3.7 and below
-    from collections import Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
 import tornado.escape
 from visdom.utils.shared_utils import get_rand_id, NanSafeEncoder
@@ -703,8 +698,6 @@ class ErrorHandler(BaseHandler):
             raise tornado.web.HTTPError(400, reason="Invalid status code")
 
         raise tornado.web.HTTPError(status_code)
-        error_text = text or "test error"
-        raise Exception(error_text)
 
 
 class UploadEnvHandler(BaseHandler):

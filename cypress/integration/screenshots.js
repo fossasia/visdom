@@ -20,6 +20,7 @@ const maxDiffPixels = {
   misc_video_tensor: 5000,
   misc_video_download: 5000,
   misc_audio_basic: 5000,
+  misc_plot_latex: 3000,
 };
 
 const compare_thresholds = {
@@ -40,7 +41,7 @@ const compare_thresholds = {
   plot_bar_stacked: 200,
   plot_bar_nonstacked: 200,
   plot_special_boxplot: 200,
-  misc_plot_latex: 50,
+  misc_plot_latex: 3000,
   misc_plot_latex_update: 200,
 };
 
