@@ -2934,6 +2934,109 @@ class Visdom(object):
         )
 
     @pytorch_wrap
+    def sankey(self, source, target, value, labels=None, win=None, env=None, opts=None):
+        """
+        This function draws a Sankey (flow) diagram. Flows are defined by three
+        equal-length arrays:
+
+        - `source`: source node index of each link (`N` array of ints)
+        - `target`: target node index of each link (`N` array of ints)
+        - `value` : magnitude of each link (`N` array of non-negative numbers)
+
+        `labels` is an optional list of node names. If omitted, nodes are
+        referenced by their index alone.
+
+        The following `opts` are supported:
+
+        - `opts.labels`     : list of node labels (alternative to the `labels` arg)
+        - `opts.pad`        : node padding in px (`number`; default = 15)
+        - `opts.thickness`  : node thickness in px (`number`; default = 20)
+        - `opts.orientation`: `'h'` (default) or `'v'`
+        - `opts.nodecolor`  : node color(s) (`string` or list of strings)
+        - `opts.linkcolor`  : link color(s) (`string` or list of strings)
+        - `opts.layoutopts` : `dict` of additional backend layout options, e.g.
+          `layoutopts = {'plotly': {'font': {'size': 10}}}`.
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        source = np.asarray(source)
+        target = np.asarray(target)
+        value = np.asarray(value)
+        for name, arr in (("source", source), ("target", target), ("value", value)):
+            assert arr.ndim <= 1, "sankey {} must be 1-D, got shape {}".format(
+                name, arr.shape
+            )
+        source = source.ravel()
+        target = target.ravel()
+        value = value.ravel()
+        assert (
+            len(source) == len(target) == len(value)
+        ), "source, target and value must have the same length"
+        assert (source >= 0).all(), "sankey source indices must be non-negative"
+        assert (target >= 0).all(), "sankey target indices must be non-negative"
+        assert (
+            source == source.astype(int)
+        ).all(), "sankey source indices must be integers"
+        assert (
+            target == target.astype(int)
+        ).all(), "sankey target indices must be integers"
+        assert (value >= 0).all(), "sankey link values must be non-negative"
+
+        labels = labels if labels is not None else opts.get("labels")
+        if labels is not None and len(source) > 0:
+            num_nodes = max(int(source.max()), int(target.max())) + 1
+            assert len(labels) >= num_nodes, (
+                "labels must cover every referenced node "
+                "({} labels for {} nodes)".format(len(labels), num_nodes)
+            )
+
+        pad = opts.get("pad", 15)
+        thickness = opts.get("thickness", 20)
+        orientation = opts.get("orientation", "h")
+        assert (
+            isinstance(pad, numbers.Number) and pad >= 0
+        ), "opts.pad must be a non-negative number"
+        assert (
+            isinstance(thickness, numbers.Number) and thickness > 0
+        ), "opts.thickness must be a positive number"
+        assert orientation in ("h", "v"), "opts.orientation must be 'h' or 'v'"
+
+        node = {"pad": pad, "thickness": thickness}
+        if labels is not None:
+            node["label"] = list(labels)
+        if opts.get("nodecolor") is not None:
+            node["color"] = opts.get("nodecolor")
+
+        link = {
+            "source": source.astype(int).tolist(),
+            "target": target.astype(int).tolist(),
+            "value": value.tolist(),
+        }
+        if opts.get("linkcolor") is not None:
+            link["color"] = opts.get("linkcolor")
+
+        data = [
+            {
+                "type": "sankey",
+                "orientation": orientation,
+                "node": node,
+                "link": link,
+            }
+        ]
+
+        return self._send(
+            {
+                "data": data,
+                "win": win,
+                "eid": env,
+                "layout": _opts2layout(opts),
+                "opts": opts,
+            }
+        )
+
+    @pytorch_wrap
     def dual_axis_lines(self, X=None, Y1=None, Y2=None, opts=None, win=None, env=None):
         """
         This function will create a line plot using plotly with different Y-Axis.
@@ -3035,7 +3138,7 @@ class Visdom(object):
 
     @pytorch_wrap
     def graph(
-        self, edges, edgeLabels=None, nodeLabels=None, opts=dict(), env=None, win=None
+        self, edges, edgeLabels=None, nodeLabels=None, opts=None, env=None, win=None
     ):
         """
         This function draws interactive network graphs. It takes list of edges as one of the arguments.
@@ -3057,9 +3160,10 @@ class Visdom(object):
                 * `height` : height of the Pane
                 * `width` : width of the Pane
         """
+        opts = {} if opts is None else opts
         try:
             import networkx as nx
-        except:
+        except ImportError:
             raise RuntimeError("networkx must be installed to plot Graph figures")
 
         G = nx.Graph()
@@ -3239,3 +3343,75 @@ class Visdom(object):
                 "opts": opts,
             }
         )
+
+    def table(self, headers, data, win=None, env=None, opts=None):
+        """
+        This function renders structured data as a styled HTML table.
+
+        - `headers`: a `list` of column header names (`string` or any
+           type convertible to `string`).
+        - `data`: a 2D `list` of row data, where each row is list or
+          `tuple` with same number of elements as `headers`. In case
+           of empty list, a table with only header will be rendered.
+
+        The following `opts` are supported:
+
+        - `opts.title`: title for the window (`string`; optional)
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        assert isinstance(headers, list), "headers should be a list"
+        assert isinstance(data, list), "data should be a list of rows"
+        assert all(
+            isinstance(row, (list, tuple)) for row in data
+        ), "each row in data should be a list or tuple"
+        assert all(
+            len(row) == len(headers) for row in data
+        ), "each data row must have the same number of columns as headers"
+
+        style = """
+            <style>
+            .visdom-table {
+                font-family: monospace;
+                border-collapse: collapse;
+                width: 100%;
+            }
+            .visdom-table th {
+                background-color: #2196F3;
+                color: white;
+                padding: 8px 12px;
+                text-align: left;
+            }
+            .visdom-table td {
+                padding: 6px 12px;
+                border-bottom: 1px solid #ddd;
+            }
+            .visdom-table tr:nth-child(even) td {
+                background-color: #f2f2f2;
+            }
+            .visdom-table tr:nth-child(odd) td {
+                background-color: #ffffff;
+            }
+            .visdom-table tr:hover td {
+                background-color: #ddeeff;
+            }
+            </style>
+        """
+
+        header_html = "".join("<th>%s</th>" % html.escape(str(h)) for h in headers)
+        rows_html = "".join(
+            "<tr>%s</tr>"
+            % "".join("<td>%s</td>" % html.escape(str(cell)) for cell in row)
+            for row in data
+        )
+
+        table_html = (
+            "%s<table class='visdom-table'>"
+            "<thead><tr>%s</tr></thead>"
+            "<tbody>%s</tbody>"
+            "</table>"
+        ) % (style, header_html, rows_html)
+
+        return self.text(text=table_html, win=win, env=env, opts=opts)
