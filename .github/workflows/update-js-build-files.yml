@@ -17,12 +17,12 @@ jobs:
     runs-on: ubuntu-latest
     name: "Update Static JS-Files"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7.0.0
         # > if the push needs to trigger other workflows, use a repo scoped Personal Acces Token
         # see: https://stackoverflow.com/questions/57921401/push-to-origin-from-github-action/58393457#58393457
         # with:
         #   token: ${{ secrets.PAT }}
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '24'
       - run: ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm install
@@ -36,4 +36,3 @@ jobs:
           git diff --cached --quiet && echo "No changes to commit" && exit 0
           git commit -m "update static/js files"
           git push
-
