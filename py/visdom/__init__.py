@@ -494,9 +494,11 @@ def pytorch_wrap(f):
 
 
 def _compute_confusion_matrix(y_true, y_pred, labels):
-    """Build an NxN confusion matrix from label vectors (numpy only)."""
-    y_true = np.asarray(y_true).ravel()
-    y_pred = np.asarray(y_pred).ravel()
+    """Build an NxN confusion matrix from label vectors (numpy only).
+
+    ``y_true``/``y_pred`` are expected to be 1-D numpy arrays; the public
+    ``confusion_matrix`` caller ravels them before calling this helper.
+    """
     if y_true.shape[0] != y_pred.shape[0]:
         raise ValueError("y_true and y_pred must have the same length")
     if y_true.shape[0] == 0:
@@ -2406,6 +2408,7 @@ class Visdom(object):
         cm=None,
         labels=None,
         normalize=None,
+        update=None,
         win=None,
         env=None,
         opts=None,
@@ -2426,10 +2429,24 @@ class Visdom(object):
         - `opts.showPercent` : show percentages in cells (`bool`; default = `True`
                                when normalized, `False` otherwise)
         - `opts.layoutopts`  : additional backend layout options (`dict`)
+
+        `update` may be used to modify an existing confusion matrix window
+        instead of creating a new one; it takes one of `None`, `'replace'`
+        (redraw the whole matrix in `win`) or `'remove'` (delete `win`).
         """
         opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
+
+        valid_update = (None, "replace", "remove")
+        assert update in valid_update, "update must be one of: {}".format(valid_update)
+
+        if update == "remove":
+            assert win is not None, "win must be provided to remove a window"
+            return self._send(
+                {"data": [], "delete": True, "win": win, "eid": env},
+                endpoint="update",
+            )
 
         has_raw = y_true is not None or y_pred is not None
         has_matrix = cm is not None
@@ -2443,7 +2460,6 @@ class Visdom(object):
             y_pred = np.asarray(y_pred).ravel()
             if labels is None:
                 labels = np.unique(np.concatenate([y_true, y_pred])).tolist()
-            cm = _compute_confusion_matrix(y_true, y_pred, labels)
         else:
             cm = np.asarray(cm)
             if cm.ndim != 2 or cm.shape[0] != cm.shape[1]:
@@ -2454,6 +2470,12 @@ class Visdom(object):
                 raise ValueError(
                     "number of labels must match confusion matrix dimensions"
                 )
+
+        if len(set(labels)) != len(labels):
+            raise ValueError("labels must be unique")
+
+        if has_raw:
+            cm = _compute_confusion_matrix(y_true, y_pred, labels)
 
         valid_normalize = (None, "true", "pred", "all")
         if normalize not in valid_normalize:
@@ -2503,19 +2525,24 @@ class Visdom(object):
         annotations = []
         max_val = float(cm.max()) if cm.size > 0 else 1.0
         threshold = max_val / 2.0
+        raw_total = float(raw_cm.sum())
+        raw_is_integer = np.issubdtype(raw_cm.dtype, np.integer)
 
         for i in range(cm.shape[0]):
             for j in range(cm.shape[1]):
                 cell_val = cm[i, j]
                 parts = []
                 if show_counts:
-                    parts.append(str(int(raw_cm[i, j])))
+                    raw_val = raw_cm[i, j]
+                    if raw_is_integer:
+                        parts.append(str(int(raw_val)))
+                    else:
+                        parts.append("{:.3g}".format(float(raw_val)))
                 if show_percent:
                     if normalize is not None:
                         parts.append("{:.1%}".format(cell_val))
                     else:
-                        total = float(raw_cm.sum())
-                        pct = raw_cm[i, j] / total if total > 0 else 0
+                        pct = raw_cm[i, j] / raw_total if raw_total > 0 else 0
                         parts.append("{:.1%}".format(pct))
                 text = "<br>".join(parts) if parts else ""
 
@@ -2540,18 +2567,18 @@ class Visdom(object):
         layout["yaxis"]["title"] = opts["ylabel"]
         layout["yaxis"]["autorange"] = "reversed"
 
+        data_to_send = {
+            "data": data,
+            "win": win,
+            "eid": env,
+            "layout": layout,
+            "opts": opts,
+        }
         endpoint = "events"
-        return self._send(
-            {
-                "data": data,
-                "win": win,
-                "eid": env,
-                "layout": layout,
-                "opts": opts,
-                "pane_type": "confusion_matrix",
-            },
-            endpoint=endpoint,
-        )
+        if update:
+            data_to_send["updateDir"] = update
+            endpoint = "update"
+        return self._send(data_to_send, endpoint=endpoint)
 
     @pytorch_wrap
     def bar(self, X, Y=None, win=None, env=None, opts=None):

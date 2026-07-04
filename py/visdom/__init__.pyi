@@ -196,6 +196,7 @@ class Visdom:
         cm: Optional[Tensor] = ...,
         labels: Optional[list] = ...,
         normalize: Optional[str] = ...,
+        update: _OptStr = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,

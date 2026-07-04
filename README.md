@@ -591,6 +591,10 @@ Optional normalization can be applied with the `normalize` parameter:
 - `'pred'`: normalize by column (predicted class)
 - `'all'`: normalize by total count
 
+An existing confusion matrix window can be modified with the `update` parameter:
+- `'replace'`: redraw the whole matrix in the window given by `win`
+- `'remove'`: delete the window given by `win`
+
 The following `opts` are supported:
 
 - `opts.title`       : plot title (`string`; default = `Confusion Matrix`)
