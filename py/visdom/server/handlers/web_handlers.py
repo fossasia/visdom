@@ -573,7 +573,6 @@ class EnvHandler(BaseHandler):
                         escape_eid(args),
                         self.subs[sid],
                         self.storage,
-                        env_path=self.env_path,
                     )
                 except ValueError as e:
                     notify(
@@ -620,7 +619,7 @@ class CompareHandler(BaseHandler):
                     self.state,
                     args.split("+"),
                     self.subs[sid],
-                    self.env_path,
+                    self.storage,
                     show_all=show_all,
                 )
             except ValueError as e:
@@ -714,7 +713,7 @@ class IndexHandler(BaseHandler):
                 wrap_socket=self.wrap_socket,
             )
         elif self.login_enabled:
-            items = gather_envs(self.state, env_path=self.env_path)
+            items = gather_envs(self.state, self.storage)
             self.render(
                 "login.html",
                 user=getpass.getuser(),
