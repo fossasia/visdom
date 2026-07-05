@@ -1,3 +1,10 @@
+#!/usr/bin/env python3
+# Copyright 2017-present, The Visdom Authors
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
 import datetime
 
 
@@ -28,7 +35,9 @@ class VisdomLogger:
         self.env = env or "run_{}".format(
             datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         )
-        self.log_every = log_every
+        self.log_every = int(log_every)
+        if self.log_every < 1:
+            raise ValueError("log_every must be >= 1, got {}".format(log_every))
         self._wins = {}
         self._step = {}
         self._counter = {}
@@ -58,11 +67,17 @@ class VisdomLogger:
             once per epoch, leave log_every=1 — the epoch counter handles
             throttling by design.
         """
+        if hasattr(value, "item"):
+            value = value.item()
+
         self._counter[name] = self._counter.get(name, 0) + 1
+        if x is None:
+            self._step[name] = self._step.get(name, 1) + 1
+
         if self._counter[name] % self.log_every != 0:
             return
 
-        x_val = x if x is not None else self._step.get(name, 1)
+        x_val = x if x is not None else self._step.get(name, 1) - 1
 
         if name not in self._wins:
             win = self.viz.line(
@@ -80,6 +95,3 @@ class VisdomLogger:
                 env=self.env,
                 update="append",
             )
-
-        if x is None:
-            self._step[name] = self._step.get(name, 1) + 1
