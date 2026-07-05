@@ -14,6 +14,7 @@ const basic_examples = [
   ['Violin Plot', 'plot_violin_basic'],
   // ["Mesh Plot", "plot_special_mesh"], // disabled due to webgl
   ['Graph Plot', 'plot_special_graph'],
+  ['Sankey Plot', 'plot_special_sankey'],
   ['Matplotlib Plot', 'misc_plot_matplot'],
   ['Latex Plot', 'misc_plot_latex'],
   ['Video Pane', 'misc_video_tensor'],
