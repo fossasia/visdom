@@ -528,9 +528,18 @@ class EnvHandler(BaseHandler):
         if "sid" in msg_args:
             sid = msg_args["sid"]
             if sid in self.subs:
-                load_env(
-                    self.state, escape_eid(args), self.subs[sid], env_path=self.env_path
-                )
+                try:
+                    load_env(
+                        self.state,
+                        escape_eid(args),
+                        self.subs[sid],
+                        env_path=self.env_path,
+                    )
+                except ValueError as e:
+                    raise tornado.web.HTTPError(
+                        400,
+                        reason="Could not load environment invalid environment JSON format",
+                    )
         if "eid" in msg_args:
             eid = escape_eid(msg_args["eid"])
             if eid not in self.state:
@@ -563,13 +572,19 @@ class CompareHandler(BaseHandler):
         sid = body["sid"]
         show_all = body.get("show_all", False)
         if sid in self.subs:
-            compare_envs(
-                self.state,
-                args.split("+"),
-                self.subs[sid],
-                self.env_path,
-                show_all=show_all,
-            )
+            try:
+                compare_envs(
+                    self.state,
+                    args.split("+"),
+                    self.subs[sid],
+                    self.env_path,
+                    show_all=show_all,
+                )
+            except ValueError as e:
+                raise tornado.web.HTTPError(
+                    400,
+                    reason="Could not compare environments: invalid environment JSON format",
+                )
 
 
 class SaveHandler(BaseHandler):
