@@ -333,7 +333,9 @@ class UpdateHandler(BaseHandler):
         if "data" not in args and args.get("append"):
             raise tornado.web.HTTPError(400, reason="missing required field: data")
         if "data" not in args and "layout" not in args and "opts" not in args:
-            raise tornado.web.HTTPError(400, reason="request must include one of: data, layout, or opts")
+            raise tornado.web.HTTPError(
+                400, reason="request must include one of: data, layout, or opts"
+            )
         eid = extract_eid(args)
 
         if eid not in handler.state:
