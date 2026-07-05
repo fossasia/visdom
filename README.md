@@ -327,6 +327,42 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 - [`vis.replay_log`](#visreplay_log): replay the actions from the provided log file
 
 
+## Loggers
+
+Framework-specific logging bridges that wrap the Visdom API so training loops stay focused on training. Each logger lives in its own submodule and handles window creation, step tracking, and throttling internally.
+
+### PyTorch
+
+`visdom.pytorch.VisdomLogger` is a context manager for raw PyTorch training loops. Call `tracker.log(name, value)` for any scalar — no `viz.line()` arguments needed.
+
+```python
+import visdom
+from visdom.pytorch import VisdomLogger
+
+viz = visdom.Visdom()
+
+with VisdomLogger(viz, env="my_run", log_every=5) as tracker:
+    for epoch in range(num_epochs):
+        for inputs, targets in train_loader:
+            loss = criterion(model(inputs), targets)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            tracker.log("Train Loss", loss.item())
+            tracker.log("Learning Rate", optimizer.param_groups[0]["lr"])
+
+        val_loss = evaluate(model, val_loader)
+        tracker.log("Val Loss", val_loss)
+```
+
+**Parameters:**
+- `viz`: a connected `visdom.Visdom()` instance
+- `env`: environment name (default: auto-generated from timestamp)
+- `log_every`: send every N calls per metric — useful for large datasets (default: `1`)
+
+Each unique name passed to `tracker.log()` gets its own window. The first call creates it; subsequent calls append. See `example/train_example.py` for a full working example.
+
 ## Details
 <img src="https://user-images.githubusercontent.com/19650074/198747904-7a8a580f-851a-45fb-8f45-94e54a910ee2.png"/>
 
