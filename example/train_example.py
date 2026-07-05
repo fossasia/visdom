@@ -41,11 +41,12 @@ def main():
 
     viz = visdom.Visdom()
 
-    with VisdomLogger(viz, env="mlp_run", log_every=5) as tracker:
+    with VisdomLogger(viz, env="mlp_run") as tracker:
         for epoch in range(50):
 
             # training
             model.train()
+            train_losses, train_accs = [], []
             for inputs, targets in train_loader:
                 outputs = model(inputs)
                 loss    = criterion(outputs, targets)
@@ -55,11 +56,8 @@ def main():
                 optimizer.step()
 
                 preds = outputs.argmax(dim=1)
-                acc   = (preds == targets).float().mean()
-
-                tracker.log("Train Loss",     loss.item())
-                tracker.log("Train Accuracy", acc.item())
-                tracker.log("Learning Rate",  optimizer.param_groups[0]["lr"])
+                train_losses.append(loss.item())
+                train_accs.append((preds == targets).float().mean().item())
 
             # validation
             model.eval()
@@ -69,20 +67,25 @@ def main():
                     outputs = model(inputs)
                     loss    = criterion(outputs, targets)
                     preds   = outputs.argmax(dim=1)
-                    acc     = (preds == targets).float().mean()
                     val_losses.append(loss.item())
-                    val_accs.append(acc.item())
+                    val_accs.append((preds == targets).float().mean().item())
 
-            val_loss = sum(val_losses) / len(val_losses)
-            val_acc  = sum(val_accs)   / len(val_accs)
-            tracker.log("Val Loss",     val_loss)
-            tracker.log("Val Accuracy", val_acc)
+            train_loss = sum(train_losses) / len(train_losses)
+            train_acc  = sum(train_accs)   / len(train_accs)
+            val_loss   = sum(val_losses)   / len(val_losses)
+            val_acc    = sum(val_accs)     / len(val_accs)
+
+            tracker.log("Train Loss",     train_loss)
+            tracker.log("Train Accuracy", train_acc)
+            tracker.log("Learning Rate",  optimizer.param_groups[0]["lr"])
+            tracker.log("Val Loss",       val_loss)
+            tracker.log("Val Accuracy",   val_acc)
 
             scheduler.step()
 
             print(
                 "epoch {:02d}  train_loss={:.4f}  val_loss={:.4f}  val_acc={:.4f}".format(
-                    epoch + 1, loss.item(), val_loss, val_acc,
+                    epoch + 1, train_loss, val_loss, val_acc,
                 )
             )
 

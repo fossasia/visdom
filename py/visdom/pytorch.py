@@ -13,17 +13,14 @@ class VisdomLogger:
 
         from visdom.pytorch import VisdomLogger
 
-        with VisdomLogger(viz, env="run_1", log_every=10) as tracker:
-            for x, y in loader:
-                loss = criterion(model(x), y)
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+        with VisdomLogger(viz, env="run_1") as tracker:
+            for epoch in range(num_epochs):
+                train_loss = run_train_epoch(model, loader)
+                val_loss   = run_val_epoch(model, val_loader)
 
-                tracker.log("loss", loss.item())
-                tracker.log("lr", optimizer.param_groups[0]["lr"])
-
-            tracker.log("val/loss", val_loss)
+                tracker.log("Train Loss", train_loss)
+                tracker.log("Val Loss",   val_loss)
+                tracker.log("LR",         optimizer.param_groups[0]["lr"])
     """
 
     def __init__(self, viz, env=None, log_every=1):
@@ -42,34 +39,47 @@ class VisdomLogger:
     def __exit__(self, exc_type, exc_val, exc_tb):
         return False
 
-    def log(self, name, value):
+    def log(self, name, value, x=None, xlabel="epoch"):
         """Log a scalar value under the given metric name.
 
-        Skips the send if log_every throttle has not been reached.
-        Creates a new Visdom window on the first call for each name,
-        then appends on subsequent calls.
+        Call once per epoch outside the batch loop. The x-axis auto-increments
+        from 1 so graphs read "epoch 1 ... N" with no extra arguments needed.
+
+        Args:
+            name: metric name, used as the window title and y-axis label.
+            value: scalar value to plot.
+            x: override the x-axis position. Use only when you need an
+               explicit value (e.g. global batch step for per-batch logging).
+            xlabel: x-axis label (default: "epoch"). Set to "step" when
+               logging inside the batch loop with log_every.
+
+        Note:
+            log_every is intended for per-batch logging only. When logging
+            once per epoch, leave log_every=1 — the epoch counter handles
+            throttling by design.
         """
         self._counter[name] = self._counter.get(name, 0) + 1
         if self._counter[name] % self.log_every != 0:
             return
 
-        step = self._step.get(name, 0)
+        x_val = x if x is not None else self._step.get(name, 1)
 
         if name not in self._wins:
             win = self.viz.line(
-                X=[step],
+                X=[x_val],
                 Y=[value],
                 env=self.env,
-                opts={"title": name, "xlabel": "step", "ylabel": name},
+                opts={"title": name, "xlabel": xlabel, "ylabel": name},
             )
             self._wins[name] = win
         else:
             self.viz.line(
-                X=[step],
+                X=[x_val],
                 Y=[value],
                 win=self._wins[name],
                 env=self.env,
                 update="append",
             )
 
-        self._step[name] = step + 1
+        if x is None:
+            self._step[name] = self._step.get(name, 1) + 1
