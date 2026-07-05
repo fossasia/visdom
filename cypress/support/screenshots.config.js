@@ -44,6 +44,7 @@ export const all_screenshots = [
   // 'plot_surface_3d', // disabled due to webgl
   'plot_special_boxplot',
   'plot_special_quiver',
+  'plot_violin_basic',
   // 'plot_special_mesh', // disabled due to webgl
   // 'plot_special_graph' // disabled as representation is undeterministic
   'misc_plot_matplot',
@@ -85,6 +86,7 @@ export const all_compareviews = [
   // 'plot_bar_histogram', // does not work or not implemented
   // 'plot_bar_piechart', // does not work or not implemented
   'plot_special_boxplot',
+  'plot_violin_basic',
   'misc_plot_latex',
   'misc_plot_latex_update',
 ];

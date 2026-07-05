@@ -150,7 +150,7 @@ const ApiProvider = ({ children }) => {
           id: cmd.data,
           readonly: cmd.readonly,
         }));
-        if(cmd.envList){
+        if (cmd.envList) {
           apiHandlers.current.onEnvUpdate(cmd.envList);
         }
         break;
@@ -177,6 +177,9 @@ const ApiProvider = ({ children }) => {
         break;
       case 'env_update':
         apiHandlers.current.onEnvUpdate(cmd.data);
+        break;
+      case 'undo_state':
+        apiHandlers.current.onUndoState(cmd);
         break;
 
       default:
@@ -264,6 +267,13 @@ const ApiProvider = ({ children }) => {
     });
   };
 
+  const sendUndo = (envID) => {
+    sendSocketMessage({
+      cmd: 'undo',
+      eid: envID,
+    });
+  };
+
   // Send request to delete an environment
   const sendEnvDelete = (envID, previousEnv) => {
     sendSocketMessage({
@@ -326,6 +336,17 @@ const ApiProvider = ({ children }) => {
   // Effects //
   // ------- //
 
+  // Redirect for POST request errors
+  useEffect(() => {
+    $(document).on('ajaxError', () => {
+      window.location.href = correctPathname() + 'error/500';
+    });
+
+    return () => {
+      $(document).off('ajaxError');
+    };
+  }, []);
+
   // connect on mount, disconnect on unmount
   useEffect(() => {
     connect();
@@ -351,6 +372,7 @@ const ApiProvider = ({ children }) => {
         sendPaneLayoutUpdate,
         sendPaneMessage,
         sendSaveAll,
+        sendUndo,
         sessionInfo,
         setConnected,
         toggleOnlineState,

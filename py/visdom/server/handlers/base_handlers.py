@@ -43,6 +43,27 @@ class BaseHandler(tornado.web.RequestHandler):
     request handlers, and contains any convenient shared logic helpers.
     """
 
+    def initialize(self, app=None):
+        """Common initialization shared by most handlers.
+
+        Copies frequently-used attributes from the application instance.
+        Subclasses that need additional attributes should call
+        ``super().initialize(app)`` and then set their own.
+
+        The ``app`` parameter defaults to ``None`` so that handlers
+        registered without an ``app`` dict (e.g. HealthHandler) still work.
+        """
+        if app is not None:
+            self.state = app.state
+            self.subs = app.subs
+            self.sources = app.sources
+            self.port = app.port
+            self.env_path = app.env_path
+            self.login_enabled = app.login_enabled
+            self.max_text_lines = app.max_text_lines
+            self.max_old_content = app.max_old_content
+            self.max_image_history = app.max_image_history
+
     def __init__(self, *request, **kwargs):
         self.include_host = False
         super(BaseHandler, self).__init__(*request, **kwargs)
@@ -75,9 +96,9 @@ class BaseHandler(tornado.web.RequestHandler):
             try:
                 params = {
                     "error": exc_info[1] if debug else None,
-                    "trace_info": traceback.format_exception(*exc_info)
-                    if debug
-                    else None,
+                    "trace_info": (
+                        traceback.format_exception(*exc_info) if debug else None
+                    ),
                     "request": self.request.__dict__ if debug else None,
                     "status_code": status_code,
                     "title": title,

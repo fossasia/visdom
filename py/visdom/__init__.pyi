@@ -50,6 +50,8 @@ class Visdom:
         self, win: _OptStr = ..., env: _OptStr = ...
     ) -> _SendReturn: ...
     def delete_env(self, env: Text) -> _SendReturn: ...
+    def get_env_list(self) -> List[Text]: ...
+    def get_env_state(self, env: Text) -> Optional[Mapping[Text, Any]]: ...
     def win_exists(self, win: Text, env: _OptStr = ...) -> Optional[bool]: ...
     def check_connection(self) -> bool: ...
     def replay_log(self, log_filename: Text) -> None: ...
@@ -93,6 +95,9 @@ class Visdom:
     ) -> _SendReturn: ...
     def image(
         self, img: Tensor, win: _OptStr = ..., env: _OptStr = ..., opts: _OptOps = ...
+    ) -> _SendReturn: ...
+    def image_select(
+        self, win: Text, selected: int, env: _OptStr = ...
     ) -> _SendReturn: ...
     def images(
         self,
@@ -141,6 +146,8 @@ class Visdom:
         update: _OptStr = ...,
         name: _OptStr = ...,
         opts: _OptOps = ...,
+        Z: Optional[Tensor] = ...,
+        is3d: bool = ...,
     ) -> _SendReturn: ...
     def grid(
         self,
@@ -170,6 +177,14 @@ class Visdom:
     ) -> _SendReturn: ...
     def histogram(
         self, X: Tensor, win: _OptStr = ..., env: _OptStr = ..., opts: _OptOps = ...
+    ) -> _SendReturn: ...
+    def histogram2d(
+        self,
+        X: Tensor,
+        Y: Tensor,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
     ) -> _SendReturn: ...
     def boxplot(
         self, X: Tensor, win: _OptStr = ..., env: _OptStr = ..., opts: _OptOps = ...
@@ -209,11 +224,36 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
+    def sankey(
+        self,
+        source: Tensor,
+        target: Tensor,
+        value: Tensor,
+        labels: Optional[List] = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
     def graph(
         self,
         edges: List,
         edgeLabels: List,
         nodeLabels: List,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
+    def violin(
+        self,
+        X: Tensor,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
+    def table(
+        self,
+        headers: List[Any],
+        data: List[List[Any]],
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
