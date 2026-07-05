@@ -7,10 +7,10 @@
  *
  */
 
-import React, { useEffect, useRef, useState, useContext } from 'react';
+import React, { useContext, useEffect, useRef, useState } from 'react';
 const { usePrevious } = require('../util');
-import Pane from './Pane';
 import ApiContext from '../api/ApiContext';
+import Pane from './Pane';
 const { sgg } = require('ml-savitzky-golay-generalized');
 
 var PlotPane = (props) => {
