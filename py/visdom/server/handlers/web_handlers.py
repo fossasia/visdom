@@ -21,14 +21,10 @@ import jsonpatch
 import logging
 import math
 import os
+import uuid
 from collections import OrderedDict
 
-try:
-    # for after python 3.8
-    from collections.abc import Mapping, Sequence
-except ImportError:
-    # for python 3.7 and below
-    from collections import Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
 import tornado.escape
 from visdom.utils.shared_utils import get_rand_id, NanSafeEncoder
@@ -47,8 +43,12 @@ from visdom.utils.server_utils import (
     update_window,
     hash_password,
     stringify,
+    push_deleted,
+    clear_deleted,
 )
 from visdom.server.handlers.base_handlers import BaseHandler
+
+logger = logging.getLogger(__name__)
 
 
 # TODO move the logic that actually parses environments and layouts to
@@ -73,8 +73,8 @@ class PostHandler(BaseHandler):
             )
 
         eid = extract_eid(req)
-        p = window(req)
 
+        p = window(req)
         register_window(self, p, eid)
 
 
@@ -376,7 +376,7 @@ class UpdateHandler(BaseHandler):
         if len(stringify(p)) <= len(stringify(diff_packet)):
             broadcast_msg = dict(p)
             broadcast_msg["eid"] = eid
-            broadcast(handler, broadcast_msg, eid)
+            broadcast(handler, json.dumps(broadcast_msg, cls=NanSafeEncoder), eid)
         else:
             broadcast_packet = {
                 "command": "window_update",
@@ -385,7 +385,7 @@ class UpdateHandler(BaseHandler):
                 "content": diff_packet,
                 "version": p.get("version", 1),
             }
-            broadcast(handler, broadcast_packet, eid)
+            broadcast(handler, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
         handler.write(p["id"])
 
     @check_auth
@@ -407,7 +407,9 @@ class CloseHandler(BaseHandler):
 
         keys = list(handler.state[eid]["jsons"].keys()) if win is None else [win]
         for win in keys:
-            handler.state[eid]["jsons"].pop(win, None)
+            p_data = handler.state[eid]["jsons"].pop(win, None)
+            if p_data is not None:
+                push_deleted(handler.env_path, eid, win, p_data)
             broadcast(handler, json.dumps({"command": "close", "data": win}), eid)
 
     @check_auth
@@ -427,6 +429,7 @@ class DeleteEnvHandler(BaseHandler):
             if eid == "main":
                 return
             handler.state.pop(eid, None)
+            clear_deleted(handler.env_path, eid)
             if handler.env_path is not None:
                 p = os.path.join(handler.env_path, "{0}.json".format(eid))
                 if os.path.exists(p):
@@ -695,8 +698,80 @@ class ErrorHandler(BaseHandler):
             raise tornado.web.HTTPError(400, reason="Invalid status code")
 
         raise tornado.web.HTTPError(status_code)
-        error_text = text or "test error"
-        raise Exception(error_text)
+
+
+class UploadEnvHandler(BaseHandler):
+    def initialize(self, app):
+        super().initialize(app)
+        self.readonly = app.readonly
+
+    @check_auth
+    def post(self):
+        # 100mb file size limit
+        MAX_SIZE = 100 * 1024 * 1024
+
+        if self.readonly:
+            self.set_status(403)
+            self.write(
+                {
+                    "success": False,
+                    "error": "Uploads are disabled while the server is in readonly mode",
+                }
+            )
+            return
+
+        if "file" not in self.request.files:
+            self.set_status(400)
+            self.write({"success": False, "error": "No file uploaded"})
+            return
+
+        file_info = self.request.files["file"][0]
+        filename = file_info["filename"]
+        body = file_info["body"]
+
+        if len(body) > MAX_SIZE:
+            self.set_status(413)
+            self.write(
+                {
+                    "success": False,
+                    "error": f"File is too large. Max {MAX_SIZE//(1024*1024)}MB",
+                }
+            )
+            return
+
+        try:
+            data = tornado.escape.json_decode(body)
+        except Exception:
+            self.set_status(400)
+            self.write({"success": False, "error": "Invalid JSON file"})
+            return
+
+        if not (isinstance(data, dict) and "jsons" in data and "reload" in data):
+            self.set_status(400)
+            self.write({"success": False, "error": "This is not a valid Visdom JSON"})
+            return
+
+        uid = uuid.uuid4().hex[:8]
+        new_eid = f"uploaded_{uid}"
+        if filename.endswith(".json"):
+            suggested_name = escape_eid(os.path.basename(filename[:-5]))
+            if suggested_name and suggested_name != "main":
+                new_eid = f"uploaded_{suggested_name}_{uid}"
+
+        self.state[new_eid] = {"jsons": data["jsons"], "reload": data["reload"]}
+
+        if self.env_path is not None:
+            serialize_env(self.state, [new_eid], env_path=self.env_path)
+
+        broadcast_envs(self)
+
+        self.write(
+            {
+                "success": True,
+                "eid": new_eid,
+                "message": f"Dashboard loaded successfully as '{new_eid}'",
+            }
+        )
 
 
 class HealthHandler(BaseHandler):

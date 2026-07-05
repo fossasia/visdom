@@ -166,7 +166,7 @@ var PlotPane = (props) => {
           // adapt color & transparency
           d.opacity = 0.35;
           smooth_d.opacity = 1.0;
-          smooth_d.marker.line.color = 0;
+          if (smooth_d.marker?.line) smooth_d.marker.line.color = 0;
 
           return smooth_d;
         });
@@ -197,8 +197,7 @@ var PlotPane = (props) => {
         layout.title = { text: layout.title };
       }
       if (layout.title.text) {
-        layout.margin.t = 65;
-        layout.title.y = 0.9;
+        layout.margin.t = 85;
       } else {
         layout.margin.t = 30;
       }
@@ -309,7 +308,9 @@ var PlotPane = (props) => {
             ? ' plotly-heatmap'
             : content.data?.[0]?.type === 'contour'
               ? ' plotly-contour'
-              : ''
+              : content.data?.[0]?.type === 'surface'
+                ? ' plotly-surface'
+                : ''
         }`}
         ref={plotlyRef}
       />
