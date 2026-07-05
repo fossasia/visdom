@@ -7,9 +7,10 @@
  *
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useContext } from 'react';
 const { usePrevious } = require('../util');
 import Pane from './Pane';
+import ApiContext from '../api/ApiContext';
 const { sgg } = require('ml-savitzky-golay-generalized');
 
 var PlotPane = (props) => {
@@ -25,6 +26,8 @@ var PlotPane = (props) => {
   const [actualSelected, setActualSelected] = useState(
     isHistory ? selected || 0 : 0
   );
+  const { sendPlotLayoutUpdate } = useContext(ApiContext);
+  const layoutUpdateTimeout = useRef(null);
 
   const content = isHistory
     ? props.content[Math.min(actualSelected, props.content.length - 1)]
@@ -92,6 +95,7 @@ var PlotPane = (props) => {
     resizeObserver.observe(plotElement);
     return () => resizeObserver.disconnect();
   }, []);
+
   useEffect(() => {
     if (previousContent && content) {
       // Retain trace visibility between old and new plots
@@ -125,6 +129,40 @@ var PlotPane = (props) => {
 
     newPlot();
   });
+
+  useEffect(() => {
+    const plotElement = plotlyRef.current;
+    if (!plotElement) return;
+
+    const handleRelayout = (eventdata) => {
+      const touchedShapes = Object.keys(eventdata).some((k) =>
+        k.includes('shapes')
+      );
+      if (!touchedShapes) return;
+
+      clearTimeout(layoutUpdateTimeout.current);
+      layoutUpdateTimeout.current = setTimeout(() => {
+        const shapes = plotElement.layout?.shapes || [];
+
+        if (content && content.layout) {
+          content.layout.shapes = shapes;
+        }
+
+        sendPlotLayoutUpdate(
+          props.envID,
+          props.id,
+          { shapes },
+          isHistory ? actualSelected : undefined
+        );
+      }, 300);
+    };
+
+    plotElement.on('plotly_relayout', handleRelayout);
+    return () => {
+      plotElement.removeListener('plotly_relayout', handleRelayout);
+      clearTimeout(layoutUpdateTimeout.current);
+    };
+  }, [props.envID, props.id, actualSelected, content]);
 
   // rendering
   // ---------
@@ -211,6 +249,7 @@ var PlotPane = (props) => {
       displaylogo: false,
       doubleClick: 'reset',
       doubleClickDelay: 500,
+      modeBarButtonsToAdd: ['drawopenpath', 'eraseshape'],
     }).then(() => {
       const plotElement = plotlyRef.current;
       if (plotElement && plotElement._fullLayout && isDisplayed(plotElement)) {
