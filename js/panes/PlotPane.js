@@ -95,7 +95,6 @@ var PlotPane = (props) => {
     resizeObserver.observe(plotElement);
     return () => resizeObserver.disconnect();
   }, []);
-
   useEffect(() => {
     if (previousContent && content) {
       // Retain trace visibility between old and new plots
