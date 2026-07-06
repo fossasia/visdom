@@ -129,7 +129,7 @@ class Visdom:
     ) -> _SendReturn: ...
     def learning_curve(
         self,
-        metrics: Mapping[Text, Tensor],
+        metrics: Mapping[Text, Any],
         step: Optional[Tensor] = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
