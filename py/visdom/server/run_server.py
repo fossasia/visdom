@@ -30,7 +30,7 @@ from visdom.server.defaults import (
     DEFAULT_PORT,
 )
 from visdom.server.build import download_scripts
-from visdom.utils.server_utils import hash_password, serialize_all, set_cookie
+from visdom.utils.server_utils import hash_password, set_cookie
 
 MAX_PORT = 65535
 
@@ -100,7 +100,7 @@ def start_server(
     logging.info("Application Started")
     logging.info(f"Working directory: {os.path.abspath(env_path)}")
 
-    atexit.register(serialize_all, app.state, env_path=env_path)
+    atexit.register(app.storage.save_all, app.state)
 
     if "HOSTNAME" in os.environ and hostname == DEFAULT_HOSTNAME:
         hostname = os.environ["HOSTNAME"]
