@@ -43,7 +43,8 @@ except ImportError:
 
 import sys
 
-assert sys.version_info[0] >= 3, "To use visdom with python 2, downgrade to v0.1.8.9"
+if sys.version_info < (3, 12):
+    raise RuntimeError("Visdom requires Python 3.12 or newer.")
 
 
 def _normalize_tsne(Y):
@@ -158,7 +159,7 @@ def loadfile(filename):
 
 
 def _title2str(opts):
-    if opts.get("title"):
+    if opts.get("title") is not None:
         if isnum(opts.get("title")):
             title = str(opts.get("title"))
             logger.warning("Numerical title %s has been cast to a string" % title)
@@ -491,6 +492,35 @@ def pytorch_wrap(f):
         return f(*args, **kwargs)
 
     return wrapped_f
+
+
+def _compute_confusion_matrix(y_true, y_pred, labels):
+    """Build an NxN confusion matrix from label vectors (numpy only).
+
+    ``y_true``/``y_pred`` are expected to be 1-D numpy arrays; the public
+    ``confusion_matrix`` caller ravels them before calling this helper.
+    """
+    if y_true.shape[0] != y_pred.shape[0]:
+        raise ValueError("y_true and y_pred must have the same length")
+    if y_true.shape[0] == 0:
+        raise ValueError("y_true and y_pred must be non-empty")
+
+    label_to_idx = {label: i for i, label in enumerate(labels)}
+    n = len(labels)
+    cm = np.zeros((n, n), dtype=int)
+    skipped = 0
+    for t, p in zip(y_true, y_pred):
+        if t in label_to_idx and p in label_to_idx:
+            cm[label_to_idx[t], label_to_idx[p]] += 1
+        else:
+            skipped += 1
+    if skipped > 0:
+        warnings.warn(
+            "{} samples had labels not in the provided labels list "
+            "and were ignored".format(skipped),
+            UserWarning,
+        )
+    return cm
 
 
 def _decode_binary_arrays(obj):
@@ -1300,9 +1330,7 @@ class Visdom(object):
                 try:
                     soup = bs4.BeautifulSoup(svg, "xml")
                 except bs4.FeatureNotFound as e:
-                    import six
-
-                    six.raise_from(ImportError("No module named 'lxml'"), e)
+                    raise ImportError("No module named 'lxml'") from e
                 height = soup.svg.attrs.pop("height", None)
                 width = soup.svg.attrs.pop("width", None)
                 svg = str(soup)
@@ -2006,6 +2034,7 @@ class Visdom(object):
 
         assert X.ndim == 2, "X should have two dims"
         assert X.shape[1] == 2 or X.shape[1] == 3, "X should have 2 or 3 cols"
+        assert X.shape[0] > 0, "X should have at least one point"
 
         if Y is not None:
             Y = np.ravel(Y)
@@ -2411,6 +2440,186 @@ class Visdom(object):
             data_to_send["updateDir"] = update
             endpoint = "update"
 
+        return self._send(data_to_send, endpoint=endpoint)
+
+    @pytorch_wrap
+    def confusion_matrix(
+        self,
+        y_true=None,
+        y_pred=None,
+        cm=None,
+        labels=None,
+        normalize=None,
+        update=None,
+        win=None,
+        env=None,
+        opts=None,
+    ):
+        """
+        Draw a confusion matrix for classification evaluation.
+
+        You can either provide raw label vectors (`y_true`, `y_pred`) or a
+        precomputed confusion matrix (`cm`).
+
+        The following `opts` are supported:
+
+        - `opts.title`       : plot title (`string`; default = `Confusion Matrix`)
+        - `opts.xlabel`      : x-axis label (`string`; default = `Predicted`)
+        - `opts.ylabel`      : y-axis label (`string`; default = `Actual`)
+        - `opts.colormap`    : Plotly colorscale (`string`; default = `Blues`)
+        - `opts.showCounts`  : show raw counts in cells (`bool`; default = `True`)
+        - `opts.showPercent` : show percentages in cells (`bool`; default = `True`
+                               when normalized, `False` otherwise)
+        - `opts.layoutopts`  : additional backend layout options (`dict`)
+
+        `update` may be used to modify an existing confusion matrix window
+        instead of creating a new one; it takes one of `None`, `'replace'`
+        (redraw the whole matrix in `win`) or `'remove'` (delete `win`).
+        """
+        opts = {} if opts is None else dict(opts)
+        _title2str(opts)
+        _assert_opts(opts)
+
+        valid_update = (None, "replace", "remove")
+        assert update in valid_update, "update must be one of: {}".format(valid_update)
+
+        if update == "remove":
+            assert win is not None, "win must be provided to remove a window"
+            return self._send(
+                {"data": [], "delete": True, "win": win, "eid": env},
+                endpoint="update",
+            )
+
+        has_raw = y_true is not None or y_pred is not None
+        has_matrix = cm is not None
+        if has_raw == has_matrix:
+            raise ValueError("provide exactly one input mode: (y_true, y_pred) or (cm)")
+
+        if has_raw:
+            if y_true is None or y_pred is None:
+                raise ValueError("both y_true and y_pred are required")
+            y_true = np.asarray(y_true).ravel()
+            y_pred = np.asarray(y_pred).ravel()
+            if labels is None:
+                labels = np.unique(np.concatenate([y_true, y_pred])).tolist()
+        else:
+            cm = np.asarray(cm)
+            if cm.ndim != 2 or cm.shape[0] != cm.shape[1]:
+                raise ValueError("cm must be a square 2D array")
+            if labels is None:
+                labels = list(range(cm.shape[0]))
+            if len(labels) != cm.shape[0]:
+                raise ValueError(
+                    "number of labels must match confusion matrix dimensions"
+                )
+
+        if len(set(labels)) != len(labels):
+            raise ValueError("labels must be unique")
+
+        if has_raw:
+            cm = _compute_confusion_matrix(y_true, y_pred, labels)
+
+        valid_normalize = (None, "true", "pred", "all")
+        if normalize not in valid_normalize:
+            raise ValueError("normalize must be one of: {}".format(valid_normalize))
+
+        raw_cm = cm.copy()
+        if normalize == "true":
+            row_sums = cm.sum(axis=1, keepdims=True).astype(float)
+            row_sums[row_sums == 0] = 1
+            cm = cm.astype(float) / row_sums
+        elif normalize == "pred":
+            col_sums = cm.sum(axis=0, keepdims=True).astype(float)
+            col_sums[col_sums == 0] = 1
+            cm = cm.astype(float) / col_sums
+        elif normalize == "all":
+            total = float(cm.sum())
+            if total == 0:
+                warnings.warn(
+                    "confusion matrix sum is zero; normalized values will be zero",
+                    UserWarning,
+                )
+                cm = cm.astype(float)
+            else:
+                cm = cm.astype(float) / total
+
+        str_labels = [str(lbl) for lbl in labels]
+
+        opts["xlabel"] = opts.get("xlabel", "Predicted")
+        opts["ylabel"] = opts.get("ylabel", "Actual")
+        opts["title"] = opts.get("title", "Confusion Matrix")
+        colormap = opts.get("colormap", "Blues")
+
+        show_counts = opts.get("showCounts", True)
+        show_percent = opts.get("showPercent", normalize is not None)
+
+        data = [
+            {
+                "z": cm.tolist(),
+                "x": str_labels,
+                "y": str_labels,
+                "type": "heatmap",
+                "colorscale": colormap,
+                "showscale": True,
+            }
+        ]
+
+        annotations = []
+        max_val = float(cm.max()) if cm.size > 0 else 1.0
+        threshold = max_val / 2.0
+        raw_total = float(raw_cm.sum())
+        raw_is_integer = np.issubdtype(raw_cm.dtype, np.integer)
+
+        for i in range(cm.shape[0]):
+            for j in range(cm.shape[1]):
+                cell_val = cm[i, j]
+                parts = []
+                if show_counts:
+                    raw_val = raw_cm[i, j]
+                    if raw_is_integer:
+                        parts.append(str(int(raw_val)))
+                    else:
+                        parts.append("{:.3g}".format(float(raw_val)))
+                if show_percent:
+                    if normalize is not None:
+                        parts.append("{:.1%}".format(cell_val))
+                    else:
+                        pct = raw_cm[i, j] / raw_total if raw_total > 0 else 0
+                        parts.append("{:.1%}".format(pct))
+                text = "<br>".join(parts) if parts else ""
+
+                font_color = "white" if cell_val > threshold else "black"
+
+                annotations.append(
+                    {
+                        "x": str_labels[j],
+                        "y": str_labels[i],
+                        "text": text,
+                        "showarrow": False,
+                        "font": {"color": font_color},
+                    }
+                )
+
+        layout = _opts2layout(opts)
+        layout["annotations"] = annotations
+        layout["xaxis"] = layout.get("xaxis", {})
+        layout["xaxis"]["title"] = opts["xlabel"]
+        layout["xaxis"]["side"] = "bottom"
+        layout["yaxis"] = layout.get("yaxis", {})
+        layout["yaxis"]["title"] = opts["ylabel"]
+        layout["yaxis"]["autorange"] = "reversed"
+
+        data_to_send = {
+            "data": data,
+            "win": win,
+            "eid": env,
+            "layout": layout,
+            "opts": opts,
+        }
+        endpoint = "events"
+        if update:
+            data_to_send["updateDir"] = update
+            endpoint = "update"
         return self._send(data_to_send, endpoint=endpoint)
 
     @pytorch_wrap

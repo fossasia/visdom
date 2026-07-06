@@ -29,12 +29,7 @@ import tornado.escape
 from collections import OrderedDict
 
 MAX_ENV_NAME_LEN = 25
-try:
-    # for after python 3.8
-    from collections.abc import Mapping, Sequence
-except ImportError:
-    # for python 3.7 and below
-    from collections import Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from visdom.server.defaults import (
     LAYOUT_FILE,
     DEFAULT_BASE_URL,
@@ -623,7 +618,7 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
 
 def broadcast(self, msg, eid):
     for s in self.subs:
-        if isinstance(self.subs[s].eid, dict):
+        if isinstance(self.subs[s].eid, (list, dict, set)):
             if eid in self.subs[s].eid:
                 self.subs[s].write_message(msg)
         else:
