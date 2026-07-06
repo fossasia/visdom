@@ -287,6 +287,7 @@ The following API is currently supported:
 - [`vis.line`](#visline)     : line plots
 - [`vis.stem`](#visstem)     : stem plots
 - [`vis.heatmap`](#visheatmap)  : heatmap plots
+- [`vis.confusion_matrix`](#visconfusion_matrix)  : confusion matrix plots
 - [`vis.bar`](#visbar)  : bar graphs
 - [`vis.histogram`](#vishistogram) : histograms
 - [`vis.histogram2d`](#vishistogram2d) : 2D histograms (density maps)
@@ -578,6 +579,32 @@ The following `opts` are supported:
 - `opts.rownames`   : `table` containing y-axis labels
 - `opts.layoutopts` : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 - `opts.nancolor`   : color for plotting `NaN`s. If this is `None`, `NaN`s will be plotted as transparent. (`string`; default = `None`)
+
+#### vis.confusion_matrix
+This function draws a confusion matrix for classification evaluation.
+
+It accepts either:
+- raw label vectors via `y_true` and `y_pred`, or
+- a precomputed confusion matrix via `cm`.
+
+Optional normalization can be applied with the `normalize` parameter:
+- `'true'`: normalize by row (actual class)
+- `'pred'`: normalize by column (predicted class)
+- `'all'`: normalize by total count
+
+An existing confusion matrix window can be modified with the `update` parameter:
+- `'replace'`: redraw the whole matrix in the window given by `win`
+- `'remove'`: delete the window given by `win`
+
+The following `opts` are supported:
+
+- `opts.title`       : plot title (`string`; default = `Confusion Matrix`)
+- `opts.xlabel`      : x-axis label (`string`; default = `Predicted`)
+- `opts.ylabel`      : y-axis label (`string`; default = `Actual`)
+- `opts.colormap`    : Plotly colorscale (`string`; default = `Blues`)
+- `opts.showCounts`  : show raw counts in cells (`bool`; default = `True`)
+- `opts.showPercent` : show percentages in cells (`bool`; default = `True` when normalized, `False` otherwise)
+- `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout.
 
 #### vis.bar
 This function draws a regular, stacked, or grouped bar plot. It takes as
