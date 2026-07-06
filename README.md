@@ -335,13 +335,28 @@ Framework-specific logging bridges that wrap the Visdom API so training loops st
 
 `visdom.pytorch.VisdomLogger` is a context manager for raw PyTorch training loops. Call `tracker.log(name, value)` for any scalar — no `viz.line()` arguments needed.
 
+**Epoch-level logging** (recommended default — one call per epoch):
+
 ```python
 import visdom
 from visdom.pytorch import VisdomLogger
 
 viz = visdom.Visdom()
 
-with VisdomLogger(viz, env="my_run", log_every=5) as tracker:
+with VisdomLogger(viz, env="my_run") as tracker:
+    for epoch in range(num_epochs):
+        train_loss = run_train_epoch(model, loader)
+        val_loss   = run_val_epoch(model, val_loader)
+
+        tracker.log("Train Loss", train_loss)
+        tracker.log("Val Loss",   val_loss)
+        tracker.log("LR",         optimizer.param_groups[0]["lr"])
+```
+
+**Per-batch logging with `log_every`** — use when logging inside the batch loop on large datasets:
+
+```python
+with VisdomLogger(viz, env="my_run", log_every=50) as tracker:
     for epoch in range(num_epochs):
         for inputs, targets in train_loader:
             loss = criterion(model(inputs), targets)
@@ -349,17 +364,15 @@ with VisdomLogger(viz, env="my_run", log_every=5) as tracker:
             loss.backward()
             optimizer.step()
 
-            tracker.log("Train Loss", loss.item())
-            tracker.log("Learning Rate", optimizer.param_groups[0]["lr"])
-
-        val_loss = evaluate(model, val_loader)
-        tracker.log("Val Loss", val_loss)
+            # sent to Visdom every 50 batches, not every batch
+            tracker.log("Train Loss", loss.item(), xlabel="step")
+            tracker.log("LR",         optimizer.param_groups[0]["lr"], xlabel="step")
 ```
 
 **Parameters:**
 - `viz`: a connected `visdom.Visdom()` instance
 - `env`: environment name (default: auto-generated from timestamp)
-- `log_every`: send every N calls per metric — useful for large datasets (default: `1`)
+- `log_every`: send every N calls per metric — use with per-batch logging on large datasets (default: `1`)
 
 Each unique name passed to `tracker.log()` gets its own window. The first call creates it; subsequent calls append. See `example/train_example.py` for a full working example.
 
