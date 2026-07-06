@@ -29,6 +29,12 @@ module.exports = defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
+  webServer: {
+    command: 'visdom -port 8098 -env_path /tmp',
+    url: 'http://localhost:8098',
+    reuseExistingServer: !process.env.CI,
+    timeout: 120 * 1000,
+  },
   projects: [
     {
       name: 'chromium',
