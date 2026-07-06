@@ -4,7 +4,7 @@
 # AGENTS instructions
 
 Visdom: Python client + Tornado server + React frontend for live data visualization.
-Version `0.2.4` · Python >= 3.8 · Apache 2.0
+Version `0.2.4` · Python >= 3.12 · Apache 2.0
 
 ## Setup
 
