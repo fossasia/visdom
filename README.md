@@ -295,6 +295,8 @@ The following API is currently supported:
 - [`vis.pie`](#vispie)      : pie charts
 - [`vis.surf`](#vissurf)     : surface plots
 - [`vis.contour`](#viscontour)  : contour plots
+- [`vis.roc_curve`](#visroc_curve)  : ROC curves
+- [`vis.pr_curve`](#vispr_curve)  : precision-recall curves
 - [`vis.quiver`](#visquiver)   : quiver plots
 - [`vis.mesh`](#vismesh)     : mesh plots
 - [`vis.sankey`](#vissankey)   : sankey (flow) diagrams

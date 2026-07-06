@@ -2461,7 +2461,7 @@ class Visdom(object):
                 "eid": env,
                 "layout": _opts2layout(opts),
                 "opts": opts,
-                "pane_type": "roc_curve",
+                "pane_type": "plot",
             }
         )
 
@@ -2565,7 +2565,7 @@ class Visdom(object):
                 "eid": env,
                 "layout": _opts2layout(opts),
                 "opts": opts,
-                "pane_type": "pr_curve",
+                "pane_type": "plot",
             }
         )
 
