@@ -112,6 +112,7 @@ const App = () => {
     sendEnvSave,
     sendLayoutsSave,
     sendPaneClose,
+    sendUndo,
     sendPaneLayoutUpdate,
     sessionInfo,
     toggleOnlineState,
@@ -133,6 +134,8 @@ const App = () => {
     panes: {},
     layout: [],
   });
+
+  const [undoCounts, setUndoCounts] = useState({});
 
   // user-changeable
   const [showEnvModal, setShowEnvModal] = useState(false);
@@ -343,6 +346,10 @@ const App = () => {
     else relayout();
   };
 
+  const onUndoState = ({ eid, count }) => {
+    setUndoCounts((prev) => ({ ...prev, [eid]: count }));
+  };
+
   const onEnvUpdate = (data) => {
     var layoutLists = storeMeta.layoutLists;
     for (var envIdx in data) {
@@ -435,9 +442,9 @@ const App = () => {
     });
 
     setStoreMeta((prev) => {
-      const layoutLists = new Map(storeMeta.layoutLists);
+      const layoutLists = new Map(prev.layoutLists);
       layoutLists.delete(env2delete);
-      let EnvIds = selection.envIDs.filter((env) => env !== env2delete);
+      let EnvIds = prev.envList.filter((env) => env !== env2delete);
       return {
         ...prev,
         envList: EnvIds,
@@ -445,11 +452,16 @@ const App = () => {
       };
     });
 
-    setStoreData((prev) => ({
-      ...prev,
-      panes: {},
-      layout: [],
-    }));
+    setStoreData((prev) => {
+      if (selection.envIDs.includes(env2delete)) {
+        return {
+          ...prev,
+          panes: {},
+          layout: [],
+        };
+      }
+      return prev;
+    });
 
     sendEnvDelete(env2delete, previousEnv);
   };
@@ -976,6 +988,11 @@ const App = () => {
       }}
       onViewChange={updateToLayout}
       onViewManageButton={() => setShowViewModal(!showViewModal)}
+      canUndo={
+        selection.envIDs.length === 1 &&
+        (undoCounts[selection.envIDs[0]] || 0) > 0
+      }
+      onUndoButton={() => sendUndo(selection.envIDs[0])}
       onEnvSelect={onEnvSelect}
       onExportHtml={exportCurrentEnvToHtml}
     />
@@ -1011,6 +1028,7 @@ const App = () => {
     onReloadMessage,
     onEnvUpdate,
     onCloseMessage,
+    onUndoState,
     onDisconnect,
   };
 

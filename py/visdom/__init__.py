@@ -43,7 +43,8 @@ except ImportError:
 
 import sys
 
-assert sys.version_info[0] >= 3, "To use visdom with python 2, downgrade to v0.1.8.9"
+if sys.version_info < (3, 12):
+    raise RuntimeError("Visdom requires Python 3.12 or newer.")
 
 
 def _normalize_tsne(Y):
@@ -158,7 +159,7 @@ def loadfile(filename):
 
 
 def _title2str(opts):
-    if opts.get("title"):
+    if opts.get("title") is not None:
         if isnum(opts.get("title")):
             title = str(opts.get("title"))
             logger.warning("Numerical title %s has been cast to a string" % title)
@@ -491,6 +492,35 @@ def pytorch_wrap(f):
         return f(*args, **kwargs)
 
     return wrapped_f
+
+
+def _compute_confusion_matrix(y_true, y_pred, labels):
+    """Build an NxN confusion matrix from label vectors (numpy only).
+
+    ``y_true``/``y_pred`` are expected to be 1-D numpy arrays; the public
+    ``confusion_matrix`` caller ravels them before calling this helper.
+    """
+    if y_true.shape[0] != y_pred.shape[0]:
+        raise ValueError("y_true and y_pred must have the same length")
+    if y_true.shape[0] == 0:
+        raise ValueError("y_true and y_pred must be non-empty")
+
+    label_to_idx = {label: i for i, label in enumerate(labels)}
+    n = len(labels)
+    cm = np.zeros((n, n), dtype=int)
+    skipped = 0
+    for t, p in zip(y_true, y_pred):
+        if t in label_to_idx and p in label_to_idx:
+            cm[label_to_idx[t], label_to_idx[p]] += 1
+        else:
+            skipped += 1
+    if skipped > 0:
+        warnings.warn(
+            "{} samples had labels not in the provided labels list "
+            "and were ignored".format(skipped),
+            UserWarning,
+        )
+    return cm
 
 
 def _decode_binary_arrays(obj):
@@ -1258,9 +1288,7 @@ class Visdom(object):
                 try:
                     soup = bs4.BeautifulSoup(svg, "xml")
                 except bs4.FeatureNotFound as e:
-                    import six
-
-                    six.raise_from(ImportError("No module named 'lxml'"), e)
+                    raise ImportError("No module named 'lxml'") from e
                 height = soup.svg.attrs.pop("height", None)
                 width = soup.svg.attrs.pop("width", None)
                 svg = str(soup)
@@ -1964,6 +1992,7 @@ class Visdom(object):
 
         assert X.ndim == 2, "X should have two dims"
         assert X.shape[1] == 2 or X.shape[1] == 3, "X should have 2 or 3 cols"
+        assert X.shape[0] > 0, "X should have at least one point"
 
         if Y is not None:
             Y = np.ravel(Y)
@@ -2369,6 +2398,186 @@ class Visdom(object):
             data_to_send["updateDir"] = update
             endpoint = "update"
 
+        return self._send(data_to_send, endpoint=endpoint)
+
+    @pytorch_wrap
+    def confusion_matrix(
+        self,
+        y_true=None,
+        y_pred=None,
+        cm=None,
+        labels=None,
+        normalize=None,
+        update=None,
+        win=None,
+        env=None,
+        opts=None,
+    ):
+        """
+        Draw a confusion matrix for classification evaluation.
+
+        You can either provide raw label vectors (`y_true`, `y_pred`) or a
+        precomputed confusion matrix (`cm`).
+
+        The following `opts` are supported:
+
+        - `opts.title`       : plot title (`string`; default = `Confusion Matrix`)
+        - `opts.xlabel`      : x-axis label (`string`; default = `Predicted`)
+        - `opts.ylabel`      : y-axis label (`string`; default = `Actual`)
+        - `opts.colormap`    : Plotly colorscale (`string`; default = `Blues`)
+        - `opts.showCounts`  : show raw counts in cells (`bool`; default = `True`)
+        - `opts.showPercent` : show percentages in cells (`bool`; default = `True`
+                               when normalized, `False` otherwise)
+        - `opts.layoutopts`  : additional backend layout options (`dict`)
+
+        `update` may be used to modify an existing confusion matrix window
+        instead of creating a new one; it takes one of `None`, `'replace'`
+        (redraw the whole matrix in `win`) or `'remove'` (delete `win`).
+        """
+        opts = {} if opts is None else dict(opts)
+        _title2str(opts)
+        _assert_opts(opts)
+
+        valid_update = (None, "replace", "remove")
+        assert update in valid_update, "update must be one of: {}".format(valid_update)
+
+        if update == "remove":
+            assert win is not None, "win must be provided to remove a window"
+            return self._send(
+                {"data": [], "delete": True, "win": win, "eid": env},
+                endpoint="update",
+            )
+
+        has_raw = y_true is not None or y_pred is not None
+        has_matrix = cm is not None
+        if has_raw == has_matrix:
+            raise ValueError("provide exactly one input mode: (y_true, y_pred) or (cm)")
+
+        if has_raw:
+            if y_true is None or y_pred is None:
+                raise ValueError("both y_true and y_pred are required")
+            y_true = np.asarray(y_true).ravel()
+            y_pred = np.asarray(y_pred).ravel()
+            if labels is None:
+                labels = np.unique(np.concatenate([y_true, y_pred])).tolist()
+        else:
+            cm = np.asarray(cm)
+            if cm.ndim != 2 or cm.shape[0] != cm.shape[1]:
+                raise ValueError("cm must be a square 2D array")
+            if labels is None:
+                labels = list(range(cm.shape[0]))
+            if len(labels) != cm.shape[0]:
+                raise ValueError(
+                    "number of labels must match confusion matrix dimensions"
+                )
+
+        if len(set(labels)) != len(labels):
+            raise ValueError("labels must be unique")
+
+        if has_raw:
+            cm = _compute_confusion_matrix(y_true, y_pred, labels)
+
+        valid_normalize = (None, "true", "pred", "all")
+        if normalize not in valid_normalize:
+            raise ValueError("normalize must be one of: {}".format(valid_normalize))
+
+        raw_cm = cm.copy()
+        if normalize == "true":
+            row_sums = cm.sum(axis=1, keepdims=True).astype(float)
+            row_sums[row_sums == 0] = 1
+            cm = cm.astype(float) / row_sums
+        elif normalize == "pred":
+            col_sums = cm.sum(axis=0, keepdims=True).astype(float)
+            col_sums[col_sums == 0] = 1
+            cm = cm.astype(float) / col_sums
+        elif normalize == "all":
+            total = float(cm.sum())
+            if total == 0:
+                warnings.warn(
+                    "confusion matrix sum is zero; normalized values will be zero",
+                    UserWarning,
+                )
+                cm = cm.astype(float)
+            else:
+                cm = cm.astype(float) / total
+
+        str_labels = [str(lbl) for lbl in labels]
+
+        opts["xlabel"] = opts.get("xlabel", "Predicted")
+        opts["ylabel"] = opts.get("ylabel", "Actual")
+        opts["title"] = opts.get("title", "Confusion Matrix")
+        colormap = opts.get("colormap", "Blues")
+
+        show_counts = opts.get("showCounts", True)
+        show_percent = opts.get("showPercent", normalize is not None)
+
+        data = [
+            {
+                "z": cm.tolist(),
+                "x": str_labels,
+                "y": str_labels,
+                "type": "heatmap",
+                "colorscale": colormap,
+                "showscale": True,
+            }
+        ]
+
+        annotations = []
+        max_val = float(cm.max()) if cm.size > 0 else 1.0
+        threshold = max_val / 2.0
+        raw_total = float(raw_cm.sum())
+        raw_is_integer = np.issubdtype(raw_cm.dtype, np.integer)
+
+        for i in range(cm.shape[0]):
+            for j in range(cm.shape[1]):
+                cell_val = cm[i, j]
+                parts = []
+                if show_counts:
+                    raw_val = raw_cm[i, j]
+                    if raw_is_integer:
+                        parts.append(str(int(raw_val)))
+                    else:
+                        parts.append("{:.3g}".format(float(raw_val)))
+                if show_percent:
+                    if normalize is not None:
+                        parts.append("{:.1%}".format(cell_val))
+                    else:
+                        pct = raw_cm[i, j] / raw_total if raw_total > 0 else 0
+                        parts.append("{:.1%}".format(pct))
+                text = "<br>".join(parts) if parts else ""
+
+                font_color = "white" if cell_val > threshold else "black"
+
+                annotations.append(
+                    {
+                        "x": str_labels[j],
+                        "y": str_labels[i],
+                        "text": text,
+                        "showarrow": False,
+                        "font": {"color": font_color},
+                    }
+                )
+
+        layout = _opts2layout(opts)
+        layout["annotations"] = annotations
+        layout["xaxis"] = layout.get("xaxis", {})
+        layout["xaxis"]["title"] = opts["xlabel"]
+        layout["xaxis"]["side"] = "bottom"
+        layout["yaxis"] = layout.get("yaxis", {})
+        layout["yaxis"]["title"] = opts["ylabel"]
+        layout["yaxis"]["autorange"] = "reversed"
+
+        data_to_send = {
+            "data": data,
+            "win": win,
+            "eid": env,
+            "layout": layout,
+            "opts": opts,
+        }
+        endpoint = "events"
+        if update:
+            data_to_send["updateDir"] = update
+            endpoint = "update"
         return self._send(data_to_send, endpoint=endpoint)
 
     @pytorch_wrap
@@ -2934,6 +3143,109 @@ class Visdom(object):
         )
 
     @pytorch_wrap
+    def sankey(self, source, target, value, labels=None, win=None, env=None, opts=None):
+        """
+        This function draws a Sankey (flow) diagram. Flows are defined by three
+        equal-length arrays:
+
+        - `source`: source node index of each link (`N` array of ints)
+        - `target`: target node index of each link (`N` array of ints)
+        - `value` : magnitude of each link (`N` array of non-negative numbers)
+
+        `labels` is an optional list of node names. If omitted, nodes are
+        referenced by their index alone.
+
+        The following `opts` are supported:
+
+        - `opts.labels`     : list of node labels (alternative to the `labels` arg)
+        - `opts.pad`        : node padding in px (`number`; default = 15)
+        - `opts.thickness`  : node thickness in px (`number`; default = 20)
+        - `opts.orientation`: `'h'` (default) or `'v'`
+        - `opts.nodecolor`  : node color(s) (`string` or list of strings)
+        - `opts.linkcolor`  : link color(s) (`string` or list of strings)
+        - `opts.layoutopts` : `dict` of additional backend layout options, e.g.
+          `layoutopts = {'plotly': {'font': {'size': 10}}}`.
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        source = np.asarray(source)
+        target = np.asarray(target)
+        value = np.asarray(value)
+        for name, arr in (("source", source), ("target", target), ("value", value)):
+            assert arr.ndim <= 1, "sankey {} must be 1-D, got shape {}".format(
+                name, arr.shape
+            )
+        source = source.ravel()
+        target = target.ravel()
+        value = value.ravel()
+        assert (
+            len(source) == len(target) == len(value)
+        ), "source, target and value must have the same length"
+        assert (source >= 0).all(), "sankey source indices must be non-negative"
+        assert (target >= 0).all(), "sankey target indices must be non-negative"
+        assert (
+            source == source.astype(int)
+        ).all(), "sankey source indices must be integers"
+        assert (
+            target == target.astype(int)
+        ).all(), "sankey target indices must be integers"
+        assert (value >= 0).all(), "sankey link values must be non-negative"
+
+        labels = labels if labels is not None else opts.get("labels")
+        if labels is not None and len(source) > 0:
+            num_nodes = max(int(source.max()), int(target.max())) + 1
+            assert len(labels) >= num_nodes, (
+                "labels must cover every referenced node "
+                "({} labels for {} nodes)".format(len(labels), num_nodes)
+            )
+
+        pad = opts.get("pad", 15)
+        thickness = opts.get("thickness", 20)
+        orientation = opts.get("orientation", "h")
+        assert (
+            isinstance(pad, numbers.Number) and pad >= 0
+        ), "opts.pad must be a non-negative number"
+        assert (
+            isinstance(thickness, numbers.Number) and thickness > 0
+        ), "opts.thickness must be a positive number"
+        assert orientation in ("h", "v"), "opts.orientation must be 'h' or 'v'"
+
+        node = {"pad": pad, "thickness": thickness}
+        if labels is not None:
+            node["label"] = list(labels)
+        if opts.get("nodecolor") is not None:
+            node["color"] = opts.get("nodecolor")
+
+        link = {
+            "source": source.astype(int).tolist(),
+            "target": target.astype(int).tolist(),
+            "value": value.tolist(),
+        }
+        if opts.get("linkcolor") is not None:
+            link["color"] = opts.get("linkcolor")
+
+        data = [
+            {
+                "type": "sankey",
+                "orientation": orientation,
+                "node": node,
+                "link": link,
+            }
+        ]
+
+        return self._send(
+            {
+                "data": data,
+                "win": win,
+                "eid": env,
+                "layout": _opts2layout(opts),
+                "opts": opts,
+            }
+        )
+
+    @pytorch_wrap
     def dual_axis_lines(self, X=None, Y1=None, Y2=None, opts=None, win=None, env=None):
         """
         This function will create a line plot using plotly with different Y-Axis.
@@ -3035,7 +3347,7 @@ class Visdom(object):
 
     @pytorch_wrap
     def graph(
-        self, edges, edgeLabels=None, nodeLabels=None, opts=dict(), env=None, win=None
+        self, edges, edgeLabels=None, nodeLabels=None, opts=None, env=None, win=None
     ):
         """
         This function draws interactive network graphs. It takes list of edges as one of the arguments.
@@ -3057,9 +3369,10 @@ class Visdom(object):
                 * `height` : height of the Pane
                 * `width` : width of the Pane
         """
+        opts = {} if opts is None else opts
         try:
             import networkx as nx
-        except:
+        except ImportError:
             raise RuntimeError("networkx must be installed to plot Graph figures")
 
         G = nx.Graph()
@@ -3239,3 +3552,75 @@ class Visdom(object):
                 "opts": opts,
             }
         )
+
+    def table(self, headers, data, win=None, env=None, opts=None):
+        """
+        This function renders structured data as a styled HTML table.
+
+        - `headers`: a `list` of column header names (`string` or any
+           type convertible to `string`).
+        - `data`: a 2D `list` of row data, where each row is list or
+          `tuple` with same number of elements as `headers`. In case
+           of empty list, a table with only header will be rendered.
+
+        The following `opts` are supported:
+
+        - `opts.title`: title for the window (`string`; optional)
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        assert isinstance(headers, list), "headers should be a list"
+        assert isinstance(data, list), "data should be a list of rows"
+        assert all(
+            isinstance(row, (list, tuple)) for row in data
+        ), "each row in data should be a list or tuple"
+        assert all(
+            len(row) == len(headers) for row in data
+        ), "each data row must have the same number of columns as headers"
+
+        style = """
+            <style>
+            .visdom-table {
+                font-family: monospace;
+                border-collapse: collapse;
+                width: 100%;
+            }
+            .visdom-table th {
+                background-color: #2196F3;
+                color: white;
+                padding: 8px 12px;
+                text-align: left;
+            }
+            .visdom-table td {
+                padding: 6px 12px;
+                border-bottom: 1px solid #ddd;
+            }
+            .visdom-table tr:nth-child(even) td {
+                background-color: #f2f2f2;
+            }
+            .visdom-table tr:nth-child(odd) td {
+                background-color: #ffffff;
+            }
+            .visdom-table tr:hover td {
+                background-color: #ddeeff;
+            }
+            </style>
+        """
+
+        header_html = "".join("<th>%s</th>" % html.escape(str(h)) for h in headers)
+        rows_html = "".join(
+            "<tr>%s</tr>"
+            % "".join("<td>%s</td>" % html.escape(str(cell)) for cell in row)
+            for row in data
+        )
+
+        table_html = (
+            "%s<table class='visdom-table'>"
+            "<thead><tr>%s</tr></thead>"
+            "<tbody>%s</tbody>"
+            "</table>"
+        ) % (style, header_html, rows_html)
+
+        return self.text(text=table_html, win=win, env=env, opts=opts)
