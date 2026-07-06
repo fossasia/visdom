@@ -178,6 +178,9 @@ const ApiProvider = ({ children }) => {
       case 'env_update':
         apiHandlers.current.onEnvUpdate(cmd.data);
         break;
+      case 'undo_state':
+        apiHandlers.current.onUndoState(cmd);
+        break;
 
       default:
         // eslint-disable-next-line no-console
@@ -202,7 +205,11 @@ const ApiProvider = ({ children }) => {
         JSON.stringify({
           sid: sessionInfo.id,
         })
-      );
+      ).fail((xhr) => {
+        document.open();
+        document.write(xhr.responseText);
+        document.close();
+      });
     } else if (envIDs.length > 1) {
       $.post(
         correctPathname() + 'compare/' + envIDs.join('+'),
@@ -210,7 +217,11 @@ const ApiProvider = ({ children }) => {
           sid: sessionInfo.id,
           show_all: !!showAll,
         })
-      );
+      ).fail((xhr) => {
+        document.open();
+        document.write(xhr.responseText);
+        document.close();
+      });
     }
   };
 
@@ -260,6 +271,13 @@ const ApiProvider = ({ children }) => {
     sendSocketMessage({
       cmd: 'close',
       data: paneID,
+      eid: envID,
+    });
+  };
+
+  const sendUndo = (envID) => {
+    sendSocketMessage({
+      cmd: 'undo',
       eid: envID,
     });
   };
@@ -326,6 +344,17 @@ const ApiProvider = ({ children }) => {
   // Effects //
   // ------- //
 
+  // Redirect for POST request errors
+  useEffect(() => {
+    $(document).on('ajaxError', () => {
+      window.location.href = correctPathname() + 'error/500';
+    });
+
+    return () => {
+      $(document).off('ajaxError');
+    };
+  }, []);
+
   // connect on mount, disconnect on unmount
   useEffect(() => {
     connect();
@@ -351,6 +380,7 @@ const ApiProvider = ({ children }) => {
         sendPaneLayoutUpdate,
         sendPaneMessage,
         sendSaveAll,
+        sendUndo,
         sessionInfo,
         setConnected,
         toggleOnlineState,
