@@ -8,7 +8,8 @@
 
 import sys
 
-assert sys.version_info[0] >= 3, "To use visdom with python 2, downgrade to v0.1.8.9"
+if sys.version_info < (3, 12):
+    raise RuntimeError("Visdom requires Python 3.12 or newer.")
 
 if __name__ == "__main__":
     from visdom.server.run_server import download_scripts_and_run
