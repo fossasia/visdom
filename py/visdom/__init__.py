@@ -159,7 +159,7 @@ def loadfile(filename):
 
 
 def _title2str(opts):
-    if opts.get("title"):
+    if opts.get("title") is not None:
         if isnum(opts.get("title")):
             title = str(opts.get("title"))
             logger.warning("Numerical title %s has been cast to a string" % title)
