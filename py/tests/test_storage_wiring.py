@@ -55,5 +55,6 @@ class TestStorageWiring(tornado.testing.AsyncHTTPTestCase):
         self.assertIn("main", calls[0])
         self.assertIn("main", json.loads(resp.body))
 
+
 if __name__ == "__main__":
     unittest.main()
