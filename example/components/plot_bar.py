@@ -42,8 +42,12 @@ def plot_bar_histogram(viz, env, args):
 # 2D histogram (density)
 def plot_bar_histogram2d(viz, env, args):
     title = args[0] if len(args) > 0 else None
-    hist2d_x = np.concatenate([np.random.randn(10000) - 1.5, np.random.randn(10000) + 1.5])
-    hist2d_y = np.concatenate([np.random.randn(10000) - 1.5, np.random.randn(10000) + 1.5])
+    hist2d_x = np.concatenate(
+        [np.random.randn(10000) - 1.5, np.random.randn(10000) + 1.5]
+    )
+    hist2d_y = np.concatenate(
+        [np.random.randn(10000) - 1.5, np.random.randn(10000) + 1.5]
+    )
     viz.histogram2d(
         X=hist2d_x,
         Y=hist2d_y,
