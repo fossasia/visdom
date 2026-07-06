@@ -154,7 +154,7 @@ jobs:
     needs: install-and-build
     strategy:
       matrix:
-        python: ['3.10', '3.11', '3.12']
+        python: ['3.12', '3.13']
     steps:
       - name: "Checkout Repository"
         uses: actions/checkout@v7.0.0

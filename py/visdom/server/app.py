@@ -256,10 +256,11 @@ class Application(tornado.web.Application):
         if os.path.exists(home_style_path):
             with open(home_style_path, "r") as f:
                 user_css += "\n" + f.read()
-        project_style_path = os.path.join(self.env_path, "style.css")
-        if os.path.exists(project_style_path):
-            with open(project_style_path, "r") as f:
-                user_css += "\n" + f.read()
+        if self.env_path is not None:
+            project_style_path = os.path.join(self.env_path, "style.css")
+            if os.path.exists(project_style_path):
+                with open(project_style_path, "r") as f:
+                    user_css += "\n" + f.read()
 
         settings["config_dir"] = config_dir
         settings["user_css"] = user_css
