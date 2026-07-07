@@ -89,8 +89,9 @@ def hash_password(password, salt=None):
 
 
 class LazyEnvData(Mapping):
-    def __init__(self, env_path_file):
-        self._env_path_file = env_path_file
+    def __init__(self, store, eid):
+        self._store = store
+        self._eid = eid
         self._raw_dict = None
 
     def lazy_load_data(self):
@@ -98,15 +99,15 @@ class LazyEnvData(Mapping):
             return
 
         try:
-            with open(self._env_path_file, "r") as fn:
-                env_data = tornado.escape.json_decode(fn.read())
-        except Exception as e:
+            env_data = self._store.load_env(self._eid)
+            self._raw_dict = {
+                "jsons": env_data["jsons"],
+                "reload": env_data["reload"],
+            }
+        except (KeyError, TypeError) as e:
             raise ValueError(
-                "Failed loading environment json: {} - {}".format(
-                    self._env_path_file, repr(e)
-                )
+                "Failed loading environment json: {} - {}".format(self._eid, repr(e))
             )
-        self._raw_dict = {"jsons": env_data["jsons"], "reload": env_data["reload"]}
 
     def __getitem__(self, key):
         self.lazy_load_data()
