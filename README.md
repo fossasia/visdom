@@ -381,7 +381,7 @@ The following `opts` are supported:
 - `jpgquality`: JPG quality (`number` 0-100). If set, the result is encoded as JPEG. Otherwise PNG.
 - `normalize`: normalize the image to `[0, 1]` before blending (`boolean`; default = `False`)
 
-> **Note** `heatmap` values are clipped to `[0, 1]` and NaN/Inf are replaced with 0 before blending. Pass a pre-normalized map for best results.
+> **Note** `heatmap` accepts any finite float range. Values outside `[0, 1]` are rescaled automatically via min-max normalization, so methods like SHAP or Integrated Gradients that return signed or unnormalized values work without any pre-processing. NaN maps to 0; infinite values are clamped to the `[0, 1]` boundary.
 
 
 #### vis.images

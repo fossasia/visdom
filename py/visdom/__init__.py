@@ -1703,9 +1703,12 @@ class Visdom(object):
         Overlay a heatmap on an image.
 
         `img` is a `CxHxW` or `HxW` tensor (uint8 or float, same rules as
-        `image()`). `heatmap` is an `HxW` float array with values in [0, 1]
-        where 1.0 marks the highest activation. The two are blended in Python
-        and sent as a single image, so no frontend changes are required.
+        `image()`). `heatmap` is an `HxW` float array. Values are expected in
+        [0, 1] but any finite range is accepted — values outside [0, 1] are
+        rescaled via min-max normalization before blending. NaN maps to 0;
+        infinite values are clamped to the [0, 1] boundary. The two are
+        blended in Python and sent as a single image, so no frontend changes
+        are required.
 
         The following `opts` are supported:
 
@@ -1767,7 +1770,12 @@ class Visdom(object):
                 )
             )
         heatmap = np.nan_to_num(heatmap, nan=0.0, posinf=1.0, neginf=0.0)
-        heatmap = np.clip(heatmap, 0.0, 1.0)
+        h_min, h_max = float(heatmap.min()), float(heatmap.max())
+        if h_min < 0.0 or h_max > 1.0:
+            if h_max > h_min:
+                heatmap = (heatmap - h_min) / (h_max - h_min)
+            else:
+                heatmap = np.zeros_like(heatmap)
 
         colormap = opts.get("colormap", "jet")
         try:
