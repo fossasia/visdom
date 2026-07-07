@@ -88,6 +88,7 @@ from components.plot_roc_pr import (
     plot_roc_precomputed,
 )
 from components.properties import properties_basic, properties_callbacks
+from components.plot_confusion_matrix import plot_confusion_matrix_basic, plot_confusion_matrix_precomputed, plot_confusion_matrix_normalized
 from components.misc import (
     misc_plot_matplot,
     misc_plot_latex,
@@ -192,6 +193,12 @@ def run_demo(viz, env, args):
     plot_roc_curve(viz, env, args)
     plot_pr_curve(viz, env, args)
     plot_roc_precomputed(viz, env, args)
+    # ================ #
+    # confusion matrix #
+    # ================ #
+    plot_confusion_matrix_basic(viz, env, args)
+    plot_confusion_matrix_precomputed(viz, env, args)
+    plot_confusion_matrix_normalized(viz, env, args)
 
     # ============= #
     # special plots #
