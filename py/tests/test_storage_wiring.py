@@ -31,30 +31,29 @@ class TestStorageWiring(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.env_path = self._tmp.name
+        self.app = Application(port=8097, env_path=self.env_path)
 
     def tearDown(self):
         self._tmp.cleanup()
 
     def test_application_has_json_store(self):
-        app = Application(port=8097, env_path=self.env_path)
-        self.assertIsInstance(app.storage, DataStore)
-        self.assertIsInstance(app.storage, JSONStore)
-        self.assertEqual(app.storage.env_path, self.env_path)
+        self.assertIsInstance(self.app.storage, DataStore)
+        self.assertIsInstance(self.app.storage, JSONStore)
+        self.assertEqual(self.app.storage.env_path, self.env_path)
 
     def test_save_routes_through_storage(self):
-        app = Application(port=8097, env_path=self.env_path)
         calls = []
-        real_save_envs = app.storage.save_envs
+        real_save_envs = self.app.storage.save_envs
 
         def spy(state, eids):
             calls.append(list(eids))
             return real_save_envs(state, eids)
 
-        app.storage.save_envs = spy
+        self.app.storage.save_envs = spy
 
         written = []
         handler = types.SimpleNamespace(
-            storage=app.storage, state=app.state, write=written.append
+            storage=self.app.storage, state=self.app.state, write=written.append
         )
         SaveHandler.wrap_func(handler, {"data": ["main"]})
 
