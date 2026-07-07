@@ -178,8 +178,28 @@ class Visdom:
     def histogram(
         self, X: Tensor, win: _OptStr = ..., env: _OptStr = ..., opts: _OptOps = ...
     ) -> _SendReturn: ...
+    def histogram2d(
+        self,
+        X: Tensor,
+        Y: Tensor,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
     def boxplot(
         self, X: Tensor, win: _OptStr = ..., env: _OptStr = ..., opts: _OptOps = ...
+    ) -> _SendReturn: ...
+    def confusion_matrix(
+        self,
+        y_true: Optional[Tensor] = ...,
+        y_pred: Optional[Tensor] = ...,
+        cm: Optional[Tensor] = ...,
+        labels: Optional[list] = ...,
+        normalize: Optional[str] = ...,
+        update: _OptStr = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
     ) -> _SendReturn: ...
     def surf(
         self, X: Tensor, win: _OptStr = ..., env: _OptStr = ..., opts: _OptOps = ...
@@ -216,6 +236,16 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
+    def sankey(
+        self,
+        source: Tensor,
+        target: Tensor,
+        value: Tensor,
+        labels: Optional[List] = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
     def graph(
         self,
         edges: List,
@@ -228,6 +258,14 @@ class Visdom:
     def violin(
         self,
         X: Tensor,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
+    def table(
+        self,
+        headers: List[Any],
+        data: List[List[Any]],
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,

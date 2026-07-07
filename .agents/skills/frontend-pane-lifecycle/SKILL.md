@@ -42,4 +42,3 @@ Use this skill when changing pane rendering, pane actions, or lifecycle events.
 ## Tests
 
 - Follow the default flow in `references/TESTS.md`.
-
