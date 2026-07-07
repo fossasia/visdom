@@ -607,6 +607,8 @@ def _average_precision(precision, recall):
     precision = np.asarray(precision)
     recall = np.asarray(recall)
     return float(np.sum(np.diff(recall) * precision[1:]))
+
+
 def _compute_confusion_matrix(y_true, y_pred, labels):
     """Build an NxN confusion matrix from label vectors (numpy only).
 
@@ -2488,7 +2490,6 @@ class Visdom(object):
                 "eid": env,
                 "layout": _opts2layout(opts),
                 "opts": opts,
-                "pane_type": "plot",
             }
         )
 
@@ -2592,7 +2593,6 @@ class Visdom(object):
                 "eid": env,
                 "layout": _opts2layout(opts),
                 "opts": opts,
-                "pane_type": "plot",
             }
         )
 
