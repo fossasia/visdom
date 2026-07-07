@@ -226,3 +226,39 @@ def plot_line_stem(viz, env, args):
     Y = np.linspace(0, 2 * np.pi, 70)
     X = np.column_stack((np.sin(Y), np.cos(Y)))
     viz.stem(X=X, Y=Y, opts=dict(legend=["Sine", "Cosine"], title=title), env=env)
+
+
+# Learning-curve convenience wrapper (single metric)
+def plot_learning_curve_basic(viz, env, args):
+    title = args[0] if len(args) > 0 else "Learning Curve – single metric"
+    num_epochs = 20
+    steps = np.arange(1, num_epochs + 1)
+    train_loss = 1.0 / (steps ** 0.5) + np.random.rand(num_epochs) * 0.05
+    viz.learning_curve(
+        metric=train_loss,
+        step=steps,
+        env=env,
+        opts=dict(title=title, legend=["train_loss"]),
+    )
+
+
+# Learning-curve convenience wrapper (multiple named metrics)
+def plot_learning_curve_multi(viz, env, args):
+    title = args[0] if len(args) > 0 else "Learning Curve – multiple metrics"
+    num_epochs = 20
+    steps = np.arange(1, num_epochs + 1)
+    train_loss = 1.0 / (steps ** 0.5) + np.random.rand(num_epochs) * 0.05
+    val_loss = 1.1 / (steps ** 0.5) + np.random.rand(num_epochs) * 0.07
+    train_acc = 1.0 - train_loss / 2
+    val_acc = 1.0 - val_loss / 2
+    viz.learning_curve(
+        metric={
+            "train_loss": train_loss,
+            "val_loss": val_loss,
+            "train_acc": train_acc,
+            "val_acc": val_acc,
+        },
+        step=steps,
+        env=env,
+        opts=dict(title=title),
+    )

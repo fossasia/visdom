@@ -3346,6 +3346,134 @@ class Visdom(object):
         return self._send(datasend, "events")
 
     @pytorch_wrap
+    def learning_curve(
+        self,
+        metric,
+        step=None,
+        win=None,
+        env=None,
+        opts=None,
+        update=None,
+    ):
+        """
+        Plot a learning curve for one or more named metrics over training steps.
+
+        This is a convenience wrapper around :meth:`line` that automatically
+        handles the required ``X``/``Y`` array shapes and sets the legend from
+        the metric names.
+
+        Parameters
+        ----------
+        metric : dict[str, array-like] or array-like
+            If a ``dict``, each key is used as the legend label and the
+            corresponding value is a 1-D array of metric values (e.g.
+            ``{"train_loss": [0.9, 0.7, ...], "val_loss": [0.95, 0.8, ...]}``).
+            If an ``array-like``, it is treated as a single unnamed metric series.
+        step : array-like, optional
+            1-D array of training step values (e.g. epoch numbers or iteration
+            counts) shared across all metrics.  If omitted, steps are generated
+            as ``[0, 1, ..., N-1]``.
+        win : str, optional
+            The window ID to plot into.
+        env : str, optional
+            The visdom environment to use.
+        opts : dict, optional
+            Options forwarded to :meth:`line`.  ``opts['xlabel']`` defaults to
+            ``'Step'``, ``opts['ylabel']`` to ``'Value'``, and
+            ``opts['title']`` to ``'Learning Curve'`` when not provided.
+        update : str, optional
+            The update mode forwarded to :meth:`line` (``'append'``,
+            ``'replace'``, etc.).
+
+        Returns
+        -------
+        str
+            The window ID of the resulting plot (same return value as
+            :meth:`line`).
+
+        Examples
+        --------
+        Basic usage with a dict of metrics::
+
+            import numpy as np
+            import visdom
+            vis = visdom.Visdom()
+
+            steps = np.arange(1, 11)
+            train_loss = np.array([0.9, 0.8, 0.7, 0.65, 0.6, 0.55, 0.5, 0.48, 0.45, 0.43])
+            val_loss   = np.array([0.95, 0.85, 0.75, 0.72, 0.70, 0.68, 0.66, 0.65, 0.64, 0.63])
+
+            vis.learning_curve(
+                metric={"Train Loss": train_loss, "Val Loss": val_loss},
+                step=steps,
+                opts=dict(title="Training Progress"),
+            )
+
+        Incrementally appending metrics during training::
+
+            vis.learning_curve(
+                metric={"Train Loss": np.array([loss])},
+                step=np.array([epoch]),
+                win="lc",
+                update="append",
+            )
+        """
+        opts = {} if opts is None else opts
+        opts.setdefault("xlabel", "Step")
+        opts.setdefault("ylabel", "Value")
+        opts.setdefault("title", "Learning Curve")
+        opts.setdefault("showlegend", True)
+
+        if isinstance(metric, dict):
+            names = list(metric.keys())
+            arrays = [np.asarray(v, dtype=float) for v in metric.values()]
+            if len(arrays) == 0:
+                raise ValueError("metric dict must contain at least one entry")
+            n = arrays[0].shape[0]
+            for name, arr in zip(names, arrays):
+                if arr.ndim != 1:
+                    raise ValueError(
+                        "Each metric value must be a 1-D array; "
+                        "'%s' has shape %s" % (name, arr.shape)
+                    )
+                if arr.shape[0] != n:
+                    raise ValueError(
+                        "All metric arrays must have the same length; "
+                        "'%s' has length %d but expected %d" % (name, arr.shape[0], n)
+                    )
+            Y = np.column_stack(arrays) if len(arrays) > 1 else arrays[0]
+            opts.setdefault("legend", names)
+        else:
+            Y = np.asarray(metric, dtype=float)
+            if Y.ndim != 1:
+                raise ValueError(
+                    "When metric is not a dict it must be a 1-D array; "
+                    "got shape %s" % (Y.shape,)
+                )
+            n = Y.shape[0]
+
+        if step is not None:
+            X = np.asarray(step, dtype=float)
+            if X.ndim != 1:
+                raise ValueError("step must be a 1-D array; got shape %s" % (X.shape,))
+            if X.shape[0] != n:
+                raise ValueError(
+                    "step length (%d) must match metric length (%d)"
+                    % (X.shape[0], n)
+                )
+        else:
+            X = np.arange(n, dtype=float)
+
+        return self.line(
+            Y=Y,
+            X=X,
+            win=win,
+            env=env,
+            opts=opts,
+            update=update,
+        )
+
+    @pytorch_wrap
     def graph(
         self, edges, edgeLabels=None, nodeLabels=None, opts=None, env=None, win=None
     ):

@@ -300,6 +300,7 @@ The following API is currently supported:
 - [`vis.mesh`](#vismesh)     : mesh plots
 - [`vis.sankey`](#vissankey)   : sankey (flow) diagrams
 - [`vis.dual_axis_lines`](#visdual_axis_lines)     : double y axis line plots
+- [`vis.learning_curve`](#vislearning_curve)       : learning curve plots (convenience wrapper)
 - [`vis.graph`](#visgraph)    : network graphs
 
 ### Generic Plots
@@ -775,6 +776,43 @@ The following `opts` are supported:
 This is the image of the output:
 <p align="center"><img align="center" src="https://user-images.githubusercontent.com/19650074/198822367-666cc42e-4354-4a7a-8dd3-d8ff143f885d.gif" width="400" /></p>
 
+
+#### vis.learning_curve
+
+This is a convenience wrapper around `vis.line()` that makes it easy to plot
+named learning curves over training steps without manually reshaping arrays or
+configuring the legend.
+
+```python
+import numpy as np
+import visdom
+vis = visdom.Visdom()
+
+steps = np.arange(1, 21)
+train_loss = 1.0 / steps ** 0.5 + np.random.rand(20) * 0.05
+val_loss   = 1.1 / steps ** 0.5 + np.random.rand(20) * 0.07
+
+vis.learning_curve(
+    metric={"Train Loss": train_loss, "Val Loss": val_loss},
+    step=steps,
+    opts=dict(title="Training Progress"),
+)
+```
+
+The following arguments are supported:
+
+- `metric`  : a `dict[str, array-like]` whose keys become legend labels and
+              values are 1-D metric arrays; or a bare 1-D array for a single
+              unnamed series.
+- `step`    : optional 1-D array of x-axis step values (e.g. epoch numbers).
+              Defaults to `[0, 1, ..., N-1]` when omitted.
+- `win`     : window ID (same as `vis.line`).
+- `env`     : environment name (same as `vis.line`).
+- `opts`    : opts dict forwarded to `vis.line`.  Defaults:
+              `xlabel='Step'`, `ylabel='Value'`, `title='Learning Curve'`,
+              `showlegend=True`.
+- `update`  : update mode forwarded to `vis.line` (`'append'`, `'replace'`,
+              etc.) for incremental training-loop usage.
 
 #### vis.graph
 

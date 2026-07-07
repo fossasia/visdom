@@ -149,6 +149,15 @@ class Visdom:
         Z: Optional[Tensor] = ...,
         is3d: bool = ...,
     ) -> _SendReturn: ...
+    def learning_curve(
+        self,
+        metric: Any,
+        step: Optional[Tensor] = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+        update: _OptStr = ...,
+    ) -> _SendReturn: ...
     def grid(
         self,
         X: Tensor,
