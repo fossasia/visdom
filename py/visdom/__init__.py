@@ -1760,10 +1760,13 @@ class Visdom(object):
             )
 
         heatmap = np.asarray(heatmap, dtype=np.float32)
-        assert heatmap.shape == (
-            H,
-            W,
-        ), "heatmap shape {} does not match image ({},{})".format(heatmap.shape, H, W)
+        if heatmap.shape != (H, W):
+            raise ValueError(
+                "heatmap shape {} does not match image ({},{})".format(
+                    heatmap.shape, H, W
+                )
+            )
+        heatmap = np.nan_to_num(heatmap, nan=0.0, posinf=1.0, neginf=0.0)
         heatmap = np.clip(heatmap, 0.0, 1.0)
 
         colormap = opts.get("colormap", "jet")
@@ -1780,10 +1783,13 @@ class Visdom(object):
             heatmap_rgb = (heatmap_rgb * 255).astype(np.uint8)
 
         alpha = float(opts.get("alpha", 0.5))
+        if not 0.0 <= alpha <= 1.0:
+            raise ValueError("alpha must be in [0, 1]; got {}".format(alpha))
+        w = (heatmap * alpha)[:, :, np.newaxis].astype(np.float32)
         blended = (
             (
-                (1.0 - alpha) * img_rgb.astype(np.float32)
-                + alpha * heatmap_rgb.astype(np.float32)
+                (1.0 - w) * img_rgb.astype(np.float32)
+                + w * heatmap_rgb.astype(np.float32)
             )
             .clip(0, 255)
             .astype(np.uint8)
@@ -2100,15 +2106,7 @@ class Visdom(object):
             }
         )
 
-        # Build layout: reuse _opts2layout with a small remap for z-axis label.
-        layout_opts = dict(opts)
-        if "zlabel" in layout_opts:
-            layout_opts["zlabel"] = layout_opts.pop("zlabel")
-        layout = _opts2layout(layout_opts, is3d=True)
-        if "zlabel" in opts:
-            layout.setdefault("scene", {}).setdefault("zaxis", {})["title"] = opts[
-                "zlabel"
-            ]
+        layout = _opts2layout(opts, is3d=True)
 
         data_to_send = {
             "data": [trace],
