@@ -197,8 +197,7 @@ var PlotPane = (props) => {
         layout.title = { text: layout.title };
       }
       if (layout.title.text) {
-        layout.margin.t = 65;
-        layout.title.y = 0.9;
+        layout.margin.t = 85;
       } else {
         layout.margin.t = 30;
       }
@@ -308,10 +307,10 @@ var PlotPane = (props) => {
           content.data?.[0]?.type === 'heatmap'
             ? ' plotly-heatmap'
             : content.data?.[0]?.type === 'contour'
-            ? ' plotly-contour'
-            : content.data?.[0]?.type === 'surface'
-            ? ' plotly-surface'
-            : ''
+              ? ' plotly-contour'
+              : content.data?.[0]?.type === 'surface'
+                ? ' plotly-surface'
+                : ''
         }`}
         ref={plotlyRef}
       />

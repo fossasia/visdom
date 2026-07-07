@@ -484,6 +484,7 @@ def WrapSocketWrapper(BaseWrapper):
             self.login_enabled = app.login_enabled
             self.app = app
 
+        @check_auth
         def post(self):
             """Either write a message to the socket, or query what's there"""
             args = tornado.escape.json_decode(
