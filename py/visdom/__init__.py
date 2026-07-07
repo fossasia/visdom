@@ -1760,16 +1760,16 @@ class Visdom(object):
             )
 
         heatmap = np.asarray(heatmap, dtype=np.float32)
-        assert heatmap.shape == (H, W), (
-            "heatmap shape {} does not match image ({},{})".format(
-                heatmap.shape, H, W
-            )
-        )
+        assert heatmap.shape == (
+            H,
+            W,
+        ), "heatmap shape {} does not match image ({},{})".format(heatmap.shape, H, W)
         heatmap = np.clip(heatmap, 0.0, 1.0)
 
         colormap = opts.get("colormap", "jet")
         try:
             import matplotlib.cm as _cm
+
             cmap = getattr(_cm, colormap, _cm.jet)
             heatmap_rgb = (cmap(heatmap)[:, :, :3] * 255).astype(np.uint8)
         except ImportError:
@@ -1781,9 +1781,13 @@ class Visdom(object):
 
         alpha = float(opts.get("alpha", 0.5))
         blended = (
-            (1.0 - alpha) * img_rgb.astype(np.float32)
-            + alpha * heatmap_rgb.astype(np.float32)
-        ).clip(0, 255).astype(np.uint8)
+            (
+                (1.0 - alpha) * img_rgb.astype(np.float32)
+                + alpha * heatmap_rgb.astype(np.float32)
+            )
+            .clip(0, 255)
+            .astype(np.uint8)
+        )
 
         im = Image.fromarray(blended, mode="RGB")
         buf = BytesIO()
@@ -2055,9 +2059,9 @@ class Visdom(object):
         - `opts.zlabel`     : z-axis label
         """
         xyz = np.asarray(xyz, dtype=np.float64)
-        assert xyz.ndim == 2 and xyz.shape[1] == 3, (
-            "xyz must have shape (N, 3); got {}".format(xyz.shape)
-        )
+        assert (
+            xyz.ndim == 2 and xyz.shape[1] == 3
+        ), "xyz must have shape (N, 3); got {}".format(xyz.shape)
         assert xyz.shape[0] > 0, "xyz must contain at least one point"
 
         opts = {} if opts is None else dict(opts)
@@ -2072,27 +2076,29 @@ class Visdom(object):
 
         if rgb is not None:
             rgb = np.asarray(rgb, dtype=np.float64)
-            assert rgb.shape == (xyz.shape[0], 3), (
-                "rgb must have shape ({}, 3); got {}".format(xyz.shape[0], rgb.shape)
-            )
+            assert rgb.shape == (
+                xyz.shape[0],
+                3,
+            ), "rgb must have shape ({}, 3); got {}".format(xyz.shape[0], rgb.shape)
             if rgb.max() <= 1.0:
                 rgb = (rgb * 255).clip(0, 255)
             else:
                 rgb = rgb.clip(0, 255)
             rgb = rgb.astype(np.uint8)
             marker["color"] = [
-                "rgb({},{},{})".format(int(r), int(g), int(b))
-                for r, g, b in rgb
+                "rgb({},{},{})".format(int(r), int(g), int(b)) for r, g, b in rgb
             ]
 
-        trace = _scrub_dict({
-            "type": "scatter3d",
-            "mode": "markers",
-            "x": xyz[:, 0].tolist(),
-            "y": xyz[:, 1].tolist(),
-            "z": xyz[:, 2].tolist(),
-            "marker": marker,
-        })
+        trace = _scrub_dict(
+            {
+                "type": "scatter3d",
+                "mode": "markers",
+                "x": xyz[:, 0].tolist(),
+                "y": xyz[:, 1].tolist(),
+                "z": xyz[:, 2].tolist(),
+                "marker": marker,
+            }
+        )
 
         # Build layout: reuse _opts2layout with a small remap for z-axis label.
         layout_opts = dict(opts)
@@ -2100,9 +2106,9 @@ class Visdom(object):
             layout_opts["zlabel"] = layout_opts.pop("zlabel")
         layout = _opts2layout(layout_opts, is3d=True)
         if "zlabel" in opts:
-            layout.setdefault("scene", {}).setdefault(
-                "zaxis", {}
-            )["title"] = opts["zlabel"]
+            layout.setdefault("scene", {}).setdefault("zaxis", {})["title"] = opts[
+                "zlabel"
+            ]
 
         data_to_send = {
             "data": [trace],
