@@ -1698,6 +1698,122 @@ class Visdom(object):
         )
 
     @pytorch_wrap
+    def image_heatmap(self, img, heatmap, win=None, env=None, opts=None):
+        """
+        Overlay a heatmap on an image.
+
+        `img` is a `CxHxW` or `HxW` tensor (uint8 or float, same rules as
+        `image()`). `heatmap` is an `HxW` float array with values in [0, 1]
+        where 1.0 marks the highest activation. The two are blended in Python
+        and sent as a single image, so no frontend changes are required.
+
+        The following `opts` are supported:
+
+        - `opts.alpha`:    heatmap blend strength (`float` in [0, 1]; default = 0.5)
+        - `opts.colormap`: matplotlib colormap name (`string`; default = `'jet'`)
+        - `opts.caption`:  caption below the image (`string`; optional)
+        - `opts.jpgquality`: JPEG quality (`number` in (0, 100]; default = PNG)
+        - `opts.normalize`: min-max scale the base image (`boolean`; default = `False`)
+        """
+        opts = {} if opts is None else dict(opts)
+        _title2str(opts)
+        _assert_opts(opts)
+
+        img = np.asarray(img)
+        if np.issubdtype(img.dtype, np.floating):
+            finite = img[np.isfinite(img)]
+            if finite.size > 0:
+                img_min, img_max = float(finite.min()), float(finite.max())
+            else:
+                img_min, img_max = 0.0, 0.0
+            if opts.get("normalize", False):
+                if img_max > img_min:
+                    img = (img - img_min) / (img_max - img_min) * 255.0
+                else:
+                    img = np.zeros_like(img)
+            elif img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
+                img = img * 255.0
+            elif img_min >= -1.0 - 1e-5 and img_max <= 1.0 + 1e-5:
+                img = (img + 1.0) / 2.0 * 255.0
+            img = np.nan_to_num(img, nan=0.0, posinf=255.0, neginf=0.0)
+            img = np.uint8(np.clip(img, 0, 255))
+
+        if img.ndim == 2:
+            H, W = img.shape
+            img_rgb = np.stack([img, img, img], axis=-1)
+        elif img.ndim == 3:
+            nchannels = img.shape[0]
+            H, W = img.shape[1], img.shape[2]
+            if nchannels == 1:
+                img_rgb = np.stack([img[0], img[0], img[0]], axis=-1)
+            elif nchannels == 3:
+                img_rgb = np.transpose(img, (1, 2, 0))
+            elif nchannels == 4:
+                img_rgb = np.transpose(img, (1, 2, 0))[:, :, :3]
+            else:
+                raise ValueError(
+                    "img must have 1, 3, or 4 channels; got {}".format(nchannels)
+                )
+        else:
+            raise ValueError(
+                "img must be 2D (H,W) or 3D (C,H,W); got {}D".format(img.ndim)
+            )
+
+        heatmap = np.asarray(heatmap, dtype=np.float32)
+        assert heatmap.shape == (H, W), (
+            "heatmap shape {} does not match image ({},{})".format(
+                heatmap.shape, H, W
+            )
+        )
+        heatmap = np.clip(heatmap, 0.0, 1.0)
+
+        colormap = opts.get("colormap", "jet")
+        try:
+            import matplotlib.cm as _cm
+            cmap = getattr(_cm, colormap, _cm.jet)
+            heatmap_rgb = (cmap(heatmap)[:, :, :3] * 255).astype(np.uint8)
+        except ImportError:
+            # fallback: blue -> red gradient
+            heatmap_rgb = np.stack(
+                [heatmap, np.zeros_like(heatmap), 1.0 - heatmap], axis=-1
+            )
+            heatmap_rgb = (heatmap_rgb * 255).astype(np.uint8)
+
+        alpha = float(opts.get("alpha", 0.5))
+        blended = (
+            (1.0 - alpha) * img_rgb.astype(np.float32)
+            + alpha * heatmap_rgb.astype(np.float32)
+        ).clip(0, 255).astype(np.uint8)
+
+        im = Image.fromarray(blended, mode="RGB")
+        buf = BytesIO()
+        image_type = "png"
+        imsave_args = {}
+        jpgquality = opts.get("jpgquality")
+        if jpgquality is not None:
+            image_type = "jpeg"
+            imsave_args["quality"] = jpgquality
+        im.save(buf, format=image_type.upper(), **imsave_args)
+        b64encoded = b64.b64encode(buf.getvalue()).decode("utf-8")
+
+        opts["width"] = opts.get("width", W)
+        opts["height"] = opts.get("height", H)
+
+        data = [
+            {
+                "content": {
+                    "src": "data:image/" + image_type + ";base64," + b64encoded,
+                    "caption": opts.get("caption"),
+                },
+                "type": "image",
+            }
+        ]
+        return self._send(
+            {"data": data, "win": win, "eid": env, "opts": opts},
+            endpoint="events",
+        )
+
+    @pytorch_wrap
     def images(self, tensor, nrow=8, padding=2, win=None, env=None, opts=None):
         """
         Given a 4D tensor of shape (B x C x H x W),
@@ -1919,6 +2035,83 @@ class Visdom(object):
             "opts": opts,
         }
         return self._send(data_to_send, endpoint="update")
+
+    @pytorch_wrap
+    def pointcloud(self, xyz, rgb=None, win=None, env=None, opts=None):
+        """
+        This function draws a 3D point cloud using Plotly scatter3d.
+
+        `xyz` is an `Nx3` array of point coordinates.
+        `rgb` is an optional `Nx3` array of per-point colors accepted as
+        uint8 [0, 255] or float [0, 1].
+
+        The following `opts` are supported:
+
+        - `opts.markersize` : point size (`number`; default = `2`)
+        - `opts.opacity`    : point opacity (`number`; default = `1.0`)
+        - `opts.title`      : plot title
+        - `opts.xlabel`     : x-axis label
+        - `opts.ylabel`     : y-axis label
+        - `opts.zlabel`     : z-axis label
+        """
+        xyz = np.asarray(xyz, dtype=np.float64)
+        assert xyz.ndim == 2 and xyz.shape[1] == 3, (
+            "xyz must have shape (N, 3); got {}".format(xyz.shape)
+        )
+        assert xyz.shape[0] > 0, "xyz must contain at least one point"
+
+        opts = {} if opts is None else dict(opts)
+        _title2str(opts)
+        _assert_opts(opts)
+
+        marker = {
+            "size": opts.get("markersize", 2),
+            "opacity": opts.get("opacity", 1.0),
+            "line": {"width": 0},
+        }
+
+        if rgb is not None:
+            rgb = np.asarray(rgb, dtype=np.float64)
+            assert rgb.shape == (xyz.shape[0], 3), (
+                "rgb must have shape ({}, 3); got {}".format(xyz.shape[0], rgb.shape)
+            )
+            if rgb.max() <= 1.0:
+                rgb = (rgb * 255).clip(0, 255)
+            else:
+                rgb = rgb.clip(0, 255)
+            rgb = rgb.astype(np.uint8)
+            marker["color"] = [
+                "rgb({},{},{})".format(int(r), int(g), int(b))
+                for r, g, b in rgb
+            ]
+
+        trace = _scrub_dict({
+            "type": "scatter3d",
+            "mode": "markers",
+            "x": xyz[:, 0].tolist(),
+            "y": xyz[:, 1].tolist(),
+            "z": xyz[:, 2].tolist(),
+            "marker": marker,
+        })
+
+        # Build layout: reuse _opts2layout with a small remap for z-axis label.
+        layout_opts = dict(opts)
+        if "zlabel" in layout_opts:
+            layout_opts["zlabel"] = layout_opts.pop("zlabel")
+        layout = _opts2layout(layout_opts, is3d=True)
+        if "zlabel" in opts:
+            layout.setdefault("scene", {}).setdefault(
+                "zaxis", {}
+            )["title"] = opts["zlabel"]
+
+        data_to_send = {
+            "data": [trace],
+            "win": win,
+            "eid": env,
+            "layout": layout,
+            "opts": opts,
+        }
+        return self._send(data_to_send, endpoint="events")
 
     @pytorch_wrap
     def scatter(self, X, Y=None, win=None, env=None, opts=None, update=None, name=None):
