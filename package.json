@@ -25,8 +25,8 @@
     "pngjs": "^7.0.0",
     "prettier": "^3.9.4",
     "react-devtools": "^7.0.1",
-    "webpack": "^5.108.3",
-    "webpack-cli": "^7.1.0",
+    "webpack": "^5.108.4",
+    "webpack-cli": "^7.2.1",
     "webpack-merge": "^6.0.1"
   },
   "scripts": {
