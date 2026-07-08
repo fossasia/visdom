@@ -8,6 +8,7 @@ is in place so a future refactor cannot silently bypass the backend.
 """
 
 import json
+import os
 import tempfile
 import types
 import unittest
@@ -16,7 +17,8 @@ from unittest import mock
 from visdom.data_model.base import DataStore
 from visdom.data_model.json_store import JSONStore
 from visdom.server.app import Application
-from visdom.server.handlers.web_handlers import SaveHandler
+from visdom.server.handlers.socket_handlers import AnySocketHandlerOrWrapper
+from visdom.server.handlers.web_handlers import DeleteEnvHandler, SaveHandler
 from visdom.utils.server_utils import LazyEnvData
 
 
@@ -127,6 +129,77 @@ class TestLoadStateWiring(unittest.TestCase):
         app = Application(port=8097, env_path=self.env_path)
         self.assertIn("main", app.state)
         self.assertTrue(JSONStore(self.env_path).env_exists("main"))
+
+
+class TestDeleteWiring(unittest.TestCase):
+    """PR #4: env deletion routes through ``storage.delete_env`` (no direct FS)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.env_path = self._tmp.name
+        self.store = JSONStore(self.env_path)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _spy_delete(self):
+        calls = []
+        real = self.store.delete_env
+
+        def spy(eid):
+            calls.append(eid)
+            return real(eid)
+
+        self.store.delete_env = spy
+        return calls
+
+    def test_web_delete_routes_through_storage(self):
+        self.store.save_env("expt", _env())
+        self.assertTrue(self.store.env_exists("expt"))
+        calls = self._spy_delete()
+        handler = types.SimpleNamespace(
+            storage=self.store,
+            state={"expt": _env()},
+            env_path=self.env_path,
+            subs={},
+        )
+        DeleteEnvHandler.wrap_func(handler, {"eid": "expt"})
+        self.assertEqual(calls, ["expt"])
+        self.assertNotIn("expt", handler.state)
+        self.assertFalse(self.store.env_exists("expt"))
+        self.assertFalse(
+            os.path.exists(os.path.join(self.env_path, "expt.json"))
+        )
+
+    def test_web_delete_protects_main(self):
+        self.store.save_env("main", _env())
+        calls = self._spy_delete()
+        handler = types.SimpleNamespace(
+            storage=self.store,
+            state={"main": _env()},
+            env_path=self.env_path,
+            subs={},
+        )
+        DeleteEnvHandler.wrap_func(handler, {"eid": "main"})
+        self.assertEqual(calls, [])
+        self.assertTrue(self.store.env_exists("main"))
+
+    def test_socket_delete_routes_through_storage(self):
+        self.store.save_env("expt", _env())
+        calls = self._spy_delete()
+        fake = types.SimpleNamespace(
+            readonly=False,
+            storage=self.store,
+            state={"expt": _env()},
+            env_path=self.env_path,
+            subs={},
+        )
+        AnySocketHandlerOrWrapper.on_message(
+            fake, json.dumps({"cmd": "delete_env", "eid": "expt"})
+        )
+        self.assertEqual(calls, ["expt"])
+        self.assertNotIn("expt", fake.state)
+        self.assertFalse(self.store.env_exists("expt"))
 
 
 class TestLazyEnvDataBackend(unittest.TestCase):
