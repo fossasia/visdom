@@ -144,7 +144,6 @@ def isndarray(n):
 
 from visdom.utils.shared_utils import NanSafeEncoder
 
-
 # TODO: In appropriate places, we need to change many numpy calls to use
 #       nan-aware ones, e.g., `X.max` => `np.nanmax(X)`.
 
