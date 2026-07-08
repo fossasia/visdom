@@ -44,7 +44,6 @@ requirements = [
     "scipy",
     "requests",
     "tornado",
-    "six",
     "jsonpatch",
     "websocket-client",
     "networkx",
@@ -64,7 +63,7 @@ setup(
     long_description_content_type="text/markdown",
     long_description=readme,
     license="Apache-2.0",
-    python_requires=">=3.10",
+    python_requires=">=3.12",
     # Package info
     packages=find_packages(where="py"),
     package_dir={"": "py"},

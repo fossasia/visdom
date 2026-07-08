@@ -9,17 +9,21 @@ const basic_examples = [
   ['Bar Plot', 'plot_bar_basic'],
   ['Scatter Plot', 'plot_scatter_basic'],
   ['Surface Plot', 'plot_surface_basic'],
+  ['ROC Curve', 'plot_roc_curve'],
+  ['PR Curve', 'plot_pr_curve'],
   ['Box Plot', 'plot_special_boxplot'],
   ['Quiver Plot', 'plot_special_quiver'],
   ['Violin Plot', 'plot_violin_basic'],
   // ["Mesh Plot", "plot_special_mesh"], // disabled due to webgl
   ['Graph Plot', 'plot_special_graph'],
+  ['Sankey Plot', 'plot_special_sankey'],
   ['Matplotlib Plot', 'misc_plot_matplot'],
   ['Latex Plot', 'misc_plot_latex'],
   ['Video Pane', 'misc_video_tensor'],
   // ["Audio Pane", "misc_audio_basic"], // bug: disabled due to inconsistent resize
   ['Properties Pane', 'properties_basic'],
   ['HTML Table', 'html_table'],
+  ['Confusion Matrix', 'plot_confusion_matrix_basic'],
 ];
 
 basic_examples.forEach((setting) => {
