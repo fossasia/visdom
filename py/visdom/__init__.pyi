@@ -236,6 +236,14 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
+    def pointcloud3d(
+        self,
+        xyz: Tensor,
+        rgb: Optional[Tensor] = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
     def sankey(
         self,
         source: Tensor,
