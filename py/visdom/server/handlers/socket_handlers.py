@@ -242,6 +242,59 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 return
             self.state[eid]["reload"][win] = msg.get("data")
 
+        elif cmd == "update_plot_layout":
+            eid = msg.get("eid")
+            win = msg.get("win")
+            frame = msg.get("frame")
+            patch = msg.get("data")
+            if eid is None or win is None or eid not in self.state:
+                logging.warning(
+                    f"update_plot_layout: env {eid!r} or win {win!r}"
+                    f" not found, dropping event"
+                )
+                return
+            if not isinstance(patch, dict):
+                logging.warning(
+                    f"update_plot_layout: expected dict patch, got"
+                    f" {type(patch).__name__!r}, dropping event"
+                )
+                return
+
+            env = self.state[eid]["jsons"]
+            if win not in env:
+                logging.warning(
+                    f"update_plot_layout: pane {win!r} not found"
+                    f" in env {eid!r}, dropping event"
+                )
+                return
+
+            p = env[win]
+
+            if p.get("type") == "plot_history":
+                content_list = p.get("content")
+                if (
+                    not isinstance(content_list, list)
+                    or frame is None
+                    or not (0 <= frame < len(content_list))
+                ):
+                    logging.warning(
+                        f"update_plot_layout: invalid frame {frame!r}"
+                        f" for plot_history pane {win!r}, dropping event"
+                    )
+                    return
+                layout = content_list[frame].setdefault("layout", {})
+            else:
+                content = p.get("content")
+                if not isinstance(content, dict):
+                    logging.warning(
+                        f"update_plot_layout: pane {win!r} has no plot"
+                        f" content, dropping event"
+                    )
+                    return
+                layout = content.setdefault("layout", {})
+
+            layout.update(patch)
+
         elif cmd == "pop_embeddings_pane":
             packet = msg.get("data")
             if not isinstance(packet, dict):
