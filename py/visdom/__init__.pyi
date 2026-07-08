@@ -4,7 +4,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Optional, List, Any, Union, Mapping, overload, Text
+from typing import Optional, List, Any, Union, Mapping, overload, Text, Callable
 
 ### Type aliases for commonly-used types.
 # For optional 'options' parameters.
@@ -262,6 +262,13 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
+    def properties(
+        self,
+        data: List,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
     def table(
         self,
         headers: List[Any],
@@ -269,4 +276,32 @@ class Visdom:
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
+    ) -> _SendReturn: ...
+    def embeddings(
+        self,
+        features: Tensor,
+        labels: Tensor,
+        data_getter: Optional[Callable[[int], Any]] = ...,
+        data_type: _OptStr = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
+    def sunburst(
+        self,
+        labels: Tensor,
+        parents: Tensor,
+        values: Optional[Tensor] = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
+    def dual_axis_lines(
+        self,
+        X: Optional[Tensor] = ...,
+        Y1: Optional[Tensor] = ...,
+        Y2: Optional[Tensor] = ...,
+        opts: _OptOps = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
     ) -> _SendReturn: ...
