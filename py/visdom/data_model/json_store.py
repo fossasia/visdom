@@ -13,7 +13,9 @@ import os
 import re
 
 from visdom.data_model.base import DataStore
+from visdom.server.defaults import LAYOUT_FILE
 from visdom.utils.server_utils import escape_eid, serialize_env
+from visdom.utils.shared_utils import ensure_dir_exists
 
 HASHED_ENV_RE = re.compile(r"^hash_[a-f0-9]{64}\.json$", re.IGNORECASE)
 
@@ -138,3 +140,26 @@ class JSONStore(DataStore):
         if self.env_path is None:
             return False
         return self._resolve_existing(eid) is not None
+
+    def _layout_path(self):
+        """Return the ``<env_path>/view/<LAYOUT_FILE>`` path for saved layouts."""
+        return os.path.join(self.env_path, "view", LAYOUT_FILE)
+
+    def save_layouts(self, layouts):
+        """Write the saved-views layout string; no-op when persistence is off."""
+        if self.env_path is None:
+            return
+        layout_path = self._layout_path()
+        ensure_dir_exists(os.path.dirname(layout_path))
+        with open(layout_path, "w") as fn:
+            fn.write(layouts)
+
+    def load_layouts(self):
+        """Read the saved-views layout string; return ``""`` if none is stored."""
+        if self.env_path is None:
+            return ""
+        layout_path = self._layout_path()
+        if os.path.isfile(layout_path):
+            with open(layout_path, "r") as fn:
+                return fn.read()
+        return ""

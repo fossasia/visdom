@@ -202,6 +202,40 @@ class TestDeleteWiring(unittest.TestCase):
         self.assertFalse(self.store.env_exists("expt"))
 
 
+class TestLayoutWiring(unittest.TestCase):
+    """PR #5: ``Application`` layout save/load route through ``storage``."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.env_path = self._tmp.name
+        self.app = Application(port=8097, env_path=self.env_path)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_save_and_load_route_through_storage(self):
+        saved = []
+        real_save = self.app.storage.save_layouts
+
+        def spy(layouts):
+            saved.append(layouts)
+            return real_save(layouts)
+
+        self.app.storage.save_layouts = spy
+        self.app.layouts = '[["v", {}]]'
+        self.app.save_layouts()
+        self.assertEqual(saved, ['[["v", {}]]'])
+
+        # A fresh Application reads the same blob back through storage.
+        app2 = Application(port=8097, env_path=self.env_path)
+        self.assertEqual(app2.layouts, '[["v", {}]]')
+
+    def test_none_path_does_not_touch_storage(self):
+        app = Application(port=8097, env_path=None)
+        # env_path=None short-circuits before storage; layouts stay empty.
+        self.assertEqual(app.load_layouts(), "")
+
+
 class TestLazyEnvDataBackend(unittest.TestCase):
     """``LazyEnvData`` reads through the DataStore and defers until first access."""
 
