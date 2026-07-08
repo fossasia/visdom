@@ -1,0 +1,14 @@
+[tool.pytest.ini_options]
+# Scope discovery to the tracked suite under py/ so the experimental scratch
+# scripts in the repo root (test_*.py, test/) are ignored.
+testpaths = ["py/tests"]
+# The visdom package lives under py/ (see setup.py package_dir). Adding it to the
+# path lets `import visdom` resolve without an editable install.
+pythonpath = ["py"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-ra -q"
+markers = [
+    "server: test requires a running visdom server (deselect with -m 'not server')",
+]

@@ -202,3 +202,27 @@ jobs:
         with:
           name: cypress-screenshots-functional-polling
           path: cypress/screenshots
+
+  playwright-test:
+    name: "Playwright Functional Test"
+    runs-on: ubuntu-latest
+    needs: install-and-build
+    steps:
+      - name: "Checkout Repository"
+        uses: actions/checkout@v7.0.0
+      - uses: ./.github/actions/prepare
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+
+
+      - name: Run Playwright tests
+        run: npm run test:pw
+
+      - name: Upload Playwright Report
+        uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright/playwright-report/
