@@ -16,10 +16,8 @@ the data_model itself.
 import copy
 import json
 import logging
-import os
 import time
 import types
-import hashlib
 from collections import deque
 from enum import Enum
 
@@ -169,27 +167,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 logging.info(f"closing environment {eid}")
                 self.state.pop(eid, None)
                 clear_deleted(self.env_path, eid)
-                if self.env_path is not None:
-                    p = os.path.join(self.env_path, "{0}.json".format(eid))
-                    if os.path.exists(p):
-                        try:
-                            os.remove(p)
-                        except FileNotFoundError:
-                            pass
-                        except OSError as e:
-                            logging.error(f"Failed to delete {p}: {e}")
-                    else:
-                        hashed_id = hashlib.sha256(eid.encode("utf-8")).hexdigest()
-                        p_hashed = os.path.join(
-                            self.env_path, "hash_{0}.json".format(hashed_id)
-                        )
-                        if os.path.exists(p_hashed):
-                            try:
-                                os.remove(p_hashed)
-                            except FileNotFoundError:
-                                pass
-                            except OSError as e:
-                                logging.error(f"Failed to delete {p_hashed}: {e}")
+                self.storage.delete_env(eid)
                 broadcast_envs(self)
 
         elif cmd == "save_layouts":

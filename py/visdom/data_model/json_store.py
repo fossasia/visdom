@@ -8,6 +8,7 @@
 
 import hashlib
 import json
+import logging
 import os
 import re
 
@@ -123,7 +124,13 @@ class JSONStore(DataStore):
         path = self._resolve_existing(eid)
         if path is None:
             return False
-        os.remove(path)
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            return False
+        except OSError as e:
+            logging.error(f"Failed to delete {path}: {e}")
+            return False
         return True
 
     def env_exists(self, eid):
