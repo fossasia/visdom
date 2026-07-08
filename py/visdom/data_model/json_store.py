@@ -6,6 +6,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import errno
 import hashlib
 import json
 import logging
@@ -13,9 +14,9 @@ import os
 import re
 
 from visdom.data_model.base import DataStore
-from visdom.server.defaults import LAYOUT_FILE
+from visdom.server.defaults import LAYOUT_FILE, UNDO_DIRNAME
 from visdom.utils.server_utils import escape_eid, serialize_env
-from visdom.utils.shared_utils import ensure_dir_exists
+from visdom.utils.shared_utils import ensure_dir_exists, NanSafeEncoder
 
 HASHED_ENV_RE = re.compile(r"^hash_[a-f0-9]{64}\.json$", re.IGNORECASE)
 
@@ -163,3 +164,63 @@ class JSONStore(DataStore):
             with open(layout_path, "r") as fn:
                 return fn.read()
         return ""
+
+    def _undo_paths(self, eid):
+        """Return ``(undo_dir, plain_path, hashed_path)`` for ``eid``'s undo file.
+
+        ``hashed_path`` mirrors ``serialize_env``'s fallback for env ids whose
+        plain filename would exceed the filesystem limit.
+        """
+        undo_dir = os.path.join(self.env_path, UNDO_DIRNAME)
+        plain = os.path.join(undo_dir, "{0}.json".format(eid))
+        hashed_id = hashlib.sha256(eid.encode("utf-8")).hexdigest()
+        hashed = os.path.join(undo_dir, "hash_{0}.json".format(hashed_id))
+        return undo_dir, plain, hashed
+
+    def load_undo(self, eid):
+        """Return ``eid``'s undo stack (a list), or ``[]`` if missing/corrupt."""
+        if self.env_path is None:
+            return []
+        _, plain, hashed = self._undo_paths(eid)
+        path = plain if os.path.exists(plain) else hashed
+        if not os.path.exists(path):
+            return []
+        try:
+            with open(path, "r") as fn:
+                data = json.loads(fn.read())
+        except (OSError, ValueError):
+            logging.warning(f"Could not read undo stack for env {eid}; ignoring it")
+            return []
+        return data if isinstance(data, list) else []
+
+    def save_undo(self, eid, stack):
+        """Atomically persist ``eid``'s undo stack; no-op when persistence is off."""
+        if self.env_path is None:
+            return
+        undo_dir, plain, hashed = self._undo_paths(eid)
+        os.makedirs(undo_dir, exist_ok=True)
+        payload = json.dumps(stack, cls=NanSafeEncoder)
+        try:
+            tmp = plain + ".tmp"
+            with open(tmp, "w") as fn:
+                fn.write(payload)
+            os.replace(tmp, plain)
+        except OSError as e:
+            if e.errno != errno.ENAMETOOLONG and getattr(e, "winerror", None) != 206:
+                raise
+            tmp = hashed + ".tmp"
+            with open(tmp, "w") as fn:
+                fn.write(payload)
+            os.replace(tmp, hashed)
+
+    def clear_undo(self, eid):
+        """Remove ``eid``'s on-disk undo history; no-op when persistence is off."""
+        if self.env_path is None:
+            return
+        _, plain, hashed = self._undo_paths(eid)
+        for path in (plain, hashed):
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except OSError as e:
+                    logging.error(f"Failed to delete undo file {path}: {e}")

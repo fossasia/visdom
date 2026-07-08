@@ -407,7 +407,7 @@ class CloseHandler(BaseHandler):
         for win in keys:
             p_data = handler.state[eid]["jsons"].pop(win, None)
             if p_data is not None:
-                push_deleted(handler.env_path, eid, win, p_data)
+                push_deleted(handler.storage, eid, win, p_data)
             broadcast(handler, json.dumps({"command": "close", "data": win}), eid)
 
     @check_auth
@@ -427,7 +427,7 @@ class DeleteEnvHandler(BaseHandler):
             if eid == "main":
                 return
             handler.state.pop(eid, None)
-            clear_deleted(handler.env_path, eid)
+            clear_deleted(handler.storage, eid)
             handler.storage.delete_env(eid)
             broadcast_envs(handler)
 
@@ -507,7 +507,11 @@ class EnvHandler(BaseHandler):
             sid = msg_args["sid"]
             if sid in self.subs:
                 load_env(
-                    self.state, escape_eid(args), self.subs[sid], env_path=self.env_path
+                    self.state,
+                    escape_eid(args),
+                    self.subs[sid],
+                    self.storage,
+                    env_path=self.env_path,
                 )
         if "eid" in msg_args:
             eid = escape_eid(msg_args["eid"])

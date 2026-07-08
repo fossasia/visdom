@@ -133,6 +133,35 @@ class TestJSONStore(unittest.TestCase):
         """load_layouts returns '' when no layout file has been written."""
         self.assertEqual(self.backend.load_layouts(), "")
 
+    def test_undo_round_trip(self):
+        """A saved undo stack reads back unchanged."""
+        stack = [["win_0", {"id": "win_0"}], ["win_1", {"id": "win_1"}]]
+        self.backend.save_undo("expt", stack)
+        self.assertEqual(self.backend.load_undo("expt"), stack)
+
+    def test_load_undo_missing_returns_empty(self):
+        """load_undo returns [] when no undo file exists."""
+        self.assertEqual(self.backend.load_undo("expt"), [])
+
+    def test_save_undo_writes_under_dot_undo(self):
+        """save_undo writes <env_path>/.undo/<eid>.json."""
+        self.backend.save_undo("expt", [["win_0", {"id": "win_0"}]])
+        expected = os.path.join(self.env_path, ".undo", "expt.json")
+        self.assertTrue(os.path.exists(expected))
+
+    def test_clear_undo_removes_history(self):
+        """clear_undo drops a previously saved undo stack."""
+        self.backend.save_undo("expt", [["win_0", {"id": "win_0"}]])
+        self.backend.clear_undo("expt")
+        self.assertEqual(self.backend.load_undo("expt"), [])
+
+    def test_undo_long_name_hash_fallback_round_trips(self):
+        """An over-long env name uses the hash_<sha256>.json undo fallback."""
+        long_eid = "e" * 5000
+        stack = [["win_0", {"id": "win_0"}]]
+        self.backend.save_undo(long_eid, stack)
+        self.assertEqual(self.backend.load_undo(long_eid), stack)
+
 
 class TestJSONStoreNoPath(unittest.TestCase):
     """JSONStore(None): persistence disabled (in-memory-only mode)."""
@@ -176,6 +205,18 @@ class TestJSONStoreNoPath(unittest.TestCase):
     def test_load_layouts_returns_empty(self):
         """load_layouts returns '' when persistence is disabled."""
         self.assertEqual(self.backend.load_layouts(), "")
+
+    def test_load_undo_returns_empty(self):
+        """load_undo returns [] when persistence is disabled."""
+        self.assertEqual(self.backend.load_undo("expt"), [])
+
+    def test_save_undo_is_noop(self):
+        """save_undo persists nothing when persistence is disabled."""
+        self.assertIsNone(self.backend.save_undo("expt", [["w", {}]]))
+
+    def test_clear_undo_is_noop(self):
+        """clear_undo removes nothing when persistence is disabled."""
+        self.assertIsNone(self.backend.clear_undo("expt"))
 
 
 if __name__ == "__main__":

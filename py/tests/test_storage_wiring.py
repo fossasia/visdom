@@ -17,9 +17,16 @@ from unittest import mock
 from visdom.data_model.base import DataStore
 from visdom.data_model.json_store import JSONStore
 from visdom.server.app import Application
+from visdom.server.defaults import DEFAULT_MAX_UNDO_HISTORY
 from visdom.server.handlers.socket_handlers import AnySocketHandlerOrWrapper
 from visdom.server.handlers.web_handlers import DeleteEnvHandler, SaveHandler
-from visdom.utils.server_utils import LazyEnvData
+from visdom.utils.server_utils import (
+    LazyEnvData,
+    clear_deleted,
+    count_deleted,
+    pop_deleted,
+    push_deleted,
+)
 
 
 def _env(win_id="win_0"):
@@ -234,6 +241,51 @@ class TestLayoutWiring(unittest.TestCase):
         app = Application(port=8097, env_path=None)
         # env_path=None short-circuits before storage; layouts stay empty.
         self.assertEqual(app.load_layouts(), "")
+
+
+class TestUndoWiring(unittest.TestCase):
+    """PR #6: undo helpers persist through the DataStore, not raw env_path I/O."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.store = JSONStore(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_push_then_pop_is_lifo(self):
+        push_deleted(self.store, "expt", "win_0", {"id": "win_0"})
+        push_deleted(self.store, "expt", "win_1", {"id": "win_1"})
+        self.assertEqual(count_deleted(self.store, "expt"), 2)
+        self.assertEqual(pop_deleted(self.store, "expt"), ("win_1", {"id": "win_1"}))
+        self.assertEqual(pop_deleted(self.store, "expt"), ("win_0", {"id": "win_0"}))
+        self.assertIsNone(pop_deleted(self.store, "expt"))
+
+    def test_push_trims_to_max_history(self):
+        for i in range(DEFAULT_MAX_UNDO_HISTORY + 3):
+            push_deleted(self.store, "expt", f"win_{i}", {"id": f"win_{i}"})
+        self.assertEqual(count_deleted(self.store, "expt"), DEFAULT_MAX_UNDO_HISTORY)
+        # The most recently closed pane is still on top after trimming.
+        win_id, _ = pop_deleted(self.store, "expt")
+        self.assertEqual(win_id, f"win_{DEFAULT_MAX_UNDO_HISTORY + 2}")
+
+    def test_clear_removes_history(self):
+        push_deleted(self.store, "expt", "win_0", {"id": "win_0"})
+        clear_deleted(self.store, "expt")
+        self.assertEqual(count_deleted(self.store, "expt"), 0)
+
+    def test_push_routes_through_store(self):
+        saved = []
+        real_save = self.store.save_undo
+
+        def spy(eid, stack):
+            saved.append((eid, list(stack)))
+            return real_save(eid, stack)
+
+        self.store.save_undo = spy
+        push_deleted(self.store, "expt", "win_0", {"id": "win_0"})
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(saved[0][0], "expt")
 
 
 class TestLazyEnvDataBackend(unittest.TestCase):
