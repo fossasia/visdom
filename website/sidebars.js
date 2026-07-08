@@ -61,6 +61,7 @@ const sidebars = {
         'api/generic-plots',
         'api/customizing-plots',
         'api/network-graph',
+        'api/point-cloud',
         'api/other-functions',
       ],
     },

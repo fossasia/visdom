@@ -301,6 +301,7 @@ The following API is currently supported:
 - [`vis.sankey`](#vissankey)   : sankey (flow) diagrams
 - [`vis.dual_axis_lines`](#visdual_axis_lines)     : double y axis line plots
 - [`vis.graph`](#visgraph)    : network graphs
+- [`vis.pointcloud3d`](#vispointcloud3d)  : WebGL 3D point clouds
 
 ### Generic Plots
 Note that the server API adheres to the Plotly convention of `data` and `layout` objects, such that you can produce your own arbitrary `Plotly` visualizations:
@@ -791,6 +792,22 @@ The following opts are supported:
 - `opts.showVertexLabels` : Whether to show vertex labels. Default : true
 - `opts.showEdgeLabels` : Whether to show edge labels. Default : false
 - `opts.scheme` : Whether all nodes should have "same" color or "different". Default : "same"
+
+#### vis.pointcloud3d
+
+This function renders a 3D point cloud in a dedicated WebGL pane (backed by [Three.js](https://threejs.org/)) with interactive orbit, pan, and zoom controls. It takes as input an `Nx3` tensor `xyz` that specifies the coordinates of the `N` points, and an optional `Nx3` tensor `rgb` containing per-point colors (accepted as integers in `[0, 255]`, floats in `[0, 1]`, or floats in `[0, 255]`).
+
+Interact with the rendered pane using the mouse: left-drag to rotate, scroll to zoom, shift-drag to pan, and double-click to reset the camera.
+
+The following opts are supported:
+- `opts.markersize` : Size of the rendered points. Default : `2.0`
+- `opts.opacity` : Opacity of the points, between 0 and 1. Default : `1.0`
+- `opts.bgcolor` : CSS background color string for the pane. Default : `'#ffffff'`
+- `opts.show_axes` : Whether to show the XYZ axes. Default : `true`
+- `opts.default_color` : `[R, G, B]` (0-255) fallback color used for points when `rgb` is not provided. Default : `[40, 40, 40]`
+- `opts.max_points` : If set, downsamples `xyz`/`rgb` to at most this many points before rendering (hard maximum of 500,000 points).
+- `opts.downsample` : Downsampling strategy to use when `max_points` is set, either `'stride'` (evenly spaced) or `'random'`. Default : `'stride'`
+- `opts.seed` : Random seed used when `opts.downsample='random'`
 
 ### Customizing plots
 

@@ -1,5 +1,5 @@
 ---
-sidebar_position: 7
+sidebar_position: 8
 title: Other Functions
 description: Utility functions — close, delete, fork, check connection, and more
 ---
