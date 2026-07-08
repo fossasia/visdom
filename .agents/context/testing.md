@@ -42,13 +42,13 @@ Always use port `8098` and `-env_path /tmp` for isolation.
   pytest functions both work — pytest auto-discovers unittest).
 - Keep them hermetic (no running server). A test that genuinely needs a live server must be
   marked `@pytest.mark.server` so CI can deselect it.
-- Follow existing patterns: `test_server_utils.py` (pure functions), `test_window_lifecycle.py`,
-  `test_environment_lifecycle.py`.
+- Start with simple hermetic tests (e.g., `test_smoke.py`) and add focused unit tests for
+  server/window/env lifecycle code as coverage grows.
 
 ## CI
 
-- `python-tests.yml` runs `pytest -m "not server"` on a Python 3.12 / 3.13 matrix for
-  every pull request (and on push to master)
+- `python-tests.yml` runs `pytest -m "not server"` on a Python version matrix for every pull
+  request (and on pushes to master/dev)
 - Visual regression compares PR screenshots against base branch
 - `update-js-build-files.yml` auto-compiles JS on master
 - `pypi.yml` publishes to PyPI when VERSION changes
