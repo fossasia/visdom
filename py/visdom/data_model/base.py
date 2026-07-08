@@ -63,3 +63,18 @@ class DataStore(ABC):
     def load_layouts(self):
         """Return the persisted saved-views layout string, or ``""`` if none."""
         raise NotImplementedError
+
+    @abstractmethod
+    def load_undo(self, eid):
+        """Return ``eid``'s closed-pane undo stack (a list), or ``[]`` if none."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def save_undo(self, eid, stack):
+        """Persist ``eid``'s closed-pane undo stack (a list)."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def clear_undo(self, eid):
+        """Remove ``eid``'s persisted closed-pane undo history."""
+        raise NotImplementedError

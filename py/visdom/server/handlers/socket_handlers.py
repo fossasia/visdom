@@ -107,7 +107,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     return
                 p_data = self.state[eid]["jsons"].pop(msg["data"], None)
                 if p_data is not None:
-                    push_deleted(self.env_path, eid, msg["data"], p_data)
+                    push_deleted(self.storage, eid, msg["data"], p_data)
                 env = self.state.get(msg["eid"])
                 if env is None:
                     return
@@ -119,14 +119,14 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     "pane_data": p_data,
                 }
                 send_to_sources(self, event)
-                broadcast_undo_state(self, eid, self.env_path)
+                broadcast_undo_state(self, eid, self.storage)
 
         elif cmd == "undo":
             if "eid" in msg:
                 eid = escape_eid(msg["eid"])
                 if eid not in self.state:
                     return
-                popped = pop_deleted(self.env_path, eid)
+                popped = pop_deleted(self.storage, eid)
                 if popped:
                     win_id, p_data = popped
                     env = self.state[eid]["jsons"]
@@ -140,7 +140,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                         json.dumps(broadcast_msg, cls=NanSafeEncoder),
                         eid,
                     )
-                broadcast_undo_state(self, eid, self.env_path)
+                broadcast_undo_state(self, eid, self.storage)
 
         elif cmd == "save":
             # save localStorage window metadata
@@ -166,7 +166,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     return
                 logging.info(f"closing environment {eid}")
                 self.state.pop(eid, None)
-                clear_deleted(self.env_path, eid)
+                clear_deleted(self.storage, eid)
                 self.storage.delete_env(eid)
                 broadcast_envs(self)
 
