@@ -53,7 +53,6 @@ from visdom.server.defaults import (
     DEFAULT_MAX_OLD_CONTENT,
     DEFAULT_MAX_TEXT_LINES,
     DEFAULT_PORT,
-    LAYOUT_FILE,
 )
 
 
@@ -142,12 +141,7 @@ class Application(tornado.web.Application):
                 RuntimeWarning,
             )
             return
-        layout_dir = os.path.join(self.env_path, "view")
-        ensure_dir_exists(layout_dir)
-
-        layout_filepath = os.path.join(layout_dir, LAYOUT_FILE)
-        with open(layout_filepath, "w") as fn:
-            fn.write(self.layouts)
+        self.storage.save_layouts(self.layouts)
 
     def load_layouts(self):
         if self.env_path is None:
@@ -157,14 +151,7 @@ class Application(tornado.web.Application):
                 RuntimeWarning,
             )
             return ""
-        layout_dir = os.path.join(self.env_path, "view")
-        layout_filepath = os.path.join(layout_dir, LAYOUT_FILE)
-        if os.path.isfile(layout_filepath):
-            with open(layout_filepath, "r") as fn:
-                return fn.read()
-        else:
-            ensure_dir_exists(layout_dir)
-            return ""
+        return self.storage.load_layouts()
 
     def load_state(self):
         state = {}

@@ -115,6 +115,24 @@ class TestJSONStore(unittest.TestCase):
         loaded = self.backend.load_env(long_eid)
         self.assertEqual(loaded["jsons"], _env()["jsons"])
 
+    def test_layouts_round_trip(self):
+        """Saved layouts read back byte-for-byte as the same string."""
+        blob = '[["view A", {"win_0": [0, 0, 3, 3]}]]'
+        self.backend.save_layouts(blob)
+        self.assertEqual(self.backend.load_layouts(), blob)
+
+    def test_save_layouts_writes_expected_file(self):
+        """save_layouts writes <env_path>/view/layouts.json."""
+        self.backend.save_layouts("[]")
+        expected = os.path.join(self.env_path, "view", "layouts.json")
+        self.assertTrue(os.path.exists(expected))
+        with open(expected) as fn:
+            self.assertEqual(fn.read(), "[]")
+
+    def test_load_layouts_missing_returns_empty(self):
+        """load_layouts returns '' when no layout file has been written."""
+        self.assertEqual(self.backend.load_layouts(), "")
+
 
 class TestJSONStoreNoPath(unittest.TestCase):
     """JSONStore(None): persistence disabled (in-memory-only mode)."""
@@ -150,6 +168,14 @@ class TestJSONStoreNoPath(unittest.TestCase):
     def test_delete_is_noop(self):
         """delete_env removes nothing and reports False."""
         self.assertFalse(self.backend.delete_env("main"))
+
+    def test_save_layouts_is_noop(self):
+        """save_layouts persists nothing when persistence is disabled."""
+        self.assertIsNone(self.backend.save_layouts("[]"))
+
+    def test_load_layouts_returns_empty(self):
+        """load_layouts returns '' when persistence is disabled."""
+        self.assertEqual(self.backend.load_layouts(), "")
 
 
 if __name__ == "__main__":
