@@ -201,6 +201,7 @@ class JSONStore(DataStore):
         os.makedirs(undo_dir, exist_ok=True)
         payload = json.dumps(stack, cls=NanSafeEncoder)
         try:
+            target = plain
             tmp = plain + ".tmp"
             with open(tmp, "w") as fn:
                 fn.write(payload)
@@ -208,10 +209,12 @@ class JSONStore(DataStore):
         except OSError as e:
             if e.errno != errno.ENAMETOOLONG and getattr(e, "winerror", None) != 206:
                 raise
+            target = hashed
             tmp = hashed + ".tmp"
             with open(tmp, "w") as fn:
                 fn.write(payload)
             os.replace(tmp, hashed)
+        return target
 
     def clear_undo(self, eid):
         """Remove ``eid``'s on-disk undo history; no-op when persistence is off."""

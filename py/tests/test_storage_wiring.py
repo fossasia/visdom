@@ -160,16 +160,21 @@ class TestDeleteWiring(unittest.TestCase):
         self.store.delete_env = spy
         return calls
 
+    def _handler(self, state, **extra):
+        """A stand-in handler exposing only what the delete paths read."""
+        return types.SimpleNamespace(
+            storage=self.store,
+            state=state,
+            env_path=self.env_path,
+            subs={},
+            **extra,
+        )
+
     def test_web_delete_routes_through_storage(self):
         self.store.save_env("expt", _env())
         self.assertTrue(self.store.env_exists("expt"))
         calls = self._spy_delete()
-        handler = types.SimpleNamespace(
-            storage=self.store,
-            state={"expt": _env()},
-            env_path=self.env_path,
-            subs={},
-        )
+        handler = self._handler({"expt": _env()})
         DeleteEnvHandler.wrap_func(handler, {"eid": "expt"})
         self.assertEqual(calls, ["expt"])
         self.assertNotIn("expt", handler.state)
@@ -181,12 +186,7 @@ class TestDeleteWiring(unittest.TestCase):
     def test_web_delete_protects_main(self):
         self.store.save_env("main", _env())
         calls = self._spy_delete()
-        handler = types.SimpleNamespace(
-            storage=self.store,
-            state={"main": _env()},
-            env_path=self.env_path,
-            subs={},
-        )
+        handler = self._handler({"main": _env()})
         DeleteEnvHandler.wrap_func(handler, {"eid": "main"})
         self.assertEqual(calls, [])
         self.assertTrue(self.store.env_exists("main"))
@@ -194,13 +194,7 @@ class TestDeleteWiring(unittest.TestCase):
     def test_socket_delete_routes_through_storage(self):
         self.store.save_env("expt", _env())
         calls = self._spy_delete()
-        fake = types.SimpleNamespace(
-            readonly=False,
-            storage=self.store,
-            state={"expt": _env()},
-            env_path=self.env_path,
-            subs={},
-        )
+        fake = self._handler({"expt": _env()}, readonly=False)
         AnySocketHandlerOrWrapper.on_message(
             fake, json.dumps({"cmd": "delete_env", "eid": "expt"})
         )
@@ -233,13 +227,11 @@ class TestLayoutWiring(unittest.TestCase):
         self.app.save_layouts()
         self.assertEqual(saved, ['[["v", {}]]'])
 
-        # A fresh Application reads the same blob back through storage.
         app2 = Application(port=8097, env_path=self.env_path)
         self.assertEqual(app2.layouts, '[["v", {}]]')
 
     def test_none_path_does_not_touch_storage(self):
         app = Application(port=8097, env_path=None)
-        # env_path=None short-circuits before storage; layouts stay empty.
         self.assertEqual(app.load_layouts(), "")
 
 
@@ -265,7 +257,6 @@ class TestUndoWiring(unittest.TestCase):
         for i in range(DEFAULT_MAX_UNDO_HISTORY + 3):
             push_deleted(self.store, "expt", f"win_{i}", {"id": f"win_{i}"})
         self.assertEqual(count_deleted(self.store, "expt"), DEFAULT_MAX_UNDO_HISTORY)
-        # The most recently closed pane is still on top after trimming.
         win_id, _ = pop_deleted(self.store, "expt")
         self.assertEqual(win_id, f"win_{DEFAULT_MAX_UNDO_HISTORY + 2}")
 
