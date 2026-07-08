@@ -190,12 +190,31 @@ def extract_eid(args):
 
 def update_window(p, args):
     """Adds new args to a window if they exist"""
+    opts = args.get("opts", {})
+
+    if p.get("type") == "pointcloud3d":
+        # pointcloud3d stores rendering opts under p["opts"] (nested dict), not
+        # as flat top-level keys. Exception: title/width/height are UI-level and
+        # must live at the top level so the pane frame updates correctly.
+        TOP_LEVEL_KEYS = {"title", "width", "height"}
+        if opts:
+            if "opts" not in p or p["opts"] is None:
+                p["opts"] = {}
+            for k, v in opts.items():
+                if k in TOP_LEVEL_KEYS:
+                    p[k] = v
+                else:
+                    # Allow None to propagate so callers can reset an opt to default.
+                    p["opts"][k] = v
+        # Version is managed by update_packet (_update_packet_pc3d) to avoid
+        # double-incrementing and to suppress increment on no-op updates.
+        return p
+
     content = p["content"]
     layout_update = args.get("layout", {})
     for layout_name, layout_val in layout_update.items():
         if layout_val is not None:
             content["layout"][layout_name] = layout_val
-    opts = args.get("opts", {})
     for opt_name, opt_val in opts.items():
         if opt_val is not None:
             p[opt_name] = opt_val
@@ -239,8 +258,10 @@ def window(args):
                 "show_slider": opts.get("show_slider", True),
             }
         )
-    elif ptype in ["image", "text", "properties"] and is_visdom_type:
+    elif ptype in ["image", "text", "properties", "pointcloud3d"] and is_visdom_type:
         p.update({"content": args["data"][0]["content"], "type": ptype})
+        if ptype == "pointcloud3d":
+            p["opts"] = opts
     elif ptype == "network" and is_visdom_type:
         p.update(
             {

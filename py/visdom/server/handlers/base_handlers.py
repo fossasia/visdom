@@ -25,6 +25,11 @@ class BaseWebSocketHandler(tornado.websocket.WebSocketHandler):
     classes.
     """
 
+    # Raise the per-message limit to 64 MiB so that large pointcloud3d payloads
+    # (up to 500k points with RGB ≈ 10-12 MB base64-encoded) are not silently
+    # dropped by Tornado's default 10 MiB cap.
+    max_message_size = 64 * 1024 * 1024
+
     def get_current_user(self):
         """
         This method determines the self.current_user
