@@ -82,6 +82,11 @@ from components.plot_special import (
     plot_special_graph,
     plot_special_sankey,
 )
+from components.plot_roc_pr import (
+    plot_roc_curve,
+    plot_pr_curve,
+    plot_roc_precomputed,
+)
 from components.properties import properties_basic, properties_callbacks
 from components.plot_confusion_matrix import plot_confusion_matrix_basic, plot_confusion_matrix_precomputed, plot_confusion_matrix_normalized
 from components.misc import (
@@ -182,6 +187,12 @@ def run_demo(viz, env, args):
     plot_surface_contour(viz, env, args)
     plot_surface_3d(viz, env, args)
 
+    # =============== #
+    # ROC / PR curves #
+    # =============== #
+    plot_roc_curve(viz, env, args)
+    plot_pr_curve(viz, env, args)
+    plot_roc_precomputed(viz, env, args)
     # ================ #
     # confusion matrix #
     # ================ #
