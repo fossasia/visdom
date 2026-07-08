@@ -189,6 +189,28 @@ class Visdom:
     def boxplot(
         self, X: Tensor, win: _OptStr = ..., env: _OptStr = ..., opts: _OptOps = ...
     ) -> _SendReturn: ...
+    def roc_curve(
+        self,
+        y_true: Optional[Tensor] = ...,
+        y_score: Optional[Tensor] = ...,
+        fpr: Optional[Tensor] = ...,
+        tpr: Optional[Tensor] = ...,
+        pos_label: Union[int, float] = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
+    def pr_curve(
+        self,
+        y_true: Optional[Tensor] = ...,
+        y_score: Optional[Tensor] = ...,
+        precision: Optional[Tensor] = ...,
+        recall: Optional[Tensor] = ...,
+        pos_label: Union[int, float] = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
     def confusion_matrix(
         self,
         y_true: Optional[Tensor] = ...,
