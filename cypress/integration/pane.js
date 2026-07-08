@@ -9,6 +9,8 @@ const basic_examples = [
   ['Bar Plot', 'plot_bar_basic'],
   ['Scatter Plot', 'plot_scatter_basic'],
   ['Surface Plot', 'plot_surface_basic'],
+  ['ROC Curve', 'plot_roc_curve'],
+  ['PR Curve', 'plot_pr_curve'],
   ['Box Plot', 'plot_special_boxplot'],
   ['Quiver Plot', 'plot_special_quiver'],
   ['Violin Plot', 'plot_violin_basic'],
