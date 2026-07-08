@@ -40,6 +40,8 @@ import ConnectionIndicator from './topbar/ConnectionIndicator';
 import EnvControls from './topbar/EnvControls';
 import FilterControls from './topbar/FilterControls';
 import ViewControls from './topbar/ViewControls';
+import WorkspaceSwitcher from './topbar/WorkspaceSwitcher';
+import DashboardTabs from './DashboardTabs';
 import WidthProvider from './Width';
 
 const jsonpatch = require('fast-json-patch');
@@ -140,6 +142,7 @@ const App = () => {
   // user-changeable
   const [showEnvModal, setShowEnvModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
+  const [showDashboardTabs, setShowDashboardTabs] = useState(false);
   const [focusedPaneID, setFocusedPaneID] = useState(null);
   const [selection, setSelection] = useState({
     envIDs: use_envs,
@@ -952,6 +955,11 @@ const App = () => {
       onLayoutSave={onLayoutSave.bind(this)}
       show={showViewModal}
     />,
+    <DashboardTabs
+      key="DashboardTabs"
+      show={showDashboardTabs}
+      onHide={() => setShowDashboardTabs(false)}
+    />,
   ];
 
   let envControls = (
@@ -1039,6 +1047,14 @@ const App = () => {
         <span className="navbar-brand visdom-title">visdom</span>
         <span className="vertical-line" />
         &nbsp;&nbsp;
+        <WorkspaceSwitcher />
+        <button 
+          className="btn btn-default" 
+          onClick={() => setShowDashboardTabs(true)}
+          style={{ marginRight: '10px' }}
+        >
+          Dashboard
+        </button>
         {envControls}
         &nbsp;&nbsp;
         <span className="vertical-line" />

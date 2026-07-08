@@ -46,6 +46,11 @@ from visdom.server.handlers.web_handlers import (
     UploadEnvHandler,
     UserSettingsHandler,
 )
+from visdom.server.handlers.workspace_handlers import (
+    WorkspacesHandler,
+    WorkspaceDetailHandler,
+    WorkspaceShareHandler,
+)
 from visdom.server.defaults import (
     DEFAULT_BASE_URL,
     DEFAULT_ENV_PATH,
@@ -123,6 +128,9 @@ class Application(tornado.web.Application):
             (r"%s/fork_env" % self.base_url, ForkEnvHandler, {"app": self}),
             (r"%s/user/(.*)" % self.base_url, UserSettingsHandler, {"app": self}),
             (r"%s/health" % self.base_url, HealthHandler),
+            (r"%s/api/v1/workspaces" % self.base_url, WorkspacesHandler),
+            (r"%s/api/v1/workspaces/([^/]+)" % self.base_url, WorkspaceDetailHandler),
+            (r"%s/api/v1/workspaces/([^/]+)/share" % self.base_url, WorkspaceShareHandler),
             (r"%s(.*)" % self.base_url, IndexHandler, {"app": self}),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)
