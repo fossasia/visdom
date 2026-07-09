@@ -61,7 +61,9 @@ const ToastContainer = () => {
 
         return (
           <div
-            className={`visdom-toast-container visdom-toast-container-${position}`}
+            className={`visdom-toast-container
+                        visdom-toast-container-${position}`
+            }
             key={position}
           >
             {positionToasts.map((toast) => (
