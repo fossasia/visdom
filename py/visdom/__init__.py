@@ -1675,12 +1675,10 @@ class Visdom(object):
             endpoint="events",
         )
 
-        # Register the handlers for managing this embeddings pane
-        # TODO allow disabling this in a way that pushes onus for calculating
-        # to the server or frontend client
-        self._register_embeddings(
-            features, labels, points, data_getter, data_type, win, env, opts
-        )
+        if opts.get("register_embedding_events", True):
+            self._register_embeddings(
+                features, labels, points, data_getter, data_type, win, env, opts
+            )
         return win
 
     @pytorch_wrap
