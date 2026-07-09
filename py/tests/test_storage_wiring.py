@@ -24,6 +24,7 @@ from visdom.utils.server_utils import (
     LazyEnvData,
     clear_deleted,
     count_deleted,
+    load_env,
     pop_deleted,
     push_deleted,
 )
@@ -308,6 +309,42 @@ class TestLazyEnvDataBackend(unittest.TestCase):
         lazy = LazyEnvData(self._store, "does_not_exist")
         with self.assertRaises(ValueError):
             _ = lazy["jsons"]
+
+
+class _FakeSocket:
+    """Minimal stand-in for a client socket used by the read helpers."""
+
+    def __init__(self):
+        self.messages = []
+        self.eid = None
+
+    def write_message(self, msg):
+        self.messages.append(msg)
+
+
+class TestReadHelperWiring(unittest.TestCase):
+    """PR #7: ``load_env`` reads a cold env through the store, not raw env_path."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.store = _SpyStore(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_load_env_reads_cold_env_through_store(self):
+        JSONStore(self.store.env_path).save_env("expt", _env())
+        state = {}
+        socket = _FakeSocket()
+        load_env(state, "expt", socket, self.store)
+        self.assertEqual(self.store.calls["load_env"], ["expt"])
+        self.assertEqual(dict(state["expt"]), _env())
+
+    def test_load_env_skips_store_when_already_in_state(self):
+        state = {"expt": _env()}
+        socket = _FakeSocket()
+        load_env(state, "expt", socket, self.store)
+        self.assertEqual(self.store.calls["load_env"], [])
 
 
 if __name__ == "__main__":

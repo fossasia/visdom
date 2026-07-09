@@ -508,30 +508,16 @@ def send_to_sources(handler, msg):
         source.write_message(json.dumps(msg, cls=NanSafeEncoder))
 
 
-def load_env(state, eid, socket, store, env_path=DEFAULT_ENV_PATH):
+def load_env(state, eid, socket, store):
     """load an environment to a client by socket"""
     env = {}
     if eid in state:
         env = state.get(eid)
-    elif env_path is not None:
-        safe_eid = escape_eid(eid.strip())
-        base_env_path = os.path.abspath(env_path)
-        p = os.path.abspath(os.path.join(base_env_path, "{0}.json".format(safe_eid)))
-        try:
-            is_safe = os.path.commonpath([p, base_env_path]) == base_env_path
-        except ValueError:
-            is_safe = False
-        if is_safe and os.path.exists(p):
-            with open(p, "r") as fn:
-                env = tornado.escape.json_decode(fn.read())
-                state[eid] = env
-        else:
-            hashed_id = hashlib.sha256(safe_eid.encode("utf-8")).hexdigest()
-            p = os.path.join(env_path, "hash_{0}.json".format(hashed_id))
-            if os.path.exists(p):
-                with open(p, "r") as fn:
-                    env = tornado.escape.json_decode(fn.read())
-                    state[eid] = env
+    else:
+        loaded = store.load_env(eid)
+        if loaded:
+            env = loaded
+            state[eid] = env
 
     if "reload" in env:
         socket.write_message(
