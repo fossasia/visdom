@@ -179,9 +179,7 @@ class TestDeleteWiring(unittest.TestCase):
         self.assertEqual(calls, ["expt"])
         self.assertNotIn("expt", handler.state)
         self.assertFalse(self.store.env_exists("expt"))
-        self.assertFalse(
-            os.path.exists(os.path.join(self.env_path, "expt.json"))
-        )
+        self.assertFalse(os.path.exists(os.path.join(self.env_path, "expt.json")))
 
     def test_web_delete_protects_main(self):
         self.store.save_env("main", _env())
