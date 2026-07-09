@@ -23,6 +23,7 @@ from visdom.server.handlers.web_handlers import DeleteEnvHandler, SaveHandler
 from visdom.utils.server_utils import (
     LazyEnvData,
     clear_deleted,
+    compare_envs,
     count_deleted,
     gather_envs,
     load_env,
@@ -356,6 +357,14 @@ class TestReadHelperWiring(unittest.TestCase):
     def test_gather_envs_in_memory_only(self):
         store = _SpyStore(None)
         self.assertEqual(gather_envs({"main": _env()}, store), ["main"])
+
+    def test_compare_envs_reads_cold_env_through_store(self):
+        JSONStore(self.store.env_path).save_env("cold", _env())
+        state = {"warm": _env("w1")}
+        socket = _FakeSocket()
+        compare_envs(state, ["warm", "cold"], socket, self.store)
+        self.assertEqual(self.store.calls["load_env"], ["cold"])
+        self.assertIn("cold", state)
 
 
 if __name__ == "__main__":
