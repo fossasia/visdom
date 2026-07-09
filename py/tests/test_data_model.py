@@ -115,6 +115,35 @@ class TestJSONStore(unittest.TestCase):
         loaded = self.backend.load_env(long_eid)
         self.assertEqual(loaded["jsons"], _env()["jsons"])
 
+    def test_save_ignores_path_traversal_ids(self):
+        """A crafted id like '../evil' cannot write outside env_path."""
+        parent = os.path.dirname(self.env_path)
+        before = set(os.listdir(parent))
+        for eid in ("../evil", "subdir/../evil", "/etc/evil"):
+            self.backend.save_env(eid, _env())
+            self.assertEqual(set(os.listdir(parent)) - before, set())
+            base = os.path.abspath(self.env_path)
+            for name in os.listdir(self.env_path):
+                resolved = os.path.abspath(os.path.join(self.env_path, name))
+                self.assertTrue(resolved.startswith(base + os.sep))
+
+    def test_traversal_id_round_trips_within_env_path(self):
+        """A crafted id is sanitised consistently across save/exists/list/load."""
+        self.backend.save_env("../evil", _env())
+        self.assertTrue(self.backend.env_exists("../evil"))
+        self.assertEqual(self.backend.list_envs(), [".._evil"])
+        self.assertEqual(self.backend.load_env("../evil"), _env())
+
+    def test_list_skips_unreadable_hash_files(self):
+        """Malformed hash_<64>.json files are ignored, not raised, by list_envs."""
+        hex64 = "a" * 64
+        with open(os.path.join(self.env_path, "hash_{0}.json".format(hex64)), "w") as fn:
+            fn.write("{not valid json")
+        with open(os.path.join(self.env_path, "hash_{0}.json".format("b" * 64)), "w") as fn:
+            fn.write(json.dumps({"jsons": {}, "reload": {}}))
+        self.backend.save_env("main", _env())
+        self.assertEqual(self.backend.list_envs(), ["main"])
+
 
 class TestJSONStoreNoPath(unittest.TestCase):
     """JSONStore(None): persistence disabled (in-memory-only mode)."""
