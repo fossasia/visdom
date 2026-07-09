@@ -646,7 +646,7 @@ class IndexHandler(BaseHandler):
                 wrap_socket=self.wrap_socket,
             )
         elif self.login_enabled:
-            items = gather_envs(self.state, env_path=self.env_path)
+            items = gather_envs(self.state, self.storage)
             self.render(
                 "login.html",
                 user=getpass.getuser(),

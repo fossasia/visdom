@@ -24,6 +24,7 @@ from visdom.utils.server_utils import (
     LazyEnvData,
     clear_deleted,
     count_deleted,
+    gather_envs,
     load_env,
     pop_deleted,
     push_deleted,
@@ -345,6 +346,16 @@ class TestReadHelperWiring(unittest.TestCase):
         socket = _FakeSocket()
         load_env(state, "expt", socket, self.store)
         self.assertEqual(self.store.calls["load_env"], [])
+
+    def test_gather_envs_lists_through_store(self):
+        JSONStore(self.store.env_path).save_env("on_disk", _env())
+        items = gather_envs({"in_memory": _env()}, self.store)
+        self.assertEqual(self.store.calls["list_envs"], 1)
+        self.assertEqual(items, ["in_memory", "on_disk"])
+
+    def test_gather_envs_in_memory_only(self):
+        store = _SpyStore(None)
+        self.assertEqual(gather_envs({"main": _env()}, store), ["main"])
 
 
 if __name__ == "__main__":

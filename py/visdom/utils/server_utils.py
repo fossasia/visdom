@@ -21,7 +21,6 @@ import json
 import logging
 import os
 import time
-import re
 import errno
 import tornado.escape
 from collections import OrderedDict
@@ -267,16 +266,8 @@ def window(args):
     return p
 
 
-def gather_envs(state, env_path=DEFAULT_ENV_PATH):
-    if env_path is not None:
-        items = [
-            i[:-5]
-            for i in os.listdir(env_path)
-            if i.endswith(".json") and not re.match(r"^hash_[a-fA-F0-9]{64}\.json$", i)
-        ]
-    else:
-        items = []
-    return sorted(list(set(items + list(state.keys()))))
+def gather_envs(state, store):
+    return sorted(set(store.list_envs() + list(state.keys())))
 
 
 def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH, show_all=False):
