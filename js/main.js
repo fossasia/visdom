@@ -36,13 +36,13 @@ import {
   ROW_HEIGHT,
 } from './settings';
 import buildExportHtml from './template/exportTemplate';
+import ToastContainer from './toasts/ToastContainer';
+import { showToast } from './toasts/toastEvents';
 import ConnectionIndicator from './topbar/ConnectionIndicator';
 import EnvControls from './topbar/EnvControls';
 import FilterControls from './topbar/FilterControls';
 import ViewControls from './topbar/ViewControls';
 import WidthProvider from './Width';
-import { showToast } from './toasts/toastEvents';
-import ToastContainer from './toasts/ToastContainer';
 
 const jsonpatch = require('fast-json-patch');
 const GridLayout = WidthProvider(ReactGridLayout);
