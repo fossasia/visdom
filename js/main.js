@@ -878,7 +878,7 @@ const App = () => {
   };
   const exportCurrentEnvToHtml = () => {
     if (!storeData.panes || Object.keys(storeData.panes).length === 0) {
-      showToast('No panes available to export.', 'warning', { duration: 4000 });
+      showToast('No panes available to export.', 'error', { duration: 4000 });
       return;
     }
 
