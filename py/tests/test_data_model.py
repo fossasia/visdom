@@ -137,9 +137,13 @@ class TestJSONStore(unittest.TestCase):
     def test_list_skips_unreadable_hash_files(self):
         """Malformed hash_<64>.json files are ignored, not raised, by list_envs."""
         hex64 = "a" * 64
-        with open(os.path.join(self.env_path, "hash_{0}.json".format(hex64)), "w") as fn:
+        with open(
+            os.path.join(self.env_path, "hash_{0}.json".format(hex64)), "w"
+        ) as fn:
             fn.write("{not valid json")
-        with open(os.path.join(self.env_path, "hash_{0}.json".format("b" * 64)), "w") as fn:
+        with open(
+            os.path.join(self.env_path, "hash_{0}.json".format("b" * 64)), "w"
+        ) as fn:
             fn.write(json.dumps({"jsons": {}, "reload": {}}))
         self.backend.save_env("main", _env())
         self.assertEqual(self.backend.list_envs(), ["main"])
