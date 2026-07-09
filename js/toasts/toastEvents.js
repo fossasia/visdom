@@ -21,7 +21,7 @@ const DEFAULT_SHAPE = 'rect';
  * @param {object} options
  * @param {number} options.duration
  * @param {string} options.position
- * @param {string} options.shap
+ * @param {string} options.shape
  * @returns {string}
  */
 export const showToast = (message, type = 'info', options = {}) => {
