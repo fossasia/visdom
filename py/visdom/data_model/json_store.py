@@ -30,13 +30,23 @@ class JSONStore(DataStore):
         """Create a store rooted at ``env_path`` (``None`` disables persistence)."""
         self.env_path = env_path
 
+    def _safe_eid(self, eid):
+        """Sanitise ``eid`` into the id used for on-disk filenames.
+
+        Strips surrounding whitespace and neutralises path separators (via
+        ``escape_eid``) so a crafted id such as ``../evil`` cannot escape
+        ``env_path``. Saves, loads, deletes and existence checks all funnel
+        through this so they agree on the file a given ``eid`` maps to.
+        """
+        return escape_eid(eid.strip())
+
     def _primary_path(self, eid):
         """Return the canonical ``<env_path>/<eid>.json`` path for ``eid``.
 
         Returns ``None`` if the resolved path would escape ``env_path`` (guards
         against path traversal via a crafted env id).
         """
-        safe_eid = escape_eid(eid.strip())
+        safe_eid = self._safe_eid(eid)
         base = os.path.abspath(self.env_path)
         path = os.path.abspath(os.path.join(base, "{0}.json".format(safe_eid)))
         try:
@@ -47,7 +57,7 @@ class JSONStore(DataStore):
 
     def _hash_path(self, eid):
         """Return the ``hash_<sha256>.json`` fallback path for ``eid``."""
-        safe_eid = escape_eid(eid.strip())
+        safe_eid = self._safe_eid(eid)
         hashed_id = hashlib.sha256(safe_eid.encode("utf-8")).hexdigest()
         return os.path.join(self.env_path, "hash_{0}.json".format(hashed_id))
 
@@ -63,22 +73,29 @@ class JSONStore(DataStore):
 
     def save_env(self, eid, env_data):
         """Persist a single environment; return ``True`` if written, else ``False``."""
-        if self.env_path is None:
-            return False
-        serialize_env({eid: env_data}, [eid], env_path=self.env_path)
-        return True
+        return bool(self.save_envs({eid: env_data}, [eid]))
 
     def save_envs(self, state, eids):
-        """Persist the named subset of ``state``; return the ids actually written."""
+        """Persist the named subset of ``state``; return the ids actually written.
+
+        Each id is sanitised (see :meth:`_safe_eid`) before it becomes a
+        filename, so a crafted id cannot write outside ``env_path``. The real
+        (unsanitised) ids are returned, matching how callers refer to them.
+        """
         if self.env_path is None:
             return []
-        return serialize_env(state, eids, env_path=self.env_path)
+        written = []
+        for eid in eids:
+            if eid not in state:
+                continue
+            safe_eid = self._safe_eid(eid)
+            serialize_env({safe_eid: state[eid]}, [safe_eid], env_path=self.env_path)
+            written.append(eid)
+        return written
 
     def save_all(self, state):
         """Persist every environment in ``state``; return the ids written."""
-        if self.env_path is None:
-            return []
-        return serialize_env(state, list(state.keys()), env_path=self.env_path)
+        return self.save_envs(state, list(state.keys()))
 
     def load_env(self, eid):
         """Read one environment by ``eid``; return ``{}`` if it is absent."""
