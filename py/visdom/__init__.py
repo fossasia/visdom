@@ -2111,9 +2111,25 @@ class Visdom(object):
                 names
             ), "legend should have at least as many entries as metrics"
 
-        # If only one metric is appended into an existing multi-metric window,
-        # update the trace matching that metric instead of all traces.
-        name = names[0] if update is not None and len(names) == 1 else None
+        if update is not None:
+            result = None
+            # Send one named update per metric so mapping order cannot swap traces.
+            for name, values in zip(names, series):
+                metric_opts = None
+                if update != "remove":
+                    metric_opts = dict(opts)
+                    metric_opts["legend"] = [name]
+                result = self.line(
+                    X=X,
+                    Y=values,
+                    win=win,
+                    env=env,
+                    opts=metric_opts,
+                    update=update,
+                    name=name,
+                )
+            return result
+
         Y = np.column_stack(series)
 
         return self.line(
@@ -2123,7 +2139,6 @@ class Visdom(object):
             env=env,
             opts=opts,
             update=update,
-            name=name,
         )
 
     @pytorch_wrap
