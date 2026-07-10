@@ -127,6 +127,15 @@ class Visdom:
     def update_window_opts(
         self, win: Text, opts: Mapping[Text, Any], env: _OptStr = ...
     ) -> _SendReturn: ...
+    def learning_curve(
+        self,
+        metrics: Mapping[Text, Any],
+        step: Optional[Tensor] = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+        update: _OptStr = ...,
+    ) -> _SendReturn: ...
     def scatter(
         self,
         X: Tensor,
