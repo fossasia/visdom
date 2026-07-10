@@ -43,7 +43,8 @@ except ImportError:
 
 import sys
 
-assert sys.version_info[0] >= 3, "To use visdom with python 2, downgrade to v0.1.8.9"
+if sys.version_info < (3, 12):
+    raise RuntimeError("Visdom requires Python 3.12 or newer.")
 
 
 def _normalize_tsne(Y):
@@ -143,7 +144,6 @@ def isndarray(n):
 
 from visdom.utils.shared_utils import NanSafeEncoder
 
-
 # TODO: In appropriate places, we need to change many numpy calls to use
 #       nan-aware ones, e.g., `X.max` => `np.nanmax(X)`.
 
@@ -158,7 +158,7 @@ def loadfile(filename):
 
 
 def _title2str(opts):
-    if opts.get("title"):
+    if opts.get("title") is not None:
         if isnum(opts.get("title")):
             title = str(opts.get("title"))
             logger.warning("Numerical title %s has been cast to a string" % title)
@@ -299,14 +299,14 @@ def _normalize_labels(Y):
         is_integer_labels = (
             np.issubdtype(Y.dtype, np.number)
             and np.equal(np.mod(Y, 1), 0).all()
-            and Y.min() >= 1
+            and np.nanmin(Y) >= 1
         )
     except TypeError:
         is_integer_labels = False
 
     if is_integer_labels:
         Y_normalized = Y.astype(int, copy=False)
-        K = int(Y_normalized.max())
+        K = int(np.nanmax(Y_normalized))
         label_values = None
     else:
         if np.issubdtype(Y.dtype, np.number):
@@ -373,7 +373,7 @@ def _markerSizeCheck(ms, X, Y):
     if ms.shape[0] == X.shape[0]:
         return np.array(ms, dtype=float)
 
-    K = int(Y.max()) if len(Y) > 0 else 0
+    K = int(np.nanmax(Y)) if len(Y) > 0 else 0
     assert ms.shape[0] >= K, (
         "markersize should be of size `%d` (per-point) or at least `%d` "
         "(per-label), but got: %d" % (X.shape[0], K, ms.shape[0])
@@ -491,6 +491,150 @@ def pytorch_wrap(f):
         return f(*args, **kwargs)
 
     return wrapped_f
+
+
+def _binary_clf_curve(y_true, y_score, pos_label=1):
+    """Compute true/false positives per distinct score threshold."""
+    y_true = np.asarray(y_true)
+    y_score = np.asarray(y_score)
+
+    if y_true.ndim != 1:
+        raise ValueError("y_true should have 1 dim")
+    if y_score.ndim != 1:
+        raise ValueError("y_score should have 1 dim")
+    if y_true.shape[0] != y_score.shape[0]:
+        raise ValueError("y_true and y_score should match")
+    if y_true.shape[0] == 0:
+        raise ValueError("y_true and y_score should be non-empty")
+    if not np.all(np.isfinite(y_score)):
+        raise ValueError("y_score should only contain finite values")
+
+    y_true = y_true == pos_label
+    desc_score_indices = np.argsort(y_score, kind="mergesort")[::-1]
+    y_score = y_score[desc_score_indices]
+    y_true = y_true[desc_score_indices]
+
+    distinct_value_indices = np.where(np.diff(y_score))[0]
+    threshold_idxs = np.r_[distinct_value_indices, y_true.size - 1]
+
+    tps = np.cumsum(y_true, dtype=float)[threshold_idxs]
+    fps = 1 + threshold_idxs - tps
+    return fps, tps
+
+
+def _compute_roc_curve(y_true, y_score, pos_label=1):
+    """Compute ROC curve (fpr, tpr) from raw labels and scores."""
+    fps, tps = _binary_clf_curve(y_true=y_true, y_score=y_score, pos_label=pos_label)
+    pos_total = float(tps[-1])
+    neg_total = float(fps[-1])
+    if pos_total <= 0:
+        raise ValueError("y_true has no positive samples")
+    if neg_total <= 0:
+        raise ValueError("y_true has no negative samples")
+
+    fpr = np.r_[0.0, fps / neg_total]
+    tpr = np.r_[0.0, tps / pos_total]
+    return fpr, tpr
+
+
+def _compute_pr_curve(y_true, y_score, pos_label=1):
+    """Compute precision-recall curve from raw labels and scores."""
+    fps, tps = _binary_clf_curve(y_true=y_true, y_score=y_score, pos_label=pos_label)
+    pos_total = float(tps[-1])
+    if pos_total <= 0:
+        raise ValueError("y_true has no positive samples")
+
+    precision = tps / (tps + fps)
+    recall = tps / pos_total
+
+    precision = np.r_[1.0, precision]
+    recall = np.r_[0.0, recall]
+    return precision, recall
+
+
+def _coerce_curve_xy(x, y, x_name, y_name):
+    """Validate and sort precomputed curve arrays by x."""
+    x = np.asarray(x)
+    y = np.asarray(y)
+    if x.ndim != 1:
+        raise ValueError("{} should have 1 dim".format(x_name))
+    if y.ndim != 1:
+        raise ValueError("{} should have 1 dim".format(y_name))
+    if x.shape[0] != y.shape[0]:
+        raise ValueError("{} and {} should match".format(x_name, y_name))
+    if x.shape[0] <= 1:
+        raise ValueError(
+            "{} and {} should have at least 2 points".format(x_name, y_name)
+        )
+
+    order = np.argsort(x, kind="mergesort")
+    return x[order], y[order]
+
+
+def _validate_curve_range(values, name):
+    """Validate that values are finite and within [0, 1]."""
+    values = np.asarray(values)
+    if not np.all(np.isfinite(values)):
+        raise ValueError("{} should only contain finite values".format(name))
+    if not np.all((values >= 0.0) & (values <= 1.0)):
+        raise ValueError("{} should be within [0, 1]".format(name))
+
+
+def _curve_legend(legend, default_legend):
+    """Return user-provided legend or default 2-element list."""
+    if not isinstance(legend, (tuple, list)) or len(legend) < 2:
+        if legend is not None:
+            warnings.warn(
+                "legend should be a list/tuple with at least 2 elements, "
+                "falling back to default: {}".format(default_legend),
+                UserWarning,
+            )
+        return list(default_legend)
+    return list(legend)
+
+
+def _trapz_area(y, x):
+    """Compute trapezoidal area under curve, compatible with numpy >= 2.0."""
+    trapezoid = getattr(np, "trapezoid", None)
+    if trapezoid is not None:
+        return float(trapezoid(y, x))
+    return float(np.trapz(y, x))
+
+
+def _average_precision(precision, recall):
+    """Compute average precision: AP = sum((R_n - R_{n-1}) * P_n)."""
+    precision = np.asarray(precision)
+    recall = np.asarray(recall)
+    return float(np.sum(np.diff(recall) * precision[1:]))
+
+
+def _compute_confusion_matrix(y_true, y_pred, labels):
+    """Build an NxN confusion matrix from label vectors (numpy only).
+
+    ``y_true``/``y_pred`` are expected to be 1-D numpy arrays; the public
+    ``confusion_matrix`` caller ravels them before calling this helper.
+    """
+    if y_true.shape[0] != y_pred.shape[0]:
+        raise ValueError("y_true and y_pred must have the same length")
+    if y_true.shape[0] == 0:
+        raise ValueError("y_true and y_pred must be non-empty")
+
+    label_to_idx = {label: i for i, label in enumerate(labels)}
+    n = len(labels)
+    cm = np.zeros((n, n), dtype=int)
+    skipped = 0
+    for t, p in zip(y_true, y_pred):
+        if t in label_to_idx and p in label_to_idx:
+            cm[label_to_idx[t], label_to_idx[p]] += 1
+        else:
+            skipped += 1
+    if skipped > 0:
+        warnings.warn(
+            "{} samples had labels not in the provided labels list "
+            "and were ignored".format(skipped),
+            UserWarning,
+        )
+    return cm
 
 
 def _decode_binary_arrays(obj):
@@ -1258,9 +1402,7 @@ class Visdom(object):
                 try:
                     soup = bs4.BeautifulSoup(svg, "xml")
                 except bs4.FeatureNotFound as e:
-                    import six
-
-                    six.raise_from(ImportError("No module named 'lxml'"), e)
+                    raise ImportError("No module named 'lxml'") from e
                 height = soup.svg.attrs.pop("height", None)
                 width = soup.svg.attrs.pop("width", None)
                 svg = str(soup)
@@ -1964,6 +2106,7 @@ class Visdom(object):
 
         assert X.ndim == 2, "X should have two dims"
         assert X.shape[1] == 2 or X.shape[1] == 3, "X should have 2 or 3 cols"
+        assert X.shape[0] > 0, "X should have at least one point"
 
         if Y is not None:
             Y = np.ravel(Y)
@@ -2261,6 +2404,198 @@ class Visdom(object):
         )
 
     @pytorch_wrap
+    def roc_curve(
+        self,
+        y_true=None,
+        y_score=None,
+        fpr=None,
+        tpr=None,
+        pos_label=1,
+        win=None,
+        env=None,
+        opts=None,
+    ):
+        """
+        Draw a ROC curve for binary classification.
+
+        You can either provide raw labels/scores (`y_true`, `y_score`) or
+        precomputed points (`fpr`, `tpr`).
+
+        The following `opts` are supported:
+
+        - `opts.title`      : plot title (`string`; default includes ROC-AUC)
+        - `opts.legend`     : two legend labels for curve and baseline (`list`)
+        - `opts.xlabel`     : x-axis label (`string`; default = `False Positive Rate`)
+        - `opts.ylabel`     : y-axis label (`string`; default = `True Positive Rate`)
+        - `opts.layoutopts` : additional backend layout options (`dict`)
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        has_raw = y_true is not None or y_score is not None
+        has_points = fpr is not None or tpr is not None
+        if has_raw == has_points:
+            raise ValueError(
+                "provide exactly one input mode: (y_true, y_score) or (fpr, tpr)"
+            )
+
+        if has_raw:
+            if y_true is None or y_score is None:
+                raise ValueError("both y_true and y_score are required")
+            fpr, tpr = _compute_roc_curve(
+                y_true=np.ravel(y_true),
+                y_score=np.ravel(y_score),
+                pos_label=pos_label,
+            )
+        else:
+            if fpr is None or tpr is None:
+                raise ValueError("both fpr and tpr are required")
+            fpr, tpr = _coerce_curve_xy(fpr, tpr, "fpr", "tpr")
+
+        _validate_curve_range(fpr, "fpr")
+        _validate_curve_range(tpr, "tpr")
+
+        auc = _trapz_area(tpr, fpr)
+
+        opts = dict(opts)
+        opts["xlabel"] = opts.get("xlabel", "False Positive Rate")
+        opts["ylabel"] = opts.get("ylabel", "True Positive Rate")
+        opts["legend"] = _curve_legend(opts.get("legend"), ["ROC", "Chance"])
+        opts["title"] = opts.get("title", "ROC Curve (AUC={:.4f})".format(auc))
+
+        data = [
+            {
+                "x": fpr.tolist(),
+                "y": tpr.tolist(),
+                "name": opts["legend"][0],
+                "type": "scatter",
+                "mode": "lines",
+            },
+            {
+                "x": [0.0, 1.0],
+                "y": [0.0, 1.0],
+                "name": opts["legend"][1],
+                "type": "scatter",
+                "mode": "lines",
+                "line": {"dash": "dash"},
+            },
+        ]
+
+        return self._send(
+            {
+                "data": data,
+                "win": win,
+                "eid": env,
+                "layout": _opts2layout(opts),
+                "opts": opts,
+            }
+        )
+
+    @pytorch_wrap
+    def pr_curve(
+        self,
+        y_true=None,
+        y_score=None,
+        precision=None,
+        recall=None,
+        pos_label=1,
+        win=None,
+        env=None,
+        opts=None,
+    ):
+        """
+        Draw a precision-recall curve for binary classification.
+
+        You can either provide raw labels/scores (`y_true`, `y_score`) or
+        precomputed points (`precision`, `recall`).
+
+        The following `opts` are supported:
+
+        - `opts.title`      : plot title (`string`; default includes PR-AUC)
+        - `opts.legend`     : two legend labels for curve and baseline (`list`)
+        - `opts.xlabel`     : x-axis label (`string`; default = `Recall`)
+        - `opts.ylabel`     : y-axis label (`string`; default = `Precision`)
+        - `opts.layoutopts` : additional backend layout options (`dict`)
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        has_raw = y_true is not None or y_score is not None
+        has_points = precision is not None or recall is not None
+        if has_raw == has_points:
+            raise ValueError(
+                "provide exactly one input mode:"
+                " (y_true, y_score) or (precision, recall)"
+            )
+
+        if has_raw:
+            if y_true is None or y_score is None:
+                raise ValueError("both y_true and y_score are required")
+            precision, recall = _compute_pr_curve(
+                y_true=np.ravel(y_true),
+                y_score=np.ravel(y_score),
+                pos_label=pos_label,
+            )
+        else:
+            if precision is None or recall is None:
+                raise ValueError("both precision and recall are required")
+            recall, precision = _coerce_curve_xy(
+                recall, precision, "recall", "precision"
+            )
+
+        _validate_curve_range(recall, "recall")
+        _validate_curve_range(precision, "precision")
+
+        auc = _average_precision(precision, recall)
+
+        opts = dict(opts)
+        opts["xlabel"] = opts.get("xlabel", "Recall")
+        opts["ylabel"] = opts.get("ylabel", "Precision")
+        opts["legend"] = _curve_legend(opts.get("legend"), ["PR", "Baseline"])
+        opts["title"] = opts.get("title", "PR Curve (AUC={:.4f})".format(auc))
+
+        if has_raw:
+            y_true_arr = np.ravel(np.asarray(y_true))
+            positive_rate = float(np.mean(y_true_arr == pos_label))
+        else:
+            positive_rate = float(precision[0]) if float(recall[0]) == 0.0 else None
+
+        baseline = [positive_rate, positive_rate] if positive_rate is not None else None
+
+        data = [
+            {
+                "x": recall.tolist(),
+                "y": precision.tolist(),
+                "name": opts["legend"][0],
+                "type": "scatter",
+                "mode": "lines",
+            },
+        ]
+        if baseline is not None:
+            data.append(
+                {
+                    "x": [0.0, 1.0],
+                    "y": baseline,
+                    "name": opts["legend"][1],
+                    "type": "scatter",
+                    "mode": "lines",
+                    "line": {"dash": "dash"},
+                }
+            )
+
+        return self._send(
+            {
+                "data": data,
+                "win": win,
+                "eid": env,
+                "layout": _opts2layout(opts),
+                "opts": opts,
+            }
+        )
+
+    @pytorch_wrap
     def heatmap(self, X, win=None, env=None, update=None, opts=None):
         """
         This function draws a heatmap. It takes as input an `NxM` tensor `X`
@@ -2372,6 +2707,186 @@ class Visdom(object):
         return self._send(data_to_send, endpoint=endpoint)
 
     @pytorch_wrap
+    def confusion_matrix(
+        self,
+        y_true=None,
+        y_pred=None,
+        cm=None,
+        labels=None,
+        normalize=None,
+        update=None,
+        win=None,
+        env=None,
+        opts=None,
+    ):
+        """
+        Draw a confusion matrix for classification evaluation.
+
+        You can either provide raw label vectors (`y_true`, `y_pred`) or a
+        precomputed confusion matrix (`cm`).
+
+        The following `opts` are supported:
+
+        - `opts.title`       : plot title (`string`; default = `Confusion Matrix`)
+        - `opts.xlabel`      : x-axis label (`string`; default = `Predicted`)
+        - `opts.ylabel`      : y-axis label (`string`; default = `Actual`)
+        - `opts.colormap`    : Plotly colorscale (`string`; default = `Blues`)
+        - `opts.showCounts`  : show raw counts in cells (`bool`; default = `True`)
+        - `opts.showPercent` : show percentages in cells (`bool`; default = `True`
+                               when normalized, `False` otherwise)
+        - `opts.layoutopts`  : additional backend layout options (`dict`)
+
+        `update` may be used to modify an existing confusion matrix window
+        instead of creating a new one; it takes one of `None`, `'replace'`
+        (redraw the whole matrix in `win`) or `'remove'` (delete `win`).
+        """
+        opts = {} if opts is None else dict(opts)
+        _title2str(opts)
+        _assert_opts(opts)
+
+        valid_update = (None, "replace", "remove")
+        assert update in valid_update, "update must be one of: {}".format(valid_update)
+
+        if update == "remove":
+            assert win is not None, "win must be provided to remove a window"
+            return self._send(
+                {"data": [], "delete": True, "win": win, "eid": env},
+                endpoint="update",
+            )
+
+        has_raw = y_true is not None or y_pred is not None
+        has_matrix = cm is not None
+        if has_raw == has_matrix:
+            raise ValueError("provide exactly one input mode: (y_true, y_pred) or (cm)")
+
+        if has_raw:
+            if y_true is None or y_pred is None:
+                raise ValueError("both y_true and y_pred are required")
+            y_true = np.asarray(y_true).ravel()
+            y_pred = np.asarray(y_pred).ravel()
+            if labels is None:
+                labels = np.unique(np.concatenate([y_true, y_pred])).tolist()
+        else:
+            cm = np.asarray(cm)
+            if cm.ndim != 2 or cm.shape[0] != cm.shape[1]:
+                raise ValueError("cm must be a square 2D array")
+            if labels is None:
+                labels = list(range(cm.shape[0]))
+            if len(labels) != cm.shape[0]:
+                raise ValueError(
+                    "number of labels must match confusion matrix dimensions"
+                )
+
+        if len(set(labels)) != len(labels):
+            raise ValueError("labels must be unique")
+
+        if has_raw:
+            cm = _compute_confusion_matrix(y_true, y_pred, labels)
+
+        valid_normalize = (None, "true", "pred", "all")
+        if normalize not in valid_normalize:
+            raise ValueError("normalize must be one of: {}".format(valid_normalize))
+
+        raw_cm = cm.copy()
+        if normalize == "true":
+            row_sums = cm.sum(axis=1, keepdims=True).astype(float)
+            row_sums[row_sums == 0] = 1
+            cm = cm.astype(float) / row_sums
+        elif normalize == "pred":
+            col_sums = cm.sum(axis=0, keepdims=True).astype(float)
+            col_sums[col_sums == 0] = 1
+            cm = cm.astype(float) / col_sums
+        elif normalize == "all":
+            total = float(cm.sum())
+            if total == 0:
+                warnings.warn(
+                    "confusion matrix sum is zero; normalized values will be zero",
+                    UserWarning,
+                )
+                cm = cm.astype(float)
+            else:
+                cm = cm.astype(float) / total
+
+        str_labels = [str(lbl) for lbl in labels]
+
+        opts["xlabel"] = opts.get("xlabel", "Predicted")
+        opts["ylabel"] = opts.get("ylabel", "Actual")
+        opts["title"] = opts.get("title", "Confusion Matrix")
+        colormap = opts.get("colormap", "Blues")
+
+        show_counts = opts.get("showCounts", True)
+        show_percent = opts.get("showPercent", normalize is not None)
+
+        data = [
+            {
+                "z": cm.tolist(),
+                "x": str_labels,
+                "y": str_labels,
+                "type": "heatmap",
+                "colorscale": colormap,
+                "showscale": True,
+            }
+        ]
+
+        annotations = []
+        max_val = float(cm.max()) if cm.size > 0 else 1.0
+        threshold = max_val / 2.0
+        raw_total = float(raw_cm.sum())
+        raw_is_integer = np.issubdtype(raw_cm.dtype, np.integer)
+
+        for i in range(cm.shape[0]):
+            for j in range(cm.shape[1]):
+                cell_val = cm[i, j]
+                parts = []
+                if show_counts:
+                    raw_val = raw_cm[i, j]
+                    if raw_is_integer:
+                        parts.append(str(int(raw_val)))
+                    else:
+                        parts.append("{:.3g}".format(float(raw_val)))
+                if show_percent:
+                    if normalize is not None:
+                        parts.append("{:.1%}".format(cell_val))
+                    else:
+                        pct = raw_cm[i, j] / raw_total if raw_total > 0 else 0
+                        parts.append("{:.1%}".format(pct))
+                text = "<br>".join(parts) if parts else ""
+
+                font_color = "white" if cell_val > threshold else "black"
+
+                annotations.append(
+                    {
+                        "x": str_labels[j],
+                        "y": str_labels[i],
+                        "text": text,
+                        "showarrow": False,
+                        "font": {"color": font_color},
+                    }
+                )
+
+        layout = _opts2layout(opts)
+        layout["annotations"] = annotations
+        layout["xaxis"] = layout.get("xaxis", {})
+        layout["xaxis"]["title"] = opts["xlabel"]
+        layout["xaxis"]["side"] = "bottom"
+        layout["yaxis"] = layout.get("yaxis", {})
+        layout["yaxis"]["title"] = opts["ylabel"]
+        layout["yaxis"]["autorange"] = "reversed"
+
+        data_to_send = {
+            "data": data,
+            "win": win,
+            "eid": env,
+            "layout": layout,
+            "opts": opts,
+        }
+        endpoint = "events"
+        if update:
+            data_to_send["updateDir"] = update
+            endpoint = "update"
+        return self._send(data_to_send, endpoint=endpoint)
+
+    @pytorch_wrap
     def bar(self, X, Y=None, win=None, env=None, opts=None):
         """
         This function draws a regular, stacked, or grouped bar plot. It takes as
@@ -2462,7 +2977,7 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
-        minx, maxx = X.min(), X.max()
+        minx, maxx = np.nanmin(X), np.nanmax(X)
         bins = np.histogram(X, bins=opts["numbins"], range=(minx, maxx))[0]
         linrange = np.linspace(minx, maxx, opts["numbins"])
 
@@ -2588,8 +3103,8 @@ class Visdom(object):
         assert X.ndim == 2, "X should be two-dimensional"
 
         opts = {} if opts is None else opts
-        opts["xmin"] = float(opts.get("xmin", X.min()))
-        opts["xmax"] = float(opts.get("xmax", X.max()))
+        opts["xmin"] = float(opts.get("xmin", np.nanmin(X)))
+        opts["xmax"] = float(opts.get("xmax", np.nanmax(X)))
         opts["colormap"] = opts.get("colormap", "Viridis")
         _title2str(opts)
         _assert_opts(opts)
@@ -2934,6 +3449,109 @@ class Visdom(object):
         )
 
     @pytorch_wrap
+    def sankey(self, source, target, value, labels=None, win=None, env=None, opts=None):
+        """
+        This function draws a Sankey (flow) diagram. Flows are defined by three
+        equal-length arrays:
+
+        - `source`: source node index of each link (`N` array of ints)
+        - `target`: target node index of each link (`N` array of ints)
+        - `value` : magnitude of each link (`N` array of non-negative numbers)
+
+        `labels` is an optional list of node names. If omitted, nodes are
+        referenced by their index alone.
+
+        The following `opts` are supported:
+
+        - `opts.labels`     : list of node labels (alternative to the `labels` arg)
+        - `opts.pad`        : node padding in px (`number`; default = 15)
+        - `opts.thickness`  : node thickness in px (`number`; default = 20)
+        - `opts.orientation`: `'h'` (default) or `'v'`
+        - `opts.nodecolor`  : node color(s) (`string` or list of strings)
+        - `opts.linkcolor`  : link color(s) (`string` or list of strings)
+        - `opts.layoutopts` : `dict` of additional backend layout options, e.g.
+          `layoutopts = {'plotly': {'font': {'size': 10}}}`.
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        source = np.asarray(source)
+        target = np.asarray(target)
+        value = np.asarray(value)
+        for name, arr in (("source", source), ("target", target), ("value", value)):
+            assert arr.ndim <= 1, "sankey {} must be 1-D, got shape {}".format(
+                name, arr.shape
+            )
+        source = source.ravel()
+        target = target.ravel()
+        value = value.ravel()
+        assert (
+            len(source) == len(target) == len(value)
+        ), "source, target and value must have the same length"
+        assert (source >= 0).all(), "sankey source indices must be non-negative"
+        assert (target >= 0).all(), "sankey target indices must be non-negative"
+        assert (
+            source == source.astype(int)
+        ).all(), "sankey source indices must be integers"
+        assert (
+            target == target.astype(int)
+        ).all(), "sankey target indices must be integers"
+        assert (value >= 0).all(), "sankey link values must be non-negative"
+
+        labels = labels if labels is not None else opts.get("labels")
+        if labels is not None and len(source) > 0:
+            num_nodes = max(int(source.max()), int(target.max())) + 1
+            assert len(labels) >= num_nodes, (
+                "labels must cover every referenced node "
+                "({} labels for {} nodes)".format(len(labels), num_nodes)
+            )
+
+        pad = opts.get("pad", 15)
+        thickness = opts.get("thickness", 20)
+        orientation = opts.get("orientation", "h")
+        assert (
+            isinstance(pad, numbers.Number) and pad >= 0
+        ), "opts.pad must be a non-negative number"
+        assert (
+            isinstance(thickness, numbers.Number) and thickness > 0
+        ), "opts.thickness must be a positive number"
+        assert orientation in ("h", "v"), "opts.orientation must be 'h' or 'v'"
+
+        node = {"pad": pad, "thickness": thickness}
+        if labels is not None:
+            node["label"] = list(labels)
+        if opts.get("nodecolor") is not None:
+            node["color"] = opts.get("nodecolor")
+
+        link = {
+            "source": source.astype(int).tolist(),
+            "target": target.astype(int).tolist(),
+            "value": value.tolist(),
+        }
+        if opts.get("linkcolor") is not None:
+            link["color"] = opts.get("linkcolor")
+
+        data = [
+            {
+                "type": "sankey",
+                "orientation": orientation,
+                "node": node,
+                "link": link,
+            }
+        ]
+
+        return self._send(
+            {
+                "data": data,
+                "win": win,
+                "eid": env,
+                "layout": _opts2layout(opts),
+                "opts": opts,
+            }
+        )
+
+    @pytorch_wrap
     def dual_axis_lines(self, X=None, Y1=None, Y2=None, opts=None, win=None, env=None):
         """
         This function will create a line plot using plotly with different Y-Axis.
@@ -2962,12 +3580,12 @@ class Visdom(object):
         - `opts.right` :  Set the right margin of the plot
         - `opts.left` :  Set the left margin of the plot
         """
-        X = np.asarray(X)
-        Y1 = np.asarray(Y1)
-        Y2 = np.asarray(Y2)
         assert X is not None, "X Cannot be None"
         assert Y1 is not None, "Y1 Cannot be None"
         assert Y2 is not None, "Y2 Cannot be None"
+        X = np.asarray(X)
+        Y1 = np.asarray(Y1)
+        Y2 = np.asarray(Y2)
         assert X.shape == Y1.shape, "values of X and Y1 are not in proper shape"
         assert X.shape == Y2.shape, "values of X and Y2 are not in proper shape"
         if opts is None:
@@ -3035,7 +3653,7 @@ class Visdom(object):
 
     @pytorch_wrap
     def graph(
-        self, edges, edgeLabels=None, nodeLabels=None, opts=dict(), env=None, win=None
+        self, edges, edgeLabels=None, nodeLabels=None, opts=None, env=None, win=None
     ):
         """
         This function draws interactive network graphs. It takes list of edges as one of the arguments.
@@ -3057,9 +3675,10 @@ class Visdom(object):
                 * `height` : height of the Pane
                 * `width` : width of the Pane
         """
+        opts = {} if opts is None else opts
         try:
             import networkx as nx
-        except:
+        except ImportError:
             raise RuntimeError("networkx must be installed to plot Graph figures")
 
         G = nx.Graph()
@@ -3239,3 +3858,75 @@ class Visdom(object):
                 "opts": opts,
             }
         )
+
+    def table(self, headers, data, win=None, env=None, opts=None):
+        """
+        This function renders structured data as a styled HTML table.
+
+        - `headers`: a `list` of column header names (`string` or any
+           type convertible to `string`).
+        - `data`: a 2D `list` of row data, where each row is list or
+          `tuple` with same number of elements as `headers`. In case
+           of empty list, a table with only header will be rendered.
+
+        The following `opts` are supported:
+
+        - `opts.title`: title for the window (`string`; optional)
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        assert isinstance(headers, list), "headers should be a list"
+        assert isinstance(data, list), "data should be a list of rows"
+        assert all(
+            isinstance(row, (list, tuple)) for row in data
+        ), "each row in data should be a list or tuple"
+        assert all(
+            len(row) == len(headers) for row in data
+        ), "each data row must have the same number of columns as headers"
+
+        style = """
+            <style>
+            .visdom-table {
+                font-family: monospace;
+                border-collapse: collapse;
+                width: 100%;
+            }
+            .visdom-table th {
+                background-color: #2196F3;
+                color: white;
+                padding: 8px 12px;
+                text-align: left;
+            }
+            .visdom-table td {
+                padding: 6px 12px;
+                border-bottom: 1px solid #ddd;
+            }
+            .visdom-table tr:nth-child(even) td {
+                background-color: #f2f2f2;
+            }
+            .visdom-table tr:nth-child(odd) td {
+                background-color: #ffffff;
+            }
+            .visdom-table tr:hover td {
+                background-color: #ddeeff;
+            }
+            </style>
+        """
+
+        header_html = "".join("<th>%s</th>" % html.escape(str(h)) for h in headers)
+        rows_html = "".join(
+            "<tr>%s</tr>"
+            % "".join("<td>%s</td>" % html.escape(str(cell)) for cell in row)
+            for row in data
+        )
+
+        table_html = (
+            "%s<table class='visdom-table'>"
+            "<thead><tr>%s</tr></thead>"
+            "<tbody>%s</tbody>"
+            "</table>"
+        ) % (style, header_html, rows_html)
+
+        return self.text(text=table_html, win=win, env=env, opts=opts)

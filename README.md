@@ -287,6 +287,7 @@ The following API is currently supported:
 - [`vis.line`](#visline)     : line plots
 - [`vis.stem`](#visstem)     : stem plots
 - [`vis.heatmap`](#visheatmap)  : heatmap plots
+- [`vis.confusion_matrix`](#visconfusion_matrix)  : confusion matrix plots
 - [`vis.bar`](#visbar)  : bar graphs
 - [`vis.histogram`](#vishistogram) : histograms
 - [`vis.histogram2d`](#vishistogram2d) : 2D histograms (density maps)
@@ -295,8 +296,11 @@ The following API is currently supported:
 - [`vis.pie`](#vispie)      : pie charts
 - [`vis.surf`](#vissurf)     : surface plots
 - [`vis.contour`](#viscontour)  : contour plots
+- [`vis.roc_curve`](#visroc_curve)  : ROC curves
+- [`vis.pr_curve`](#vispr_curve)  : precision-recall curves
 - [`vis.quiver`](#visquiver)   : quiver plots
 - [`vis.mesh`](#vismesh)     : mesh plots
+- [`vis.sankey`](#vissankey)   : sankey (flow) diagrams
 - [`vis.dual_axis_lines`](#visdual_axis_lines)     : double y axis line plots
 - [`vis.graph`](#visgraph)    : network graphs
 
@@ -548,6 +552,34 @@ The following `opts` are supported:
 - `opts.traceopts`   : `dict` mapping trace names or indices to `dict`s of additional options that plot.ly accepts for a trace.
 - `opts.webgl`       : use WebGL for plotting (`boolean`; default = `false`). It is faster if a plot contains too many points. Use sparingly as browsers won't allow more than a couple of WebGL contexts on a single page.
 
+#### vis.roc_curve
+This function draws a ROC curve for binary classification.
+
+It accepts either:
+- raw binary labels and scores via `y_true` and `y_score`, or
+- precomputed curve points via `fpr` and `tpr`.
+
+The following `opts` are supported:
+- `opts.title`      : plot title (`string`; default includes ROC-AUC)
+- `opts.legend`     : two legend labels for curve and baseline (`list`)
+- `opts.xlabel`     : x-axis label (`string`; default = `False Positive Rate`)
+- `opts.ylabel`     : y-axis label (`string`; default = `True Positive Rate`)
+- `opts.layoutopts` : additional backend layout options (`dict`)
+
+#### vis.pr_curve
+This function draws a precision-recall curve for binary classification.
+
+It accepts either:
+- raw binary labels and scores via `y_true` and `y_score`, or
+- precomputed curve points via `precision` and `recall`.
+
+The following `opts` are supported:
+- `opts.title`      : plot title (`string`; default includes PR-AUC)
+- `opts.legend`     : two legend labels for curve and baseline (`list`)
+- `opts.xlabel`     : x-axis label (`string`; default = `Recall`)
+- `opts.ylabel`     : y-axis label (`string`; default = `Precision`)
+- `opts.layoutopts` : additional backend layout options (`dict`)
+
 
 #### vis.stem
 This function draws a stem plot. It takes as input an `N` or `NxM` tensor
@@ -577,6 +609,32 @@ The following `opts` are supported:
 - `opts.rownames`   : `table` containing y-axis labels
 - `opts.layoutopts` : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 - `opts.nancolor`   : color for plotting `NaN`s. If this is `None`, `NaN`s will be plotted as transparent. (`string`; default = `None`)
+
+#### vis.confusion_matrix
+This function draws a confusion matrix for classification evaluation.
+
+It accepts either:
+- raw label vectors via `y_true` and `y_pred`, or
+- a precomputed confusion matrix via `cm`.
+
+Optional normalization can be applied with the `normalize` parameter:
+- `'true'`: normalize by row (actual class)
+- `'pred'`: normalize by column (predicted class)
+- `'all'`: normalize by total count
+
+An existing confusion matrix window can be modified with the `update` parameter:
+- `'replace'`: redraw the whole matrix in the window given by `win`
+- `'remove'`: delete the window given by `win`
+
+The following `opts` are supported:
+
+- `opts.title`       : plot title (`string`; default = `Confusion Matrix`)
+- `opts.xlabel`      : x-axis label (`string`; default = `Predicted`)
+- `opts.ylabel`      : y-axis label (`string`; default = `Actual`)
+- `opts.colormap`    : Plotly colorscale (`string`; default = `Blues`)
+- `opts.showCounts`  : show raw counts in cells (`bool`; default = `True`)
+- `opts.showPercent` : show percentages in cells (`bool`; default = `True` when normalized, `False` otherwise)
+- `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout.
 
 #### vis.bar
 This function draws a regular, stacked, or grouped bar plot. It takes as
@@ -695,6 +753,27 @@ The following `opts` are supported:
 - `opts.color`: color (`string`)
 - `opts.opacity`: opacity of polygons (`number` between 0 and 1)
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
+
+#### vis.sankey
+This function draws a Sankey (flow) diagram. Flows are defined by three
+equal-length arrays:
+
+- `source`: source node index of each link (`N` array of ints)
+- `target`: target node index of each link (`N` array of ints)
+- `value` : magnitude of each link (`N` array of non-negative numbers)
+
+`labels` is an optional list of node names. If omitted, nodes are referenced
+by their index alone.
+
+The following `opts` are supported:
+
+- `opts.labels`     : list of node labels (alternative to the `labels` arg)
+- `opts.pad`        : node padding in px (`number`; default = 15)
+- `opts.thickness`  : node thickness in px (`number`; default = 20)
+- `opts.orientation`: `'h'` (default) or `'v'`
+- `opts.nodecolor`  : node color(s) (`string` or list of strings)
+- `opts.linkcolor`  : link color(s) (`string` or list of strings)
+- `opts.layoutopts` : `dict` of any additional options that the graph backend accepts for a layout.
 
 #### vis.dual_axis_lines
 This function will create a line plot using plotly with different Y-Axis.
@@ -857,7 +936,7 @@ visdom is Apache 2.0 licensed, as found in the LICENSE file.
 Support for Lua Torch was deprecated following `v0.1.8.4`. If you'd like to use torch support, you'll need to download that release. You can follow the usage instructions there, but it is no longer officially supported.
 
 ## Contributing
-See guidelines for contributing [here.](./CONTRIBUTING.md)
+See guidelines for contributing and running E2E/visual tests (Cypress and Playwright) [here.](./CONTRIBUTING.md)
 
 ## Acknowledgments
 Visdom was inspired by tools like [display](https://github.com/szym/display) and relies on [Plotly](https://plot.ly/) as a plotting front-end.

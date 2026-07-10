@@ -8,7 +8,6 @@
  */
 
 const { test, expect } = require('@playwright/test');
-const { openEnv, closeEnvs } = require('../support/helpers');
 
 test.describe('Test Setup', () => {
   test.beforeEach(async ({ page }) => {
@@ -63,18 +62,21 @@ test.describe('Test Setup', () => {
       .getByText('main')
       .first();
     await mainSelection.hover();
+    await expect(removeBtn).toBeVisible();
 
     const removeBtn = page
       .locator('.rc-tree-select .rc-tree-select-selection-item-remove')
       .first();
-    await expect(removeBtn).toBeVisible();
     await removeBtn.click({ force: true });
     await expect(mainTitle).not.toBeVisible();
 
-    await openEnv(page, 'main');
+    await page.locator('.rc-tree-select').click();
+    const tree = page.locator('.rc-tree-select-tree');
+    await tree.getByText('main').first().click();
     await expect(mainTitle).toBeVisible();
 
-    await closeEnvs(page);
+    const clearBtn = page.locator('.rc-tree-select-clear').first();
+    await clearBtn.click({ force: true });
     await expect(mainTitle).not.toBeVisible();
   });
 });
