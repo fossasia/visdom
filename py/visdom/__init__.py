@@ -1723,6 +1723,8 @@ class Visdom(object):
         _assert_opts(opts)
 
         img = np.asarray(img)
+        if not np.issubdtype(img.dtype, np.floating) and img.dtype != np.uint8:
+            img = img.astype(np.float64)
         if np.issubdtype(img.dtype, np.floating):
             finite = img[np.isfinite(img)]
             if finite.size > 0:
