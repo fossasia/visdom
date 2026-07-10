@@ -11,6 +11,7 @@
     "@babel/plugin-proposal-class-properties": "^7.18.6",
     "@babel/preset-env": "^7.29.7",
     "@babel/preset-react": "^7.29.7",
+    "@playwright/test": "^1.45.0",
     "babel-loader": "^10.1.1",
     "cypress": "^15.18.0",
     "eslint": "^7.32.0",
@@ -36,6 +37,7 @@
     "test:init": "cypress run --spec './cypress/integration/screenshots.init.js'",
     "test:visual": "cypress run --spec './cypress/integration/screenshots.js'",
     "test": "cypress run --config excludeSpecPattern=**/*.init.js",
+    "test:pw": "playwright test --config=playwright.config.js",
     "lint": "eslint js/.",
     "lint:fix": "eslint --fix --ext .js,.jsx js/"
   },

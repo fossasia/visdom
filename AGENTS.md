@@ -38,14 +38,15 @@ Version `0.2.4` · Python >= 3.12 · Apache 2.0
 
 ## Testing
 
-- Start server: `visdom -port 8098 -env_path /tmp`
+- Python unit tests: `pytest -m "not server"` (config in `pyproject.toml`, suite in `py/tests/`)
+- Start server (for Cypress): `visdom -port 8098 -env_path /tmp`
 - Baseline: `npm run test:init`
-- Run tests: `npm run test`
+- Run E2E tests: `npm run test`
 - Pre-commit: `pre-commit run --all-files`
 
 ## PR Checklist
 
-- Branch from `master`, add Cypress tests for new code
+- Branch from `master`; add `pytest` tests in `py/tests/` for Python code and Cypress tests for frontend behavior
 - Update `README` for API changes, `__init__.pyi` for interface changes
 - Run linters, do not commit `py/visdom/static/`
 
