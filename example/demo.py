@@ -73,6 +73,7 @@ from components.plot_line import (
     plot_line_pytorch,
     plot_line_stem,
     plot_line_many_updates,
+    plot_line_learning_curve,
 )
 from components.plot_special import (
     plot_special_boxplot,
@@ -80,8 +81,15 @@ from components.plot_special import (
     plot_special_mesh,
     plot_special_sunburst,
     plot_special_graph,
+    plot_special_sankey,
+)
+from components.plot_roc_pr import (
+    plot_roc_curve,
+    plot_pr_curve,
+    plot_roc_precomputed,
 )
 from components.properties import properties_basic, properties_callbacks
+from components.plot_confusion_matrix import plot_confusion_matrix_basic, plot_confusion_matrix_precomputed, plot_confusion_matrix_normalized
 from components.misc import (
     misc_plot_matplot,
     misc_plot_latex,
@@ -100,6 +108,7 @@ from components.plot_violin import (
     plot_violin_with_points,
     plot_violin_horizontal,
 )
+from components.plot_html_table import html_table
 
 
 # This demo shows all features in a single environment.
@@ -141,6 +150,7 @@ def run_demo(viz, env, args):
     plot_line_doubleyaxis(viz, env, args)
     plot_line_pytorch(viz, env, args)
     plot_line_stem(viz, env, args)
+    plot_line_learning_curve(viz, env, args)
 
     # ============= #
     # scatter plots #
@@ -179,6 +189,19 @@ def run_demo(viz, env, args):
     plot_surface_contour(viz, env, args)
     plot_surface_3d(viz, env, args)
 
+    # =============== #
+    # ROC / PR curves #
+    # =============== #
+    plot_roc_curve(viz, env, args)
+    plot_pr_curve(viz, env, args)
+    plot_roc_precomputed(viz, env, args)
+    # ================ #
+    # confusion matrix #
+    # ================ #
+    plot_confusion_matrix_basic(viz, env, args)
+    plot_confusion_matrix_precomputed(viz, env, args)
+    plot_confusion_matrix_normalized(viz, env, args)
+
     # ============= #
     # special plots #
     # ============= #
@@ -187,6 +210,7 @@ def run_demo(viz, env, args):
     plot_special_mesh(viz, env, args)
     plot_special_sunburst(viz, env, args)
     plot_special_graph(viz, env, args)
+    plot_special_sankey(viz, env, args)
 
     # ============ #
     # violin plots #
@@ -195,6 +219,11 @@ def run_demo(viz, env, args):
     plot_violin_multigroup(viz, env, args)
     plot_violin_with_points(viz, env, args)
     plot_violin_horizontal(viz, env, args)
+
+    # ========== #
+    # html table #
+    # ========== #
+    html_table(viz, env, args)
 
     # ==== #
     # misc #

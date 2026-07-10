@@ -9,16 +9,22 @@ const basic_examples = [
   ['Bar Plot', 'plot_bar_basic'],
   ['Scatter Plot', 'plot_scatter_basic'],
   ['Surface Plot', 'plot_surface_basic'],
+  ['ROC Curve', 'plot_roc_curve'],
+  ['PR Curve', 'plot_pr_curve'],
   ['Box Plot', 'plot_special_boxplot'],
   ['Quiver Plot', 'plot_special_quiver'],
   ['Violin Plot', 'plot_violin_basic'],
   // ["Mesh Plot", "plot_special_mesh"], // disabled due to webgl
   ['Graph Plot', 'plot_special_graph'],
+  ['Sankey Plot', 'plot_special_sankey'],
+  ['Learning Curve', 'plot_line_learning_curve'],
   ['Matplotlib Plot', 'misc_plot_matplot'],
   ['Latex Plot', 'misc_plot_latex'],
   ['Video Pane', 'misc_video_tensor'],
   // ["Audio Pane", "misc_audio_basic"], // bug: disabled due to inconsistent resize
   ['Properties Pane', 'properties_basic'],
+  ['HTML Table', 'html_table'],
+  ['Confusion Matrix', 'plot_confusion_matrix_basic'],
 ];
 
 basic_examples.forEach((setting) => {
@@ -54,7 +60,7 @@ basic_examples.forEach((setting) => {
                   ? 350
                   : basic_example == 'properties_basic'
                     ? 263
-                    : 390;
+                    : basic_example == "html_table" ? 263 : 390;
 
       cy.get('.layout .react-grid-item')
         .first()
@@ -101,6 +107,9 @@ basic_examples.forEach((setting) => {
     } else if (basic_example == 'properties_basic') {
       [height, width] = [290, 244];
       [height4, width4] = [height, width];
+    } else if (basic_example == "html_table") {
+      [ height, width ] = [ 290, 244 ];
+      [ height4, width4 ] = [ height, width];
     } else {
       [height, width] = [350, 370];
       [height4, width4] = [height, width];
