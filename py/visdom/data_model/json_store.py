@@ -93,11 +93,11 @@ class JSONStore(DataStore):
         for eid in eids:
             if eid not in state:
                 continue
-            if self._write_env_file(eid, state[eid]):
+            if self.serialize_env(eid, state[eid]):
                 written.append(eid)
         return written
 
-    def _write_env_file(self, eid, env_data):
+    def serialize_env(self, eid, env_data):
         """Write one environment to disk; return ``True`` if written.
 
         A :class:`LazyEnvData` that was never materialised (``_raw_dict`` is
