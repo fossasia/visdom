@@ -285,6 +285,7 @@ The following API is currently supported:
 - [`vis.scatter`](#visscatter)  : 2D or 3D scatter plots
 - [`vis.sunburst`](#vissunburst)  : sunburst (hierarchy) charts
 - [`vis.line`](#visline)     : line plots
+- [`vis.learning_curve`](#vislearning_curve) : named training metric curves
 - [`vis.stem`](#visstem)     : stem plots
 - [`vis.heatmap`](#visheatmap)  : heatmap plots
 - [`vis.confusion_matrix`](#visconfusion_matrix)  : confusion matrix plots
@@ -579,6 +580,29 @@ The following `opts` are supported:
 - `opts.xlabel`     : x-axis label (`string`; default = `Recall`)
 - `opts.ylabel`     : y-axis label (`string`; default = `Precision`)
 - `opts.layoutopts` : additional backend layout options (`dict`)
+
+
+#### vis.learning_curve
+This function draws named machine-learning metrics as line plots. It accepts a mapping from metric names to scalar values or equal-length 1D series and forwards to [`vis.line`](#visline).
+
+For example:
+
+```python
+win = vis.learning_curve(
+    {"train_loss": [1.0, 0.8, 0.6], "val_loss": [1.1, 0.9, 0.7]},
+    step=[1, 2, 3],
+    env="training",
+    opts={"title": "Loss", "ylabel": "loss"},
+)
+
+vis.learning_curve(
+    {"train_loss": 0.55, "val_loss": 0.68},
+    step=4,
+    win=win,
+    env="training",
+    update="append",
+)
+```
 
 
 #### vis.stem

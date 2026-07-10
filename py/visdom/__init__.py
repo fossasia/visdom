@@ -2035,6 +2035,113 @@ class Visdom(object):
         return self._send(data_to_send, endpoint="update")
 
     @pytorch_wrap
+    def learning_curve(
+        self,
+        metrics,
+        step=None,
+        win=None,
+        env=None,
+        opts=None,
+        update=None,
+    ):
+        """
+        This function draws machine-learning learning curves using named metrics.
+        It is a convenience wrapper around `line`, accepting a mapping from metric
+        names to scalar values or equal-length 1D series.
+
+        `metrics` should be a non-empty mapping, for example:
+
+            {"train_loss": [1.0, 0.8], "val_loss": [1.1, 0.9]}
+
+        `step` can be a scalar or a 1D series matching the metric length. When
+        `update='append'`, `step` must be specified to avoid repeatedly appending
+        points at the same x-coordinate.
+        """
+        assert hasattr(metrics, "items"), "metrics should be a mapping"
+        metric_items = list(metrics.items())
+        assert len(metric_items) > 0, "must provide at least one metric"
+
+        names = []
+        series = []
+        for metric_name, metric_values in metric_items:
+            name = str(metric_name)
+            values = np.asarray(_to_numpy(metric_values))
+            values = np.squeeze(values)
+            if values.ndim == 0:
+                values = values.reshape(1)
+            assert (
+                values.ndim == 1
+            ), "metric '{}' should be a scalar or one-dimensional".format(name)
+            assert values.shape[0] > 0, "metric '{}' should not be empty".format(name)
+            names.append(name)
+            series.append(values)
+
+        num_steps = series[0].shape[0]
+        for name, values in zip(names, series):
+            assert (
+                values.shape[0] == num_steps
+            ), "metric '{}' has length {}, expected {}".format(
+                name, values.shape[0], num_steps
+            )
+
+        if step is None:
+            assert update != "append", "must specify step when update='append'"
+            X = np.arange(num_steps)
+        else:
+            X = np.asarray(_to_numpy(step))
+            X = np.squeeze(X)
+            if X.ndim == 0:
+                X = X.reshape(1)
+            assert X.ndim == 1, "step should be a scalar or one-dimensional"
+            assert X.shape[0] == num_steps, "step has length {}, expected {}".format(
+                X.shape[0], num_steps
+            )
+
+        opts = {} if opts is None else dict(opts)
+        opts.setdefault("title", "Learning Curve")
+        opts.setdefault("xlabel", "step")
+        opts.setdefault("ylabel", "metric")
+        if opts.get("legend") is None:
+            legend = names
+            opts["legend"] = legend
+        else:
+            legend = opts["legend"]
+            assert isinstance(legend, (tuple, list)), "legend should be a list or tuple"
+            assert len(legend) >= len(
+                names
+            ), "legend should have at least as many entries as metrics"
+
+        if update is not None:
+            result = None
+            # Send one named update per metric so mapping order cannot swap traces.
+            for name, values in zip(names, series):
+                metric_opts = None
+                if update != "remove":
+                    metric_opts = dict(opts)
+                    metric_opts["legend"] = [name]
+                result = self.line(
+                    X=X,
+                    Y=values,
+                    win=win,
+                    env=env,
+                    opts=metric_opts,
+                    update=update,
+                    name=name,
+                )
+            return result
+
+        Y = np.column_stack(series)
+
+        return self.line(
+            X=X,
+            Y=Y,
+            win=win,
+            env=env,
+            opts=opts,
+            update=update,
+        )
+
+    @pytorch_wrap
     def scatter(self, X, Y=None, win=None, env=None, opts=None, update=None, name=None):
         """
         This function draws a 2D or 3D scatter plot. It takes in an `Nx2` or
