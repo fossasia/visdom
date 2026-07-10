@@ -6,6 +6,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import copy
 import errno
 import hashlib
 import json
@@ -15,7 +16,7 @@ import re
 
 from visdom.data_model.base import DataStore
 from visdom.server.defaults import LAYOUT_FILE, UNDO_DIRNAME
-from visdom.utils.server_utils import escape_eid, serialize_env
+from visdom.utils.server_utils import escape_eid, LazyEnvData
 from visdom.utils.shared_utils import ensure_dir_exists, NanSafeEncoder
 
 HASHED_ENV_RE = re.compile(r"^hash_[a-f0-9]{64}\.json$", re.IGNORECASE)
@@ -92,10 +93,43 @@ class JSONStore(DataStore):
         for eid in eids:
             if eid not in state:
                 continue
-            safe_eid = self._safe_eid(eid)
-            serialize_env({safe_eid: state[eid]}, [safe_eid], env_path=self.env_path)
-            written.append(eid)
+            if self._write_env_file(eid, state[eid]):
+                written.append(eid)
         return written
+
+    def _write_env_file(self, eid, env_data):
+        """Write one environment to disk; return ``True`` if written.
+
+        A :class:`LazyEnvData` that was never materialised (``_raw_dict`` is
+        ``None``) is skipped and ``False`` is returned: its on-disk copy is
+        already current, so there is nothing to rewrite and no reason to force
+        it into memory. The write funnels through :meth:`_primary_path` /
+        :meth:`_hash_path` so it agrees with load/delete/exists on the file a
+        given ``eid`` maps to; over-long ids fall back to ``hash_<sha256>.json``
+        with the real id kept in a ``name`` field.
+        """
+        if isinstance(env_data, LazyEnvData):
+            if env_data._raw_dict is None:
+                return False
+            env_data.lazy_load_data()
+            payload = env_data._raw_dict
+        else:
+            payload = env_data
+
+        primary = self._primary_path(eid)
+        try:
+            if primary is None:
+                raise OSError(errno.ENAMETOOLONG, "env id maps outside env_path")
+            with open(primary, "w") as fn:
+                fn.write(json.dumps(payload, cls=NanSafeEncoder))
+        except OSError as e:
+            if e.errno != errno.ENAMETOOLONG and getattr(e, "winerror", None) != 206:
+                raise
+            data_to_save = copy.deepcopy(payload)
+            data_to_save["name"] = self._safe_eid(eid)
+            with open(self._hash_path(eid), "w") as fn:
+                fn.write(json.dumps(data_to_save, cls=NanSafeEncoder))
+        return True
 
     def save_all(self, state):
         """Persist every environment in ``state``; return the ids written."""
@@ -185,8 +219,8 @@ class JSONStore(DataStore):
     def _undo_paths(self, eid):
         """Return ``(undo_dir, plain_path, hashed_path)`` for ``eid``'s undo file.
 
-        ``hashed_path`` mirrors ``serialize_env``'s fallback for env ids whose
-        plain filename would exceed the filesystem limit.
+        ``hashed_path`` mirrors the env-file hash fallback for ids whose plain
+        filename would exceed the filesystem limit.
         """
         undo_dir = os.path.join(self.env_path, UNDO_DIRNAME)
         plain = os.path.join(undo_dir, "{0}.json".format(eid))

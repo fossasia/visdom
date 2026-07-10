@@ -21,7 +21,6 @@ import json
 import logging
 import os
 import time
-import errno
 from collections import OrderedDict
 
 MAX_ENV_NAME_LEN = 25
@@ -121,49 +120,6 @@ class LazyEnvData(Mapping):
     def __len__(self):
         self.lazy_load_data()
         return len(self._raw_dict)
-
-
-def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
-    env_ids = [i for i in eids if i in state]
-    if env_path is not None:
-        for env_id in env_ids:
-            if isinstance(state[env_id], LazyEnvData):
-                if state[env_id]._raw_dict is None:
-                    continue
-            env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
-            try:
-                with open(env_path_file, "w") as fn:
-                    if isinstance(state[env_id], LazyEnvData):
-                        state[env_id].lazy_load_data()
-                        fn.write(
-                            json.dumps(state[env_id]._raw_dict, cls=NanSafeEncoder)
-                        )
-                    else:
-                        fn.write(json.dumps(state[env_id], cls=NanSafeEncoder))
-            except OSError as e:
-                if (
-                    e.errno != errno.ENAMETOOLONG
-                    and getattr(e, "winerror", None) != 206
-                ):
-                    raise
-                hashed_id = hashlib.sha256(env_id.encode("utf-8")).hexdigest()
-                env_path_file = os.path.join(
-                    env_path, "hash_{0}.json".format(hashed_id)
-                )
-                with open(env_path_file, "w") as fn:
-                    if isinstance(state[env_id], LazyEnvData):
-                        state[env_id].lazy_load_data()
-                        data_to_save = copy.deepcopy(state[env_id]._raw_dict)
-                    else:
-                        data_to_save = copy.deepcopy(state[env_id])
-                    data_to_save["name"] = env_id
-                    fn.write(json.dumps(data_to_save, cls=NanSafeEncoder))
-
-    return env_ids
-
-
-def serialize_all(state, env_path=DEFAULT_ENV_PATH):
-    serialize_env(state, list(state.keys()), env_path=env_path)
 
 
 # ------- Environment management helpers ----- #

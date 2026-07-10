@@ -1,6 +1,6 @@
 """
 Tests that the server routes persistence through ``Application.storage``
-(the DataStore backend) rather than calling ``serialize_env`` directly.
+(the DataStore backend) rather than writing environment files directly.
 
 These guard the PR-#2 wiring: end-to-end save/fork/reload behavior is already
 covered in ``test_environment_lifecycle``; here we assert the abstraction itself
