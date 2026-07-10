@@ -7,7 +7,7 @@
  *
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 const EXIT_ANIMATION_MS = 200;
 
@@ -19,14 +19,24 @@ const Toast = ({
   onDismiss,
 }) => {
   const [isLeaving, setIsLeaving] = useState(false);
+  const isLeavingRef = useRef(false);
   const dismissTimerRef = useRef(null);
   const exitTimerRef = useRef(null);
+  const onDismissRef = useRef(onDismiss);
 
-  const startExit = () => {
-    if (isLeaving) return;
+  useEffect(() => {
+    onDismissRef.current = onDismiss;
+  }, [onDismiss]);
+
+  const startExit = useCallback(() => {
+    if (isLeavingRef.current) return;
+    isLeavingRef.current = true;
     setIsLeaving(true);
-    exitTimerRef.current = setTimeout(onDismiss, EXIT_ANIMATION_MS);
-  };
+    exitTimerRef.current = setTimeout(
+      () => onDismissRef.current(),
+      EXIT_ANIMATION_MS
+    );
+  }, []);
 
   useEffect(() => {
     if (duration > 0) {
@@ -36,7 +46,7 @@ const Toast = ({
       clearTimeout(dismissTimerRef.current);
       clearTimeout(exitTimerRef.current);
     };
-  }, [duration]);
+  }, [duration, startExit]);
 
   const isPill = shape === 'pill';
 
