@@ -382,6 +382,75 @@ paths:
         "500":
           description: Server error. Occurs if the source environment does not exist (unhandled assertion error).
 
+  /upload_env:
+    post:
+      operationId: uploadEnvironment
+      tags: [Environment]
+      summary: Upload a Visdom JSON file as a new environment
+      description: >
+        Accepts a Visdom environment-export JSON file via multipart form upload
+        and loads it as a new environment named `uploaded_<name>_<id>`. The
+        uploaded JSON must be an object containing `jsons` and `reload` keys.
+        The new environment is saved to disk (when a persistence path is
+        configured) and an `env_update` broadcast is sent. Maximum file size is
+        100 MB. Rejected when the server is running in readonly mode.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: >
+                    A Visdom environment-export JSON file (object with `jsons`
+                    and `reload` keys).
+      responses:
+        "200":
+          description: Environment created from the uploaded file.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, eid, message]
+                properties:
+                  success:
+                    type: boolean
+                  eid:
+                    type: string
+                    description: ID of the newly created environment.
+                  message:
+                    type: string
+              examples:
+                uploaded:
+                  value:
+                    success: true
+                    eid: uploaded_myrun_1a2b3c4d
+                    message: "Dashboard loaded successfully as 'uploaded_myrun_1a2b3c4d'"
+        "400":
+          description: >
+            No file uploaded, invalid JSON, not a valid Visdom JSON, or
+            authentication required but not provided (when login is enabled).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadErrorResponse"
+        "403":
+          description: Uploads are disabled because the server is in readonly mode.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadErrorResponse"
+        "413":
+          description: Uploaded file exceeds the 100 MB size limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadErrorResponse"
+
   /env/{eid}:
     get:
       operationId: renderEnvironmentPage
@@ -775,6 +844,17 @@ components:
         the server is started with `--enable_login`.
 
   schemas:
+
+    UploadErrorResponse:
+      type: object
+      description: Error response returned by the /upload_env endpoint.
+      properties:
+        success:
+          type: boolean
+          description: Always `false` for error responses.
+        error:
+          type: string
+          description: Human-readable description of what went wrong.
 
     CreateWindowRequest:
       type: object
