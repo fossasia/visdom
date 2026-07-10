@@ -99,6 +99,14 @@ class Visdom:
     def image_select(
         self, win: Text, selected: int, env: _OptStr = ...
     ) -> _SendReturn: ...
+    def image_heatmap(
+        self,
+        img: Tensor,
+        heatmap: Tensor,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
     def images(
         self,
         tensor: Tensor,

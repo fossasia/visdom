@@ -1812,6 +1812,142 @@ class Visdom(object):
         )
 
     @pytorch_wrap
+    def image_heatmap(self, img, heatmap, win=None, env=None, opts=None):
+        """
+        Overlay a heatmap on an image.
+
+        `img` is a `CxHxW` or `HxW` tensor (uint8 or float, same rules as
+        `image()`). `heatmap` is an `HxW` float array. Values are expected in
+        [0, 1] but any finite range is accepted — values outside [0, 1] are
+        rescaled via min-max normalization before blending. NaN maps to 0;
+        infinite values are clamped to the [0, 1] boundary. The two are
+        blended in Python and sent as a single image, so no frontend changes
+        are required.
+
+        The following `opts` are supported:
+
+        - `opts.alpha`:    heatmap blend strength (`float` in [0, 1]; default = 0.5)
+        - `opts.colormap`: matplotlib colormap name (`string`; default = `'jet'`)
+        - `opts.caption`:  caption below the image (`string`; optional)
+        - `opts.jpgquality`: JPEG quality (`number` in (0, 100]; default = PNG)
+        - `opts.normalize`: min-max scale the base image (`boolean`; default = `False`)
+        """
+        opts = {} if opts is None else dict(opts)
+        _title2str(opts)
+        _assert_opts(opts)
+
+        img = np.asarray(img)
+        if not np.issubdtype(img.dtype, np.floating) and img.dtype != np.uint8:
+            img = img.astype(np.float64)
+        if np.issubdtype(img.dtype, np.floating):
+            finite = img[np.isfinite(img)]
+            if finite.size > 0:
+                img_min, img_max = float(finite.min()), float(finite.max())
+            else:
+                img_min, img_max = 0.0, 0.0
+            if opts.get("normalize", False):
+                if img_max > img_min:
+                    img = (img - img_min) / (img_max - img_min) * 255.0
+                else:
+                    img = np.zeros_like(img)
+            elif img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
+                img = img * 255.0
+            elif img_min >= -1.0 - 1e-5 and img_max <= 1.0 + 1e-5:
+                img = (img + 1.0) / 2.0 * 255.0
+            img = np.nan_to_num(img, nan=0.0, posinf=255.0, neginf=0.0)
+            img = np.uint8(np.clip(img, 0, 255))
+
+        if img.ndim == 2:
+            H, W = img.shape
+            img_rgb = np.stack([img, img, img], axis=-1)
+        elif img.ndim == 3:
+            nchannels = img.shape[0]
+            H, W = img.shape[1], img.shape[2]
+            if nchannels == 1:
+                img_rgb = np.stack([img[0], img[0], img[0]], axis=-1)
+            elif nchannels == 3:
+                img_rgb = np.transpose(img, (1, 2, 0))
+            elif nchannels == 4:
+                img_rgb = np.transpose(img, (1, 2, 0))[:, :, :3]
+            else:
+                raise ValueError(
+                    "img must have 1, 3, or 4 channels; got {}".format(nchannels)
+                )
+        else:
+            raise ValueError(
+                "img must be 2D (H,W) or 3D (C,H,W); got {}D".format(img.ndim)
+            )
+
+        heatmap = np.asarray(heatmap, dtype=np.float32)
+        if heatmap.shape != (H, W):
+            raise ValueError(
+                "heatmap shape {} does not match image ({},{})".format(
+                    heatmap.shape, H, W
+                )
+            )
+        heatmap = np.nan_to_num(heatmap, nan=0.0, posinf=1.0, neginf=0.0)
+        h_min, h_max = float(heatmap.min()), float(heatmap.max())
+        if h_min < 0.0 or h_max > 1.0:
+            if h_max > h_min:
+                heatmap = (heatmap - h_min) / (h_max - h_min)
+            else:
+                heatmap = np.zeros_like(heatmap)
+
+        colormap = opts.get("colormap", "jet")
+        try:
+            import matplotlib.cm as _cm
+
+            cmap = getattr(_cm, colormap, _cm.jet)
+            heatmap_rgb = (cmap(heatmap)[:, :, :3] * 255).astype(np.uint8)
+        except ImportError:
+            # fallback: blue -> red gradient
+            heatmap_rgb = np.stack(
+                [heatmap, np.zeros_like(heatmap), 1.0 - heatmap], axis=-1
+            )
+            heatmap_rgb = (heatmap_rgb * 255).astype(np.uint8)
+
+        alpha = float(opts.get("alpha", 0.5))
+        if not 0.0 <= alpha <= 1.0:
+            raise ValueError("alpha must be in [0, 1]; got {}".format(alpha))
+        w = (heatmap * alpha)[:, :, np.newaxis].astype(np.float32)
+        blended = (
+            (
+                (1.0 - w) * img_rgb.astype(np.float32)
+                + w * heatmap_rgb.astype(np.float32)
+            )
+            .clip(0, 255)
+            .astype(np.uint8)
+        )
+
+        im = Image.fromarray(blended, mode="RGB")
+        buf = BytesIO()
+        image_type = "png"
+        imsave_args = {}
+        jpgquality = opts.get("jpgquality")
+        if jpgquality is not None:
+            image_type = "jpeg"
+            imsave_args["quality"] = jpgquality
+        im.save(buf, format=image_type.upper(), **imsave_args)
+        b64encoded = b64.b64encode(buf.getvalue()).decode("utf-8")
+
+        opts["width"] = opts.get("width", W)
+        opts["height"] = opts.get("height", H)
+
+        data = [
+            {
+                "content": {
+                    "src": "data:image/" + image_type + ";base64," + b64encoded,
+                    "caption": opts.get("caption"),
+                },
+                "type": "image",
+            }
+        ]
+        return self._send(
+            {"data": data, "win": win, "eid": env, "opts": opts},
+            endpoint="events",
+        )
+
+    @pytorch_wrap
     def images(self, tensor, nrow=8, padding=2, win=None, env=None, opts=None):
         """
         Given a 4D tensor of shape (B x C x H x W),
