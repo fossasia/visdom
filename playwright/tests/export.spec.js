@@ -96,9 +96,12 @@ test.describe('Test Export Env as HTML', () => {
       .click();
     await expect(page.locator('.layout .react-grid-item')).toHaveCount(0);
 
-    const dialogPromise = page.waitForEvent('dialog');
-    await page.locator(EXPORT_BUTTON).click();
-    const dialog = await dialogPromise;
+    // Register the dialog listener before clicking since the export
+    // button triggers a synchronous window.alert().
+    const [dialog] = await Promise.all([
+      page.waitForEvent('dialog'),
+      page.locator(EXPORT_BUTTON).click(),
+    ]);
     expect(dialog.message()).toBe('No panes available to export.');
     await dialog.dismiss();
   });
