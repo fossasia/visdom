@@ -95,14 +95,12 @@ test.describe('Test Export Env as HTML', () => {
       .locator('button[title="close"]')
       .click();
     await expect(page.locator('.layout .react-grid-item')).toHaveCount(0);
-
-    // Register the dialog listener before clicking since the export
-    // button triggers a synchronous window.alert().
-    const [dialog] = await Promise.all([
-      page.waitForEvent('dialog'),
-      page.locator(EXPORT_BUTTON).click(),
-    ]);
-    expect(dialog.message()).toBe('No panes available to export.');
-    await dialog.dismiss();
+    let dialogMessage;
+    page.once('dialog', async (dialog) => {
+      dialogMessage = dialog.message();
+      await dialog.dismiss();
+    });
+    await page.locator(EXPORT_BUTTON).click();
+    expect(dialogMessage).toBe('No panes available to export.');
   });
 });
