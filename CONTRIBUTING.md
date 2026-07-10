@@ -193,12 +193,18 @@ To run the predefined tests
 5. run `npm run test:gui` (a new window should appear)
 6. click through the test spec-files and observe the tests done automatically in a newly opened browser instance
 
-**as CLI tests**:
+**as CLI tests (Cypress)**:
 1. start a fresh visdom server instance on port `8098` , i.e. by just calling `visdom -port 8098` (Just to make sure another instance is not interfering with our test.)
 2. run `npm run test:init`. This generates screenshots of all plots for the visual regression testing.
 3. Adapt the code now to your needs.
 4. run `npm run build` *or* `npm run dev` (enables automatic building)
 5. run `npm run test`
+
+**using Playwright (E2E tests)**:
+1. start a fresh visdom server instance on port `8098` using your environment's Python, i.e. `python -m visdom.server -port 8098 -env_path playwright/tmp` (make sure no other instances interfere).
+2. run `npx playwright install chromium` on first setup to install the browser.
+3. run `npm run build` *or* `npm run dev` to compile the frontend code.
+4. run the Playwright test suite: `npm run test:pw`
 
 ## Issues
 We use GitHub issues to track public bugs. Please ensure your description is

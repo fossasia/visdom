@@ -7,8 +7,9 @@
  *
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useContext, useEffect, useRef, useState } from 'react';
 const { usePrevious } = require('../util');
+import ApiContext from '../api/ApiContext';
 import Pane from './Pane';
 const { sgg } = require('ml-savitzky-golay-generalized');
 
@@ -25,6 +26,8 @@ var PlotPane = (props) => {
   const [actualSelected, setActualSelected] = useState(
     isHistory ? selected || 0 : 0
   );
+  const { sendPlotLayoutUpdate } = useContext(ApiContext);
+  const layoutUpdateTimeout = useRef(null);
 
   const content = isHistory
     ? props.content[Math.min(actualSelected, props.content.length - 1)]
@@ -126,6 +129,40 @@ var PlotPane = (props) => {
     newPlot();
   });
 
+  useEffect(() => {
+    const plotElement = plotlyRef.current;
+    if (!plotElement) return;
+
+    const handleRelayout = (eventdata) => {
+      const touchedShapes = Object.keys(eventdata).some((k) =>
+        k.includes('shapes')
+      );
+      if (!touchedShapes) return;
+
+      clearTimeout(layoutUpdateTimeout.current);
+      layoutUpdateTimeout.current = setTimeout(() => {
+        const shapes = plotElement.layout?.shapes || [];
+
+        if (content && content.layout) {
+          content.layout.shapes = shapes;
+        }
+
+        sendPlotLayoutUpdate(
+          props.envID,
+          props.id,
+          { shapes },
+          isHistory ? actualSelected : undefined
+        );
+      }, 300);
+    };
+
+    plotElement.on('plotly_relayout', handleRelayout);
+    return () => {
+      plotElement.removeListener('plotly_relayout', handleRelayout);
+      clearTimeout(layoutUpdateTimeout.current);
+    };
+  }, [props.envID, props.id, actualSelected, content]);
+
   // rendering
   // ---------
 
@@ -197,8 +234,7 @@ var PlotPane = (props) => {
         layout.title = { text: layout.title };
       }
       if (layout.title.text) {
-        layout.margin.t = 65;
-        layout.title.y = 0.9;
+        layout.margin.t = 85;
       } else {
         layout.margin.t = 30;
       }
@@ -212,6 +248,7 @@ var PlotPane = (props) => {
       displaylogo: false,
       doubleClick: 'reset',
       doubleClickDelay: 500,
+      modeBarButtonsToAdd: ['drawopenpath', 'eraseshape'],
     }).then(() => {
       const plotElement = plotlyRef.current;
       if (plotElement && plotElement._fullLayout && isDisplayed(plotElement)) {
@@ -308,10 +345,10 @@ var PlotPane = (props) => {
           content.data?.[0]?.type === 'heatmap'
             ? ' plotly-heatmap'
             : content.data?.[0]?.type === 'contour'
-            ? ' plotly-contour'
-            : content.data?.[0]?.type === 'surface'
-            ? ' plotly-surface'
-            : ''
+              ? ' plotly-contour'
+              : content.data?.[0]?.type === 'surface'
+                ? ' plotly-surface'
+                : ''
         }`}
         ref={plotlyRef}
       />
