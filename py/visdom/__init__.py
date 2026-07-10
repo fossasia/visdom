@@ -144,7 +144,6 @@ def isndarray(n):
 
 from visdom.utils.shared_utils import NanSafeEncoder
 
-
 # TODO: In appropriate places, we need to change many numpy calls to use
 #       nan-aware ones, e.g., `X.max` => `np.nanmax(X)`.
 
@@ -492,6 +491,121 @@ def pytorch_wrap(f):
         return f(*args, **kwargs)
 
     return wrapped_f
+
+
+def _binary_clf_curve(y_true, y_score, pos_label=1):
+    """Compute true/false positives per distinct score threshold."""
+    y_true = np.asarray(y_true)
+    y_score = np.asarray(y_score)
+
+    if y_true.ndim != 1:
+        raise ValueError("y_true should have 1 dim")
+    if y_score.ndim != 1:
+        raise ValueError("y_score should have 1 dim")
+    if y_true.shape[0] != y_score.shape[0]:
+        raise ValueError("y_true and y_score should match")
+    if y_true.shape[0] == 0:
+        raise ValueError("y_true and y_score should be non-empty")
+    if not np.all(np.isfinite(y_score)):
+        raise ValueError("y_score should only contain finite values")
+
+    y_true = y_true == pos_label
+    desc_score_indices = np.argsort(y_score, kind="mergesort")[::-1]
+    y_score = y_score[desc_score_indices]
+    y_true = y_true[desc_score_indices]
+
+    distinct_value_indices = np.where(np.diff(y_score))[0]
+    threshold_idxs = np.r_[distinct_value_indices, y_true.size - 1]
+
+    tps = np.cumsum(y_true, dtype=float)[threshold_idxs]
+    fps = 1 + threshold_idxs - tps
+    return fps, tps
+
+
+def _compute_roc_curve(y_true, y_score, pos_label=1):
+    """Compute ROC curve (fpr, tpr) from raw labels and scores."""
+    fps, tps = _binary_clf_curve(y_true=y_true, y_score=y_score, pos_label=pos_label)
+    pos_total = float(tps[-1])
+    neg_total = float(fps[-1])
+    if pos_total <= 0:
+        raise ValueError("y_true has no positive samples")
+    if neg_total <= 0:
+        raise ValueError("y_true has no negative samples")
+
+    fpr = np.r_[0.0, fps / neg_total]
+    tpr = np.r_[0.0, tps / pos_total]
+    return fpr, tpr
+
+
+def _compute_pr_curve(y_true, y_score, pos_label=1):
+    """Compute precision-recall curve from raw labels and scores."""
+    fps, tps = _binary_clf_curve(y_true=y_true, y_score=y_score, pos_label=pos_label)
+    pos_total = float(tps[-1])
+    if pos_total <= 0:
+        raise ValueError("y_true has no positive samples")
+
+    precision = tps / (tps + fps)
+    recall = tps / pos_total
+
+    precision = np.r_[1.0, precision]
+    recall = np.r_[0.0, recall]
+    return precision, recall
+
+
+def _coerce_curve_xy(x, y, x_name, y_name):
+    """Validate and sort precomputed curve arrays by x."""
+    x = np.asarray(x)
+    y = np.asarray(y)
+    if x.ndim != 1:
+        raise ValueError("{} should have 1 dim".format(x_name))
+    if y.ndim != 1:
+        raise ValueError("{} should have 1 dim".format(y_name))
+    if x.shape[0] != y.shape[0]:
+        raise ValueError("{} and {} should match".format(x_name, y_name))
+    if x.shape[0] <= 1:
+        raise ValueError(
+            "{} and {} should have at least 2 points".format(x_name, y_name)
+        )
+
+    order = np.argsort(x, kind="mergesort")
+    return x[order], y[order]
+
+
+def _validate_curve_range(values, name):
+    """Validate that values are finite and within [0, 1]."""
+    values = np.asarray(values)
+    if not np.all(np.isfinite(values)):
+        raise ValueError("{} should only contain finite values".format(name))
+    if not np.all((values >= 0.0) & (values <= 1.0)):
+        raise ValueError("{} should be within [0, 1]".format(name))
+
+
+def _curve_legend(legend, default_legend):
+    """Return user-provided legend or default 2-element list."""
+    if not isinstance(legend, (tuple, list)) or len(legend) < 2:
+        if legend is not None:
+            warnings.warn(
+                "legend should be a list/tuple with at least 2 elements, "
+                "falling back to default: {}".format(default_legend),
+                UserWarning,
+            )
+        return list(default_legend)
+    return list(legend)
+
+
+def _trapz_area(y, x):
+    """Compute trapezoidal area under curve, compatible with numpy >= 2.0."""
+    trapezoid = getattr(np, "trapezoid", None)
+    if trapezoid is not None:
+        return float(trapezoid(y, x))
+    return float(np.trapz(y, x))
+
+
+def _average_precision(precision, recall):
+    """Compute average precision: AP = sum((R_n - R_{n-1}) * P_n)."""
+    precision = np.asarray(precision)
+    recall = np.asarray(recall)
+    return float(np.sum(np.diff(recall) * precision[1:]))
 
 
 def _compute_confusion_matrix(y_true, y_pred, labels):
@@ -2057,6 +2171,113 @@ class Visdom(object):
         return self._send(data_to_send, endpoint="update")
 
     @pytorch_wrap
+    def learning_curve(
+        self,
+        metrics,
+        step=None,
+        win=None,
+        env=None,
+        opts=None,
+        update=None,
+    ):
+        """
+        This function draws machine-learning learning curves using named metrics.
+        It is a convenience wrapper around `line`, accepting a mapping from metric
+        names to scalar values or equal-length 1D series.
+
+        `metrics` should be a non-empty mapping, for example:
+
+            {"train_loss": [1.0, 0.8], "val_loss": [1.1, 0.9]}
+
+        `step` can be a scalar or a 1D series matching the metric length. When
+        `update='append'`, `step` must be specified to avoid repeatedly appending
+        points at the same x-coordinate.
+        """
+        assert hasattr(metrics, "items"), "metrics should be a mapping"
+        metric_items = list(metrics.items())
+        assert len(metric_items) > 0, "must provide at least one metric"
+
+        names = []
+        series = []
+        for metric_name, metric_values in metric_items:
+            name = str(metric_name)
+            values = np.asarray(_to_numpy(metric_values))
+            values = np.squeeze(values)
+            if values.ndim == 0:
+                values = values.reshape(1)
+            assert (
+                values.ndim == 1
+            ), "metric '{}' should be a scalar or one-dimensional".format(name)
+            assert values.shape[0] > 0, "metric '{}' should not be empty".format(name)
+            names.append(name)
+            series.append(values)
+
+        num_steps = series[0].shape[0]
+        for name, values in zip(names, series):
+            assert (
+                values.shape[0] == num_steps
+            ), "metric '{}' has length {}, expected {}".format(
+                name, values.shape[0], num_steps
+            )
+
+        if step is None:
+            assert update != "append", "must specify step when update='append'"
+            X = np.arange(num_steps)
+        else:
+            X = np.asarray(_to_numpy(step))
+            X = np.squeeze(X)
+            if X.ndim == 0:
+                X = X.reshape(1)
+            assert X.ndim == 1, "step should be a scalar or one-dimensional"
+            assert X.shape[0] == num_steps, "step has length {}, expected {}".format(
+                X.shape[0], num_steps
+            )
+
+        opts = {} if opts is None else dict(opts)
+        opts.setdefault("title", "Learning Curve")
+        opts.setdefault("xlabel", "step")
+        opts.setdefault("ylabel", "metric")
+        if opts.get("legend") is None:
+            legend = names
+            opts["legend"] = legend
+        else:
+            legend = opts["legend"]
+            assert isinstance(legend, (tuple, list)), "legend should be a list or tuple"
+            assert len(legend) >= len(
+                names
+            ), "legend should have at least as many entries as metrics"
+
+        if update is not None:
+            result = None
+            # Send one named update per metric so mapping order cannot swap traces.
+            for name, values in zip(names, series):
+                metric_opts = None
+                if update != "remove":
+                    metric_opts = dict(opts)
+                    metric_opts["legend"] = [name]
+                result = self.line(
+                    X=X,
+                    Y=values,
+                    win=win,
+                    env=env,
+                    opts=metric_opts,
+                    update=update,
+                    name=name,
+                )
+            return result
+
+        Y = np.column_stack(series)
+
+        return self.line(
+            X=X,
+            Y=Y,
+            win=win,
+            env=env,
+            opts=opts,
+            update=update,
+        )
+
+    @pytorch_wrap
     def scatter(self, X, Y=None, win=None, env=None, opts=None, update=None, name=None):
         """
         This function draws a 2D or 3D scatter plot. It takes in an `Nx2` or
@@ -2423,6 +2644,198 @@ class Visdom(object):
 
         return self.scatter(
             X=linedata, Y=labels, opts=opts, win=win, env=env, update=update, name=name
+        )
+
+    @pytorch_wrap
+    def roc_curve(
+        self,
+        y_true=None,
+        y_score=None,
+        fpr=None,
+        tpr=None,
+        pos_label=1,
+        win=None,
+        env=None,
+        opts=None,
+    ):
+        """
+        Draw a ROC curve for binary classification.
+
+        You can either provide raw labels/scores (`y_true`, `y_score`) or
+        precomputed points (`fpr`, `tpr`).
+
+        The following `opts` are supported:
+
+        - `opts.title`      : plot title (`string`; default includes ROC-AUC)
+        - `opts.legend`     : two legend labels for curve and baseline (`list`)
+        - `opts.xlabel`     : x-axis label (`string`; default = `False Positive Rate`)
+        - `opts.ylabel`     : y-axis label (`string`; default = `True Positive Rate`)
+        - `opts.layoutopts` : additional backend layout options (`dict`)
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        has_raw = y_true is not None or y_score is not None
+        has_points = fpr is not None or tpr is not None
+        if has_raw == has_points:
+            raise ValueError(
+                "provide exactly one input mode: (y_true, y_score) or (fpr, tpr)"
+            )
+
+        if has_raw:
+            if y_true is None or y_score is None:
+                raise ValueError("both y_true and y_score are required")
+            fpr, tpr = _compute_roc_curve(
+                y_true=np.ravel(y_true),
+                y_score=np.ravel(y_score),
+                pos_label=pos_label,
+            )
+        else:
+            if fpr is None or tpr is None:
+                raise ValueError("both fpr and tpr are required")
+            fpr, tpr = _coerce_curve_xy(fpr, tpr, "fpr", "tpr")
+
+        _validate_curve_range(fpr, "fpr")
+        _validate_curve_range(tpr, "tpr")
+
+        auc = _trapz_area(tpr, fpr)
+
+        opts = dict(opts)
+        opts["xlabel"] = opts.get("xlabel", "False Positive Rate")
+        opts["ylabel"] = opts.get("ylabel", "True Positive Rate")
+        opts["legend"] = _curve_legend(opts.get("legend"), ["ROC", "Chance"])
+        opts["title"] = opts.get("title", "ROC Curve (AUC={:.4f})".format(auc))
+
+        data = [
+            {
+                "x": fpr.tolist(),
+                "y": tpr.tolist(),
+                "name": opts["legend"][0],
+                "type": "scatter",
+                "mode": "lines",
+            },
+            {
+                "x": [0.0, 1.0],
+                "y": [0.0, 1.0],
+                "name": opts["legend"][1],
+                "type": "scatter",
+                "mode": "lines",
+                "line": {"dash": "dash"},
+            },
+        ]
+
+        return self._send(
+            {
+                "data": data,
+                "win": win,
+                "eid": env,
+                "layout": _opts2layout(opts),
+                "opts": opts,
+            }
+        )
+
+    @pytorch_wrap
+    def pr_curve(
+        self,
+        y_true=None,
+        y_score=None,
+        precision=None,
+        recall=None,
+        pos_label=1,
+        win=None,
+        env=None,
+        opts=None,
+    ):
+        """
+        Draw a precision-recall curve for binary classification.
+
+        You can either provide raw labels/scores (`y_true`, `y_score`) or
+        precomputed points (`precision`, `recall`).
+
+        The following `opts` are supported:
+
+        - `opts.title`      : plot title (`string`; default includes PR-AUC)
+        - `opts.legend`     : two legend labels for curve and baseline (`list`)
+        - `opts.xlabel`     : x-axis label (`string`; default = `Recall`)
+        - `opts.ylabel`     : y-axis label (`string`; default = `Precision`)
+        - `opts.layoutopts` : additional backend layout options (`dict`)
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        has_raw = y_true is not None or y_score is not None
+        has_points = precision is not None or recall is not None
+        if has_raw == has_points:
+            raise ValueError(
+                "provide exactly one input mode:"
+                " (y_true, y_score) or (precision, recall)"
+            )
+
+        if has_raw:
+            if y_true is None or y_score is None:
+                raise ValueError("both y_true and y_score are required")
+            precision, recall = _compute_pr_curve(
+                y_true=np.ravel(y_true),
+                y_score=np.ravel(y_score),
+                pos_label=pos_label,
+            )
+        else:
+            if precision is None or recall is None:
+                raise ValueError("both precision and recall are required")
+            recall, precision = _coerce_curve_xy(
+                recall, precision, "recall", "precision"
+            )
+
+        _validate_curve_range(recall, "recall")
+        _validate_curve_range(precision, "precision")
+
+        auc = _average_precision(precision, recall)
+
+        opts = dict(opts)
+        opts["xlabel"] = opts.get("xlabel", "Recall")
+        opts["ylabel"] = opts.get("ylabel", "Precision")
+        opts["legend"] = _curve_legend(opts.get("legend"), ["PR", "Baseline"])
+        opts["title"] = opts.get("title", "PR Curve (AUC={:.4f})".format(auc))
+
+        if has_raw:
+            y_true_arr = np.ravel(np.asarray(y_true))
+            positive_rate = float(np.mean(y_true_arr == pos_label))
+        else:
+            positive_rate = float(precision[0]) if float(recall[0]) == 0.0 else None
+
+        baseline = [positive_rate, positive_rate] if positive_rate is not None else None
+
+        data = [
+            {
+                "x": recall.tolist(),
+                "y": precision.tolist(),
+                "name": opts["legend"][0],
+                "type": "scatter",
+                "mode": "lines",
+            },
+        ]
+        if baseline is not None:
+            data.append(
+                {
+                    "x": [0.0, 1.0],
+                    "y": baseline,
+                    "name": opts["legend"][1],
+                    "type": "scatter",
+                    "mode": "lines",
+                    "line": {"dash": "dash"},
+                }
+            )
+
+        return self._send(
+            {
+                "data": data,
+                "win": win,
+                "eid": env,
+                "layout": _opts2layout(opts),
+                "opts": opts,
+            }
         )
 
     @pytorch_wrap

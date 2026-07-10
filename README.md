@@ -286,6 +286,7 @@ The following API is currently supported:
 - [`vis.scatter`](#visscatter)  : 2D or 3D scatter plots
 - [`vis.sunburst`](#vissunburst)  : sunburst (hierarchy) charts
 - [`vis.line`](#visline)     : line plots
+- [`vis.learning_curve`](#vislearning_curve) : named training metric curves
 - [`vis.stem`](#visstem)     : stem plots
 - [`vis.heatmap`](#visheatmap)  : heatmap plots
 - [`vis.confusion_matrix`](#visconfusion_matrix)  : confusion matrix plots
@@ -297,6 +298,8 @@ The following API is currently supported:
 - [`vis.pie`](#vispie)      : pie charts
 - [`vis.surf`](#vissurf)     : surface plots
 - [`vis.contour`](#viscontour)  : contour plots
+- [`vis.roc_curve`](#visroc_curve)  : ROC curves
+- [`vis.pr_curve`](#vispr_curve)  : precision-recall curves
 - [`vis.quiver`](#visquiver)   : quiver plots
 - [`vis.mesh`](#vismesh)     : mesh plots
 - [`vis.sankey`](#vissankey)   : sankey (flow) diagrams
@@ -578,6 +581,57 @@ The following `opts` are supported:
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 - `opts.traceopts`   : `dict` mapping trace names or indices to `dict`s of additional options that plot.ly accepts for a trace.
 - `opts.webgl`       : use WebGL for plotting (`boolean`; default = `false`). It is faster if a plot contains too many points. Use sparingly as browsers won't allow more than a couple of WebGL contexts on a single page.
+
+#### vis.roc_curve
+This function draws a ROC curve for binary classification.
+
+It accepts either:
+- raw binary labels and scores via `y_true` and `y_score`, or
+- precomputed curve points via `fpr` and `tpr`.
+
+The following `opts` are supported:
+- `opts.title`      : plot title (`string`; default includes ROC-AUC)
+- `opts.legend`     : two legend labels for curve and baseline (`list`)
+- `opts.xlabel`     : x-axis label (`string`; default = `False Positive Rate`)
+- `opts.ylabel`     : y-axis label (`string`; default = `True Positive Rate`)
+- `opts.layoutopts` : additional backend layout options (`dict`)
+
+#### vis.pr_curve
+This function draws a precision-recall curve for binary classification.
+
+It accepts either:
+- raw binary labels and scores via `y_true` and `y_score`, or
+- precomputed curve points via `precision` and `recall`.
+
+The following `opts` are supported:
+- `opts.title`      : plot title (`string`; default includes PR-AUC)
+- `opts.legend`     : two legend labels for curve and baseline (`list`)
+- `opts.xlabel`     : x-axis label (`string`; default = `Recall`)
+- `opts.ylabel`     : y-axis label (`string`; default = `Precision`)
+- `opts.layoutopts` : additional backend layout options (`dict`)
+
+
+#### vis.learning_curve
+This function draws named machine-learning metrics as line plots. It accepts a mapping from metric names to scalar values or equal-length 1D series and forwards to [`vis.line`](#visline).
+
+For example:
+
+```python
+win = vis.learning_curve(
+    {"train_loss": [1.0, 0.8, 0.6], "val_loss": [1.1, 0.9, 0.7]},
+    step=[1, 2, 3],
+    env="training",
+    opts={"title": "Loss", "ylabel": "loss"},
+)
+
+vis.learning_curve(
+    {"train_loss": 0.55, "val_loss": 0.68},
+    step=4,
+    win=win,
+    env="training",
+    update="append",
+)
+```
 
 
 #### vis.stem
@@ -935,7 +989,7 @@ visdom is Apache 2.0 licensed, as found in the LICENSE file.
 Support for Lua Torch was deprecated following `v0.1.8.4`. If you'd like to use torch support, you'll need to download that release. You can follow the usage instructions there, but it is no longer officially supported.
 
 ## Contributing
-See guidelines for contributing [here.](./CONTRIBUTING.md)
+See guidelines for contributing and running E2E/visual tests (Cypress and Playwright) [here.](./CONTRIBUTING.md)
 
 ## Acknowledgments
 Visdom was inspired by tools like [display](https://github.com/szym/display) and relies on [Plotly](https://plot.ly/) as a plotting front-end.
