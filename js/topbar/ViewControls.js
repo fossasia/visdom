@@ -71,7 +71,7 @@ function ViewControls(props) {
           props.onEnvSelect([result.eid]);
         }
       } else {
-        showToast('Error: ' + (result.error || 'Upload failed'), 'success', {
+        showToast('Error: ' + (result.error || 'Upload failed'), 'error', {
           duration: 4000,
         });
       }
