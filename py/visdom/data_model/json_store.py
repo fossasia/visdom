@@ -89,6 +89,7 @@ class JSONStore(DataStore):
         """
         if self.env_path is None:
             return []
+        os.makedirs(os.path.abspath(self.env_path), exist_ok=True)
         written = []
         for eid in eids:
             if eid not in state:
@@ -142,8 +143,14 @@ class JSONStore(DataStore):
         path = self._resolve_existing(eid)
         if path is None:
             return {}
-        with open(path, "r") as fn:
-            return json.loads(fn.read())
+        try:
+            with open(path, "r", encoding="utf-8") as fn:
+                data = json.load(fn)
+        except (OSError, ValueError):
+            return {}
+        if isinstance(data, dict) and "jsons" in data and "reload" in data:
+            return {"jsons": data.get("jsons", {}), "reload": data.get("reload", {})}
+        return {}
 
     def list_envs(self):
         """Return the ids of all environments stored on disk.
@@ -163,13 +170,13 @@ class JSONStore(DataStore):
                 continue
             if HASHED_ENV_RE.match(name):
                 try:
-                    with open(path, "r") as fn:
-                        envs.append(json.loads(fn.read())["name"])
-                except (OSError, ValueError, KeyError):
+                    with open(path, "r", encoding="utf-8") as fn:
+                        envs.append(json.load(fn)["name"])
+                except (OSError, UnicodeError, ValueError, KeyError):
                     continue
             else:
                 envs.append(name[: -len(".json")])
-        return envs
+        return sorted(envs)
 
     def delete_env(self, eid):
         """Remove ``eid`` from disk; return ``True`` if a file was removed."""

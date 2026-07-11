@@ -27,6 +27,7 @@ from components.image import (
     image_grid,
     image_svg,
     image_compare_basic,
+    image_heatmap_basic,
 )
 from components.plot_scatter import (
     plot_scatter_basic,
@@ -73,6 +74,7 @@ from components.plot_line import (
     plot_line_pytorch,
     plot_line_stem,
     plot_line_many_updates,
+    plot_line_learning_curve,
 )
 from components.plot_special import (
     plot_special_boxplot,
@@ -133,6 +135,7 @@ def run_demo(viz, env, args):
     image_save_jpeg(viz, env, args)
     image_history(viz, env, args)
     image_grid(viz, env, args)
+    image_heatmap_basic(viz, env, args)
 
     # ========== #
     # line plots #
@@ -149,6 +152,7 @@ def run_demo(viz, env, args):
     plot_line_doubleyaxis(viz, env, args)
     plot_line_pytorch(viz, env, args)
     plot_line_stem(viz, env, args)
+    plot_line_learning_curve(viz, env, args)
 
     # ============= #
     # scatter plots #
