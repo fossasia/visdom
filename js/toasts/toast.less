@@ -1,0 +1,163 @@
+.visdom-toast-container {
+  position: fixed;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 360px;
+  pointer-events: none;
+}
+
+.visdom-toast-container-top-left {
+  top: 70px;
+  left: 16px;
+  align-items: flex-start;
+}
+
+.visdom-toast-container-top-center {
+  top: 70px;
+  left: 50%;
+  align-items: center;
+  transform: translateX(-50%);
+}
+
+.visdom-toast-container-top-right {
+  top: 70px;
+  right: 16px;
+  align-items: flex-end;
+}
+
+.visdom-toast-container-bottom-left {
+  bottom: 16px;
+  left: 16px;
+  flex-direction: column-reverse;
+  align-items: flex-start;
+}
+
+.visdom-toast-container-bottom-center {
+  bottom: 16px;
+  left: 50%;
+  flex-direction: column-reverse;
+  align-items: center;
+  transform: translateX(-50%);
+}
+
+.visdom-toast-container-bottom-right {
+  bottom: 16px;
+  right: 16px;
+  flex-direction: column-reverse;
+  align-items: flex-end;
+}
+
+.visdom-toast {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 240px;
+  padding: 10px 14px;
+  overflow: hidden;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.4;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  pointer-events: auto;
+  animation: visdom-toast-enter 0.2s ease-out;
+}
+
+.visdom-toast-leaving {
+  animation: visdom-toast-exit 0.2s ease-in forwards;
+}
+
+.visdom-toast-message {
+  flex: 1;
+  word-break: break-word;
+}
+
+.visdom-toast-close {
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0.8;
+  padding: 0;
+
+  &:hover {
+    opacity: 1;
+  }
+}
+
+.visdom-toast-progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.7);
+  animation: visdom-toast-progress-shrink linear forwards;
+}
+
+.visdom-toast-pill {
+  min-width: 0;
+  padding: 8px 20px;
+  justify-content: center;
+  border-radius: 999px;
+  font-weight: 500;
+  text-align: center;
+}
+
+.visdom-toast-pill.visdom-toast-success {
+  background-color: #fff;
+  color: #2a2a2a;
+  border: 1px solid #e0e0e0;
+}
+
+.visdom-toast-info {
+  background-color: #337ab7;
+}
+
+.visdom-toast-success {
+  background-color: #5cb85c;
+}
+
+.visdom-toast-warning {
+  background-color: #f0ad4e;
+}
+
+.visdom-toast-error {
+  background-color: #d9534f;
+}
+
+@keyframes visdom-toast-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes visdom-toast-exit {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+}
+
+@keyframes visdom-toast-progress-shrink {
+  from {
+    width: 100%;
+  }
+  to {
+    width: 0%;
+  }
+}
