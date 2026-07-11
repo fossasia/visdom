@@ -67,8 +67,15 @@ class VisdomLogger:
             once per epoch, leave log_every=1 — the epoch counter handles
             throttling by design.
         """
+        if not isinstance(name, str) or not name:
+            raise TypeError("name must be a non-empty string, got {!r}".format(name))
+
         if hasattr(value, "item"):
             value = value.item()
+        if not isinstance(value, (int, float)):
+            raise TypeError(
+                "value must be a number, got {!r}".format(type(value).__name__)
+            )
 
         self._counter[name] = self._counter.get(name, 0) + 1
         if x is None:
