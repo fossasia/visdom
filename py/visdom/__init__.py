@@ -1812,6 +1812,142 @@ class Visdom(object):
         )
 
     @pytorch_wrap
+    def image_heatmap(self, img, heatmap, win=None, env=None, opts=None):
+        """
+        Overlay a heatmap on an image.
+
+        `img` is a `CxHxW` or `HxW` tensor (uint8 or float, same rules as
+        `image()`). `heatmap` is an `HxW` float array. Values are expected in
+        [0, 1] but any finite range is accepted — values outside [0, 1] are
+        rescaled via min-max normalization before blending. NaN maps to 0;
+        infinite values are clamped to the [0, 1] boundary. The two are
+        blended in Python and sent as a single image, so no frontend changes
+        are required.
+
+        The following `opts` are supported:
+
+        - `opts.alpha`:    heatmap blend strength (`float` in [0, 1]; default = 0.5)
+        - `opts.colormap`: matplotlib colormap name (`string`; default = `'jet'`)
+        - `opts.caption`:  caption below the image (`string`; optional)
+        - `opts.jpgquality`: JPEG quality (`number` in (0, 100]; default = PNG)
+        - `opts.normalize`: min-max scale the base image (`boolean`; default = `False`)
+        """
+        opts = {} if opts is None else dict(opts)
+        _title2str(opts)
+        _assert_opts(opts)
+
+        img = np.asarray(img)
+        if not np.issubdtype(img.dtype, np.floating) and img.dtype != np.uint8:
+            img = img.astype(np.float64)
+        if np.issubdtype(img.dtype, np.floating):
+            finite = img[np.isfinite(img)]
+            if finite.size > 0:
+                img_min, img_max = float(finite.min()), float(finite.max())
+            else:
+                img_min, img_max = 0.0, 0.0
+            if opts.get("normalize", False):
+                if img_max > img_min:
+                    img = (img - img_min) / (img_max - img_min) * 255.0
+                else:
+                    img = np.zeros_like(img)
+            elif img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
+                img = img * 255.0
+            elif img_min >= -1.0 - 1e-5 and img_max <= 1.0 + 1e-5:
+                img = (img + 1.0) / 2.0 * 255.0
+            img = np.nan_to_num(img, nan=0.0, posinf=255.0, neginf=0.0)
+            img = np.uint8(np.clip(img, 0, 255))
+
+        if img.ndim == 2:
+            H, W = img.shape
+            img_rgb = np.stack([img, img, img], axis=-1)
+        elif img.ndim == 3:
+            nchannels = img.shape[0]
+            H, W = img.shape[1], img.shape[2]
+            if nchannels == 1:
+                img_rgb = np.stack([img[0], img[0], img[0]], axis=-1)
+            elif nchannels == 3:
+                img_rgb = np.transpose(img, (1, 2, 0))
+            elif nchannels == 4:
+                img_rgb = np.transpose(img, (1, 2, 0))[:, :, :3]
+            else:
+                raise ValueError(
+                    "img must have 1, 3, or 4 channels; got {}".format(nchannels)
+                )
+        else:
+            raise ValueError(
+                "img must be 2D (H,W) or 3D (C,H,W); got {}D".format(img.ndim)
+            )
+
+        heatmap = np.asarray(heatmap, dtype=np.float32)
+        if heatmap.shape != (H, W):
+            raise ValueError(
+                "heatmap shape {} does not match image ({},{})".format(
+                    heatmap.shape, H, W
+                )
+            )
+        heatmap = np.nan_to_num(heatmap, nan=0.0, posinf=1.0, neginf=0.0)
+        h_min, h_max = float(heatmap.min()), float(heatmap.max())
+        if h_min < 0.0 or h_max > 1.0:
+            if h_max > h_min:
+                heatmap = (heatmap - h_min) / (h_max - h_min)
+            else:
+                heatmap = np.zeros_like(heatmap)
+
+        colormap = opts.get("colormap", "jet")
+        try:
+            import matplotlib.cm as _cm
+
+            cmap = getattr(_cm, colormap, _cm.jet)
+            heatmap_rgb = (cmap(heatmap)[:, :, :3] * 255).astype(np.uint8)
+        except ImportError:
+            # fallback: blue -> red gradient
+            heatmap_rgb = np.stack(
+                [heatmap, np.zeros_like(heatmap), 1.0 - heatmap], axis=-1
+            )
+            heatmap_rgb = (heatmap_rgb * 255).astype(np.uint8)
+
+        alpha = float(opts.get("alpha", 0.5))
+        if not 0.0 <= alpha <= 1.0:
+            raise ValueError("alpha must be in [0, 1]; got {}".format(alpha))
+        w = (heatmap * alpha)[:, :, np.newaxis].astype(np.float32)
+        blended = (
+            (
+                (1.0 - w) * img_rgb.astype(np.float32)
+                + w * heatmap_rgb.astype(np.float32)
+            )
+            .clip(0, 255)
+            .astype(np.uint8)
+        )
+
+        im = Image.fromarray(blended, mode="RGB")
+        buf = BytesIO()
+        image_type = "png"
+        imsave_args = {}
+        jpgquality = opts.get("jpgquality")
+        if jpgquality is not None:
+            image_type = "jpeg"
+            imsave_args["quality"] = jpgquality
+        im.save(buf, format=image_type.upper(), **imsave_args)
+        b64encoded = b64.b64encode(buf.getvalue()).decode("utf-8")
+
+        opts["width"] = opts.get("width", W)
+        opts["height"] = opts.get("height", H)
+
+        data = [
+            {
+                "content": {
+                    "src": "data:image/" + image_type + ";base64," + b64encoded,
+                    "caption": opts.get("caption"),
+                },
+                "type": "image",
+            }
+        ]
+        return self._send(
+            {"data": data, "win": win, "eid": env, "opts": opts},
+            endpoint="events",
+        )
+
+    @pytorch_wrap
     def images(self, tensor, nrow=8, padding=2, win=None, env=None, opts=None):
         """
         Given a 4D tensor of shape (B x C x H x W),
@@ -2033,6 +2169,113 @@ class Visdom(object):
             "opts": opts,
         }
         return self._send(data_to_send, endpoint="update")
+
+    @pytorch_wrap
+    def learning_curve(
+        self,
+        metrics,
+        step=None,
+        win=None,
+        env=None,
+        opts=None,
+        update=None,
+    ):
+        """
+        This function draws machine-learning learning curves using named metrics.
+        It is a convenience wrapper around `line`, accepting a mapping from metric
+        names to scalar values or equal-length 1D series.
+
+        `metrics` should be a non-empty mapping, for example:
+
+            {"train_loss": [1.0, 0.8], "val_loss": [1.1, 0.9]}
+
+        `step` can be a scalar or a 1D series matching the metric length. When
+        `update='append'`, `step` must be specified to avoid repeatedly appending
+        points at the same x-coordinate.
+        """
+        assert hasattr(metrics, "items"), "metrics should be a mapping"
+        metric_items = list(metrics.items())
+        assert len(metric_items) > 0, "must provide at least one metric"
+
+        names = []
+        series = []
+        for metric_name, metric_values in metric_items:
+            name = str(metric_name)
+            values = np.asarray(_to_numpy(metric_values))
+            values = np.squeeze(values)
+            if values.ndim == 0:
+                values = values.reshape(1)
+            assert (
+                values.ndim == 1
+            ), "metric '{}' should be a scalar or one-dimensional".format(name)
+            assert values.shape[0] > 0, "metric '{}' should not be empty".format(name)
+            names.append(name)
+            series.append(values)
+
+        num_steps = series[0].shape[0]
+        for name, values in zip(names, series):
+            assert (
+                values.shape[0] == num_steps
+            ), "metric '{}' has length {}, expected {}".format(
+                name, values.shape[0], num_steps
+            )
+
+        if step is None:
+            assert update != "append", "must specify step when update='append'"
+            X = np.arange(num_steps)
+        else:
+            X = np.asarray(_to_numpy(step))
+            X = np.squeeze(X)
+            if X.ndim == 0:
+                X = X.reshape(1)
+            assert X.ndim == 1, "step should be a scalar or one-dimensional"
+            assert X.shape[0] == num_steps, "step has length {}, expected {}".format(
+                X.shape[0], num_steps
+            )
+
+        opts = {} if opts is None else dict(opts)
+        opts.setdefault("title", "Learning Curve")
+        opts.setdefault("xlabel", "step")
+        opts.setdefault("ylabel", "metric")
+        if opts.get("legend") is None:
+            legend = names
+            opts["legend"] = legend
+        else:
+            legend = opts["legend"]
+            assert isinstance(legend, (tuple, list)), "legend should be a list or tuple"
+            assert len(legend) >= len(
+                names
+            ), "legend should have at least as many entries as metrics"
+
+        if update is not None:
+            result = None
+            # Send one named update per metric so mapping order cannot swap traces.
+            for name, values in zip(names, series):
+                metric_opts = None
+                if update != "remove":
+                    metric_opts = dict(opts)
+                    metric_opts["legend"] = [name]
+                result = self.line(
+                    X=X,
+                    Y=values,
+                    win=win,
+                    env=env,
+                    opts=metric_opts,
+                    update=update,
+                    name=name,
+                )
+            return result
+
+        Y = np.column_stack(series)
+
+        return self.line(
+            X=X,
+            Y=Y,
+            win=win,
+            env=env,
+            opts=opts,
+            update=update,
+        )
 
     @pytorch_wrap
     def scatter(self, X, Y=None, win=None, env=None, opts=None, update=None, name=None):
