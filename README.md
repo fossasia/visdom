@@ -267,6 +267,7 @@ Other options are either currently unused (endpoint, ipv6) or used for internal 
 ### Basics
 Visdom offers the following basic visualization functions:
 - [`vis.image`](#visimage)    : image
+- [`vis.image_heatmap`](#visimageheatmap) : image with heatmap overlay
 - [`vis.images`](#visimages)   : list of images
 - [`vis.text`](#vistext)     : arbitrary HTML
 - [`vis.properties`](#visproperties)     : properties grid
@@ -356,6 +357,34 @@ The following `opts` are supported:
 - `store_history`: Keep all images stored to the same window and attach a slider to the bottom that will let you select the image to view. You must always provide this opt when sending new images to an image with history.
 
 > **Note** You can use alt on an image pane to view the x/y coordinates of the cursor. You can also ctrl-scroll to zoom, alt scroll to pan vertically, and alt-shift scroll to pan horizontally. Double click inside the pane to restore the image to default.
+
+
+#### vis.image_heatmap
+
+This function overlays a saliency or attention heatmap on top of an image. It takes a `CxHxW` or `HxW` array `img` (uint8 or float) and an `HxW` float array `heatmap` with values in `[0, 1]`. The blending is per-pixel — pixels where the heatmap is near zero stay close to the original image, so a zero-gradient background does not get tinted by the colormap.
+
+```python
+import numpy as np
+from visdom import Visdom
+
+viz = Visdom()
+
+# img: CxHxW uint8 or float in [0, 1]
+# heatmap: HxW float in [0, 1] — e.g. from a saliency method or attention map
+viz.image_heatmap(img, heatmap, opts=dict(title="Saliency", alpha=0.6, colormap="jet"))
+```
+
+Any attribution method that produces an `HxW` numpy array works — gradient saliency, GradCAM, SHAP, or a hand-computed attention map.
+
+The following `opts` are supported:
+
+- `alpha`: blend strength (`float` in `[0, 1]`; default = `0.5`). Higher values make the heatmap more visible.
+- `colormap`: matplotlib colormap name (`string`; default = `'jet'`). Falls back to a blue-red gradient if matplotlib is not installed.
+- `caption`: caption for the image pane
+- `jpgquality`: JPG quality (`number` 0-100). If set, the result is encoded as JPEG. Otherwise PNG.
+- `normalize`: normalize the image to `[0, 1]` before blending (`boolean`; default = `False`)
+
+> **Note** `heatmap` accepts any finite float range. Values outside `[0, 1]` are rescaled automatically via min-max normalization, so methods like SHAP or Integrated Gradients that return signed or unnormalized values work without any pre-processing. NaN maps to 0; infinite values are clamped to the `[0, 1]` boundary.
 
 
 #### vis.images
