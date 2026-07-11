@@ -132,13 +132,11 @@ class UpdateHandler(BaseHandler):
                 p["content"]["selected"] = args["data"]["selected"]
             elif args["data"]["update_type"] == "RegionSelected":
                 p["content"]["selected"] = None
-                print(len(p["content"]["data"]))
                 p["old_content"].append(p["content"]["data"])
                 if len(p["old_content"]) > max_old_content:
                     p["old_content"] = p["old_content"][-max_old_content:]
                 p["content"]["has_previous"] = True
                 p["content"]["data"] = args["data"]["points"]
-                print(len(p["content"]["data"]))
             return p
         if p["type"] == "image_history":
             utype = args["data"][0]["type"]
@@ -528,9 +526,18 @@ class EnvHandler(BaseHandler):
         if "sid" in msg_args:
             sid = msg_args["sid"]
             if sid in self.subs:
-                load_env(
-                    self.state, escape_eid(args), self.subs[sid], env_path=self.env_path
-                )
+                try:
+                    load_env(
+                        self.state,
+                        escape_eid(args),
+                        self.subs[sid],
+                        env_path=self.env_path,
+                    )
+                except ValueError as e:
+                    raise tornado.web.HTTPError(
+                        400,
+                        reason="Could not load environment invalid environment JSON format",
+                    )
         if "eid" in msg_args:
             eid = escape_eid(msg_args["eid"])
             if eid not in self.state:
@@ -563,13 +570,19 @@ class CompareHandler(BaseHandler):
         sid = body["sid"]
         show_all = body.get("show_all", False)
         if sid in self.subs:
-            compare_envs(
-                self.state,
-                args.split("+"),
-                self.subs[sid],
-                self.env_path,
-                show_all=show_all,
-            )
+            try:
+                compare_envs(
+                    self.state,
+                    args.split("+"),
+                    self.subs[sid],
+                    self.env_path,
+                    show_all=show_all,
+                )
+            except ValueError as e:
+                raise tornado.web.HTTPError(
+                    400,
+                    reason="Could not compare environments: invalid environment JSON format",
+                )
 
 
 class SaveHandler(BaseHandler):

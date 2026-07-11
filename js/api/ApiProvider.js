@@ -205,7 +205,11 @@ const ApiProvider = ({ children }) => {
         JSON.stringify({
           sid: sessionInfo.id,
         })
-      );
+      ).fail((xhr) => {
+        document.open();
+        document.write(xhr.responseText);
+        document.close();
+      });
     } else if (envIDs.length > 1) {
       $.post(
         correctPathname() + 'compare/' + envIDs.join('+'),
@@ -213,7 +217,11 @@ const ApiProvider = ({ children }) => {
           sid: sessionInfo.id,
           show_all: !!showAll,
         })
-      );
+      ).fail((xhr) => {
+        document.open();
+        document.write(xhr.responseText);
+        document.close();
+      });
     }
   };
 
@@ -312,6 +320,16 @@ const ApiProvider = ({ children }) => {
     });
   };
 
+  const sendPlotLayoutUpdate = (envID, win, layoutPatch, frame) => {
+    sendSocketMessage({
+      cmd: 'update_plot_layout',
+      eid: envID,
+      win: win,
+      data: layoutPatch,
+      frame: frame,
+    });
+  };
+
   // Save layout lists to the server
   const sendLayoutsSave = (layoutLists) => {
     // pushes layouts to the server
@@ -370,6 +388,7 @@ const ApiProvider = ({ children }) => {
         sendLayoutsSave,
         sendPaneClose,
         sendPaneLayoutUpdate,
+        sendPlotLayoutUpdate,
         sendPaneMessage,
         sendSaveAll,
         sendUndo,
