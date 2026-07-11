@@ -9,6 +9,7 @@
 import React, { useContext, useRef } from 'react';
 
 import ApiContext from '../api/ApiContext';
+import { showToast } from '../toasts/toastEvents';
 
 function ViewControls(props) {
   const { connected, sessionInfo } = useContext(ApiContext);
@@ -32,14 +33,18 @@ function ViewControls(props) {
     if (!file) return;
 
     if (!file.name.toLowerCase().endsWith('.json')) {
-      alert('Please upload a valid .json file.');
+      showToast('Please upload a valid .json file.', 'error', {
+        duration: 4000,
+      });
       e.target.value = '';
       return;
     }
 
     if (file.size > 100 * 1024 * 1024) {
       // 100 MB limit
-      alert('Maximum 100 MB File allowed.');
+      showToast('Maximum 100 MB File allowed.', 'warning', {
+        duration: 4000,
+      });
       e.target.value = '';
       return;
     }
@@ -57,21 +62,37 @@ function ViewControls(props) {
       const result = await res.json();
 
       if (result.success) {
-        alert(`Dashboard successfully loaded as "${result.eid}"`);
+        showToast(
+          `Dashboard successfully loaded as "${result.eid}"`,
+          'success',
+          { duration: 4000 }
+        );
         if (props.onEnvSelect) {
           props.onEnvSelect([result.eid]);
         }
       } else {
-        alert('Error: ' + (result.error || 'Upload failed'));
+        showToast('Error: ' + (result.error || 'Upload failed'), 'error', {
+          duration: 4000,
+        });
       }
     } catch (err) {
       console.error('Upload error:', err);
       if (!navigator.onLine) {
-        alert('Network error: no internet connection detected.');
+        showToast('Network error: no internet connection detected.', 'error', {
+          duration: 4000,
+        });
       } else if (err.message.includes('Failed to fetch')) {
-        alert('Cannot connect to the Visdom server.\nPlease check that the server is running.');
+        showToast(
+          'Cannot connect to the Visdom server.\nPlease check that the server is running.',
+          'error',
+          {
+            duration: 4000,
+          }
+        );
       } else {
-        alert(`Upload failed:\n${err.message}`);
+        showToast(`Upload failed:\n${err.message}`, 'error', {
+          duration: 4000,
+        });
       }
     }
 
