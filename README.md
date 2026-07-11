@@ -499,6 +499,7 @@ The function accepts the following arguments:
 - `labels`: a list of corresponding labels for the tensors provided for `features`
 - `data_getter=fn`: (optional) a function that takes as a parameter an index into the features array and returns a summary representation of the tensor. If this is set, `data_type` must also be set.
 - `data_type=str`: (optional) currently the only acceptable value here is `"html"`
+- `opts.register_embedding_events`: (optional) set to `False` to skip registering the default Python client event handler for hover previews and lasso drilldown. This leaves embeddings interaction events for external server or frontend code to handle.
 
 We currently assume that there are no more than 10 unique labels, in the future we hope to provide a colormap in opts for other cases.
 
