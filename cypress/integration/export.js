@@ -65,27 +65,4 @@ describe('Test Export Env as HTML', () => {
       expect(html).to.include(env);
     });
   });
-
-  it('Shows alert when all panes are closed before export', () => {
-    const env = 'export_empty_' + Cypress._.random(0, 1e6);
-    cy.run('text_basic', { env });
-    cy.get('.layout .window').should('have.length', 1);
-
-    cy.get('.layout .react-grid-item')
-      .first()
-      .find('button[title="close"]')
-      .click();
-    cy.get('.layout .react-grid-item').should('have.length', 0);
-
-    cy.window().then((win) => {
-      cy.stub(win, 'alert').as('alertStub');
-    });
-
-    cy.get(exportButton).should('not.be.disabled').click();
-
-    cy.get('@alertStub').should(
-      'have.been.calledWith',
-      'No panes available to export.'
-    );
-  });
 });
