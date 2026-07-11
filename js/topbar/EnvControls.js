@@ -42,19 +42,20 @@ function EnvControls(props) {
     }
   });
 
-  var keyCounter = 1;
   var env_options2 = [];
   var parentKeys = {};
 
-  Object.keys(childrenByPrefix).sort().forEach((prefix) => {
-    parentKeys[prefix] = keyCounter;
-    env_options2.push({
-      key: keyCounter++,
-      pId: 0,
-      label: prefix,
-      value: '__group__' + prefix,
+  Object.keys(childrenByPrefix)
+    .sort()
+    .forEach((prefix) => {
+      parentKeys[prefix] = '__group__' + prefix;
+      env_options2.push({
+        key: '__group__' + prefix,
+        pId: 0,
+        label: prefix,
+        value: '__group__' + prefix,
+      });
     });
-  });
 
   slist.forEach((env) => {
     var idx = env.indexOf('_');
@@ -68,13 +69,14 @@ function EnvControls(props) {
     }
 
     env_options2.push({
-      key: keyCounter++,
+      key: env,
       pId: parentKey,
       label: env,
       value: env,
     });
   });
 
+  const validEnvIDs = envIDs.filter((env) => slist.indexOf(env) !== -1);
   const currentIdx = envIDs.length > 0 ? slist.indexOf(envIDs[0]) : -1;
   const hasSingleSelectedEnv = envIDs.length === 1 && currentIdx !== -1;
   const onPrevEnv = () => {
@@ -106,24 +108,24 @@ function EnvControls(props) {
             style={envSelectorStyle}
             allowClear={true}
             dropdownStyle={{
-              maxHeight: 900,
+              maxHeight: 'calc(100vh - 200px)',
               overflow: 'auto',
               wordBreak: 'break-all',
             }}
             placeholder={<i>Select environment(s)</i>}
-            searchPlaceholder="search"
             treeLine
             maxTagTextLength={1000}
             inputValue={null}
-            value={envIDs}
+            value={validEnvIDs}
             treeData={env_options2}
-            treeDefaultExpandAll
-            treeNodeFilterProp="title"
+            treeNodeFilterProp="label"
             treeDataSimpleMode={{ id: 'key', rootPId: 0 }}
             treeCheckable
             showCheckedStrategy={SHOW_CHILD}
+            listHeight={2000}
             dropdownMatchSelectWidth={false}
             onChange={onEnvSelect}
+            treeDefaultExpandedKeys={[]}
           />
           {slist.length > 1 && (
             <div className="env-arrow-wrapper">
@@ -153,7 +155,7 @@ function EnvControls(props) {
           data-toggle="tooltip"
           title={confirmClear ? 'Are you sure?' : 'Clear Current Environment'}
           data-placement="bottom"
-          className={confirmClear ? 'btn btn-warning' : 'btn btn-default'}
+          className={confirmClear ? 'btn btn-warning btn-sm' : 'btn btn-default btn-sm'}
           disabled={!(connected && envIDs.length > 0 && !readonly)}
           onClick={() => {
             if (confirmClear) {
@@ -169,7 +171,7 @@ function EnvControls(props) {
           data-toggle="tooltip"
           title="Save All Environments"
           data-placement="bottom"
-          className="btn btn-default"
+          className="btn btn-default btn-sm"
           disabled={!(connected && !readonly)}
           onClick={sendSaveAll}
         >
@@ -179,7 +181,7 @@ function EnvControls(props) {
           data-toggle="tooltip"
           title="Manage Environments"
           data-placement="bottom"
-          className="btn btn-default"
+          className="btn btn-default btn-sm"
           disabled={!(connected && envIDs.length > 0 && !readonly)}
           onClick={onEnvManageButton}
         >
@@ -191,7 +193,7 @@ function EnvControls(props) {
             title="Show All Windows from All Environments"
             data-placement="bottom"
             className={
-              showAllEnvWindows ? 'btn btn-primary' : 'btn btn-default'
+              showAllEnvWindows ? 'btn btn-primary btn-sm' : 'btn btn-default btn-sm'
             }
             onClick={onToggleShowAll}
           >

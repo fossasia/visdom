@@ -43,12 +43,16 @@ from visdom.server.handlers.web_handlers import (
     PostHandler,
     SaveHandler,
     UpdateHandler,
+    UploadEnvHandler,
     UserSettingsHandler,
 )
 from visdom.server.defaults import (
     DEFAULT_BASE_URL,
     DEFAULT_ENV_PATH,
     DEFAULT_HOSTNAME,
+    DEFAULT_MAX_IMAGE_HISTORY,
+    DEFAULT_MAX_OLD_CONTENT,
+    DEFAULT_MAX_TEXT_LINES,
     DEFAULT_PORT,
     LAYOUT_FILE,
 )
@@ -75,6 +79,9 @@ class Application(tornado.web.Application):
         eager_data_loading=False,
     ):
         self.eager_data_loading = eager_data_loading
+        self.max_image_history = DEFAULT_MAX_IMAGE_HISTORY
+        self.max_old_content = DEFAULT_MAX_OLD_CONTENT
+        self.max_text_lines = DEFAULT_MAX_TEXT_LINES
         self.env_path = env_path
         self.state = self.load_state()
         self.layouts = self.load_layouts()
@@ -107,6 +114,7 @@ class Application(tornado.web.Application):
             (r"%s/env/(.*)" % self.base_url, EnvHandler, {"app": self}),
             (r"%s/compare/(.*)" % self.base_url, CompareHandler, {"app": self}),
             (r"%s/save" % self.base_url, SaveHandler, {"app": self}),
+            (r"%s/upload_env" % self.base_url, UploadEnvHandler, {"app": self}),
             (r"%s/error/(.*)" % self.base_url, ErrorHandler, {"app": self}),
             (r"%s/win_exists" % self.base_url, ExistsHandler, {"app": self}),
             (r"%s/win_data" % self.base_url, DataHandler, {"app": self}),
@@ -248,10 +256,11 @@ class Application(tornado.web.Application):
         if os.path.exists(home_style_path):
             with open(home_style_path, "r") as f:
                 user_css += "\n" + f.read()
-        project_style_path = os.path.join(self.env_path, "style.css")
-        if os.path.exists(project_style_path):
-            with open(project_style_path, "r") as f:
-                user_css += "\n" + f.read()
+        if self.env_path is not None:
+            project_style_path = os.path.join(self.env_path, "style.css")
+            if os.path.exists(project_style_path):
+                with open(project_style_path, "r") as f:
+                    user_css += "\n" + f.read()
 
         settings["config_dir"] = config_dir
         settings["user_css"] = user_css

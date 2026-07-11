@@ -5,15 +5,21 @@
     "plugin:jsx-a11y/recommended",
     "prettier"
   ],
-  "plugins": ["react", "jsx-a11y", "ignore-generated-and-nolint", "cypress", "simple-import-sort"],
+  "plugins": [
+    "react",
+    "jsx-a11y",
+    "ignore-generated-and-nolint",
+    "cypress",
+    "simple-import-sort"
+  ],
   "parser": "@babel/eslint-parser",
   "parserOptions": {
-      "requireConfigFile": false,
-      "ecmaVersion": "latest",
-      "sourceType": "module",
-      "ecmaFeatures": {
-          "jsx": true
-      }
+    "requireConfigFile": false,
+    "ecmaVersion": "latest",
+    "sourceType": "module",
+    "ecmaFeatures": {
+      "jsx": true
+    }
   },
   "env": {
     "browser": true,

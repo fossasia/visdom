@@ -81,7 +81,7 @@ var Pane = forwardRef((props, ref) => {
       );
     }
 
-    // properties for content.data
+    // properties for content.layout
     if (typeof content.layout == 'object') {
       propertylists.push(
         <span key="layout">

@@ -21,11 +21,12 @@ import time
 import types
 import hashlib
 from collections import deque
+from enum import Enum
 
 import tornado.ioloop
 import tornado.escape
 from visdom.server.handlers.base_handlers import BaseWebSocketHandler, BaseHandler
-from visdom.utils.shared_utils import get_rand_id
+from visdom.utils.shared_utils import get_rand_id, NanSafeEncoder
 from visdom.utils.server_utils import (
     check_auth,
     broadcast_envs,
@@ -34,6 +35,10 @@ from visdom.utils.server_utils import (
     send_to_sources,
     broadcast,
     escape_eid,
+    push_deleted,
+    pop_deleted,
+    clear_deleted,
+    broadcast_undo_state,
 )
 from visdom.server.defaults import MAX_SOCKET_WAIT
 
@@ -80,7 +85,6 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
         self.readonly = app.readonly
 
     def open(self, register_to="sources"):
-        # self.sid = str(hex(int(time.time() * 10000000))[2:]) # TODO: was previously used for websockets+vis only
         self.sid = get_rand_id()
         register_list = self.sources if register_to == "sources" else self.subs
         if self not in list(register_list.values()):
@@ -101,20 +105,54 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
         elif cmd == "close":
             if "data" in msg and "eid" in msg:
                 logging.info(f"closing window {msg['data']}")
-                p_data = self.state[msg["eid"]]["jsons"].pop(msg["data"], None)
+                eid = escape_eid(msg["eid"])
+                if eid not in self.state:
+                    return
+                p_data = self.state[eid]["jsons"].pop(msg["data"], None)
+                if p_data is not None:
+                    push_deleted(self.env_path, eid, msg["data"], p_data)
+                env = self.state.get(msg["eid"])
+                if env is None:
+                    return
+                p_data = env["jsons"].pop(msg["data"], None)
                 event = {
                     "event_type": "close",
                     "target": msg["data"],
-                    "eid": msg["eid"],
+                    "eid": eid,
                     "pane_data": p_data,
                 }
                 send_to_sources(self, event)
+                broadcast_undo_state(self, eid, self.env_path)
+
+        elif cmd == "undo":
+            if "eid" in msg:
+                eid = escape_eid(msg["eid"])
+                if eid not in self.state:
+                    return
+                popped = pop_deleted(self.env_path, eid)
+                if popped:
+                    win_id, p_data = popped
+                    env = self.state[eid]["jsons"]
+                    max_i = max((p.get("i", -1) for p in env.values()), default=-1)
+                    p_data["i"] = max_i + 1
+                    env[win_id] = p_data
+                    broadcast_msg = dict(p_data)
+                    broadcast_msg["eid"] = eid
+                    broadcast(
+                        self,
+                        json.dumps(broadcast_msg, cls=NanSafeEncoder),
+                        eid,
+                    )
+                broadcast_undo_state(self, eid, self.env_path)
 
         elif cmd == "save":
             # save localStorage window metadata
             if "data" in msg and "eid" in msg:
                 msg["eid"] = escape_eid(msg["eid"])
-                self.state[msg["eid"]] = copy.deepcopy(self.state[msg["prev_eid"]])
+                prev_eid = escape_eid(msg["prev_eid"]) if msg.get("prev_eid") else None
+                if prev_eid not in self.state:
+                    return
+                self.state[msg["eid"]] = copy.deepcopy(self.state[prev_eid])
                 self.state[msg["eid"]]["reload"] = msg["data"]
                 self.eid = msg["eid"]
                 serialize_env(self.state, [self.eid], env_path=self.env_path)
@@ -131,6 +169,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     return
                 logging.info(f"closing environment {eid}")
                 self.state.pop(eid, None)
+                clear_deleted(self.env_path, eid)
                 if self.env_path is not None:
                     p = os.path.join(self.env_path, "{0}.json".format(eid))
                     if os.path.exists(p):
@@ -162,27 +201,138 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
 
         elif cmd == "forward_to_vis":
             packet = msg.get("data")
-            environment = self.state[packet["eid"]]
+            if not isinstance(packet, dict):
+                logging.warning(
+                    f"forward_to_vis: expected dict payload, got {type(packet).__name__!r}, dropping event"
+                )
+                return
+            eid = packet.get("eid")
+            target = packet.get("target")
+            if eid is None or target is None:
+                logging.warning(
+                    f"forward_to_vis: malformed packet (eid={eid!r},"
+                    f" target={target!r}), dropping event"
+                )
+                return
+            environment = self.state.get(eid)
+            if environment is None:
+                logging.warning(
+                    f"forward_to_vis: env {eid!r} not found, dropping event"
+                )
+                return
             if packet.get("pane_data") is not False:
-                packet["pane_data"] = environment["jsons"][packet["target"]]
+                pane = environment["jsons"].get(target)
+                if pane is None:
+                    logging.warning(
+                        f"forward_to_vis: pane {target!r} not found"
+                        f" in env {eid!r}, dropping event"
+                    )
+                    return
+                packet["pane_data"] = pane
             send_to_sources(self, msg.get("data"))
 
         elif cmd == "layout_item_update":
             eid = msg.get("eid")
             win = msg.get("win")
+            if eid is None or win is None or eid not in self.state:
+                logging.warning(
+                    f"layout_item_update: env {eid!r} or win {win!r}"
+                    f" not found, dropping event"
+                )
+                return
             self.state[eid]["reload"][win] = msg.get("data")
+
+        elif cmd == "update_plot_layout":
+            eid = msg.get("eid")
+            win = msg.get("win")
+            frame = msg.get("frame")
+            patch = msg.get("data")
+            if eid is None or win is None or eid not in self.state:
+                logging.warning(
+                    f"update_plot_layout: env {eid!r} or win {win!r}"
+                    f" not found, dropping event"
+                )
+                return
+            if not isinstance(patch, dict):
+                logging.warning(
+                    f"update_plot_layout: expected dict patch, got"
+                    f" {type(patch).__name__!r}, dropping event"
+                )
+                return
+
+            env = self.state[eid]["jsons"]
+            if win not in env:
+                logging.warning(
+                    f"update_plot_layout: pane {win!r} not found"
+                    f" in env {eid!r}, dropping event"
+                )
+                return
+
+            p = env[win]
+
+            if p.get("type") == "plot_history":
+                content_list = p.get("content")
+                if (
+                    not isinstance(content_list, list)
+                    or frame is None
+                    or not (0 <= frame < len(content_list))
+                ):
+                    logging.warning(
+                        f"update_plot_layout: invalid frame {frame!r}"
+                        f" for plot_history pane {win!r}, dropping event"
+                    )
+                    return
+                layout = content_list[frame].setdefault("layout", {})
+            else:
+                content = p.get("content")
+                if not isinstance(content, dict):
+                    logging.warning(
+                        f"update_plot_layout: pane {win!r} has no plot"
+                        f" content, dropping event"
+                    )
+                    return
+                layout = content.setdefault("layout", {})
+
+            layout.update(patch)
 
         elif cmd == "pop_embeddings_pane":
             packet = msg.get("data")
-            eid = packet["eid"]
-            win = packet["target"]
-            p = self.state[eid]["jsons"][win]
+            if not isinstance(packet, dict):
+                logging.warning(
+                    f"pop_embeddings_pane: expected dict payload,"
+                    f" got {type(packet).__name__!r}, dropping event"
+                )
+                return
+            eid = packet.get("eid")
+            win = packet.get("target")
+            if eid is None or win is None:
+                logging.warning(
+                    f"pop_embeddings_pane: malformed packet"
+                    f" (eid={eid!r}, target={win!r}), dropping event"
+                )
+                return
+            env = self.state.get(eid)
+            if env is None:
+                logging.warning(
+                    f"pop_embeddings_pane: env {eid!r} not found, dropping event"
+                )
+                return
+            if win not in env["jsons"]:
+                logging.warning(
+                    f"pop_embeddings_pane: pane {win!r} not found"
+                    f" in env {eid!r}, dropping event"
+                )
+                return
+            p = env["jsons"][win]
             p["content"]["selected"] = None
             p["content"]["data"] = p["old_content"].pop()
             if len(p["old_content"]) == 0:
                 p["content"]["has_previous"] = False
             p["contentID"] = get_rand_id()
-            broadcast(self, p, eid)
+            # Attach eid so the frontend can filter stale messages after env switch.
+            broadcast_msg = dict(p)
+            broadcast_msg["eid"] = eid
+            broadcast(self, json.dumps(broadcast_msg, cls=NanSafeEncoder), eid)
 
 
 class AnySocketWrapper(AnySocketHandlerOrWrapper):
@@ -230,13 +380,8 @@ class AnySocketWrapper(AnySocketHandlerOrWrapper):
 
     def get_messages(self):
         to_send = []
-        messages = self.messages
-        self.messages = []
-        for message in messages:
-            if isinstance(message, dict):
-                # Not all messages are being formatted the same way (JSON)
-                # TODO investigate
-                message = json.dumps(message)
+        while len(self.messages) > 0:
+            message = self.messages.popleft()
             to_send.append(message)
         self.last_read_time = time.time()
         return to_send
@@ -254,7 +399,9 @@ class VisSocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
             self.close()
             return
         super().open("sources")
-        self.write_message(json.dumps({"command": "alive", "data": "vis_alive"}))
+        self.write_message(
+            json.dumps({"command": "alive", "data": "vis_alive"}, cls=NanSafeEncoder)
+        )
 
     def on_close(self):
         if self in list(self.sources.values()):
@@ -267,7 +414,7 @@ class VisSocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
         if cmd == "echo":
             logging.info(f"from visdom client: {message}")
             for sub in self.sources.values():
-                sub.write_message(json.dumps(msg))
+                sub.write_message(json.dumps(msg, cls=NanSafeEncoder))
             return
 
         super().on_message(message)
@@ -307,7 +454,8 @@ class SocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
                     "data": self.sid,
                     "readonly": self.readonly,
                     "envList": sorted(list(self.state.keys())),
-                }
+                },
+                cls=NanSafeEncoder,
             )
         )
         self.broadcast_layouts([self])
@@ -318,7 +466,10 @@ class SocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
             target_subs = self.subs.values()
         for sub in target_subs:
             sub.write_message(
-                json.dumps({"command": "layout_update", "data": self.app.layouts})
+                json.dumps(
+                    {"command": "layout_update", "data": self.app.layouts},
+                    cls=NanSafeEncoder,
+                )
             )
 
     def initialize(self, app):
@@ -341,6 +492,40 @@ class SocketWrapper(SocketHandlerOrWrapper, AnySocketWrapper):
         pass
 
 
+class SocketFailureReason(Enum):
+    """Failure reason codes for the HTTP polling socket protocol."""
+
+    CONNECTION_CLOSED = (
+        "closed",
+        "No active socket found for the given sid; "
+        "it may have been closed or never existed",
+    )
+    MISSING_MESSAGE = (
+        "no msg",
+        "POST body must include a 'message' field when message_type is 'send'",
+    )
+    INVALID_MESSAGE_TYPE = (
+        "invalid",
+        "Unrecognized message_type; expected 'query' or 'send'",
+    )
+
+    def __new__(cls, value, detail=""):
+        obj = object.__new__(cls)
+        obj._value_ = value
+        obj._detail = detail
+        return obj
+
+    @property
+    def detail(self):
+        return self._detail
+
+    def to_failure_response(self, message=""):
+        resp = {"success": False, "reason": self.value, "detail": self.detail}
+        if message:
+            resp["message"] = message
+        return resp
+
+
 def WrapSocketWrapper(BaseWrapper):
     class WrappedSocketWrap(BaseHandler):
         def initialize(self, app):
@@ -352,9 +537,9 @@ def WrapSocketWrapper(BaseWrapper):
             self.login_enabled = app.login_enabled
             self.app = app
 
+        @check_auth
         def post(self):
             """Either write a message to the socket, or query what's there"""
-            # TODO formalize failure reasons
             args = tornado.escape.json_decode(
                 tornado.escape.to_basestring(self.request.body)
             )
@@ -371,24 +556,38 @@ def WrapSocketWrapper(BaseWrapper):
                 self.subs if BaseWrapper == SocketWrapper else self.sources
             ).get(sid)
 
-            # ensure a wrapper still exists for this connection
             if socket_wrap is None:
-                self.write(json.dumps({"success": False, "reason": "closed"}))
+                self.write(
+                    json.dumps(
+                        SocketFailureReason.CONNECTION_CLOSED.to_failure_response(
+                            f"sid={sid!r}"
+                        )
+                    )
+                )
                 return
 
-            # handle the requests
             if msg_type == "query":
                 messages = socket_wrap.get_messages()
                 self.write(json.dumps({"success": True, "messages": messages}))
             elif msg_type == "send":
                 msg = args.get("message")
                 if msg is None:
-                    self.write(json.dumps({"success": False, "reason": "no msg"}))
+                    self.write(
+                        json.dumps(
+                            SocketFailureReason.MISSING_MESSAGE.to_failure_response()
+                        )
+                    )
                 else:
                     socket_wrap.on_message(msg)
                     self.write(json.dumps({"success": True}))
             else:
-                self.write(json.dumps({"success": False, "reason": "invalid"}))
+                self.write(
+                    json.dumps(
+                        SocketFailureReason.INVALID_MESSAGE_TYPE.to_failure_response(
+                            f"message_type={msg_type!r}"
+                        )
+                    )
+                )
 
     if BaseWrapper == SocketWrapper:
 

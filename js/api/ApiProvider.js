@@ -150,7 +150,7 @@ const ApiProvider = ({ children }) => {
           id: cmd.data,
           readonly: cmd.readonly,
         }));
-        if(cmd.envList){
+        if (cmd.envList) {
           apiHandlers.current.onEnvUpdate(cmd.envList);
         }
         break;
@@ -178,6 +178,9 @@ const ApiProvider = ({ children }) => {
       case 'env_update':
         apiHandlers.current.onEnvUpdate(cmd.data);
         break;
+      case 'undo_state':
+        apiHandlers.current.onUndoState(cmd);
+        break;
 
       default:
         // eslint-disable-next-line no-console
@@ -202,7 +205,11 @@ const ApiProvider = ({ children }) => {
         JSON.stringify({
           sid: sessionInfo.id,
         })
-      );
+      ).fail((xhr) => {
+        document.open();
+        document.write(xhr.responseText);
+        document.close();
+      });
     } else if (envIDs.length > 1) {
       $.post(
         correctPathname() + 'compare/' + envIDs.join('+'),
@@ -210,7 +217,11 @@ const ApiProvider = ({ children }) => {
           sid: sessionInfo.id,
           show_all: !!showAll,
         })
-      );
+      ).fail((xhr) => {
+        document.open();
+        document.write(xhr.responseText);
+        document.close();
+      });
     }
   };
 
@@ -264,6 +275,13 @@ const ApiProvider = ({ children }) => {
     });
   };
 
+  const sendUndo = (envID) => {
+    sendSocketMessage({
+      cmd: 'undo',
+      eid: envID,
+    });
+  };
+
   // Send request to delete an environment
   const sendEnvDelete = (envID, previousEnv) => {
     sendSocketMessage({
@@ -302,6 +320,16 @@ const ApiProvider = ({ children }) => {
     });
   };
 
+  const sendPlotLayoutUpdate = (envID, win, layoutPatch, frame) => {
+    sendSocketMessage({
+      cmd: 'update_plot_layout',
+      eid: envID,
+      win: win,
+      data: layoutPatch,
+      frame: frame,
+    });
+  };
+
   // Save layout lists to the server
   const sendLayoutsSave = (layoutLists) => {
     // pushes layouts to the server
@@ -326,6 +354,17 @@ const ApiProvider = ({ children }) => {
   // Effects //
   // ------- //
 
+  // Redirect for POST request errors
+  useEffect(() => {
+    $(document).on('ajaxError', () => {
+      window.location.href = correctPathname() + 'error/500';
+    });
+
+    return () => {
+      $(document).off('ajaxError');
+    };
+  }, []);
+
   // connect on mount, disconnect on unmount
   useEffect(() => {
     connect();
@@ -349,8 +388,10 @@ const ApiProvider = ({ children }) => {
         sendLayoutsSave,
         sendPaneClose,
         sendPaneLayoutUpdate,
+        sendPlotLayoutUpdate,
         sendPaneMessage,
         sendSaveAll,
+        sendUndo,
         sessionInfo,
         setConnected,
         toggleOnlineState,
