@@ -39,6 +39,18 @@ def image_basic(viz, env, args):
     return img_callback_win
 
 
+def image_heatmap_basic(viz, env, args):
+    img = np.random.rand(3, 128, 128)
+    ys, xs = np.mgrid[0:128, 0:128]
+    heatmap = np.exp(-((ys - 64) ** 2 + (xs - 64) ** 2) / (2 * 20.0**2))
+    return viz.image_heatmap(
+        img,
+        heatmap,
+        opts={"title": "Heatmap overlay", "colormap": "jet", "alpha": 0.6},
+        env=env,
+    )
+
+
 def image_callback(viz, env, args):
     img_callback_win = image_basic(viz, env, args)
     img_coord_text = viz.text("Coords: ", env=env)
