@@ -99,6 +99,14 @@ class Visdom:
     def image_select(
         self, win: Text, selected: int, env: _OptStr = ...
     ) -> _SendReturn: ...
+    def image_heatmap(
+        self,
+        img: Tensor,
+        heatmap: Tensor,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
     def images(
         self,
         tensor: Tensor,
@@ -126,6 +134,15 @@ class Visdom:
     ) -> _SendReturn: ...
     def update_window_opts(
         self, win: Text, opts: Mapping[Text, Any], env: _OptStr = ...
+    ) -> _SendReturn: ...
+    def learning_curve(
+        self,
+        metrics: Mapping[Text, Any],
+        step: Optional[Tensor] = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+        update: _OptStr = ...,
     ) -> _SendReturn: ...
     def scatter(
         self,
