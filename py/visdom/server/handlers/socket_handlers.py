@@ -45,8 +45,6 @@ from visdom.server.defaults import MAX_SOCKET_WAIT
 
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
-# TODO move generalized initialization logic from these handlers into the
-# basehandler
 # TODO abstract out any direct references to the app where possible from
 # all handlers. Can instead provide accessor functions on the state?
 # TODO Try to standardize the code between the client-server and
@@ -73,16 +71,6 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
     def __init__(self, *args, **kwargs):
         self.polling = False
         super().__init__(*args, **kwargs)
-
-    def initialize(self, app):
-        self.state = app.state
-        self.subs = app.subs
-        self.sources = app.sources
-        self.port = app.port
-        self.env_path = app.env_path
-        self.login_enabled = app.login_enabled
-        self.app = app
-        self.readonly = app.readonly
 
     def open(self, register_to="sources"):
         self.sid = get_rand_id()
@@ -529,12 +517,7 @@ class SocketFailureReason(Enum):
 def WrapSocketWrapper(BaseWrapper):
     class WrappedSocketWrap(BaseHandler):
         def initialize(self, app):
-            self.state = app.state
-            self.subs = app.subs
-            self.sources = app.sources
-            self.port = app.port
-            self.env_path = app.env_path
-            self.login_enabled = app.login_enabled
+            super().initialize(app)
             self.app = app
 
         @check_auth
