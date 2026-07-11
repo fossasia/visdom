@@ -267,6 +267,7 @@ Other options are either currently unused (endpoint, ipv6) or used for internal 
 ### Basics
 Visdom offers the following basic visualization functions:
 - [`vis.image`](#visimage)    : image
+- [`vis.image_heatmap`](#visimageheatmap) : image with heatmap overlay
 - [`vis.images`](#visimages)   : list of images
 - [`vis.text`](#vistext)     : arbitrary HTML
 - [`vis.properties`](#visproperties)     : properties grid
@@ -285,8 +286,10 @@ The following API is currently supported:
 - [`vis.scatter`](#visscatter)  : 2D or 3D scatter plots
 - [`vis.sunburst`](#vissunburst)  : sunburst (hierarchy) charts
 - [`vis.line`](#visline)     : line plots
+- [`vis.learning_curve`](#vislearning_curve) : named training metric curves
 - [`vis.stem`](#visstem)     : stem plots
 - [`vis.heatmap`](#visheatmap)  : heatmap plots
+- [`vis.confusion_matrix`](#visconfusion_matrix)  : confusion matrix plots
 - [`vis.bar`](#visbar)  : bar graphs
 - [`vis.histogram`](#vishistogram) : histograms
 - [`vis.histogram2d`](#vishistogram2d) : 2D histograms (density maps)
@@ -295,6 +298,8 @@ The following API is currently supported:
 - [`vis.pie`](#vispie)      : pie charts
 - [`vis.surf`](#vissurf)     : surface plots
 - [`vis.contour`](#viscontour)  : contour plots
+- [`vis.roc_curve`](#visroc_curve)  : ROC curves
+- [`vis.pr_curve`](#vispr_curve)  : precision-recall curves
 - [`vis.quiver`](#visquiver)   : quiver plots
 - [`vis.mesh`](#vismesh)     : mesh plots
 - [`vis.sankey`](#vissankey)   : sankey (flow) diagrams
@@ -352,6 +357,34 @@ The following `opts` are supported:
 - `store_history`: Keep all images stored to the same window and attach a slider to the bottom that will let you select the image to view. You must always provide this opt when sending new images to an image with history.
 
 > **Note** You can use alt on an image pane to view the x/y coordinates of the cursor. You can also ctrl-scroll to zoom, alt scroll to pan vertically, and alt-shift scroll to pan horizontally. Double click inside the pane to restore the image to default.
+
+
+#### vis.image_heatmap
+
+This function overlays a saliency or attention heatmap on top of an image. It takes a `CxHxW` or `HxW` array `img` (uint8 or float) and an `HxW` float array `heatmap` with values in `[0, 1]`. The blending is per-pixel — pixels where the heatmap is near zero stay close to the original image, so a zero-gradient background does not get tinted by the colormap.
+
+```python
+import numpy as np
+from visdom import Visdom
+
+viz = Visdom()
+
+# img: CxHxW uint8 or float in [0, 1]
+# heatmap: HxW float in [0, 1] — e.g. from a saliency method or attention map
+viz.image_heatmap(img, heatmap, opts=dict(title="Saliency", alpha=0.6, colormap="jet"))
+```
+
+Any attribution method that produces an `HxW` numpy array works — gradient saliency, GradCAM, SHAP, or a hand-computed attention map.
+
+The following `opts` are supported:
+
+- `alpha`: blend strength (`float` in `[0, 1]`; default = `0.5`). Higher values make the heatmap more visible.
+- `colormap`: matplotlib colormap name (`string`; default = `'jet'`). Falls back to a blue-red gradient if matplotlib is not installed.
+- `caption`: caption for the image pane
+- `jpgquality`: JPG quality (`number` 0-100). If set, the result is encoded as JPEG. Otherwise PNG.
+- `normalize`: normalize the image to `[0, 1]` before blending (`boolean`; default = `False`)
+
+> **Note** `heatmap` accepts any finite float range. Values outside `[0, 1]` are rescaled automatically via min-max normalization, so methods like SHAP or Integrated Gradients that return signed or unnormalized values work without any pre-processing. NaN maps to 0; infinite values are clamped to the `[0, 1]` boundary.
 
 
 #### vis.images
@@ -466,6 +499,7 @@ The function accepts the following arguments:
 - `labels`: a list of corresponding labels for the tensors provided for `features`
 - `data_getter=fn`: (optional) a function that takes as a parameter an index into the features array and returns a summary representation of the tensor. If this is set, `data_type` must also be set.
 - `data_type=str`: (optional) currently the only acceptable value here is `"html"`
+- `opts.register_embedding_events`: (optional) set to `False` to skip registering the default Python client event handler for hover previews and lasso drilldown. This leaves embeddings interaction events for external server or frontend code to handle.
 
 We currently assume that there are no more than 10 unique labels, in the future we hope to provide a colormap in opts for other cases.
 
@@ -549,6 +583,57 @@ The following `opts` are supported:
 - `opts.traceopts`   : `dict` mapping trace names or indices to `dict`s of additional options that plot.ly accepts for a trace.
 - `opts.webgl`       : use WebGL for plotting (`boolean`; default = `false`). It is faster if a plot contains too many points. Use sparingly as browsers won't allow more than a couple of WebGL contexts on a single page.
 
+#### vis.roc_curve
+This function draws a ROC curve for binary classification.
+
+It accepts either:
+- raw binary labels and scores via `y_true` and `y_score`, or
+- precomputed curve points via `fpr` and `tpr`.
+
+The following `opts` are supported:
+- `opts.title`      : plot title (`string`; default includes ROC-AUC)
+- `opts.legend`     : two legend labels for curve and baseline (`list`)
+- `opts.xlabel`     : x-axis label (`string`; default = `False Positive Rate`)
+- `opts.ylabel`     : y-axis label (`string`; default = `True Positive Rate`)
+- `opts.layoutopts` : additional backend layout options (`dict`)
+
+#### vis.pr_curve
+This function draws a precision-recall curve for binary classification.
+
+It accepts either:
+- raw binary labels and scores via `y_true` and `y_score`, or
+- precomputed curve points via `precision` and `recall`.
+
+The following `opts` are supported:
+- `opts.title`      : plot title (`string`; default includes PR-AUC)
+- `opts.legend`     : two legend labels for curve and baseline (`list`)
+- `opts.xlabel`     : x-axis label (`string`; default = `Recall`)
+- `opts.ylabel`     : y-axis label (`string`; default = `Precision`)
+- `opts.layoutopts` : additional backend layout options (`dict`)
+
+
+#### vis.learning_curve
+This function draws named machine-learning metrics as line plots. It accepts a mapping from metric names to scalar values or equal-length 1D series and forwards to [`vis.line`](#visline).
+
+For example:
+
+```python
+win = vis.learning_curve(
+    {"train_loss": [1.0, 0.8, 0.6], "val_loss": [1.1, 0.9, 0.7]},
+    step=[1, 2, 3],
+    env="training",
+    opts={"title": "Loss", "ylabel": "loss"},
+)
+
+vis.learning_curve(
+    {"train_loss": 0.55, "val_loss": 0.68},
+    step=4,
+    win=win,
+    env="training",
+    update="append",
+)
+```
+
 
 #### vis.stem
 This function draws a stem plot. It takes as input an `N` or `NxM` tensor
@@ -578,6 +663,32 @@ The following `opts` are supported:
 - `opts.rownames`   : `table` containing y-axis labels
 - `opts.layoutopts` : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 - `opts.nancolor`   : color for plotting `NaN`s. If this is `None`, `NaN`s will be plotted as transparent. (`string`; default = `None`)
+
+#### vis.confusion_matrix
+This function draws a confusion matrix for classification evaluation.
+
+It accepts either:
+- raw label vectors via `y_true` and `y_pred`, or
+- a precomputed confusion matrix via `cm`.
+
+Optional normalization can be applied with the `normalize` parameter:
+- `'true'`: normalize by row (actual class)
+- `'pred'`: normalize by column (predicted class)
+- `'all'`: normalize by total count
+
+An existing confusion matrix window can be modified with the `update` parameter:
+- `'replace'`: redraw the whole matrix in the window given by `win`
+- `'remove'`: delete the window given by `win`
+
+The following `opts` are supported:
+
+- `opts.title`       : plot title (`string`; default = `Confusion Matrix`)
+- `opts.xlabel`      : x-axis label (`string`; default = `Predicted`)
+- `opts.ylabel`      : y-axis label (`string`; default = `Actual`)
+- `opts.colormap`    : Plotly colorscale (`string`; default = `Blues`)
+- `opts.showCounts`  : show raw counts in cells (`bool`; default = `True`)
+- `opts.showPercent` : show percentages in cells (`bool`; default = `True` when normalized, `False` otherwise)
+- `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout.
 
 #### vis.bar
 This function draws a regular, stacked, or grouped bar plot. It takes as
@@ -879,7 +990,7 @@ visdom is Apache 2.0 licensed, as found in the LICENSE file.
 Support for Lua Torch was deprecated following `v0.1.8.4`. If you'd like to use torch support, you'll need to download that release. You can follow the usage instructions there, but it is no longer officially supported.
 
 ## Contributing
-See guidelines for contributing [here.](./CONTRIBUTING.md)
+See guidelines for contributing and running E2E/visual tests (Cypress and Playwright) [here.](./CONTRIBUTING.md)
 
 ## Acknowledgments
 Visdom was inspired by tools like [display](https://github.com/szym/display) and relies on [Plotly](https://plot.ly/) as a plotting front-end.

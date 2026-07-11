@@ -80,6 +80,8 @@ class PostHandler(BaseHandler):
 class ExistsHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
+        if "win" not in args:
+            raise tornado.web.HTTPError(400, reason="missing required field: win")
         eid = extract_eid(args)
         if eid in handler.state and args["win"] in handler.state[eid]["jsons"]:
             handler.write("true")
@@ -131,13 +133,11 @@ class UpdateHandler(BaseHandler):
                 p["content"]["selected"] = args["data"]["selected"]
             elif args["data"]["update_type"] == "RegionSelected":
                 p["content"]["selected"] = None
-                print(len(p["content"]["data"]))
                 p["old_content"].append(p["content"]["data"])
                 if len(p["old_content"]) > max_old_content:
                     p["old_content"] = p["old_content"][-max_old_content:]
                 p["content"]["has_previous"] = True
                 p["content"]["data"] = args["data"]["points"]
-                print(len(p["content"]["data"]))
             return p
         if p["type"] == "image_history":
             utype = args["data"][0]["type"]
@@ -325,6 +325,14 @@ class UpdateHandler(BaseHandler):
 
     @staticmethod
     def wrap_func(handler, args):
+        if "win" not in args:
+            raise tornado.web.HTTPError(400, reason="missing required field: win")
+        if "data" not in args and args.get("append"):
+            raise tornado.web.HTTPError(400, reason="missing required field: data")
+        if "data" not in args and "layout" not in args and "opts" not in args:
+            raise tornado.web.HTTPError(
+                400, reason="request must include one of: data, layout, or opts"
+            )
         eid = extract_eid(args)
 
         if eid not in handler.state:
@@ -527,9 +535,18 @@ class EnvHandler(BaseHandler):
         if "sid" in msg_args:
             sid = msg_args["sid"]
             if sid in self.subs:
-                load_env(
-                    self.state, escape_eid(args), self.subs[sid], env_path=self.env_path
-                )
+                try:
+                    load_env(
+                        self.state,
+                        escape_eid(args),
+                        self.subs[sid],
+                        env_path=self.env_path,
+                    )
+                except ValueError as e:
+                    raise tornado.web.HTTPError(
+                        400,
+                        reason="Could not load environment invalid environment JSON format",
+                    )
         if "eid" in msg_args:
             eid = escape_eid(msg_args["eid"])
             if eid not in self.state:
@@ -562,13 +579,19 @@ class CompareHandler(BaseHandler):
         sid = body["sid"]
         show_all = body.get("show_all", False)
         if sid in self.subs:
-            compare_envs(
-                self.state,
-                args.split("+"),
-                self.subs[sid],
-                self.env_path,
-                show_all=show_all,
-            )
+            try:
+                compare_envs(
+                    self.state,
+                    args.split("+"),
+                    self.subs[sid],
+                    self.env_path,
+                    show_all=show_all,
+                )
+            except ValueError as e:
+                raise tornado.web.HTTPError(
+                    400,
+                    reason="Could not compare environments: invalid environment JSON format",
+                )
 
 
 class SaveHandler(BaseHandler):
