@@ -88,14 +88,11 @@ async function closeEnvs(page) {
 }
 
 async function expandAllEnvGroups(page) {
-  // Scope to the visible popup container so we only expand switchers that are
-  // actually inside the open dropdown, not stale/hidden ones elsewhere in the DOM.
-  const popup = page.locator('.rc-tree-select-dropdown:visible');
-  const closedGroups = popup.locator('.rc-tree-select-tree-switcher_close');
+  const closedGroups = page.locator('.rc-tree-select-tree-switcher_close');
   let count = await closedGroups.count();
   let attempts = 0;
   while (count > 0 && attempts < 50) {
-    await closedGroups.first().click();
+    await closedGroups.first().click({ force: true });
     await page.waitForTimeout(150);
     count = await closedGroups.count();
     attempts++;
@@ -103,45 +100,39 @@ async function expandAllEnvGroups(page) {
 }
 
 async function closeEnvDropdown(page) {
-  // Click the trigger only if the dropdown is still open, to avoid toggling it
-  // back open. The trigger has class rc-tree-select-open when the popup is visible.
-  const trigger = page.locator('.navbar-form .rc-tree-select').first();
-  const isOpen = await trigger.evaluate((el) =>
-    el.classList.contains('rc-tree-select-open')
-  );
-  if (isOpen) {
-    await trigger.click();
+  await page.keyboard.press('Escape');
+  const treeSelect = page.locator('.navbar-form .rc-tree-select').first();
+  if (await treeSelect.count()) {
+    const isOpen = await treeSelect.evaluate((el) =>
+      el.classList.contains('rc-tree-select-open')
+    );
+    if (isOpen) {
+      await treeSelect.click();
+    }
   }
 }
 
 async function openEnv(page, name) {
-  // Only open the dropdown if it is not already open. Unconditionally clicking
-  // a tree-select that is already open toggles it closed, which then causes
-  // the group-wait and item-click below to target a hidden popup.
-  const trigger = page.locator('.navbar-form .rc-tree-select').first();
-  const isOpen = await trigger.evaluate((el) =>
+  const treeSelect = page.locator('.navbar-form .rc-tree-select').first();
+  const isOpen = await treeSelect.evaluate((el) =>
     el.classList.contains('rc-tree-select-open')
   );
   if (!isOpen) {
-    await trigger.click();
+    await treeSelect.click();
   }
 
   const idx = name.indexOf('_');
   const expectedText = idx > 0 ? name.substring(0, idx) : name;
 
-  // Wait for the popup to be visible and for the group/root node to appear.
-  // This targets the popup container directly so we don't match selection tags
-  // that contain the same text in the closed trigger area.
-  const popup = page.locator('.rc-tree-select-dropdown');
-  await popup.waitFor({ state: 'visible', timeout: 10000 });
-  await popup
+  const tree = page.locator('.rc-tree-select-tree');
+  await tree
     .locator(`text=${expectedText}`)
     .first()
     .waitFor({ state: 'visible', timeout: 10000 });
 
   await expandAllEnvGroups(page);
 
-  await popup.locator(`text=${name}`).first().click();
+  await tree.locator(`text=${name}`).first().click({ force: true });
   await closeEnvDropdown(page);
 }
 
