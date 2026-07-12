@@ -1,8 +1,20 @@
 # Testing Instructions
 
-Cypress 9 for E2E and visual regression. No Python unit tests — validation is via demo scripts and Cypress.
+Two layers: **pytest** for Python unit tests (pure functions, server utils, window/env lifecycle) and **Cypress 9** for E2E and visual regression. Demo scripts remain useful for manual/visual validation.
 
-## Run Tests
+## Run Python Tests (pytest)
+
+```bash
+pip install -r test-requirements.txt   # includes pytest, pytest-cov
+pytest                                 # runs the tracked suite under py/tests/
+pytest -m "not server"                 # skip tests that need a live server (CI default)
+```
+
+Config lives in `pyproject.toml` (`[tool.pytest.ini_options]`): discovery is scoped to
+`py/tests/` and `pythonpath = ["py"]` makes `import visdom` work without an editable install.
+Experimental `test_*.py` scripts in the repo root (and `test/`) are intentionally out of scope.
+
+## Run E2E / Visual Tests (Cypress)
 
 ```bash
 visdom -port 8098 -env_path /tmp   # Always start fresh server first
@@ -24,9 +36,19 @@ Always use port `8098` and `-env_path /tmp` for isolation.
 
 `basic.js` (connection), `pane.js` (CRUD), `text.js`, `image.js`, `properties.js`, `modal.js`, `misc.js`, `screenshots.init.js` (baseline), `screenshots.js` (comparison).
 
+## Writing Python Tests
+
+- Place in `py/tests/`, name files `test_*.py`, classes `Test*` (unittest `TestCase` or plain
+  pytest functions both work — pytest auto-discovers unittest).
+- Keep them hermetic (no running server). A test that genuinely needs a live server must be
+  marked `@pytest.mark.server` so CI can deselect it.
+- Start with simple hermetic tests (e.g., `test_smoke.py`) and add focused unit tests for
+  server/window/env lifecycle code as coverage grows.
+
 ## CI
 
-- Python 3.8, 3.9, 3.10 matrix, both WebSocket and polling modes
+- `python-tests.yml` runs `pytest -m "not server"` on a Python version matrix for every pull
+  request (and on pushes to master/dev)
 - Visual regression compares PR screenshots against base branch
 - `update-js-build-files.yml` auto-compiles JS on master
 - `pypi.yml` publishes to PyPI when VERSION changes

@@ -35,6 +35,10 @@ from visdom.utils.server_utils import (
     send_to_sources,
     broadcast,
     escape_eid,
+    push_deleted,
+    pop_deleted,
+    clear_deleted,
+    broadcast_undo_state,
 )
 from visdom.server.defaults import MAX_SOCKET_WAIT
 
@@ -101,6 +105,12 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
         elif cmd == "close":
             if "data" in msg and "eid" in msg:
                 logging.info(f"closing window {msg['data']}")
+                eid = escape_eid(msg["eid"])
+                if eid not in self.state:
+                    return
+                p_data = self.state[eid]["jsons"].pop(msg["data"], None)
+                if p_data is not None:
+                    push_deleted(self.env_path, eid, msg["data"], p_data)
                 env = self.state.get(msg["eid"])
                 if env is None:
                     return
@@ -108,10 +118,32 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 event = {
                     "event_type": "close",
                     "target": msg["data"],
-                    "eid": msg["eid"],
+                    "eid": eid,
                     "pane_data": p_data,
                 }
                 send_to_sources(self, event)
+                broadcast_undo_state(self, eid, self.env_path)
+
+        elif cmd == "undo":
+            if "eid" in msg:
+                eid = escape_eid(msg["eid"])
+                if eid not in self.state:
+                    return
+                popped = pop_deleted(self.env_path, eid)
+                if popped:
+                    win_id, p_data = popped
+                    env = self.state[eid]["jsons"]
+                    max_i = max((p.get("i", -1) for p in env.values()), default=-1)
+                    p_data["i"] = max_i + 1
+                    env[win_id] = p_data
+                    broadcast_msg = dict(p_data)
+                    broadcast_msg["eid"] = eid
+                    broadcast(
+                        self,
+                        json.dumps(broadcast_msg, cls=NanSafeEncoder),
+                        eid,
+                    )
+                broadcast_undo_state(self, eid, self.env_path)
 
         elif cmd == "save":
             # save localStorage window metadata
@@ -137,6 +169,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     return
                 logging.info(f"closing environment {eid}")
                 self.state.pop(eid, None)
+                clear_deleted(self.env_path, eid)
                 if self.env_path is not None:
                     p = os.path.join(self.env_path, "{0}.json".format(eid))
                     if os.path.exists(p):
@@ -208,6 +241,59 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 )
                 return
             self.state[eid]["reload"][win] = msg.get("data")
+
+        elif cmd == "update_plot_layout":
+            eid = msg.get("eid")
+            win = msg.get("win")
+            frame = msg.get("frame")
+            patch = msg.get("data")
+            if eid is None or win is None or eid not in self.state:
+                logging.warning(
+                    f"update_plot_layout: env {eid!r} or win {win!r}"
+                    f" not found, dropping event"
+                )
+                return
+            if not isinstance(patch, dict):
+                logging.warning(
+                    f"update_plot_layout: expected dict patch, got"
+                    f" {type(patch).__name__!r}, dropping event"
+                )
+                return
+
+            env = self.state[eid]["jsons"]
+            if win not in env:
+                logging.warning(
+                    f"update_plot_layout: pane {win!r} not found"
+                    f" in env {eid!r}, dropping event"
+                )
+                return
+
+            p = env[win]
+
+            if p.get("type") == "plot_history":
+                content_list = p.get("content")
+                if (
+                    not isinstance(content_list, list)
+                    or frame is None
+                    or not (0 <= frame < len(content_list))
+                ):
+                    logging.warning(
+                        f"update_plot_layout: invalid frame {frame!r}"
+                        f" for plot_history pane {win!r}, dropping event"
+                    )
+                    return
+                layout = content_list[frame].setdefault("layout", {})
+            else:
+                content = p.get("content")
+                if not isinstance(content, dict):
+                    logging.warning(
+                        f"update_plot_layout: pane {win!r} has no plot"
+                        f" content, dropping event"
+                    )
+                    return
+                layout = content.setdefault("layout", {})
+
+            layout.update(patch)
 
         elif cmd == "pop_embeddings_pane":
             packet = msg.get("data")
@@ -451,6 +537,7 @@ def WrapSocketWrapper(BaseWrapper):
             self.login_enabled = app.login_enabled
             self.app = app
 
+        @check_auth
         def post(self):
             """Either write a message to the socket, or query what's there"""
             args = tornado.escape.json_decode(
