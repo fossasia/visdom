@@ -16,6 +16,7 @@ env dict, an environment without an experiment blob behaves exactly as it does
 today — the feature is fully opt-in.
 """
 
+from visdom.data_model.base import DataStore
 from visdom.experiments.models import Experiment, STATUS_FINISHED
 
 METADATA_KEY = "experiment"
@@ -26,6 +27,11 @@ class ExperimentStore:
 
     def __init__(self, datastore):
         """Create a store backed by ``datastore`` (a :class:`DataStore`)."""
+        if not isinstance(datastore, DataStore):
+            raise TypeError(
+                "datastore must be a DataStore, got "
+                f"{type(datastore).__name__}"
+            )
         self.datastore = datastore
 
     def _read(self, env_id):
