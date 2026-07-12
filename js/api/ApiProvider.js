@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 
 import ApiContext from './ApiContext';
 import Poller from './Legacy';
+import { showToast } from '../toasts/toastEvents';
 
 const ApiProvider = ({ children }) => {
   const [connected, setConnected] = useState(false);
@@ -180,6 +181,11 @@ const ApiProvider = ({ children }) => {
         break;
       case 'undo_state':
         apiHandlers.current.onUndoState(cmd);
+        break;
+      case 'notification':
+        showToast(cmd.data.message, cmd.data.type, {
+          duration: cmd.data.duration,
+        });
         break;
 
       default:
