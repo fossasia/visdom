@@ -685,9 +685,7 @@ def notify(handler, message, type="info", duration=None, eid=None, target_subs=N
     if duration is not None:
         payload["duration"] = duration
 
-    msg = json.dumps(
-        {"command": "notification", "data": payload}, cls=NanSafeEncoder
-    )
+    msg = json.dumps({"command": "notification", "data": payload}, cls=NanSafeEncoder)
 
     if target_subs is not None:
         for sub in target_subs:
