@@ -114,6 +114,33 @@ def plot_line_many_updates(viz, env, args):
         )
 
 
+def plot_line_learning_curve(viz, env, args):
+    epochs = np.arange(1, 11)
+    train_loss = np.exp(-epochs / 4.0) + 0.08 * np.random.rand(len(epochs))
+    val_loss = np.exp(-epochs / 3.7) + 0.12 * np.random.rand(len(epochs)) + 0.08
+    win = viz.learning_curve(
+        {
+            "train_loss": train_loss,
+            "val_loss": val_loss,
+        },
+        step=epochs,
+        opts={"title": "Learning curve", "ylabel": "loss"},
+        env=env,
+    )
+
+    for epoch in range(11, 16):
+        viz.learning_curve(
+            {
+                "train_loss": np.exp(-epoch / 4.0),
+                "val_loss": np.exp(-epoch / 3.7) + 0.08,
+            },
+            step=epoch,
+            win=win,
+            update="append",
+            env=env,
+        )
+
+
 def plot_line_opts(viz, env, args):
     return viz.line(
         X=np.column_stack(

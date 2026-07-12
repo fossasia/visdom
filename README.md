@@ -267,6 +267,7 @@ Other options are either currently unused (endpoint, ipv6) or used for internal 
 ### Basics
 Visdom offers the following basic visualization functions:
 - [`vis.image`](#visimage)    : image
+- [`vis.image_heatmap`](#visimageheatmap) : image with heatmap overlay
 - [`vis.images`](#visimages)   : list of images
 - [`vis.text`](#vistext)     : arbitrary HTML
 - [`vis.properties`](#visproperties)     : properties grid
@@ -285,6 +286,7 @@ The following API is currently supported:
 - [`vis.scatter`](#visscatter)  : 2D or 3D scatter plots
 - [`vis.sunburst`](#vissunburst)  : sunburst (hierarchy) charts
 - [`vis.line`](#visline)     : line plots
+- [`vis.learning_curve`](#vislearning_curve) : named training metric curves
 - [`vis.stem`](#visstem)     : stem plots
 - [`vis.heatmap`](#visheatmap)  : heatmap plots
 - [`vis.confusion_matrix`](#visconfusion_matrix)  : confusion matrix plots
@@ -330,6 +332,55 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 - [`vis.replay_log`](#visreplay_log): replay the actions from the provided log file
 
 
+## Loggers
+
+Framework-specific logging bridges that wrap the Visdom API so training loops stay focused on training. Each logger lives in its own submodule and handles window creation, step tracking, and throttling internally.
+
+### PyTorch
+
+`visdom.pytorch.VisdomLogger` is a context manager for raw PyTorch training loops. Call `tracker.log(name, value)` for any scalar — no `viz.line()` arguments needed.
+
+**Epoch-level logging** (recommended default — one call per epoch):
+
+```python
+import visdom
+from visdom.pytorch import VisdomLogger
+
+viz = visdom.Visdom()
+
+with VisdomLogger(viz, env="my_run") as tracker:
+    for epoch in range(num_epochs):
+        train_loss = run_train_epoch(model, loader)
+        val_loss   = run_val_epoch(model, val_loader)
+
+        tracker.log("Train Loss", train_loss)
+        tracker.log("Val Loss",   val_loss)
+        tracker.log("LR",         optimizer.param_groups[0]["lr"])
+```
+
+**Per-batch logging with `log_every`** — use when logging inside the batch loop on large datasets:
+
+```python
+with VisdomLogger(viz, env="my_run", log_every=50) as tracker:
+    for epoch in range(num_epochs):
+        for inputs, targets in train_loader:
+            loss = criterion(model(inputs), targets)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            # sent to Visdom every 50 batches, not every batch
+            tracker.log("Train Loss", loss.item(), xlabel="step")
+            tracker.log("LR",         optimizer.param_groups[0]["lr"], xlabel="step")
+```
+
+**Parameters:**
+- `viz`: a connected `visdom.Visdom()` instance
+- `env`: environment name (default: auto-generated from timestamp)
+- `log_every`: send every N calls per metric — use with per-batch logging on large datasets (default: `1`)
+
+Each unique name passed to `tracker.log()` gets its own window. The first call creates it; subsequent calls append. See `example/train_example.py` for a full working example.
+
 ## Details
 <img src="https://user-images.githubusercontent.com/19650074/198747904-7a8a580f-851a-45fb-8f45-94e54a910ee2.png"/>
 
@@ -355,6 +406,34 @@ The following `opts` are supported:
 - `store_history`: Keep all images stored to the same window and attach a slider to the bottom that will let you select the image to view. You must always provide this opt when sending new images to an image with history.
 
 > **Note** You can use alt on an image pane to view the x/y coordinates of the cursor. You can also ctrl-scroll to zoom, alt scroll to pan vertically, and alt-shift scroll to pan horizontally. Double click inside the pane to restore the image to default.
+
+
+#### vis.image_heatmap
+
+This function overlays a saliency or attention heatmap on top of an image. It takes a `CxHxW` or `HxW` array `img` (uint8 or float) and an `HxW` float array `heatmap` with values in `[0, 1]`. The blending is per-pixel — pixels where the heatmap is near zero stay close to the original image, so a zero-gradient background does not get tinted by the colormap.
+
+```python
+import numpy as np
+from visdom import Visdom
+
+viz = Visdom()
+
+# img: CxHxW uint8 or float in [0, 1]
+# heatmap: HxW float in [0, 1] — e.g. from a saliency method or attention map
+viz.image_heatmap(img, heatmap, opts=dict(title="Saliency", alpha=0.6, colormap="jet"))
+```
+
+Any attribution method that produces an `HxW` numpy array works — gradient saliency, GradCAM, SHAP, or a hand-computed attention map.
+
+The following `opts` are supported:
+
+- `alpha`: blend strength (`float` in `[0, 1]`; default = `0.5`). Higher values make the heatmap more visible.
+- `colormap`: matplotlib colormap name (`string`; default = `'jet'`). Falls back to a blue-red gradient if matplotlib is not installed.
+- `caption`: caption for the image pane
+- `jpgquality`: JPG quality (`number` 0-100). If set, the result is encoded as JPEG. Otherwise PNG.
+- `normalize`: normalize the image to `[0, 1]` before blending (`boolean`; default = `False`)
+
+> **Note** `heatmap` accepts any finite float range. Values outside `[0, 1]` are rescaled automatically via min-max normalization, so methods like SHAP or Integrated Gradients that return signed or unnormalized values work without any pre-processing. NaN maps to 0; infinite values are clamped to the `[0, 1]` boundary.
 
 
 #### vis.images
@@ -469,6 +548,7 @@ The function accepts the following arguments:
 - `labels`: a list of corresponding labels for the tensors provided for `features`
 - `data_getter=fn`: (optional) a function that takes as a parameter an index into the features array and returns a summary representation of the tensor. If this is set, `data_type` must also be set.
 - `data_type=str`: (optional) currently the only acceptable value here is `"html"`
+- `opts.register_embedding_events`: (optional) set to `False` to skip registering the default Python client event handler for hover previews and lasso drilldown. This leaves embeddings interaction events for external server or frontend code to handle.
 
 We currently assume that there are no more than 10 unique labels, in the future we hope to provide a colormap in opts for other cases.
 
@@ -579,6 +659,29 @@ The following `opts` are supported:
 - `opts.xlabel`     : x-axis label (`string`; default = `Recall`)
 - `opts.ylabel`     : y-axis label (`string`; default = `Precision`)
 - `opts.layoutopts` : additional backend layout options (`dict`)
+
+
+#### vis.learning_curve
+This function draws named machine-learning metrics as line plots. It accepts a mapping from metric names to scalar values or equal-length 1D series and forwards to [`vis.line`](#visline).
+
+For example:
+
+```python
+win = vis.learning_curve(
+    {"train_loss": [1.0, 0.8, 0.6], "val_loss": [1.1, 0.9, 0.7]},
+    step=[1, 2, 3],
+    env="training",
+    opts={"title": "Loss", "ylabel": "loss"},
+)
+
+vis.learning_curve(
+    {"train_loss": 0.55, "val_loss": 0.68},
+    step=4,
+    win=win,
+    env="training",
+    update="append",
+)
+```
 
 
 #### vis.stem
