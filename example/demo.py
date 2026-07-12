@@ -27,6 +27,7 @@ from components.image import (
     image_grid,
     image_svg,
     image_compare_basic,
+    image_heatmap_basic,
 )
 from components.plot_scatter import (
     plot_scatter_basic,
@@ -134,6 +135,7 @@ def run_demo(viz, env, args):
     image_save_jpeg(viz, env, args)
     image_history(viz, env, args)
     image_grid(viz, env, args)
+    image_heatmap_basic(viz, env, args)
 
     # ========== #
     # line plots #

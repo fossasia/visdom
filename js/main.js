@@ -36,6 +36,8 @@ import {
   ROW_HEIGHT,
 } from './settings';
 import buildExportHtml from './template/exportTemplate';
+import ToastContainer from './toasts/ToastContainer';
+import { showToast } from './toasts/toastEvents';
 import ConnectionIndicator from './topbar/ConnectionIndicator';
 import EnvControls from './topbar/EnvControls';
 import FilterControls from './topbar/FilterControls';
@@ -876,7 +878,7 @@ const App = () => {
   };
   const exportCurrentEnvToHtml = () => {
     if (!storeData.panes || Object.keys(storeData.panes).length === 0) {
-      alert('No panes available to export.');
+      showToast('No panes available to export.', 'error', { duration: 4000 });
       return;
     }
 
@@ -1034,6 +1036,7 @@ const App = () => {
 
   return (
     <div>
+      <ToastContainer />
       {modals}
       <div className="navbar-form navbar-default">
         <span className="navbar-brand visdom-title">visdom</span>
