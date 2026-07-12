@@ -29,8 +29,7 @@ class ExperimentStore:
         """Create a store backed by ``datastore`` (a :class:`DataStore`)."""
         if not isinstance(datastore, DataStore):
             raise TypeError(
-                "datastore must be a DataStore, got "
-                f"{type(datastore).__name__}"
+                f"datastore must be a DataStore, got {type(datastore).__name__}"
             )
         self.datastore = datastore
 
