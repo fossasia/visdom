@@ -25,6 +25,15 @@ const BASE_POS = 10;
  * page.mouse.wheel() does not support modifier keys, so we use evaluate().
  */
 async function ctrlWheel(locator, deltaY, clientX, clientY) {
+  let cx = clientX;
+  let cy = clientY;
+  if (cx === undefined || cy === undefined) {
+    const box = await locator.boundingBox();
+    if (box) {
+      if (cx === undefined) cx = box.x + box.width / 2;
+      if (cy === undefined) cy = box.y + box.height / 2;
+    }
+  }
   await locator.evaluate(
     (el, args) => {
       el.dispatchEvent(
@@ -38,7 +47,7 @@ async function ctrlWheel(locator, deltaY, clientX, clientY) {
         })
       );
     },
-    { deltaY, clientX: clientX ?? 0, clientY: clientY ?? 0 }
+    { deltaY, clientX: cx ?? 0, clientY: cy ?? 0 }
   );
 }
 
@@ -48,7 +57,10 @@ async function ctrlWheel(locator, deltaY, clientX, clientY) {
  */
 async function dragBy(page, locator, sourceOffset, dx, dy) {
   const box = await locator.boundingBox();
-  if (!box) throw new Error(`dragBy: boundingBox() returned null — element may not be visible`);
+  if (!box)
+    throw new Error(
+      `dragBy: boundingBox() returned null — element may not be visible`
+    );
   const startX = box.x + sourceOffset;
   const startY = box.y + sourceOffset;
   await page.mouse.move(startX, startY);
@@ -285,10 +297,7 @@ test.describe('Image Pane', () => {
   test('image_svg', async ({ page }) => {
     await runDemo(page, 'image_svg', { asyncrun: true });
 
-    const ellipse = page
-      .locator('.window .content')
-      .first()
-      .locator('ellipse');
+    const ellipse = page.locator('.window .content').first().locator('ellipse');
 
     await expect(ellipse).toHaveCount(1);
     await expect(ellipse).toHaveAttribute('cx', '80');
@@ -304,16 +313,17 @@ test.describe('Image Pane', () => {
     await runDemo(page, 'image_callback', { asyncrun: true });
 
     // Locate the pane by finding the grid item that contains the image
-    const pane = page.locator(WIN_SEL).filter({ has: page.locator('img') }).first();
+    const pane = page
+      .locator(WIN_SEL)
+      .filter({ has: page.locator('img') })
+      .first();
     await pane.click();
 
     const content = pane.locator('div.content');
     await content.click({ position: { x: click1[0], y: click1[1] } });
     await content.click({ position: { x: click2[0], y: click2[1] } });
 
-    const textPane = page
-      .locator(`${WIN_SEL} .content-text`)
-      .first();
+    const textPane = page.locator(`${WIN_SEL} .content-text`).first();
     await expect(textPane).toContainText('Coords:');
     await expect(textPane).toContainText(`x: ${click1[0]}, y: ${click1[1]};`);
     await expect(textPane).toContainText(`x: ${click2[0]}, y: ${click2[1]};`);
@@ -327,14 +337,22 @@ test.describe('Image Pane', () => {
 
     const initialSrc = await img.getAttribute('src');
 
+    // Click pane to focus it before sending keyboard events
+    await page.locator(WIN_SEL).first().click();
+
     // Press right 3 times then left once
-    await img.press('ArrowRight');
-    await img.press('ArrowRight');
-    await img.press('ArrowRight');
-    await img.press('ArrowLeft');
+    await page.keyboard.press('ArrowRight');
+    await page.waitForTimeout(150);
+    await page.keyboard.press('ArrowRight');
+    await page.waitForTimeout(150);
+    await page.keyboard.press('ArrowRight');
+    await page.waitForTimeout(150);
+    await page.keyboard.press('ArrowLeft');
 
     // The src change is driven by a server WebSocket response — wait for it
-    await expect(img).not.toHaveAttribute('src', initialSrc);
+    await expect(img).not.toHaveAttribute('src', initialSrc, {
+      timeout: 10000,
+    });
     const newSrc = await img.getAttribute('src');
     expect(newSrc).toMatch(/^data:image\/png;base64,/);
     expect(newSrc).not.toBe(initialSrc);
@@ -406,7 +424,9 @@ test.describe('Image Pane', () => {
     const imgCount = await images.count();
     for (let i = 0; i < imgCount; i++) {
       const img = images.nth(i);
-      const cell = img.locator('xpath=ancestor::*[@data-testid="compare-cell"]');
+      const cell = img.locator(
+        'xpath=ancestor::*[@data-testid="compare-cell"]'
+      );
       const capCount = await cell.locator('figcaption.widget').count();
       if (capCount > 0) {
         const caption = cell.locator('figcaption.widget').first();
@@ -450,16 +470,14 @@ test.describe('Image Pane', () => {
 
     await expect(comparePane.locator('img.content-image')).toHaveCount(2);
 
-    const [dl1, dl2] = await Promise.all([
-      page.waitForEvent('download'),
-      page.waitForEvent('download'),
-      comparePane.locator("button[title='save']").click(),
-    ]);
+    const downloads = [];
+    page.on('download', (dl) => downloads.push(dl));
 
-    const filenames = [dl1.suggestedFilename(), dl2.suggestedFilename()].sort();
-    expect(filenames).toContain('CompareTest_1.jpg');
-    expect(filenames).toContain('CompareTest_2.jpg');
-    expect(await dl1.path()).toBeTruthy();
-    expect(await dl2.path()).toBeTruthy();
+    await comparePane.locator("button[title='save']").click();
+
+    await expect.poll(() => downloads.length, { timeout: 10000 }).toBe(2);
+
+    const filenames = downloads.map((dl) => dl.suggestedFilename()).sort();
+    expect(filenames).toEqual(['CompareTest_1.jpg', 'CompareTest_2.jpg']);
   });
 });

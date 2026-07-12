@@ -126,13 +126,13 @@ async function openEnv(page, name) {
 
   const tree = page.locator('.rc-tree-select-tree');
   await tree
-    .locator(`text=${expectedText}`)
+    .getByText(expectedText, { exact: true })
     .first()
     .waitFor({ state: 'visible', timeout: 10000 });
 
   await expandAllEnvGroups(page);
 
-  await tree.locator(`text=${name}`).first().click({ force: true });
+  await tree.getByText(name, { exact: true }).first().click({ force: true });
   await closeEnvDropdown(page);
 }
 
