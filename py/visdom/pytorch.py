@@ -41,12 +41,33 @@ class VisdomLogger:
         self._wins = {}
         self._step = {}
         self._counter = {}
+        self._pending = {}
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        for name, (x_val, value, xlabel) in self._pending.items():
+            self._plot(name, x_val, value, xlabel)
         return False
+
+    def _plot(self, name, x_val, value, xlabel):
+        if name not in self._wins:
+            win = self.viz.line(
+                X=[x_val],
+                Y=[value],
+                env=self.env,
+                opts={"title": name, "xlabel": xlabel, "ylabel": name},
+            )
+            self._wins[name] = win
+        else:
+            self.viz.line(
+                X=[x_val],
+                Y=[value],
+                win=self._wins[name],
+                env=self.env,
+                update="append",
+            )
 
     def log(self, name, value, x=None, xlabel="epoch"):
         """Log a scalar value under the given metric name.
@@ -65,7 +86,10 @@ class VisdomLogger:
         Note:
             log_every is intended for per-batch logging only. When logging
             once per epoch, leave log_every=1 — the epoch counter handles
-            throttling by design.
+            throttling by design. The first call for a metric is always
+            plotted immediately, and any value still waiting on log_every
+            when the context manager exits is flushed automatically — no
+            metric is ever silently dropped.
         """
         if not isinstance(name, str) or not name:
             raise TypeError("name must be a non-empty string, got {!r}".format(name))
@@ -81,24 +105,11 @@ class VisdomLogger:
         if x is None:
             self._step[name] = self._step.get(name, 1) + 1
 
-        if self._counter[name] % self.log_every != 0:
-            return
-
         x_val = x if x is not None else self._step.get(name, 1) - 1
 
-        if name not in self._wins:
-            win = self.viz.line(
-                X=[x_val],
-                Y=[value],
-                env=self.env,
-                opts={"title": name, "xlabel": xlabel, "ylabel": name},
-            )
-            self._wins[name] = win
-        else:
-            self.viz.line(
-                X=[x_val],
-                Y=[value],
-                win=self._wins[name],
-                env=self.env,
-                update="append",
-            )
+        if name in self._wins and self._counter[name] % self.log_every != 0:
+            self._pending[name] = (x_val, value, xlabel)
+            return
+
+        self._plot(name, x_val, value, xlabel)
+        self._pending.pop(name, None)
