@@ -81,6 +81,8 @@ class PostHandler(BaseHandler):
 class ExistsHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
+        if "win" not in args:
+            raise tornado.web.HTTPError(400, reason="missing required field: win")
         eid = extract_eid(args)
         if eid in handler.state and args["win"] in handler.state[eid]["jsons"]:
             handler.write("true")
@@ -132,13 +134,11 @@ class UpdateHandler(BaseHandler):
                 p["content"]["selected"] = args["data"]["selected"]
             elif args["data"]["update_type"] == "RegionSelected":
                 p["content"]["selected"] = None
-                print(len(p["content"]["data"]))
                 p["old_content"].append(p["content"]["data"])
                 if len(p["old_content"]) > max_old_content:
                     p["old_content"] = p["old_content"][-max_old_content:]
                 p["content"]["has_previous"] = True
                 p["content"]["data"] = args["data"]["points"]
-                print(len(p["content"]["data"]))
             return p
         if p["type"] == "image_history":
             utype = args["data"][0]["type"]
@@ -326,6 +326,14 @@ class UpdateHandler(BaseHandler):
 
     @staticmethod
     def wrap_func(handler, args):
+        if "win" not in args:
+            raise tornado.web.HTTPError(400, reason="missing required field: win")
+        if "data" not in args and args.get("append"):
+            raise tornado.web.HTTPError(400, reason="missing required field: data")
+        if "data" not in args and "layout" not in args and "opts" not in args:
+            raise tornado.web.HTTPError(
+                400, reason="request must include one of: data, layout, or opts"
+            )
         eid = extract_eid(args)
 
         if eid not in handler.state:

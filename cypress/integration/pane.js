@@ -17,6 +17,7 @@ const basic_examples = [
   // ["Mesh Plot", "plot_special_mesh"], // disabled due to webgl
   ['Graph Plot', 'plot_special_graph'],
   ['Sankey Plot', 'plot_special_sankey'],
+  ['Learning Curve', 'plot_line_learning_curve'],
   ['Matplotlib Plot', 'misc_plot_matplot'],
   ['Latex Plot', 'misc_plot_latex'],
   ['Video Pane', 'misc_video_tensor'],
