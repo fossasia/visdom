@@ -18,8 +18,6 @@ today — the feature is fully opt-in.
 
 from visdom.experiments.models import Experiment, STATUS_FINISHED
 
-# Key under which the experiment blob is stored inside an environment dict,
-# alongside the existing "jsons" and "reload" keys.
 METADATA_KEY = "experiment"
 
 

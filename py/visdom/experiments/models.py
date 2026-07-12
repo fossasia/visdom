@@ -26,9 +26,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-# Experiment lifecycle states. ``running`` is the state a freshly logged
-# experiment starts in; ``finish_experiment`` moves it to one of the terminal
-# states.
 STATUS_RUNNING = "running"
 STATUS_FINISHED = "finished"
 STATUS_FAILED = "failed"
@@ -147,7 +144,6 @@ class Experiment:
                 )
             )
 
-    # -- parameters ---------------------------------------------------------
     def set_param(self, key: str, value: Any) -> Param:
         """Set ``key`` to ``value``, replacing any existing param of that name."""
         param = Param(key=key, value=value)
@@ -165,7 +161,6 @@ class Experiment:
                 return param
         return None
 
-    # -- metrics ------------------------------------------------------------
     def add_metric(self, key: str, value: float, step: Optional[int] = None) -> Metric:
         """Append a metric observation to this experiment's time series."""
         metric = Metric(key=key, value=value, step=step)
@@ -179,7 +174,6 @@ class Experiment:
                 return metric
         return None
 
-    # -- tags ---------------------------------------------------------------
     def set_tag(self, key: str, value: str) -> Tag:
         """Set tag ``key`` to ``value``, replacing any existing tag of that name."""
         tag = Tag(key=key, value=value)
@@ -190,7 +184,6 @@ class Experiment:
         self.tags.append(tag)
         return tag
 
-    # -- lifecycle ----------------------------------------------------------
     def finish(self, status: str = STATUS_FINISHED) -> None:
         """Mark the experiment terminal and stamp ``finished_at``.
 
@@ -206,7 +199,6 @@ class Experiment:
         self.status = status
         self.finished_at = time.time()
 
-    # -- serialisation ------------------------------------------------------
     def to_dict(self) -> dict:
         """Return the JSON-serialisable dict stored under ``env["experiment"]``."""
         return {
