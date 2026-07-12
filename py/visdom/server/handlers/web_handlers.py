@@ -551,6 +551,7 @@ class EnvHandler(BaseHandler):
                         type="error",
                         target_subs=[self.subs[sid]],
                     )
+                    return
         if "eid" in msg_args:
             eid = escape_eid(msg_args["eid"])
             if eid not in self.state:
@@ -598,6 +599,7 @@ class CompareHandler(BaseHandler):
                     type="error",
                     target_subs=[self.subs[sid]],
                 )
+                return
 
 
 class SaveHandler(BaseHandler):
