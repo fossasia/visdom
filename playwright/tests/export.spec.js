@@ -82,7 +82,7 @@ test.describe('Test Export Env as HTML', () => {
     expect(html).toContain(env);
   });
 
-  test('shows alert when all panes are closed before export', async ({
+  test('shows toast notification when all panes are closed before export', async ({
     page,
   }) => {
     const env = `export_empty_${Math.floor(Math.random() * 1e6)}`;
@@ -95,12 +95,11 @@ test.describe('Test Export Env as HTML', () => {
       .locator('button[title="close"]')
       .click();
     await expect(page.locator('.layout .react-grid-item')).toHaveCount(0);
-    let dialogMessage;
-    page.once('dialog', async (dialog) => {
-      dialogMessage = dialog.message();
-      await dialog.dismiss();
-    });
+
     await page.locator(EXPORT_BUTTON).click();
-    expect(dialogMessage).toBe('No panes available to export.');
+
+    const toast = page.locator('.visdom-toast');
+    await expect(toast).toBeVisible();
+    await expect(toast).toContainText('No panes available to export.');
   });
 });
