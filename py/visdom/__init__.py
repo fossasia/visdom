@@ -1137,6 +1137,68 @@ class Visdom(object):
 
         return self._send(msg={"prev_eid": prev_eid, "eid": eid}, endpoint="fork_env")
 
+    def _experiment_send(self, msg, env):
+        """POST an experiment action to the server and decode the JSON reply.
+
+        Shared plumbing for :meth:`experiment`, :meth:`log_metrics` and
+        :meth:`finish_experiment`. Returns the stored experiment as a dict when
+        the server replies with JSON, otherwise the raw response (e.g. an error
+        string, or the `(msg, endpoint)` tuple when this client has `send=False`).
+        """
+        msg["eid"] = env if env is not None else self.env
+        response = self._send(msg, endpoint="experiments/log", quiet=True)
+        if not isstr(response):
+            return response
+        try:
+            return json.loads(response)
+        except ValueError:
+            return response
+
+    def experiment(self, name=None, params=None, tags=None, description=None, env=None):
+        """Create or update the experiment metadata for an environment.
+
+        Records the hyper-parameters (`params`), free-form `tags` (both dicts of
+        `{name: value}`), a display `name`, and a `description` against `env`
+        (defaults to this client's env). Calling it again for the same env merges
+        in new params/tags and overwrites name/description, so it is safe to call
+        at the start of and again during a run. Returns the stored experiment as
+        a dict.
+        """
+        if params is not None and not isinstance(params, dict):
+            raise TypeError("params must be a dict of {name: value}")
+        if tags is not None and not isinstance(tags, dict):
+            raise TypeError("tags must be a dict of {name: value}")
+        return self._experiment_send(
+            {
+                "action": "log",
+                "name": name,
+                "params": params,
+                "tags": tags,
+                "description": description,
+            },
+            env,
+        )
+
+    def log_metrics(self, metrics, step=None, env=None):
+        """Append one or more metric observations to an env's experiment.
+
+        `metrics` is a dict of `{name: value}` recorded at an optional training
+        `step`; the experiment is created automatically if it does not exist yet.
+        Returns the updated experiment as a dict.
+        """
+        if not isinstance(metrics, dict) or not metrics:
+            raise TypeError("metrics must be a non-empty dict of {name: value}")
+        return self._experiment_send(
+            {"action": "metrics", "metrics": metrics, "step": step}, env
+        )
+
+    def finish_experiment(self, status="finished", env=None):
+        """Mark an env's experiment terminal (`"finished"` or `"failed"`).
+
+        Returns the stored experiment as a dict.
+        """
+        return self._experiment_send({"action": "finish", "status": status}, env)
+
     def get_window_data(self, win=None, env=None):
         """
         This function returns all the window data for a specified window in

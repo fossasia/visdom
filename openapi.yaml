@@ -52,6 +52,8 @@ tags:
     description: Query, close, and retrieve window data
   - name: Environment
     description: Manage environments (create, delete, fork, list, save, compare)
+  - name: Experiments
+    description: Track experiment metadata (hyper-parameters, metrics, tags)
   - name: Authentication
     description: Login and session management
   - name: Socket Polling
@@ -381,6 +383,92 @@ paths:
           description: Authentication required but not provided (when login is enabled).
         "500":
           description: Server error. Occurs if the source environment does not exist (unhandled assertion error).
+
+  /experiments/log:
+    post:
+      operationId: logExperiment
+      tags: [Experiments]
+      summary: Record experiment metadata for an environment
+      description: >
+        Attaches experiment metadata (hyper-parameters, metric observations,
+        and tags) to an environment, stored under the environment's
+        `experiment` key and persisted through the server's data store. The
+        `action` field selects the operation:
+
+
+        - `log` (default): create or update the experiment. Repeated calls
+        merge new `params`/`tags` and overwrite `name`/`description`.
+
+
+        - `metrics`: append one or more `{name: value}` observations at an
+        optional `step`, creating the experiment if it does not exist yet.
+
+
+        - `finish`: mark the experiment terminal (`finished` or `failed`).
+
+
+        Once an experiment is terminal, `log` and `metrics` are rejected with
+        `409` so a finished run's recorded data cannot change after the fact.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                eid:
+                  type: string
+                  description: Target environment ID. Defaults to `main`.
+                action:
+                  type: string
+                  enum: [log, metrics, finish]
+                  default: log
+                  description: Operation to perform.
+                name:
+                  type: string
+                  description: Display name (action `log`). Defaults to the eid.
+                description:
+                  type: string
+                  description: Free-form description (action `log`).
+                params:
+                  type: object
+                  additionalProperties: true
+                  description: 'Hyper-parameters as `{name: value}` (action `log`).'
+                tags:
+                  type: object
+                  additionalProperties: true
+                  description: 'Free-form tags as `{name: value}` (action `log`).'
+                metrics:
+                  type: object
+                  additionalProperties:
+                    type: number
+                  description: >
+                    Metric observations as `{name: value}` (action `metrics`).
+                    Must be a non-empty object.
+                step:
+                  type: integer
+                  description: Optional training step for the metrics (action `metrics`).
+                status:
+                  type: string
+                  enum: [finished, failed]
+                  default: finished
+                  description: Terminal status (action `finish`).
+      responses:
+        "200":
+          description: The stored experiment as JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Experiment"
+        "400":
+          description: >
+            Invalid request — unknown `action`, non-object `params`/`tags`/`metrics`,
+            empty `metrics`, or a non-terminal `finish` status. Also returned when
+            authentication is required but not provided.
+        "404":
+          description: A `finish` was requested for an env that has no experiment.
+        "409":
+          description: A `log`/`metrics` write was attempted on a terminal (finished/failed) experiment.
 
   /upload_env:
     post:
@@ -844,6 +932,66 @@ components:
         the server is started with `--enable_login`.
 
   schemas:
+
+    Experiment:
+      type: object
+      description: Experiment metadata attached to an environment.
+      properties:
+        env_id:
+          type: string
+          description: Environment the experiment belongs to.
+        name:
+          type: string
+          description: Display name. Defaults to the env_id.
+        description:
+          type: string
+        status:
+          type: string
+          enum: [running, finished, failed]
+          description: Lifecycle state. New experiments start `running`.
+        created_at:
+          type: number
+          description: Unix timestamp when the experiment was created.
+        finished_at:
+          type: [number, "null"]
+          description: Unix timestamp when finished, or `null` while running.
+        params:
+          type: array
+          description: Hyper-parameters, keyed by name.
+          items:
+            type: object
+            properties:
+              key:
+                type: string
+              value: {}
+              dtype:
+                type: string
+                enum: [bool, int, float, str]
+                description: Inferred type, so a stored value can be cast back.
+        metrics:
+          type: array
+          description: Metric observations, appended over time.
+          items:
+            type: object
+            properties:
+              key:
+                type: string
+              value:
+                type: number
+              step:
+                type: [integer, "null"]
+              timestamp:
+                type: number
+        tags:
+          type: array
+          description: Free-form key/value labels.
+          items:
+            type: object
+            properties:
+              key:
+                type: string
+              value:
+                type: string
 
     UploadErrorResponse:
       type: object

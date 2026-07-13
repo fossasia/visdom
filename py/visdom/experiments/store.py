@@ -17,7 +17,11 @@ today — the feature is fully opt-in.
 """
 
 from visdom.data_model.base import DataStore
-from visdom.experiments.models import Experiment, STATUS_FINISHED
+from visdom.experiments.models import (
+    Experiment,
+    ExperimentFinishedError,
+    STATUS_FINISHED,
+)
 
 METADATA_KEY = "experiment"
 
@@ -55,6 +59,16 @@ class ExperimentStore:
         self.datastore.save_env(env_id, env)
         return experiment
 
+    @staticmethod
+    def _reject_if_terminal(env_id, experiment):
+        """Raise if ``experiment`` is finished/failed and so must not be logged to."""
+        if experiment.is_terminal():
+            raise ExperimentFinishedError(
+                "experiment {0!r} is {1}; cannot log to a terminal experiment".format(
+                    env_id, experiment.status
+                )
+            )
+
     def log_experiment(
         self, env_id, name=None, params=None, tags=None, description=None
     ):
@@ -73,6 +87,7 @@ class ExperimentStore:
                 description=description or "",
             )
         else:
+            self._reject_if_terminal(env_id, experiment)
             if name is not None:
                 experiment.name = name
             if description is not None:
@@ -88,6 +103,8 @@ class ExperimentStore:
         env, experiment = self._read(env_id)
         if experiment is None:
             experiment = Experiment(env_id=env_id, name=env_id)
+        else:
+            self._reject_if_terminal(env_id, experiment)
         experiment.add_metric(key, value, step)
         return self._write(env_id, env, experiment)
 

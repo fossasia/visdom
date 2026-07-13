@@ -45,6 +45,11 @@ from visdom.utils.server_utils import (
     clear_deleted,
 )
 from visdom.server.handlers.base_handlers import BaseHandler
+from visdom.experiments import (
+    ExperimentStore,
+    ExperimentFinishedError,
+    STATUS_FINISHED,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -772,6 +777,102 @@ class UploadEnvHandler(BaseHandler):
                 "message": f"Dashboard loaded successfully as '{new_eid}'",
             }
         )
+
+
+class ExperimentLogHandler(BaseHandler):
+    """POST ``/experiments/log`` — record experiment metadata for an environment.
+
+    The JSON body carries an ``action`` selecting one of three operations:
+
+    * ``"log"`` (default) — create or update the experiment (``name``/``params``/
+      ``tags``/``description``); repeated calls merge rather than replace.
+    * ``"metrics"`` — append one or more ``{name: value}`` metric observations at
+      an optional ``step``, creating the experiment if it does not exist yet.
+    * ``"finish"`` — mark the experiment terminal (``status`` finished/failed).
+
+    Once an experiment is terminal, ``"log"``/``"metrics"`` are rejected with
+    409 Conflict so a finished run's recorded data cannot change after the fact.
+
+    Metadata is persisted through the server's existing ``DataStore``
+    (:class:`ExperimentStore` over ``handler.storage``) and mirrored into the
+    in-memory env state so a later full-env save writes it back rather than
+    dropping it. The stored experiment is written back to the client as JSON.
+    """
+
+    VALID_ACTIONS = ("log", "metrics", "finish")
+
+    @staticmethod
+    def _require_mapping(args, field):
+        """Return ``args[field]`` if it is a mapping (or absent); else raise 400."""
+        value = args.get(field)
+        if value is not None and not isinstance(value, Mapping):
+            raise tornado.web.HTTPError(
+                400, reason="'{0}' must be an object".format(field)
+            )
+        return value
+
+    @staticmethod
+    def wrap_func(handler, args):
+        action = args.get("action", "log")
+        if action not in ExperimentLogHandler.VALID_ACTIONS:
+            raise tornado.web.HTTPError(
+                400, reason="unknown action {0!r}".format(action)
+            )
+
+        eid = extract_eid(args)
+        store = ExperimentStore(handler.storage)
+
+        if action == "metrics":
+            metrics = ExperimentLogHandler._require_mapping(args, "metrics")
+            if not metrics:
+                raise tornado.web.HTTPError(
+                    400, reason="'metrics' must be a non-empty object"
+                )
+        elif action == "log":
+            params = ExperimentLogHandler._require_mapping(args, "params")
+            tags = ExperimentLogHandler._require_mapping(args, "tags")
+
+        try:
+            if action == "log":
+                experiment = store.log_experiment(
+                    eid,
+                    name=args.get("name"),
+                    params=params,
+                    tags=tags,
+                    description=args.get("description"),
+                )
+            elif action == "metrics":
+                step = args.get("step")
+                for key, value in metrics.items():
+                    experiment = store.log_metric(eid, key, value, step)
+            else:
+                experiment = store.finish_experiment(
+                    eid, args.get("status", STATUS_FINISHED)
+                )
+        except ExperimentFinishedError as e:
+            raise tornado.web.HTTPError(409, reason=str(e))
+        except KeyError:
+            raise tornado.web.HTTPError(
+                404, reason="no experiment logged for env {0!r}".format(eid)
+            )
+        except ValueError as e:
+            raise tornado.web.HTTPError(400, reason=str(e))
+
+        is_new_env = eid not in handler.state
+        if is_new_env:
+            handler.state[eid] = {"jsons": {}, "reload": {}}
+        handler.state[eid]["experiment"] = experiment.to_dict()
+        if is_new_env:
+            broadcast_envs(handler)
+
+        handler.write(json.dumps(experiment.to_dict(), cls=NanSafeEncoder))
+
+    @check_auth
+    def post(self):
+        args = tornado.escape.json_decode(
+            tornado.escape.to_basestring(self.request.body)
+        )
+        self.wrap_func(self, args)
 
 
 class HealthHandler(BaseHandler):
