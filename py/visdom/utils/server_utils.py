@@ -264,7 +264,11 @@ def window(args):
         )
         p["content"]["has_previous"] = False
     else:
-        p["content"] = {"data": args["data"], "layout": args["layout"], "caption": opts.get("caption")}
+        p["content"] = {
+            "data": args["data"],
+            "layout": args["layout"],
+            "caption": opts.get("caption"),
+        }
         p["type"] = "plot"
 
     return p
