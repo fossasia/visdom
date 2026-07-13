@@ -199,7 +199,8 @@ def update_window(p, args):
     for opt_name, opt_val in opts.items():
         if opt_val is not None:
             if opt_name == "caption":
-                p["content"]["caption"] = opt_val
+                if isinstance(p.get("content"), dict):
+                    p["content"]["caption"] = opt_val
             else:
                 p[opt_name] = opt_val
 
