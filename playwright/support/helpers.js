@@ -28,10 +28,6 @@ function getPythonExecutable() {
   if (fs.existsSync(localVenvAlt)) {
     return localVenvAlt;
   }
-  const localMyEnv = path.join(rootDir, 'myenv', ...pyRelativePath);
-  if (fs.existsSync(localMyEnv)) {
-    return localMyEnv;
-  }
   return fallback;
 }
 
