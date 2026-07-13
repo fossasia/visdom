@@ -128,9 +128,14 @@ async function openEnv(page, name) {
   await tree
     .getByText(expectedText, { exact: true })
     .first()
-    .waitFor({ state: 'visible', timeout: 10000 });
+    .waitFor({ state: 'attached', timeout: 10000 });
 
   await expandAllEnvGroups(page);
+
+  await tree
+    .getByText(expectedText, { exact: true })
+    .first()
+    .waitFor({ state: 'visible', timeout: 10000 });
 
   await tree.getByText(name, { exact: true }).first().click({ force: true });
   await closeEnvDropdown(page);
