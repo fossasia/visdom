@@ -36,7 +36,7 @@ function paneByTitle(page, title) {
   });
 }
 
-test.describe('Test Env Modal', () => {
+test.describe.serial('Test Env Modal', () => {
   const env = 'text_fork_' + Math.floor(Math.random() * 1e6);
 
   test.beforeEach(async ({ page }) => {
@@ -119,7 +119,7 @@ test.describe('Test Env Modal', () => {
   });
 });
 
-test.describe('Test View Modal', () => {
+test.describe.serial('Test View Modal', () => {
   let env;
 
   test.beforeEach(async ({ page }) => {
