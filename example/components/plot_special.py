@@ -98,6 +98,9 @@ def plot_special_parallel_coordinates(viz, env, args):
             tickvals={5: [0, 1, 2]},
             ticktext={5: ["SGD", "Adam", "AdamW"]},
         ),
+    )
+
+
 # sankey (flow) diagram
 def plot_special_sankey(viz, env, args):
     title = args[0] if len(args) > 0 else None

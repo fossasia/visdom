@@ -3986,6 +3986,7 @@ class Visdom(object):
             {"data": data, "win": win, "eid": env, "opts": opts}, endpoint="events"
         )
 
+    @pytorch_wrap
     def parallel_coordinates(self, X, Y=None, win=None, env=None, opts=None):
         """
         This function draws a parallel coordinates plot for comparing multiple
