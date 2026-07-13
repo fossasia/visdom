@@ -28,6 +28,10 @@ function getPythonExecutable() {
   if (fs.existsSync(localVenvAlt)) {
     return localVenvAlt;
   }
+  const localMyEnv = path.join(rootDir, 'myenv', ...pyRelativePath);
+  if (fs.existsSync(localMyEnv)) {
+    return localMyEnv;
+  }
   return fallback;
 }
 
@@ -88,7 +92,9 @@ async function closeEnvs(page) {
 }
 
 async function expandAllEnvGroups(page) {
-  const closedGroups = page.locator('.rc-tree-select-tree-switcher_close');
+  const closedGroups = page.locator(
+    '.rc-tree-select-tree-switcher_close:visible'
+  );
   let count = await closedGroups.count();
   let attempts = 0;
   while (count > 0 && attempts < 50) {
@@ -100,25 +106,41 @@ async function expandAllEnvGroups(page) {
 }
 
 async function closeEnvDropdown(page) {
-  await page.keyboard.press('Escape');
-  const treeSelect = page.locator('.navbar-form .rc-tree-select').first();
-  if (await treeSelect.count()) {
-    const isOpen = await treeSelect.evaluate((el) =>
-      el.classList.contains('rc-tree-select-open')
-    );
-    if (isOpen) {
-      await treeSelect.click();
+  const dropdown = page.locator(
+    '.rc-tree-select-dropdown:not(.rc-tree-select-dropdown-hidden)'
+  );
+  if (await dropdown.isVisible()) {
+    await page
+      .locator('.navbar-form .rc-tree-select')
+      .first()
+      .click({ position: { x: 5, y: 10 }, force: true });
+    try {
+      await dropdown.waitFor({ state: 'hidden', timeout: 1000 });
+    } catch (e) {
+      await page.keyboard.press('Escape');
+      await dropdown.waitFor({ state: 'hidden', timeout: 2000 }).catch(() => {});
     }
   }
 }
 
 async function openEnv(page, name) {
-  const treeSelect = page.locator('.navbar-form .rc-tree-select').first();
-  const isOpen = await treeSelect.evaluate((el) =>
-    el.classList.contains('rc-tree-select-open')
+  const dropdown = page.locator(
+    '.rc-tree-select-dropdown:not(.rc-tree-select-dropdown-hidden)'
   );
-  if (!isOpen) {
-    await treeSelect.click();
+  if (!(await dropdown.isVisible())) {
+    await page
+      .locator('.navbar-form .rc-tree-select')
+      .first()
+      .click({ position: { x: 5, y: 10 }, force: true });
+    try {
+      await dropdown.waitFor({ state: 'visible', timeout: 1000 });
+    } catch (e) {
+      await page
+        .locator('.navbar-form .rc-tree-select')
+        .first()
+        .click({ position: { x: 5, y: 10 }, force: true });
+      await dropdown.waitFor({ state: 'visible', timeout: 5000 });
+    }
   }
 
   const idx = name.indexOf('_');
@@ -128,12 +150,12 @@ async function openEnv(page, name) {
   await tree
     .getByText(expectedText, { exact: true })
     .first()
-    .waitFor({ state: 'attached', timeout: 10000 });
+    .waitFor({ state: 'visible', timeout: 10000 });
 
   await expandAllEnvGroups(page);
 
   await tree
-    .getByText(expectedText, { exact: true })
+    .getByText(name, { exact: true })
     .first()
     .waitFor({ state: 'visible', timeout: 10000 });
 

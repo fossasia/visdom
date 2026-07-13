@@ -379,18 +379,19 @@ test.describe('Image Pane', () => {
 
     await expect(comparePane.locator('img.content-image')).toHaveCount(2);
 
-    // Both downloads fire simultaneously when save is clicked in compare mode
-    const [dl1, dl2] = await Promise.all([
-      page.waitForEvent('download'),
-      page.waitForEvent('download'),
-      comparePane.locator("button[title='save']").click(),
-    ]);
+    const downloads = [];
+    page.on('download', (dl) => downloads.push(dl));
 
-    const filenames = [dl1.suggestedFilename(), dl2.suggestedFilename()].sort();
+    await comparePane.locator("button[title='save']").click();
+
+    await expect.poll(() => downloads.length, { timeout: 10000 }).toBe(2);
+
+    const filenames = downloads.map((dl) => dl.suggestedFilename()).sort();
     expect(filenames).toContain('Random!_1.jpg');
     expect(filenames).toContain('Random!_2.jpg');
-    expect(await dl1.path()).toBeTruthy();
-    expect(await dl2.path()).toBeTruthy();
+    for (const dl of downloads) {
+      expect(await dl.path()).toBeTruthy();
+    }
   });
 
   test('image_compare_basic: captions are visible and do not overlap images', async ({
