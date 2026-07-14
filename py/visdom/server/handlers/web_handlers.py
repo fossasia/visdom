@@ -35,7 +35,6 @@ from visdom.utils.server_utils import (
     register_window,
     gather_envs,
     broadcast_envs,
-    serialize_env,
     escape_eid,
     compare_envs,
     load_env,
@@ -502,7 +501,7 @@ class ForkEnvHandler(BaseHandler):
         assert prev_eid in handler.state, "env to be forked doesn't exist"
 
         handler.state[eid] = copy.deepcopy(handler.state[prev_eid])
-        serialize_env(handler.state, [eid], env_path=handler.env_path)
+        handler.storage.save_env(eid, handler.state[eid])
         broadcast_envs(handler)
 
         handler.write(eid)
@@ -608,7 +607,7 @@ class SaveHandler(BaseHandler):
         envs = args["data"]
         envs = [escape_eid(eid) for eid in envs]
         # this drops invalid env ids
-        ret = serialize_env(handler.state, envs, env_path=handler.env_path)
+        ret = handler.storage.save_envs(handler.state, envs)
         handler.write(json.dumps(ret))
 
     @check_auth
@@ -790,8 +789,7 @@ class UploadEnvHandler(BaseHandler):
 
         self.state[new_eid] = {"jsons": data["jsons"], "reload": data["reload"]}
 
-        if self.env_path is not None:
-            serialize_env(self.state, [new_eid], env_path=self.env_path)
+        self.storage.save_env(new_eid, self.state[new_eid])
 
         broadcast_envs(self)
 

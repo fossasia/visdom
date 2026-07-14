@@ -165,6 +165,13 @@ button>span.glyphicon {
   margin-bottom: 10px;
 }
 
+.plot-caption {
+  text-align: center;
+  color: #000000;
+  display: block;
+  width: 100%;
+}
+
 .content-image {
   image-rendering: pixelated;
   background-color: white;
