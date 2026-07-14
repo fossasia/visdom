@@ -1,6 +1,7 @@
 import $ from 'jquery';
 import React, { useEffect, useRef, useState } from 'react';
 
+import { showToast } from '../toasts/toastEvents';
 import ApiContext from './ApiContext';
 import Poller from './Legacy';
 
@@ -180,6 +181,11 @@ const ApiProvider = ({ children }) => {
         break;
       case 'undo_state':
         apiHandlers.current.onUndoState(cmd);
+        break;
+      case 'notification':
+        showToast(cmd.data.message, cmd.data.type, {
+          duration: cmd.data.duration,
+        });
         break;
 
       default:

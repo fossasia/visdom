@@ -43,6 +43,7 @@ from visdom.utils.server_utils import (
     stringify,
     push_deleted,
     clear_deleted,
+    notify,
 )
 from visdom.server.handlers.base_handlers import BaseHandler
 
@@ -522,11 +523,14 @@ class EnvHandler(BaseHandler):
                         self.storage,
                         env_path=self.env_path,
                     )
-                except ValueError:
-                    raise tornado.web.HTTPError(
-                        400,
-                        reason="Could not load environment invalid environment JSON format",
+                except ValueError as e:
+                    notify(
+                        self,
+                        "Could not load environment: invalid environment JSON format",
+                        type="error",
+                        target_subs=[self.subs[sid]],
                     )
+                    return
         if "eid" in msg_args:
             eid = escape_eid(msg_args["eid"])
             if eid not in self.state:
@@ -568,10 +572,13 @@ class CompareHandler(BaseHandler):
                     show_all=show_all,
                 )
             except ValueError as e:
-                raise tornado.web.HTTPError(
-                    400,
-                    reason="Could not compare environments: invalid environment JSON format",
+                notify(
+                    self,
+                    "Could not compare environments: invalid environment JSON format",
+                    type="error",
+                    target_subs=[self.subs[sid]],
                 )
+                return
 
 
 class SaveHandler(BaseHandler):
