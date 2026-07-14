@@ -117,7 +117,7 @@ class EmbeddingsPane extends React.Component {
     var link = document.createElement('a');
     link.download = this.props.contentID
       ? `${this.props.contentID}_tsne_data.txt`
-      : 'visdom_tsne_data.txt';
+      : 'plot_tsne_data.txt';
     link.href = url;
     link.click();
   };
