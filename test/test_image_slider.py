@@ -26,36 +26,39 @@ class TestImageUpdateSelected(unittest.TestCase):
             },
         }
 
+    def _update(self, pane, args):
+        return UpdateHandler.update(pane, args, 500, 50, 4)
+
     def test_sets_index(self):
-        p = UpdateHandler.update(self._pane(), self._args(3))
+        p = self._update(self._pane(), self._args(3))
         self.assertEqual(p["selected"], 3)
 
     def test_empty_content_returns_unchanged(self):
         p = {"type": "image_history", "content": [], "selected": 0}
-        result = UpdateHandler.update(p, self._args(2))
+        result = self._update(p, self._args(2))
         self.assertEqual(result["selected"], 0)
 
     def test_clamps_negative(self):
-        p = UpdateHandler.update(self._pane(), self._args(-5))
+        p = self._update(self._pane(), self._args(-5))
         self.assertEqual(p["selected"], 0)
 
     def test_clamps_over_bound(self):
-        p = UpdateHandler.update(self._pane(n=3), self._args(99))
+        p = self._update(self._pane(n=3), self._args(99))
         self.assertEqual(p["selected"], 2)
 
     def test_rejects_fractional_index(self):
         with self.assertRaises(ValueError):
-            UpdateHandler.update(self._pane(), self._args(1.5))
+            self._update(self._pane(), self._args(1.5))
 
     def test_rejects_non_numeric_index(self):
         for bad_value in ["2", None]:
             with self.subTest(bad_value=bad_value):
                 with self.assertRaises(TypeError):
-                    UpdateHandler.update(self._pane(), self._args(bad_value))
+                    self._update(self._pane(), self._args(bad_value))
 
     def test_server_rejects_bool_index(self):
         with self.assertRaises(TypeError):
-            UpdateHandler.update(self._pane(), self._args(True))
+            self._update(self._pane(), self._args(True))
 
     def test_client_rejects_bool_index(self):
         viz = visdom.Visdom(send=False, use_incoming_socket=False)
@@ -127,6 +130,9 @@ class TestImageUpdateSelected(unittest.TestCase):
                 self.state = {"main": {"jsons": {"image_win": pane}}}
                 self.messages = []
                 self.status = None
+                self.max_text_lines = 500
+                self.max_old_content = 50
+                self.max_image_history = 4
 
             def set_status(self, code):
                 self.status = code
