@@ -52,7 +52,7 @@ var PlotPane = (props) => {
   const handleDownload = () => {
     Plotly.downloadImage(plotlyRef.current, {
       format: 'svg',
-      filename: contentID,
+      filename: contentID || 'plot',
     });
   };
 
@@ -67,7 +67,7 @@ var PlotPane = (props) => {
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${contentID}_metadata.json`;
+    link.download = `${contentID || 'plot'}_metadata.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
