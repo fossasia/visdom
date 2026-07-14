@@ -959,6 +959,7 @@ The following `opts` are generic in the sense that they are the same for all vis
 - `opts.marginright` : right margin (in pixels)
 - `opts.margintop`   : top margin (in pixels)
 - `opts.marginbottom`: bottom margin (in pixels)
+- `opts.caption`     : caption displayed below the plot (`string`; optional)
 
 `opts` are passed as dictionary in python scripts.You can pass `opts` like:
 
