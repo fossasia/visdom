@@ -19,7 +19,6 @@
 /* eslint-disable react/no-find-dom-node, react/display-name */
 
 import React, { useEffect, useRef, useState } from 'react';
-import ReactDOM from 'react-dom';
 
 var Width = (ComposedComponent) => (props) => {
   const { onWidthChange } = props;
@@ -47,9 +46,11 @@ var Width = (ComposedComponent) => (props) => {
     setTimerActive(false);
 
     // get new dimensions
-    const node = ReactDOM.findDOMNode(containerRef.current);
-    setCols((node.offsetWidth / width) * cols);
-    setWidth(node.offsetWidth);
+    const node = containerRef.current;
+    if (node) {
+      setCols((node.offsetWidth / width) * cols);
+      setWidth(node.offsetWidth);
+    }
   };
 
   // effects
@@ -87,13 +88,59 @@ var Width = (ComposedComponent) => (props) => {
   // rendering
   // ---------
 
+  const {
+    // eslint-disable-next-line no-unused-vars
+    cols: propCols,
+    rowHeight,
+    margin,
+    containerPadding,
+    maxRows,
+    useCSSTransforms,
+
+    isDraggable,
+    draggableHandle,
+    dragBounded,
+    draggableCancel,
+    dragThreshold,
+
+    isResizable,
+    resizeHandles,
+
+    ...restProps
+  } = props;
+
+  const gridConfig = {
+    cols: cols,
+    rowHeight: rowHeight !== undefined ? rowHeight : 150,
+    margin: margin !== undefined ? margin : [10, 10],
+    containerPadding: containerPadding !== undefined ? containerPadding : null,
+    maxRows: maxRows !== undefined ? maxRows : Infinity,
+    useCSSTransforms: useCSSTransforms !== undefined ? useCSSTransforms : true,
+  };
+
+  const dragConfig = {
+    enabled: isDraggable !== false,
+    handle: draggableHandle,
+    cancel: draggableCancel,
+    bounded: dragBounded !== undefined ? dragBounded : false,
+    threshold: dragThreshold !== undefined ? dragThreshold : 3,
+  };
+
+  const resizeConfig = {
+    enabled: isResizable !== false,
+    handles: resizeHandles !== undefined ? resizeHandles : ['se'],
+  };
+
   return (
-    <ComposedComponent
-      {...props}
-      ref={containerRef}
-      width={width}
-      cols={cols}
-    />
+    <div ref={containerRef} style={{ width: '100%' }}>
+      <ComposedComponent
+        {...restProps}
+        width={width}
+        gridConfig={gridConfig}
+        dragConfig={dragConfig}
+        resizeConfig={resizeConfig}
+      />
+    </div>
   );
 };
 
