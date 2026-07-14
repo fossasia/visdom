@@ -39,6 +39,7 @@ from visdom.utils.server_utils import (
     pop_deleted,
     clear_deleted,
     broadcast_undo_state,
+    notify,
 )
 from visdom.server.defaults import MAX_SOCKET_WAIT
 
@@ -219,6 +220,12 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 logging.warning(
                     f"forward_to_vis: env {eid!r} not found, dropping event"
                 )
+                notify(
+                    self,
+                    f"Environment '{eid}' not found.",
+                    type="warning",
+                    target_subs=[self],
+                )
                 return
             if packet.get("pane_data") is not False:
                 pane = environment["jsons"].get(target)
@@ -226,6 +233,12 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     logging.warning(
                         f"forward_to_vis: pane {target!r} not found"
                         f" in env {eid!r}, dropping event"
+                    )
+                    notify(
+                        self,
+                        f"Pane '{target}' not found in environment '{eid}'.",
+                        type="warning",
+                        target_subs=[self],
                     )
                     return
                 packet["pane_data"] = pane
