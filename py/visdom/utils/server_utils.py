@@ -15,7 +15,6 @@ in the previous server.py class.
 """
 
 import copy
-import html
 import hashlib
 import html
 import json
@@ -28,20 +27,22 @@ import tornado.escape
 from collections import OrderedDict
 
 MAX_ENV_NAME_LEN = 25
-try:
-    # for after python 3.8
-    from collections.abc import Mapping, Sequence
-except ImportError:
-    # for python 3.7 and below
-    from collections import Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from visdom.server.defaults import (
     LAYOUT_FILE,
     DEFAULT_BASE_URL,
     DEFAULT_ENV_PATH,
     DEFAULT_HOSTNAME,
+    DEFAULT_MAX_UNDO_HISTORY,
     DEFAULT_PORT,
+    UNDO_DIRNAME,
 )
-from visdom.utils.shared_utils import warn_once, get_rand_id, get_new_window_id
+from visdom.utils.shared_utils import (
+    warn_once,
+    get_rand_id,
+    get_new_window_id,
+    NanSafeEncoder,
+)
 
 
 # ---- Vaguely server-security related functions ---- #
@@ -57,7 +58,7 @@ def check_auth(f):
         # TODO this should call a shared method of the handler
         handler.last_access = time.time()
         if handler.login_enabled and not handler.current_user:
-            handler.set_status(400)
+            handler.set_status(401)
             return
         f(handler, *args, **kwargs)
 
@@ -74,12 +75,17 @@ def set_cookie(value=None):
         cookie_file.write(cookie_secret)
 
 
-def hash_password(password):
-    """Hashing Password with SHA-256"""
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+def hash_password(password, salt=None):
+    """Hash password using PBKDF2-HMAC-SHA256 with a random salt."""
+    if salt is None:
+        salt = os.urandom(32)
+    elif isinstance(salt, str):
+        salt = bytes.fromhex(salt)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 100000)
+    return salt.hex() + "$" + dk.hex()
 
 
-# ------- File management helprs ----- #
+# ------- File management helpers ----- #
 
 
 class LazyEnvData(Mapping):
@@ -131,9 +137,11 @@ def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
                 with open(env_path_file, "w") as fn:
                     if isinstance(state[env_id], LazyEnvData):
                         state[env_id].lazy_load_data()
-                        fn.write(json.dumps(state[env_id]._raw_dict))
+                        fn.write(
+                            json.dumps(state[env_id]._raw_dict, cls=NanSafeEncoder)
+                        )
                     else:
-                        fn.write(json.dumps(state[env_id]))
+                        fn.write(json.dumps(state[env_id], cls=NanSafeEncoder))
             except OSError as e:
                 if (
                     e.errno != errno.ENAMETOOLONG
@@ -151,7 +159,7 @@ def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
                     else:
                         data_to_save = copy.deepcopy(state[env_id])
                     data_to_save["name"] = env_id
-                    fn.write(json.dumps(data_to_save))
+                    fn.write(json.dumps(data_to_save, cls=NanSafeEncoder))
 
     return env_ids
 
@@ -222,7 +230,7 @@ def window(args):
         "contentID": get_rand_id(),  # to detected updated windows
     }
 
-    if ptype == "image_history" and is_visdom_type:
+    if ptype in ["image_history", "plot_history"] and is_visdom_type:
         p.update(
             {
                 "content": [args["data"][0]["content"]],
@@ -306,7 +314,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH, show_all=False)
 
     valid_eids = [eid for eid in eids if eid in envs]
     if not valid_eids:
-        socket.write_message(json.dumps({"command": "layout"}))
+        socket.write_message(json.dumps({"command": "layout"}, cls=NanSafeEncoder))
         socket.eid = eids
         return
     base_eid = valid_eids[0]
@@ -466,14 +474,16 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH, show_all=False)
         "has_compare": True,
     }
     if "reload" in res:
-        socket.write_message(json.dumps({"command": "reload", "data": res["reload"]}))
+        socket.write_message(
+            json.dumps({"command": "reload", "data": res["reload"]}, cls=NanSafeEncoder)
+        )
 
     jsons = list(res.get("jsons", {}).values())
     windows = sorted(jsons, key=lambda k: ("i" not in k, k.get("i", None)))
     for v in windows:
-        socket.write_message(v)
+        socket.write_message(json.dumps(v, cls=NanSafeEncoder))
 
-    socket.write_message(json.dumps({"command": "layout"}))
+    socket.write_message(json.dumps({"command": "layout"}, cls=NanSafeEncoder))
     socket.eid = eids
 
 
@@ -485,14 +495,17 @@ def broadcast_envs(handler, target_subs=None):
         target_subs = handler.subs.values()
     for sub in target_subs:
         sub.write_message(
-            json.dumps({"command": "env_update", "data": list(handler.state.keys())})
+            json.dumps(
+                {"command": "env_update", "data": list(handler.state.keys())},
+                cls=NanSafeEncoder,
+            )
         )
 
 
 def send_to_sources(handler, msg):
     target_sources = handler.sources.values()
     for source in target_sources:
-        source.write_message(json.dumps(msg))
+        source.write_message(json.dumps(msg, cls=NanSafeEncoder))
 
 
 def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
@@ -521,27 +534,170 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
                     state[eid] = env
 
     if "reload" in env:
-        socket.write_message(json.dumps({"command": "reload", "data": env["reload"]}))
+        socket.write_message(
+            json.dumps({"command": "reload", "data": env["reload"]}, cls=NanSafeEncoder)
+        )
 
     jsons = list(env.get("jsons", {}).values())
     windows = sorted(jsons, key=lambda k: ("i" not in k, k.get("i", None)))
     for v in windows:
         msg = dict(v)
         msg["eid"] = eid
-        socket.write_message(msg)
+        socket.write_message(json.dumps(msg, cls=NanSafeEncoder))
 
-    socket.write_message(json.dumps({"command": "layout"}))
+    socket.write_message(json.dumps({"command": "layout"}, cls=NanSafeEncoder))
+    socket.write_message(
+        json.dumps(
+            {
+                "command": "undo_state",
+                "eid": eid,
+                "count": count_deleted(env_path, eid),
+            },
+            cls=NanSafeEncoder,
+        )
+    )
     socket.eid = eid
 
 
 def broadcast(self, msg, eid):
     for s in self.subs:
-        if isinstance(self.subs[s].eid, dict):
+        if isinstance(self.subs[s].eid, (list, dict, set)):
             if eid in self.subs[s].eid:
                 self.subs[s].write_message(msg)
         else:
             if self.subs[s].eid == eid:
                 self.subs[s].write_message(msg)
+
+
+def _undo_paths(env_path, eid):
+    """Return (undo_dir, plain_path, hashed_path) for an environment's undo file.
+
+    ``hashed_path`` mirrors ``serialize_env``'s fallback for env ids whose plain
+    filename would exceed the filesystem limit.
+    """
+    undo_dir = os.path.join(env_path, UNDO_DIRNAME)
+    plain = os.path.join(undo_dir, "{0}.json".format(eid))
+    hashed_id = hashlib.sha256(eid.encode("utf-8")).hexdigest()
+    hashed = os.path.join(undo_dir, "hash_{0}.json".format(hashed_id))
+    return undo_dir, plain, hashed
+
+
+def _read_undo(env_path, eid):
+    """Load an environment's undo stack from disk, or [] if missing/corrupt."""
+    _, plain, hashed = _undo_paths(env_path, eid)
+    path = plain if os.path.exists(plain) else hashed
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r") as fn:
+            data = json.loads(fn.read())
+    except (OSError, ValueError):
+        logging.warning(f"Could not read undo stack for env {eid}; ignoring it")
+        return []
+    return data if isinstance(data, list) else []
+
+
+def _write_undo(env_path, eid, stack):
+    """Atomically write an environment's undo stack to disk."""
+    undo_dir, plain, hashed = _undo_paths(env_path, eid)
+    os.makedirs(undo_dir, exist_ok=True)
+    payload = json.dumps(stack, cls=NanSafeEncoder)
+    try:
+        target = plain
+        tmp = plain + ".tmp"
+        with open(tmp, "w") as fn:
+            fn.write(payload)
+        os.replace(tmp, plain)
+    except OSError as e:
+        if e.errno != errno.ENAMETOOLONG and getattr(e, "winerror", None) != 206:
+            raise
+        target = hashed
+        tmp = hashed + ".tmp"
+        with open(tmp, "w") as fn:
+            fn.write(payload)
+        os.replace(tmp, hashed)
+    return target
+
+
+def push_deleted(env_path, eid, win_id, p_data):
+    """Append a closed pane to the environment's on-disk undo stack (LIFO),
+    keeping at most DEFAULT_MAX_UNDO_HISTORY entries."""
+    if env_path is None:
+        return
+    stack = _read_undo(env_path, eid)
+    stack.append([win_id, p_data])
+    if len(stack) > DEFAULT_MAX_UNDO_HISTORY:
+        stack = stack[-DEFAULT_MAX_UNDO_HISTORY:]
+    _write_undo(env_path, eid, stack)
+
+
+def pop_deleted(env_path, eid):
+    """Pop and return the most recently closed pane as (win_id, p_data),
+    or None if the environment has no undo history."""
+    if env_path is None:
+        return None
+    stack = _read_undo(env_path, eid)
+    if not stack:
+        return None
+    win_id, p_data = stack.pop()
+    if stack:
+        _write_undo(env_path, eid, stack)
+    else:
+        clear_deleted(env_path, eid)
+    return win_id, p_data
+
+
+def clear_deleted(env_path, eid):
+    """Remove an environment's on-disk undo history."""
+    if env_path is None:
+        return
+    _, plain, hashed = _undo_paths(env_path, eid)
+    for path in (plain, hashed):
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except OSError as e:
+                logging.error(f"Failed to delete undo file {path}: {e}")
+
+
+def count_deleted(env_path, eid):
+    """Return the number of closed panes available to undo for an env."""
+    if env_path is None:
+        return 0
+    return len(_read_undo(env_path, eid))
+
+
+def broadcast_undo_state(handler, eid, env_path):
+    """Tell subscribers of an env how many closed panes remain to undo."""
+    msg = json.dumps(
+        {
+            "command": "undo_state",
+            "eid": eid,
+            "count": count_deleted(env_path, eid),
+        },
+        cls=NanSafeEncoder,
+    )
+    broadcast(handler, msg, eid)
+
+
+def notify(handler, message, type="info", duration=None, eid=None, target_subs=None):
+    payload = {"message": message, "type": type}
+    if duration is not None:
+        payload["duration"] = duration
+
+    msg = json.dumps({"command": "notification", "data": payload}, cls=NanSafeEncoder)
+
+    if target_subs is not None:
+        for sub in target_subs:
+            sub.write_message(msg)
+        return
+
+    if eid is not None:
+        broadcast(handler, msg, eid)
+        return
+
+    for sub in handler.subs.values():
+        sub.write_message(msg)
 
 
 def register_window(self, p, eid):
@@ -562,7 +718,7 @@ def register_window(self, p, eid):
 
     broadcast_msg = dict(p)
     broadcast_msg["eid"] = eid
-    broadcast(self, broadcast_msg, eid)
+    broadcast(self, json.dumps(broadcast_msg, cls=NanSafeEncoder), eid)
     if is_new_env:
         broadcast_envs(self)
     self.write(p["id"])

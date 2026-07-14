@@ -21,23 +21,22 @@ function ImageComparePane(props) {
 
   const handleDownload = () => {
     content.forEach((img, index) => {
-      let link = document.createElement('a');
+      setTimeout(() => {
+        let link = document.createElement('a');
 
-      let filenameSuffix = content.length > 1 ? `_${index + 1}` : '';
-      link.download = `${title || 'visdom_compare'}${filenameSuffix}.jpg`;
+        let filenameSuffix = content.length > 1 ? `_${index + 1}` : '';
+        link.download = `${title || 'visdom_compare'}${filenameSuffix}.jpg`;
 
-      link.href = img.src;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+        link.href = img.src;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }, index * 300);
     });
   };
 
   return (
-    <Pane
-      {...props}
-      handleDownload={handleDownload}
-    >
+    <Pane {...props} handleDownload={handleDownload}>
       <div
         style={{
           display: 'flex',
@@ -45,44 +44,60 @@ function ImageComparePane(props) {
           width: '100%',
           height: '100%',
           overflowX: 'auto',
-          alignItems: 'center',
-          justifyContent: 'space-around'
+          alignItems: 'stretch',
+          justifyContent: 'space-around',
         }}
       >
         {content.map((imgItem, idx) => (
-          <div
-             key={`${id}-compare-${idx}`}
-             style={{
-               flex: 1,
-               display: 'flex',
-               flexDirection: 'column',
-               alignItems: 'center',
-               padding: '5px'
-             }}
+          <figure
+            key={`${id}-compare-${idx}`}
+            data-testid="compare-cell"
+            style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              padding: '5px',
+              minHeight: 0,
+              margin: 0,
+            }}
           >
-      {/* Only show the legend if there are multiple images being compared */}
+            {/* Only show caption when comparing multiple images */}
             {content.length > 1 && imgItem.caption && (
-               <span
-                 className="widget"
-                 style={{
-                   marginBottom: '5px',
-                   fontWeight: 'bold'
-                 }}
-               >
-                 {imgItem.caption}
-               </span>
+              <figcaption
+                className="widget"
+                style={{
+                  flexShrink: 0,
+                  marginBottom: '5px',
+                  fontWeight: 'bold',
+                }}
+              >
+                {imgItem.caption}
+              </figcaption>
             )}
-            <img
-              className="content-image"
-              alt={imgItem.caption || 'Compare Image'}
-              src={imgItem.src}
+            <div
               style={{
-                maxWidth: '100%',
-                maxHeight: '100%',
-                objectFit: 'contain'
+                flex: 1,
+                minHeight: 0,
+                position: 'relative',
+                width: '100%',
               }}
-            />
-          </div>
+            >
+              <img
+                className="content-image"
+                alt={imgItem.caption || 'Compare Image'}
+                src={imgItem.src}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'contain',
+                }}
+              />
+            </div>
+          </figure>
         ))}
       </div>
     </Pane>

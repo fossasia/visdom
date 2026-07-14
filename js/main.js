@@ -12,11 +12,15 @@
 'use strict';
 
 import 'fetch';
-import 'rc-tree-select/assets/index.css';
+import 'rc-tree-select/assets/index.less';
 
 import React, { useContext, useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
-import ReactResizeDetector from 'react-resize-detector';
+import ReactGridLayout, {
+  getLayoutItem,
+  sortLayoutItemsByRowCol as sortLayout,
+} from 'react-grid-layout';
+import { useResizeDetector } from 'react-resize-detector';
 
 import ApiContext from './api/ApiContext';
 import ApiProvider from './api/ApiProvider';
@@ -31,17 +35,17 @@ import {
   PANES,
   ROW_HEIGHT,
 } from './settings';
+import buildExportHtml from './template/exportTemplate';
+import ToastContainer from './toasts/ToastContainer';
+import { showToast } from './toasts/toastEvents';
 import ConnectionIndicator from './topbar/ConnectionIndicator';
 import EnvControls from './topbar/EnvControls';
 import FilterControls from './topbar/FilterControls';
 import ViewControls from './topbar/ViewControls';
 import WidthProvider from './Width';
 
-const ReactGridLayout = require('react-grid-layout');
 const jsonpatch = require('fast-json-patch');
 const GridLayout = WidthProvider(ReactGridLayout);
-const sortLayout = ReactGridLayout.utils.sortLayoutItemsByRowCol;
-const getLayoutItem = ReactGridLayout.utils.getLayoutItem;
 
 var use_envs = null;
 if (ACTIVE_ENV !== '') {
@@ -56,9 +60,49 @@ if (ACTIVE_ENV !== '') {
   use_envs = JSON.parse(localStorage.getItem('envIDs')) || ['main'];
 }
 
+const PaneWrapper = ({
+  Comp,
+  pane,
+  panelayout,
+  envID,
+  onClose,
+  onFocus,
+  isFocused,
+  defaultWidth,
+  defaultHeight,
+}) => {
+  const { width, height, ref } = useResizeDetector();
+  const PANE_TITLE_BAR_HEIGHT = 14;
+
+  const finalWidth =
+    width !== undefined && width > 0 ? width - 2 : defaultWidth;
+  const finalHeight =
+    (height !== undefined && height > 0 ? height - 2 : defaultHeight) -
+    PANE_TITLE_BAR_HEIGHT;
+
+  return (
+    <div ref={ref} style={{ width: '100%', height: '100%' }}>
+      <Comp
+        key={pane.id}
+        {...pane}
+        envID={envID}
+        onClose={onClose}
+        onFocus={onFocus}
+        isFocused={isFocused}
+        w={panelayout.w}
+        h={panelayout.h}
+        width={finalWidth}
+        height={finalHeight}
+        _width={finalWidth}
+        _height={finalHeight}
+      />
+    </div>
+  );
+};
+
 const App = () => {
   // -------------- //
-  // state varibles //
+  // state variables //
   // -------------- //
 
   // api variables & functions
@@ -70,6 +114,7 @@ const App = () => {
     sendEnvSave,
     sendLayoutsSave,
     sendPaneClose,
+    sendUndo,
     sendPaneLayoutUpdate,
     sessionInfo,
     toggleOnlineState,
@@ -77,7 +122,6 @@ const App = () => {
 
   // internal variables
   const mounted = useRef(false);
-  const [resizeClickHappened, setResizeClickHappened] = useState(false);
   const windowSize = useRef({
     width: 1280,
     cols: 100,
@@ -92,6 +136,8 @@ const App = () => {
     panes: {},
     layout: [],
   });
+
+  const [undoCounts, setUndoCounts] = useState({});
 
   // user-changeable
   const [showEnvModal, setShowEnvModal] = useState(false);
@@ -302,6 +348,10 @@ const App = () => {
     else relayout();
   };
 
+  const onUndoState = ({ eid, count }) => {
+    setUndoCounts((prev) => ({ ...prev, [eid]: count }));
+  };
+
   const onEnvUpdate = (data) => {
     var layoutLists = storeMeta.layoutLists;
     for (var envIdx in data) {
@@ -322,24 +372,20 @@ const App = () => {
     if (sessionInfo.readonly) {
       return;
     }
-    let newPanes = Object.assign({}, storeData.panes);
-    delete newPanes[paneID];
     if (!keepPosition) {
       localStorage.removeItem(keyLS(paneID));
       sendPaneClose(paneID, selection.envIDs[0]);
     }
 
     if (setState) {
-      // Make sure we remove the pane from our layout.
-      let newLayout = storeData.layout.filter(
-        (paneLayout) => paneLayout.i !== paneID
-      );
-
-      setStoreData((prev) => ({
-        ...prev,
-        layout: newLayout,
-        panes: newPanes,
-      }));
+      setStoreData((prev) => {
+        let newPanes = Object.assign({}, prev.panes);
+        delete newPanes[paneID];
+        let newLayout = prev.layout.filter(
+          (paneLayout) => paneLayout.i !== paneID
+        );
+        return { ...prev, panes: newPanes, layout: newLayout };
+      });
       setFocusedPaneID(focusedPaneID === paneID ? null : focusedPaneID);
       callbacks.current.push('relayout');
     }
@@ -385,7 +431,6 @@ const App = () => {
     sendEnvQuery(selectedNodes, showAllEnvWindows);
   };
   const onEnvDelete = (env2delete, previousEnv) => {
-
     if (env2delete === previousEnv) {
       previousEnv = 'main';
     }
@@ -399,9 +444,9 @@ const App = () => {
     });
 
     setStoreMeta((prev) => {
-      const layoutLists = new Map(storeMeta.layoutLists);
+      const layoutLists = new Map(prev.layoutLists);
       layoutLists.delete(env2delete);
-      let EnvIds = selection.envIDs.filter((env) => env !== env2delete);
+      let EnvIds = prev.envList.filter((env) => env !== env2delete);
       return {
         ...prev,
         envList: EnvIds,
@@ -409,11 +454,16 @@ const App = () => {
       };
     });
 
-    setStoreData((prev) => ({
-      ...prev,
-      panes: {},
-      layout: [],
-    }));
+    setStoreData((prev) => {
+      if (selection.envIDs.includes(env2delete)) {
+        return {
+          ...prev,
+          panes: {},
+          layout: [],
+        };
+      }
+      return prev;
+    });
 
     sendEnvDelete(env2delete, previousEnv);
   };
@@ -469,22 +519,6 @@ const App = () => {
   };
 
   const resizePane = (layout, oldLayoutItem, layoutItem) => {
-    // register a double click on the resize handle to reset the window size
-    if (
-      resizeClickHappened &&
-      layoutItem.w == oldLayoutItem.w &&
-      layoutItem.h == oldLayoutItem.h
-    ) {
-      let pane = storeData.panes[layoutItem.i];
-
-      // resets to default layout (same as during pane creation)
-      layoutItem.w = pane.width ? p2w(pane.width) : PANE_SIZE[pane.type][0];
-      layoutItem.h = pane.height
-        ? Math.ceil(p2h(pane.height + 14))
-        : PANE_SIZE[pane.type][1];
-      if (pane.content && pane.content.caption) layoutItem.h += 1;
-    }
-
     // update layout according to user interaction
     setSelection((prev) => ({
       ...prev,
@@ -493,15 +527,31 @@ const App = () => {
     focusPane(layoutItem.i);
     updateLayout(layout);
     sendPaneLayoutUpdate(selection.envIDs[0], layoutItem);
+  };
 
-    // register a double click in this function
-    setResizeClickHappened(true);
-    setTimeout(
-      function () {
-        setResizeClickHappened(false);
-      }.bind(this),
-      400
-    );
+  const handlePaneDoubleClick = (e, panelayout) => {
+    if (
+      e.target.className &&
+      typeof e.target.className === 'string' &&
+      e.target.className.includes('react-resizable-handle')
+    ) {
+      let pane = storeData.panes[panelayout.i];
+
+      // resets to default layout (same as during pane creation)
+      panelayout.w = pane.width ? p2w(pane.width) : PANE_SIZE[pane.type][0];
+      panelayout.h = pane.height
+        ? Math.ceil(p2h(pane.height + 14))
+        : PANE_SIZE[pane.type][1];
+      if (pane.content && pane.content.caption) panelayout.h += 1;
+
+      setSelection((prev) => ({
+        ...prev,
+        layoutID: DEFAULT_LAYOUT,
+      }));
+      focusPane(panelayout.i);
+      updateLayout(storeData.layout);
+      sendPaneLayoutUpdate(selection.envIDs[0], panelayout);
+    }
   };
 
   const movePane = (layout) => {
@@ -774,29 +824,26 @@ const App = () => {
       let filter = getValidFilter(filterString);
       let isVisible = pane.title.match(filter);
 
-      const PANE_TITLE_BAR_HEIGHT = 14;
-
       var _height = Math.round(h2p(panelayout.h));
       var _width = Math.round(w2p(panelayout.w));
 
       return (
-        <div key={pane.id} className={isVisible ? '' : 'hidden-window'}>
-          <ReactResizeDetector handleWidth handleHeight>
-            <Comp
-              {...pane}
-              envID={selection.envIDs[0]}
-              key={pane.id}
-              onClose={closePane}
-              onFocus={focusPane}
-              isFocused={pane.id === focusedPaneID}
-              w={panelayout.w}
-              h={panelayout.h}
-              width={w2p(panelayout.w)}
-              height={h2p(panelayout.h) - PANE_TITLE_BAR_HEIGHT}
-              _width={_width}
-              _height={_height - PANE_TITLE_BAR_HEIGHT}
-            />
-          </ReactResizeDetector>
+        <div
+          key={pane.id}
+          className={isVisible ? '' : 'hidden-window'}
+          onDoubleClick={(e) => handlePaneDoubleClick(e, panelayout)}
+        >
+          <PaneWrapper
+            Comp={Comp}
+            pane={pane}
+            panelayout={panelayout}
+            envID={selection.envIDs[0]}
+            onClose={closePane}
+            onFocus={focusPane}
+            isFocused={pane.id === focusedPaneID}
+            defaultWidth={_width}
+            defaultHeight={_height}
+          />
         </div>
       );
     } catch (err) {
@@ -821,6 +868,72 @@ const App = () => {
       );
     }
   });
+  const escapeHtml = (str) => {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  };
+  const exportCurrentEnvToHtml = () => {
+    if (!storeData.panes || Object.keys(storeData.panes).length === 0) {
+      showToast('No panes available to export.', 'error', { duration: 4000 });
+      return;
+    }
+
+    const safeTs = new Date()
+      .toISOString()
+      .slice(0, 16)
+      .replace('T', '_')
+      .replace(':', '-');
+    const rawTitle = `Visdom – ${selection.envIDs.join('+')} – ${safeTs}`;
+    const title = escapeHtml(rawTitle);
+
+    const layoutMap = new Map(storeData.layout.map((l) => [l.i, l]));
+
+    const sortedIds = Object.keys(storeData.panes).sort((a, b) => {
+      const la = layoutMap.get(a);
+      const lb = layoutMap.get(b);
+      if (!la && !lb) return a.localeCompare(b);
+      if (!la) return 1;
+      if (!lb) return -1;
+      if (la.y !== lb.y) return la.y - lb.y;
+      if (la.x !== lb.x) return la.x - lb.x;
+      return a.localeCompare(b);
+    });
+
+    const paneData = {};
+    sortedIds.forEach((id) => {
+      const pane = storeData.panes[id];
+      const li = layoutMap.get(id);
+      if (!li) return;
+      paneData[id] = {
+        type: pane.type,
+        title: pane.title || pane.type,
+        content: pane.content,
+        selected: pane.selected,
+        initW: Math.max(280, Math.round(w2p(li.w))),
+        initH: Math.max(200, Math.round(h2p(li.h))),
+      };
+    });
+
+    const validIds = sortedIds.filter((id) => paneData[id]);
+
+    const html = buildExportHtml(title, paneData, validIds);
+
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `visdom_${selection.envIDs
+      .map((id) => String(id).replace(/[^a-zA-Z0-9._-]/g, '_'))
+      .join('_')}_${safeTs}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
 
   let modals = [
     <EnvModal
@@ -877,6 +990,13 @@ const App = () => {
       }}
       onViewChange={updateToLayout}
       onViewManageButton={() => setShowViewModal(!showViewModal)}
+      canUndo={
+        selection.envIDs.length === 1 &&
+        (undoCounts[selection.envIDs[0]] || 0) > 0
+      }
+      onUndoButton={() => sendUndo(selection.envIDs[0])}
+      onEnvSelect={onEnvSelect}
+      onExportHtml={exportCurrentEnvToHtml}
     />
   );
   let filterControl = (
@@ -910,11 +1030,13 @@ const App = () => {
     onReloadMessage,
     onEnvUpdate,
     onCloseMessage,
+    onUndoState,
     onDisconnect,
   };
 
   return (
     <div>
+      <ToastContainer />
       {modals}
       <div className="navbar-form navbar-default">
         <span className="navbar-brand visdom-title">visdom</span>
