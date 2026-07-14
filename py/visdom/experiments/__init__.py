@@ -20,6 +20,7 @@ from visdom.experiments.models import (
 from visdom.experiments.query import (
     And,
     Comparison,
+    ExperimentLike,
     Node,
     Or,
     Query,
@@ -34,6 +35,7 @@ __all__ = [
     "Comparison",
     "Experiment",
     "ExperimentFinishedError",
+    "ExperimentLike",
     "ExperimentStore",
     "Metric",
     "Node",

@@ -309,6 +309,60 @@ class TestBuildRecord(unittest.TestCase):
         self.assertEqual(record["status"], "running")
         self.assertEqual(record["param.status"], "custom")
 
+    def test_bare_name_precedence_is_param_then_metric_then_tag(self):
+        exp = Experiment(env_id="run3")
+        exp.set_param("score", "from-param")
+        exp.add_metric("score", 1.0)
+        exp.set_tag("score", "from-tag")
+        exp.add_metric("loss", 0.5)
+        exp.set_tag("loss", "from-tag")
+        record = build_record(exp)
+
+        self.assertEqual(record["score"], "from-param")
+        self.assertEqual(record["loss"], 0.5)
+        self.assertEqual(record["param.score"], "from-param")
+        self.assertEqual(record["metric.score"], 1.0)
+        self.assertEqual(record["tag.score"], "from-tag")
+        self.assertEqual(record["tag.loss"], "from-tag")
+
+    def test_latest_metric_wins_regardless_of_step_order(self):
+        exp = Experiment(env_id="run4")
+        exp.add_metric("acc", 90.0, step=5)
+        exp.add_metric("acc", 70.0, step=1)
+        self.assertEqual(build_record(exp)["acc"], 70.0)
+
+
+class _FakeNamedValue:
+    def __init__(self, key, value):
+        self.key = key
+        self.value = value
+
+
+class _FakeExperiment:
+    """Experiment-shaped without being an Experiment; satisfies ExperimentLike."""
+
+    def __init__(self):
+        self.env_id = "fake1"
+        self.name = "fake-run"
+        self.description = ""
+        self.status = "finished"
+        self.created_at = 0.0
+        self.finished_at = 1.0
+        self.params = [_FakeNamedValue("lr", 0.5)]
+        self.metrics = [_FakeNamedValue("acc", 99.0)]
+        self.tags = [_FakeNamedValue("owner", "bob")]
+
+
+class TestBuildRecordIsDecoupledFromModels(unittest.TestCase):
+    """build_record reads a structural shape, not the concrete Experiment class."""
+
+    def test_accepts_any_experiment_shaped_object(self):
+        record = build_record(_FakeExperiment())
+        self.assertEqual(record["lr"], 0.5)
+        self.assertEqual(record["metric.acc"], 99.0)
+        self.assertEqual(record["tag.owner"], "bob")
+        self.assertTrue(Query("lr < 1 AND acc > 90").matches(record))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -36,19 +36,31 @@ quote it (``"..."`` or ``'...'``) if it contains spaces or a reserved word.
 
 The public surface is deliberately tiny: :func:`parse_query` (text → AST),
 the :class:`Query` convenience wrapper, :func:`build_record` (Experiment →
-queryable dict), and :class:`QueryParseError`.
+queryable dict) with the :class:`ExperimentLike` shape it accepts, and
+:class:`QueryParseError`.
 """
 
 from __future__ import annotations
 
 import re
-from typing import Any, Callable, Iterable, Iterator, List, NamedTuple, Optional
+from typing import (
+    Any,
+    Callable,
+    Iterable,
+    Iterator,
+    List,
+    NamedTuple,
+    Optional,
+    Protocol,
+    Sequence,
+)
 
 __all__ = [
     "QueryParseError",
     "parse_query",
     "Query",
     "build_record",
+    "ExperimentLike",
     "Node",
     "And",
     "Or",
@@ -421,16 +433,55 @@ class Query:
         return "Query({0!r})".format(self.text)
 
 
-def build_record(experiment: Any) -> dict:
+class _KeyValueLike(Protocol):
+    """A named value: :class:`~visdom.experiments.models.Param`, ``Metric``, ``Tag``."""
+
+    key: str
+    value: Any
+
+
+class ExperimentLike(Protocol):
+    """The shape :func:`build_record` reads.
+
+    Structural, so :class:`~visdom.experiments.models.Experiment` satisfies it
+    without inheriting from or knowing about it, and :mod:`query` needs no import
+    of :mod:`~visdom.experiments.models`. Anything experiment-shaped — including
+    a test fake — is accepted.
+    """
+
+    env_id: str
+    name: str
+    description: str
+    status: str
+    created_at: float
+    finished_at: Optional[float]
+
+    @property
+    def params(self) -> Sequence[_KeyValueLike]:
+        ...
+
+    @property
+    def metrics(self) -> Sequence[_KeyValueLike]:
+        ...
+
+    @property
+    def tags(self) -> Sequence[_KeyValueLike]:
+        ...
+
+
+def build_record(experiment: ExperimentLike) -> dict:
     """Flatten an :class:`~visdom.experiments.models.Experiment` into a queryable dict.
 
-    Each param, latest-metric value and tag is exposed both under its bare name
-    (``lr``, ``acc``, ``owner``) and under a namespaced key (``param.lr``,
-    ``metric.acc``, ``tag.owner``) so a query can disambiguate when names
-    collide. Built-in fields (``name``, ``status`` …) take precedence over a
-    bare param/metric/tag of the same name; the namespaced form always reaches
-    the specific value. This is a duck-typed helper — it never imports the model
-    class — so :mod:`query` stays free of storage dependencies.
+    Each param, latest-metric value and tag is exposed twice on purpose: once
+    under its bare name (``lr``, ``acc``, ``owner``) and once under a namespaced
+    key (``param.lr``, ``metric.acc``, ``tag.owner``). The bare form keeps the
+    common query readable, the namespaced form disambiguates when names collide.
+    The duplication costs only this dict, which lives for the length of one
+    query; the persisted shape is still :meth:`Experiment.to_dict`.
+
+    Where a bare name is claimed more than once, first writer wins:
+    built-ins (``name``, ``status`` …) > params > metrics > tags. The namespaced
+    form always reaches the specific value regardless.
     """
     record: dict = {
         "env_id": experiment.env_id,
@@ -443,11 +494,12 @@ def build_record(experiment: Any) -> dict:
     for param in experiment.params:
         record.setdefault(param.key, param.value)
         record["param." + param.key] = param.value
-    for key in {metric.key for metric in experiment.metrics}:
-        latest = experiment.latest_metric(key)
-        if latest is not None:
-            record.setdefault(key, latest.value)
-            record["metric." + key] = latest.value
+    latest_metrics: dict[str, Any] = {}
+    for metric in reversed(experiment.metrics):
+        latest_metrics.setdefault(metric.key, metric.value)
+    for key, value in latest_metrics.items():
+        record.setdefault(key, value)
+        record["metric." + key] = value
     for tag in experiment.tags:
         record.setdefault(tag.key, tag.value)
         record["tag." + tag.key] = tag.value
