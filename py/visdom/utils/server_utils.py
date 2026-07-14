@@ -680,6 +680,26 @@ def broadcast_undo_state(handler, eid, env_path):
     broadcast(handler, msg, eid)
 
 
+def notify(handler, message, type="info", duration=None, eid=None, target_subs=None):
+    payload = {"message": message, "type": type}
+    if duration is not None:
+        payload["duration"] = duration
+
+    msg = json.dumps({"command": "notification", "data": payload}, cls=NanSafeEncoder)
+
+    if target_subs is not None:
+        for sub in target_subs:
+            sub.write_message(msg)
+        return
+
+    if eid is not None:
+        broadcast(handler, msg, eid)
+        return
+
+    for sub in handler.subs.values():
+        sub.write_message(msg)
+
+
 def register_window(self, p, eid):
     # in case env doesn't exist
     is_new_env = False
