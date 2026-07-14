@@ -13,10 +13,15 @@ Provides simple entrypoints to set up and run the main visdom server.
 import atexit
 import argparse
 import getpass
+import hashlib
 import logging
 import os
 import sys
+import errno
+import socket
 from tornado import ioloop
+import tornado.httpserver
+import tornado.netutil
 from visdom.server.app import Application
 from visdom.server.defaults import (
     DEFAULT_BASE_URL,
@@ -26,6 +31,32 @@ from visdom.server.defaults import (
 )
 from visdom.server.build import download_scripts
 from visdom.utils.server_utils import hash_password, serialize_all, set_cookie
+
+MAX_PORT = 65535
+
+
+class PortValidationError(ValueError, argparse.ArgumentTypeError):
+    """Validation error for port values that work for argparse and callers."""
+
+
+def valid_port(value):
+    """
+    Validate that the port is an integer in the range [1, 65535].
+    Note: Port 0 is excluded for HTTP/browser use because browsers block it
+    with `ERR_UNSAFE_PORT`.
+    It raises PortValidationError so argparse preserves the custom message when
+    used as a `type=` argument, while programmatic callers can still treat it
+    as a ValueError.
+    """
+    if isinstance(value, (bool, float)):
+        raise PortValidationError(f"Port must be an integer, got: '{value}'")
+    try:
+        port = int(value)
+    except (TypeError, ValueError):
+        raise PortValidationError(f"Port must be an integer, got: '{value}'")
+    if not (1 <= port <= MAX_PORT):
+        raise PortValidationError(f"Port must be between 1 and {MAX_PORT}, got: {port}")
+    return port
 
 
 def start_server(
@@ -50,10 +81,22 @@ def start_server(
         use_frontend_client_polling=use_frontend_client_polling,
         eager_data_loading=eager_data_loading,
     )
-    if bind_local:
-        app.listen(port, max_buffer_size=1024**3, address="127.0.0.1")
-    else:
-        app.listen(port, max_buffer_size=1024**3)
+    bind_addr = "127.0.0.1" if bind_local else None
+    family = socket.AF_INET if bind_local else socket.AF_UNSPEC
+    try:
+        sockets = tornado.netutil.bind_sockets(port, address=bind_addr, family=family)
+    except OSError as e:
+        if e.errno == errno.EADDRINUSE:
+            logging.warning(f"Port {port} is already in use, assigning a free port")
+            sockets = tornado.netutil.bind_sockets(0, address=bind_addr, family=family)
+        else:
+            logging.error(f"Failed to bind to port {port}: {e}")
+            raise
+    port = sockets[0].getsockname()[1]
+    app.port = port
+    server = tornado.httpserver.HTTPServer(app, max_buffer_size=1024**3)
+    server.add_sockets(sockets)
+
     logging.info("Application Started")
     logging.info(f"Working directory: {os.path.abspath(env_path)}")
 
@@ -80,12 +123,12 @@ def main(print_func=None):
     parser.add_argument(
         "-port",
         metavar="port",
-        type=int,
+        type=valid_port,
         default=DEFAULT_PORT,
         help="port to run the server on.",
     )
     parser.add_argument(
-        "--hostname",
+        "-hostname",
         metavar="hostname",
         type=str,
         default=DEFAULT_HOSTNAME,
@@ -190,9 +233,10 @@ def main(print_func=None):
             username = input("Please input your username: ")
             password = getpass.getpass(prompt="Please input your password: ")
 
+        client_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
         user_credential = {
             "username": username,
-            "password": hash_password(hash_password(password)),
+            "password": hash_password(client_hash),
         }
 
         need_to_set_cookie = (
