@@ -17,15 +17,33 @@ from visdom.experiments.models import (
     STATUS_RUNNING,
     VALID_STATUSES,
 )
+from visdom.experiments.query import (
+    And,
+    Comparison,
+    Node,
+    Or,
+    Query,
+    QueryParseError,
+    build_record,
+    parse_query,
+)
 from visdom.experiments.store import ExperimentStore
 
 __all__ = [
+    "And",
+    "Comparison",
     "Experiment",
     "ExperimentFinishedError",
     "ExperimentStore",
     "Metric",
+    "Node",
+    "Or",
     "Param",
+    "Query",
+    "QueryParseError",
     "Tag",
+    "build_record",
+    "parse_query",
     "STATUS_FAILED",
     "STATUS_FINISHED",
     "STATUS_RUNNING",
