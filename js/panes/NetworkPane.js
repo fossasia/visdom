@@ -46,7 +46,8 @@ function NetworkPane(props) {
     }
 
     requestAnimationFrame(() => {
-      saveSvgAsPng(svg, 'plot.png', {
+      const filename = props.contentID ? `${props.contentID}.png` : 'plot.png';
+      saveSvgAsPng(svg, filename, {
         scale: 2,
         backgroundColor: '#FFFFFF',
       });
