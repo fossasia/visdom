@@ -17,6 +17,7 @@ today — the feature is fully opt-in.
 """
 
 from visdom.data_model.base import DataStore
+from visdom.experiments.compare import build_comparison
 from visdom.experiments.models import (
     Experiment,
     ExperimentFinishedError,
@@ -206,6 +207,87 @@ class ExperimentStore:
         if sort_by:
             pairs = _sort_pairs(pairs, sort_by, descending)
         return [experiment for _, experiment in pairs]
+
+    def _load_named(self, env_ids):
+        """Return the experiments for ``env_ids``, in the order asked for.
+
+        Duplicate ids collapse to their first occurrence: a comparison is keyed
+        by env_id, so a run named twice cannot mean anything beyond once.
+        """
+        if isinstance(env_ids, str) or not isinstance(env_ids, (list, tuple)):
+            raise TypeError(
+                "env_ids must be a list of environment ids, got {0}".format(
+                    type(env_ids).__name__
+                )
+            )
+        unique = list(dict.fromkeys(env_ids))
+        for env_id in unique:
+            if not isinstance(env_id, str):
+                raise TypeError(
+                    "env_ids must contain strings, got {0}".format(
+                        type(env_id).__name__
+                    )
+                )
+        if not unique:
+            raise ValueError("env_ids must name at least one environment")
+        experiments = []
+        missing = []
+        for env_id in unique:
+            experiment = self.get_experiment(env_id)
+            if experiment is None:
+                missing.append(env_id)
+            else:
+                experiments.append(experiment)
+        if missing:
+            raise KeyError(
+                "no experiment logged for env(s) {0}".format(
+                    ", ".join(repr(env_id) for env_id in missing)
+                )
+            )
+        return experiments
+
+    def compare(
+        self,
+        env_ids=None,
+        query=None,
+        sort_by=DEFAULT_SORT_FIELD,
+        descending=True,
+        limit=None,
+    ):
+        """Compare experiments field by field; see :func:`build_comparison`.
+
+        The experiments are chosen either by name or by search, and the two are
+        mutually exclusive — passing both, or neither, is a ``ValueError`` rather
+        than a guess at which was meant:
+
+        * ``env_ids`` — an explicit list, compared in the order given. Every id
+          must have an experiment; a :class:`KeyError` names those that do not,
+          since a comparison silently missing a run it was asked for would be
+          read as a comparison of the rest.
+        * ``query`` — compare everything the query matches, ordered by
+          ``sort_by``/``descending`` as in :meth:`search` and capped at ``limit``
+          (``None`` = uncapped). A query matching nothing compares nothing and
+          yields empty sections; that is an empty answer, not an error.
+
+        ``limit`` applies only to ``query`` selection — an explicit ``env_ids``
+        list is already the exact set to compare. Note that the diff describes
+        the runs actually compared, so a ``limit`` that truncates the matches
+        narrows what ``shared``/``differing`` are computed over; the returned
+        ``env_ids`` always say which runs those were.
+        """
+        if env_ids is not None and query is not None:
+            raise ValueError("pass either env_ids or query, not both")
+        if env_ids is None and query is None:
+            raise ValueError("one of env_ids or query is required")
+        if env_ids is not None:
+            experiments = self._load_named(env_ids)
+        else:
+            experiments = self.search(
+                query=query, sort_by=sort_by, descending=descending
+            )
+            if limit is not None:
+                experiments = experiments[:limit]
+        return build_comparison(experiments)
 
     def delete_experiment(self, env_id):
         """Drop the experiment blob from ``env_id`` (keeping the env itself).

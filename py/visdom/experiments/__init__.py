@@ -6,6 +6,11 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+from visdom.experiments.compare import (
+    ComparableExperiment,
+    SECTIONS,
+    build_comparison,
+)
 from visdom.experiments.models import (
     Experiment,
     ExperimentFinishedError,
@@ -32,6 +37,7 @@ from visdom.experiments.store import DEFAULT_SORT_FIELD, ExperimentStore
 
 __all__ = [
     "And",
+    "ComparableExperiment",
     "Comparison",
     "DEFAULT_SORT_FIELD",
     "Experiment",
@@ -44,7 +50,9 @@ __all__ = [
     "Param",
     "Query",
     "QueryParseError",
+    "SECTIONS",
     "Tag",
+    "build_comparison",
     "build_record",
     "parse_query",
     "STATUS_FAILED",
