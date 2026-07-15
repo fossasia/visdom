@@ -39,7 +39,6 @@ from visdom.utils.server_utils import (
     register_window,
     gather_envs,
     broadcast_envs,
-    serialize_env,
     escape_eid,
     compare_envs,
     load_env,
@@ -123,6 +122,39 @@ class UpdateHandler(BaseHandler):
         return p, patch.patch
 
     @staticmethod
+    def update_embeddings_packet(p, args, max_old_content):
+        update_type = args["data"]["update_type"]
+        content_id = get_rand_id()
+        if update_type == "EntitySelected":
+            selected = args["data"]["selected"]
+            p["content"]["selected"] = selected
+            p["contentID"] = content_id
+            # `selected` may not exist yet on the first selection, so use "add"
+            # (which also overwrites when the key is already present).
+            return [
+                {"op": "add", "path": "/content/selected", "value": selected},
+                {"op": "replace", "path": "/contentID", "value": content_id},
+            ]
+        if update_type == "RegionSelected":
+            old_data = p["content"]["data"]
+            new_data = args["data"]["points"]
+            p["old_content"].append(old_data)
+            # Cap retained history to prevent unbounded in-memory growth (#1320).
+            if len(p["old_content"]) > max_old_content:
+                p["old_content"] = p["old_content"][-max_old_content:]
+            p["content"]["data"] = new_data
+            p["content"]["has_previous"] = True
+            p["content"]["selected"] = None
+            p["contentID"] = content_id
+            return [
+                {"op": "replace", "path": "/content/data", "value": new_data},
+                {"op": "add", "path": "/content/has_previous", "value": True},
+                {"op": "add", "path": "/content/selected", "value": None},
+                {"op": "replace", "path": "/contentID", "value": content_id},
+            ]
+        return []
+
+    @staticmethod
     def update(p, args, max_text_lines, max_old_content, max_image_history):
         # Update text in window, separated by a line break
         if p["type"] == "text":
@@ -130,20 +162,6 @@ class UpdateHandler(BaseHandler):
             lines = p["content"].split("<br>")
             if len(lines) > max_text_lines:
                 p["content"] = "<br>".join(lines[-max_text_lines:])
-            return p
-        if p["type"] == "embeddings":
-            # TODO embeddings updates should be handled outside of the regular
-            # update flow, as update packets are easy to create manually and
-            # expensive to calculate otherwise
-            if args["data"]["update_type"] == "EntitySelected":
-                p["content"]["selected"] = args["data"]["selected"]
-            elif args["data"]["update_type"] == "RegionSelected":
-                p["content"]["selected"] = None
-                p["old_content"].append(p["content"]["data"])
-                if len(p["old_content"]) > max_old_content:
-                    p["old_content"] = p["old_content"][-max_old_content:]
-                p["content"]["has_previous"] = True
-                p["content"]["data"] = args["data"]["points"]
             return p
         if p["type"] == "image_history":
             utype = args["data"][0]["type"]
@@ -330,6 +348,17 @@ class UpdateHandler(BaseHandler):
         return p
 
     @staticmethod
+    def broadcast_window_update(handler, args, eid, p, diff_packet):
+        broadcast_packet = {
+            "command": "window_update",
+            "win": args["win"],
+            "eid": eid,
+            "content": diff_packet,
+            "version": p.get("version", 1),
+        }
+        broadcast(handler, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
+
+    @staticmethod
     def wrap_func(handler, args):
         if "win" not in args:
             raise tornado.web.HTTPError(400, reason="missing required field: win")
@@ -388,6 +417,14 @@ class UpdateHandler(BaseHandler):
             )
             return
 
+        if p["type"] == "embeddings":
+            diff_packet = UpdateHandler.update_embeddings_packet(
+                p, args, handler.max_old_content
+            )
+            UpdateHandler.broadcast_window_update(handler, args, eid, p, diff_packet)
+            handler.write(p["id"])
+            return
+
         try:
             p, diff_packet = UpdateHandler.update_packet(
                 p,
@@ -408,14 +445,7 @@ class UpdateHandler(BaseHandler):
             broadcast_msg["eid"] = eid
             broadcast(handler, json.dumps(broadcast_msg, cls=NanSafeEncoder), eid)
         else:
-            broadcast_packet = {
-                "command": "window_update",
-                "win": args["win"],
-                "eid": eid,
-                "content": diff_packet,
-                "version": p.get("version", 1),
-            }
-            broadcast(handler, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
+            UpdateHandler.broadcast_window_update(handler, args, eid, p, diff_packet)
         handler.write(p["id"])
 
     @check_auth
@@ -523,7 +553,7 @@ class ForkEnvHandler(BaseHandler):
         assert prev_eid in handler.state, "env to be forked doesn't exist"
 
         handler.state[eid] = copy.deepcopy(handler.state[prev_eid])
-        serialize_env(handler.state, [eid], env_path=handler.env_path)
+        handler.storage.save_env(eid, handler.state[eid])
         broadcast_envs(handler)
 
         handler.write(eid)
@@ -629,7 +659,7 @@ class SaveHandler(BaseHandler):
         envs = args["data"]
         envs = [escape_eid(eid) for eid in envs]
         # this drops invalid env ids
-        ret = serialize_env(handler.state, envs, env_path=handler.env_path)
+        ret = handler.storage.save_envs(handler.state, envs)
         handler.write(json.dumps(ret))
 
     @check_auth
@@ -811,8 +841,7 @@ class UploadEnvHandler(BaseHandler):
 
         self.state[new_eid] = {"jsons": data["jsons"], "reload": data["reload"]}
 
-        if self.env_path is not None:
-            serialize_env(self.state, [new_eid], env_path=self.env_path)
+        self.storage.save_env(new_eid, self.state[new_eid])
 
         broadcast_envs(self)
 
