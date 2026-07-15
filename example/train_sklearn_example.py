@@ -32,28 +32,28 @@ def main():
     )
 
     viz = visdom.Visdom()
+    VisdomSklearnLogger.autolog(viz, env="sklearn_run")
 
-    with VisdomSklearnLogger(viz, env="sklearn_run") as logger:
-        # plain classifier -> text pane (estimator name, n_params, fit_time)
-        clf = RandomForestClassifier(n_estimators=100, random_state=42)
-        clf.fit(X_train_clf, y_train_clf)
+    # plain classifier -> text pane (dataset, train_score, fit_time, params)
+    clf = RandomForestClassifier(n_estimators=100, random_state=42)
+    clf.fit(X_train_clf, y_train_clf)
 
-        # plain regressor -> text pane (estimator name, n_params, fit_time)
-        reg = Ridge(alpha=1.0)
-        reg.fit(X_train_reg, y_train_reg)
+    # plain regressor -> text pane (dataset, train_score, fit_time, params)
+    reg = Ridge(alpha=1.0)
+    reg.fit(X_train_reg, y_train_reg)
 
-        # grid search -> bar chart of mean_test_score + best params text pane
-        param_grid = {
-            "n_estimators": [50, 100, 200],
-            "max_depth": [3, 5, None],
-        }
-        gs = GridSearchCV(
-            RandomForestClassifier(random_state=42),
-            param_grid,
-            cv=3,
-            scoring="accuracy",
-        )
-        gs.fit(X_train_clf, y_train_clf)
+    # grid search -> bar chart of mean_test_score + best params text pane
+    param_grid = {
+        "n_estimators": [50, 100, 200],
+        "max_depth": [3, 5, None],
+    }
+    gs = GridSearchCV(
+        RandomForestClassifier(random_state=42),
+        param_grid,
+        cv=3,
+        scoring="accuracy",
+    )
+    gs.fit(X_train_clf, y_train_clf)
 
     print("RF accuracy:     {:.4f}".format(clf.score(X_test_clf, y_test_clf)))
     print("Ridge R2:        {:.4f}".format(reg.score(X_test_reg, y_test_reg)))

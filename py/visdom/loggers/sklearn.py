@@ -26,48 +26,40 @@ _SECTION = (
 
 
 class VisdomSklearnLogger:
-    """Patches sklearn estimator fit() calls to log results to Visdom.
+    """Auto-logs sklearn estimator fit() calls to Visdom.
+
+    Call autolog() once at the start of your script. Every subsequent
+    fit() call on any sklearn estimator is logged automatically.
 
     GridSearchCV and RandomizedSearchCV produce a bar chart of
     mean_test_score per parameter combination and a text pane with
     best_params_ and best_score_. All other estimators produce a text
-    pane with the estimator name, parameter count, and fit duration.
+    pane with dataset shape, train score, fit time, and hyperparameters.
 
     Usage::
 
-        from visdom.logger import VisdomSklearnLogger
+        import visdom
+        from visdom.loggers import VisdomSklearnLogger
 
-        logger = VisdomSklearnLogger(viz, env="sklearn_run")
-        logger.enable()
+        viz = visdom.Visdom()
+        VisdomSklearnLogger.autolog(viz, env="sklearn_run")
 
-        clf.fit(X_train, y_train)
-        gs.fit(X_train, y_train)
-
-        logger.disable()
-
-        # or as a context manager:
-        with VisdomSklearnLogger(viz, env="sklearn_run"):
-            clf.fit(X_train, y_train)
+        clf.fit(X_train, y_train)   # logged automatically
+        gs.fit(X_train, y_train)    # logged automatically
     """
 
-    def __init__(self, viz, env=None):
+    def __init__(self, viz, env):
         self.viz = viz
-        self.env = env or "sklearn_{}".format(
-            datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        )
-        self._patches = {}
+        self.env = env
         self._cv_depth = 0
 
-    def __enter__(self):
-        self.enable()
-        return self
+    @classmethod
+    def autolog(cls, viz=None, env=None):
+        """Patch all sklearn estimators to log fit() calls to Visdom."""
+        if viz is None:
+            import visdom as _visdom
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.disable()
-        return False
-
-    def enable(self):
-        """Patch sklearn estimator fit() methods to log to Visdom."""
+            viz = _visdom.Visdom()
         try:
             from sklearn.model_selection import (
                 GridSearchCV,
@@ -79,32 +71,24 @@ class VisdomSklearnLogger:
                 "scikit-learn is required for VisdomSklearnLogger. "
                 "Install with: pip install scikit-learn"
             )
-
-        for cls in (GridSearchCV, RandomizedSearchCV):
-            self._patch(cls, is_cv=True)
-
-        for _name, cls in all_estimators():
-            self._patch(cls, is_cv=False)
-
-    def disable(self):
-        """Restore all patched fit() methods to their originals."""
-        for cls, (original, had_own_fit) in self._patches.items():
-            if had_own_fit:
-                cls.fit = original
-            else:
-                try:
-                    delattr(cls, "fit")
-                except AttributeError:
-                    pass
-        self._patches.clear()
+        env = (
+            env
+            or getattr(viz, "env", None)
+            or "sklearn_{}".format(datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
+        )
+        instance = cls(viz, env)
+        for cv_cls in (GridSearchCV, RandomizedSearchCV):
+            instance._patch(cv_cls, is_cv=True)
+        for _name, est_cls in all_estimators():
+            instance._patch(est_cls, is_cv=False)
 
     def _patch(self, cls, is_cv):
-        if cls in self._patches or not hasattr(cls, "fit"):
+        if not hasattr(cls, "fit"):
+            return
+        if getattr(cls.fit, "_visdom_patched", False):
             return
 
-        had_own_fit = "fit" in cls.__dict__
         original = cls.fit
-        self._patches[cls] = (original, had_own_fit)
         visdom_logger = self
 
         if is_cv:
@@ -134,6 +118,7 @@ class VisdomSklearnLogger:
                     visdom_logger._log_plain(self_est, X, y, duration)
                 return result
 
+        patched_fit._visdom_patched = True
         cls.fit = patched_fit
 
     @staticmethod
@@ -158,7 +143,6 @@ class VisdomSklearnLogger:
                 "rownames": ["combo_{}".format(i) for i in range(n)],
             },
         )
-
         summary_rows = "".join(
             [
                 self._row("best_score", "{:.4f}".format(est.best_score_)),

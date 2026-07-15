@@ -383,13 +383,11 @@ Each unique name passed to `tracker.log()` gets its own window. The first call c
 
 ### scikit-learn
 
-`visdom.loggers.VisdomSklearnLogger` is a context manager that patches sklearn `fit()` calls so every estimator trained inside the block logs to Visdom automatically.
+`visdom.loggers.VisdomSklearnLogger` patches all sklearn `fit()` calls so every estimator trained after `autolog()` logs to Visdom automatically — no per-estimator code needed.
 
 **Plain estimators** (classifiers, regressors, clusterers) produce a text pane with the estimator name, dataset shape, training score, fit time, and all hyperparameters.
 
 **GridSearchCV / RandomizedSearchCV** produce a bar chart of `mean_test_score` per parameter combination and a text pane with `best_score_`, `best_params_`, and fit time.
-
-**Usage as a context manager** (recommended):
 
 ```python
 import visdom
@@ -399,32 +397,30 @@ from sklearn.linear_model import Ridge
 from sklearn.model_selection import GridSearchCV
 
 viz = visdom.Visdom()
+VisdomSklearnLogger.autolog()
 
-with VisdomSklearnLogger(viz, env="sklearn_run") as logger:
-    clf = RandomForestClassifier(n_estimators=100)
-    clf.fit(X_train, y_train)        # -> text pane
+clf = RandomForestClassifier(n_estimators=100)
+clf.fit(X_train, y_train)        # -> text pane
 
-    reg = Ridge(alpha=1.0)
-    reg.fit(X_train, y_train)        # -> text pane
+reg = Ridge(alpha=1.0)
+reg.fit(X_train, y_train)        # -> text pane
 
-    gs = GridSearchCV(clf, param_grid, cv=3)
-    gs.fit(X_train, y_train)         # -> bar chart + text pane
+gs = GridSearchCV(clf, param_grid, cv=3)
+gs.fit(X_train, y_train)         # -> bar chart + text pane
 ```
 
-**Explicit enable/disable** — use when a `with` block isn't practical:
+If you have a custom Visdom connection (non-default port, remote server, auth), pass it explicitly:
 
 ```python
-logger = VisdomSklearnLogger(viz, env="sklearn_run")
-logger.enable()
+import visdom
 
-clf.fit(X_train, y_train)
-
-logger.disable()
+viz = visdom.Visdom(port=8098, server="http://myserver")
+VisdomSklearnLogger.autolog(viz, env="sklearn_run")
 ```
 
 **Parameters:**
-- `viz`: a connected `visdom.Visdom()` instance
-- `env`: environment name (default: auto-generated from timestamp)
+- `viz`: a connected `visdom.Visdom()` instance (optional — created internally if not passed)
+- `env`: environment name (default: `viz.env` if set, otherwise auto-generated from timestamp)
 
 See `example/train_sklearn_example.py` for a full working example covering plain estimators and grid search.
 
