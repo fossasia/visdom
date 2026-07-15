@@ -199,7 +199,11 @@ def update_window(p, args):
     opts = args.get("opts", {})
     for opt_name, opt_val in opts.items():
         if opt_val is not None:
-            p[opt_name] = opt_val
+            if opt_name == "caption":
+                if isinstance(p.get("content"), dict):
+                    p["content"]["caption"] = opt_val
+            else:
+                p[opt_name] = opt_val
 
     if "legend" in opts:
         pdata = p["content"]["data"]
@@ -262,7 +266,11 @@ def window(args):
         )
         p["content"]["has_previous"] = False
     else:
-        p["content"] = {"data": args["data"], "layout": args["layout"]}
+        p["content"] = {
+            "data": args["data"],
+            "layout": args["layout"],
+            "caption": opts.get("caption"),
+        }
         p["type"] = "plot"
 
     return p
@@ -679,6 +687,26 @@ def broadcast_undo_state(handler, eid, env_path):
         cls=NanSafeEncoder,
     )
     broadcast(handler, msg, eid)
+
+
+def notify(handler, message, type="info", duration=None, eid=None, target_subs=None):
+    payload = {"message": message, "type": type}
+    if duration is not None:
+        payload["duration"] = duration
+
+    msg = json.dumps({"command": "notification", "data": payload}, cls=NanSafeEncoder)
+
+    if target_subs is not None:
+        for sub in target_subs:
+            sub.write_message(msg)
+        return
+
+    if eid is not None:
+        broadcast(handler, msg, eid)
+        return
+
+    for sub in handler.subs.values():
+        sub.write_message(msg)
 
 
 def register_window(self, p, eid):
