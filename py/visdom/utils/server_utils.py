@@ -198,7 +198,11 @@ def update_window(p, args):
     opts = args.get("opts", {})
     for opt_name, opt_val in opts.items():
         if opt_val is not None:
-            p[opt_name] = opt_val
+            if opt_name == "caption":
+                if isinstance(p.get("content"), dict):
+                    p["content"]["caption"] = opt_val
+            else:
+                p[opt_name] = opt_val
 
     if "legend" in opts:
         pdata = p["content"]["data"]
@@ -261,7 +265,11 @@ def window(args):
         )
         p["content"]["has_previous"] = False
     else:
-        p["content"] = {"data": args["data"], "layout": args["layout"]}
+        p["content"] = {
+            "data": args["data"],
+            "layout": args["layout"],
+            "caption": opts.get("caption"),
+        }
         p["type"] = "plot"
 
     return p
