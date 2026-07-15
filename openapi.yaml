@@ -1112,7 +1112,7 @@ components:
       description: >
         One section (params, metrics or tags) of an experiment comparison,
         diffed across the compared runs.
-      required: [fields, shared, differing, values]
+      required: [fields, shared, differing, values, groups]
       properties:
         fields:
           type: array
@@ -1140,6 +1140,29 @@ components:
           description: >
             Per-field, per-run values as `{field: {env_id: value}}`. A run that
             never logged the field is omitted from that field's map.
+        groups:
+          type: object
+          description: >
+            Per field, the runs clustered by the value they used — the finer
+            question "which runs agree?", where `shared`/`differing` answer only
+            "do they all?". With three runs on two learning rates, the two that
+            match share a group. A field appears in `shared` exactly when its
+            groups are a single cluster holding every compared run, so the two
+            never disagree. Groups are ordered by first appearance, and a run
+            that never logged the field is in no group.
+          additionalProperties:
+            type: array
+            items:
+              type: object
+              required: [value, env_ids]
+              properties:
+                value:
+                  description: The value these runs share.
+                env_ids:
+                  type: array
+                  description: The runs that used it, in compared order.
+                  items:
+                    type: string
 
     Experiment:
       type: object

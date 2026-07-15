@@ -90,13 +90,45 @@ def _same_value(a: Any, b: Any) -> bool:
     return bool(a == b)
 
 
+def _group_values(present: dict) -> list:
+    """Cluster ``{env_id: value}`` into ``[{"value": v, "env_ids": [...]}, ...]``.
+
+    Answers "which runs used the same value?" rather than only "did they all?" —
+    with three runs on two learning rates, the two that match end up in one group
+    and the odd one out in another.
+
+    The obvious ``defaultdict`` keyed by value cannot be used here. Values need
+    not be hashable (a param may hold a list), ``hash(True) == hash(1)`` with
+    ``True == 1`` so a dict would silently merge them and undo the bool rule
+    :func:`_same_value` exists to enforce, and NaN never equals itself so it would
+    never group. Scanning the groups with :func:`_same_value` keeps one definition
+    of sameness for the whole module; the run count per comparison is small.
+
+    Groups appear in the order their value was first seen, and env_ids within a
+    group keep the order the runs were compared in.
+    """
+    groups: list = []
+    for env_id, value in present.items():
+        for group in groups:
+            if _same_value(group["value"], value):
+                group["env_ids"].append(env_id)
+                break
+        else:
+            groups.append({"value": value, "env_ids": [env_id]})
+    return groups
+
+
 def _compare_section(per_env: dict) -> dict:
     """Diff one section across the experiments in ``per_env``.
 
     ``per_env`` maps env_id to that experiment's ``{field: value}`` for the
-    section. A field counts as shared only when every experiment carries it *and*
-    they all agree: a value one run never logged is a difference between the runs,
-    not a consensus among those that happen to have it.
+    section. Each field gets its per-run ``values``, its ``groups`` of runs that
+    agree, and a place in ``shared`` or ``differing``.
+
+    A field counts as shared only when every experiment carries it *and* they all
+    agree — one group holding every run. A value one run never logged is a
+    difference between the runs, not a consensus among those that happen to have
+    it, and that run appears in no group for the field.
     """
     fields = sorted({field for values in per_env.values() for field in values})
     values = {
@@ -107,19 +139,18 @@ def _compare_section(per_env: dict) -> dict:
         }
         for field in fields
     }
-    shared = {}
-    for field in fields:
-        present = values[field]
-        if len(present) != len(per_env):
-            continue
-        found = list(present.values())
-        if all(_same_value(found[0], other) for other in found[1:]):
-            shared[field] = found[0]
+    groups = {field: _group_values(values[field]) for field in fields}
+    shared = {
+        field: groups[field][0]["value"]
+        for field in fields
+        if len(groups[field]) == 1 and len(values[field]) == len(per_env)
+    }
     return {
         "fields": fields,
         "shared": shared,
         "differing": [field for field in fields if field not in shared],
         "values": values,
+        "groups": groups,
     }
 
 
@@ -130,24 +161,36 @@ def build_comparison(experiments: Iterable[ComparableExperiment]) -> dict:
     full ``experiments``) alongside one diff per section::
 
         {
-          "env_ids": ["run-a", "run-b"],
-          "experiments": [{...}, {...}],
+          "env_ids": ["run-a", "run-b", "run-c"],
+          "experiments": [{...}, {...}, {...}],
           "params": {
             "fields": ["epochs", "lr"],
             "shared": {"epochs": 10},
             "differing": ["lr"],
-            "values": {"lr": {"run-a": 0.1, "run-b": 0.001},
-                       "epochs": {"run-a": 10, "run-b": 10}}
+            "values": {"lr": {"run-a": 0.1, "run-b": 0.001, "run-c": 0.1},
+                       "epochs": {"run-a": 10, "run-b": 10, "run-c": 10}},
+            "groups": {
+              "epochs": [{"value": 10, "env_ids": ["run-a", "run-b", "run-c"]}],
+              "lr": [{"value": 0.1, "env_ids": ["run-a", "run-c"]},
+                     {"value": 0.001, "env_ids": ["run-b"]}]
+            }
           },
           "metrics": {...}, "tags": {...}
         }
 
-    ``fields`` is every name any run has, sorted; ``shared`` holds the fields all
-    runs carry with the same value; ``differing`` is the rest — the ones that vary
-    or that some run is missing; ``values`` gives the raw per-run value, omitting
-    the runs that never logged the field. Comparing a single experiment is legal
-    and puts everything it has in ``shared``; comparing none yields empty
-    sections.
+    ``fields`` is every name any run has, sorted. ``shared`` holds the fields all
+    runs carry with the same value, and ``differing`` is the rest — the ones that
+    vary or that some run is missing; together they answer "what changed?" at a
+    glance. ``values`` gives the raw per-run value, omitting the runs that never
+    logged the field.
+
+    ``groups`` answers the finer question "*which* runs agree?", clustering the
+    runs by value per field: above, ``lr`` differs overall, but run-a and run-c
+    still used the same one. A field is in ``shared`` exactly when its ``groups``
+    is a single cluster holding every compared run, so the two never disagree.
+
+    Comparing a single experiment is legal and puts everything it has in
+    ``shared``; comparing none yields empty sections.
     """
     ordered: Sequence[ComparableExperiment] = list(experiments)
     comparison = {

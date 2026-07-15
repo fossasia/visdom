@@ -1262,10 +1262,15 @@ class Visdom(object):
         Returns the server's reply as a dict: the compared runs (`env_ids` and
         the full `experiments`), plus a `params`, `metrics` and `tags` section.
         Each section holds the union of `fields`, the `shared` ones every run
-        agrees on, the `differing` rest, and the per-run `values`. Comparing two
-        runs that differ only in learning rate gives a `params` section whose
-        `differing` is `['lr']` and whose `values['lr']` is
-        `{'run-a': 0.1, 'run-b': 0.001}`.
+        agrees on, the `differing` rest, the per-run `values`, and `groups`.
+
+        `shared`/`differing` answer "what changed?"; `groups` answers "which runs
+        agree?", clustering the runs by value per field. Comparing three runs on
+        two learning rates gives a `params` section whose `differing` is `['lr']`,
+        whose `values['lr']` is `{'run-a': 0.1, 'run-b': 0.001, 'run-c': 0.1}`,
+        and whose `groups['lr']` is
+        `[{'value': 0.1, 'env_ids': ['run-a', 'run-c']},
+          {'value': 0.001, 'env_ids': ['run-b']}]`.
         """
         if isstr(env_ids) or not isinstance(env_ids, (list, tuple)):
             raise TypeError("env_ids must be a list of environment ids")

@@ -161,6 +161,112 @@ class TestBuildComparison(unittest.TestCase):
             self.assertEqual(comparison[section]["fields"], [])
             self.assertEqual(comparison[section]["shared"], {})
 
+    def test_groups_cluster_the_runs_that_agree(self):
+        """groups answers which runs match, not just whether all of them do."""
+        comparison = build_comparison(
+            [
+                make_experiment("a", params={"lr": 0.1}),
+                make_experiment("b", params={"lr": 0.001}),
+                make_experiment("c", params={"lr": 0.1}),
+            ]
+        )
+        self.assertEqual(comparison["params"]["differing"], ["lr"])
+        self.assertEqual(
+            comparison["params"]["groups"]["lr"],
+            [
+                {"value": 0.1, "env_ids": ["a", "c"]},
+                {"value": 0.001, "env_ids": ["b"]},
+            ],
+        )
+
+    def test_a_shared_field_is_one_group_of_everyone(self):
+        """shared and groups cannot disagree: shared == a single full cluster."""
+        comparison = build_comparison(
+            [
+                make_experiment("a", params={"epochs": 10}),
+                make_experiment("b", params={"epochs": 10}),
+            ]
+        )
+        self.assertEqual(comparison["params"]["shared"], {"epochs": 10})
+        self.assertEqual(
+            comparison["params"]["groups"]["epochs"],
+            [{"value": 10, "env_ids": ["a", "b"]}],
+        )
+
+    def test_a_run_missing_the_field_is_in_no_group(self):
+        """Groups cover only the runs that logged the field."""
+        comparison = build_comparison(
+            [
+                make_experiment("a", params={"lr": 0.1}),
+                make_experiment("b", params={"lr": 0.1}),
+                make_experiment("c", params={"seed": 7}),
+            ]
+        )
+        self.assertEqual(
+            comparison["params"]["groups"]["lr"],
+            [{"value": 0.1, "env_ids": ["a", "b"]}],
+        )
+        self.assertEqual(comparison["params"]["differing"], ["lr", "seed"])
+
+    def test_groups_do_not_merge_a_bool_with_one(self):
+        """A dict keyed by value would merge these: hash(True) == hash(1)."""
+        comparison = build_comparison(
+            [
+                make_experiment("a", params={"amp": True}),
+                make_experiment("b", params={"amp": 1}),
+            ]
+        )
+        self.assertEqual(
+            comparison["params"]["groups"]["amp"],
+            [
+                {"value": True, "env_ids": ["a"]},
+                {"value": 1, "env_ids": ["b"]},
+            ],
+        )
+
+    def test_groups_cluster_nan_together(self):
+        """NaN never equals itself, so a dict would never group these."""
+        comparison = build_comparison(
+            [
+                make_experiment("a", metrics=[("loss", float("nan"))]),
+                make_experiment("b", metrics=[("loss", float("nan"))]),
+            ]
+        )
+        groups = comparison["metrics"]["groups"]["loss"]
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0]["env_ids"], ["a", "b"])
+
+    def test_groups_handle_unhashable_values(self):
+        """A param may hold a list, which could not be a dict key."""
+        comparison = build_comparison(
+            [
+                make_experiment("a", params={"layers": [64, 32]}),
+                make_experiment("b", params={"layers": [64, 32]}),
+                make_experiment("c", params={"layers": [128]}),
+            ]
+        )
+        self.assertEqual(
+            comparison["params"]["groups"]["layers"],
+            [
+                {"value": [64, 32], "env_ids": ["a", "b"]},
+                {"value": [128], "env_ids": ["c"]},
+            ],
+        )
+
+    def test_group_order_follows_the_compared_order(self):
+        """Groups appear in the order their value was first seen."""
+        comparison = build_comparison(
+            [
+                make_experiment("b", params={"lr": 0.001}),
+                make_experiment("a", params={"lr": 0.1}),
+                make_experiment("c", params={"lr": 0.1}),
+            ]
+        )
+        self.assertEqual(
+            [g["value"] for g in comparison["params"]["groups"]["lr"]], [0.001, 0.1]
+        )
+        self.assertEqual(comparison["params"]["groups"]["lr"][1]["env_ids"], ["a", "c"])
+
     def test_sections_are_independent(self):
         """A name used as both a param and a tag is not conflated across sections."""
         comparison = build_comparison(
@@ -282,6 +388,21 @@ class TestCompareEndpoint(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(body["tags"]["differing"], ["dataset"])
         self.assertEqual(
             body["tags"]["values"]["dataset"], {"run-a": "mnist", "run-b": "cifar10"}
+        )
+
+    def test_groups_survive_the_json_round_trip(self):
+        """The clusters reach the client intact, epochs shared and lr split."""
+        body = self.compare_ok({"env_ids": ["run-a", "run-b"]})
+        self.assertEqual(
+            body["params"]["groups"]["epochs"],
+            [{"value": 10, "env_ids": ["run-a", "run-b"]}],
+        )
+        self.assertEqual(
+            body["params"]["groups"]["lr"],
+            [
+                {"value": 0.1, "env_ids": ["run-a"]},
+                {"value": 0.001, "env_ids": ["run-b"]},
+            ],
         )
 
     def test_experiments_are_returned_in_full(self):
