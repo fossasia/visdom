@@ -1,4 +1,3 @@
-import numpy as np
 from sklearn.datasets import make_classification, make_regression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import Ridge

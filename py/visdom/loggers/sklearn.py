@@ -38,11 +38,9 @@ class VisdomSklearnLogger:
 
     Usage::
 
-        import visdom
         from visdom.loggers import VisdomSklearnLogger
 
-        viz = visdom.Visdom()
-        VisdomSklearnLogger.autolog(viz, env="sklearn_run")
+        VisdomSklearnLogger.autolog()
 
         clf.fit(X_train, y_train)   # logged automatically
         gs.fit(X_train, y_train)    # logged automatically
@@ -71,9 +69,10 @@ class VisdomSklearnLogger:
                 "scikit-learn is required for VisdomSklearnLogger. "
                 "Install with: pip install scikit-learn"
             )
+        _viz_env = getattr(viz, "env", None)
         env = (
             env
-            or getattr(viz, "env", None)
+            or (_viz_env if _viz_env and _viz_env != "main" else None)
             or "sklearn_{}".format(datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
         )
         instance = cls(viz, env)
