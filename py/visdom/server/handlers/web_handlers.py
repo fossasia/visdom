@@ -51,8 +51,10 @@ from visdom.utils.server_utils import (
 )
 from visdom.server.handlers.base_handlers import BaseHandler
 from visdom.experiments import (
+    DEFAULT_SORT_FIELD,
     ExperimentStore,
     ExperimentFinishedError,
+    QueryParseError,
     STATUS_FINISHED,
 )
 
@@ -951,6 +953,137 @@ class ExperimentLogHandler(BaseHandler):
             tornado.escape.to_basestring(self.request.body)
         )
         self.wrap_func(self, args)
+
+
+class ExperimentSearchHandler(BaseHandler):
+    """POST ``/experiments/search`` — find experiments across all environments.
+
+    The JSON body carries a ``query`` in the syntax of
+    :mod:`~visdom.experiments.query` (``"lr < 0.01 AND acc > 90"``); an absent or
+    blank query matches every experiment. Queries are parsed into a predicate and
+    evaluated in Python — never eval'd — so a hostile query is a parse error, not
+    an execution.
+
+    Results are sorted (``sort_by``/``descending``, newest first by default) and
+    then paged with ``limit``/``offset``, and the reply reports the unpaged
+    ``total`` so a caller can page through it:
+
+        {"experiments": [...], "total": 42, "limit": 100, "offset": 0, "query": ""}
+
+    Experiments are read back through the server's ``DataStore``, which means a
+    server running with ``env_path=None`` — where nothing is persisted at all —
+    has nothing to search and returns no results.
+    """
+
+    DEFAULT_LIMIT = 100
+
+    @staticmethod
+    def _require_index(args, field, default):
+        """Return ``args[field]`` as a non-negative int (``None`` = unbounded).
+
+        A JSON body has no int/float distinction, so a client that sends ``10.0``
+        means the index 10; anything with a fractional part is a mistake.
+        """
+        value = args.get(field, default)
+        if value is None:
+            return None
+        if isinstance(value, float) and value.is_integer():
+            value = int(value)
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise tornado.web.HTTPError(
+                400, reason="'{0}' must be an integer".format(field)
+            )
+        if value < 0:
+            raise tornado.web.HTTPError(
+                400, reason="'{0}' must not be negative".format(field)
+            )
+        return value
+
+    @staticmethod
+    def _require_text(args, field):
+        """Return ``args[field]`` if it is a string (or absent); else raise 400."""
+        value = args.get(field)
+        if value is not None and not isinstance(value, str):
+            raise tornado.web.HTTPError(
+                400, reason="'{0}' must be a string".format(field)
+            )
+        return value
+
+    @staticmethod
+    def _require_flag(args, field, default):
+        """Return ``args[field]`` as a bool; else raise 400.
+
+        Deliberately not ``bool(value)``: JSON has real booleans, so a client
+        sending the *string* ``"false"`` means false, and coercing it would
+        truthily flip the result to its opposite without a word.
+        """
+        value = args.get(field, default)
+        if not isinstance(value, bool):
+            raise tornado.web.HTTPError(
+                400, reason="'{0}' must be a boolean".format(field)
+            )
+        return value
+
+    @staticmethod
+    def _decode_body(body):
+        """Return the request body decoded into a dict of arguments.
+
+        The body is optional — the endpoint documents it as such, and a search
+        with no arguments matches everything — so an empty body is read as an
+        empty object. Anything else that is not a JSON object is the caller's
+        error: without this, malformed JSON or a bare list would surface as an
+        unhandled exception and a 500.
+        """
+        try:
+            text = tornado.escape.to_basestring(body).strip()
+            if not text:
+                return {}
+            args = tornado.escape.json_decode(text)
+        except ValueError:
+            raise tornado.web.HTTPError(400, reason="request body must be valid JSON")
+        if not isinstance(args, Mapping):
+            raise tornado.web.HTTPError(400, reason="request body must be an object")
+        return args
+
+    @staticmethod
+    def wrap_func(handler, args):
+        query = ExperimentSearchHandler._require_text(args, "query")
+        sort_by = ExperimentSearchHandler._require_text(args, "sort_by")
+        limit = ExperimentSearchHandler._require_index(
+            args, "limit", ExperimentSearchHandler.DEFAULT_LIMIT
+        )
+        offset = ExperimentSearchHandler._require_index(args, "offset", 0)
+        descending = ExperimentSearchHandler._require_flag(args, "descending", True)
+
+        store = ExperimentStore(handler.storage)
+        try:
+            experiments = store.search(
+                query=query,
+                sort_by=sort_by or DEFAULT_SORT_FIELD,
+                descending=descending,
+            )
+        except QueryParseError as e:
+            raise tornado.web.HTTPError(400, reason=str(e))
+
+        end = None if limit is None else offset + limit
+        page = experiments[offset:end]
+
+        handler.write(
+            json.dumps(
+                {
+                    "experiments": [e.to_dict() for e in page],
+                    "total": len(experiments),
+                    "limit": limit,
+                    "offset": offset,
+                    "query": query or "",
+                },
+                cls=NanSafeEncoder,
+            )
+        )
+
+    @check_auth
+    def post(self):
+        self.wrap_func(self, self._decode_body(self.request.body))
 
 
 class HealthHandler(BaseHandler):

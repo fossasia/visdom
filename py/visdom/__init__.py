@@ -1177,22 +1177,31 @@ class Visdom(object):
 
         return self._send(msg={"prev_eid": prev_eid, "eid": eid}, endpoint="fork_env")
 
-    def _experiment_send(self, msg, env):
-        """POST an experiment action to the server and decode the JSON reply.
+    def _experiment_request(self, msg, endpoint):
+        """POST to an experiment `endpoint` and decode the JSON reply.
 
         Shared plumbing for :meth:`experiment`, :meth:`log_metrics` and
         :meth:`finish_experiment`. Returns the stored experiment as a dict when
         the server replies with JSON, otherwise the raw response (e.g. an error
         string, or the `(msg, endpoint)` tuple when this client has `send=False`).
         """
-        msg["eid"] = env if env is not None else self.env
-        response = self._send(msg, endpoint="experiments/log", quiet=True)
+        response = self._send(msg, endpoint=endpoint, quiet=True)
         if not isstr(response):
             return response
         try:
             return json.loads(response)
         except ValueError:
             return response
+
+    def _experiment_send(self, msg, env):
+        """POST an experiment action for `env` and decode the JSON reply.
+
+        Shared plumbing for :meth:`experiment`, :meth:`log_metrics` and
+        :meth:`finish_experiment`, each of which acts on a single environment.
+        Returns the stored experiment as a dict.
+        """
+        msg["eid"] = env if env is not None else self.env
+        return self._experiment_request(msg, "experiments/log")
 
     def experiment(self, name=None, params=None, tags=None, description=None, env=None):
         """Create or update the experiment metadata for an environment.
@@ -1240,6 +1249,43 @@ class Visdom(object):
         Returns the stored experiment as a dict.
         """
         return self._experiment_send({"action": "finish", "status": status}, env)
+
+    def search_experiments(
+        self, query=None, limit=100, offset=0, sort_by=None, descending=True
+    ):
+        """Search the experiments logged on the server, across all environments.
+
+        `query` filters the results using a small readable syntax — comparisons
+        (`<`, `<=`, `>`, `>=`, `=`, `!=`, `contains`) over param, metric and tag
+        names, combined with `AND`/`OR` and parentheses:
+
+            vis.search_experiments("lr < 0.01 AND acc > 0.9")
+            vis.search_experiments("status = finished AND (dataset contains mnist)")
+
+        A name is matched bare (`acc`) or namespaced (`metric.acc`, `param.lr`,
+        `tag.owner`) when it is ambiguous; metrics compare on their latest value.
+        `query=None` returns everything. Results are sorted by `sort_by` (any of
+        those same names, newest-created first by default) and paged with
+        `limit`/`offset`; pass `limit=None` for all of them.
+
+        Returns the server's reply as a dict of `experiments` (a list of
+        experiment dicts, one page worth), the unpaged `total` matching the
+        query, and the `limit`/`offset`/`query` used.
+        """
+        if query is not None and not isstr(query):
+            raise TypeError("query must be a string")
+        if sort_by is not None and not isstr(sort_by):
+            raise TypeError("sort_by must be a string")
+        return self._experiment_request(
+            {
+                "query": query,
+                "limit": limit,
+                "offset": offset,
+                "sort_by": sort_by,
+                "descending": descending,
+            },
+            "experiments/search",
+        )
 
     def get_window_data(self, win=None, env=None):
         """

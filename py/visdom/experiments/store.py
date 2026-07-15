@@ -22,8 +22,50 @@ from visdom.experiments.models import (
     ExperimentFinishedError,
     STATUS_FINISHED,
 )
+from visdom.experiments.query import Query, build_record
 
 METADATA_KEY = "experiment"
+
+DEFAULT_SORT_FIELD = "created_at"
+
+_MISSING = object()
+
+
+def _order_key(value):
+    """Return a sort key that totally orders values of mixed types.
+
+    Records come from user-supplied params/metrics/tags, so one field can hold a
+    number in one experiment and a string in another; sorting them directly
+    would raise ``TypeError``. Numbers sort before strings, and everything that
+    is neither is compared by its text form. Booleans are ordered as text rather
+    than as 0/1, matching :mod:`~visdom.experiments.query`, which likewise
+    refuses to treat a bool as a number.
+    """
+    if isinstance(value, bool):
+        return (1, 0.0, str(value))
+    if isinstance(value, (int, float)):
+        return (0, float(value), "")
+    return (1, 0.0, str(value))
+
+
+def _sort_pairs(pairs, field, descending):
+    """Sort ``(record, experiment)`` pairs by ``record[field]``.
+
+    Experiments whose record lacks ``field`` (or holds ``None`` there) keep
+    their relative order and always land last, in both directions: a run that
+    never logged ``acc`` is not the best-scoring run just because the sort was
+    reversed.
+    """
+    present = []
+    missing = []
+    for record, experiment in pairs:
+        value = record.get(field, _MISSING)
+        if value is _MISSING or value is None:
+            missing.append((record, experiment))
+        else:
+            present.append((record, experiment))
+    present.sort(key=lambda pair: _order_key(pair[0][field]), reverse=descending)
+    return present + missing
 
 
 class ExperimentStore:
@@ -140,6 +182,41 @@ class ExperimentStore:
             if experiment is not None:
                 experiments.append(experiment)
         return experiments
+
+    def search(self, query=None, sort_by=DEFAULT_SORT_FIELD, descending=True):
+        """Return the experiments matching ``query``, sorted by ``sort_by``.
+
+        ``query`` is the human-readable syntax of
+        :mod:`~visdom.experiments.query` (``"lr < 0.01 AND acc > 90"``); ``None``
+        or a blank string matches every experiment. Matching runs against the
+        flattened record of :func:`~visdom.experiments.query.build_record`, so a
+        param, latest metric or tag is reachable both bare (``acc``) and
+        namespaced (``metric.acc``) — and ``sort_by`` accepts either spelling of
+        the same names.
+
+        Sorting defaults to newest-first; pass ``descending=False`` for oldest
+        first, or ``sort_by=None`` to keep the backend's own ordering. Results
+        are ordinary :class:`Experiment` objects, and paging through them is left
+        to the caller — the whole set is scanned regardless, since every
+        environment must be read to know whether it matches.
+
+        Raises :class:`~visdom.experiments.query.QueryParseError` if ``query``
+        is not valid query syntax.
+        """
+        if query is not None and not isinstance(query, str):
+            raise TypeError(
+                "query must be a string or None, got {0}".format(type(query).__name__)
+            )
+        pairs = [
+            (build_record(experiment), experiment)
+            for experiment in self.list_experiments()
+        ]
+        if query is not None and query.strip():
+            compiled = Query(query)
+            pairs = [pair for pair in pairs if compiled.matches(pair[0])]
+        if sort_by:
+            pairs = _sort_pairs(pairs, sort_by, descending)
+        return [experiment for _, experiment in pairs]
 
     def delete_experiment(self, env_id):
         """Drop the experiment blob from ``env_id`` (keeping the env itself).
