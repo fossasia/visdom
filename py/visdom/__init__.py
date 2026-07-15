@@ -1246,6 +1246,7 @@ class Visdom(object):
 
         An experiment that is already terminal cannot be finished again; the
         server rejects the attempt rather than restamping the existing record.
+
         Returns the stored experiment as a dict.
         """
         return self._experiment_send({"action": "finish", "status": status}, env)
@@ -1285,6 +1286,43 @@ class Visdom(object):
                 "descending": descending,
             },
             "experiments/search",
+        )
+
+    def compare_experiments(self, env_ids):
+        """Compare the named experiments field by field, to see what differs.
+
+        `env_ids` names the runs to compare, in the order given, and each must
+        exist:
+
+            vis.compare_experiments(["run-a", "run-b"])
+
+        Finding the runs is :meth:`search_experiments`' job — it answers "which
+        runs match?", this answers "how do these runs differ?". To compare a
+        query's matches, search first and pass the ids on:
+
+            found = vis.search_experiments("lr < 0.01")
+            vis.compare_experiments([e["env_id"] for e in found["experiments"]])
+
+        Returns the server's reply as a dict: the compared runs (`env_ids` and
+        the full `experiments`), plus a `params`, `metrics` and `tags` section.
+        Each section holds the union of `fields`, the `shared` ones every run
+        agrees on, the `differing` rest, the per-run `values`, and `groups`.
+
+        `shared`/`differing` answer "what changed?"; `groups` answers "which runs
+        agree?", clustering the runs by value per field. Comparing three runs on
+        two learning rates gives a `params` section whose `differing` is `['lr']`,
+        whose `values['lr']` is `{'run-a': 0.1, 'run-b': 0.001, 'run-c': 0.1}`,
+        and whose `groups['lr']` is
+        `[{'value': 0.1, 'env_ids': ['run-a', 'run-c']},
+          {'value': 0.001, 'env_ids': ['run-b']}]`.
+        """
+        if isstr(env_ids) or not isinstance(env_ids, (list, tuple)):
+            raise TypeError("env_ids must be a list of environment ids")
+        if not all(isstr(env_id) for env_id in env_ids):
+            raise TypeError("env_ids must contain strings")
+        return self._experiment_request(
+            {"env_ids": list(env_ids)},
+            "experiments/compare",
         )
 
     def get_window_data(self, win=None, env=None):

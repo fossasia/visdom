@@ -37,6 +37,7 @@ from visdom.utils.server_utils import (
     broadcast_undo_state,
     notify,
 )
+from visdom.experiments import retarget_experiment
 from visdom.server.defaults import MAX_SOCKET_WAIT
 
 
@@ -137,7 +138,12 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 prev_eid = escape_eid(msg["prev_eid"]) if msg.get("prev_eid") else None
                 if prev_eid not in self.state:
                     return
-                self.state[msg["eid"]] = copy.deepcopy(self.state[prev_eid])
+                # Saving under a new eid clones the env, metadata blob and all,
+                # so retarget the copy rather than leave it recording the env
+                # it was cloned from.
+                self.state[msg["eid"]] = retarget_experiment(
+                    copy.deepcopy(self.state[prev_eid]), msg["eid"]
+                )
                 self.state[msg["eid"]]["reload"] = msg["data"]
                 self.eid = msg["eid"]
                 self.storage.save_env(self.eid, self.state[self.eid])

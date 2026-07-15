@@ -55,6 +55,7 @@ from visdom.experiments import (
     ExperimentStore,
     ExperimentFinishedError,
     QueryParseError,
+    retarget_experiment,
     STATUS_FINISHED,
 )
 
@@ -538,7 +539,14 @@ class ForkEnvHandler(BaseHandler):
 
         assert prev_eid in handler.state, "env to be forked doesn't exist"
 
-        handler.state[eid] = copy.deepcopy(handler.state[prev_eid])
+        # The copy carries the source env's experiment metadata, whose env_id
+        # still names the env it was forked from; retarget it so the fork does
+        # not answer to its parent's id. Reading the copy also materialises it
+        # when the source was still lazy, which is what makes the save below
+        # write the fork out: an unmaterialised LazyEnvData is skipped.
+        handler.state[eid] = retarget_experiment(
+            copy.deepcopy(handler.state[prev_eid]), eid
+        )
         handler.storage.save_env(eid, handler.state[eid])
         broadcast_envs(handler)
 
@@ -1084,6 +1092,73 @@ class ExperimentSearchHandler(BaseHandler):
     @check_auth
     def post(self):
         self.wrap_func(self, self._decode_body(self.request.body))
+
+
+class ExperimentCompareHandler(BaseHandler):
+    """POST ``/experiments/compare`` — diff the named experiments field by field.
+
+    The JSON body names the runs to compare::
+
+        {"env_ids": ["run-a", "run-b"]}
+
+    Every id must have an experiment — a 404 names the ones that do not, since
+    quietly comparing the remainder would answer a question the caller did not
+    ask. Finding the runs is ``/experiments/search``'s job: it answers "which runs
+    match?", this answers "how do these runs differ?". A caller comparing a
+    query's matches searches first and passes the ids on.
+
+    The reply carries the compared runs (``env_ids``, ``experiments``) and a diff
+    per section, each listing the union of ``fields``, the ``shared`` ones every
+    run agrees on, the ``differing`` rest, and the per-run ``values``::
+
+        {"env_ids": [...], "experiments": [...],
+         "params": {"fields": [...], "shared": {...},
+                    "differing": [...], "values": {...}},
+         "metrics": {...}, "tags": {...}}
+
+    Experiments are read through the server's ``DataStore``, so as with search a
+    server running with ``env_path=None`` has nothing to compare. The body is
+    decoded by ``ExperimentSearchHandler._decode_body``, so the two endpoints
+    answer malformed JSON and non-object bodies with the same 400; unlike
+    search, an empty body is not a valid request here, since ``env_ids`` is
+    required and there is no comparison to make without it.
+    """
+
+    @staticmethod
+    def _require_env_ids(args):
+        """Return ``args["env_ids"]`` as a list of ids; raise 400 if unusable.
+
+        A bare string is rejected rather than treated as a one-id list: it would
+        otherwise be iterated character by character into a comparison of runs
+        named ``"r"``, ``"u"``, ``"n"``.
+        """
+        value = args.get("env_ids")
+        if value is None:
+            raise tornado.web.HTTPError(400, reason="'env_ids' is required")
+        if not isinstance(value, list):
+            raise tornado.web.HTTPError(400, reason="'env_ids' must be a list of ids")
+        if not value:
+            raise tornado.web.HTTPError(
+                400, reason="'env_ids' must name at least one environment"
+            )
+        if not all(isinstance(env_id, str) for env_id in value):
+            raise tornado.web.HTTPError(400, reason="'env_ids' must contain strings")
+        return value
+
+    @staticmethod
+    def wrap_func(handler, args):
+        env_ids = ExperimentCompareHandler._require_env_ids(args)
+        store = ExperimentStore(handler.storage)
+        try:
+            comparison = store.compare(env_ids)
+        except KeyError as e:
+            raise tornado.web.HTTPError(404, reason=str(e.args[0]))
+
+        handler.write(json.dumps(comparison, cls=NanSafeEncoder))
+
+    @check_auth
+    def post(self):
+        self.wrap_func(self, ExperimentSearchHandler._decode_body(self.request.body))
 
 
 class HealthHandler(BaseHandler):
