@@ -381,6 +381,53 @@ with VisdomLogger(viz, env="my_run", log_every=50) as tracker:
 
 Each unique name passed to `tracker.log()` gets its own window. The first call creates it; subsequent calls append. See `example/train_example.py` for a full working example.
 
+### scikit-learn
+
+`visdom.loggers.VisdomSklearnLogger` is a context manager that patches sklearn `fit()` calls so every estimator trained inside the block logs to Visdom automatically.
+
+**Plain estimators** (classifiers, regressors, clusterers) produce a text pane with the estimator name, dataset shape, training score, fit time, and all hyperparameters.
+
+**GridSearchCV / RandomizedSearchCV** produce a bar chart of `mean_test_score` per parameter combination and a text pane with `best_score_`, `best_params_`, and fit time.
+
+**Usage as a context manager** (recommended):
+
+```python
+import visdom
+from visdom.loggers import VisdomSklearnLogger
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import Ridge
+from sklearn.model_selection import GridSearchCV
+
+viz = visdom.Visdom()
+
+with VisdomSklearnLogger(viz, env="sklearn_run") as logger:
+    clf = RandomForestClassifier(n_estimators=100)
+    clf.fit(X_train, y_train)        # -> text pane
+
+    reg = Ridge(alpha=1.0)
+    reg.fit(X_train, y_train)        # -> text pane
+
+    gs = GridSearchCV(clf, param_grid, cv=3)
+    gs.fit(X_train, y_train)         # -> bar chart + text pane
+```
+
+**Explicit enable/disable** — use when a `with` block isn't practical:
+
+```python
+logger = VisdomSklearnLogger(viz, env="sklearn_run")
+logger.enable()
+
+clf.fit(X_train, y_train)
+
+logger.disable()
+```
+
+**Parameters:**
+- `viz`: a connected `visdom.Visdom()` instance
+- `env`: environment name (default: auto-generated from timestamp)
+
+See `example/train_sklearn_example.py` for a full working example covering plain estimators and grid search.
+
 ## Details
 <img src="https://user-images.githubusercontent.com/19650074/198747904-7a8a580f-851a-45fb-8f45-94e54a910ee2.png"/>
 
