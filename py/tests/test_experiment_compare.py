@@ -2,7 +2,7 @@
 
 Covers the four pieces the compare layer is built from: the pure
 ``build_comparison`` diff over experiment objects; ``ExperimentStore.compare``
-selecting runs by name or by query against a real ``JSONStore`` over a temporary
+over the named runs against a real ``JSONStore`` over a temporary
 directory; the ``/experiments/compare`` endpoint end-to-end through a real
 :class:`~visdom.server.app.Application` with Tornado's ``AsyncHTTPTestCase``; and
 the ``Visdom.compare_experiments`` message shape with ``send=False`` (no server).
@@ -17,12 +17,7 @@ import tornado.testing
 
 from visdom import Visdom
 from visdom.data_model import JSONStore
-from visdom.experiments import (
-    Experiment,
-    ExperimentStore,
-    QueryParseError,
-    build_comparison,
-)
+from visdom.experiments import Experiment, ExperimentStore, build_comparison
 from visdom.server.app import Application
 
 
@@ -179,7 +174,7 @@ class TestBuildComparison(unittest.TestCase):
 
 
 class TestStoreCompare(unittest.TestCase):
-    """ExperimentStore.compare selects runs by name or by query."""
+    """ExperimentStore.compare diffs the runs it is given by name."""
 
     def setUp(self):
         self._tmp_dir = tempfile.mkdtemp(prefix="visdom_exp_compare_")
@@ -236,52 +231,20 @@ class TestStoreCompare(unittest.TestCase):
         with self.assertRaises(TypeError):
             self.store.compare(env_ids=["run-a", 7])
 
-    def test_compare_by_query(self):
-        """A query selects the runs to compare."""
-        comparison = self.store.compare(query="lr > 0.05")
-        self.assertEqual(sorted(comparison["env_ids"]), ["run-a", "run-c"])
-        self.assertEqual(comparison["params"]["differing"], ["epochs", "lr"])
+    def test_searching_then_comparing_the_matches(self):
+        """Comparing a query's matches is search's job, then compare's.
 
-    def test_query_selection_is_sorted(self):
-        """sort_by/descending order the compared runs as search does."""
-        comparison = self.store.compare(query="lr > 0.05", descending=False)
+        The two compose: search answers which runs match, compare answers how
+        they differ. This is the path that replaced compare's own query mode.
+        """
+        found = self.store.search(query="lr > 0.05", descending=False)
+        comparison = self.store.compare([e.env_id for e in found])
         self.assertEqual(comparison["env_ids"], ["run-a", "run-c"])
-        comparison = self.store.compare(query="lr > 0.05", sort_by="lr")
-        self.assertEqual(comparison["env_ids"], ["run-c", "run-a"])
-
-    def test_query_limit_caps_the_compared_set(self):
-        """limit narrows which runs are compared, and env_ids says which."""
-        comparison = self.store.compare(query="lr > 0.0001", limit=2)
-        self.assertEqual(comparison["env_ids"], ["run-c", "run-b"])
-        self.assertEqual(len(comparison["experiments"]), 2)
-
-    def test_query_matching_nothing_compares_nothing(self):
-        """An empty answer to a valid question is not an error."""
-        comparison = self.store.compare(query="lr > 100")
-        self.assertEqual(comparison["env_ids"], [])
-        self.assertEqual(comparison["params"]["fields"], [])
-
-    def test_invalid_query_raises_parse_error(self):
-        with self.assertRaises(QueryParseError):
-            self.store.compare(query="lr <")
-
-    def test_both_selectors_raises_value_error(self):
-        """Passing both is ambiguous, so refuse rather than pick one."""
-        with self.assertRaises(ValueError):
-            self.store.compare(env_ids=["run-a"], query="lr > 0")
-
-    def test_neither_selector_raises_value_error(self):
-        with self.assertRaises(ValueError):
-            self.store.compare()
-
-    def test_limit_is_ignored_for_env_ids(self):
-        """An explicit list is already the exact set; limit has nothing to cap."""
-        comparison = self.store.compare(env_ids=["run-a", "run-b"], limit=1)
-        self.assertEqual(comparison["env_ids"], ["run-a", "run-b"])
+        self.assertEqual(comparison["params"]["differing"], ["epochs", "lr"])
 
 
 class TestCompareEndpoint(tornado.testing.AsyncHTTPTestCase):
-    """POST /experiments/compare diffs the selected experiments."""
+    """POST /experiments/compare diffs the named experiments."""
 
     def setUp(self):
         self._tmp_dir = tempfile.mkdtemp(prefix="visdom_exp_compare_api_")
@@ -323,25 +286,10 @@ class TestCompareEndpoint(tornado.testing.AsyncHTTPTestCase):
 
     def test_experiments_are_returned_in_full(self):
         """The compared runs are echoed as full experiment dicts."""
-        body = self.compare_ok({"env_ids": ["run-a"]})
+        body = self.compare_ok({"env_ids": ["run-a", "run-b"]})
         experiment = body["experiments"][0]
         self.assertEqual(experiment["name"], "alpha")
         self.assertEqual(experiment["params"][0]["key"], "lr")
-
-    def test_compare_by_query(self):
-        """A query selects the runs to compare."""
-        body = self.compare_ok({"query": "lr > 0.05", "descending": False})
-        self.assertEqual(body["env_ids"], ["run-a", "run-c"])
-
-    def test_query_with_limit(self):
-        """limit caps how many matches are compared."""
-        body = self.compare_ok({"query": "lr > 0.0001", "limit": 2})
-        self.assertEqual(len(body["env_ids"]), 2)
-
-    def test_query_matching_nothing_is_200(self):
-        """An empty comparison is a valid answer."""
-        body = self.compare_ok({"query": "lr > 100"})
-        self.assertEqual(body["env_ids"], [])
 
     def test_unknown_env_id_is_404(self):
         """A run that has no experiment is named in the error."""
@@ -349,23 +297,12 @@ class TestCompareEndpoint(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(resp.code, 404)
         self.assertIn("nope", resp.reason)
 
-    def test_both_selectors_is_400(self):
-        """Both selectors together is refused, not silently resolved."""
-        resp = self.compare({"env_ids": ["run-a"], "query": "lr > 0"})
-        self.assertEqual(resp.code, 400)
-        self.assertIn("not both", resp.reason)
-
-    def test_neither_selector_is_400(self):
+    def test_missing_env_ids_is_400(self):
+        """env_ids is the only way to select runs, so it is required."""
         resp = self.compare({})
         self.assertEqual(resp.code, 400)
         self.assertIn("required", resp.reason)
-
-    def test_explicit_nulls_are_treated_as_absent(self):
-        """The client always sends both keys, one of them null."""
-        body = self.compare_ok({"env_ids": ["run-a"], "query": None})
-        self.assertEqual(body["env_ids"], ["run-a"])
-        body = self.compare_ok({"env_ids": None, "query": "lr = 0.5"})
-        self.assertEqual(body["env_ids"], ["run-c"])
+        self.assertEqual(self.compare({"env_ids": None}).code, 400)
 
     def test_empty_env_ids_is_400(self):
         resp = self.compare({"env_ids": []})
@@ -380,29 +317,26 @@ class TestCompareEndpoint(tornado.testing.AsyncHTTPTestCase):
     def test_non_string_env_id_is_400(self):
         self.assertEqual(self.compare({"env_ids": ["run-a", 7]}).code, 400)
 
-    def test_invalid_query_is_400(self):
-        """A malformed query is the caller's error, and says why."""
-        resp = self.compare({"query": "lr <"})
-        self.assertEqual(resp.code, 400)
-        self.assertIn("end of query", resp.reason)
+    def test_unknown_keys_are_ignored(self):
+        """A stale caller still sending query/limit is not an error, just ignored.
 
-    def test_non_boolean_descending_is_400(self):
-        """The string "false" is rejected rather than coerced to true."""
-        self.assertEqual(
-            self.compare({"query": "lr > 0", "descending": "false"}).code, 400
+        The endpoint took a `query` until compare's query mode was dropped in
+        favour of search; an old client's extra keys must not 500.
+        """
+        body = self.compare_ok(
+            {"env_ids": ["run-a", "run-b"], "query": "lr > 0", "limit": 1}
         )
+        self.assertEqual(body["env_ids"], ["run-a", "run-b"])
 
-    def test_negative_limit_is_400(self):
-        self.assertEqual(self.compare({"query": "lr > 0", "limit": -1}).code, 400)
+    def test_traversal_env_id_is_404_not_a_file_read(self):
+        """A crafted id cannot escape env_path; it simply names no experiment.
 
-    def test_non_string_sort_by_is_400(self):
-        self.assertEqual(self.compare({"query": "lr > 0", "sort_by": 7}).code, 400)
-
-    def test_injection_payload_is_inert(self):
-        """A SQL-ish payload is a parse error or a plain string compare, not an act."""
-        resp = self.compare({"query": "name = 'x'; DROP TABLE experiments'"})
-        self.assertIn(resp.code, (200, 400))
-        self.assertEqual(len(self.compare_ok({"query": "lr > 0.0001"})["env_ids"]), 3)
+        JSONStore._primary_path resolves the id under env_path and rejects
+        anything that would climb out, so this degrades to "no such experiment"
+        rather than reading the filesystem.
+        """
+        resp = self.compare({"env_ids": ["run-a", "../../../../etc/passwd"]})
+        self.assertEqual(resp.code, 404)
 
     def test_compare_sees_an_experiment_logged_over_http(self):
         """An experiment logged through /experiments/log is comparable at once."""
@@ -422,19 +356,16 @@ class TestCompareClientMessage(unittest.TestCase):
     def setUp(self):
         self.vis = Visdom(send=False, raise_exceptions=True)
 
-    def test_compare_by_env_ids_message_shape(self):
+    def test_compare_message_shape(self):
+        """The message names the runs and carries no selection knobs.
+
+        ``_send`` stamps an ``eid`` on every message; the endpoint ignores it.
+        """
         msg, endpoint = self.vis.compare_experiments(["run-a", "run-b"])
         self.assertEqual(endpoint, "experiments/compare")
         self.assertEqual(msg["env_ids"], ["run-a", "run-b"])
-        self.assertIsNone(msg["query"])
-        self.assertIsNone(msg["limit"])
-
-    def test_compare_by_query_message_shape(self):
-        msg, _ = self.vis.compare_experiments(query="lr < 0.01", limit=10)
-        self.assertIsNone(msg["env_ids"])
-        self.assertEqual(msg["query"], "lr < 0.01")
-        self.assertEqual(msg["limit"], 10)
-        self.assertTrue(msg["descending"])
+        for dropped in ("query", "limit", "sort_by", "descending"):
+            self.assertNotIn(dropped, msg)
 
     def test_tuple_env_ids_is_sent_as_a_list(self):
         """A tuple is a fine way to name runs, but JSON only has arrays."""
@@ -447,15 +378,10 @@ class TestCompareClientMessage(unittest.TestCase):
             self.vis.compare_experiments("run-a")
         with self.assertRaises(TypeError):
             self.vis.compare_experiments([1, 2])
-        with self.assertRaises(TypeError):
-            self.vis.compare_experiments(query=42)
-        with self.assertRaises(TypeError):
-            self.vis.compare_experiments(query="lr > 0", sort_by=42)
 
-    def test_client_rejects_both_or_neither_selector(self):
-        with self.assertRaises(ValueError):
-            self.vis.compare_experiments(["run-a"], query="lr > 0")
-        with self.assertRaises(ValueError):
+    def test_env_ids_is_required(self):
+        """There is no other way to select runs, so it cannot be omitted."""
+        with self.assertRaises(TypeError):
             self.vis.compare_experiments()
 
 

@@ -16,7 +16,7 @@ _OptStr = Optional[Text]  # For optional string parameters, like 'window' and 'e
 # For the list of environments to compare. Spelled out rather than Sequence[Text]
 # because a bare str is itself a Sequence[str]: 'compare_experiments' rejects one
 # at runtime, so a checker must not accept it here.
-_EnvIds = Optional[Union[List[Text], Tuple[Text, ...]]]
+_EnvIds = Union[List[Text], Tuple[Text, ...]]
 
 # The decoded JSON reply of the experiment endpoints.
 _ExperimentReply = Mapping[Text, Any]
@@ -79,14 +79,7 @@ class Visdom:
         sort_by: _OptStr = ...,
         descending: bool = ...,
     ) -> _ExperimentReply: ...
-    def compare_experiments(
-        self,
-        env_ids: _EnvIds = ...,
-        query: _OptStr = ...,
-        limit: Optional[int] = ...,
-        sort_by: _OptStr = ...,
-        descending: bool = ...,
-    ) -> _ExperimentReply: ...
+    def compare_experiments(self, env_ids: _EnvIds) -> _ExperimentReply: ...
     def get_window_data(
         self, win: _OptStr = ..., env: _OptStr = ...
     ) -> _SendReturn: ...

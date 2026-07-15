@@ -580,14 +580,13 @@ paths:
         not — the short list of knobs that actually changed between runs.
 
 
-        The runs to compare are selected either by name (`env_ids`) or by search
-        (`query`), and the two are mutually exclusive: sending both, or neither,
-        is a `400` rather than a silent guess at which was meant. With `env_ids`
-        the runs are compared in the order given and every id must have an
-        experiment, otherwise `404`. With `query` the syntax and the
-        `sort_by`/`descending`/`limit` handling are those of
-        `/experiments/search`, and a query matching nothing is an empty
-        comparison rather than an error.
+        The runs are named by `env_ids` and compared in the order given; every id
+        must have an experiment, otherwise `404`.
+
+
+        Finding the runs is `/experiments/search`'s job: it answers "which runs
+        match?", this answers "how do these runs differ?". To compare a query's
+        matches, search first and pass the resulting ids on.
 
 
         Metrics are a time series, so a comparison uses each metric's latest
@@ -602,43 +601,16 @@ paths:
           application/json:
             schema:
               type: object
+              required: [env_ids]
               properties:
                 env_ids:
                   type: array
-                  nullable: true
                   minItems: 1
                   description: >
-                    Environments to compare, in the order given. Mutually
-                    exclusive with `query`. Duplicate ids collapse to one.
+                    Environments to compare, in the order given. Duplicate ids
+                    collapse to one.
                   items:
                     type: string
-                query:
-                  type: string
-                  nullable: true
-                  description: >
-                    Compare every experiment this filter matches, in the syntax
-                    of `/experiments/search`. Mutually exclusive with `env_ids`.
-                sort_by:
-                  type: string
-                  nullable: true
-                  default: created_at
-                  description: >
-                    Field ordering the compared runs (`query` selection only).
-                descending:
-                  type: boolean
-                  default: true
-                  description: Sort direction; newest/highest first by default.
-                limit:
-                  type: integer
-                  nullable: true
-                  minimum: 0
-                  default: null
-                  description: >
-                    Maximum number of runs to compare (`query` selection only;
-                    `null` compares every match). Note that the diff describes
-                    the runs actually compared, so a limit that truncates the
-                    matches narrows what `shared`/`differing` are computed
-                    over; the returned `env_ids` say which runs those were.
       responses:
         "200":
           description: The comparison of the selected experiments.
@@ -666,10 +638,9 @@ paths:
                     $ref: "#/components/schemas/ExperimentComparisonSection"
         "400":
           description: >
-            Invalid request — both `env_ids` and `query` given, neither given,
-            an empty or non-string `env_ids`, malformed `query` syntax, or a
-            `limit` that is not a non-negative integer. Also returned when
-            authentication is required but not provided.
+            Invalid request — `env_ids` missing, empty, not a list, or holding
+            something other than strings. Also returned when authentication is
+            required but not provided.
         "404":
           description: One or more of the given `env_ids` has no experiment.
 

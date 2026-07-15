@@ -819,49 +819,6 @@ class UploadEnvHandler(BaseHandler):
         )
 
 
-def _require_index(args, field, default):
-    """Return ``args[field]`` as a non-negative int (``None`` = unbounded).
-
-    A JSON body has no int/float distinction, so a client that sends ``10.0``
-    means the index 10; anything with a fractional part is a mistake.
-    """
-    value = args.get(field, default)
-    if value is None:
-        return None
-    if isinstance(value, float) and value.is_integer():
-        value = int(value)
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise tornado.web.HTTPError(
-            400, reason="'{0}' must be an integer".format(field)
-        )
-    if value < 0:
-        raise tornado.web.HTTPError(
-            400, reason="'{0}' must not be negative".format(field)
-        )
-    return value
-
-
-def _require_text(args, field):
-    """Return ``args[field]`` if it is a string (or absent); else raise 400."""
-    value = args.get(field)
-    if value is not None and not isinstance(value, str):
-        raise tornado.web.HTTPError(400, reason="'{0}' must be a string".format(field))
-    return value
-
-
-def _require_flag(args, field, default):
-    """Return ``args[field]`` as a bool; else raise 400.
-
-    Deliberately not ``bool(value)``: JSON has real booleans, so a client
-    sending the *string* ``"false"`` means false, and coercing it would
-    truthily flip the result to its opposite without a word.
-    """
-    value = args.get(field, default)
-    if not isinstance(value, bool):
-        raise tornado.web.HTTPError(400, reason="'{0}' must be a boolean".format(field))
-    return value
-
-
 class ExperimentLogHandler(BaseHandler):
     """POST ``/experiments/log`` — record experiment metadata for an environment.
 
@@ -981,12 +938,61 @@ class ExperimentSearchHandler(BaseHandler):
     DEFAULT_LIMIT = 100
 
     @staticmethod
+    def _require_index(args, field, default):
+        """Return ``args[field]`` as a non-negative int (``None`` = unbounded).
+
+        A JSON body has no int/float distinction, so a client that sends ``10.0``
+        means the index 10; anything with a fractional part is a mistake.
+        """
+        value = args.get(field, default)
+        if value is None:
+            return None
+        if isinstance(value, float) and value.is_integer():
+            value = int(value)
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise tornado.web.HTTPError(
+                400, reason="'{0}' must be an integer".format(field)
+            )
+        if value < 0:
+            raise tornado.web.HTTPError(
+                400, reason="'{0}' must not be negative".format(field)
+            )
+        return value
+
+    @staticmethod
+    def _require_text(args, field):
+        """Return ``args[field]`` if it is a string (or absent); else raise 400."""
+        value = args.get(field)
+        if value is not None and not isinstance(value, str):
+            raise tornado.web.HTTPError(
+                400, reason="'{0}' must be a string".format(field)
+            )
+        return value
+
+    @staticmethod
+    def _require_flag(args, field, default):
+        """Return ``args[field]`` as a bool; else raise 400.
+
+        Deliberately not ``bool(value)``: JSON has real booleans, so a client
+        sending the *string* ``"false"`` means false, and coercing it would
+        truthily flip the result to its opposite without a word.
+        """
+        value = args.get(field, default)
+        if not isinstance(value, bool):
+            raise tornado.web.HTTPError(
+                400, reason="'{0}' must be a boolean".format(field)
+            )
+        return value
+
+    @staticmethod
     def wrap_func(handler, args):
-        query = _require_text(args, "query")
-        sort_by = _require_text(args, "sort_by")
-        limit = _require_index(args, "limit", ExperimentSearchHandler.DEFAULT_LIMIT)
-        offset = _require_index(args, "offset", 0)
-        descending = _require_flag(args, "descending", True)
+        query = ExperimentSearchHandler._require_text(args, "query")
+        sort_by = ExperimentSearchHandler._require_text(args, "sort_by")
+        limit = ExperimentSearchHandler._require_index(
+            args, "limit", ExperimentSearchHandler.DEFAULT_LIMIT
+        )
+        offset = ExperimentSearchHandler._require_index(args, "offset", 0)
+        descending = ExperimentSearchHandler._require_flag(args, "descending", True)
 
         store = ExperimentStore(handler.storage)
         try:
@@ -1023,21 +1029,17 @@ class ExperimentSearchHandler(BaseHandler):
 
 
 class ExperimentCompareHandler(BaseHandler):
-    """POST ``/experiments/compare`` — diff experiments field by field.
+    """POST ``/experiments/compare`` — diff the named experiments field by field.
 
-    Selects the experiments to compare either by name or by search, and the two
-    are mutually exclusive::
+    The JSON body names the runs to compare::
 
         {"env_ids": ["run-a", "run-b"]}
-        {"query": "lr < 0.01", "limit": 10}
 
-    Sending both is a 400 rather than a silent precedence rule, as is sending
-    neither. With ``env_ids``, every id must have an experiment — a 404 names the
-    ones that do not, since quietly comparing the remainder would answer a
-    question the caller did not ask. With ``query``, the syntax and the
-    ``sort_by``/``descending``/``limit`` handling are exactly
-    :class:`ExperimentSearchHandler`'s, and a query matching nothing is an empty
-    comparison rather than an error.
+    Every id must have an experiment — a 404 names the ones that do not, since
+    quietly comparing the remainder would answer a question the caller did not
+    ask. Finding the runs is ``/experiments/search``'s job: it answers "which runs
+    match?", this answers "how do these runs differ?". A caller comparing a
+    query's matches searches first and passes the ids on.
 
     The reply carries the compared runs (``env_ids``, ``experiments``) and a diff
     per section, each listing the union of ``fields``, the ``shared`` ones every
@@ -1054,7 +1056,7 @@ class ExperimentCompareHandler(BaseHandler):
 
     @staticmethod
     def _require_env_ids(args):
-        """Return ``args["env_ids"]`` as a list of ids, or ``None`` if absent.
+        """Return ``args["env_ids"]`` as a list of ids; raise 400 if unusable.
 
         A bare string is rejected rather than treated as a one-id list: it would
         otherwise be iterated character by character into a comparison of runs
@@ -1062,7 +1064,7 @@ class ExperimentCompareHandler(BaseHandler):
         """
         value = args.get("env_ids")
         if value is None:
-            return None
+            raise tornado.web.HTTPError(400, reason="'env_ids' is required")
         if not isinstance(value, list):
             raise tornado.web.HTTPError(400, reason="'env_ids' must be a list of ids")
         if not value:
@@ -1076,30 +1078,9 @@ class ExperimentCompareHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
         env_ids = ExperimentCompareHandler._require_env_ids(args)
-        query = _require_text(args, "query")
-        if env_ids is not None and query is not None:
-            raise tornado.web.HTTPError(
-                400, reason="pass either 'env_ids' or 'query', not both"
-            )
-        if env_ids is None and query is None:
-            raise tornado.web.HTTPError(
-                400, reason="one of 'env_ids' or 'query' is required"
-            )
-        sort_by = _require_text(args, "sort_by")
-        limit = _require_index(args, "limit", None)
-        descending = _require_flag(args, "descending", True)
-
         store = ExperimentStore(handler.storage)
         try:
-            comparison = store.compare(
-                env_ids=env_ids,
-                query=query,
-                sort_by=sort_by or DEFAULT_SORT_FIELD,
-                descending=descending,
-                limit=limit,
-            )
-        except QueryParseError as e:
-            raise tornado.web.HTTPError(400, reason=str(e))
+            comparison = store.compare(env_ids)
         except KeyError as e:
             raise tornado.web.HTTPError(404, reason=str(e.args[0]))
 

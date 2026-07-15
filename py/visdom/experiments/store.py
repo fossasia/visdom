@@ -246,48 +246,21 @@ class ExperimentStore:
             )
         return experiments
 
-    def compare(
-        self,
-        env_ids=None,
-        query=None,
-        sort_by=DEFAULT_SORT_FIELD,
-        descending=True,
-        limit=None,
-    ):
-        """Compare experiments field by field; see :func:`build_comparison`.
+    def compare(self, env_ids):
+        """Compare the named experiments field by field; see :func:`build_comparison`.
 
-        The experiments are chosen either by name or by search, and the two are
-        mutually exclusive — passing both, or neither, is a ``ValueError`` rather
-        than a guess at which was meant:
+        ``env_ids`` is an explicit list, compared in the order given. Every id must
+        have an experiment; a :class:`KeyError` names those that do not, since a
+        comparison silently missing a run it was asked for would be read as a
+        comparison of the rest.
 
-        * ``env_ids`` — an explicit list, compared in the order given. Every id
-          must have an experiment; a :class:`KeyError` names those that do not,
-          since a comparison silently missing a run it was asked for would be
-          read as a comparison of the rest.
-        * ``query`` — compare everything the query matches, ordered by
-          ``sort_by``/``descending`` as in :meth:`search` and capped at ``limit``
-          (``None`` = uncapped). A query matching nothing compares nothing and
-          yields empty sections; that is an empty answer, not an error.
-
-        ``limit`` applies only to ``query`` selection — an explicit ``env_ids``
-        list is already the exact set to compare. Note that the diff describes
-        the runs actually compared, so a ``limit`` that truncates the matches
-        narrows what ``shared``/``differing`` are computed over; the returned
-        ``env_ids`` always say which runs those were.
+        Finding the runs to compare is :meth:`search`'s job, not this one: search
+        answers "which runs match?" and compare answers "how do these runs differ?".
+        Callers that want to compare a query's matches search first and pass the
+        ids on, which also keeps the diff honest — it always describes exactly the
+        runs that were named.
         """
-        if env_ids is not None and query is not None:
-            raise ValueError("pass either env_ids or query, not both")
-        if env_ids is None and query is None:
-            raise ValueError("one of env_ids or query is required")
-        if env_ids is not None:
-            experiments = self._load_named(env_ids)
-        else:
-            experiments = self.search(
-                query=query, sort_by=sort_by, descending=descending
-            )
-            if limit is not None:
-                experiments = experiments[:limit]
-        return build_comparison(experiments)
+        return build_comparison(self._load_named(env_ids))
 
     def delete_experiment(self, env_id):
         """Drop the experiment blob from ``env_id`` (keeping the env itself).

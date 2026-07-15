@@ -1244,20 +1244,20 @@ class Visdom(object):
             "experiments/search",
         )
 
-    def compare_experiments(
-        self, env_ids=None, query=None, limit=None, sort_by=None, descending=True
-    ):
-        """Compare experiments field by field, to see what differs between runs.
+    def compare_experiments(self, env_ids):
+        """Compare the named experiments field by field, to see what differs.
 
-        Choose the runs either by name or by search — one or the other, not both:
+        `env_ids` names the runs to compare, in the order given, and each must
+        exist:
 
             vis.compare_experiments(["run-a", "run-b"])
-            vis.compare_experiments(query="lr < 0.01", limit=10)
 
-        With `env_ids` the runs are compared in the order given and each must
-        exist. With `query` the syntax is :meth:`search_experiments`', ordered by
-        `sort_by`/`descending` and capped at `limit` (`None` for all of them);
-        the comparison then describes exactly the runs the query selected.
+        Finding the runs is :meth:`search_experiments`' job — it answers "which
+        runs match?", this answers "how do these runs differ?". To compare a
+        query's matches, search first and pass the ids on:
+
+            found = vis.search_experiments("lr < 0.01")
+            vis.compare_experiments([e["env_id"] for e in found["experiments"]])
 
         Returns the server's reply as a dict: the compared runs (`env_ids` and
         the full `experiments`), plus a `params`, `metrics` and `tags` section.
@@ -1267,27 +1267,12 @@ class Visdom(object):
         `differing` is `['lr']` and whose `values['lr']` is
         `{'run-a': 0.1, 'run-b': 0.001}`.
         """
-        if env_ids is not None:
-            if isstr(env_ids) or not isinstance(env_ids, (list, tuple)):
-                raise TypeError("env_ids must be a list of environment ids")
-            if not all(isstr(env_id) for env_id in env_ids):
-                raise TypeError("env_ids must contain strings")
-        if query is not None and not isstr(query):
-            raise TypeError("query must be a string")
-        if sort_by is not None and not isstr(sort_by):
-            raise TypeError("sort_by must be a string")
-        if env_ids is not None and query is not None:
-            raise ValueError("pass either env_ids or query, not both")
-        if env_ids is None and query is None:
-            raise ValueError("one of env_ids or query is required")
+        if isstr(env_ids) or not isinstance(env_ids, (list, tuple)):
+            raise TypeError("env_ids must be a list of environment ids")
+        if not all(isstr(env_id) for env_id in env_ids):
+            raise TypeError("env_ids must contain strings")
         return self._experiment_request(
-            {
-                "env_ids": list(env_ids) if env_ids is not None else None,
-                "query": query,
-                "limit": limit,
-                "sort_by": sort_by,
-                "descending": descending,
-            },
+            {"env_ids": list(env_ids)},
             "experiments/compare",
         )
 
