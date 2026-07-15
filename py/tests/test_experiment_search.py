@@ -41,7 +41,7 @@ def seed_experiments(store):
         tags={"dataset": "cifar10"},
     )
     store.log_metric("run-b", "acc", 0.55)
-    store.log_metric("run-b", "acc", 0.95)  # latest wins when querying "acc"
+    store.log_metric("run-b", "acc", 0.95)
     store.finish_experiment("run-b")
 
     store.log_experiment("run-c", name="gamma", params={"lr": 0.5})
@@ -85,8 +85,10 @@ class TestStoreSearch(unittest.TestCase):
         self.assertEqual(env_ids(self.store.search(query="lr < 0.01")), ["run-b"])
 
     def test_filters_by_latest_metric(self):
-        """Metrics compare on their most recent value, not their first."""
-        # run-b logged acc 0.55 and then 0.95; only the latter should match.
+        """Metrics compare on their most recent value, not their first.
+
+        run-b logged acc 0.55 and then 0.95; only the latter should match.
+        """
         self.assertEqual(env_ids(self.store.search(query="acc > 0.9")), ["run-b"])
 
     def test_filters_by_namespaced_name(self):
@@ -148,8 +150,10 @@ class TestStoreSearch(unittest.TestCase):
         )
 
     def test_sort_by_metric_puts_missing_last_in_both_directions(self):
-        """A run missing the sort field sorts last however the sort is directed."""
-        # run-c logged no metrics at all, so it has no "acc" to be ranked by.
+        """A run missing the sort field sorts last however the sort is directed.
+
+        run-c logged no metrics at all, so it has no "acc" to be ranked by.
+        """
         self.assertEqual(
             env_ids(self.store.search(sort_by="acc")), ["run-b", "run-a", "run-c"]
         )
@@ -164,10 +168,12 @@ class TestStoreSearch(unittest.TestCase):
         self.assertEqual(sorted(unsorted), ["run-a", "run-b", "run-c"])
 
     def test_sort_by_mixed_types_does_not_raise(self):
-        """A field holding a number in one run and a string in another still sorts."""
+        """A field holding a number in one run and a string in another still sorts.
+
+        Numbers order among themselves and ahead of the string.
+        """
         self.store.log_experiment("run-d", params={"lr": "auto"})
         results = env_ids(self.store.search(sort_by="lr", descending=False))
-        # Numbers order among themselves and ahead of the string.
         self.assertEqual(results, ["run-b", "run-a", "run-c", "run-d"])
 
     def test_filter_and_sort_combine(self):
@@ -312,10 +318,12 @@ class TestSearchEndpoint(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(self.search({"descending": "false"}).code, 400)
 
     def test_sql_injection_payload_is_inert(self):
-        """A SQL-ish payload is either a parse error or a plain string compare."""
+        """A SQL-ish payload is either a parse error or a plain string compare.
+
+        Whatever happened, the data must be untouched.
+        """
         resp = self.search({"query": "name = 'x'; DROP TABLE experiments'"})
         self.assertIn(resp.code, (200, 400))
-        # Whatever happened, the data is untouched.
         self.assertEqual(self.search_ok({})["total"], 3)
 
     def test_search_sees_an_experiment_logged_over_http(self):

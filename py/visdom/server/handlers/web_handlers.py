@@ -939,12 +939,14 @@ class ExperimentSearchHandler(BaseHandler):
 
     @staticmethod
     def _require_index(args, field, default):
-        """Return ``args[field]`` as a non-negative int (``None`` = unbounded)."""
+        """Return ``args[field]`` as a non-negative int (``None`` = unbounded).
+
+        A JSON body has no int/float distinction, so a client that sends ``10.0``
+        means the index 10; anything with a fractional part is a mistake.
+        """
         value = args.get(field, default)
         if value is None:
             return None
-        # A JSON body has no int/float distinction, so a client that sends 10.0
-        # means the index 10; anything with a fractional part is a mistake.
         if isinstance(value, float) and value.is_integer():
             value = int(value)
         if isinstance(value, bool) or not isinstance(value, int):

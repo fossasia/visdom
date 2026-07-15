@@ -28,8 +28,6 @@ METADATA_KEY = "experiment"
 
 DEFAULT_SORT_FIELD = "created_at"
 
-# Distinguishes "the record has no such field" from "the field is present and
-# None": both sort last, but only the former is absent from the record at all.
 _MISSING = object()
 
 
