@@ -285,6 +285,56 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
 
             layout.update(patch)
 
+        elif cmd == "update_comment":
+            if self.readonly:
+                logging.warning("update_comment: rejected, server is in readonly mode")
+                return
+
+            eid = msg.get("eid")
+            win = msg.get("win")
+            comment = msg.get("data")
+            if eid is None or win is None or eid not in self.state:
+                logging.warning(
+                    f"update_comment: env {eid!r} or win {win!r}"
+                    f" not found, dropping event"
+                )
+                return
+            if not isinstance(comment, str):
+                logging.warning(
+                    f"update_comment: expected str data, got"
+                    f" {type(comment).__name__!r}, dropping event"
+                )
+                return
+
+            env = self.state[eid]["jsons"]
+            if win not in env:
+                logging.warning(
+                    f"update_comment: pane {win!r} not found"
+                    f" in env {eid!r}, dropping event"
+                )
+                return
+
+            p = env[win]
+            p["comment"] = comment
+            p["version"] = p.get("version", 1) + 1
+
+            diff_packet = [
+                {"op": "add", "path": "/comment", "value": comment},
+                {"op": "replace", "path": "/version", "value": p["version"]},
+            ]
+            broadcast_packet = {
+                "command": "window_update",
+                "win": win,
+                "eid": eid,
+                "content": diff_packet,
+                "version": p["version"],
+            }
+            broadcast(self, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
+
+            tornado.ioloop.IOLoop.current().run_in_executor(
+                None, self.storage.save_env, eid, self.state[eid]
+            )
+
         elif cmd == "pop_embeddings_pane":
             packet = msg.get("data")
             if not isinstance(packet, dict):
