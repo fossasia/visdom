@@ -1262,11 +1262,10 @@ class Visdom(object):
         Returns the server's reply as a dict: the compared runs (`env_ids` and
         the full `experiments`), plus a `params`, `metrics` and `tags` section.
         Each section holds the union of `fields`, the `shared` ones every run
-        agrees on, the `differing` rest, and the per-run `values`::
-
-            cmp = vis.compare_experiments(["run-a", "run-b"])
-            cmp["params"]["differing"]        # ['lr']
-            cmp["params"]["values"]["lr"]     # {'run-a': 0.1, 'run-b': 0.001}
+        agrees on, the `differing` rest, and the per-run `values`. Comparing two
+        runs that differ only in learning rate gives a `params` section whose
+        `differing` is `['lr']` and whose `values['lr']` is
+        `{'run-a': 0.1, 'run-b': 0.001}`.
         """
         if env_ids is not None:
             if isstr(env_ids) or not isinstance(env_ids, (list, tuple)):
