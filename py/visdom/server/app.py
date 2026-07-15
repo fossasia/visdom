@@ -37,6 +37,7 @@ from visdom.server.handlers.web_handlers import (
     ErrorHandler,
     ExistsHandler,
     ExperimentLogHandler,
+    ExperimentSearchHandler,
     ForkEnvHandler,
     HealthHandler,
     IndexHandler,
@@ -124,6 +125,11 @@ class Application(tornado.web.Application):
             (
                 r"%s/experiments/log" % self.base_url,
                 ExperimentLogHandler,
+                {"app": self},
+            ),
+            (
+                r"%s/experiments/search" % self.base_url,
+                ExperimentSearchHandler,
                 {"app": self},
             ),
             (r"%s/user/(.*)" % self.base_url, UserSettingsHandler, {"app": self}),
