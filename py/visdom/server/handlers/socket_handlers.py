@@ -30,8 +30,6 @@ from visdom.utils.shared_utils import get_rand_id, NanSafeEncoder
 from visdom.utils.server_utils import (
     check_auth,
     broadcast_envs,
-    serialize_env,
-    serialize_all,
     send_to_sources,
     broadcast,
     escape_eid,
@@ -81,6 +79,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
         self.sources = app.sources
         self.port = app.port
         self.env_path = app.env_path
+        self.storage = app.storage
         self.login_enabled = app.login_enabled
         self.app = app
         self.readonly = app.readonly
@@ -156,11 +155,11 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 self.state[msg["eid"]] = copy.deepcopy(self.state[prev_eid])
                 self.state[msg["eid"]]["reload"] = msg["data"]
                 self.eid = msg["eid"]
-                serialize_env(self.state, [self.eid], env_path=self.env_path)
+                self.storage.save_env(self.eid, self.state[self.eid])
 
         elif cmd == "save_all":
             tornado.ioloop.IOLoop.current().run_in_executor(
-                None, serialize_all, self.state, self.env_path
+                None, self.storage.save_all, self.state
             )
 
         elif cmd == "delete_env":
