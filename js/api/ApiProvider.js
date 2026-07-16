@@ -399,6 +399,7 @@ const ApiProvider = ({ children }) => {
       value={{
         apiHandlers,
         connected,
+        sendCommentUpdate,
         sendEmbeddingPop,
         sendEnvDelete,
         sendEnvQuery,

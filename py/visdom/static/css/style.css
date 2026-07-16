@@ -138,6 +138,40 @@ button>span.glyphicon {
   position: absolute;
   overflow: hidden;
   left: 0;
+  display: flex;
+  flex-direction: row;
+}
+
+.content > *:not(.comment-panel) {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+}
+
+.comment-panel {
+  flex: 0 0 220px;
+  width: 220px;
+  height: 100%;
+  box-sizing: border-box;
+  border-left: 1px solid #dedede;
+  background: #ffffff;
+  padding: 6px;
+}
+
+.comment-panel .comment-textarea {
+  width: 100%;
+  height: 100%;
+  resize: none;
+  box-sizing: border-box;
+  border: 1px solid #dedede;
+  padding: 6px;
+  font-size: 12px;
+  font-family: inherit;
+  color: #333;
+}
+
+button[title="comment"].active > .glyphicon {
+  color: red;
 }
 
 .widgets {

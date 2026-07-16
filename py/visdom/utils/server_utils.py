@@ -232,6 +232,7 @@ def window(args):
         "width": opts.get("width"),
         "height": opts.get("height"),
         "contentID": get_rand_id(),  # to detected updated windows
+        "comment": opts.get("comment", ""),
     }
 
     if ptype in ["image_history", "plot_history"] and is_visdom_type:
@@ -480,6 +481,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH, show_all=False)
         "layout": {"title": "compare_legend"},
         "i": 1,
         "has_compare": True,
+        "commentsDisabled": True,
     }
     if "reload" in res:
         socket.write_message(
@@ -719,6 +721,7 @@ def register_window(self, p, eid):
 
     if p["id"] in env:
         p["i"] = env[p["id"]]["i"]
+        p["comment"] = env[p["id"]].get("comment", p.get("comment", ""))
     else:
         p["i"] = len(env)
 
