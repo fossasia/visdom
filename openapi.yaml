@@ -648,11 +648,66 @@ paths:
                     $ref: "#/components/schemas/ExperimentComparisonSection"
         "400":
           description: >
-            Invalid request — `env_ids` missing, empty, not a list, or holding
-            something other than strings. Also returned when authentication is
-            required but not provided.
+            Invalid request — the body is not a JSON object, or `env_ids` is
+            missing, empty, not a list, or holds something other than strings.
+            Also returned when authentication is required but not provided.
         "404":
           description: One or more of the given `env_ids` has no experiment.
+
+  /experiments/suggest:
+    post:
+      operationId: suggestExperiment
+      tags: [Experiments]
+      summary: Suggest parameters for the next run (reserved)
+      description: >
+        Reserved endpoint for hyper-parameter suggestion. Choosing the next set
+        of parameters to try is a search-strategy problem (Optuna-backed) that
+        lands in a later layer, so this is currently a stub: it accepts the
+        request and replies `501 Not Implemented` with a JSON body carrying a
+        `suggestion: null` placeholder, rather than a made-up suggestion. The
+        route, the `suggest_experiment` client method and this documentation are
+        in place so the strategy can be wired in later without changing the
+        surface.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                eid:
+                  type: string
+                  description: Target environment ID. Defaults to `main`.
+                params:
+                  type: object
+                  additionalProperties: true
+                  description: >
+                    The search space to suggest over, as `{name: spec}`. Ignored
+                    by the stub; reserved for the eventual strategy.
+      responses:
+        "501":
+          description: >
+            Not implemented — the suggestion strategy is reserved for a later
+            layer. The body is a JSON stub.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, detail, suggestion]
+                properties:
+                  status:
+                    type: string
+                    example: not_implemented
+                  detail:
+                    type: string
+                  suggestion:
+                    nullable: true
+                    description: Always `null` while the endpoint is a stub.
+        "400":
+          description: >
+            Invalid request — the body is present but is not valid JSON, or is
+            not a JSON object. Also returned when authentication is required
+            but not provided.
 
   /upload_env:
     post:

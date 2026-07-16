@@ -358,6 +358,15 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 - [`vis.check_connection`](#vischeck_connection): check if the server is connected
 - [`vis.replay_log`](#visreplay_log): replay the actions from the provided log file
 
+### Experiments
+Track experiment metadata (hyper-parameters, metrics, tags) alongside your plots, then search and compare runs across your server:
+- [`vis.experiment`](#visexperiment)  : create or update experiment metadata for an env
+- [`vis.log_metrics`](#vislog_metrics)  : append metric observations to an env's experiment
+- [`vis.finish_experiment`](#visfinish_experiment)  : mark an experiment terminal (finished/failed)
+- [`vis.search_experiments`](#vissearch_experiments)  : search experiments across envs with a query
+- [`vis.compare_experiments`](#viscompare_experiments)  : diff experiments field by field
+- [`vis.suggest_experiment`](#vissuggest_experiment)  : suggest parameters for the next run (reserved)
+
 
 ## Loggers
 
@@ -1105,6 +1114,77 @@ This function takes the contents of a visdom log and replays them to the current
 
 Arguments:
 - `log_filename`: log file to replay the contents of.
+
+### Experiments
+
+Attach experiment metadata — hyper-parameters, metric observations and tags — to an environment, then search and compare runs across your server. Metadata is stored under the environment's `experiment` key and persisted through the server's data store, so a server started without a persistence path (`env_path=None`) has nothing to store, search or compare. Each function returns the server's reply decoded as a dict.
+
+#### vis.experiment
+
+This function creates or updates the experiment metadata for an environment. Calling it again for the same env merges in new params/tags and overwrites the name/description, so it is safe to call at the start of and again during a run.
+
+Arguments:
+- `name`: Display name for the experiment. Defaults to the env id.
+- `params`: Hyper-parameters as a dict of `{name: value}`.
+- `tags`: Free-form tags as a dict of `{name: value}`.
+- `description`: Free-form description.
+- `env`: Environment to attach the experiment to. Defaults to the client's env.
+
+#### vis.log_metrics
+
+This function appends one or more metric observations to an env's experiment, creating the experiment automatically if it does not exist yet.
+
+Arguments:
+- `metrics`: A non-empty dict of `{name: value}` observations.
+- `step`: Optional training step the observations were recorded at.
+- `env`: Environment whose experiment to log to. Defaults to the client's env.
+
+> **Note**: once an experiment is finished (see `finish_experiment`), further `experiment`/`log_metrics` writes are rejected so a completed run's recorded data cannot change after the fact.
+
+#### vis.finish_experiment
+
+This function marks an env's experiment terminal so its recorded data is frozen.
+
+Arguments:
+- `status`: Terminal status, either `finished` (default) or `failed`.
+- `env`: Environment whose experiment to finish. Defaults to the client's env.
+
+#### vis.search_experiments
+
+This function searches the experiments logged on the server, across all environments. The `query` uses a small readable syntax — comparisons (`<`, `<=`, `>`, `>=`, `=`, `!=`, `contains`) over param, metric and tag names, combined with `AND`/`OR` and parentheses. A name is matched bare (`acc`) or namespaced (`metric.acc`, `param.lr`, `tag.owner`) when ambiguous; metrics compare on their latest value. Queries are evaluated in Python, never `eval`'d, so a hostile query is a parse error rather than code execution.
+
+```python
+vis.search_experiments("lr < 0.01 AND acc > 0.9")
+vis.search_experiments("status = finished AND (dataset contains mnist)")
+```
+
+Arguments:
+- `query`: The filter string. `None` (default) returns everything.
+- `limit`: Maximum results to return (default `100`). `None` returns all matches.
+- `offset`: Number of results to skip, for paging (default `0`).
+- `sort_by`: Field to sort by (any of the same names). Defaults to newest-created first.
+- `descending`: Sort direction (default `True`).
+
+Returns a dict of `experiments` (one page's worth), the unpaged `total` matching the query, and the `limit`/`offset`/`query` used.
+
+`search_experiments`, `compare_experiments` and `suggest_experiment` ask the server a question rather than record something, so an offline client (`Visdom(offline=True)`) has nothing to answer with and each returns `None`.
+
+#### vis.compare_experiments
+
+This function compares the named experiments field by field to see what differs. Finding the runs is `search_experiments`' job — it answers "which runs match?"; this answers "how do these runs differ?". To compare a query's matches, search first and pass the resulting ids on.
+
+Arguments:
+- `env_ids`: A list (or tuple) of environment ids to compare, in the order given. Each must have an experiment.
+
+Returns a dict with the compared runs (`env_ids`, full `experiments`) and a `params`, `metrics` and `tags` section. Each section lists the union of `fields`, the `shared` ones every run agrees on, the `differing` rest, the per-run `values`, and `groups` clustering the runs that agree per field.
+
+#### vis.suggest_experiment
+
+> **Reserved**: this endpoint is a stub. Choosing the next set of hyper-parameters to try (an Optuna-backed search strategy) is planned for a later layer, so the server currently replies `501 Not Implemented` and this function returns a stub dict `{"status": "not_implemented", "suggestion": None, ...}` rather than a real suggestion. The method, its arguments and the endpoint are in place so callers and docs are ready for when the strategy is wired in.
+
+Arguments:
+- `params`: The search space to suggest over, as a dict of `{name: spec}`. Currently ignored by the stub.
+- `env`: Environment (study) to suggest against. Defaults to the client's env.
 
 ## Customizing Visdom
 The user config directory for visdom is

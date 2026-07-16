@@ -1193,6 +1193,22 @@ class Visdom(object):
         except ValueError:
             return response
 
+    def _experiment_query(self, msg, endpoint):
+        """Ask an experiment `endpoint` a question and decode the JSON reply.
+
+        Unlike the endpoints reached through :meth:`_experiment_send`, which
+        record something, these ones ask a question that only a server can
+        answer. An offline client never reaches one, and would otherwise fall
+        through to the generic `_send` short circuit and hand back `True` — a
+        value a caller expecting a reply dict cannot use and cannot tell apart
+        from a real answer.
+
+        Returns None when offline, as the other read methods do.
+        """
+        if self.offline:
+            return None
+        return self._experiment_request(msg, endpoint)
+
     def _experiment_send(self, msg, env):
         """POST an experiment action for `env` and decode the JSON reply.
 
@@ -1271,13 +1287,14 @@ class Visdom(object):
 
         Returns the server's reply as a dict of `experiments` (a list of
         experiment dicts, one page worth), the unpaged `total` matching the
-        query, and the `limit`/`offset`/`query` used.
+        query, and the `limit`/`offset`/`query` used. Returns None on an offline
+        client, which has no server to search.
         """
         if query is not None and not isstr(query):
             raise TypeError("query must be a string")
         if sort_by is not None and not isstr(sort_by):
             raise TypeError("sort_by must be a string")
-        return self._experiment_request(
+        return self._experiment_query(
             {
                 "query": query,
                 "limit": limit,
@@ -1315,15 +1332,37 @@ class Visdom(object):
         and whose `groups['lr']` is
         `[{'value': 0.1, 'env_ids': ['run-a', 'run-c']},
           {'value': 0.001, 'env_ids': ['run-b']}]`.
+
+        Returns None on an offline client, which has no server to compare on.
         """
         if isstr(env_ids) or not isinstance(env_ids, (list, tuple)):
             raise TypeError("env_ids must be a list of environment ids")
         if not all(isstr(env_id) for env_id in env_ids):
             raise TypeError("env_ids must contain strings")
-        return self._experiment_request(
+        return self._experiment_query(
             {"env_ids": list(env_ids)},
             "experiments/compare",
         )
+
+    def suggest_experiment(self, params=None, env=None):
+        """Ask the server to suggest parameters for the next run.
+
+        Reserved: the suggestion strategy (Optuna-backed) is not implemented
+        yet, so this returns the server's stub reply — a dict of
+        `{"status": "not_implemented", "suggestion": None, ...}` — rather than a
+        real suggestion. The method, its `params` search space (a dict of
+        `{name: spec}`) and the endpoint are in place so callers and the docs
+        are ready for when the strategy is wired in.
+
+        Returns the server's reply as a dict, or None on an offline client,
+        which has no server to ask.
+        """
+        if params is not None and not isinstance(params, dict):
+            raise TypeError("params must be a dict of {name: spec}")
+        msg = {"params": params}
+        if env is not None:
+            msg["eid"] = env
+        return self._experiment_query(msg, "experiments/suggest")
 
     def get_window_data(self, win=None, env=None):
         """
