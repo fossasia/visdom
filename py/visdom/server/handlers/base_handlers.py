@@ -24,6 +24,7 @@ _COMMON_APP_ATTRIBUTES = (
     "sources",
     "port",
     "env_path",
+    "storage",
     "login_enabled",
 )
 
