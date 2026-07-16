@@ -139,9 +139,20 @@ function ImagePane(props) {
   };
 
   const updateSlider = (evt) => {
-    // TODO add history update events here! need to send these to the client
-    // with sendPaneMessage
-    setActualSelected(parseInt(evt.target.value));
+    const idx = parseInt(evt.target.value, 10);
+    if (Number.isNaN(idx)) return;
+    setActualSelected(idx);
+  };
+
+  const commitSliderSelection = (value) => {
+    const idx = parseInt(value, 10);
+    if (Number.isNaN(idx)) return;
+    sendPaneMessage({ event_type: 'SliderMoved', index: idx, pane_data: false }, id, envID);
+  };
+
+  const finalizeSlider = (evt) => {
+    if (!evt || !evt.target) return;
+    commitSliderSelection(evt.target.value);
   };
 
   // effects
@@ -285,6 +296,8 @@ function ImagePane(props) {
               max={content.length - 1}
               value={actualSelected}
               onChange={updateSlider}
+              onPointerUp={finalizeSlider}
+              onKeyUp={finalizeSlider}
             />
             <span>&nbsp;&nbsp;{actualSelected}&nbsp;&nbsp;</span>
           </div>
