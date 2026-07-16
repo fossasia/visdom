@@ -29,7 +29,6 @@ from collections import OrderedDict
 MAX_ENV_NAME_LEN = 25
 from collections.abc import Mapping, Sequence
 from visdom.server.defaults import (
-    LAYOUT_FILE,
     DEFAULT_BASE_URL,
     DEFAULT_ENV_PATH,
     DEFAULT_HOSTNAME,

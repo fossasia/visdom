@@ -35,7 +35,7 @@ def _env(win_id="win_0"):
 
 
 class TestStorageWiring(unittest.TestCase):
-    """PR #2: the server's save handlers route through ``Application.storage``."""
+    """The server's save handlers route through ``Application.storage``."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -88,7 +88,7 @@ class _SpyStore(JSONStore):
 
 
 class TestLoadStateWiring(unittest.TestCase):
-    """PR #3: ``Application.load_state`` routes env discovery/reads through storage."""
+    """``Application.load_state`` routes env discovery/reads through storage."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -139,7 +139,7 @@ class TestLoadStateWiring(unittest.TestCase):
 
 
 class TestDeleteWiring(unittest.TestCase):
-    """PR #4: env deletion routes through ``storage.delete_env`` (no direct FS)."""
+    """Env deletion routes through ``storage.delete_env`` (no direct FS)."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -202,7 +202,7 @@ class TestDeleteWiring(unittest.TestCase):
 
 
 class TestLayoutWiring(unittest.TestCase):
-    """PR #5: ``Application`` layout save/load route through ``storage``."""
+    """``Application`` layout save/load route through ``storage``."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -234,7 +234,7 @@ class TestLayoutWiring(unittest.TestCase):
 
 
 class TestUndoWiring(unittest.TestCase):
-    """PR #6: undo helpers persist through the DataStore, not raw env_path I/O."""
+    """Undo helpers persist through the DataStore, not raw env_path I/O."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
