@@ -205,7 +205,7 @@ def update_window(p, args):
             else:
                 p[opt_name] = opt_val
 
-        if "legend" in opts:
+    if "legend" in opts:
         legend = opts["legend"]
         pdata = p["content"]["data"]
         name = args.get("name")
