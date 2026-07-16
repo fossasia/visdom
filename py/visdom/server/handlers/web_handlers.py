@@ -27,7 +27,11 @@ from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 
 import tornado.escape
-from visdom.utils.shared_utils import get_rand_id, NanSafeEncoder
+from visdom.utils.shared_utils import (
+    get_rand_id,
+    _coerce_image_slider_index,
+    NanSafeEncoder,
+)
 from visdom.utils.server_utils import (
     check_auth,
     extract_eid,
@@ -167,11 +171,11 @@ class UpdateHandler(BaseHandler):
                     p["content"] = p["content"][-max_image_history:]
                 p["selected"] = len(p["content"]) - 1
             elif utype == "image_update_selected":
-                # Bound the update to within the dims of the array
-                selected = args["data"][0]["selected"]
-                selected_not_neg = max(0, selected)
-                selected_exists = min(len(p["content"]) - 1, selected_not_neg)
-                p["selected"] = selected_exists
+                if not p["content"]:
+                    return p
+                selected = _coerce_image_slider_index(args["data"][0]["selected"])
+                selected = min(max(0, selected), len(p["content"]) - 1)
+                p["selected"] = selected
             return p
         if p["type"] == "plot_history":
             utype = args["data"][0]["type"]
@@ -381,6 +385,16 @@ class UpdateHandler(BaseHandler):
             return
 
         p = handler.state[eid]["jsons"][args["win"]]
+        data = args.get("data")
+        is_image_slider_update = isinstance(data, list) and any(
+            isinstance(entry, dict) and entry.get("type") == "image_update_selected"
+            for entry in data
+        )
+
+        if is_image_slider_update and p["type"] != "image_history":
+            handler.set_status(400)
+            handler.write("win is not image_history; was {}".format(p["type"]))
+            return
 
         if not (
             p["type"] == "text"
@@ -411,13 +425,20 @@ class UpdateHandler(BaseHandler):
             handler.write(p["id"])
             return
 
-        p, diff_packet = UpdateHandler.update_packet(
-            p,
-            args,
-            handler.max_text_lines,
-            handler.max_old_content,
-            handler.max_image_history,
-        )
+        try:
+            p, diff_packet = UpdateHandler.update_packet(
+                p,
+                args,
+                handler.max_text_lines,
+                handler.max_old_content,
+                handler.max_image_history,
+            )
+        except (TypeError, ValueError) as exc:
+            if is_image_slider_update:
+                handler.set_status(400)
+                handler.write(str(exc))
+                return
+            raise
         # send the smaller of the patch and the updated pane
         if len(stringify(p)) <= len(stringify(diff_packet)):
             broadcast_msg = dict(p)
