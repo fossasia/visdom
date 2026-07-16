@@ -336,8 +336,6 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
             p["comment"] = comment
             p["version"] = p.get("version", 1) + 1
 
-            # Persist immediately (off the IO loop thread) so the note isn't
-            # lost if the server crashes or restarts before an explicit save.
             tornado.ioloop.IOLoop.current().run_in_executor(
                 None, self.storage.save_env, eid, self.state[eid]
             )
