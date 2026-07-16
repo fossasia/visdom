@@ -309,9 +309,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
 
         elif cmd == "update_comment":
             if self.readonly:
-                logging.warning(
-                    "update_comment: rejected, server is in readonly mode"
-                )
+                logging.warning("update_comment: rejected, server is in readonly mode")
                 return
 
             eid = msg.get("eid")
