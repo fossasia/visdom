@@ -1281,6 +1281,25 @@ class Visdom(object):
             "experiments/compare",
         )
 
+    def suggest_experiment(self, params=None, env=None):
+        """Ask the server to suggest parameters for the next run.
+
+        Reserved: the suggestion strategy (Optuna-backed) is not implemented
+        yet, so this returns the server's stub reply — a dict of
+        `{"status": "not_implemented", "suggestion": None, ...}` — rather than a
+        real suggestion. The method, its `params` search space (a dict of
+        `{name: spec}`) and the endpoint are in place so callers and the docs
+        are ready for when the strategy is wired in.
+
+        Returns the server's reply as a dict.
+        """
+        if params is not None and not isinstance(params, dict):
+            raise TypeError("params must be a dict of {name: spec}")
+        msg = {"params": params}
+        if env is not None:
+            msg["eid"] = env
+        return self._experiment_request(msg, "experiments/suggest")
+
     def get_window_data(self, win=None, env=None):
         """
         This function returns all the window data for a specified window in

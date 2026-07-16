@@ -1094,6 +1094,48 @@ class ExperimentCompareHandler(BaseHandler):
         self.wrap_func(self, args)
 
 
+class ExperimentSuggestHandler(BaseHandler):
+    """POST ``/experiments/suggest`` — suggest parameters for the next run.
+
+    Reserved endpoint. Choosing the next set of hyper-parameters to try is a
+    search-strategy problem (Optuna-backed) that belongs to a later layer, so
+    this is a stub: it accepts the request and replies ``501 Not Implemented``
+    with a JSON body rather than a made-up suggestion. Wiring the route, the
+    :meth:`Visdom.suggest_experiment` client method and the API docs now means
+    the strategy can be dropped in later without changing the surface, and a
+    caller gets a stable, decodable answer it can tell apart from a real one::
+
+        {"status": "not_implemented", "detail": "...", "suggestion": null}
+
+    The request body is parsed and passed through like the sibling handlers so
+    that shape is already in place, but it is otherwise ignored until the
+    strategy lands.
+    """
+
+    #: The stub reply, carrying ``suggestion: null`` so the eventual field is
+    #: already named and a caller can distinguish the stub from a real result.
+    NOT_IMPLEMENTED = {
+        "status": "not_implemented",
+        "detail": (
+            "experiment suggestion is not implemented yet; the endpoint is "
+            "reserved for a later layer"
+        ),
+        "suggestion": None,
+    }
+
+    @staticmethod
+    def wrap_func(handler, args):
+        handler.set_status(501)
+        handler.write(json.dumps(ExperimentSuggestHandler.NOT_IMPLEMENTED))
+
+    @check_auth
+    def post(self):
+        args = tornado.escape.json_decode(
+            tornado.escape.to_basestring(self.request.body)
+        )
+        self.wrap_func(self, args)
+
+
 class HealthHandler(BaseHandler):
     def get(self):
         self.write({"status": "ok"})
