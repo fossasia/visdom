@@ -138,14 +138,17 @@ button>span.glyphicon {
   position: absolute;
   overflow: hidden;
   left: 0;
-  display: flex;
-  flex-direction: row;
 }
 
-.content > *:not(.comment-panel) {
+.content.content-with-comment {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+}
+
+.content.content-with-comment > *:not(.comment-panel) {
   flex: 1 1 auto;
   min-width: 0;
-  height: 100%;
 }
 
 .comment-panel {
