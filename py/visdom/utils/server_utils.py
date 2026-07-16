@@ -229,7 +229,6 @@ def update_window(p, args):
     return p
 
 
-
 def window(args):
     """Build a window dict structure for sending to client"""
     uid = args.get("win", get_new_window_id())
