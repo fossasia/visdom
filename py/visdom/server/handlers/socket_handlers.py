@@ -308,6 +308,12 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
             layout.update(patch)
 
         elif cmd == "update_comment":
+            if self.readonly:
+                logging.warning(
+                    "update_comment: rejected, server is in readonly mode"
+                )
+                return
+
             eid = msg.get("eid")
             win = msg.get("win")
             comment = msg.get("data")
@@ -335,6 +341,19 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
             p = env[win]
             p["comment"] = comment
             p["version"] = p.get("version", 1) + 1
+
+            diff_packet = [
+                {"op": "add", "path": "/comment", "value": comment},
+                {"op": "replace", "path": "/version", "value": p["version"]},
+            ]
+            broadcast_packet = {
+                "command": "window_update",
+                "win": win,
+                "eid": eid,
+                "content": diff_packet,
+                "version": p["version"],
+            }
+            broadcast(self, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
 
             tornado.ioloop.IOLoop.current().run_in_executor(
                 None, self.storage.save_env, eid, self.state[eid]
