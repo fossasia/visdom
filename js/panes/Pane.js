@@ -77,6 +77,11 @@ var Pane = forwardRef((props, ref) => {
   let windowClassNames = classNames({ window: true, focus: props.isFocused });
   let barClassNames = classNames({ bar: true, focus: props.isFocused });
 
+  let contentClassNames = classNames({
+   content: true,
+   'content-with-comment': commentEnabled && commentOpen,
+  });
+
   // add property list button to barwidgets
   if (
     enablePropertyList &&
@@ -180,7 +185,7 @@ var Pane = forwardRef((props, ref) => {
         {barwidgets}
         <div className="pull-right">{title}</div>
       </div>
-      <div className="content">
+      <div className={contentClassNames}>
         {children}
         {commentEnabled && commentOpen && (
           <div className="comment-panel">
