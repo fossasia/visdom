@@ -26,6 +26,7 @@ from components.image import (
     image_history,
     image_grid,
     image_svg,
+    image_slider_sync,
     image_compare_basic,
     image_heatmap_basic,
 )
@@ -135,6 +136,7 @@ def run_demo(viz, env, args):
     image_save_jpeg(viz, env, args)
     image_history(viz, env, args)
     image_grid(viz, env, args)
+    image_slider_sync(viz, env, args)
     image_heatmap_basic(viz, env, args)
 
     # ========== #
