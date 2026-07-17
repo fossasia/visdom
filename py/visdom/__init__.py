@@ -1382,6 +1382,61 @@ class Visdom(object):
             msg["eid"] = env
         return self._experiment_query(msg, "experiments/suggest")
 
+    def hparams(
+        self, query=None, env_ids=None, mode=None, win=None, env=None, opts=None
+    ):
+        """Open a hyper-parameter pane over the experiments logged on the server.
+
+        Posts the selection to the ``experiments/hparams`` endpoint, which picks
+        the runs, flattens them into a table of hyper-parameters against their
+        latest metric values (and tags), and registers a dedicated ``hparams``
+        window with that content. The window persists/reloads like any pane.
+
+        `mode` chooses how the runs to show are selected; when it is left as
+        `None` the server infers it from which of `query`/`env_ids` were given:
+
+        * ``"query"`` — the runs matching `query` (the readable syntax of
+          :meth:`search_experiments`). The query must be non-empty and `env_ids`
+          must not be given.
+        * ``"env_ids"`` — the runs named in `env_ids`, in that order. `env_ids`
+          must be non-empty and `query` must not be given; only those
+          environments are read rather than every experiment.
+        * ``"both"`` — the intersection: runs that match `query` *and* are named
+          in `env_ids`, ordered by `env_ids`. Both must be given and non-empty.
+
+        There is no "show everything" call: with neither `query` nor `env_ids`
+        the server has nothing to select and rejects the request. A blank or
+        whitespace-only `query` counts as no query. Every id in `env_ids` must
+        name an environment that has an experiment: one that does not — a typo,
+        a deleted run — is answered with a ``404`` naming it rather than left
+        out of the pane unremarked.
+
+        ::
+
+            vis.hparams("lr < 0.01 AND acc > 0.9")          # query
+            vis.hparams(env_ids=["run-a", "run-b"])         # env_ids
+            vis.hparams("acc > 0.9", ["run-a", "run-b"])    # both
+            vis.hparams("acc > 0.9", ["run-a"], mode="query")   # forced, errors
+
+        `win`/`env`/`opts` behave as they do for the other plotting methods.
+        Returns the created window id.
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        return self._send(
+            {
+                "query": query,
+                "env_ids": env_ids,
+                "mode": mode,
+                "win": win,
+                "eid": env,
+                "opts": opts,
+            },
+            endpoint="experiments/hparams",
+        )
+
     def get_window_data(self, win=None, env=None):
         """
         This function returns all the window data for a specified window in
