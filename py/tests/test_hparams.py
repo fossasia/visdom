@@ -162,54 +162,85 @@ class TestHparamsClientMessage(unittest.TestCase):
         with self.assertRaises(TypeError):
             self.vis.hparams(env_ids=["run-a", 3])
 
-    def _stub_search(self):
-        """Stub search_experiments to record its query and return three runs."""
-        self._seen = {}
-        canned = {
-            "experiments": [
-                {"env_id": "run-a", "name": "a", "params": [], "metrics": []},
-                {"env_id": "run-b", "name": "b", "params": [], "metrics": []},
-                {"env_id": "run-c", "name": "c", "params": [], "metrics": []},
-            ]
-        }
+    def _stub_endpoints(self):
+        """Stub both read endpoints, recording which one each call reaches.
+
+        ``search`` records the query it was handed; ``compare`` records the ids
+        and, like the real endpoint, returns only those runs. This lets the
+        tests assert that a query-less env_ids selection fetches by id rather
+        than pulling every experiment.
+        """
+        self._seen = {"search": None, "compare": None}
+        runs = [
+            {"env_id": "run-a", "name": "a", "params": [], "metrics": [], "tags": []},
+            {"env_id": "run-b", "name": "b", "params": [], "metrics": [], "tags": []},
+            {"env_id": "run-c", "name": "c", "params": [], "metrics": [], "tags": []},
+        ]
+        by_id = {run["env_id"]: run for run in runs}
 
         def fake_search(query=None, limit=None):
-            self._seen["query"] = query
-            return canned
+            self._seen["search"] = query
+            return {"experiments": runs}
+
+        def fake_compare(env_ids):
+            self._seen["compare"] = list(env_ids)
+            return {"experiments": [by_id[e] for e in env_ids if e in by_id]}
 
         self.vis.search_experiments = fake_search
+        self.vis.compare_experiments = fake_compare
 
     def _ordered(self, msg):
         return [r["env_id"] for r in msg["data"][0]["content"]["records"]]
 
-    def test_env_ids_filter_and_order(self):
-        """env_ids selects and orders runs out of the fetched set (default mode)."""
-        self._stub_search()
+    def test_no_selection_searches_everything(self):
+        """No query and no env_ids searches (query=None) for the full set."""
+        self._stub_endpoints()
+        msg, _ = self.vis.hparams()
+        self.assertIsNone(self._seen["search"])
+        self.assertIsNone(self._seen["compare"])
+        self.assertEqual(self._ordered(msg), ["run-a", "run-b", "run-c"])
+
+    def test_env_ids_without_query_fetches_by_id(self):
+        """env_ids and no query fetches only the named runs via compare."""
+        self._stub_endpoints()
         msg, _ = self.vis.hparams(env_ids=["run-c", "run-a"])
+        self.assertEqual(self._seen["compare"], ["run-c", "run-a"])
+        self.assertIsNone(self._seen["search"])
         self.assertEqual(self._ordered(msg), ["run-c", "run-a"])
+
+    def test_mode_env_ids_fetches_by_id_ignoring_query(self):
+        """mode='env_ids' fetches by id and never runs the query."""
+        self._stub_endpoints()
+        msg, _ = self.vis.hparams(query="acc > 0.9", env_ids=["run-b"], mode="env_ids")
+        self.assertEqual(self._seen["compare"], ["run-b"])
+        self.assertIsNone(self._seen["search"])
+        self.assertEqual(self._ordered(msg), ["run-b"])
 
     def test_mode_query_ignores_env_ids(self):
         """mode='query' forwards the query and does not narrow by env_ids."""
-        self._stub_search()
+        self._stub_endpoints()
         msg, _ = self.vis.hparams(query="acc > 0.9", env_ids=["run-a"], mode="query")
-        self.assertEqual(self._seen["query"], "acc > 0.9")
+        self.assertEqual(self._seen["search"], "acc > 0.9")
+        self.assertIsNone(self._seen["compare"])
         self.assertEqual(self._ordered(msg), ["run-a", "run-b", "run-c"])
 
-    def test_mode_env_ids_ignores_query(self):
-        """mode='env_ids' sends no query and narrows to the named runs."""
-        self._stub_search()
-        msg, _ = self.vis.hparams(query="acc > 0.9", env_ids=["run-b"], mode="env_ids")
-        self.assertIsNone(self._seen["query"])
-        self.assertEqual(self._ordered(msg), ["run-b"])
-
-    def test_mode_both_intersects(self):
-        """mode='both' forwards the query and then narrows by env_ids."""
-        self._stub_search()
+    def test_mode_both_with_query_searches_then_narrows(self):
+        """mode='both' with a query searches, then narrows by env_ids."""
+        self._stub_endpoints()
         msg, _ = self.vis.hparams(
             query="acc > 0.9", env_ids=["run-c", "run-a"], mode="both"
         )
-        self.assertEqual(self._seen["query"], "acc > 0.9")
+        self.assertEqual(self._seen["search"], "acc > 0.9")
+        self.assertIsNone(self._seen["compare"])
         self.assertEqual(self._ordered(msg), ["run-c", "run-a"])
+
+    def test_blank_query_with_env_ids_fetches_by_id(self):
+        """A blank query is treated as no query, so it fetches by id."""
+        self._stub_endpoints()
+        msg, _ = self.vis.hparams(query="   ", env_ids=["run-b"])
+        self.assertEqual(self._seen["compare"], ["run-b"])
+        self.assertIsNone(self._seen["search"])
+        self.assertEqual(self._ordered(msg), ["run-b"])
 
     def test_mode_env_ids_requires_env_ids(self):
         """mode='env_ids' without env_ids is a usage error."""

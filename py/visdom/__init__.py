@@ -1383,6 +1383,12 @@ class Visdom(object):
           supplied it degrades to that one (so the single-argument calls below
           work under the default).
 
+        When no query is in play but `env_ids` is given, the named runs are
+        fetched directly (through :meth:`compare_experiments`, which reads only
+        those environments) rather than pulling every experiment and discarding
+        the rest; a query, when present, still goes through
+        :meth:`search_experiments`.
+
         ::
 
             vis.hparams()
@@ -1403,6 +1409,8 @@ class Visdom(object):
         use_query = mode in ("query", "both")
         use_env_ids = mode in ("env_ids", "both")
 
+        if query is not None and not isstr(query):
+            raise TypeError("query must be a string")
         if mode == "env_ids" and env_ids is None:
             raise ValueError("mode='env_ids' requires env_ids")
         if use_env_ids and env_ids is not None:
@@ -1415,10 +1423,20 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
-        reply = self.search_experiments(query=query if use_query else None, limit=None)
+        active_query = query if (use_query and query and query.strip()) else None
+        wanted = (
+            list(dict.fromkeys(env_ids))
+            if (use_env_ids and env_ids is not None)
+            else None
+        )
+
+        if wanted and active_query is None:
+            reply = self.compare_experiments(wanted)
+        else:
+            reply = self.search_experiments(query=active_query, limit=None)
         experiments = reply.get("experiments", []) if isinstance(reply, dict) else []
-        if use_env_ids and env_ids is not None:
-            wanted = list(dict.fromkeys(env_ids))
+
+        if wanted is not None:
             by_id = {exp.get("env_id"): exp for exp in experiments}
             experiments = [by_id[eid] for eid in wanted if eid in by_id]
 
