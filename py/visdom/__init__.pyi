@@ -87,7 +87,7 @@ class Visdom:
         self,
         query: _OptStr = ...,
         env_ids: Optional[_EnvIds] = ...,
-        mode: Text = ...,
+        mode: _OptStr = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,

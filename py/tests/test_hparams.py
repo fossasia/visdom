@@ -125,50 +125,19 @@ class TestFlattenExperiments(unittest.TestCase):
 
 
 class TestHparamsClientMessage(unittest.TestCase):
-    """Visdom.hparams builds the window the pane expects."""
+    """Visdom.hparams selects runs per mode and builds the pane window."""
 
     def setUp(self):
         self.vis = Visdom(send=False, raise_exceptions=True)
-
-    def test_creates_an_hparams_window(self):
-        """The message posts to events and carries a single hparams pane."""
-        msg, endpoint = self.vis.hparams()
-        self.assertEqual(endpoint, "events")
-        self.assertEqual(len(msg["data"]), 1)
-        self.assertEqual(msg["data"][0]["type"], "hparams")
-
-    def test_content_has_records_shape(self):
-        """The pane content always exposes the keys the frontend reads."""
-        msg, _ = self.vis.hparams()
-        content = msg["data"][0]["content"]
-        self.assertIn("records", content)
-        self.assertIn("param_keys", content)
-        self.assertIn("metric_keys", content)
-        self.assertIn("tag_keys", content)
-
-    def test_env_and_win_pass_through(self):
-        """win/env target a specific pane like the other plotting methods."""
-        msg, _ = self.vis.hparams(win="hp1", env="run-x")
-        self.assertEqual(msg["win"], "hp1")
-        self.assertEqual(msg["eid"], "run-x")
-
-    def test_rejects_non_list_env_ids(self):
-        """env_ids must be a list/tuple of ids, not a bare string."""
-        with self.assertRaises(TypeError):
-            self.vis.hparams(env_ids="run-a")
-
-    def test_rejects_non_string_env_ids(self):
-        """env_ids must contain strings."""
-        with self.assertRaises(TypeError):
-            self.vis.hparams(env_ids=["run-a", 3])
+        self._stub_endpoints()
 
     def _stub_endpoints(self):
         """Stub both read endpoints, recording which one each call reaches.
 
         ``search`` records the query it was handed; ``compare`` records the ids
         and, like the real endpoint, returns only those runs. This lets the
-        tests assert that a query-less env_ids selection fetches by id rather
-        than pulling every experiment.
+        tests assert that an env_ids selection fetches by id rather than pulling
+        every experiment through search.
         """
         self._seen = {"search": None, "compare": None}
         runs = [
@@ -192,65 +161,95 @@ class TestHparamsClientMessage(unittest.TestCase):
     def _ordered(self, msg):
         return [r["env_id"] for r in msg["data"][0]["content"]["records"]]
 
-    def test_no_selection_searches_everything(self):
-        """No query and no env_ids searches (query=None) for the full set."""
-        self._stub_endpoints()
-        msg, _ = self.vis.hparams()
-        self.assertIsNone(self._seen["search"])
+    def test_query_only_creates_hparams_window_via_search(self):
+        """A query builds one hparams pane and is fetched through search."""
+        msg, endpoint = self.vis.hparams("acc > 0.9")
+        self.assertEqual(endpoint, "events")
+        self.assertEqual(len(msg["data"]), 1)
+        self.assertEqual(msg["data"][0]["type"], "hparams")
+        self.assertEqual(self._seen["search"], "acc > 0.9")
         self.assertIsNone(self._seen["compare"])
-        self.assertEqual(self._ordered(msg), ["run-a", "run-b", "run-c"])
 
-    def test_env_ids_without_query_fetches_by_id(self):
-        """env_ids and no query fetches only the named runs via compare."""
-        self._stub_endpoints()
+    def test_content_has_records_shape(self):
+        """The pane content exposes the keys the frontend reads."""
+        msg, _ = self.vis.hparams("acc > 0.9")
+        content = msg["data"][0]["content"]
+        self.assertIn("records", content)
+        self.assertIn("param_keys", content)
+        self.assertIn("metric_keys", content)
+        self.assertIn("tag_keys", content)
+
+    def test_env_and_win_pass_through(self):
+        """win/env target a specific pane like the other plotting methods."""
+        msg, _ = self.vis.hparams("acc > 0.9", win="hp1", env="run-x")
+        self.assertEqual(msg["win"], "hp1")
+        self.assertEqual(msg["eid"], "run-x")
+
+    def test_env_ids_only_fetches_by_id_via_compare(self):
+        """env_ids alone infers env_ids mode and fetches only the named runs."""
         msg, _ = self.vis.hparams(env_ids=["run-c", "run-a"])
         self.assertEqual(self._seen["compare"], ["run-c", "run-a"])
         self.assertIsNone(self._seen["search"])
         self.assertEqual(self._ordered(msg), ["run-c", "run-a"])
 
-    def test_mode_env_ids_fetches_by_id_ignoring_query(self):
-        """mode='env_ids' fetches by id and never runs the query."""
-        self._stub_endpoints()
-        msg, _ = self.vis.hparams(query="acc > 0.9", env_ids=["run-b"], mode="env_ids")
-        self.assertEqual(self._seen["compare"], ["run-b"])
-        self.assertIsNone(self._seen["search"])
-        self.assertEqual(self._ordered(msg), ["run-b"])
-
-    def test_mode_query_ignores_env_ids(self):
-        """mode='query' forwards the query and does not narrow by env_ids."""
-        self._stub_endpoints()
-        msg, _ = self.vis.hparams(query="acc > 0.9", env_ids=["run-a"], mode="query")
-        self.assertEqual(self._seen["search"], "acc > 0.9")
-        self.assertIsNone(self._seen["compare"])
-        self.assertEqual(self._ordered(msg), ["run-a", "run-b", "run-c"])
-
-    def test_mode_both_with_query_searches_then_narrows(self):
-        """mode='both' with a query searches, then narrows by env_ids."""
-        self._stub_endpoints()
-        msg, _ = self.vis.hparams(
-            query="acc > 0.9", env_ids=["run-c", "run-a"], mode="both"
-        )
+    def test_both_infers_and_searches_then_narrows(self):
+        """query + env_ids infers both mode: search, then narrow by env_ids."""
+        msg, _ = self.vis.hparams("acc > 0.9", ["run-c", "run-a"])
         self.assertEqual(self._seen["search"], "acc > 0.9")
         self.assertIsNone(self._seen["compare"])
         self.assertEqual(self._ordered(msg), ["run-c", "run-a"])
 
-    def test_blank_query_with_env_ids_fetches_by_id(self):
-        """A blank query is treated as no query, so it fetches by id."""
-        self._stub_endpoints()
-        msg, _ = self.vis.hparams(query="   ", env_ids=["run-b"])
-        self.assertEqual(self._seen["compare"], ["run-b"])
-        self.assertIsNone(self._seen["search"])
-        self.assertEqual(self._ordered(msg), ["run-b"])
+    def test_no_arguments_is_an_error(self):
+        """With neither query nor env_ids there is nothing to select."""
+        with self.assertRaises(ValueError):
+            self.vis.hparams()
+
+    def test_blank_query_alone_is_an_error(self):
+        """A blank query counts as no query, so it selects nothing."""
+        with self.assertRaises(ValueError):
+            self.vis.hparams("   ")
+
+    def test_mode_query_rejects_env_ids(self):
+        """mode='query' does not accept env_ids."""
+        with self.assertRaises(ValueError):
+            self.vis.hparams("acc > 0.9", ["run-a"], mode="query")
+
+    def test_mode_query_requires_nonempty_query(self):
+        """mode='query' needs an actual query."""
+        with self.assertRaises(ValueError):
+            self.vis.hparams(mode="query")
+
+    def test_mode_env_ids_rejects_query(self):
+        """mode='env_ids' does not accept a query."""
+        with self.assertRaises(ValueError):
+            self.vis.hparams("acc > 0.9", ["run-b"], mode="env_ids")
 
     def test_mode_env_ids_requires_env_ids(self):
-        """mode='env_ids' without env_ids is a usage error."""
+        """mode='env_ids' needs a non-empty env_ids."""
         with self.assertRaises(ValueError):
             self.vis.hparams(mode="env_ids")
+
+    def test_mode_both_requires_both(self):
+        """mode='both' needs both a query and env_ids."""
+        with self.assertRaises(ValueError):
+            self.vis.hparams("acc > 0.9", mode="both")
+        with self.assertRaises(ValueError):
+            self.vis.hparams(env_ids=["run-a"], mode="both")
+
+    def test_rejects_non_list_env_ids(self):
+        """env_ids must be a list/tuple of ids, not a bare string."""
+        with self.assertRaises(TypeError):
+            self.vis.hparams(env_ids="run-a")
+
+    def test_rejects_non_string_env_ids(self):
+        """env_ids must contain strings."""
+        with self.assertRaises(TypeError):
+            self.vis.hparams(env_ids=["run-a", 3])
 
     def test_rejects_unknown_mode(self):
         """An unrecognised mode is rejected before any request."""
         with self.assertRaises(ValueError):
-            self.vis.hparams(mode="sideways")
+            self.vis.hparams("acc > 0.9", mode="sideways")
 
 
 if __name__ == "__main__":

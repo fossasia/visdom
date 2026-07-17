@@ -1363,7 +1363,7 @@ class Visdom(object):
         return self._experiment_request(msg, "experiments/suggest")
 
     def hparams(
-        self, query=None, env_ids=None, mode="both", win=None, env=None, opts=None
+        self, query=None, env_ids=None, mode=None, win=None, env=None, opts=None
     ):
         """Open a hyper-parameter pane over the experiments logged on the server.
 
@@ -1371,69 +1371,85 @@ class Visdom(object):
         against their latest metric values (and tags), and renders it in a
         dedicated ``hparams`` window that persists/reloads like any other pane.
 
-        `mode` chooses how the runs to show are selected:
+        `mode` chooses how the runs to show are selected; when it is left as
+        `None` it is inferred from which of `query`/`env_ids` were supplied:
 
-        * ``"query"`` — only the runs matching `query` (the readable syntax of
-          :meth:`search_experiments`; `query=None` means every run). `env_ids`
-          is ignored.
-        * ``"env_ids"`` — only the runs named in `env_ids`, in that order.
-          `query` is ignored, and `env_ids` is required.
-        * ``"both"`` (default) — the intersection: runs that match `query` *and*
-          are named in `env_ids`, ordered by `env_ids`. With only one of the two
-          supplied it degrades to that one (so the single-argument calls below
-          work under the default).
+        * ``"query"`` — the runs matching `query` (the readable syntax of
+          :meth:`search_experiments`). The query must be non-empty and `env_ids`
+          must not be given. Fetched with :meth:`search_experiments`.
+        * ``"env_ids"`` — the runs named in `env_ids`, in that order. `env_ids`
+          must be non-empty and `query` must not be given. Fetched with
+          :meth:`compare_experiments`, which reads only those environments
+          instead of every experiment.
+        * ``"both"`` — the intersection: runs that match `query` *and* are named
+          in `env_ids`, ordered by `env_ids`. Both must be given and non-empty.
 
-        When no query is in play but `env_ids` is given, the named runs are
-        fetched directly (through :meth:`compare_experiments`, which reads only
-        those environments) rather than pulling every experiment and discarding
-        the rest; a query, when present, still goes through
-        :meth:`search_experiments`.
+        There is no "show everything" call: with neither `query` nor `env_ids`
+        there is nothing to select, so a :class:`ValueError` is raised. A blank
+        or whitespace-only `query` counts as no query.
 
         ::
 
-            vis.hparams()
-            vis.hparams("lr < 0.01 AND acc > 0.9")
-            vis.hparams(env_ids=["run-a", "run-b"])
-            vis.hparams("acc > 0.9", ["run-a", "run-b"])
-            vis.hparams("acc > 0.9", ["run-a"], mode="query")
+            vis.hparams("lr < 0.01 AND acc > 0.9")          # query
+            vis.hparams(env_ids=["run-a", "run-b"])         # env_ids
+            vis.hparams("acc > 0.9", ["run-a", "run-b"])    # both
+            vis.hparams("acc > 0.9", ["run-a"], mode="query")   # forced, errors
 
         `win`/`env`/`opts` behave as they do for the other plotting methods.
         Returns the created window id (or the raw send result when this client is
         constructed with `send=False`).
         """
         valid_modes = ("query", "env_ids", "both")
-        if mode not in valid_modes:
+        if mode is not None and mode not in valid_modes:
             raise ValueError(
                 "mode must be one of {0}, got {1!r}".format(valid_modes, mode)
             )
-        use_query = mode in ("query", "both")
-        use_env_ids = mode in ("env_ids", "both")
-
         if query is not None and not isstr(query):
             raise TypeError("query must be a string")
-        if mode == "env_ids" and env_ids is None:
-            raise ValueError("mode='env_ids' requires env_ids")
-        if use_env_ids and env_ids is not None:
+        if env_ids is not None:
             if isstr(env_ids) or not isinstance(env_ids, (list, tuple)):
                 raise TypeError("env_ids must be a list of environment ids")
             if not all(isstr(env_id) for env_id in env_ids):
                 raise TypeError("env_ids must contain strings")
 
+        has_query = isstr(query) and query.strip() != ""
+        has_env_ids = env_ids is not None and len(env_ids) > 0
+
+        if mode is None:
+            if has_query and has_env_ids:
+                mode = "both"
+            elif has_query:
+                mode = "query"
+            elif has_env_ids:
+                mode = "env_ids"
+            else:
+                raise ValueError("hparams needs a query, env_ids, or both")
+        elif mode == "query":
+            if not has_query:
+                raise ValueError("mode='query' requires a non-empty query")
+            if env_ids is not None:
+                raise ValueError("mode='query' does not accept env_ids")
+        elif mode == "env_ids":
+            if query is not None:
+                raise ValueError("mode='env_ids' does not accept a query")
+            if not has_env_ids:
+                raise ValueError("mode='env_ids' requires a non-empty env_ids")
+        else:
+            if not has_query:
+                raise ValueError("mode='both' requires a non-empty query")
+            if not has_env_ids:
+                raise ValueError("mode='both' requires a non-empty env_ids")
+
         opts = {} if opts is None else opts
         _title2str(opts)
         _assert_opts(opts)
 
-        active_query = query if (use_query and query and query.strip()) else None
-        wanted = (
-            list(dict.fromkeys(env_ids))
-            if (use_env_ids and env_ids is not None)
-            else None
-        )
+        wanted = list(dict.fromkeys(env_ids)) if mode in ("env_ids", "both") else None
 
-        if wanted and active_query is None:
+        if mode == "env_ids":
             reply = self.compare_experiments(wanted)
         else:
-            reply = self.search_experiments(query=active_query, limit=None)
+            reply = self.search_experiments(query=query, limit=None)
         experiments = reply.get("experiments", []) if isinstance(reply, dict) else []
 
         if wanted is not None:
