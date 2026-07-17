@@ -656,6 +656,58 @@ def _decode_binary_arrays(obj):
     return obj
 
 
+def _flatten_experiments(experiments):
+    """Flatten experiment dicts into a compact records payload for the hparams pane.
+
+    ``experiments`` is a list of experiment dicts as returned by the
+    ``experiments/search`` endpoint (see :class:`visdom.experiments.Experiment`).
+    Each experiment carries ``params``/``metrics``/``tags`` as lists of
+    ``{"key": ..., "value": ...}`` dicts; this collapses them into per-run maps so
+    the frontend renders a table/parallel-coordinates view without re-deriving the
+    column set. Metrics form a time series, so only each metric's *latest* logged
+    value is kept (the last observation for that key).
+
+    Returns a dict of ``records`` (one flattened row per run), the sorted
+    ``param_keys`` union and the sorted ``metric_keys`` union across all runs.
+    """
+    records = []
+    param_keys = set()
+    metric_keys = set()
+    for exp in experiments:
+        if not isinstance(exp, dict):
+            continue
+        params = {}
+        for param in exp.get("params", []) or []:
+            key = param.get("key")
+            if key is None:
+                continue
+            params[key] = param.get("value")
+            param_keys.add(key)
+        # Metrics are appended in order; keep the last value seen per key.
+        metrics = {}
+        for metric in exp.get("metrics", []) or []:
+            key = metric.get("key")
+            if key is None:
+                continue
+            metrics[key] = metric.get("value")
+            metric_keys.add(key)
+        records.append(
+            {
+                "env_id": exp.get("env_id"),
+                "name": exp.get("name", exp.get("env_id")),
+                "status": exp.get("status"),
+                "created_at": exp.get("created_at"),
+                "params": params,
+                "metrics": metrics,
+            }
+        )
+    return {
+        "records": records,
+        "param_keys": sorted(param_keys),
+        "metric_keys": sorted(metric_keys),
+    }
+
+
 class Visdom(object):
     def __init__(
         self,
@@ -1299,6 +1351,54 @@ class Visdom(object):
         if env is not None:
             msg["eid"] = env
         return self._experiment_request(msg, "experiments/suggest")
+
+    def hparams(self, query=None, env_ids=None, win=None, env=None, opts=None):
+        """Open a hyper-parameter pane over the experiments logged on the server.
+
+        Gathers experiments via :meth:`search_experiments` (so the same `query`
+        syntax applies, and `query=None` pulls every logged run), optionally
+        restricting to an explicit list of `env_ids`, then flattens them into a
+        table of hyper-parameters against their latest metric values and renders
+        it in a dedicated ``hparams`` window. The window travels through the
+        normal window machinery, so it persists and reloads like any other pane.
+
+            vis.hparams()                      # every logged experiment
+            vis.hparams("lr < 0.01 AND acc > 0.9")
+            vis.hparams(env_ids=["run-a", "run-b"])
+
+        `win`/`env`/`opts` behave as they do for the other plotting methods.
+        Returns the created window id (or the raw send result when this client is
+        constructed with `send=False`).
+        """
+        if env_ids is not None:
+            if isstr(env_ids) or not isinstance(env_ids, (list, tuple)):
+                raise TypeError("env_ids must be a list of environment ids")
+            if not all(isstr(env_id) for env_id in env_ids):
+                raise TypeError("env_ids must contain strings")
+
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        reply = self.search_experiments(query=query, limit=None)
+        experiments = reply.get("experiments", []) if isinstance(reply, dict) else []
+        if env_ids is not None:
+            wanted = list(dict.fromkeys(env_ids))
+            by_id = {exp.get("env_id"): exp for exp in experiments}
+            experiments = [by_id[eid] for eid in wanted if eid in by_id]
+
+        content = _flatten_experiments(experiments)
+        data = [{"content": content, "type": "hparams"}]
+
+        return self._send(
+            {
+                "data": data,
+                "win": win,
+                "eid": env,
+                "opts": opts,
+            },
+            endpoint="events",
+        )
 
     def get_window_data(self, win=None, env=None):
         """
