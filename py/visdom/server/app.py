@@ -27,6 +27,7 @@ from visdom.server.handlers.socket_handlers import (
     VisSocketHandler,
     VisSocketWrap,
 )
+from visdom.server.handlers.experiments_handler import ExperimentHparamsHandler
 from visdom.server.handlers.web_handlers import (
     CloseHandler,
     CompareHandler,
@@ -142,6 +143,11 @@ class Application(tornado.web.Application):
             (
                 r"%s/experiments/suggest" % self.base_url,
                 ExperimentSuggestHandler,
+                {"app": self},
+            ),
+            (
+                r"%s/experiments/hparams" % self.base_url,
+                ExperimentHparamsHandler,
                 {"app": self},
             ),
             (r"%s/user/(.*)" % self.base_url, UserSettingsHandler, {"app": self}),

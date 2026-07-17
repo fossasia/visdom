@@ -656,68 +656,6 @@ def _decode_binary_arrays(obj):
     return obj
 
 
-def _flatten_experiments(experiments):
-    """Flatten experiment dicts into a compact records payload for the hparams pane.
-
-    ``experiments`` is a list of experiment dicts as returned by the
-    ``experiments/search`` endpoint (see :class:`visdom.experiments.Experiment`).
-    Each experiment carries ``params``/``metrics``/``tags`` as lists of
-    ``{"key": ..., "value": ...}`` dicts; this collapses each of the three into a
-    per-run ``{name: value}`` map so the frontend renders a table/parallel-
-    coordinates view without re-deriving the column set. Metrics form a time
-    series, so only each metric's *latest* logged value is kept (the last
-    observation for that key).
-
-    Returns a dict of ``records`` (one flattened row per run) plus the sorted
-    ``param_keys``, ``metric_keys`` and ``tag_keys`` unions across all runs.
-    """
-    records = []
-    param_keys = set()
-    metric_keys = set()
-    tag_keys = set()
-    for exp in experiments:
-        if not isinstance(exp, dict):
-            continue
-        params = {}
-        for param in exp.get("params", []) or []:
-            key = param.get("key")
-            if key is None:
-                continue
-            params[key] = param.get("value")
-            param_keys.add(key)
-        metrics = {}
-        for metric in exp.get("metrics", []) or []:
-            key = metric.get("key")
-            if key is None:
-                continue
-            metrics[key] = metric.get("value")
-            metric_keys.add(key)
-        tags = {}
-        for tag in exp.get("tags", []) or []:
-            key = tag.get("key")
-            if key is None:
-                continue
-            tags[key] = tag.get("value")
-            tag_keys.add(key)
-        records.append(
-            {
-                "env_id": exp.get("env_id"),
-                "name": exp.get("name", exp.get("env_id")),
-                "status": exp.get("status"),
-                "created_at": exp.get("created_at"),
-                "params": params,
-                "metrics": metrics,
-                "tags": tags,
-            }
-        )
-    return {
-        "records": records,
-        "param_keys": sorted(param_keys),
-        "metric_keys": sorted(metric_keys),
-        "tag_keys": sorted(tag_keys),
-    }
-
-
 class Visdom(object):
     def __init__(
         self,
@@ -1367,26 +1305,26 @@ class Visdom(object):
     ):
         """Open a hyper-parameter pane over the experiments logged on the server.
 
-        Gathers experiments, flattens them into a table of hyper-parameters
-        against their latest metric values (and tags), and renders it in a
-        dedicated ``hparams`` window that persists/reloads like any other pane.
+        Posts the selection to the ``experiments/hparams`` endpoint, which picks
+        the runs, flattens them into a table of hyper-parameters against their
+        latest metric values (and tags), and registers a dedicated ``hparams``
+        window with that content. The window persists/reloads like any pane.
 
         `mode` chooses how the runs to show are selected; when it is left as
-        `None` it is inferred from which of `query`/`env_ids` were supplied:
+        `None` the server infers it from which of `query`/`env_ids` were given:
 
         * ``"query"`` — the runs matching `query` (the readable syntax of
           :meth:`search_experiments`). The query must be non-empty and `env_ids`
-          must not be given. Fetched with :meth:`search_experiments`.
+          must not be given.
         * ``"env_ids"`` — the runs named in `env_ids`, in that order. `env_ids`
-          must be non-empty and `query` must not be given. Fetched with
-          :meth:`compare_experiments`, which reads only those environments
-          instead of every experiment.
+          must be non-empty and `query` must not be given; only those
+          environments are read rather than every experiment.
         * ``"both"`` — the intersection: runs that match `query` *and* are named
           in `env_ids`, ordered by `env_ids`. Both must be given and non-empty.
 
         There is no "show everything" call: with neither `query` nor `env_ids`
-        there is nothing to select, so a :class:`ValueError` is raised. A blank
-        or whitespace-only `query` counts as no query.
+        the server has nothing to select and rejects the request. A blank or
+        whitespace-only `query` counts as no query.
 
         ::
 
@@ -1396,77 +1334,22 @@ class Visdom(object):
             vis.hparams("acc > 0.9", ["run-a"], mode="query")   # forced, errors
 
         `win`/`env`/`opts` behave as they do for the other plotting methods.
-        Returns the created window id (or the raw send result when this client is
-        constructed with `send=False`).
+        Returns the created window id.
         """
-        valid_modes = ("query", "env_ids", "both")
-        if mode is not None and mode not in valid_modes:
-            raise ValueError(
-                "mode must be one of {0}, got {1!r}".format(valid_modes, mode)
-            )
-        if query is not None and not isstr(query):
-            raise TypeError("query must be a string")
-        if env_ids is not None:
-            if isstr(env_ids) or not isinstance(env_ids, (list, tuple)):
-                raise TypeError("env_ids must be a list of environment ids")
-            if not all(isstr(env_id) for env_id in env_ids):
-                raise TypeError("env_ids must contain strings")
-
-        has_query = isstr(query) and query.strip() != ""
-        has_env_ids = env_ids is not None and len(env_ids) > 0
-
-        if mode is None:
-            if has_query and has_env_ids:
-                mode = "both"
-            elif has_query:
-                mode = "query"
-            elif has_env_ids:
-                mode = "env_ids"
-            else:
-                raise ValueError("hparams needs a query, env_ids, or both")
-        elif mode == "query":
-            if not has_query:
-                raise ValueError("mode='query' requires a non-empty query")
-            if env_ids is not None:
-                raise ValueError("mode='query' does not accept env_ids")
-        elif mode == "env_ids":
-            if query is not None:
-                raise ValueError("mode='env_ids' does not accept a query")
-            if not has_env_ids:
-                raise ValueError("mode='env_ids' requires a non-empty env_ids")
-        else:
-            if not has_query:
-                raise ValueError("mode='both' requires a non-empty query")
-            if not has_env_ids:
-                raise ValueError("mode='both' requires a non-empty env_ids")
-
         opts = {} if opts is None else opts
         _title2str(opts)
         _assert_opts(opts)
 
-        wanted = list(dict.fromkeys(env_ids)) if mode in ("env_ids", "both") else None
-
-        if mode == "env_ids":
-            reply = self.compare_experiments(wanted)
-        else:
-            reply = self.search_experiments(query=query, limit=None)
-        experiments = reply.get("experiments", []) if isinstance(reply, dict) else []
-
-        if wanted is not None:
-            by_id = {exp.get("env_id"): exp for exp in experiments}
-            experiments = [by_id[eid] for eid in wanted if eid in by_id]
-
-        content = _flatten_experiments(experiments)
-        data = [{"content": content, "type": "hparams"}]
-
         return self._send(
             {
-                "data": data,
+                "query": query,
+                "env_ids": env_ids,
+                "mode": mode,
                 "win": win,
                 "eid": env,
                 "opts": opts,
             },
-            endpoint="events",
+            endpoint="experiments/hparams",
         )
 
     def get_window_data(self, win=None, env=None):
