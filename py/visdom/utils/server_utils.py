@@ -206,9 +206,25 @@ def update_window(p, args):
                 p[opt_name] = opt_val
 
     if "legend" in opts:
+        legend = opts["legend"]
         pdata = p["content"]["data"]
-        for i, d in enumerate(pdata):
-            d["name"] = opts["legend"][i]
+        name = args.get("name")
+        if name is not None:
+            if len(legend) > 0:
+                for d in pdata:
+                    if d.get("name") == name:
+                        d["name"] = legend[0]
+        else:
+            if len(legend) < len(pdata):
+                logging.warning(
+                    "update_window: legend has %d entries but pane has %d"
+                    " traces; leaving trailing traces' names unchanged",
+                    len(legend),
+                    len(pdata),
+                )
+            for i, d in enumerate(pdata):
+                if i < len(legend):
+                    d["name"] = legend[i]
     p["version"] += 1
     return p
 
