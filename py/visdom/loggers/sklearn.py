@@ -46,6 +46,8 @@ class VisdomSklearnLogger:
         gs.fit(X_train, y_train)    # logged automatically
     """
 
+    _active = None
+
     def __init__(self, viz, env):
         self.viz = viz
         self.env = env
@@ -76,6 +78,7 @@ class VisdomSklearnLogger:
             or "sklearn_{}".format(datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
         )
         instance = cls(viz, env)
+        cls._active = instance
         for cv_cls in (GridSearchCV, RandomizedSearchCV):
             instance._patch(cv_cls, is_cv=True)
         for _name, est_cls in all_estimators():
@@ -88,20 +91,21 @@ class VisdomSklearnLogger:
             return
 
         original = cls.fit
-        visdom_logger = self
+        visdom_cls = self.__class__
 
         if is_cv:
 
             @functools.wraps(original)
             def patched_fit(self_est, *args, **kwargs):
-                visdom_logger._cv_depth += 1
+                logger = visdom_cls._active
+                logger._cv_depth += 1
                 t0 = time.time()
                 try:
                     result = original(self_est, *args, **kwargs)
                 finally:
-                    visdom_logger._cv_depth -= 1
+                    logger._cv_depth -= 1
                 duration = time.time() - t0
-                visdom_logger._log_cv(self_est, duration)
+                logger._log_cv(self_est, duration)
                 return result
 
         else:
@@ -111,10 +115,11 @@ class VisdomSklearnLogger:
                 t0 = time.time()
                 result = original(self_est, *args, **kwargs)
                 duration = time.time() - t0
-                if visdom_logger._cv_depth == 0:
+                logger = visdom_cls._active
+                if logger._cv_depth == 0:
                     X = args[0] if args else None
                     y = args[1] if len(args) > 1 else None
-                    visdom_logger._log_plain(self_est, X, y, duration)
+                    logger._log_plain(self_est, X, y, duration)
                 return result
 
         patched_fit._visdom_patched = True
