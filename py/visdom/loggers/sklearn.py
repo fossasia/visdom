@@ -46,12 +46,12 @@ class VisdomSklearnLogger:
         gs.fit(X_train, y_train)    # logged automatically
     """
 
-    _active = None
+    active = None
 
     def __init__(self, viz, env):
         self.viz = viz
         self.env = env
-        self._cv_depth = 0
+        self._depth = 0
 
     @classmethod
     def autolog(cls, viz=None, env=None):
@@ -78,7 +78,7 @@ class VisdomSklearnLogger:
             or "sklearn_{}".format(datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
         )
         instance = cls(viz, env)
-        cls._active = instance
+        cls.active = instance
         for cv_cls in (GridSearchCV, RandomizedSearchCV):
             instance._patch(cv_cls, is_cv=True)
         for _name, est_cls in all_estimators():
@@ -97,26 +97,31 @@ class VisdomSklearnLogger:
 
             @functools.wraps(original)
             def patched_fit(self_est, *args, **kwargs):
-                logger = visdom_cls._active
-                logger._cv_depth += 1
+                logger = visdom_cls.active
+                logger._depth += 1
                 t0 = time.time()
                 try:
                     result = original(self_est, *args, **kwargs)
                 finally:
-                    logger._cv_depth -= 1
+                    logger._depth -= 1
                 duration = time.time() - t0
-                logger._log_cv(self_est, duration)
+                if logger._depth == 0:
+                    logger._log_cv(self_est, duration)
                 return result
 
         else:
 
             @functools.wraps(original)
             def patched_fit(self_est, *args, **kwargs):
+                logger = visdom_cls.active
+                logger._depth += 1
                 t0 = time.time()
-                result = original(self_est, *args, **kwargs)
+                try:
+                    result = original(self_est, *args, **kwargs)
+                finally:
+                    logger._depth -= 1
                 duration = time.time() - t0
-                logger = visdom_cls._active
-                if logger._cv_depth == 0:
+                if logger._depth == 0:
                     X = args[0] if args else None
                     y = args[1] if len(args) > 1 else None
                     logger._log_plain(self_est, X, y, duration)
@@ -135,7 +140,14 @@ class VisdomSklearnLogger:
         )
 
     def _log_cv(self, est, duration):
-        scores = est.cv_results_["mean_test_score"]
+        refit = getattr(est, "refit", None)
+        score_key = "mean_test_{}".format(refit) if isinstance(refit, str) else None
+        if score_key not in est.cv_results_:
+            score_key = next(
+                (k for k in est.cv_results_ if k.startswith("mean_test_")),
+                "mean_test_score",
+            )
+        scores = est.cv_results_[score_key]
         n = len(scores)
         self.viz.bar(
             X=scores,
@@ -143,7 +155,7 @@ class VisdomSklearnLogger:
             opts={
                 "title": "{} CV scores".format(type(est).__name__),
                 "xlabel": "param combo",
-                "ylabel": "mean_test_score",
+                "ylabel": score_key,
                 "rownames": ["combo_{}".format(i) for i in range(n)],
             },
         )
