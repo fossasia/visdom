@@ -662,17 +662,19 @@ def _flatten_experiments(experiments):
     ``experiments`` is a list of experiment dicts as returned by the
     ``experiments/search`` endpoint (see :class:`visdom.experiments.Experiment`).
     Each experiment carries ``params``/``metrics``/``tags`` as lists of
-    ``{"key": ..., "value": ...}`` dicts; this collapses them into per-run maps so
-    the frontend renders a table/parallel-coordinates view without re-deriving the
-    column set. Metrics form a time series, so only each metric's *latest* logged
-    value is kept (the last observation for that key).
+    ``{"key": ..., "value": ...}`` dicts; this collapses each of the three into a
+    per-run ``{name: value}`` map so the frontend renders a table/parallel-
+    coordinates view without re-deriving the column set. Metrics form a time
+    series, so only each metric's *latest* logged value is kept (the last
+    observation for that key).
 
-    Returns a dict of ``records`` (one flattened row per run), the sorted
-    ``param_keys`` union and the sorted ``metric_keys`` union across all runs.
+    Returns a dict of ``records`` (one flattened row per run) plus the sorted
+    ``param_keys``, ``metric_keys`` and ``tag_keys`` unions across all runs.
     """
     records = []
     param_keys = set()
     metric_keys = set()
+    tag_keys = set()
     for exp in experiments:
         if not isinstance(exp, dict):
             continue
@@ -683,7 +685,6 @@ def _flatten_experiments(experiments):
                 continue
             params[key] = param.get("value")
             param_keys.add(key)
-        # Metrics are appended in order; keep the last value seen per key.
         metrics = {}
         for metric in exp.get("metrics", []) or []:
             key = metric.get("key")
@@ -691,6 +692,13 @@ def _flatten_experiments(experiments):
                 continue
             metrics[key] = metric.get("value")
             metric_keys.add(key)
+        tags = {}
+        for tag in exp.get("tags", []) or []:
+            key = tag.get("key")
+            if key is None:
+                continue
+            tags[key] = tag.get("value")
+            tag_keys.add(key)
         records.append(
             {
                 "env_id": exp.get("env_id"),
@@ -699,12 +707,14 @@ def _flatten_experiments(experiments):
                 "created_at": exp.get("created_at"),
                 "params": params,
                 "metrics": metrics,
+                "tags": tags,
             }
         )
     return {
         "records": records,
         "param_keys": sorted(param_keys),
         "metric_keys": sorted(metric_keys),
+        "tag_keys": sorted(tag_keys),
     }
 
 
@@ -1352,25 +1362,50 @@ class Visdom(object):
             msg["eid"] = env
         return self._experiment_request(msg, "experiments/suggest")
 
-    def hparams(self, query=None, env_ids=None, win=None, env=None, opts=None):
+    def hparams(
+        self, query=None, env_ids=None, mode="both", win=None, env=None, opts=None
+    ):
         """Open a hyper-parameter pane over the experiments logged on the server.
 
-        Gathers experiments via :meth:`search_experiments` (so the same `query`
-        syntax applies, and `query=None` pulls every logged run), optionally
-        restricting to an explicit list of `env_ids`, then flattens them into a
-        table of hyper-parameters against their latest metric values and renders
-        it in a dedicated ``hparams`` window. The window travels through the
-        normal window machinery, so it persists and reloads like any other pane.
+        Gathers experiments, flattens them into a table of hyper-parameters
+        against their latest metric values (and tags), and renders it in a
+        dedicated ``hparams`` window that persists/reloads like any other pane.
 
-            vis.hparams()                      # every logged experiment
+        `mode` chooses how the runs to show are selected:
+
+        * ``"query"`` — only the runs matching `query` (the readable syntax of
+          :meth:`search_experiments`; `query=None` means every run). `env_ids`
+          is ignored.
+        * ``"env_ids"`` — only the runs named in `env_ids`, in that order.
+          `query` is ignored, and `env_ids` is required.
+        * ``"both"`` (default) — the intersection: runs that match `query` *and*
+          are named in `env_ids`, ordered by `env_ids`. With only one of the two
+          supplied it degrades to that one (so the single-argument calls below
+          work under the default).
+
+        ::
+
+            vis.hparams()
             vis.hparams("lr < 0.01 AND acc > 0.9")
             vis.hparams(env_ids=["run-a", "run-b"])
+            vis.hparams("acc > 0.9", ["run-a", "run-b"])
+            vis.hparams("acc > 0.9", ["run-a"], mode="query")
 
         `win`/`env`/`opts` behave as they do for the other plotting methods.
         Returns the created window id (or the raw send result when this client is
         constructed with `send=False`).
         """
-        if env_ids is not None:
+        valid_modes = ("query", "env_ids", "both")
+        if mode not in valid_modes:
+            raise ValueError(
+                "mode must be one of {0}, got {1!r}".format(valid_modes, mode)
+            )
+        use_query = mode in ("query", "both")
+        use_env_ids = mode in ("env_ids", "both")
+
+        if mode == "env_ids" and env_ids is None:
+            raise ValueError("mode='env_ids' requires env_ids")
+        if use_env_ids and env_ids is not None:
             if isstr(env_ids) or not isinstance(env_ids, (list, tuple)):
                 raise TypeError("env_ids must be a list of environment ids")
             if not all(isstr(env_id) for env_id in env_ids):
@@ -1380,9 +1415,9 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
-        reply = self.search_experiments(query=query, limit=None)
+        reply = self.search_experiments(query=query if use_query else None, limit=None)
         experiments = reply.get("experiments", []) if isinstance(reply, dict) else []
-        if env_ids is not None:
+        if use_env_ids and env_ids is not None:
             wanted = list(dict.fromkeys(env_ids))
             by_id = {exp.get("env_id"): exp for exp in experiments}
             experiments = [by_id[eid] for eid in wanted if eid in by_id]

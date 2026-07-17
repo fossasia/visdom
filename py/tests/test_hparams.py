@@ -18,17 +18,26 @@ from visdom.experiments import ExperimentStore
 
 
 def seed_experiments(store):
-    """Log three runs with heterogeneous params and a metric time series."""
-    store.log_experiment("run-a", name="alpha", params={"lr": 0.1, "epochs": 10})
+    """Log three runs with heterogeneous params/tags and a metric time series."""
+    store.log_experiment(
+        "run-a",
+        name="alpha",
+        params={"lr": 0.1, "epochs": 10},
+        tags={"dataset": "mnist"},
+    )
     store.log_metric("run-a", "acc", 0.80)
 
-    store.log_experiment("run-b", name="beta", params={"lr": 0.001, "epochs": 20})
+    store.log_experiment(
+        "run-b",
+        name="beta",
+        params={"lr": 0.001, "epochs": 20},
+        tags={"dataset": "cifar10", "owner": "mira"},
+    )
     store.log_metric("run-b", "acc", 0.55)
-    store.log_metric("run-b", "acc", 0.95)  # latest wins
+    store.log_metric("run-b", "acc", 0.95)
     store.log_metric("run-b", "loss", 0.1)
     store.finish_experiment("run-b")
 
-    # run-c only carries a param that the other two do not.
     store.log_experiment("run-c", name="gamma", params={"momentum": 0.9})
 
 
@@ -41,10 +50,13 @@ class TestFlattenExperiments(unittest.TestCase):
     """_flatten_experiments collapses lists of params/metrics into per-run maps."""
 
     def setUp(self):
-        self._tmp_dir = tempfile.mkdtemp(prefix="visdom_hparams_flatten_")
-        self.store = ExperimentStore(JSONStore(self._tmp_dir))
+        self._tmp = tempfile.TemporaryDirectory()
+        self.store = ExperimentStore(JSONStore(self._tmp.name))
         seed_experiments(self.store)
         self.payload = _flatten_experiments(search_dicts(self.store))
+
+    def tearDown(self):
+        self._tmp.cleanup()
 
     def _record(self, env_id):
         for record in self.payload["records"]:
@@ -63,6 +75,20 @@ class TestFlattenExperiments(unittest.TestCase):
     def test_metric_keys_are_sorted_union(self):
         """metric_keys is the sorted union of every run's metric names."""
         self.assertEqual(self.payload["metric_keys"], ["acc", "loss"])
+
+    def test_tag_keys_are_sorted_union(self):
+        """tag_keys is the sorted union of every run's tag names."""
+        self.assertEqual(self.payload["tag_keys"], ["dataset", "owner"])
+
+    def test_tags_collapse_to_a_map(self):
+        """A run's tags flatten to a {name: value} map on the record."""
+        self.assertEqual(
+            self._record("run-b")["tags"], {"dataset": "cifar10", "owner": "mira"}
+        )
+
+    def test_run_without_tags_has_empty_tag_map(self):
+        """A run with no tags still exposes a tags key (an empty map)."""
+        self.assertEqual(self._record("run-c")["tags"], {})
 
     def test_params_collapse_to_a_map(self):
         """A run's params flatten to a {name: value} map."""
@@ -89,6 +115,7 @@ class TestFlattenExperiments(unittest.TestCase):
         self.assertEqual(payload["records"], [])
         self.assertEqual(payload["param_keys"], [])
         self.assertEqual(payload["metric_keys"], [])
+        self.assertEqual(payload["tag_keys"], [])
 
     def test_non_dict_entries_are_skipped(self):
         """Defensive: a malformed entry does not abort the whole flatten."""
@@ -111,12 +138,13 @@ class TestHparamsClientMessage(unittest.TestCase):
         self.assertEqual(msg["data"][0]["type"], "hparams")
 
     def test_content_has_records_shape(self):
-        """The pane content always exposes the three keys the frontend reads."""
+        """The pane content always exposes the keys the frontend reads."""
         msg, _ = self.vis.hparams()
         content = msg["data"][0]["content"]
         self.assertIn("records", content)
         self.assertIn("param_keys", content)
         self.assertIn("metric_keys", content)
+        self.assertIn("tag_keys", content)
 
     def test_env_and_win_pass_through(self):
         """win/env target a specific pane like the other plotting methods."""
@@ -134,12 +162,9 @@ class TestHparamsClientMessage(unittest.TestCase):
         with self.assertRaises(TypeError):
             self.vis.hparams(env_ids=["run-a", 3])
 
-    def test_env_ids_filter_and_order(self):
-        """env_ids selects and orders runs out of the fetched set.
-
-        The search call is stubbed so the filter/flatten path runs without a
-        server; hparams should keep only the named runs, in the order given.
-        """
+    def _stub_search(self):
+        """Stub search_experiments to record its query and return three runs."""
+        self._seen = {}
         canned = {
             "experiments": [
                 {"env_id": "run-a", "name": "a", "params": [], "metrics": []},
@@ -147,10 +172,54 @@ class TestHparamsClientMessage(unittest.TestCase):
                 {"env_id": "run-c", "name": "c", "params": [], "metrics": []},
             ]
         }
-        self.vis.search_experiments = lambda query=None, limit=None: canned
+
+        def fake_search(query=None, limit=None):
+            self._seen["query"] = query
+            return canned
+
+        self.vis.search_experiments = fake_search
+
+    def _ordered(self, msg):
+        return [r["env_id"] for r in msg["data"][0]["content"]["records"]]
+
+    def test_env_ids_filter_and_order(self):
+        """env_ids selects and orders runs out of the fetched set (default mode)."""
+        self._stub_search()
         msg, _ = self.vis.hparams(env_ids=["run-c", "run-a"])
-        ordered = [r["env_id"] for r in msg["data"][0]["content"]["records"]]
-        self.assertEqual(ordered, ["run-c", "run-a"])
+        self.assertEqual(self._ordered(msg), ["run-c", "run-a"])
+
+    def test_mode_query_ignores_env_ids(self):
+        """mode='query' forwards the query and does not narrow by env_ids."""
+        self._stub_search()
+        msg, _ = self.vis.hparams(query="acc > 0.9", env_ids=["run-a"], mode="query")
+        self.assertEqual(self._seen["query"], "acc > 0.9")
+        self.assertEqual(self._ordered(msg), ["run-a", "run-b", "run-c"])
+
+    def test_mode_env_ids_ignores_query(self):
+        """mode='env_ids' sends no query and narrows to the named runs."""
+        self._stub_search()
+        msg, _ = self.vis.hparams(query="acc > 0.9", env_ids=["run-b"], mode="env_ids")
+        self.assertIsNone(self._seen["query"])
+        self.assertEqual(self._ordered(msg), ["run-b"])
+
+    def test_mode_both_intersects(self):
+        """mode='both' forwards the query and then narrows by env_ids."""
+        self._stub_search()
+        msg, _ = self.vis.hparams(
+            query="acc > 0.9", env_ids=["run-c", "run-a"], mode="both"
+        )
+        self.assertEqual(self._seen["query"], "acc > 0.9")
+        self.assertEqual(self._ordered(msg), ["run-c", "run-a"])
+
+    def test_mode_env_ids_requires_env_ids(self):
+        """mode='env_ids' without env_ids is a usage error."""
+        with self.assertRaises(ValueError):
+            self.vis.hparams(mode="env_ids")
+
+    def test_rejects_unknown_mode(self):
+        """An unrecognised mode is rejected before any request."""
+        with self.assertRaises(ValueError):
+            self.vis.hparams(mode="sideways")
 
 
 if __name__ == "__main__":
