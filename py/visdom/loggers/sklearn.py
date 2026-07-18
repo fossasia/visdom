@@ -159,15 +159,28 @@ class VisdomSklearnLogger:
                 "rownames": ["combo_{}".format(i) for i in range(n)],
             },
         )
-        summary_rows = "".join(
-            [
-                self._row("best_score", "{:.4f}".format(est.best_score_)),
-                self._row("fit_time", "{:.2f}s".format(duration)),
-            ]
-        )
-        param_rows = "".join(
-            self._row(k, v) for k, v in sorted(est.best_params_.items())
-        )
+        if hasattr(est, "best_score_"):
+            summary_rows = "".join(
+                [
+                    self._row("best_score", "{:.4f}".format(est.best_score_)),
+                    self._row("fit_time", "{:.2f}s".format(duration)),
+                ]
+            )
+            param_rows = "".join(
+                self._row(k, v) for k, v in sorted(est.best_params_.items())
+            )
+        else:
+            summary_rows = "".join(
+                [
+                    self._row("fit_time", "{:.2f}s".format(duration)),
+                    self._row(
+                        "note",
+                        "refit=False with multi-metric scoring: "
+                        "best_score_/best_params_ unavailable",
+                    ),
+                ]
+            )
+            param_rows = ""
         body = (
             "<div {wrap}>"
             "<div {title}>{name}</div>"
