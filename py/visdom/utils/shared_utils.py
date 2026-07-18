@@ -15,6 +15,7 @@ helper functions.
 import importlib
 import json
 import math
+import numbers
 import uuid
 import warnings
 import os
@@ -57,6 +58,35 @@ def get_visdom_path(filename=None):
     if filename is None:
         return cwd
     return os.path.join(cwd, filename)
+
+
+def _coerce_image_slider_index(index):
+    """Validate and normalize a slider index to a plain Python int."""
+    if isinstance(index, np.ndarray):
+        if index.size != 1:
+            raise TypeError("image slider index must be a single integer value")
+        index = index.item()
+    elif isinstance(index, np.generic):
+        index = index.item()
+
+    if isinstance(index, bool):
+        raise TypeError("image slider index must be an integer, got bool")
+
+    if isinstance(index, numbers.Integral):
+        return int(index)
+
+    if isinstance(index, numbers.Real):
+        if not math.isfinite(index):
+            raise ValueError("image slider index must be finite")
+        if float(index).is_integer():
+            return int(index)
+        raise ValueError(
+            "image slider index must be an integer, got {!r}".format(index)
+        )
+
+    raise TypeError(
+        "image slider index must be an integer, got {}".format(type(index).__name__)
+    )
 
 
 def _sanitize_nans(obj):

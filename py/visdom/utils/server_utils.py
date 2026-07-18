@@ -89,8 +89,9 @@ def hash_password(password, salt=None):
 
 
 class LazyEnvData(Mapping):
-    def __init__(self, env_path_file):
-        self._env_path_file = env_path_file
+    def __init__(self, store, eid):
+        self._store = store
+        self._eid = eid
         self._raw_dict = None
 
     def lazy_load_data(self):
@@ -98,15 +99,15 @@ class LazyEnvData(Mapping):
             return
 
         try:
-            with open(self._env_path_file, "r") as fn:
-                env_data = tornado.escape.json_decode(fn.read())
-        except Exception as e:
+            env_data = self._store.load_env(self._eid)
+            self._raw_dict = {
+                "jsons": env_data["jsons"],
+                "reload": env_data["reload"],
+            }
+        except (KeyError, TypeError) as e:
             raise ValueError(
-                "Failed loading environment json: {} - {}".format(
-                    self._env_path_file, repr(e)
-                )
+                "Failed loading environment json: {} - {}".format(self._eid, repr(e))
             )
-        self._raw_dict = {"jsons": env_data["jsons"], "reload": env_data["reload"]}
 
     def __getitem__(self, key):
         self.lazy_load_data()
@@ -205,9 +206,25 @@ def update_window(p, args):
                 p[opt_name] = opt_val
 
     if "legend" in opts:
+        legend = opts["legend"]
         pdata = p["content"]["data"]
-        for i, d in enumerate(pdata):
-            d["name"] = opts["legend"][i]
+        name = args.get("name")
+        if name is not None:
+            if len(legend) > 0:
+                for d in pdata:
+                    if d.get("name") == name:
+                        d["name"] = legend[0]
+        else:
+            if len(legend) < len(pdata):
+                logging.warning(
+                    "update_window: legend has %d entries but pane has %d"
+                    " traces; leaving trailing traces' names unchanged",
+                    len(legend),
+                    len(pdata),
+                )
+            for i, d in enumerate(pdata):
+                if i < len(legend):
+                    d["name"] = legend[i]
     p["version"] += 1
     return p
 
