@@ -502,7 +502,7 @@ def send_to_sources(handler, msg):
         source.write_message(json.dumps(msg, cls=NanSafeEncoder))
 
 
-def load_env(state, eid, socket, store, env_path=DEFAULT_ENV_PATH):
+def load_env(state, eid, socket, store):
     """load an environment to a client by socket"""
     env = {}
     if eid in state:
