@@ -81,6 +81,7 @@ def plot_special_parallel_coordinates(viz, env, args):
     viz.parallel_coordinates(
         X=X,
         Y=X[:, 7],
+        env=env,
         opts=dict(
             dimensions=[
                 "LR",
