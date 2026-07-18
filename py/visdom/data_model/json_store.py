@@ -234,12 +234,13 @@ class JSONStore(DataStore):
     def _undo_paths(self, eid):
         """Return ``(undo_dir, plain_path, hashed_path)`` for ``eid``'s undo file.
 
-        ``hashed_path`` mirrors the env-file hash fallback for ids whose plain
-        filename would exceed the filesystem limit.
+        ``hashed_path`` mirrors ``serialize_env``'s fallback for env ids whose
+        plain filename would exceed the filesystem limit.
         """
+        safe_eid = self._safe_eid(eid)
         undo_dir = os.path.join(self.env_path, UNDO_DIRNAME)
-        plain = os.path.join(undo_dir, "{0}.json".format(eid))
-        hashed_id = hashlib.sha256(eid.encode("utf-8")).hexdigest()
+        plain = os.path.join(undo_dir, "{0}.json".format(safe_eid))
+        hashed_id = hashlib.sha256(safe_eid.encode("utf-8")).hexdigest()
         hashed = os.path.join(undo_dir, "hash_{0}.json".format(hashed_id))
         return undo_dir, plain, hashed
 
