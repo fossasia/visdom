@@ -8,6 +8,7 @@ is in place so a future refactor cannot silently bypass the backend.
 """
 
 import json
+import os
 import tempfile
 import types
 import unittest
@@ -16,8 +17,16 @@ from unittest import mock
 from visdom.data_model.base import DataStore
 from visdom.data_model.json_store import JSONStore
 from visdom.server.app import Application
-from visdom.server.handlers.web_handlers import SaveHandler
-from visdom.utils.server_utils import LazyEnvData
+from visdom.server.defaults import DEFAULT_MAX_UNDO_HISTORY
+from visdom.server.handlers.socket_handlers import AnySocketHandlerOrWrapper
+from visdom.server.handlers.web_handlers import DeleteEnvHandler, SaveHandler
+from visdom.utils.server_utils import (
+    LazyEnvData,
+    clear_deleted,
+    count_deleted,
+    pop_deleted,
+    push_deleted,
+)
 
 
 def _env(win_id="win_0"):
@@ -26,7 +35,7 @@ def _env(win_id="win_0"):
 
 
 class TestStorageWiring(unittest.TestCase):
-    """PR #2: the server's save handlers route through ``Application.storage``."""
+    """The server's save handlers route through ``Application.storage``."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -79,7 +88,7 @@ class _SpyStore(JSONStore):
 
 
 class TestLoadStateWiring(unittest.TestCase):
-    """PR #3: ``Application.load_state`` routes env discovery/reads through storage."""
+    """``Application.load_state`` routes env discovery/reads through storage."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -127,6 +136,145 @@ class TestLoadStateWiring(unittest.TestCase):
         app = Application(port=8097, env_path=self.env_path)
         self.assertIn("main", app.state)
         self.assertTrue(JSONStore(self.env_path).env_exists("main"))
+
+
+class TestDeleteWiring(unittest.TestCase):
+    """Env deletion routes through ``storage.delete_env`` (no direct FS)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.env_path = self._tmp.name
+        self.store = JSONStore(self.env_path)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _spy_delete(self):
+        calls = []
+        real = self.store.delete_env
+
+        def spy(eid):
+            calls.append(eid)
+            return real(eid)
+
+        self.store.delete_env = spy
+        return calls
+
+    def _handler(self, state, **extra):
+        """A stand-in handler exposing only what the delete paths read."""
+        return types.SimpleNamespace(
+            storage=self.store,
+            state=state,
+            env_path=self.env_path,
+            subs={},
+            **extra,
+        )
+
+    def test_web_delete_routes_through_storage(self):
+        self.store.save_env("expt", _env())
+        self.assertTrue(self.store.env_exists("expt"))
+        calls = self._spy_delete()
+        handler = self._handler({"expt": _env()})
+        DeleteEnvHandler.wrap_func(handler, {"eid": "expt"})
+        self.assertEqual(calls, ["expt"])
+        self.assertNotIn("expt", handler.state)
+        self.assertFalse(self.store.env_exists("expt"))
+        self.assertFalse(os.path.exists(os.path.join(self.env_path, "expt.json")))
+
+    def test_web_delete_protects_main(self):
+        self.store.save_env("main", _env())
+        calls = self._spy_delete()
+        handler = self._handler({"main": _env()})
+        DeleteEnvHandler.wrap_func(handler, {"eid": "main"})
+        self.assertEqual(calls, [])
+        self.assertTrue(self.store.env_exists("main"))
+
+    def test_socket_delete_routes_through_storage(self):
+        self.store.save_env("expt", _env())
+        calls = self._spy_delete()
+        fake = self._handler({"expt": _env()}, readonly=False)
+        AnySocketHandlerOrWrapper.on_message(
+            fake, json.dumps({"cmd": "delete_env", "eid": "expt"})
+        )
+        self.assertEqual(calls, ["expt"])
+        self.assertNotIn("expt", fake.state)
+        self.assertFalse(self.store.env_exists("expt"))
+
+
+class TestLayoutWiring(unittest.TestCase):
+    """``Application`` layout save/load route through ``storage``."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.env_path = self._tmp.name
+        self.app = Application(port=8097, env_path=self.env_path)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_save_and_load_route_through_storage(self):
+        saved = []
+        real_save = self.app.storage.save_layouts
+
+        def spy(layouts):
+            saved.append(layouts)
+            return real_save(layouts)
+
+        self.app.storage.save_layouts = spy
+        self.app.layouts = '[["v", {}]]'
+        self.app.save_layouts()
+        self.assertEqual(saved, ['[["v", {}]]'])
+
+        app2 = Application(port=8097, env_path=self.env_path)
+        self.assertEqual(app2.layouts, '[["v", {}]]')
+
+    def test_none_path_does_not_touch_storage(self):
+        app = Application(port=8097, env_path=None)
+        self.assertEqual(app.load_layouts(), "")
+
+
+class TestUndoWiring(unittest.TestCase):
+    """Undo helpers persist through the DataStore, not raw env_path I/O."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.store = JSONStore(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_push_then_pop_is_lifo(self):
+        push_deleted(self.store, "expt", "win_0", {"id": "win_0"})
+        push_deleted(self.store, "expt", "win_1", {"id": "win_1"})
+        self.assertEqual(count_deleted(self.store, "expt"), 2)
+        self.assertEqual(pop_deleted(self.store, "expt"), ("win_1", {"id": "win_1"}))
+        self.assertEqual(pop_deleted(self.store, "expt"), ("win_0", {"id": "win_0"}))
+        self.assertIsNone(pop_deleted(self.store, "expt"))
+
+    def test_push_trims_to_max_history(self):
+        for i in range(DEFAULT_MAX_UNDO_HISTORY + 3):
+            push_deleted(self.store, "expt", f"win_{i}", {"id": f"win_{i}"})
+        self.assertEqual(count_deleted(self.store, "expt"), DEFAULT_MAX_UNDO_HISTORY)
+        win_id, _ = pop_deleted(self.store, "expt")
+        self.assertEqual(win_id, f"win_{DEFAULT_MAX_UNDO_HISTORY + 2}")
+
+    def test_clear_removes_history(self):
+        push_deleted(self.store, "expt", "win_0", {"id": "win_0"})
+        clear_deleted(self.store, "expt")
+        self.assertEqual(count_deleted(self.store, "expt"), 0)
+
+    def test_push_routes_through_store(self):
+        saved = []
+        real_save = self.store.save_undo
+
+        def spy(eid, stack):
+            saved.append((eid, list(stack)))
+            return real_save(eid, stack)
+
+        self.store.save_undo = spy
+        push_deleted(self.store, "expt", "win_0", {"id": "win_0"})
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(saved[0][0], "expt")
 
 
 class TestLazyEnvDataBackend(unittest.TestCase):
