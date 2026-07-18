@@ -9,16 +9,15 @@
 """Handler that builds the hyper-parameter pane.
 
 ``/experiments/hparams`` selects experiments, flattens them into the records
-matrix the pane renders from, and stores an ``hparams`` window with that content
-in the env state — so the ``Visdom.hparams`` client is a thin call to this
-endpoint rather than gathering, flattening and creating the window itself. It
-reads through the server's ``DataStore`` (:class:`ExperimentStore` over
+matrix the pane renders from, and registers an ``hparams`` window with that
+content — so the ``Visdom.hparams`` client is a thin call to this endpoint
+rather than gathering, flattening and creating the window itself. It reads
+through the server's ``DataStore`` (:class:`ExperimentStore` over
 ``handler.storage``), so it stays backend-agnostic.
 
-For now the window is only written into the state; it is served on the next env
-load but not broadcast to connected clients, because the frontend does not yet
-have a dedicated ``hparams`` pane to render it. Broadcasting is added together
-with that pane.
+The window is registered like any other pane (:func:`register_window`): written
+into the env state and broadcast to connected clients, so it appears live and is
+also served on the next env load.
 """
 
 import tornado.escape
@@ -33,6 +32,7 @@ from visdom.server.handlers.base_handlers import BaseHandler
 from visdom.utils.server_utils import (
     check_auth,
     extract_eid,
+    register_window,
     window,
 )
 
@@ -54,8 +54,8 @@ class ExperimentHparamsHandler(BaseHandler):
 
     ``win``/``eid``/``opts`` behave as for any other window. The selected runs
     are flattened (:func:`~visdom.experiments.flatten_experiments`) into the
-    window content and written into the env state; the reply is the created
-    window id.
+    window content and registered as a window (env state + broadcast); the reply
+    is the created window id.
     """
 
     @staticmethod
@@ -162,25 +162,7 @@ class ExperimentHparamsHandler(BaseHandler):
                 "opts": args.get("opts", {}),
             }
         )
-        ExperimentHparamsHandler._store_window(handler, p, eid)
-        handler.write(p["id"])
-
-    @staticmethod
-    def _store_window(handler, p, eid):
-        """Write ``p`` into ``eid``'s state so it is served on the next env load.
-
-        This is the state half of :func:`register_window` without the socket
-        broadcast: the pane is persisted but not pushed to connected clients,
-        since the frontend has no ``hparams`` pane to render it yet.
-        """
-        if eid not in handler.state:
-            handler.state[eid] = {"jsons": {}, "reload": {}}
-        env = handler.state[eid]["jsons"]
-        if p["id"] in env:
-            p["i"] = env[p["id"]]["i"]
-        else:
-            p["i"] = len(env)
-        env[p["id"]] = p
+        register_window(handler, p, eid)
 
     @check_auth
     def post(self):

@@ -1,4 +1,5 @@
 import EmbeddingsPane from './panes/EmbeddingsPane';
+import HParamsPane from './panes/HParamsPane';
 import ImageComparePane from './panes/ImageComparePane';
 import ImagePane from './panes/ImagePane';
 import NetworkPane from './panes/NetworkPane';
@@ -19,6 +20,7 @@ const PANES = {
   properties: PropertiesPane,
   embeddings: EmbeddingsPane,
   network: NetworkPane,
+  hparams: HParamsPane,
 };
 const PANE_SIZE = {
   image: [20, 20],
@@ -30,6 +32,7 @@ const PANE_SIZE = {
   embeddings: [20, 20],
   properties: [20, 20],
   network: [20, 20],
+  hparams: [40, 24],
 };
 const MODAL_STYLE = {
   content: {
