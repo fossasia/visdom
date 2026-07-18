@@ -107,6 +107,9 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
+    def update_image_slider(
+        self, win: Text, index: Union[int, float], env: _OptStr = ...
+    ) -> _SendReturn: ...
     def images(
         self,
         tensor: Tensor,

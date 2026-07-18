@@ -268,6 +268,7 @@ Other options are either currently unused (endpoint, ipv6) or used for internal 
 Visdom offers the following basic visualization functions:
 - [`vis.image`](#visimage)    : image
 - [`vis.image_heatmap`](#visimageheatmap) : image with heatmap overlay
+- [`vis.update_image_slider`](#visupdate_image_slider) : set visible frame of an image_history pane
 - [`vis.images`](#visimages)   : list of images
 - [`vis.text`](#vistext)     : arbitrary HTML
 - [`vis.properties`](#visproperties)     : properties grid
@@ -332,6 +333,55 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 - [`vis.replay_log`](#visreplay_log): replay the actions from the provided log file
 
 
+## Loggers
+
+Framework-specific logging bridges that wrap the Visdom API so training loops stay focused on training. Each logger lives in its own submodule and handles window creation, step tracking, and throttling internally.
+
+### PyTorch
+
+`visdom.pytorch.VisdomLogger` is a context manager for raw PyTorch training loops. Call `tracker.log(name, value)` for any scalar — no `viz.line()` arguments needed.
+
+**Epoch-level logging** (recommended default — one call per epoch):
+
+```python
+import visdom
+from visdom.pytorch import VisdomLogger
+
+viz = visdom.Visdom()
+
+with VisdomLogger(viz, env="my_run") as tracker:
+    for epoch in range(num_epochs):
+        train_loss = run_train_epoch(model, loader)
+        val_loss   = run_val_epoch(model, val_loader)
+
+        tracker.log("Train Loss", train_loss)
+        tracker.log("Val Loss",   val_loss)
+        tracker.log("LR",         optimizer.param_groups[0]["lr"])
+```
+
+**Per-batch logging with `log_every`** — use when logging inside the batch loop on large datasets:
+
+```python
+with VisdomLogger(viz, env="my_run", log_every=50) as tracker:
+    for epoch in range(num_epochs):
+        for inputs, targets in train_loader:
+            loss = criterion(model(inputs), targets)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            # sent to Visdom every 50 batches, not every batch
+            tracker.log("Train Loss", loss.item(), xlabel="step")
+            tracker.log("LR",         optimizer.param_groups[0]["lr"], xlabel="step")
+```
+
+**Parameters:**
+- `viz`: a connected `visdom.Visdom()` instance
+- `env`: environment name (default: auto-generated from timestamp)
+- `log_every`: send every N calls per metric — use with per-batch logging on large datasets (default: `1`)
+
+Each unique name passed to `tracker.log()` gets its own window. The first call creates it; subsequent calls append. See `example/train_example.py` for a full working example.
+
 ## Details
 <img src="https://user-images.githubusercontent.com/19650074/198747904-7a8a580f-851a-45fb-8f45-94e54a910ee2.png"/>
 
@@ -355,6 +405,18 @@ The following `opts` are supported:
 - `jpgquality`: JPG quality (`number` 0-100). If defined image will be saved as JPG to reduce file size. If not defined image will be saved as PNG.
 - `caption`: Caption for the image
 - `store_history`: Keep all images stored to the same window and attach a slider to the bottom that will let you select the image to view. You must always provide this opt when sending new images to an image with history.
+
+#### vis.update_image_slider
+
+Programmatically set the visible frame of an `image_history` pane from Python:
+
+```python
+win = vis.image(img, opts=dict(store_history=True))
+vis.image(img2, win=win, opts=dict(store_history=True))
+vis.update_image_slider(win, index=1)  # show second frame
+```
+
+The `index` is 0-based and is clamped to the valid range by the server. NumPy integer scalars (e.g. `np.int64`) are accepted and coerced automatically. Passing a non-integer or a non-`image_history` window raises an error.
 
 > **Note** You can use alt on an image pane to view the x/y coordinates of the cursor. You can also ctrl-scroll to zoom, alt scroll to pan vertically, and alt-shift scroll to pan horizontally. Double click inside the pane to restore the image to default.
 
@@ -910,6 +972,7 @@ The following `opts` are generic in the sense that they are the same for all vis
 - `opts.marginright` : right margin (in pixels)
 - `opts.margintop`   : top margin (in pixels)
 - `opts.marginbottom`: bottom margin (in pixels)
+- `opts.caption`     : caption displayed below the plot (`string`; optional)
 
 `opts` are passed as dictionary in python scripts.You can pass `opts` like:
 

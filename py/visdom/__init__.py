@@ -6,7 +6,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from visdom.utils.shared_utils import get_new_window_id
+from visdom.utils.shared_utils import get_new_window_id, _coerce_image_slider_index
 from visdom import server
 import os
 import os.path
@@ -1943,6 +1943,30 @@ class Visdom(object):
         return self._send(
             {"data": data, "win": win, "eid": env, "opts": opts},
             endpoint="events",
+        )
+
+    @pytorch_wrap
+    def update_image_slider(self, win, index, env=None):
+        """
+        Set the displayed frame of an ``image_history`` window.
+
+        Args:
+            win (str): Window ID of an existing image_history pane.
+            index: Frame index to display (0-based). Accepts Python integers,
+                integral floats, and NumPy integer scalars or 0-d arrays.
+                Fractional or non-finite values raise an error. Clamped to
+                the valid range by the server.
+            env (str, optional): Environment ID. Defaults to ``self.env``.
+        """
+        assert win is not None, "update_image_slider requires a window id"
+        index = _coerce_image_slider_index(index)
+        return self._send(
+            {
+                "data": [{"type": "image_update_selected", "selected": index}],
+                "win": win,
+                "eid": env,
+            },
+            endpoint="update",
         )
 
     @pytorch_wrap
