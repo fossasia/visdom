@@ -16,10 +16,8 @@ the data_model itself.
 import copy
 import json
 import logging
-import os
 import time
 import types
-import hashlib
 from collections import deque
 from enum import Enum
 
@@ -97,7 +95,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     return
                 p_data = self.state[eid]["jsons"].pop(msg["data"], None)
                 if p_data is not None:
-                    push_deleted(self.env_path, eid, msg["data"], p_data)
+                    push_deleted(self.storage, eid, msg["data"], p_data)
                 env = self.state.get(msg["eid"])
                 if env is None:
                     return
@@ -109,14 +107,14 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     "pane_data": p_data,
                 }
                 send_to_sources(self, event)
-                broadcast_undo_state(self, eid, self.env_path)
+                broadcast_undo_state(self, eid, self.storage)
 
         elif cmd == "undo":
             if "eid" in msg:
                 eid = escape_eid(msg["eid"])
                 if eid not in self.state:
                     return
-                popped = pop_deleted(self.env_path, eid)
+                popped = pop_deleted(self.storage, eid)
                 if popped:
                     win_id, p_data = popped
                     env = self.state[eid]["jsons"]
@@ -130,7 +128,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                         json.dumps(broadcast_msg, cls=NanSafeEncoder),
                         eid,
                     )
-                broadcast_undo_state(self, eid, self.env_path)
+                broadcast_undo_state(self, eid, self.storage)
 
         elif cmd == "save":
             # save localStorage window metadata
@@ -156,28 +154,8 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     return
                 logging.info(f"closing environment {eid}")
                 self.state.pop(eid, None)
-                clear_deleted(self.env_path, eid)
-                if self.env_path is not None:
-                    p = os.path.join(self.env_path, "{0}.json".format(eid))
-                    if os.path.exists(p):
-                        try:
-                            os.remove(p)
-                        except FileNotFoundError:
-                            pass
-                        except OSError as e:
-                            logging.error(f"Failed to delete {p}: {e}")
-                    else:
-                        hashed_id = hashlib.sha256(eid.encode("utf-8")).hexdigest()
-                        p_hashed = os.path.join(
-                            self.env_path, "hash_{0}.json".format(hashed_id)
-                        )
-                        if os.path.exists(p_hashed):
-                            try:
-                                os.remove(p_hashed)
-                            except FileNotFoundError:
-                                pass
-                            except OSError as e:
-                                logging.error(f"Failed to delete {p_hashed}: {e}")
+                clear_deleted(self.storage, eid)
+                self.storage.delete_env(eid)
                 broadcast_envs(self)
 
         elif cmd == "save_layouts":
