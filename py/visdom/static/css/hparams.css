@@ -8,7 +8,7 @@
 
 .content-hparams {
   height: 100%;
-  overflow: auto;
+  overflow: hidden;
   background-color: #fff;
   font-family: "Open Sans", sans-serif;
   font-size: 12px;
@@ -99,11 +99,37 @@
   color: #b94a48;
 }
 
+/* ---- Title bar (centered, like a proper pane heading) ---- */
+
+.bar-hparams {
+  height: 22px;
+}
+
+.bar-hparams button {
+  line-height: 22px;
+}
+
+.bar-hparams .pull-right {
+  float: none !important;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  line-height: 22px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #3b5998;
+  pointer-events: none;
+}
+
 /* ---- HParamsTable (B2) ---- */
 
 .hparams-views {
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
 }
@@ -111,6 +137,7 @@
 .hparams-table-wrap {
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
 }
@@ -226,9 +253,14 @@
   border-bottom: 1px solid #dedede !important;
 }
 
+.hparams-group-param,
 .hparams-group-metric,
 .hparams-group-tag {
-  border-left: 1px solid #dedede;
+  border-left: 1px solid #ccc;
+}
+
+.hparams-col-sep {
+  border-left: 1px solid #ccc;
 }
 
 .hparams-col-blank {

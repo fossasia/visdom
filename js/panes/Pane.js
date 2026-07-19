@@ -34,8 +34,14 @@ var Pane = forwardRef((props, ref) => {
 
   // rendering
   // ---------
-  let windowClassNames = classNames({ window: true, focus: props.isFocused });
-  let barClassNames = classNames({ bar: true, focus: props.isFocused });
+  let windowClassNames = classNames(
+    { window: true, focus: props.isFocused },
+    props.type && 'window-' + props.type
+  );
+  let barClassNames = classNames(
+    { bar: true, focus: props.isFocused },
+    props.type && 'bar-' + props.type
+  );
 
   // add property list button to barwidgets
   if (

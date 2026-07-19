@@ -155,11 +155,13 @@ class ExperimentHparamsHandler(BaseHandler):
         )
 
         eid = extract_eid(args)
+        opts = dict(args.get("opts") or {})
+        opts.setdefault("title", "Hyperparameters")
         p = window(
             {
                 "data": [{"content": content, "type": "hparams"}],
                 "win": args.get("win"),
-                "opts": args.get("opts", {}),
+                "opts": opts,
             }
         )
         register_window(handler, p, eid)

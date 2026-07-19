@@ -88,6 +88,7 @@ const HParamsRow = React.memo(function HParamsRow({
   extent,
   isSelected,
   onToggle,
+  groupStartIds,
 }) {
   const runLabel = record.name || record.env_id || 'run';
   return (
@@ -123,7 +124,8 @@ const HParamsRow = React.memo(function HParamsRow({
         const cls =
           'hparams-cell' +
           (isNumeric(value) ? ' hparams-cell-num' : '') +
-          (style ? ' hparams-cell-spine' : '');
+          (style ? ' hparams-cell-spine' : '') +
+          (groupStartIds.has(col.id) ? ' hparams-col-sep' : '');
         return (
           <td key={col.id} className={cls} style={style || undefined}>
             {formatValue(value)}
@@ -155,6 +157,16 @@ const HParamsTable = ({ records, paramKeys, metricKeys, tagKeys }) => {
   );
   const colorParamCols = colorCols.filter((c) => c.group === 'param');
   const colorMetricCols = colorCols.filter((c) => c.group === 'metric');
+
+  const groupStartIds = useMemo(() => {
+    const ids = new Set();
+    let prev = null;
+    columns.forEach((c) => {
+      if (c.group !== prev) ids.add(c.id);
+      prev = c.group;
+    });
+    return ids;
+  }, [columns]);
 
   const filtered = useMemo(
     () => filterRecords(records, filter, columns),
@@ -378,7 +390,11 @@ const HParamsTable = ({ records, paramKeys, metricKeys, tagKeys }) => {
                   sort={sort}
                   columnId={col.id}
                   label={col.label}
-                  scopeClass={'hparams-th-' + col.group}
+                  scopeClass={
+                    'hparams-th-' +
+                    col.group +
+                    (groupStartIds.has(col.id) ? ' hparams-col-sep' : '')
+                  }
                   onSort={handleSort}
                 />
               ))}
@@ -401,6 +417,7 @@ const HParamsTable = ({ records, paramKeys, metricKeys, tagKeys }) => {
                   extent={extent}
                   isSelected={selected.has(record.env_id)}
                   onToggle={toggle}
+                  groupStartIds={groupStartIds}
                 />
               ))
             )}
