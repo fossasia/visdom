@@ -13,7 +13,6 @@ necessary, but defers underlying manipulations of the server's data to
 the data_model itself.
 """
 
-import hashlib
 import copy
 import getpass
 import json
@@ -469,7 +468,7 @@ class CloseHandler(BaseHandler):
         for win in keys:
             p_data = handler.state[eid]["jsons"].pop(win, None)
             if p_data is not None:
-                push_deleted(handler.env_path, eid, win, p_data)
+                push_deleted(handler.storage, eid, win, p_data)
             broadcast(handler, json.dumps({"command": "close", "data": win}), eid)
 
     @check_auth
@@ -489,28 +488,8 @@ class DeleteEnvHandler(BaseHandler):
             if eid == "main":
                 return
             handler.state.pop(eid, None)
-            clear_deleted(handler.env_path, eid)
-            if handler.env_path is not None:
-                p = os.path.join(handler.env_path, "{0}.json".format(eid))
-                if os.path.exists(p):
-                    try:
-                        os.remove(p)
-                    except FileNotFoundError:
-                        pass
-                    except OSError as e:
-                        logging.error(f"Failed to delete {p}: {e}")
-                else:
-                    hashed_id = hashlib.sha256(eid.encode("utf-8")).hexdigest()
-                    p = os.path.join(
-                        handler.env_path, "hash_{0}.json".format(hashed_id)
-                    )
-                    if os.path.exists(p):
-                        try:
-                            os.remove(p)
-                        except FileNotFoundError:
-                            pass
-                        except OSError as e:
-                            logging.error(f"Failed to delete {p}: {e}")
+            clear_deleted(handler.storage, eid)
+            handler.storage.delete_env(eid)
             broadcast_envs(handler)
 
     @check_auth
@@ -593,7 +572,7 @@ class EnvHandler(BaseHandler):
                         self.state,
                         escape_eid(args),
                         self.subs[sid],
-                        env_path=self.env_path,
+                        self.storage,
                     )
                 except ValueError as e:
                     notify(
@@ -640,7 +619,7 @@ class CompareHandler(BaseHandler):
                     self.state,
                     args.split("+"),
                     self.subs[sid],
-                    self.env_path,
+                    self.storage,
                     show_all=show_all,
                 )
             except ValueError as e:
@@ -734,7 +713,7 @@ class IndexHandler(BaseHandler):
                 wrap_socket=self.wrap_socket,
             )
         elif self.login_enabled:
-            items = gather_envs(self.state, env_path=self.env_path)
+            items = gather_envs(self.state, self.storage)
             self.render(
                 "login.html",
                 user=getpass.getuser(),
