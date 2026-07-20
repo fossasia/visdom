@@ -382,6 +382,33 @@ with VisdomLogger(viz, env="my_run", log_every=50) as tracker:
 
 Each unique name passed to `tracker.log()` gets its own window. The first call creates it; subsequent calls append. See `example/train_example.py` for a full working example.
 
+### XGBoost
+
+`visdom.loggers.VisdomXGBLogger` implements XGBoost's `TrainingCallback` protocol, plotting train/eval metrics to Visdom after every boosting round.
+
+There was no way to visualize XGBoost training runs in Visdom without manually attaching a `TrainingCallback` and wiring up `viz.line()` calls yourself. This adds opt-in auto-logging behind a single `autolog()` call, with no changes required to model, `train()`, or `fit()` code.
+
+```python
+import xgboost as xgb
+import visdom
+from visdom.loggers import VisdomXGBLogger
+
+viz = visdom.Visdom()
+VisdomXGBLogger.autolog(viz, env="xgb_run")
+
+booster = xgb.train(params, dtrain, evals=[(dtrain, "train"), (dval, "eval")])  # logged automatically
+clf = xgb.XGBClassifier().fit(X_train, y_train, eval_set=[(X_val, y_val)])      # logged automatically
+```
+
+Or attach it manually to a single run without patching anything:
+
+```python
+callback = VisdomXGBLogger(viz, env="xgb_run")
+booster = xgb.train(params, dtrain, evals=[(dtrain, "train"), (dval, "eval")], callbacks=[callback])
+```
+
+Each eval metric gets its own window with one trace per data name (`train`/`eval`), and `best_iteration`/`best_score` are logged as a text pane once training finishes. See `example/train_xgboost_example.py` for a full working example.
+
 ## Details
 <img src="https://user-images.githubusercontent.com/19650074/198747904-7a8a580f-851a-45fb-8f45-94e54a910ee2.png"/>
 
