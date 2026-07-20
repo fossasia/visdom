@@ -14,6 +14,9 @@ const { defineConfig, devices } = require('@playwright/test');
  */
 module.exports = defineConfig({
   testDir: './playwright/tests',
+  metadata: {
+    transport: 'websocket',
+  },
   timeout: 30 * 1000,
   expect: {
     timeout: 5000,
