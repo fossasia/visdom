@@ -180,6 +180,14 @@
   color: #333;
 }
 
+.hparams-select-narrow {
+  width: 150px;
+}
+
+.hparams-select-wide {
+  width: 220px;
+}
+
 .hparams-treeselect .rc-tree-select-selector {
   border-radius: 4px !important;
   border-color: #dedede !important;
@@ -404,4 +412,79 @@
   padding: 16px;
   text-align: center;
   color: grey;
+}
+
+/* ---- View switcher (Table | Scatter matrix) ---- */
+
+.hparams-viewtabs {
+  display: flex;
+  gap: 2px;
+  padding: 4px 10px 0;
+  background-color: #fff;
+  border-bottom: 1px solid #dedede;
+}
+
+.hparams-viewtab {
+  padding: 3px 12px;
+  font-family: "Open Sans", sans-serif;
+  font-size: 12px;
+  color: #666;
+  background: none;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  cursor: pointer;
+}
+
+.hparams-viewtab:hover {
+  color: #3b5998;
+}
+
+.hparams-viewtab-active {
+  color: #3b5998;
+  font-weight: 600;
+  background-color: #f0f0f0;
+  border-color: #dedede;
+}
+
+.hparams-viewtab:focus-visible {
+  outline: 2px solid #3b5998;
+  outline-offset: -2px;
+}
+
+/* ---- HParamsSplom (B4) ---- */
+
+.hparams-splom-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.hparams-splom-plot {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+.hparams-splom-overlay {
+  position: absolute;
+  top: 40px;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: grey;
+  pointer-events: none;
+}
+
+.hparams-splom-note {
+  margin-left: auto;
+  color: #888;
+  font-style: italic;
+  white-space: nowrap;
 }

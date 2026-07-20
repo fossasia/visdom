@@ -21,7 +21,6 @@ import {
 } from './hparamsUtils';
 
 const RUN_COLUMN_ID = 'run:name';
-const CONTROL_STYLE = { width: 150 };
 
 function nextSort(current, columnId) {
   if (current.by !== columnId) return { by: columnId, dir: 'asc' };
@@ -294,8 +293,7 @@ const HParamsTable = ({ records, paramKeys, metricKeys, tagKeys }) => {
         <span className="hparams-sortby">
           sort by:
           <TreeSelect
-            className="hparams-treeselect"
-            style={CONTROL_STYLE}
+            className="hparams-treeselect hparams-select-narrow"
             value={sort.by || undefined}
             placeholder="none"
             allowClear
@@ -326,8 +324,7 @@ const HParamsTable = ({ records, paramKeys, metricKeys, tagKeys }) => {
           <span className="hparams-colorby">
             color by:
             <TreeSelect
-              className="hparams-treeselect"
-              style={CONTROL_STYLE}
+              className="hparams-treeselect hparams-select-narrow"
               value={colorBy || undefined}
               placeholder="none"
               allowClear

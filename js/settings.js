@@ -32,7 +32,7 @@ const PANE_SIZE = {
   embeddings: [20, 20],
   properties: [20, 20],
   network: [20, 20],
-  hparams: [40, 24],
+  hparams: [98, 46],
 };
 const MODAL_STYLE = {
   content: {

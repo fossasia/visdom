@@ -150,3 +150,37 @@ export function spineStyle(value, extent) {
     ')';
   return { backgroundColor: bg, color: t > 0.62 ? '#fff' : '#333' };
 }
+
+/*
+ * Numeric param/metric columns only — the axes a scatter matrix (SPLOM) or a
+ * "color by" ramp can actually plot. Tags are excluded (categorical) and any
+ * column whose values are all missing/non-numeric is dropped.
+ */
+export function selectNumericColumns(records, columns) {
+  return (columns || []).filter(
+    (col) =>
+      (col.group === 'param' || col.group === 'metric') &&
+      numericExtent(records, col.accessor) !== null
+  );
+}
+
+/*
+ * Build Plotly `splom` dimensions from the chosen column ids. Order follows
+ * selectedIds; unknown ids are skipped; missing/non-numeric cells become null
+ * so Plotly leaves a gap instead of plotting a bogus 0.
+ */
+export function buildSplomDimensions(records, columns, selectedIds) {
+  const byId = new Map((columns || []).map((col) => [col.id, col]));
+  const dimensions = [];
+  (selectedIds || []).forEach((id) => {
+    const col = byId.get(id);
+    if (!col) return;
+    const values = (records || []).map((record) => {
+      const value = col.accessor(record);
+      return isNumeric(value) ? value : null;
+    });
+    if (values.every((v) => v === null)) return;
+    dimensions.push({ label: col.label, values });
+  });
+  return dimensions;
+}
