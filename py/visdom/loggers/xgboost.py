@@ -50,10 +50,8 @@ class VisdomXGBLogger(TrainingCallback):
             callbacks=[callback],
         )
 
-    Not thread-safe: active, _depth, and _wins are unsynchronized state
-    shared on the class/instance, so concurrent fits sharing one process
-    (real threads, not the joblib multiprocess case where each forked
-    worker gets its own unpatched active) can race on the depth check.
+    Not thread-safe: active/_depth/_wins have no locking, so concurrent
+    fits in the same process can race.
     """
 
     active = None
@@ -107,10 +105,8 @@ class VisdomXGBLogger(TrainingCallback):
     @staticmethod
     def _all_estimators(base_cls):
         """Recursively collect base_cls and every (sub)subclass of it.
-
-        __subclasses__() is a snapshot at call time: a subclass defined
-        or imported after autolog() runs (e.g. xgboost.dask classes that
-        require importing xgboost.dask first) will not be patched."""
+        __subclasses__() is a call-time snapshot, so subclasses imported
+        later (e.g. xgboost.dask) are missed."""
         estimators = {base_cls}
         frontier = [base_cls]
         while frontier:
@@ -182,12 +178,9 @@ class VisdomXGBLogger(TrainingCallback):
         cls.fit = patched_fit
 
     def _patch_depth(self, cls):
-        """Track nesting depth around a meta-estimator's fit() (e.g.
-        GridSearchCV), which has no callbacks= of its own — the actual
-        callback injection happens when it calls into a patched
-        XGBModel.fit() internally. Sharing the depth counter lets those
-        inner fits detect they are nested and reuse one window per
-        metric instead of each opening its own."""
+        """Track depth around a meta-estimator's fit() (e.g. GridSearchCV)
+        that has no callbacks= of its own but calls into a patched
+        XGBModel.fit() internally."""
         if not hasattr(cls, "fit"):
             return
         if getattr(cls.fit, "_visdom_patched", False):
@@ -234,14 +227,8 @@ class VisdomXGBLogger(TrainingCallback):
                         },
                     )
                 elif epoch == 0:
-                    # Reusing a window from a prior run sharing this
-                    # instance — either a nested fit under autolog()'s
-                    # depth tracking, or a manually-passed callback reused
-                    # across separate xgb.train(callbacks=[...]) calls,
-                    # which never touches _depth/_wins reset at all and
-                    # relies on this branch alone. Replace only this
-                    # trace instead of appending, so the new run's curve
-                    # doesn't jumble together with the last.
+                    # New run reusing an old window (nested fit, or a
+                    # manually reused callback) — replace, don't append.
                     self.viz.line(
                         X=[epoch],
                         Y=[value],
