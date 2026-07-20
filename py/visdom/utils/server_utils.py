@@ -21,9 +21,7 @@ import json
 import logging
 import os
 import time
-import re
 import errno
-import tornado.escape
 from collections import OrderedDict
 
 MAX_ENV_NAME_LEN = 25
@@ -291,50 +289,23 @@ def window(args):
     return p
 
 
-def gather_envs(state, env_path=DEFAULT_ENV_PATH):
-    if env_path is not None:
-        items = [
-            i[:-5]
-            for i in os.listdir(env_path)
-            if i.endswith(".json") and not re.match(r"^hash_[a-fA-F0-9]{64}\.json$", i)
-        ]
-    else:
-        items = []
-    return sorted(list(set(items + list(state.keys()))))
+def gather_envs(state, store):
+    return sorted(set(store.list_envs() + list(state.keys())))
 
 
-def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH, show_all=False):
+def compare_envs(state, eids, socket, store, show_all=False):
     logging.info("comparing envs")
     use_env_names = all(len(str(eid)) <= MAX_ENV_NAME_LEN for eid in eids)
     eidNums = {e: e if use_env_names else str(i) for i, e in enumerate(eids)}
-    env = {}
     envs = {}
     for eid in eids:
         if eid in state:
             envs[eid] = state.get(eid)
-        elif env_path is not None:
-            safe_eid = escape_eid(eid.strip())
-            base_env_path = os.path.abspath(env_path)
-            p = os.path.abspath(
-                os.path.join(base_env_path, "{0}.json".format(safe_eid))
-            )
-            try:
-                is_safe = os.path.commonpath([p, base_env_path]) == base_env_path
-            except ValueError:
-                is_safe = False
-            if is_safe and os.path.exists(p):
-                with open(p, "r") as fn:
-                    env = tornado.escape.json_decode(fn.read())
-                    state[eid] = env
-                    envs[eid] = env
-            else:
-                hashed_id = hashlib.sha256(safe_eid.encode("utf-8")).hexdigest()
-                p = os.path.join(env_path, "hash_{0}.json".format(hashed_id))
-                if os.path.exists(p):
-                    with open(p, "r") as fn:
-                        env = tornado.escape.json_decode(fn.read())
-                        state[eid] = env
-                        envs[eid] = env
+        else:
+            env = store.load_env(eid)
+            if env:
+                state[eid] = env
+                envs[eid] = env
 
     valid_eids = [eid for eid in eids if eid in envs]
     if not valid_eids:
@@ -533,30 +504,16 @@ def send_to_sources(handler, msg):
         source.write_message(json.dumps(msg, cls=NanSafeEncoder))
 
 
-def load_env(state, eid, socket, store, env_path=DEFAULT_ENV_PATH):
+def load_env(state, eid, socket, store):
     """load an environment to a client by socket"""
     env = {}
     if eid in state:
         env = state.get(eid)
-    elif env_path is not None:
-        safe_eid = escape_eid(eid.strip())
-        base_env_path = os.path.abspath(env_path)
-        p = os.path.abspath(os.path.join(base_env_path, "{0}.json".format(safe_eid)))
-        try:
-            is_safe = os.path.commonpath([p, base_env_path]) == base_env_path
-        except ValueError:
-            is_safe = False
-        if is_safe and os.path.exists(p):
-            with open(p, "r") as fn:
-                env = tornado.escape.json_decode(fn.read())
-                state[eid] = env
-        else:
-            hashed_id = hashlib.sha256(safe_eid.encode("utf-8")).hexdigest()
-            p = os.path.join(env_path, "hash_{0}.json".format(hashed_id))
-            if os.path.exists(p):
-                with open(p, "r") as fn:
-                    env = tornado.escape.json_decode(fn.read())
-                    state[eid] = env
+    else:
+        loaded = store.load_env(eid)
+        if loaded:
+            env = loaded
+            state[eid] = env
 
     if "reload" in env:
         socket.write_message(
