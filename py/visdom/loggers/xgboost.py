@@ -24,8 +24,13 @@ class VisdomXGBLogger(TrainingCallback):
     so there is no separate evals_result dict to pass or read.
 
     Call autolog() once at the start of your script to patch xgb.train,
-    xgb.cv, and every XGBModel subclass's fit() to log automatically. Or
-    pass an instance directly via callbacks= for manual control.
+    xgb.cv, every XGBModel subclass's fit(), and (if scikit-learn is
+    installed) GridSearchCV/RandomizedSearchCV.fit(), to log automatically.
+    When an XGBModel is fit inside a CV search, the per-fold and refit
+    calls share a single window per metric instead of each opening its
+    own — only the most recent run's curve is shown, rather than one
+    window per inner fit. Or pass an instance directly via callbacks= for
+    manual control.
 
     Usage::
 
@@ -44,6 +49,11 @@ class VisdomXGBLogger(TrainingCallback):
             evals=[(dtrain, "train"), (dval, "eval")],
             callbacks=[callback],
         )
+
+    Not thread-safe: active, _depth, and _wins are unsynchronized state
+    shared on the class/instance, so concurrent fits sharing one process
+    (real threads, not the joblib multiprocess case where each forked
+    worker gets its own unpatched active) can race on the depth check.
     """
 
     active = None
@@ -59,7 +69,8 @@ class VisdomXGBLogger(TrainingCallback):
 
     @classmethod
     def autolog(cls, viz=None, env=None):
-        """Patch xgb.train, xgb.cv, and every XGBModel subclass's fit()
+        """Patch xgb.train, xgb.cv, every XGBModel subclass's fit(), and
+        (if scikit-learn is installed) GridSearchCV/RandomizedSearchCV.fit()
         to log boosting rounds to Visdom."""
         if viz is None:
             import visdom as _visdom
@@ -85,6 +96,13 @@ class VisdomXGBLogger(TrainingCallback):
         instance._patch_function(xgb, "cv")
         for est_cls in cls._all_estimators(xgb.XGBModel):
             instance._patch_fit(est_cls)
+        try:
+            from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
+        except ImportError:
+            pass
+        else:
+            for cv_cls in (GridSearchCV, RandomizedSearchCV):
+                instance._patch_depth(cv_cls)
 
     @staticmethod
     def _all_estimators(base_cls):
@@ -117,6 +135,8 @@ class VisdomXGBLogger(TrainingCallback):
             logger = visdom_cls.active
             if logger is None:
                 return original(*args, **kwargs)
+            if logger._depth == 0:
+                logger._wins = {}
             callbacks = list(kwargs.get("callbacks") or [])
             if logger not in callbacks:
                 callbacks.append(logger)
@@ -144,6 +164,8 @@ class VisdomXGBLogger(TrainingCallback):
             logger = visdom_cls.active
             if logger is None:
                 return original(self_est, *args, **kwargs)
+            if logger._depth == 0:
+                logger._wins = {}
             original_callbacks = self_est.callbacks
             callbacks = list(original_callbacks or [])
             if logger not in callbacks:
@@ -159,9 +181,36 @@ class VisdomXGBLogger(TrainingCallback):
         patched_fit._visdom_patched = True
         cls.fit = patched_fit
 
-    def before_training(self, model):
-        self._wins = {}
-        return model
+    def _patch_depth(self, cls):
+        """Track nesting depth around a meta-estimator's fit() (e.g.
+        GridSearchCV), which has no callbacks= of its own — the actual
+        callback injection happens when it calls into a patched
+        XGBModel.fit() internally. Sharing the depth counter lets those
+        inner fits detect they are nested and reuse one window per
+        metric instead of each opening its own."""
+        if not hasattr(cls, "fit"):
+            return
+        if getattr(cls.fit, "_visdom_patched", False):
+            return
+
+        original = cls.fit
+        visdom_cls = self.__class__
+
+        @functools.wraps(original)
+        def patched_fit(self_est, *args, **kwargs):
+            logger = visdom_cls.active
+            if logger is None:
+                return original(self_est, *args, **kwargs)
+            if logger._depth == 0:
+                logger._wins = {}
+            logger._depth += 1
+            try:
+                return original(self_est, *args, **kwargs)
+            finally:
+                logger._depth -= 1
+
+        patched_fit._visdom_patched = True
+        cls.fit = patched_fit
 
     def after_iteration(self, model, epoch, evals_log):
         for data_name, metrics in evals_log.items():
@@ -184,6 +233,23 @@ class VisdomXGBLogger(TrainingCallback):
                             "showlegend": True,
                         },
                     )
+                elif epoch == 0:
+                    # Reusing a window from a prior run sharing this
+                    # instance — either a nested fit under autolog()'s
+                    # depth tracking, or a manually-passed callback reused
+                    # across separate xgb.train(callbacks=[...]) calls,
+                    # which never touches _depth/_wins reset at all and
+                    # relies on this branch alone. Replace only this
+                    # trace instead of appending, so the new run's curve
+                    # doesn't jumble together with the last.
+                    self.viz.line(
+                        X=[epoch],
+                        Y=[value],
+                        win=self._wins[win_name],
+                        env=self.env,
+                        name=trace_name,
+                        update="replace",
+                    )
                 else:
                     self.viz.line(
                         X=[epoch],
@@ -203,10 +269,12 @@ class VisdomXGBLogger(TrainingCallback):
             best_iteration = None
             best_score = None
         if best_iteration is not None and best_score is not None:
-            self.viz.text(
-                "best_iteration: {}<br>best_score: {}".format(
-                    best_iteration, best_score
-                ),
-                env=self.env,
+            text = "best_iteration: {}<br>best_score: {}".format(
+                best_iteration, best_score
             )
+            summary_win = self._wins.get("__summary__")
+            if summary_win is None:
+                self._wins["__summary__"] = self.viz.text(text, env=self.env)
+            else:
+                self.viz.text(text, win=summary_win, env=self.env)
         return model
