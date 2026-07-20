@@ -8,6 +8,7 @@
 import datetime
 import functools
 import html
+import threading
 import time
 
 _TD_KEY = (
@@ -48,18 +49,26 @@ class VisdomSklearnLogger:
 
     active = None
 
-    def __init__(self, viz, env):
-        self.viz = viz
-        self.env = env
-        self._depth = 0
-
-    @classmethod
-    def autolog(cls, viz=None, env=None):
-        """Patch all sklearn estimators to log fit() calls to Visdom."""
+    def __init__(self, viz=None, env=None):
         if viz is None:
             import visdom as _visdom
 
             viz = _visdom.Visdom()
+        self.viz = viz
+        self.env = env
+        self._local = threading.local()
+
+    @property
+    def _depth(self):
+        return getattr(self._local, "depth", 0)
+
+    @_depth.setter
+    def _depth(self, value):
+        self._local.depth = value
+
+    @classmethod
+    def autolog(cls, viz=None, env=None):
+        """Patch all sklearn estimators to log fit() calls to Visdom."""
         try:
             from sklearn.model_selection import (
                 GridSearchCV,
@@ -71,13 +80,13 @@ class VisdomSklearnLogger:
                 "scikit-learn is required for VisdomSklearnLogger. "
                 "Install with: pip install scikit-learn"
             )
-        _viz_env = getattr(viz, "env", None)
-        env = (
+        instance = cls(viz, env)
+        _viz_env = getattr(instance.viz, "env", None)
+        instance.env = (
             env
             or (_viz_env if _viz_env and _viz_env != "main" else None)
             or "sklearn_{}".format(datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
         )
-        instance = cls(viz, env)
         cls.active = instance
         for cv_cls in (GridSearchCV, RandomizedSearchCV):
             instance._patch(cv_cls, is_cv=True)
@@ -175,8 +184,7 @@ class VisdomSklearnLogger:
                     self._row("fit_time", "{:.2f}s".format(duration)),
                     self._row(
                         "note",
-                        "refit=False with multi-metric scoring: "
-                        "best_score_/best_params_ unavailable",
+                        "refit=False: best_score_/best_params_ " "unavailable",
                     ),
                 ]
             )
