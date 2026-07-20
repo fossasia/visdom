@@ -398,9 +398,10 @@ VisdomXGBLogger.autolog(viz, env="xgb_run")
 
 booster = xgb.train(params, dtrain, evals=[(dtrain, "train"), (dval, "eval")])  # logged automatically
 clf = xgb.XGBClassifier().fit(X_train, y_train, eval_set=[(X_val, y_val)])      # logged automatically
+xgb.cv(params, dtrain, nfold=3)                                                 # logged automatically
 ```
 
-Or attach it manually to a single run without patching anything:
+Or attach a logger to a single run without patching anything:
 
 ```python
 callback = VisdomXGBLogger(viz, env="xgb_run")

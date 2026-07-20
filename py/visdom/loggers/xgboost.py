@@ -23,9 +23,9 @@ class VisdomXGBLogger(TrainingCallback):
     receives evals_log directly from xgboost after every boosting round,
     so there is no separate evals_result dict to pass or read.
 
-    Call autolog() once at the start of your script to patch xgb.train
-    and every XGBModel subclass's fit() to log automatically. Or pass an
-    instance directly via callbacks= for manual control.
+    Call autolog() once at the start of your script to patch xgb.train,
+    xgb.cv, and every XGBModel subclass's fit() to log automatically. Or
+    pass an instance directly via callbacks= for manual control.
 
     Usage::
 
@@ -59,8 +59,8 @@ class VisdomXGBLogger(TrainingCallback):
 
     @classmethod
     def autolog(cls, viz=None, env=None):
-        """Patch xgb.train and every XGBModel subclass's fit() to log
-        boosting rounds to Visdom."""
+        """Patch xgb.train, xgb.cv, and every XGBModel subclass's fit()
+        to log boosting rounds to Visdom."""
         if viz is None:
             import visdom as _visdom
 
@@ -81,14 +81,18 @@ class VisdomXGBLogger(TrainingCallback):
         )
         instance = cls(viz, env)
         cls.active = instance
-        instance._patch_train(xgb)
+        instance._patch_function(xgb, "train")
+        instance._patch_function(xgb, "cv")
         for est_cls in cls._all_estimators(xgb.XGBModel):
             instance._patch_fit(est_cls)
 
     @staticmethod
     def _all_estimators(base_cls):
-        """Recursively collect base_cls and every (sub)subclass of it, so
-        third-party or future XGBModel subclasses are covered too."""
+        """Recursively collect base_cls and every (sub)subclass of it.
+
+        __subclasses__() is a snapshot at call time: a subclass defined
+        or imported after autolog() runs (e.g. xgboost.dask classes that
+        require importing xgboost.dask first) will not be patched."""
         estimators = {base_cls}
         frontier = [base_cls]
         while frontier:
@@ -99,15 +103,17 @@ class VisdomXGBLogger(TrainingCallback):
                     frontier.append(sub)
         return estimators
 
-    def _patch_train(self, xgb):
-        if getattr(xgb.train, "_visdom_patched", False):
+    def _patch_function(self, xgb, name):
+        """Patch a top-level xgboost function (train or cv) that accepts
+        a keyword-only callbacks= argument."""
+        original = getattr(xgb, name)
+        if getattr(original, "_visdom_patched", False):
             return
 
-        original = xgb.train
         visdom_cls = self.__class__
 
         @functools.wraps(original)
-        def patched_train(*args, **kwargs):
+        def patched(*args, **kwargs):
             logger = visdom_cls.active
             if logger is None:
                 return original(*args, **kwargs)
@@ -121,8 +127,8 @@ class VisdomXGBLogger(TrainingCallback):
             finally:
                 logger._depth -= 1
 
-        patched_train._visdom_patched = True
-        xgb.train = patched_train
+        patched._visdom_patched = True
+        setattr(xgb, name, patched)
 
     def _patch_fit(self, cls):
         if not hasattr(cls, "fit"):
