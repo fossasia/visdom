@@ -25,12 +25,18 @@ class VisdomXGBLogger(TrainingCallback):
 
     Call autolog() once at the start of your script to patch xgb.train,
     xgb.cv, every XGBModel subclass's fit(), and (if scikit-learn is
-    installed) GridSearchCV/RandomizedSearchCV.fit(), to log automatically.
-    When an XGBModel is fit inside a CV search, the per-fold and refit
-    calls share a single window per metric instead of each opening its
-    own — only the most recent run's curve is shown, rather than one
-    window per inner fit. Or pass an instance directly via callbacks= for
+    installed) GridSearchCV/RandomizedSearchCV.fit() and
+    cross_val_score/cross_validate, to log automatically. When an
+    XGBModel is fit inside one of these, the per-fold and refit calls
+    share a single window per metric instead of each opening its own —
+    only the most recent run's curve is shown, rather than one window
+    per inner fit. Or pass an instance directly via callbacks= for
     manual control.
+
+    cross_val_score/cross_validate are patched on the sklearn.model_selection
+    module object, so call autolog() before `from sklearn.model_selection
+    import cross_val_score` — importing the name first binds it to the
+    original, unpatched function.
 
     Usage::
 
@@ -69,7 +75,8 @@ class VisdomXGBLogger(TrainingCallback):
     def autolog(cls, viz=None, env=None):
         """Patch xgb.train, xgb.cv, every XGBModel subclass's fit(), and
         (if scikit-learn is installed) GridSearchCV/RandomizedSearchCV.fit()
-        to log boosting rounds to Visdom."""
+        and cross_val_score/cross_validate to log boosting rounds to
+        Visdom."""
         if viz is None:
             import visdom as _visdom
 
@@ -95,12 +102,14 @@ class VisdomXGBLogger(TrainingCallback):
         for est_cls in cls._all_estimators(xgb.XGBModel):
             instance._patch_fit(est_cls)
         try:
-            from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
+            import sklearn.model_selection as sklearn_ms
         except ImportError:
             pass
         else:
-            for cv_cls in (GridSearchCV, RandomizedSearchCV):
+            for cv_cls in (sklearn_ms.GridSearchCV, sklearn_ms.RandomizedSearchCV):
                 instance._patch_depth(cv_cls)
+            for fn_name in ("cross_val_score", "cross_validate"):
+                instance._patch_depth_function(sklearn_ms, fn_name)
 
     @staticmethod
     def _all_estimators(base_cls):
@@ -204,6 +213,32 @@ class VisdomXGBLogger(TrainingCallback):
 
         patched_fit._visdom_patched = True
         cls.fit = patched_fit
+
+    def _patch_depth_function(self, module, name):
+        """Track depth around a plain function (e.g. cross_val_score)
+        that has no callbacks= of its own but calls into a patched
+        estimator's fit() internally."""
+        original = getattr(module, name)
+        if getattr(original, "_visdom_patched", False):
+            return
+
+        visdom_cls = self.__class__
+
+        @functools.wraps(original)
+        def patched(*args, **kwargs):
+            logger = visdom_cls.active
+            if logger is None:
+                return original(*args, **kwargs)
+            if logger._depth == 0:
+                logger._wins = {}
+            logger._depth += 1
+            try:
+                return original(*args, **kwargs)
+            finally:
+                logger._depth -= 1
+
+        patched._visdom_patched = True
+        setattr(module, name, patched)
 
     def after_iteration(self, model, epoch, evals_log):
         for data_name, metrics in evals_log.items():
