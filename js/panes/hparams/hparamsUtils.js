@@ -184,3 +184,26 @@ export function buildSplomDimensions(records, columns, selectedIds) {
   });
   return dimensions;
 }
+
+export function buildParcoordsDimensions(records, columns, selectedIds) {
+  const byId = new Map((columns || []).map((col) => [col.id, col]));
+  const dimensions = [];
+  (selectedIds || []).forEach((id) => {
+    const col = byId.get(id);
+    if (!col) return;
+    const values = (records || []).map((record) => {
+      const value = col.accessor(record);
+      return isNumeric(value) ? value : null;
+    });
+    const extent = numericExtent(records, col.accessor);
+    if (extent === null) return;
+    const span = extent.max - extent.min;
+    const pad = span > 0 ? span * 0.05 : Math.abs(extent.max) * 0.05 || 1;
+    dimensions.push({
+      label: col.label,
+      values,
+      range: [extent.min - pad, extent.max + pad],
+    });
+  });
+  return dimensions;
+}

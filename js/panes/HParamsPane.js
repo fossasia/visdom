@@ -9,12 +9,14 @@
 
 import React, { useState } from 'react';
 
+import HParamsParallelCoords from './hparams/HParamsParallelCoords';
 import HParamsSplom from './hparams/HParamsSplom';
 import HParamsTable from './hparams/HParamsTable';
 import Pane from './Pane';
 
 const VIEWS = [
   { key: 'table', label: 'Table' },
+  { key: 'parcoords', label: 'Parallel coordinates' },
   { key: 'splom', label: 'Scatter matrix' },
 ];
 
@@ -98,21 +100,18 @@ var HParamsPane = (props) => {
               </button>
             ))}
           </div>
-          {view === 'splom' ? (
-            <HParamsSplom
-              records={data.records}
-              paramKeys={data.paramKeys}
-              metricKeys={data.metricKeys}
-              tagKeys={data.tagKeys}
-            />
-          ) : (
-            <HParamsTable
-              records={data.records}
-              paramKeys={data.paramKeys}
-              metricKeys={data.metricKeys}
-              tagKeys={data.tagKeys}
-            />
-          )}
+          {(() => {
+            const viewProps = {
+              records: data.records,
+              paramKeys: data.paramKeys,
+              metricKeys: data.metricKeys,
+              tagKeys: data.tagKeys,
+            };
+            if (view === 'splom') return <HParamsSplom {...viewProps} />;
+            if (view === 'parcoords')
+              return <HParamsParallelCoords {...viewProps} />;
+            return <HParamsTable {...viewProps} />;
+          })()}
         </div>
       </div>
     );
