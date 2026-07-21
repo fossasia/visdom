@@ -102,7 +102,63 @@ class ExistsHandler(BaseHandler):
 
 class UpdateHandler(BaseHandler):
     @staticmethod
+    def _fast_path_update_packet(
+        p, args, max_text_lines, max_old_content, max_image_history, content_id
+    ):
+        """
+        Build targeted JSON patch ops for update types that mutate a small,
+        predictable set of fields. This avoids full jsonpatch diff generation on
+        high-frequency streaming updates.
+        """
+        pane_type = p.get("type")
+        if pane_type not in {"text", "image_history", "plot_history"}:
+            return None
+
+        p = UpdateHandler.update(
+            p, args, max_text_lines, max_old_content, max_image_history
+        )
+        p["contentID"] = content_id
+
+        if pane_type == "text":
+            return p, [
+                {"op": "replace", "path": "/content", "value": p["content"]},
+                {"op": "add", "path": "/contentID", "value": content_id},
+            ]
+
+        utype = None
+        data = args.get("data")
+        if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
+            utype = data[0].get("type")
+
+        if pane_type == "image_history" and utype == "image_update_selected":
+            return p, [
+                {"op": "add", "path": "/selected", "value": p.get("selected")},
+                {"op": "add", "path": "/contentID", "value": content_id},
+            ]
+
+        if pane_type == "plot_history" and utype == "plot_update_selected":
+            return p, [
+                {"op": "add", "path": "/selected", "value": p.get("selected")},
+                {"op": "add", "path": "/contentID", "value": content_id},
+            ]
+
+        # For append-style history updates, replacing content + selected is
+        # typically much smaller than building a full structural diff.
+        return p, [
+            {"op": "replace", "path": "/content", "value": p["content"]},
+            {"op": "add", "path": "/selected", "value": p.get("selected")},
+            {"op": "add", "path": "/contentID", "value": content_id},
+        ]
+
+    @staticmethod
     def update_packet(p, args, max_text_lines, max_old_content, max_image_history):
+        content_id = get_rand_id()
+        fast_packet = UpdateHandler._fast_path_update_packet(
+            p, args, max_text_lines, max_old_content, max_image_history, content_id
+        )
+        if fast_packet is not None:
+            return fast_packet
+
         # Shallow copy the packet to dynamically capture changes to top-level keys.
         old_p = p.copy()
 
@@ -115,7 +171,7 @@ class UpdateHandler(BaseHandler):
         p = UpdateHandler.update(
             p, args, max_text_lines, max_old_content, max_image_history
         )
-        p["contentID"] = get_rand_id()
+        p["contentID"] = content_id
 
         patch = jsonpatch.make_patch(old_p, p)
         return p, patch.patch
