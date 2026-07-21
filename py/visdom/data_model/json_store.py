@@ -7,6 +7,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import errno
+import copy
 import hashlib
 import json
 import logging
@@ -75,6 +76,29 @@ class JSONStore(DataStore):
             return hashed
         return None
 
+    @staticmethod
+    def _looks_like_windows_path_limit(path):
+        """
+        Return True when ``path`` is likely to hit legacy Windows path limits.
+
+        On some Windows setups, very long paths fail with FileNotFoundError
+        instead of ENAMETOOLONG, so we use a conservative pre-check.
+        """
+        if os.name != "nt":
+            return False
+        abs_path = os.path.abspath(path)
+        if len(abs_path) >= 240:
+            return True
+        return any(len(part) >= 240 for part in abs_path.split(os.sep))
+
+    def _write_hashed_env_file(self, safe_eid, env_data):
+        hashed_id = hashlib.sha256(safe_eid.encode("utf-8")).hexdigest()
+        hashed_path = os.path.join(self.env_path, "hash_{0}.json".format(hashed_id))
+        payload = copy.deepcopy(env_data)
+        payload["name"] = safe_eid
+        with open(hashed_path, "w", encoding="utf-8") as fn:
+            fn.write(json.dumps(payload, cls=NanSafeEncoder))
+
     def save_env(self, eid, env_data):
         """Persist a single environment; return ``True`` if written, else ``False``."""
         return bool(self.save_envs({eid: env_data}, [eid]))
@@ -94,7 +118,25 @@ class JSONStore(DataStore):
             if eid not in state:
                 continue
             safe_eid = self._safe_eid(eid)
-            serialize_env({safe_eid: state[eid]}, [safe_eid], env_path=self.env_path)
+            primary = self._primary_path(eid)
+            if primary is None:
+                continue
+            if self._looks_like_windows_path_limit(primary):
+                self._write_hashed_env_file(safe_eid, state[eid])
+                written.append(eid)
+                continue
+            try:
+                serialize_env(
+                    {safe_eid: state[eid]}, [safe_eid], env_path=self.env_path
+                )
+            except OSError as e:
+                if (
+                    e.errno != errno.ENAMETOOLONG
+                    and getattr(e, "winerror", None) != 206
+                    and not self._looks_like_windows_path_limit(primary)
+                ):
+                    raise
+                self._write_hashed_env_file(safe_eid, state[eid])
             written.append(eid)
         return written
 
@@ -225,6 +267,13 @@ class JSONStore(DataStore):
         undo_dir, plain, hashed = self._undo_paths(eid)
         os.makedirs(undo_dir, exist_ok=True)
         payload = json.dumps(stack, cls=NanSafeEncoder)
+        if self._looks_like_windows_path_limit(plain):
+            target = hashed
+            tmp = hashed + ".tmp"
+            with open(tmp, "w") as fn:
+                fn.write(payload)
+            os.replace(tmp, hashed)
+            return target
         try:
             target = plain
             tmp = plain + ".tmp"
@@ -232,7 +281,11 @@ class JSONStore(DataStore):
                 fn.write(payload)
             os.replace(tmp, plain)
         except OSError as e:
-            if e.errno != errno.ENAMETOOLONG and getattr(e, "winerror", None) != 206:
+            if (
+                e.errno != errno.ENAMETOOLONG
+                and getattr(e, "winerror", None) != 206
+                and not self._looks_like_windows_path_limit(plain)
+            ):
                 raise
             target = hashed
             tmp = hashed + ".tmp"
