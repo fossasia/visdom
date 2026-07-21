@@ -28,12 +28,9 @@ LICENSE file in the root directory of this source tree.
     <div class="header-sub">An unhandled exception occurred</div>
   </div>
 
-  <div class="header-sub">
-    <a href="/" class="back-link"
-      onclick="try { localStorage.removeItem('envIDs'); } catch (e) {}">
-      ← Back to dashboard
-    </a>
-  </div>
+  <script>
+    try { localStorage.removeItem('envIDs'); } catch (e) {}
+  </script>
 
   {% if error is not None %}
 
