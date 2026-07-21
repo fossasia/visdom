@@ -86,6 +86,19 @@ def start_server(
     )
     bind_addr = "127.0.0.1" if bind_local else None
     family = socket.AF_INET if bind_local else socket.AF_UNSPEC
+
+    ssl_ctx = None
+    if ssl_certfile and ssl_keyfile:
+        if not os.path.isfile(ssl_certfile):
+            raise FileNotFoundError(f"SSL certificate file not found: {ssl_certfile}")
+        if not os.path.isfile(ssl_keyfile):
+            raise FileNotFoundError(f"SSL key file not found: {ssl_keyfile}")
+        ssl_ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        ssl_ctx.load_cert_chain(ssl_certfile, ssl_keyfile)
+        logging.info("SSL enabled")
+
+    server = tornado.httpserver.HTTPServer(app, max_buffer_size=1024**3, ssl_options=ssl_ctx)
+
     try:
         sockets = tornado.netutil.bind_sockets(port, address=bind_addr, family=family)
     except OSError as e:
@@ -97,18 +110,6 @@ def start_server(
             raise
     port = sockets[0].getsockname()[1]
     app.port = port
-    ssl_ctx = None
-    if ssl_certfile and ssl_keyfile:
-        if not os.path.isfile(ssl_certfile):
-            raise FileNotFoundError(f"SSL certificate file not found: {ssl_certfile}")
-        if not os.path.isfile(ssl_keyfile):
-            raise FileNotFoundError(f"SSL key file not found: {ssl_keyfile}")
-        ssl_ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-        ssl_ctx.load_cert_chain(ssl_certfile, ssl_keyfile)
-        logging.info("SSL enabled")
-    server = tornado.httpserver.HTTPServer(
-        app, max_buffer_size=1024**3, ssl_options=ssl_ctx
-    )
     server.add_sockets(sockets)
 
     logging.info("Application Started")
@@ -120,6 +121,7 @@ def start_server(
         hostname = os.environ["HOSTNAME"]
 
     scheme = "https" if ssl_ctx else "http"
+
     if print_func is None:
         print("You can navigate to %s://%s:%s%s" % (scheme, hostname, port, base_url))
     else:
@@ -219,7 +221,6 @@ def main(print_func=None):
         help="Path to SSL private key file (.pem or .key) to enable HTTPS. "
         "Must be used together with -ssl_certfile.",
     )
-
     FLAGS = parser.parse_args()
 
     # Process base_url
