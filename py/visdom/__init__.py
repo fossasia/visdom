@@ -11,6 +11,7 @@ from visdom import server
 import os
 import os.path
 import requests
+import ssl
 import traceback
 import threading
 import websocket  # type: ignore
@@ -678,10 +679,22 @@ class Visdom(object):
         use_polling=False,
         session_idle_timeout=SESSION_IDLE_TIMEOUT,
         session_idle_check_interval=SESSION_IDLE_CHECK_INTERVAL,
+        ssl_verify=None,
     ):
         parsed_url = urlparse(server)
         if not parsed_url.scheme:
             parsed_url = urlparse("http://{}".format(server))
+        
+        if parsed_url.scheme == "http" and ssl_verify is not None:
+            raise ValueError(
+                "ssl_verify is only valid with HTTPS. "
+                "Use server='https://...' to enable HTTPS."
+            )
+        
+        if ssl_verify is None:
+            ssl_verify = True
+
+        self.ssl_verify = ssl_verify
         self.server_base_name = parsed_url.netloc
         self.server = urlunparse((parsed_url.scheme, parsed_url.netloc, "", "", "", ""))
         self.endpoint = endpoint
@@ -800,6 +813,10 @@ class Visdom(object):
             sess = requests.Session()
             if self.proxies:
                 sess.proxies.update(self.proxies)
+            if isinstance(self.ssl_verify, str):
+                sess.verify = self.ssl_verify
+            elif not self.ssl_verify:
+                sess.verify = False  
             if self.username:
                 resp = sess.post(
                     "%s:%s%s" % (self.server, self.port, self.base_url),
@@ -995,11 +1012,22 @@ class Visdom(object):
                             + self.session.cookies.get("user_password", "")
                         },
                     )
-                    ws.run_forever(
-                        http_proxy_host=self.http_proxy_host,
-                        http_proxy_port=self.http_proxy_port,
-                        ping_timeout=100.0,
-                    )
+                    run_forever_kwargs = {
+                        "http_proxy_host": self.http_proxy_host,
+                        "http_proxy_port": self.http_proxy_port,
+                        "ping_timeout": 100.0,
+                    }
+                    if ws_scheme == "wss":
+                        if isinstance(self.ssl_verify, str):
+                            run_forever_kwargs["sslopt"] = {
+                                "cert_reqs": ssl.CERT_REQUIRED,
+                                "ca_certs": self.ssl_verify,
+                            }
+                        elif not self.ssl_verify:
+                            run_forever_kwargs["sslopt"] = {
+                                "cert_reqs": ssl.CERT_NONE,
+                            }
+                    ws.run_forever(**run_forever_kwargs)
                     ws.close()
                 except Exception as e:
                     logger.error("Socket had error {}, attempting restart".format(e))
@@ -1039,7 +1067,7 @@ class Visdom(object):
         self._last_post_time = time.time()
         had_session = self._session is not None
         try:
-            r = self.session.post(url, data=data)
+            r = self.session.post(url, data=data, timeout=20)
             return r.text
         except (requests.ConnectionError, requests.Timeout):
             if not had_session:
@@ -1052,7 +1080,7 @@ class Visdom(object):
                 except Exception:
                     pass
                 self._session = None
-            r = self.session.post(url, data=data)
+            r = self.session.post(url, data=data, timeout=20)
             return r.text
 
     def _send(self, msg, endpoint="events", quiet=False, from_log=False, create=True):
@@ -1094,6 +1122,23 @@ class Visdom(object):
                 ),
                 data=json.dumps(msg, cls=NanSafeEncoder),
             )
+        except requests.exceptions.SSLError as e:
+            ssl_msg = (
+                "SSL certificate verification failed for {}:{}. "
+                "If using a self-signed certificate, pass ssl_verify=False. "
+                "If using mkcert, run: "
+                "export REQUESTS_CA_BUNDLE=$(mkcert -CAROOT)/rootCA.pem".format(
+                    self.server, self.port
+                )
+            )
+            if self.raise_exceptions:
+                raise ConnectionError(ssl_msg) from e
+            else:
+                if not quiet:
+                    print("SSL Error:")
+                    print("-" * 60)
+                    print(ssl_msg)
+                return False
         except (requests.RequestException, requests.ConnectionError, requests.Timeout):
             if self.raise_exceptions:
                 raise ConnectionError("Error connecting to Visdom server")
