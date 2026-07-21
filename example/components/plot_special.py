@@ -61,6 +61,47 @@ def plot_special_graph(viz, env, args):
     )
 
 
+# parallel coordinates plot
+def plot_special_parallel_coordinates(viz, env, args):
+    n = 20
+    X = np.column_stack(
+        [
+            np.random.uniform(1e-4, 0.1, n),
+            np.random.choice([16, 32, 64, 128, 256], n).astype(float),
+            np.random.randint(10, 200, n).astype(float),
+            np.random.uniform(0.0, 0.5, n),
+            np.random.uniform(1e-5, 1e-2, n),
+            np.random.choice([0, 1, 2], n).astype(float),
+            np.random.choice([64, 128, 256, 512], n).astype(float),
+            np.random.uniform(50, 99, n),
+            np.random.uniform(0.01, 1.0, n),
+            np.random.uniform(0.4, 0.95, n),
+        ]
+    )
+    viz.parallel_coordinates(
+        X=X,
+        Y=X[:, 7],
+        env=env,
+        opts=dict(
+            dimensions=[
+                "LR",
+                "Batch",
+                "Epochs",
+                "Dropout",
+                "WD",
+                "Optim",
+                "Hidden",
+                "Acc",
+                "Loss",
+                "F1",
+            ],
+            title="Experiment Comparison",
+            tickvals={5: [0, 1, 2]},
+            ticktext={5: ["SGD", "Adam", "AdamW"]},
+        ),
+    )
+
+
 # sankey (flow) diagram
 def plot_special_sankey(viz, env, args):
     title = args[0] if len(args) > 0 else None
