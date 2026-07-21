@@ -325,7 +325,7 @@ class _FakeSocket:
 
 
 class TestReadHelperWiring(unittest.TestCase):
-    """PR #7: ``load_env`` reads a cold env through the store, not raw env_path."""
+    """``load_env`` reads a cold env through the store, not raw env_path."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
