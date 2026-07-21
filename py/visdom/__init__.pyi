@@ -107,6 +107,9 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
+    def update_image_slider(
+        self, win: Text, index: Union[int, float], env: _OptStr = ...
+    ) -> _SendReturn: ...
     def images(
         self,
         tensor: Tensor,
@@ -290,6 +293,14 @@ class Visdom:
         edges: List,
         edgeLabels: List,
         nodeLabels: List,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
+    def parallel_coordinates(
+        self,
+        X: Tensor,
+        Y: Optional[Tensor] = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
