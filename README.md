@@ -382,6 +382,49 @@ with VisdomLogger(viz, env="my_run", log_every=50) as tracker:
 
 Each unique name passed to `tracker.log()` gets its own window. The first call creates it; subsequent calls append. See `example/train_example.py` for a full working example.
 
+### scikit-learn
+
+`visdom.loggers.VisdomSklearnLogger` patches all sklearn `fit()` calls so every estimator trained after `autolog()` logs to Visdom automatically — no per-estimator code needed.
+
+**Plain estimators** (classifiers, regressors, clusterers) produce a text pane with the estimator name, dataset shape, training score, fit time, and all hyperparameters.
+
+**GridSearchCV / RandomizedSearchCV** produce a bar chart of `mean_test_score` per parameter combination and a text pane with `best_score_`, `best_params_`, and fit time.
+
+```python
+import visdom
+from visdom.loggers import VisdomSklearnLogger
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import Ridge
+from sklearn.model_selection import GridSearchCV
+
+viz = visdom.Visdom()
+VisdomSklearnLogger.autolog()
+
+clf = RandomForestClassifier(n_estimators=100)
+clf.fit(X_train, y_train)        # -> text pane
+
+reg = Ridge(alpha=1.0)
+reg.fit(X_train, y_train)        # -> text pane
+
+gs = GridSearchCV(clf, param_grid, cv=3)
+gs.fit(X_train, y_train)         # -> bar chart + text pane
+```
+
+If you have a custom Visdom connection (non-default port, remote server, auth), pass it explicitly:
+
+```python
+import visdom
+
+viz = visdom.Visdom(port=8098, server="http://myserver")
+VisdomSklearnLogger.autolog(viz, env="sklearn_run")
+```
+
+**Parameters:**
+- `viz`: a connected `visdom.Visdom()` instance (optional — created internally if not passed)
+- `env`: environment name (default: `viz.env` if set, otherwise auto-generated from timestamp)
+
+See `example/train_sklearn_example.py` for a full working example covering plain estimators and grid search.
+
 ## Details
 <img src="https://user-images.githubusercontent.com/19650074/198747904-7a8a580f-851a-45fb-8f45-94e54a910ee2.png"/>
 
