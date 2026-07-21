@@ -578,7 +578,6 @@ class EnvHandler(BaseHandler):
                         escape_eid(args),
                         self.subs[sid],
                         self.storage,
-                        env_path=self.env_path,
                     )
                 except ValueError as e:
                     notify(
