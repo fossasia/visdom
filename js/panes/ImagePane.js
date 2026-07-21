@@ -139,9 +139,20 @@ function ImagePane(props) {
   };
 
   const updateSlider = (evt) => {
-    // TODO add history update events here! need to send these to the client
-    // with sendPaneMessage
-    setActualSelected(parseInt(evt.target.value));
+    const idx = parseInt(evt.target.value, 10);
+    if (Number.isNaN(idx)) return;
+    setActualSelected(idx);
+  };
+
+  const commitSliderSelection = (value) => {
+    const idx = parseInt(value, 10);
+    if (Number.isNaN(idx)) return;
+    sendPaneMessage({ event_type: 'SliderMoved', index: idx, pane_data: false }, id, envID);
+  };
+
+  const finalizeSlider = (evt) => {
+    if (!evt || !evt.target) return;
+    commitSliderSelection(evt.target.value);
   };
 
   // effects
@@ -210,9 +221,11 @@ function ImagePane(props) {
 
   // Find the width/height that preserves the aspect ratio 'scaledWidth/height'
   const computeHFromW = (scaledWidth) => {
+    if (!imgDim.width) return 0;
     return Math.ceil((imgDim.height / imgDim.width) * scaledWidth);
   };
   const computeWFromH = (scaledHeight) => {
+    if (!imgDim.height) return 0;
     return Math.ceil((imgDim.width / imgDim.height) * scaledHeight);
   };
 
@@ -283,6 +296,8 @@ function ImagePane(props) {
               max={content.length - 1}
               value={actualSelected}
               onChange={updateSlider}
+              onPointerUp={finalizeSlider}
+              onKeyUp={finalizeSlider}
             />
             <span>&nbsp;&nbsp;{actualSelected}&nbsp;&nbsp;</span>
           </div>
@@ -334,7 +349,6 @@ function ImagePane(props) {
           />
         </div>
       </div>
-      <p className="caption">{content.caption}</p>
       <span
         className="mouse_image_location"
         style={{ visibility: mouseLocation.visibility }}

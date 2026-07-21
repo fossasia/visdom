@@ -26,6 +26,7 @@ function NetworkPane(props) {
 
   const containerRef = useRef(null);
   const timeoutRef = useRef(null);
+  const forceRef = useRef(null);
   const [downloadError, setDownloadError] = useState(null);
 
   // private events
@@ -45,7 +46,8 @@ function NetworkPane(props) {
     }
 
     requestAnimationFrame(() => {
-      saveSvgAsPng(svg, 'plot.png', {
+      const filename = props.contentID ? `${props.contentID}.png` : 'plot.png';
+      saveSvgAsPng(svg, filename, {
         scale: 2,
         backgroundColor: '#FFFFFF',
       });
@@ -57,8 +59,20 @@ function NetworkPane(props) {
 
   // initialize d3
   useEffect(() => {
+    // stop the previous simulation's timer before starting a new one
+    if (forceRef.current) {
+      forceRef.current.stop();
+    }
+    d3.select(containerRef.current).selectAll('*').remove();
     CreateNetwork(content);
-  }, []);
+
+    return () => {
+      if (forceRef.current) {
+        forceRef.current.stop();
+        forceRef.current = null;
+      }
+    };
+  }, [content, directed, showEdgeLabels, showVertexLabels]);
 
   useEffect(() => {
     return () => {
@@ -77,6 +91,7 @@ function NetworkPane(props) {
       .charge(-120)
       .linkDistance(120)
       .size([width, height]);
+    forceRef.current = force;
     var svg = d3
       .select(containerRef.current)
       .select('svg')
@@ -239,11 +254,7 @@ function NetworkPane(props) {
 
   return (
     <Pane {...props} handleDownload={handleDownload}>
-    {downloadError && (
-      <div className="error-message">
-        {downloadError}
-      </div>
-    )}
+      {downloadError && <div className="error-message">{downloadError}</div>}
       <div
         ref={containerRef}
         style={{ height: '100%', width: '100%', flex: 1 }}

@@ -59,6 +59,7 @@ class BaseHandler(tornado.web.RequestHandler):
             self.sources = app.sources
             self.port = app.port
             self.env_path = app.env_path
+            self.storage = app.storage
             self.login_enabled = app.login_enabled
             self.max_text_lines = app.max_text_lines
             self.max_old_content = app.max_old_content

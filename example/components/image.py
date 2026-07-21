@@ -1,6 +1,34 @@
 import numpy as np
 
 
+# image compare demo
+# Creates solid-color images with matching titles in two sibling environments
+# so that opening both at once produces an image_compare pane.
+def image_compare_basic(viz, env, args):
+    red = np.zeros((3, 100, 100), dtype=np.uint8)
+    red[0, :, :] = 200
+
+    blue = np.zeros((3, 100, 100), dtype=np.uint8)
+    blue[2, :, :] = 200
+
+    viz.image(
+        red,
+        env=env,
+        opts={
+            "title": "CompareTest",
+            "caption": "Image A",
+        },
+    )
+    viz.image(
+        blue,
+        env=env + "_compare",
+        opts={
+            "title": "CompareTest",
+            "caption": "Image B",
+        },
+    )
+
+
 # image demo
 def image_basic(viz, env, args):
     img_callback_win = viz.image(
@@ -9,6 +37,18 @@ def image_basic(viz, env, args):
         env=env,
     )
     return img_callback_win
+
+
+def image_heatmap_basic(viz, env, args):
+    img = np.random.rand(3, 128, 128)
+    ys, xs = np.mgrid[0:128, 0:128]
+    heatmap = np.exp(-((ys - 64) ** 2 + (xs - 64) ** 2) / (2 * 20.0**2))
+    return viz.image_heatmap(
+        img,
+        heatmap,
+        opts={"title": "Heatmap overlay", "colormap": "jet", "alpha": 0.6},
+        env=env,
+    )
 
 
 def image_callback(viz, env, args):
@@ -92,6 +132,46 @@ def image_grid(viz, env, args):
         opts=dict(title="Random images", caption="How random."),
         env=env,
     )
+
+# image slider sync demo — one slider drives two panes
+def image_slider_sync(viz, env, args):
+    n_frames = 4
+    colors = np.linspace(0.2, 0.8, n_frames)
+
+    win_a = None
+    win_b = None
+    for i, c in enumerate(colors):
+        frame = np.full((3, 128, 256), c)
+        win_a = viz.image(
+            frame,
+            win=win_a,
+            opts=dict(
+                title="Model A",
+                caption="Frame {}".format(i),
+                store_history=True,
+            ),
+            env=env,
+        )
+        win_b = viz.image(
+            1.0 - frame,
+            win=win_b,
+            opts=dict(
+                title="Model B (synced)",
+                caption="Frame {}".format(i),
+                store_history=True,
+            ),
+            env=env,
+        )
+
+    viz.update_image_slider(win_a, 0, env=env)
+    viz.update_image_slider(win_b, 0, env=env)
+
+    def on_slider_moved(event):
+        if event["event_type"] != "SliderMoved":
+            return
+        viz.update_image_slider(win_b, event["index"], env=env)
+
+    viz.register_event_handler(on_slider_moved, win_a)
 
 
 # SVG plotting

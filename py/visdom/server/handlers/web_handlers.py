@@ -13,7 +13,6 @@ necessary, but defers underlying manipulations of the server's data to
 the data_model itself.
 """
 
-import hashlib
 import copy
 import getpass
 import json
@@ -21,17 +20,17 @@ import jsonpatch
 import logging
 import math
 import os
+import uuid
 from collections import OrderedDict
 
-try:
-    # for after python 3.8
-    from collections.abc import Mapping, Sequence
-except ImportError:
-    # for python 3.7 and below
-    from collections import Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
 import tornado.escape
-from visdom.utils.shared_utils import get_rand_id, NanSafeEncoder
+from visdom.utils.shared_utils import (
+    get_rand_id,
+    _coerce_image_slider_index,
+    NanSafeEncoder,
+)
 from visdom.utils.server_utils import (
     check_auth,
     extract_eid,
@@ -39,7 +38,6 @@ from visdom.utils.server_utils import (
     register_window,
     gather_envs,
     broadcast_envs,
-    serialize_env,
     escape_eid,
     compare_envs,
     load_env,
@@ -47,8 +45,13 @@ from visdom.utils.server_utils import (
     update_window,
     hash_password,
     stringify,
+    push_deleted,
+    clear_deleted,
+    notify,
 )
 from visdom.server.handlers.base_handlers import BaseHandler
+
+logger = logging.getLogger(__name__)
 
 
 # TODO move the logic that actually parses environments and layouts to
@@ -73,14 +76,16 @@ class PostHandler(BaseHandler):
             )
 
         eid = extract_eid(req)
-        p = window(req)
 
+        p = window(req)
         register_window(self, p, eid)
 
 
 class ExistsHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
+        if "win" not in args:
+            raise tornado.web.HTTPError(400, reason="missing required field: win")
         eid = extract_eid(args)
         if eid in handler.state and args["win"] in handler.state[eid]["jsons"]:
             handler.write("true")
@@ -116,6 +121,39 @@ class UpdateHandler(BaseHandler):
         return p, patch.patch
 
     @staticmethod
+    def update_embeddings_packet(p, args, max_old_content):
+        update_type = args["data"]["update_type"]
+        content_id = get_rand_id()
+        if update_type == "EntitySelected":
+            selected = args["data"]["selected"]
+            p["content"]["selected"] = selected
+            p["contentID"] = content_id
+            # `selected` may not exist yet on the first selection, so use "add"
+            # (which also overwrites when the key is already present).
+            return [
+                {"op": "add", "path": "/content/selected", "value": selected},
+                {"op": "replace", "path": "/contentID", "value": content_id},
+            ]
+        if update_type == "RegionSelected":
+            old_data = p["content"]["data"]
+            new_data = args["data"]["points"]
+            p["old_content"].append(old_data)
+            # Cap retained history to prevent unbounded in-memory growth (#1320).
+            if len(p["old_content"]) > max_old_content:
+                p["old_content"] = p["old_content"][-max_old_content:]
+            p["content"]["data"] = new_data
+            p["content"]["has_previous"] = True
+            p["content"]["selected"] = None
+            p["contentID"] = content_id
+            return [
+                {"op": "replace", "path": "/content/data", "value": new_data},
+                {"op": "add", "path": "/content/has_previous", "value": True},
+                {"op": "add", "path": "/content/selected", "value": None},
+                {"op": "replace", "path": "/contentID", "value": content_id},
+            ]
+        return []
+
+    @staticmethod
     def update(p, args, max_text_lines, max_old_content, max_image_history):
         # Update text in window, separated by a line break
         if p["type"] == "text":
@@ -123,22 +161,6 @@ class UpdateHandler(BaseHandler):
             lines = p["content"].split("<br>")
             if len(lines) > max_text_lines:
                 p["content"] = "<br>".join(lines[-max_text_lines:])
-            return p
-        if p["type"] == "embeddings":
-            # TODO embeddings updates should be handled outside of the regular
-            # update flow, as update packets are easy to create manually and
-            # expensive to calculate otherwise
-            if args["data"]["update_type"] == "EntitySelected":
-                p["content"]["selected"] = args["data"]["selected"]
-            elif args["data"]["update_type"] == "RegionSelected":
-                p["content"]["selected"] = None
-                print(len(p["content"]["data"]))
-                p["old_content"].append(p["content"]["data"])
-                if len(p["old_content"]) > max_old_content:
-                    p["old_content"] = p["old_content"][-max_old_content:]
-                p["content"]["has_previous"] = True
-                p["content"]["data"] = args["data"]["points"]
-                print(len(p["content"]["data"]))
             return p
         if p["type"] == "image_history":
             utype = args["data"][0]["type"]
@@ -148,11 +170,11 @@ class UpdateHandler(BaseHandler):
                     p["content"] = p["content"][-max_image_history:]
                 p["selected"] = len(p["content"]) - 1
             elif utype == "image_update_selected":
-                # Bound the update to within the dims of the array
-                selected = args["data"][0]["selected"]
-                selected_not_neg = max(0, selected)
-                selected_exists = min(len(p["content"]) - 1, selected_not_neg)
-                p["selected"] = selected_exists
+                if not p["content"]:
+                    return p
+                selected = _coerce_image_slider_index(args["data"][0]["selected"])
+                selected = min(max(0, selected), len(p["content"]) - 1)
+                p["selected"] = selected
             return p
         if p["type"] == "plot_history":
             utype = args["data"][0]["type"]
@@ -325,7 +347,26 @@ class UpdateHandler(BaseHandler):
         return p
 
     @staticmethod
+    def broadcast_window_update(handler, args, eid, p, diff_packet):
+        broadcast_packet = {
+            "command": "window_update",
+            "win": args["win"],
+            "eid": eid,
+            "content": diff_packet,
+            "version": p.get("version", 1),
+        }
+        broadcast(handler, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
+
+    @staticmethod
     def wrap_func(handler, args):
+        if "win" not in args:
+            raise tornado.web.HTTPError(400, reason="missing required field: win")
+        if "data" not in args and args.get("append"):
+            raise tornado.web.HTTPError(400, reason="missing required field: data")
+        if "data" not in args and "layout" not in args and "opts" not in args:
+            raise tornado.web.HTTPError(
+                400, reason="request must include one of: data, layout, or opts"
+            )
         eid = extract_eid(args)
 
         if eid not in handler.state:
@@ -343,6 +384,16 @@ class UpdateHandler(BaseHandler):
             return
 
         p = handler.state[eid]["jsons"][args["win"]]
+        data = args.get("data")
+        is_image_slider_update = isinstance(data, list) and any(
+            isinstance(entry, dict) and entry.get("type") == "image_update_selected"
+            for entry in data
+        )
+
+        if is_image_slider_update and p["type"] != "image_history":
+            handler.set_status(400)
+            handler.write("win is not image_history; was {}".format(p["type"]))
+            return
 
         if not (
             p["type"] == "text"
@@ -365,27 +416,35 @@ class UpdateHandler(BaseHandler):
             )
             return
 
-        p, diff_packet = UpdateHandler.update_packet(
-            p,
-            args,
-            handler.max_text_lines,
-            handler.max_old_content,
-            handler.max_image_history,
-        )
+        if p["type"] == "embeddings":
+            diff_packet = UpdateHandler.update_embeddings_packet(
+                p, args, handler.max_old_content
+            )
+            UpdateHandler.broadcast_window_update(handler, args, eid, p, diff_packet)
+            handler.write(p["id"])
+            return
+
+        try:
+            p, diff_packet = UpdateHandler.update_packet(
+                p,
+                args,
+                handler.max_text_lines,
+                handler.max_old_content,
+                handler.max_image_history,
+            )
+        except (TypeError, ValueError) as exc:
+            if is_image_slider_update:
+                handler.set_status(400)
+                handler.write(str(exc))
+                return
+            raise
         # send the smaller of the patch and the updated pane
         if len(stringify(p)) <= len(stringify(diff_packet)):
             broadcast_msg = dict(p)
             broadcast_msg["eid"] = eid
-            broadcast(handler, broadcast_msg, eid)
+            broadcast(handler, json.dumps(broadcast_msg, cls=NanSafeEncoder), eid)
         else:
-            broadcast_packet = {
-                "command": "window_update",
-                "win": args["win"],
-                "eid": eid,
-                "content": diff_packet,
-                "version": p.get("version", 1),
-            }
-            broadcast(handler, broadcast_packet, eid)
+            UpdateHandler.broadcast_window_update(handler, args, eid, p, diff_packet)
         handler.write(p["id"])
 
     @check_auth
@@ -407,7 +466,9 @@ class CloseHandler(BaseHandler):
 
         keys = list(handler.state[eid]["jsons"].keys()) if win is None else [win]
         for win in keys:
-            handler.state[eid]["jsons"].pop(win, None)
+            p_data = handler.state[eid]["jsons"].pop(win, None)
+            if p_data is not None:
+                push_deleted(handler.storage, eid, win, p_data)
             broadcast(handler, json.dumps({"command": "close", "data": win}), eid)
 
     @check_auth
@@ -427,27 +488,8 @@ class DeleteEnvHandler(BaseHandler):
             if eid == "main":
                 return
             handler.state.pop(eid, None)
-            if handler.env_path is not None:
-                p = os.path.join(handler.env_path, "{0}.json".format(eid))
-                if os.path.exists(p):
-                    try:
-                        os.remove(p)
-                    except FileNotFoundError:
-                        pass
-                    except OSError as e:
-                        logging.error(f"Failed to delete {p}: {e}")
-                else:
-                    hashed_id = hashlib.sha256(eid.encode("utf-8")).hexdigest()
-                    p = os.path.join(
-                        handler.env_path, "hash_{0}.json".format(hashed_id)
-                    )
-                    if os.path.exists(p):
-                        try:
-                            os.remove(p)
-                        except FileNotFoundError:
-                            pass
-                        except OSError as e:
-                            logging.error(f"Failed to delete {p}: {e}")
+            clear_deleted(handler.storage, eid)
+            handler.storage.delete_env(eid)
             broadcast_envs(handler)
 
     @check_auth
@@ -490,7 +532,7 @@ class ForkEnvHandler(BaseHandler):
         assert prev_eid in handler.state, "env to be forked doesn't exist"
 
         handler.state[eid] = copy.deepcopy(handler.state[prev_eid])
-        serialize_env(handler.state, [eid], env_path=handler.env_path)
+        handler.storage.save_env(eid, handler.state[eid])
         broadcast_envs(handler)
 
         handler.write(eid)
@@ -525,9 +567,21 @@ class EnvHandler(BaseHandler):
         if "sid" in msg_args:
             sid = msg_args["sid"]
             if sid in self.subs:
-                load_env(
-                    self.state, escape_eid(args), self.subs[sid], env_path=self.env_path
-                )
+                try:
+                    load_env(
+                        self.state,
+                        escape_eid(args),
+                        self.subs[sid],
+                        self.storage,
+                    )
+                except ValueError as e:
+                    notify(
+                        self,
+                        "Could not load environment: invalid environment JSON format",
+                        type="error",
+                        target_subs=[self.subs[sid]],
+                    )
+                    return
         if "eid" in msg_args:
             eid = escape_eid(msg_args["eid"])
             if eid not in self.state:
@@ -560,13 +614,22 @@ class CompareHandler(BaseHandler):
         sid = body["sid"]
         show_all = body.get("show_all", False)
         if sid in self.subs:
-            compare_envs(
-                self.state,
-                args.split("+"),
-                self.subs[sid],
-                self.env_path,
-                show_all=show_all,
-            )
+            try:
+                compare_envs(
+                    self.state,
+                    args.split("+"),
+                    self.subs[sid],
+                    self.storage,
+                    show_all=show_all,
+                )
+            except ValueError as e:
+                notify(
+                    self,
+                    "Could not compare environments: invalid environment JSON format",
+                    type="error",
+                    target_subs=[self.subs[sid]],
+                )
+                return
 
 
 class SaveHandler(BaseHandler):
@@ -575,7 +638,7 @@ class SaveHandler(BaseHandler):
         envs = args["data"]
         envs = [escape_eid(eid) for eid in envs]
         # this drops invalid env ids
-        ret = serialize_env(handler.state, envs, env_path=handler.env_path)
+        ret = handler.storage.save_envs(handler.state, envs)
         handler.write(json.dumps(ret))
 
     @check_auth
@@ -650,7 +713,7 @@ class IndexHandler(BaseHandler):
                 wrap_socket=self.wrap_socket,
             )
         elif self.login_enabled:
-            items = gather_envs(self.state, env_path=self.env_path)
+            items = gather_envs(self.state, self.storage)
             self.render(
                 "login.html",
                 user=getpass.getuser(),
@@ -695,8 +758,79 @@ class ErrorHandler(BaseHandler):
             raise tornado.web.HTTPError(400, reason="Invalid status code")
 
         raise tornado.web.HTTPError(status_code)
-        error_text = text or "test error"
-        raise Exception(error_text)
+
+
+class UploadEnvHandler(BaseHandler):
+    def initialize(self, app):
+        super().initialize(app)
+        self.readonly = app.readonly
+
+    @check_auth
+    def post(self):
+        # 100mb file size limit
+        MAX_SIZE = 100 * 1024 * 1024
+
+        if self.readonly:
+            self.set_status(403)
+            self.write(
+                {
+                    "success": False,
+                    "error": "Uploads are disabled while the server is in readonly mode",
+                }
+            )
+            return
+
+        if "file" not in self.request.files:
+            self.set_status(400)
+            self.write({"success": False, "error": "No file uploaded"})
+            return
+
+        file_info = self.request.files["file"][0]
+        filename = file_info["filename"]
+        body = file_info["body"]
+
+        if len(body) > MAX_SIZE:
+            self.set_status(413)
+            self.write(
+                {
+                    "success": False,
+                    "error": f"File is too large. Max {MAX_SIZE//(1024*1024)}MB",
+                }
+            )
+            return
+
+        try:
+            data = tornado.escape.json_decode(body)
+        except Exception:
+            self.set_status(400)
+            self.write({"success": False, "error": "Invalid JSON file"})
+            return
+
+        if not (isinstance(data, dict) and "jsons" in data and "reload" in data):
+            self.set_status(400)
+            self.write({"success": False, "error": "This is not a valid Visdom JSON"})
+            return
+
+        uid = uuid.uuid4().hex[:8]
+        new_eid = f"uploaded_{uid}"
+        if filename.endswith(".json"):
+            suggested_name = escape_eid(os.path.basename(filename[:-5]))
+            if suggested_name and suggested_name != "main":
+                new_eid = f"uploaded_{suggested_name}_{uid}"
+
+        self.state[new_eid] = {"jsons": data["jsons"], "reload": data["reload"]}
+
+        self.storage.save_env(new_eid, self.state[new_eid])
+
+        broadcast_envs(self)
+
+        self.write(
+            {
+                "success": True,
+                "eid": new_eid,
+                "message": f"Dashboard loaded successfully as '{new_eid}'",
+            }
+        )
 
 
 class HealthHandler(BaseHandler):

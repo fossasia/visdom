@@ -7,8 +7,9 @@
  *
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useContext, useEffect, useRef, useState } from 'react';
 const { usePrevious } = require('../util');
+import ApiContext from '../api/ApiContext';
 import Pane from './Pane';
 const { sgg } = require('ml-savitzky-golay-generalized');
 
@@ -23,8 +24,10 @@ var PlotPane = (props) => {
   const [smoothWidgetActive, setSmoothWidgetActive] = useState(false);
   const [smoothvalue, setSmoothValue] = useState(1);
   const [actualSelected, setActualSelected] = useState(
-    isHistory ? (selected || 0) : 0
+    isHistory ? selected || 0 : 0
   );
+  const { sendPlotLayoutUpdate } = useContext(ApiContext);
+  const layoutUpdateTimeout = useRef(null);
 
   const content = isHistory
     ? props.content[Math.min(actualSelected, props.content.length - 1)]
@@ -49,7 +52,7 @@ var PlotPane = (props) => {
   const handleDownload = () => {
     Plotly.downloadImage(plotlyRef.current, {
       format: 'svg',
-      filename: contentID,
+      filename: contentID || 'plot',
     });
   };
 
@@ -64,7 +67,7 @@ var PlotPane = (props) => {
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${contentID}_metadata.json`;
+    link.download = `${contentID || 'plot'}_metadata.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -126,6 +129,40 @@ var PlotPane = (props) => {
     newPlot();
   });
 
+  useEffect(() => {
+    const plotElement = plotlyRef.current;
+    if (!plotElement) return;
+
+    const handleRelayout = (eventdata) => {
+      const touchedShapes = Object.keys(eventdata).some((k) =>
+        k.includes('shapes')
+      );
+      if (!touchedShapes) return;
+
+      clearTimeout(layoutUpdateTimeout.current);
+      layoutUpdateTimeout.current = setTimeout(() => {
+        const shapes = plotElement.layout?.shapes || [];
+
+        if (content && content.layout) {
+          content.layout.shapes = shapes;
+        }
+
+        sendPlotLayoutUpdate(
+          props.envID,
+          props.id,
+          { shapes },
+          isHistory ? actualSelected : undefined
+        );
+      }, 300);
+    };
+
+    plotElement.on('plotly_relayout', handleRelayout);
+    return () => {
+      plotElement.removeListener('plotly_relayout', handleRelayout);
+      clearTimeout(layoutUpdateTimeout.current);
+    };
+  }, [props.envID, props.id, actualSelected, content]);
+
   // rendering
   // ---------
 
@@ -166,7 +203,7 @@ var PlotPane = (props) => {
           // adapt color & transparency
           d.opacity = 0.35;
           smooth_d.opacity = 1.0;
-          smooth_d.marker.line.color = 0;
+          if (smooth_d.marker?.line) smooth_d.marker.line.color = 0;
 
           return smooth_d;
         });
@@ -197,13 +234,16 @@ var PlotPane = (props) => {
         layout.title = { text: layout.title };
       }
       if (layout.title.text) {
-        layout.margin.t = 65;
-        layout.title.y = 0.9;
+        layout.margin.t = 85;
       } else {
         layout.margin.t = 30;
       }
     } else {
       layout.margin.t = 30;
+    }
+
+    if (content.caption) {
+      layout.margin.b = Math.max(layout.margin.b || 60, 100);
     }
 
     // draw / redraw plot with layout-options
@@ -212,6 +252,7 @@ var PlotPane = (props) => {
       displaylogo: false,
       doubleClick: 'reset',
       doubleClickDelay: 500,
+      modeBarButtonsToAdd: ['drawopenpath', 'eraseshape'],
     }).then(() => {
       const plotElement = plotlyRef.current;
       if (plotElement && plotElement._fullLayout && isDisplayed(plotElement)) {
@@ -225,10 +266,7 @@ var PlotPane = (props) => {
     content &&
     content.data &&
     content.data.some((data) => {
-      return (
-        data['type'] == 'scatter' &&
-        data['mode'] == 'lines'
-      );
+      return data['type'] == 'scatter' && data['mode'] == 'lines';
     });
 
   var smooth_widget_button = '';
@@ -287,11 +325,11 @@ var PlotPane = (props) => {
   }
 
   var caption_widget = '';
-  if (isHistory && content && content.caption) {
+  if (content && content.caption) {
     caption_widget = (
-      <span className="widget" key="plot_caption">
+      <div className="widget plot-caption" key="plot_caption">
         {content.caption}
-      </span>
+      </div>
     );
   }
 
@@ -311,8 +349,10 @@ var PlotPane = (props) => {
           content.data?.[0]?.type === 'heatmap'
             ? ' plotly-heatmap'
             : content.data?.[0]?.type === 'contour'
-            ? ' plotly-contour'
-            : ''
+              ? ' plotly-contour'
+              : content.data?.[0]?.type === 'surface'
+                ? ' plotly-surface'
+                : ''
         }`}
         ref={plotlyRef}
       />

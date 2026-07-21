@@ -4,7 +4,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Optional, List, Any, Union, Mapping, overload, Text
+from typing import Optional, List, Any, Union, Mapping, overload, Text, Callable
 
 ### Type aliases for commonly-used types.
 # For optional 'options' parameters.
@@ -99,6 +99,17 @@ class Visdom:
     def image_select(
         self, win: Text, selected: int, env: _OptStr = ...
     ) -> _SendReturn: ...
+    def image_heatmap(
+        self,
+        img: Tensor,
+        heatmap: Tensor,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
+    def update_image_slider(
+        self, win: Text, index: Union[int, float], env: _OptStr = ...
+    ) -> _SendReturn: ...
     def images(
         self,
         tensor: Tensor,
@@ -126,6 +137,15 @@ class Visdom:
     ) -> _SendReturn: ...
     def update_window_opts(
         self, win: Text, opts: Mapping[Text, Any], env: _OptStr = ...
+    ) -> _SendReturn: ...
+    def learning_curve(
+        self,
+        metrics: Mapping[Text, Any],
+        step: Optional[Tensor] = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+        update: _OptStr = ...,
     ) -> _SendReturn: ...
     def scatter(
         self,
@@ -178,8 +198,50 @@ class Visdom:
     def histogram(
         self, X: Tensor, win: _OptStr = ..., env: _OptStr = ..., opts: _OptOps = ...
     ) -> _SendReturn: ...
+    def histogram2d(
+        self,
+        X: Tensor,
+        Y: Tensor,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
     def boxplot(
         self, X: Tensor, win: _OptStr = ..., env: _OptStr = ..., opts: _OptOps = ...
+    ) -> _SendReturn: ...
+    def roc_curve(
+        self,
+        y_true: Optional[Tensor] = ...,
+        y_score: Optional[Tensor] = ...,
+        fpr: Optional[Tensor] = ...,
+        tpr: Optional[Tensor] = ...,
+        pos_label: Union[int, float] = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
+    def pr_curve(
+        self,
+        y_true: Optional[Tensor] = ...,
+        y_score: Optional[Tensor] = ...,
+        precision: Optional[Tensor] = ...,
+        recall: Optional[Tensor] = ...,
+        pos_label: Union[int, float] = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
+    def confusion_matrix(
+        self,
+        y_true: Optional[Tensor] = ...,
+        y_pred: Optional[Tensor] = ...,
+        cm: Optional[Tensor] = ...,
+        labels: Optional[list] = ...,
+        normalize: Optional[str] = ...,
+        update: _OptStr = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
     ) -> _SendReturn: ...
     def surf(
         self, X: Tensor, win: _OptStr = ..., env: _OptStr = ..., opts: _OptOps = ...
@@ -216,11 +278,29 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
+    def sankey(
+        self,
+        source: Tensor,
+        target: Tensor,
+        value: Tensor,
+        labels: Optional[List] = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
     def graph(
         self,
         edges: List,
         edgeLabels: List,
         nodeLabels: List,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
+    def parallel_coordinates(
+        self,
+        X: Tensor,
+        Y: Optional[Tensor] = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
@@ -231,4 +311,47 @@ class Visdom:
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
+    ) -> _SendReturn: ...
+    def properties(
+        self,
+        data: List,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
+    def table(
+        self,
+        headers: List[Any],
+        data: List[List[Any]],
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
+    def embeddings(
+        self,
+        features: Tensor,
+        labels: Tensor,
+        data_getter: Optional[Callable[[int], Any]] = ...,
+        data_type: _OptStr = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
+    def sunburst(
+        self,
+        labels: Tensor,
+        parents: Tensor,
+        values: Optional[Tensor] = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
+    def dual_axis_lines(
+        self,
+        X: Optional[Tensor] = ...,
+        Y1: Optional[Tensor] = ...,
+        Y2: Optional[Tensor] = ...,
+        opts: _OptOps = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
     ) -> _SendReturn: ...
