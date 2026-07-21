@@ -37,25 +37,33 @@ var Pane = forwardRef((props, ref) => {
   const [commentText, setCommentText] = useState(props.comment || '');
   const commentSaveTimeout = useRef(null);
   const isEditingComment = useRef(false);
+  const latestCommentTextRef = useRef(commentText);
 
   useEffect(() => {
     if (!isEditingComment.current) {
       setCommentText(props.comment || '');
+      latestCommentTextRef.current = props.comment || '';
     }
   }, [props.comment]);
 
   useEffect(() => {
-    return () => clearTimeout(commentSaveTimeout.current);
+    return () => {
+      if (commentSaveTimeout.current) {
+        flushCommentSave(latestCommentTextRef.current);
+      }
+    };
   }, []);
 
   const flushCommentSave = (value) => {
     clearTimeout(commentSaveTimeout.current);
+    commentSaveTimeout.current = null;
     sendCommentUpdate(props.envID, id, value);
   };
 
   const handleCommentChange = (ev) => {
     const value = ev.target.value;
     setCommentText(value);
+    latestCommentTextRef.current = value;
     clearTimeout(commentSaveTimeout.current);
     commentSaveTimeout.current = setTimeout(() => {
       flushCommentSave(value);
