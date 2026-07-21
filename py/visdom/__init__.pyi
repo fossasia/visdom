@@ -297,6 +297,14 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
+    def parallel_coordinates(
+        self,
+        X: Tensor,
+        Y: Optional[Tensor] = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
     def violin(
         self,
         X: Tensor,

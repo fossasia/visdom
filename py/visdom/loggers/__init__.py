@@ -5,6 +5,8 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+from visdom.pytorch import VisdomLogger
+from visdom.loggers.sklearn import VisdomSklearnLogger
 from visdom.loggers.xgboost import VisdomXGBLogger
 
-__all__ = ["VisdomXGBLogger"]
+__all__ = ["VisdomLogger", "VisdomSklearnLogger", "VisdomXGBLogger"]
