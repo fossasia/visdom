@@ -165,14 +165,3 @@ body {
 .report-link:hover {
   text-decoration: underline;
 }
-
-.back-link {
-  color: #ffffff;
-  text-decoration: none;
-  font-weight: 500;
-}
-
-.back-link:hover {
-  color: #e2e8f0;
-  text-decoration: underline;
-}
