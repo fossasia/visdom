@@ -763,9 +763,19 @@ class Visdom(object):
         # Setup for online interactions
         result = self._send({"eid": env}, endpoint="env/" + env)
         if self.send and result is False:
-            raise ConnectionError(
-                "Could not connect to server at {}:{}.".format(self.server, self.port)
-            )
+            if self.raise_exceptions is not False:
+                raise ConnectionError(
+                    "Could not connect to server at {}:{}.".format(
+                        self.server, self.port
+                    )
+                )
+            else:
+                logger.warning(
+                    "Could not connect to server at {}:{}. "
+                    "Continuing as raise_exceptions=False.".format(
+                        self.server, self.port
+                    )
+                )
 
         # when talking to a server, get a backchannel
         if send and use_incoming_socket:
