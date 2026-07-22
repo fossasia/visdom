@@ -1068,7 +1068,9 @@ class Visdom(object):
         try:
             r = self.session.post(url, data=data, timeout=20)
             return r.text
-        except (requests.ConnectionError, requests.Timeout, requests.exceptions.SSLError):
+        except requests.exceptions.SSLError:
+            raise
+        except (requests.ConnectionError, requests.Timeout):
             if not had_session:
                 raise
             logger.warning("Connection failed, resetting session and retrying...")
