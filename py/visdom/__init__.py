@@ -1063,7 +1063,7 @@ class Visdom(object):
         self._last_post_time = time.time()
         had_session = self._session is not None
         try:
-            r = self.session.post(url, data=data,timeout=20)
+            r = self.session.post(url, data=data, timeout=20)
             return r.text
         except (requests.ConnectionError, requests.Timeout):
             if not had_session:
