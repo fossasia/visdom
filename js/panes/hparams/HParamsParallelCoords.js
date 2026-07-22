@@ -14,7 +14,9 @@ import { applySnapshotButton, observePlotResize } from './hparamsPlot';
 import {
   buildColumns,
   buildParcoordsDimensions,
+  completeRecords,
   groupColumnTree,
+  isNumeric,
   NUMERIC_GROUPS,
   numericExtent,
   selectNumericColumns,
@@ -49,9 +51,15 @@ const HParamsParallelCoords = ({
   const effectiveDims = useMemo(() => {
     const validIds = new Set(numericCols.map((c) => c.id));
     let ids = (selectedDims || []).filter((id) => validIds.has(id));
-    if (ids.length === 0) ids = numericCols.slice(0, MAX_DIMS).map((c) => c.id);
+    if (ids.length === 0) {
+      const dense = numericCols.filter((c) =>
+        records.every((r) => isNumeric(c.accessor(r)))
+      );
+      const pick = dense.length >= 2 ? dense : numericCols;
+      ids = pick.slice(0, MAX_DIMS).map((c) => c.id);
+    }
     return ids.slice(0, MAX_DIMS);
-  }, [selectedDims, numericCols]);
+  }, [selectedDims, numericCols, records]);
 
   const effectiveColorBy = useMemo(() => {
     if (!colorBy) return null;
@@ -67,6 +75,17 @@ const HParamsParallelCoords = ({
     [numericCols]
   );
 
+  const rows = useMemo(() => {
+    const colorCol = effectiveColorBy
+      ? columns.find((c) => c.id === effectiveColorBy)
+      : null;
+    const axisCols = effectiveDims
+      .map((id) => columns.find((c) => c.id === id))
+      .filter(Boolean);
+    const requiredCols = colorCol ? axisCols.concat(colorCol) : axisCols;
+    return completeRecords(records, requiredCols);
+  }, [records, columns, effectiveDims, effectiveColorBy]);
+
   const hasPlot = numericCols.length >= 2;
 
   useEffect(() => {
@@ -79,24 +98,21 @@ const HParamsParallelCoords = ({
     const el = plotRef.current;
     if (!el || !window.Plotly) return;
 
-    const dimensions = buildParcoordsDimensions(
-      records,
-      columns,
-      effectiveDims
-    );
-    if (dimensions.length < 2) {
+    const colorCol = effectiveColorBy
+      ? columns.find((c) => c.id === effectiveColorBy)
+      : null;
+
+    const dimensions = buildParcoordsDimensions(rows, columns, effectiveDims);
+    if (dimensions.length < 2 || rows.length === 0) {
       window.Plotly.purge(el);
       return;
     }
 
-    const colorCol = effectiveColorBy
-      ? columns.find((c) => c.id === effectiveColorBy)
-      : null;
     let line;
     if (colorCol) {
-      const ext = numericExtent(records, colorCol.accessor);
+      const ext = numericExtent(rows, colorCol.accessor);
       line = {
-        color: toNumericColumn(records, colorCol.accessor),
+        color: toNumericColumn(rows, colorCol.accessor),
         colorscale: PARCOORDS_COLORSCALE,
         showscale: true,
         cmin: ext ? ext.min : 0,
@@ -110,11 +126,11 @@ const HParamsParallelCoords = ({
       };
     } else {
       line = {
-        color: records.map((_, i) => i + 1),
+        color: rows.map((_, i) => i + 1),
         colorscale: PARCOORDS_COLORSCALE,
         showscale: true,
         cmin: 1,
-        cmax: Math.max(records.length, 1),
+        cmax: Math.max(rows.length, 1),
         colorbar: {
           title: { text: 'run order', side: 'right', font: { size: 11 } },
           thickness: 12,
@@ -147,7 +163,7 @@ const HParamsParallelCoords = ({
         '::' +
         (effectiveColorBy || 'order') +
         '::' +
-        records.length,
+        rows.length,
     };
 
     const config = applySnapshotButton(
@@ -171,7 +187,7 @@ const HParamsParallelCoords = ({
     } catch (e) {
       window.Plotly.purge(el);
     }
-  }, [records, columns, effectiveDims, effectiveColorBy]);
+  }, [rows, columns, effectiveDims, effectiveColorBy]);
 
   const handleDims = (value) => {
     onSelectedDims(Array.isArray(value) ? value.slice(0, MAX_DIMS) : []);
@@ -223,7 +239,11 @@ const HParamsParallelCoords = ({
             aria-label="Color parallel coordinates by"
           />
         </span>
-        {truncated ? (
+        {rows.length < records.length ? (
+          <span className="hparams-splom-note">
+            {rows.length} of {records.length} runs have all selected axes
+          </span>
+        ) : truncated ? (
           <span className="hparams-splom-note">showing first {MAX_DIMS}</span>
         ) : null}
       </div>
