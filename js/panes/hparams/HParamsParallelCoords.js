@@ -123,14 +123,16 @@ const HParamsParallelCoords = ({ records, paramKeys, metricKeys, tagKeys }) => {
         type: 'parcoords',
         dimensions,
         line,
-        labelfont: { size: 12 },
-        tickfont: { size: 10 },
-        rangefont: { size: 10 },
+        labelangle: 0,
+        labelside: 'top',
+        labelfont: { size: 12, color: '#333' },
+        tickfont: { size: 10, color: '#666' },
+        rangefont: { size: 10, color: '#888' },
       },
     ];
 
     const layout = {
-      margin: { l: 60, r: 40, t: 30, b: 24 },
+      margin: { l: 70, r: 80, t: 64, b: 48 },
       font: { family: '"Open Sans", sans-serif', size: 11, color: '#333' },
       paper_bgcolor: '#ffffff',
       plot_bgcolor: '#ffffff',
