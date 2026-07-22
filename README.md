@@ -247,7 +247,7 @@ Connect via the Python client:
 vis = visdom.Visdom(server="https://myserver.com")
 
 # For Development - self signed certificate
-vis = visdom.Visdom(ssl_verify=False)
+vis = visdom.Visdom(server="http://localhost", ssl_verify=False)
 ```
 
 > **Note**: `ssl_verify=False` disables certificate verification and should only be used in development with self-signed certificates. Do not use in production.
