@@ -252,6 +252,11 @@ const HParamsParallelCoords = ({
         <div className="hparams-splom-overlay">
           Select at least two dimensions to plot.
         </div>
+      ) : rows.length === 0 ? (
+        <div className="hparams-splom-overlay">
+          No run has a value on every selected axis. Remove a sparse axis to see
+          lines.
+        </div>
       ) : null}
     </div>
   );
