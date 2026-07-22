@@ -97,7 +97,9 @@ def start_server(
         ssl_ctx.load_cert_chain(ssl_certfile, ssl_keyfile)
         logging.info("SSL enabled")
 
-    server = tornado.httpserver.HTTPServer(app, max_buffer_size=1024**3, ssl_options=ssl_ctx)
+    server = tornado.httpserver.HTTPServer(
+        app, max_buffer_size=1024**3, ssl_options=ssl_ctx
+    )
 
     try:
         sockets = tornado.netutil.bind_sockets(port, address=bind_addr, family=family)
