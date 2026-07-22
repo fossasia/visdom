@@ -126,11 +126,11 @@ def download_scripts(proxies=None, install_dir=None):
     # Download MathJax Js Files
     import requests
 
-    mathjax_version = "4.0.0"
+    mathjax_version = "3.2.2"
     cdnjs_url = "https://cdnjs.cloudflare.com/ajax/libs/mathjax/%s/" % mathjax_version
     mathjax_dir = os.path.join(*cdnjs_url.split("/")[-3:])
     mathjax_path = [
-        "tex-mml-chtml.js",
+        "es5/tex-mml-svg.js",
     ]
     mathjax_dir_path = "%s/static/%s/%s" % (install_dir, "js", mathjax_dir)
 
