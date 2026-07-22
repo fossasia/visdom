@@ -18,7 +18,7 @@ function ImageComparePane(props) {
 
   useEffect(() => {
     let cancelled = false;
-    typesetMathJax(contentRef.current, () => cancelled);
+    typesetMathJax(containerRef.current, () => cancelled);
     return () => {
       cancelled = true;
     };
