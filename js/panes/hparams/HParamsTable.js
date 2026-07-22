@@ -12,11 +12,16 @@ import React, { useCallback, useMemo, useState } from 'react';
 
 import {
   buildColumns,
+  COLUMN_GROUPS,
   filterRecords,
   formatValue,
+  groupColumnTree,
   isNumeric,
   makeComparator,
+  NUMERIC_GROUPS,
   numericExtent,
+  runLabel,
+  selectNumericColumns,
   spineStyle,
 } from './hparamsUtils';
 
@@ -89,7 +94,7 @@ const HParamsRow = React.memo(function HParamsRow({
   onToggle,
   groupStartIds,
 }) {
-  const runLabel = record.name || record.env_id || 'run';
+  const label = runLabel(record);
   return (
     <tr
       className={
@@ -101,12 +106,12 @@ const HParamsRow = React.memo(function HParamsRow({
           type="checkbox"
           checked={isSelected}
           onChange={() => onToggle(record.env_id)}
-          aria-label={'Select ' + runLabel}
+          aria-label={'Select ' + label}
         />
       </td>
       <th scope="row" className="hparams-cell hparams-cell-run">
-        <div className="hparams-run-cell" title={runLabel}>
-          <span className="hparams-run-name">{runLabel}</span>
+        <div className="hparams-run-cell" title={label}>
+          <span className="hparams-run-name">{label}</span>
           {record.status ? (
             <span
               className={'hparams-run-status hparams-status-' + record.status}
@@ -146,16 +151,9 @@ const HParamsTable = ({ records, paramKeys, metricKeys, tagKeys }) => {
     [paramKeys, metricKeys, tagKeys]
   );
   const colorCols = useMemo(
-    () =>
-      columns.filter(
-        (c) =>
-          (c.group === 'param' || c.group === 'metric') &&
-          numericExtent(records, c.accessor)
-      ),
-    [columns, records]
+    () => selectNumericColumns(records, columns),
+    [records, columns]
   );
-  const colorParamCols = colorCols.filter((c) => c.group === 'param');
-  const colorMetricCols = colorCols.filter((c) => c.group === 'metric');
 
   const groupStartIds = useMemo(() => {
     const ids = new Set();
@@ -227,57 +225,17 @@ const HParamsTable = ({ records, paramKeys, metricKeys, tagKeys }) => {
     });
   }, [rows]);
 
-  const bands = [
-    { key: 'param', label: 'params' },
-    { key: 'metric', label: 'metrics' },
-    { key: 'tag', label: 'tags' },
-  ]
-    .map((b) => ({
-      ...b,
-      span: columns.filter((c) => c.group === b.key).length,
-    }))
-    .filter((b) => b.span > 0);
+  const bands = COLUMN_GROUPS.map((b) => ({
+    ...b,
+    span: columns.filter((c) => c.group === b.key).length,
+  })).filter((b) => b.span > 0);
 
   const sortTreeData = [
     { key: RUN_COLUMN_ID, value: RUN_COLUMN_ID, title: 'run' },
-    ...bands.map((b) => ({
-      key: '__g_' + b.key,
-      value: '__g_' + b.key,
-      title: b.label,
-      selectable: false,
-      children: columns
-        .filter((c) => c.group === b.key)
-        .map((c) => ({ key: c.id, value: c.id, title: c.label })),
-    })),
+    ...groupColumnTree(columns, COLUMN_GROUPS),
   ];
 
-  const colorTreeData = [];
-  if (colorParamCols.length) {
-    colorTreeData.push({
-      key: '__cg_param',
-      value: '__cg_param',
-      title: 'params',
-      selectable: false,
-      children: colorParamCols.map((c) => ({
-        key: c.id,
-        value: c.id,
-        title: c.label,
-      })),
-    });
-  }
-  if (colorMetricCols.length) {
-    colorTreeData.push({
-      key: '__cg_metric',
-      value: '__cg_metric',
-      title: 'metrics',
-      selectable: false,
-      children: colorMetricCols.map((c) => ({
-        key: c.id,
-        value: c.id,
-        title: c.label,
-      })),
-    });
-  }
+  const colorTreeData = groupColumnTree(colorCols, NUMERIC_GROUPS);
 
   return (
     <div className="hparams-table-wrap">

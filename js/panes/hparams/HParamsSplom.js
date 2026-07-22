@@ -12,9 +12,13 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   buildColumns,
-  isNumeric,
+  buildSplomDimensions,
+  groupColumnTree,
+  NUMERIC_GROUPS,
   numericExtent,
+  runLabel,
   selectNumericColumns,
+  toNumericColumn,
 } from './hparamsUtils';
 
 const MAX_DIMS = 6;
@@ -69,32 +73,6 @@ function downloadSnapshot(gd) {
     });
 }
 
-function groupedTreeData(cols) {
-  const params = cols.filter((c) => c.group === 'param');
-  const metrics = cols.filter((c) => c.group === 'metric');
-  const branch = (key, title, children) =>
-    children.length
-      ? [
-          {
-            key: '__g_' + key,
-            value: '__g_' + key,
-            title,
-            selectable: false,
-            checkable: false,
-            children: children.map((c) => ({
-              key: c.id,
-              value: c.id,
-              title: c.label,
-            })),
-          },
-        ]
-      : [];
-  return [
-    ...branch('param', 'params', params),
-    ...branch('metric', 'metrics', metrics),
-  ];
-}
-
 const HParamsSplom = ({ records, paramKeys, metricKeys, tagKeys }) => {
   const plotRef = useRef(null);
   const prevDimCount = useRef(0);
@@ -127,12 +105,8 @@ const HParamsSplom = ({ records, paramKeys, metricKeys, tagKeys }) => {
     (selectedDims || []).filter((id) => numericCols.some((c) => c.id === id))
       .length > MAX_DIMS;
 
-  const dimTreeData = useMemo(
-    () => groupedTreeData(numericCols),
-    [numericCols]
-  );
-  const colorTreeData = useMemo(
-    () => groupedTreeData(numericCols),
+  const treeData = useMemo(
+    () => groupColumnTree(numericCols, NUMERIC_GROUPS),
     [numericCols]
   );
 
@@ -159,25 +133,14 @@ const HParamsSplom = ({ records, paramKeys, metricKeys, tagKeys }) => {
     const el = plotRef.current;
     if (!el || !window.Plotly) return;
 
-    const activeCols = effectiveDims
-      .map((id) => columns.find((c) => c.id === id))
-      .filter((col) => col && records.some((r) => isNumeric(col.accessor(r))));
-    if (activeCols.length < 2) {
+    const dimensions = buildSplomDimensions(records, columns, effectiveDims);
+    if (dimensions.length < 2) {
       window.Plotly.purge(el);
       prevDimCount.current = 0;
       return;
     }
 
-    const dimensions = activeCols.map((col) => ({
-      label: col.label,
-      values: records.map((r) => {
-        const v = col.accessor(r);
-        return isNumeric(v) ? v : null;
-      }),
-    }));
-
-    const label = (r) => r.name || r.env_id || 'run';
-    const names = records.map(label);
+    const names = records.map(runLabel);
 
     const colorCol = effectiveColorBy
       ? columns.find((c) => c.id === effectiveColorBy)
@@ -187,10 +150,7 @@ const HParamsSplom = ({ records, paramKeys, metricKeys, tagKeys }) => {
     let cmin;
     let cmax;
     if (colorCol) {
-      colorValues = records.map((r) => {
-        const v = colorCol.accessor(r);
-        return isNumeric(v) ? v : null;
-      });
+      colorValues = toNumericColumn(records, colorCol.accessor);
       colorLabel = colorCol.label;
       const ext = numericExtent(records, colorCol.accessor);
       if (ext) {
@@ -247,16 +207,16 @@ const HParamsSplom = ({ records, paramKeys, metricKeys, tagKeys }) => {
         '::' +
         records.length,
     };
-    for (let i = 1; i <= activeCols.length; i++) {
+    for (let i = 1; i <= dimensions.length; i++) {
       const suffix = i === 1 ? '' : String(i);
       layout['xaxis' + suffix] = { ...AXIS_STYLE };
       layout['yaxis' + suffix] = { ...AXIS_STYLE };
     }
 
-    if (el._fullLayout && prevDimCount.current !== activeCols.length) {
+    if (el._fullLayout && prevDimCount.current !== dimensions.length) {
       window.Plotly.purge(el);
     }
-    prevDimCount.current = activeCols.length;
+    prevDimCount.current = dimensions.length;
 
     const config = {
       showLink: false,
@@ -320,7 +280,7 @@ const HParamsSplom = ({ records, paramKeys, metricKeys, tagKeys }) => {
             treeDefaultExpandAll
             maxTagCount={3}
             dropdownMatchSelectWidth={false}
-            treeData={dimTreeData}
+            treeData={treeData}
             onChange={handleDims}
             aria-label="Scatter matrix dimensions"
           />
@@ -335,7 +295,7 @@ const HParamsSplom = ({ records, paramKeys, metricKeys, tagKeys }) => {
             treeLine
             treeDefaultExpandAll
             dropdownMatchSelectWidth={false}
-            treeData={colorTreeData}
+            treeData={treeData}
             onChange={(value) => setColorBy(value || null)}
             aria-label="Color scatter matrix by"
           />
