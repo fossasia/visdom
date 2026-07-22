@@ -813,6 +813,10 @@ class Visdom(object):
             sess = requests.Session()
             if self.proxies:
                 sess.proxies.update(self.proxies)
+            if isinstance(self.ssl_verify, str):
+                sess.verify = self.ssl_verify
+            elif not self.ssl_verify:
+                sess.verify = False
             if self.username:
                 resp = sess.post(
                     "%s:%s%s" % (self.server, self.port, self.base_url),
