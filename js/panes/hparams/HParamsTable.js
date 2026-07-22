@@ -8,7 +8,7 @@
  */
 
 import TreeSelect from 'rc-tree-select';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo } from 'react';
 
 import {
   buildColumns,
@@ -140,12 +140,20 @@ const HParamsRow = React.memo(function HParamsRow({
   );
 });
 
-const HParamsTable = ({ records, paramKeys, metricKeys, tagKeys }) => {
-  const [sort, setSort] = useState({ by: null, dir: null });
-  const [filter, setFilter] = useState('');
-  const [colorBy, setColorBy] = useState(null);
-  const [selected, setSelected] = useState(() => new Set());
-
+const HParamsTable = ({
+  records,
+  paramKeys,
+  metricKeys,
+  tagKeys,
+  sort,
+  setSort,
+  filter,
+  setFilter,
+  colorBy,
+  setColorBy,
+  selected,
+  setSelected,
+}) => {
   const columns = useMemo(
     () => buildColumns(paramKeys, metricKeys, tagKeys),
     [paramKeys, metricKeys, tagKeys]

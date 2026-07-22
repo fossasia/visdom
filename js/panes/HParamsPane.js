@@ -38,6 +38,10 @@ var HParamsPane = (props) => {
   const { content } = props;
   const data = readContent(content);
   const [view, setView] = useState('table');
+  const [tableSort, setTableSort] = useState({ by: null, dir: null });
+  const [tableFilter, setTableFilter] = useState('');
+  const [tableColorBy, setTableColorBy] = useState(null);
+  const [tableSelected, setTableSelected] = useState(() => new Set());
   const [splomDims, setSplomDims] = useState(null);
   const [splomColorBy, setSplomColorBy] = useState(null);
 
@@ -117,6 +121,14 @@ var HParamsPane = (props) => {
               paramKeys={data.paramKeys}
               metricKeys={data.metricKeys}
               tagKeys={data.tagKeys}
+              sort={tableSort}
+              setSort={setTableSort}
+              filter={tableFilter}
+              setFilter={setTableFilter}
+              colorBy={tableColorBy}
+              setColorBy={setTableColorBy}
+              selected={tableSelected}
+              setSelected={setTableSelected}
             />
           )}
         </div>
