@@ -9,9 +9,9 @@
 
 import React, { useContext, useEffect, useRef, useState } from 'react';
 const { usePrevious } = require('../util');
-import { typesetMathJax } from './utils/mathjaxHelpers';
 import ApiContext from '../api/ApiContext';
 import Pane from './Pane';
+import { typesetMathJax } from './utils/mathjaxHelpers';
 const { sgg } = require('ml-savitzky-golay-generalized');
 
 var PlotPane = (props) => {
