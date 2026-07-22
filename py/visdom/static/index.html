@@ -30,9 +30,15 @@ LICENSE file in the root directory of this source tree.
     <script src={{ static_url("js/layout_bin_packer.js") }}></script>
 
     <!-- Mathjax -->
-	  <script type='text/javascript' src={{ static_url('js/mathjax/2.7.5/MathJax.js') }}></script>
-    <script type='text/x-mathjax-config'>MathJax.Hub.Config({tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']], processEscapes: true}});</script>
-    <script type='text/javascript' src={{ static_url('js/mathjax/2.7.5/config/TeX-AMS-MML_HTMLorMML.js') }}></script>
+    <script type='text/javascript'>
+      window.MathJax = {
+        tex: {
+          inlineMath: [['$', '$'], ['\\(', '\\)']],
+          processEscapes: true
+        }
+      };
+    </script>
+    <script type='text/javascript' id="MathJax-script" src={{ static_url('js/mathjax/4.0.0/tex-mml-chtml.js') }}></script>
 
     <!-- Plotly -->
     <script src={{ static_url("js/plotly-plotly.min.js") }}></script>
