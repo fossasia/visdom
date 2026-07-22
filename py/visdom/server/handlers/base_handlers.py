@@ -13,6 +13,7 @@ Contain the basic web request handlers that all other handlers derive from
 import logging
 import traceback
 import http.client
+import time
 
 import tornado.web
 import tornado.websocket
@@ -64,6 +65,14 @@ class BaseHandler(tornado.web.RequestHandler):
             self.max_text_lines = app.max_text_lines
             self.max_old_content = app.max_old_content
             self.max_image_history = app.max_image_history
+
+    def is_authorized(self):
+        """Update access time and validate authentication for protected methods."""
+        self.last_access = time.time()
+        if self.login_enabled and not self.current_user:
+            self.set_status(401)
+            return False
+        return True
 
     def __init__(self, *request, **kwargs):
         self.include_host = False
