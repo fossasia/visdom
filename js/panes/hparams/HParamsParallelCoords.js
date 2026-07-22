@@ -138,7 +138,7 @@ const HParamsParallelCoords = ({
     ];
 
     const layout = {
-      margin: { l: 70, r: 80, t: 64, b: 48 },
+      margin: { l: 70, r: 80, t: 64, b: 76 },
       font: { family: '"Open Sans", sans-serif', size: 11, color: '#333' },
       paper_bgcolor: '#ffffff',
       plot_bgcolor: '#ffffff',
