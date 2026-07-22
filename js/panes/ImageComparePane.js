@@ -7,12 +7,22 @@
  *
  */
 
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 
 import Pane from './Pane';
+import { typesetMathJax } from './utils/mathjaxHelpers';
 
 function ImageComparePane(props) {
   const { content, title, id } = props;
+  const containerRef = useRef();
+
+  useEffect(() => {
+    let cancelled = false;
+    typesetMathJax(contentRef.current, () => cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [content]);
 
   // If content isn't an array, fallback
   if (!Array.isArray(content)) {
@@ -38,6 +48,7 @@ function ImageComparePane(props) {
   return (
     <Pane {...props} handleDownload={handleDownload}>
       <div
+        ref={containerRef}
         style={{
           display: 'flex',
           flexDirection: 'row',
