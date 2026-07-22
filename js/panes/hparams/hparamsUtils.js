@@ -18,6 +18,18 @@
 const SPINE_LIGHT = [235, 240, 249];
 const SPINE_DARK = [59, 89, 152];
 
+export const COLUMN_GROUPS = [
+  { key: 'param', label: 'params' },
+  { key: 'metric', label: 'metrics' },
+  { key: 'tag', label: 'tags' },
+];
+
+export const NUMERIC_GROUPS = COLUMN_GROUPS.slice(0, 2);
+
+export function runLabel(record) {
+  return (record && (record.name || record.env_id)) || 'run';
+}
+
 export function isMissing(value) {
   return (
     value === undefined ||
@@ -93,6 +105,28 @@ export function buildColumns(paramKeys, metricKeys, tagKeys) {
   return columns;
 }
 
+export function groupColumnTree(columns, groups) {
+  const cols = columns || [];
+  return (groups || [])
+    .map(({ key, label }) => {
+      const children = cols.filter((col) => col.group === key);
+      if (children.length === 0) return null;
+      return {
+        key: '__g_' + key,
+        value: '__g_' + key,
+        title: label,
+        selectable: false,
+        checkable: false,
+        children: children.map((col) => ({
+          key: col.id,
+          value: col.id,
+          title: col.label,
+        })),
+      };
+    })
+    .filter(Boolean);
+}
+
 export function formatValue(value) {
   if (isMissing(value)) return '—';
   if (typeof value === 'number') {
@@ -116,6 +150,13 @@ export function filterRecords(records, query, columns) {
       }
     }
     return false;
+  });
+}
+
+export function toNumericColumn(records, accessor) {
+  return (records || []).map((record) => {
+    const value = accessor(record);
+    return isNumeric(value) ? value : null;
   });
 }
 
@@ -175,10 +216,7 @@ export function buildSplomDimensions(records, columns, selectedIds) {
   (selectedIds || []).forEach((id) => {
     const col = byId.get(id);
     if (!col) return;
-    const values = (records || []).map((record) => {
-      const value = col.accessor(record);
-      return isNumeric(value) ? value : null;
-    });
+    const values = toNumericColumn(records, col.accessor);
     if (values.every((v) => v === null)) return;
     dimensions.push({ label: col.label, values });
   });
@@ -191,10 +229,7 @@ export function buildParcoordsDimensions(records, columns, selectedIds) {
   (selectedIds || []).forEach((id) => {
     const col = byId.get(id);
     if (!col) return;
-    const values = (records || []).map((record) => {
-      const value = col.accessor(record);
-      return isNumeric(value) ? value : null;
-    });
+    const values = toNumericColumn(records, col.accessor);
     const extent = numericExtent(records, col.accessor);
     if (extent === null) return;
     const span = extent.max - extent.min;
