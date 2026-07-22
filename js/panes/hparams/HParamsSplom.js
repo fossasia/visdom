@@ -8,7 +8,7 @@
  */
 
 import TreeSelect from 'rc-tree-select';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 
 import {
   buildColumns,
@@ -73,7 +73,16 @@ function downloadSnapshot(gd) {
     });
 }
 
-const HParamsSplom = ({ records, paramKeys, metricKeys, tagKeys }) => {
+const HParamsSplom = ({
+  records,
+  paramKeys,
+  metricKeys,
+  tagKeys,
+  selectedDims,
+  onSelectedDims,
+  colorBy,
+  onColorBy,
+}) => {
   const plotRef = useRef(null);
   const prevDimCount = useRef(0);
 
@@ -85,9 +94,6 @@ const HParamsSplom = ({ records, paramKeys, metricKeys, tagKeys }) => {
     () => selectNumericColumns(records, columns),
     [records, columns]
   );
-
-  const [selectedDims, setSelectedDims] = useState(null);
-  const [colorBy, setColorBy] = useState(null);
 
   const effectiveDims = useMemo(() => {
     const validIds = new Set(numericCols.map((c) => c.id));
@@ -251,7 +257,7 @@ const HParamsSplom = ({ records, paramKeys, metricKeys, tagKeys }) => {
   }, [records, columns, effectiveDims, effectiveColorBy]);
 
   const handleDims = (value) => {
-    setSelectedDims(Array.isArray(value) ? value.slice(0, MAX_DIMS) : []);
+    onSelectedDims(Array.isArray(value) ? value.slice(0, MAX_DIMS) : []);
   };
 
   if (!hasPlot) {
@@ -296,7 +302,7 @@ const HParamsSplom = ({ records, paramKeys, metricKeys, tagKeys }) => {
             treeDefaultExpandAll
             dropdownMatchSelectWidth={false}
             treeData={treeData}
-            onChange={(value) => setColorBy(value || null)}
+            onChange={(value) => onColorBy(value || null)}
             aria-label="Color scatter matrix by"
           />
         </span>

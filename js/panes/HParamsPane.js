@@ -38,6 +38,8 @@ var HParamsPane = (props) => {
   const { content } = props;
   const data = readContent(content);
   const [view, setView] = useState('table');
+  const [splomDims, setSplomDims] = useState(null);
+  const [splomColorBy, setSplomColorBy] = useState(null);
 
   const handleDownload = () => {
     let blob = new Blob([JSON.stringify(content)], {
@@ -104,6 +106,10 @@ var HParamsPane = (props) => {
               paramKeys={data.paramKeys}
               metricKeys={data.metricKeys}
               tagKeys={data.tagKeys}
+              selectedDims={splomDims}
+              onSelectedDims={setSplomDims}
+              colorBy={splomColorBy}
+              onColorBy={setSplomColorBy}
             />
           ) : (
             <HParamsTable
