@@ -35,23 +35,10 @@ LICENSE file in the root directory of this source tree.
         tex: {
           inlineMath: [['$', '$'], ['\\(', '\\)']],
           processEscapes: true
-        },
-        options: {
-          enableSpeech: false,
-          enableBraille: false,
-          menuOptions: {
-            settings: {
-              enrich: false,
-              collapsible: false,
-              speech: false,
-              braille: false,
-              assistiveMml: false
-            }
-          }
         }
       };
     </script>
-    <script type='text/javascript' id="MathJax-script" src={{ static_url('js/mathjax/4.0.0/tex-mml-chtml.js') }}></script>
+    <script type='text/javascript' id="MathJax-script" src={{ static_url('js/mathjax/3.2.2/es5/tex-mml-svg.js') }}></script>
 
     <!-- Plotly -->
     <script src={{ static_url("js/plotly-plotly.min.js") }}></script>
