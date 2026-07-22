@@ -761,12 +761,11 @@ class Visdom(object):
         # storage for data associated with specific windows
 
         # Setup for online interactions
-        self._send(
-            {
-                "eid": env,
-            },
-            endpoint="env/" + env,
-        )
+        result = self._send({"eid": env}, endpoint="env/" + env)
+        if self.send and result is False:
+            raise ConnectionError(
+                "Could not connect to server at {}:{}.".format(self.server, self.port)
+            )
 
         # when talking to a server, get a backchannel
         if send and use_incoming_socket:
@@ -1069,7 +1068,7 @@ class Visdom(object):
         try:
             r = self.session.post(url, data=data, timeout=20)
             return r.text
-        except (requests.ConnectionError, requests.Timeout):
+        except (requests.ConnectionError, requests.Timeout, requests.exceptions.SSLError):
             if not had_session:
                 raise
             logger.warning("Connection failed, resetting session and retrying...")
