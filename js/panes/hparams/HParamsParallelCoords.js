@@ -19,9 +19,12 @@ import {
   isNumeric,
   NUMERIC_GROUPS,
   numericExtent,
+  runLabel,
   selectNumericColumns,
   toNumericColumn,
 } from './hparamsUtils';
+
+const RUN_LABEL_MAX = 18;
 
 const MAX_DIMS = 10;
 
@@ -102,11 +105,30 @@ const HParamsParallelCoords = ({
       ? columns.find((c) => c.id === effectiveColorBy)
       : null;
 
-    const dimensions = buildParcoordsDimensions(rows, columns, effectiveDims);
-    if (dimensions.length < 2 || rows.length === 0) {
+    const numericDimensions = buildParcoordsDimensions(
+      rows,
+      columns,
+      effectiveDims
+    );
+    if (numericDimensions.length < 2 || rows.length === 0) {
       window.Plotly.purge(el);
       return;
     }
+
+    const runName = (record) => {
+      const name = runLabel(record);
+      return name.length > RUN_LABEL_MAX
+        ? name.slice(0, RUN_LABEL_MAX - 1) + '…'
+        : name;
+    };
+    const runDimension = {
+      label: 'run',
+      values: rows.map((_, i) => i),
+      tickvals: rows.map((_, i) => i),
+      ticktext: rows.map(runName),
+      range: [-0.5, Math.max(rows.length - 1, 0.5)],
+    };
+    const dimensions = [runDimension, ...numericDimensions];
 
     let line;
     if (colorCol) {
@@ -154,7 +176,7 @@ const HParamsParallelCoords = ({
     ];
 
     const layout = {
-      margin: { l: 70, r: 80, t: 64, b: 76 },
+      margin: { l: 120, r: 80, t: 64, b: 76 },
       font: { family: '"Open Sans", sans-serif', size: 11, color: '#333' },
       paper_bgcolor: '#ffffff',
       plot_bgcolor: '#ffffff',
