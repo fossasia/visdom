@@ -1076,7 +1076,7 @@ class Visdom(object):
         self._last_post_time = time.time()
         had_session = self._session is not None
         try:
-            r = self.session.post(url, data=data, timeout=20)
+            r = self.session.post(url, data=data, timeout=(20, None))
             return r.text
         except requests.exceptions.SSLError:
             raise
@@ -1091,7 +1091,7 @@ class Visdom(object):
                 except Exception:
                     pass
                 self._session = None
-            r = self.session.post(url, data=data, timeout=20)
+            r = self.session.post(url, data=data, timeout=(20, None))
             return r.text
 
     def _send(self, msg, endpoint="events", quiet=False, from_log=False, create=True):
