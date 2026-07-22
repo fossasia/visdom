@@ -16,6 +16,7 @@ import getpass
 import hashlib
 import logging
 import os
+import ssl
 import sys
 import errno
 import socket
