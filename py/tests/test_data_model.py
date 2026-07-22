@@ -10,6 +10,7 @@ import tempfile
 import unittest
 
 from visdom.data_model import JSONStore, DataStore
+from visdom.utils.server_utils import LazyEnvData
 
 
 def _env(win_id="win_0"):
@@ -100,6 +101,30 @@ class TestJSONStore(unittest.TestCase):
         ret = self.backend.save_all(state)
         self.assertEqual(sorted(ret), ["main", "other"])
         self.assertEqual(self.backend.load_env("main"), _env())
+
+    def test_save_skips_unmaterialised_lazy_env(self):
+        """A LazyEnvData never loaded into memory is not rewritten by save.
+
+        Its on-disk copy is already current, so save must not force it into
+        memory just to write it back — it is skipped and left out of the
+        returned ids.
+        """
+        lazy = LazyEnvData(self.backend, "lazy")
+        self.assertIsNone(lazy._raw_dict)
+        ret = self.backend.save_envs({"lazy": lazy}, ["lazy"])
+        self.assertEqual(ret, [])
+        self.assertFalse(self.backend.env_exists("lazy"))
+
+    def test_save_writes_materialised_lazy_env(self):
+        """A LazyEnvData that has been loaded is persisted by save."""
+        self.backend.save_env("lazy", _env())
+        lazy = LazyEnvData(self.backend, "lazy")
+        lazy.lazy_load_data()  # materialise from disk
+        self.backend.delete_env("lazy")  # prove the next save recreates it
+        self.assertFalse(self.backend.env_exists("lazy"))
+        ret = self.backend.save_envs({"lazy": lazy}, ["lazy"])
+        self.assertEqual(ret, ["lazy"])
+        self.assertEqual(self.backend.load_env("lazy"), _env())
 
     def test_env_named_like_hash_is_not_misread(self):
         """An env named 'hash_results' is not treated as a hash_<64hex> file."""

@@ -79,7 +79,7 @@ This is the primary TODO from PR #675: *"move the logic that actually parses env
 | File | Purpose |
 |------|---------|
 | `environment.py` | `Environment` class wrapping `{"jsons": {}, "reload": {}}` dict. Methods: `get_window()`, `set_window()`, `remove_window()`, `list_windows()`, `get_reload()` |
-| `state_manager.py` | `StateManager` class wrapping the top-level `state` dict. Methods: `get_env()`, `create_env()`, `delete_env()`, `list_envs()`, `fork_env()`, `serialize()`, `serialize_all()`. Absorbs functions from `server_utils.py` (`serialize_env`, `serialize_all`, `load_env`, `gather_envs`, `compare_envs`) |
+| `state_manager.py` | `StateManager` class wrapping the top-level `state` dict. Methods: `get_env()`, `create_env()`, `delete_env()`, `list_envs()`, `fork_env()`, `serialize()`, `serialize_all()`. Absorbs functions from `server_utils.py` (`load_env`, `gather_envs`, `compare_envs`). Environment file serialization now lives in `data_model/json_store.py` (`JSONStore`) via the `DataStore` abstraction |
 | `window.py` | Typed window structures (dataclasses/TypedDicts) replacing raw dicts built in `server_utils.py:window()` (lines 202-258) |
 
 ### 3b. Refactor handlers to use data model
@@ -109,12 +109,12 @@ py/visdom/server/
 **Effort: Medium-Large | Risk: Medium | PRs: 2 | Dependencies: Phase 3**
 
 ### 4a. Wrap blocking file I/O with `run_in_executor`
-Currently only **ONE** place uses async I/O (`socket_handlers.py:123` for `serialize_all`). All others block the Tornado event loop:
+Currently only **ONE** place uses async I/O (`socket_handlers.py:123` for `storage.save_all`). All others block the Tornado event loop:
 
 | File | Lines | Blocking Operation |
 |------|-------|-------------------|
 | `server_utils.py` | 72 | Cookie file write |
-| `server_utils.py` | 121-155 | `serialize_env()` — JSON file write |
+| `data_model/json_store.py` | `save_envs()` | `JSONStore` — JSON file write |
 | `server_utils.py` | 273-303 | `compare_envs()` — env file read |
 | `app.py` | 141 | Layout save (file write) |
 | `app.py` | 155 | Layout load (file read) |

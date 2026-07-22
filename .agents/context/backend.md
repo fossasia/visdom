@@ -8,7 +8,7 @@
 - `py/visdom/server/app.py` — Application class, routes, state management.
 - `py/visdom/server/handlers/web_handlers.py` — HTTP handlers. Copy app attributes in `initialize()`, use `@check_auth`.
 - `py/visdom/server/handlers/socket_handlers.py` — WebSocket handlers (read-only + write-enabled).
-- `py/visdom/utils/server_utils.py` — `check_auth`, `broadcast`, `LazyEnvData`, `serialize_env`.
+- `py/visdom/utils/server_utils.py` — `check_auth`, `broadcast`, `LazyEnvData`. Environment persistence lives in `py/visdom/data_model/json_store.py` (`JSONStore`).
 - `py/visdom/server/build.py` — `download_scripts()`: fetches CDN dependencies.
 
 ## Coding Rules
