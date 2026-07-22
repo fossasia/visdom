@@ -232,13 +232,14 @@ export function buildParcoordsDimensions(records, columns, selectedIds) {
     const values = toNumericColumn(records, col.accessor);
     const extent = numericExtent(records, col.accessor);
     if (extent === null) return;
-    const span = extent.max - extent.min;
-    const pad = span > 0 ? span * 0.05 : Math.abs(extent.max) * 0.05 || 1;
-    dimensions.push({
-      label: col.label,
-      values,
-      range: [extent.min - pad, extent.max + pad],
-    });
+    const dimension = { label: col.label, values };
+    if (extent.min === extent.max) {
+      const delta = Math.abs(extent.max) * 0.05 || 1;
+      dimension.range = [extent.min - delta, extent.max + delta];
+    } else {
+      dimension.range = [extent.min, extent.max];
+    }
+    dimensions.push(dimension);
   });
   return dimensions;
 }
