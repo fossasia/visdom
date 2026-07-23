@@ -126,7 +126,6 @@ const HParamsFilters = ({
   statuses,
   filters,
   setFilters,
-  search,
   setSearch,
   onClose,
   visibleCount,
@@ -181,15 +180,6 @@ const HParamsFilters = ({
       </div>
 
       <div className="hparams-filters-body">
-        <input
-          type="text"
-          className="hparams-filter"
-          placeholder="Search runs…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          aria-label="Search runs"
-        />
-
         {statuses.length > 0 ? (
           <div className="hparams-filter-group">
             <div className="hparams-filter-eyebrow">status</div>

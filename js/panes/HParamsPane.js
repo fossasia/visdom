@@ -148,18 +148,28 @@ var HParamsPane = (props) => {
                 {v.label}
               </button>
             ))}
-            <button
-              type="button"
-              className={
-                'hparams-filters-toggle' +
-                (filtersOpen ? ' hparams-filters-toggle-active' : '')
-              }
-              onClick={() => setFiltersOpen((open) => !open)}
-              aria-expanded={filtersOpen}
-              title="Filter runs across every view"
-            >
-              Filters{activeFilters ? ' (' + activeFilters + ')' : ''}
-            </button>
+            <span className="hparams-viewtools">
+              <input
+                type="text"
+                className="hparams-filter"
+                placeholder="Search runs…"
+                value={tableFilter}
+                onChange={(e) => setTableFilter(e.target.value)}
+                aria-label="Search runs"
+              />
+              <button
+                type="button"
+                className={
+                  'hparams-filters-toggle' +
+                  (filtersOpen ? ' hparams-filters-toggle-active' : '')
+                }
+                onClick={() => setFiltersOpen((open) => !open)}
+                aria-expanded={filtersOpen}
+                title="Filter runs across every view"
+              >
+                Filters{activeFilters ? ' (' + activeFilters + ')' : ''}
+              </button>
+            </span>
           </div>
           <div className="hparams-layout">
             {filtersOpen ? (
@@ -168,7 +178,6 @@ var HParamsPane = (props) => {
                 statuses={statuses}
                 filters={filters}
                 setFilters={setFilters}
-                search={tableFilter}
                 setSearch={setTableFilter}
                 onClose={() => setFiltersOpen(false)}
                 visibleCount={visibleRecords.length}
@@ -215,8 +224,6 @@ var HParamsPane = (props) => {
                   {...viewProps}
                   sort={tableSort}
                   setSort={setTableSort}
-                  filter={tableFilter}
-                  setFilter={setTableFilter}
                   colorBy={tableColorBy}
                   setColorBy={setTableColorBy}
                   selected={tableSelected}

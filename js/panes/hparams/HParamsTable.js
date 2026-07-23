@@ -13,7 +13,6 @@ import React, { useCallback, useMemo } from 'react';
 import {
   buildColumns,
   COLUMN_GROUPS,
-  filterRecords,
   formatValue,
   groupColumnTree,
   isNumeric,
@@ -147,8 +146,6 @@ const HParamsTable = ({
   tagKeys,
   sort,
   setSort,
-  filter,
-  setFilter,
   colorBy,
   setColorBy,
   selected,
@@ -173,17 +170,12 @@ const HParamsTable = ({
     return ids;
   }, [columns]);
 
-  const filtered = useMemo(
-    () => filterRecords(records, filter, columns),
-    [records, filter, columns]
-  );
-
   const rows = useMemo(() => {
-    if (!sort.by) return filtered;
+    if (!sort.by) return records;
     const accessor = accessorFor(sort.by, columns);
-    if (!accessor) return filtered;
-    return filtered.slice().sort(makeComparator(accessor, sort.dir));
-  }, [filtered, sort, columns]);
+    if (!accessor) return records;
+    return records.slice().sort(makeComparator(accessor, sort.dir));
+  }, [records, sort, columns]);
 
   const extent = useMemo(() => {
     if (!colorBy) return null;
@@ -248,14 +240,6 @@ const HParamsTable = ({
   return (
     <div className="hparams-table-wrap">
       <div className="hparams-toolbar">
-        <input
-          type="text"
-          className="hparams-filter"
-          placeholder="Filter runs…"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          aria-label="Filter runs"
-        />
         <span className="hparams-sortby">
           sort by:
           <TreeSelect
@@ -367,7 +351,7 @@ const HParamsTable = ({
             {rows.length === 0 ? (
               <tr>
                 <td className="hparams-nomatch" colSpan={2 + columns.length}>
-                  No runs match “{filter}”.
+                  No runs to show.
                 </td>
               </tr>
             ) : (
