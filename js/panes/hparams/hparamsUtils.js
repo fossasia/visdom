@@ -373,16 +373,25 @@ export function collectStatuses(records) {
   return known.concat(extra);
 }
 
-function passesSpec(record, spec, state, accessor) {
-  if (!state) return true;
+/*
+ * Whether a filter still admits runs that have no value for its column. Absent
+ * means yes: a filter should only ever remove runs it actually judged, so
+ * excluding the unmeasured ones has to be asked for.
+ */
+export function keepsMissing(entry) {
+  return !entry || entry.includeMissing !== false;
+}
+
+function passesSpec(record, spec, entry, accessor) {
+  if (!entry) return true;
   const value = accessor(record);
-  if (isMissing(value)) return state.includeMissing !== false;
+  if (isMissing(value)) return keepsMissing(entry);
   if (spec.kind === 'range') {
-    if (!isNumeric(value)) return state.includeMissing !== false;
-    return value >= state.lo && value <= state.hi;
+    if (!isNumeric(value)) return keepsMissing(entry);
+    return value >= entry.lo && value <= entry.hi;
   }
-  if (!state.values || state.values.length === 0) return true;
-  return state.values.indexOf(value) !== -1;
+  if (!entry.values || entry.values.length === 0) return true;
+  return entry.values.indexOf(value) !== -1;
 }
 
 /*
@@ -425,17 +434,11 @@ export function countActiveFilters(filters, specs) {
   (specs || []).forEach((spec) => {
     const entry = columns[spec.id];
     if (!entry) return;
-    if (spec.kind === 'range') {
-      const bounded = entry.lo > spec.min || entry.hi < spec.max;
-      if (bounded || entry.includeMissing === false) count += 1;
-      return;
-    }
-    if (
-      (entry.values && entry.values.length > 0) ||
-      entry.includeMissing === false
-    ) {
-      count += 1;
-    }
+    const narrowed =
+      spec.kind === 'range'
+        ? entry.lo > spec.min || entry.hi < spec.max
+        : entry.values && entry.values.length > 0;
+    if (narrowed || !keepsMissing(entry)) count += 1;
   });
   return count;
 }

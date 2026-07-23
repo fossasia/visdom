@@ -59,7 +59,7 @@ var HParamsPane = (props) => {
   const [splomColorBy, setSplomColorBy] = useState(null);
   const [parcoordsDims, setParcoordsDims] = useState(null);
   const [parcoordsColorBy, setParcoordsColorBy] = useState(null);
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(true);
   const [filters, setFilters] = useState({ statuses: [], columns: {} });
 
   const records = data ? data.records : NO_RECORDS;

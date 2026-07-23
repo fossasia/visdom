@@ -10,7 +10,18 @@
 import Slider from 'rc-slider';
 import React, { useCallback, useEffect, useState } from 'react';
 
-import { COLUMN_GROUPS, formatValue } from './hparamsUtils';
+import { COLUMN_GROUPS, formatValue, keepsMissing } from './hparamsUtils';
+
+/*
+ * Every control edits one field of its filter and leaves the rest alone, so
+ * they all build the next entry the same way: the current one where it exists,
+ * the spec's full range or an empty tick list where it does not.
+ */
+const entryFor = (spec, entry) =>
+  entry ||
+  (spec.kind === 'range'
+    ? { lo: spec.min, hi: spec.max, includeMissing: true }
+    : { values: [], includeMissing: true });
 
 /*
  * A range control that tracks the drag locally and lifts the value only once
@@ -29,11 +40,7 @@ const RangeFilter = ({ spec, entry, onChange }) => {
 
   const commit = (next) => {
     setDragging(null);
-    onChange(spec.id, {
-      lo: next[0],
-      hi: next[1],
-      includeMissing: entry ? entry.includeMissing !== false : true,
-    });
+    onChange(spec.id, { ...entryFor(spec, entry), lo: next[0], hi: next[1] });
   };
 
   return (
@@ -64,10 +71,7 @@ const CategoryFilter = ({ spec, entry, onChange }) => {
     const at = next.indexOf(value);
     if (at === -1) next.push(value);
     else next.splice(at, 1);
-    onChange(spec.id, {
-      values: next,
-      includeMissing: entry ? entry.includeMissing !== false : true,
-    });
+    onChange(spec.id, { ...entryFor(spec, entry), values: next });
   };
 
   return (
@@ -88,12 +92,9 @@ const CategoryFilter = ({ spec, entry, onChange }) => {
 
 const FilterSection = ({ spec, entry, onChange }) => {
   const toggleMissing = () => {
-    const base =
-      entry ||
-      (spec.kind === 'range' ? { lo: spec.min, hi: spec.max } : { values: [] });
     onChange(spec.id, {
-      ...base,
-      includeMissing: entry ? entry.includeMissing === false : false,
+      ...entryFor(spec, entry),
+      includeMissing: !keepsMissing(entry),
     });
   };
 
@@ -117,7 +118,7 @@ const FilterSection = ({ spec, entry, onChange }) => {
       >
         <input
           type="checkbox"
-          checked={!entry || entry.includeMissing !== false}
+          checked={keepsMissing(entry)}
           onChange={toggleMissing}
         />
         <span>include missing ({spec.missing})</span>

@@ -7,21 +7,17 @@
  *
  */
 
-import TreeSelect from 'rc-tree-select';
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 
+import HParamsAxisToolbar from './HParamsAxisToolbar';
 import { applySnapshotButton, observePlotResize } from './hparamsPlot';
 import {
-  buildColumns,
   buildSplomDimensions,
-  defaultDimIds,
-  groupColumnTree,
-  NUMERIC_GROUPS,
   numericExtent,
   runLabel,
-  selectNumericColumns,
   toNumericColumn,
 } from './hparamsUtils';
+import useHParamsAxes from './useHParamsAxes';
 
 const MAX_DIMS = 6;
 
@@ -53,44 +49,23 @@ const HParamsSplom = ({
   const plotRef = useRef(null);
   const prevDimCount = useRef(0);
 
-  /*
-   * Which columns can be plotted is derived from the unfiltered records, so a
-   * filter that empties a column does not make it vanish from the axis picker
-   * and silently reset the user's selection.
-   */
-  const pickerRecords = columnRecords || records;
-
-  const columns = useMemo(
-    () => buildColumns(paramKeys, metricKeys, tagKeys),
-    [paramKeys, metricKeys, tagKeys]
-  );
-  const numericCols = useMemo(
-    () => selectNumericColumns(pickerRecords, columns),
-    [pickerRecords, columns]
-  );
-
-  const effectiveDims = useMemo(() => {
-    const validIds = new Set(numericCols.map((c) => c.id));
-    let ids = (selectedDims || []).filter((id) => validIds.has(id));
-    if (ids.length === 0) ids = defaultDimIds(numericCols);
-    return ids.slice(0, MAX_DIMS);
-  }, [selectedDims, numericCols]);
-
-  const effectiveColorBy = useMemo(() => {
-    if (!colorBy) return null;
-    return numericCols.some((c) => c.id === colorBy) ? colorBy : null;
-  }, [colorBy, numericCols]);
-
-  const truncated =
-    (selectedDims || []).filter((id) => numericCols.some((c) => c.id === id))
-      .length > MAX_DIMS;
-
-  const treeData = useMemo(
-    () => groupColumnTree(numericCols, NUMERIC_GROUPS),
-    [numericCols]
-  );
-
-  const hasPlot = numericCols.length >= 2;
+  const {
+    columns,
+    dims: effectiveDims,
+    colorBy: effectiveColorBy,
+    treeData,
+    truncated,
+    hasPlot,
+  } = useHParamsAxes({
+    records,
+    columnRecords,
+    paramKeys,
+    metricKeys,
+    tagKeys,
+    selectedDims,
+    colorBy,
+    maxDims: MAX_DIMS,
+  });
 
   useEffect(() => {
     const el = plotRef.current;
@@ -210,10 +185,6 @@ const HParamsSplom = ({
     }
   }, [records, columns, effectiveDims, effectiveColorBy]);
 
-  const handleDims = (value) => {
-    onSelectedDims(Array.isArray(value) ? value.slice(0, MAX_DIMS) : []);
-  };
-
   if (!hasPlot) {
     return (
       <div className="hparams-splom-wrap">
@@ -226,47 +197,21 @@ const HParamsSplom = ({
 
   return (
     <div className="hparams-splom-wrap">
-      <div className="hparams-toolbar">
-        <span className="hparams-sortby">
-          dimensions:
-          <TreeSelect
-            className="hparams-treeselect hparams-select-wide"
-            value={effectiveDims}
-            placeholder="pick axes"
-            treeCheckable
-            multiple
-            showCheckedStrategy="SHOW_CHILD"
-            treeLine
-            treeDefaultExpandAll
-            maxTagCount={3}
-            dropdownMatchSelectWidth={false}
-            treeData={treeData}
-            onChange={handleDims}
-            aria-label="Scatter matrix dimensions"
-          />
-        </span>
-        <span className="hparams-colorby">
-          color by:
-          <TreeSelect
-            className="hparams-treeselect hparams-select-narrow"
-            value={effectiveColorBy || undefined}
-            placeholder="none"
-            allowClear
-            treeLine
-            treeDefaultExpandAll
-            dropdownMatchSelectWidth={false}
-            treeData={treeData}
-            onChange={(value) => onColorBy(value || null)}
-            aria-label="Color scatter matrix by"
-          />
-        </span>
-        {truncated ? (
-          <span className="hparams-splom-note">showing first {MAX_DIMS}</span>
-        ) : null}
-      </div>
+      <HParamsAxisToolbar
+        axesLabel="dimensions"
+        axesName="scatter matrix"
+        colorFallback="none"
+        treeData={treeData}
+        dims={effectiveDims}
+        onDims={onSelectedDims}
+        colorBy={effectiveColorBy}
+        onColorBy={onColorBy}
+        maxDims={MAX_DIMS}
+        note={truncated ? 'showing first ' + MAX_DIMS : null}
+      />
       <div className="hparams-splom-plot" ref={plotRef} />
       {effectiveDims.length < 2 ? (
-        <div className="hparams-splom-overlay">
+        <div className="hparams-plot-overlay">
           Select at least two dimensions to plot.
         </div>
       ) : null}

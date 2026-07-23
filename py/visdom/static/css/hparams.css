@@ -469,7 +469,7 @@
   min-width: 0;
 }
 
-.hparams-splom-overlay {
+.hparams-plot-overlay {
   position: absolute;
   top: 40px;
   right: 0;
@@ -482,7 +482,7 @@
   pointer-events: none;
 }
 
-.hparams-splom-note {
+.hparams-plot-note {
   margin-left: auto;
   color: #888;
   font-style: italic;
