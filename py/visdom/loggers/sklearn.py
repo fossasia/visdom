@@ -10,6 +10,7 @@ import functools
 import html
 import threading
 import time
+import warnings
 
 import numpy as np
 
@@ -125,7 +126,14 @@ class VisdomSklearnLogger:
                     logger._depth -= 1
                 duration = time.time() - t0
                 if logger._depth == 0:
-                    logger._log_cv(self_est, duration)
+                    try:
+                        logger._log_cv(self_est, duration)
+                    except Exception as e:
+                        warnings.warn(
+                            "VisdomSklearnLogger failed to log {}: {}".format(
+                                type(self_est).__name__, e
+                            )
+                        )
                 return result
 
         else:
@@ -143,7 +151,14 @@ class VisdomSklearnLogger:
                 if logger._depth == 0:
                     X = args[0] if args else None
                     y = args[1] if len(args) > 1 else None
-                    logger._log_plain(self_est, X, y, duration)
+                    try:
+                        logger._log_plain(self_est, X, y, duration)
+                    except Exception as e:
+                        warnings.warn(
+                            "VisdomSklearnLogger failed to log {}: {}".format(
+                                type(self_est).__name__, e
+                            )
+                        )
                 return result
 
         patched_fit._visdom_patched = True
