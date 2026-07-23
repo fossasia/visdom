@@ -7,6 +7,7 @@
 
 import datetime
 import functools
+import warnings
 
 try:
     from xgboost.callback import TrainingCallback
@@ -241,46 +242,49 @@ class VisdomXGBLogger(TrainingCallback):
         setattr(module, name, patched)
 
     def after_iteration(self, model, epoch, evals_log):
-        for data_name, metrics in evals_log.items():
-            for metric_name, log in metrics.items():
-                value = log[-1]
-                if isinstance(value, tuple):
-                    value = value[0]
-                win_name = metric_name
-                trace_name = data_name
-                if win_name not in self._wins:
-                    self._wins[win_name] = self.viz.line(
-                        X=[epoch],
-                        Y=[value],
-                        env=self.env,
-                        name=trace_name,
-                        opts={
-                            "title": win_name,
-                            "xlabel": "round",
-                            "ylabel": win_name,
-                            "showlegend": True,
-                        },
-                    )
-                elif epoch == 0:
-                    # New run reusing an old window (nested fit, or a
-                    # manually reused callback) — replace, don't append.
-                    self.viz.line(
-                        X=[epoch],
-                        Y=[value],
-                        win=self._wins[win_name],
-                        env=self.env,
-                        name=trace_name,
-                        update="replace",
-                    )
-                else:
-                    self.viz.line(
-                        X=[epoch],
-                        Y=[value],
-                        win=self._wins[win_name],
-                        env=self.env,
-                        name=trace_name,
-                        update="append",
-                    )
+        try:
+            for data_name, metrics in evals_log.items():
+                for metric_name, log in metrics.items():
+                    value = log[-1]
+                    if isinstance(value, tuple):
+                        value = value[0]
+                    win_name = metric_name
+                    trace_name = data_name
+                    if win_name not in self._wins:
+                        self._wins[win_name] = self.viz.line(
+                            X=[epoch],
+                            Y=[value],
+                            env=self.env,
+                            name=trace_name,
+                            opts={
+                                "title": win_name,
+                                "xlabel": "round",
+                                "ylabel": win_name,
+                                "showlegend": True,
+                            },
+                        )
+                    elif epoch == 0:
+                        # New run reusing an old window (nested fit, or a
+                        # manually reused callback) — replace, don't append.
+                        self.viz.line(
+                            X=[epoch],
+                            Y=[value],
+                            win=self._wins[win_name],
+                            env=self.env,
+                            name=trace_name,
+                            update="replace",
+                        )
+                    else:
+                        self.viz.line(
+                            X=[epoch],
+                            Y=[value],
+                            win=self._wins[win_name],
+                            env=self.env,
+                            name=trace_name,
+                            update="append",
+                        )
+        except Exception as e:
+            warnings.warn("VisdomXGBLogger failed to log round {}: {}".format(epoch, e))
         return False
 
     def after_training(self, model):
@@ -294,9 +298,14 @@ class VisdomXGBLogger(TrainingCallback):
             text = "best_iteration: {}<br>best_score: {}".format(
                 best_iteration, best_score
             )
-            summary_win = self._wins.get("__summary__")
-            if summary_win is None:
-                self._wins["__summary__"] = self.viz.text(text, env=self.env)
-            else:
-                self.viz.text(text, win=summary_win, env=self.env)
+            try:
+                summary_win = self._wins.get("__summary__")
+                if summary_win is None:
+                    self._wins["__summary__"] = self.viz.text(text, env=self.env)
+                else:
+                    self.viz.text(text, win=summary_win, env=self.env)
+            except Exception as e:
+                warnings.warn(
+                    "VisdomXGBLogger failed to log training summary: {}".format(e)
+                )
         return model
