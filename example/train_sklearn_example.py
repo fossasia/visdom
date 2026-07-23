@@ -1,7 +1,8 @@
 from sklearn.datasets import make_classification, make_regression
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestClassifier
 from sklearn.linear_model import Ridge
 from sklearn.model_selection import GridSearchCV, train_test_split
+from sklearn.neural_network import MLPClassifier
 
 import visdom
 from visdom.loggers import VisdomSklearnLogger
@@ -37,7 +38,8 @@ def main():
     clf = RandomForestClassifier(n_estimators=100, random_state=42)
     clf.fit(X_train_clf, y_train_clf)
 
-    # plain regressor -> text pane (dataset, train_score, fit_time, params)
+    # plain regressor -> text pane (dataset, train_score, rmse, mae, fit_time,
+    # params) + predicted-vs-residual scatter plot
     reg = Ridge(alpha=1.0)
     reg.fit(X_train_reg, y_train_reg)
 
@@ -54,9 +56,32 @@ def main():
     )
     gs.fit(X_train_clf, y_train_clf)
 
+    # MLPClassifier -> text pane + line chart of loss_curve_ per epoch
+    mlp = MLPClassifier(hidden_layer_sizes=(20,), max_iter=200, random_state=42)
+    mlp.fit(X_train_clf, y_train_clf)
+
+    # MLPClassifier with early_stopping -> also plots validation_scores_
+    # per epoch, alongside loss_curve_
+    mlp_es = MLPClassifier(
+        hidden_layer_sizes=(20,),
+        max_iter=200,
+        early_stopping=True,
+        n_iter_no_change=5,
+        random_state=42,
+    )
+    mlp_es.fit(X_train_clf, y_train_clf)
+
+    # GradientBoostingRegressor -> text pane (+ rmse, mae, residual scatter)
+    # and a line chart of train_score_ per boosting iteration
+    gbr = GradientBoostingRegressor(n_estimators=100, random_state=42)
+    gbr.fit(X_train_reg, y_train_reg)
+
     print("RF accuracy:     {:.4f}".format(clf.score(X_test_clf, y_test_clf)))
     print("Ridge R2:        {:.4f}".format(reg.score(X_test_reg, y_test_reg)))
     print("GridSearch best: {:.4f}  params: {}".format(gs.best_score_, gs.best_params_))
+    print("MLP accuracy:    {:.4f}".format(mlp.score(X_test_clf, y_test_clf)))
+    print("MLP (ES) acc:    {:.4f}".format(mlp_es.score(X_test_clf, y_test_clf)))
+    print("GBR R2:          {:.4f}".format(gbr.score(X_test_reg, y_test_reg)))
 
 
 if __name__ == "__main__":
