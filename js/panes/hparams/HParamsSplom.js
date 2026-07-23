@@ -14,6 +14,7 @@ import { applySnapshotButton, observePlotResize } from './hparamsPlot';
 import {
   buildColumns,
   buildSplomDimensions,
+  defaultDimIds,
   groupColumnTree,
   NUMERIC_GROUPS,
   numericExtent,
@@ -71,7 +72,7 @@ const HParamsSplom = ({
   const effectiveDims = useMemo(() => {
     const validIds = new Set(numericCols.map((c) => c.id));
     let ids = (selectedDims || []).filter((id) => validIds.has(id));
-    if (ids.length === 0) ids = numericCols.slice(0, MAX_DIMS).map((c) => c.id);
+    if (ids.length === 0) ids = defaultDimIds(numericCols);
     return ids.slice(0, MAX_DIMS);
   }, [selectedDims, numericCols]);
 

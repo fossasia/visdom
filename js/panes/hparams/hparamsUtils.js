@@ -206,6 +206,25 @@ export function selectNumericColumns(records, columns) {
 }
 
 /*
+ * The axes a plot opens on: one param against one metric, so a freshly opened
+ * view reads as a single relationship rather than every numeric column at once.
+ * Callers may pass `isDense` to prefer columns that hold a value on every run,
+ * since a sparse axis costs a parallel-coordinates plot whole lines. Falls back
+ * to the first two columns when the data has no param/metric pair to offer.
+ */
+export function defaultDimIds(numericCols, isDense) {
+  const cols = numericCols || [];
+  const dense = isDense ? cols.filter(isDense) : cols;
+  const pick = (group) =>
+    dense.find((col) => col.group === group) ||
+    cols.find((col) => col.group === group);
+  const param = pick('param');
+  const metric = pick('metric');
+  if (param && metric) return [param.id, metric.id];
+  return cols.slice(0, 2).map((col) => col.id);
+}
+
+/*
  * Build Plotly `splom` dimensions from the chosen column ids. Order follows
  * selectedIds; unknown ids are skipped; missing/non-numeric cells become null
  * so Plotly leaves a gap instead of plotting a bogus 0.

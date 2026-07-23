@@ -15,6 +15,7 @@ import {
   buildColumns,
   buildParcoordsDimensions,
   completeRecords,
+  defaultDimIds,
   groupColumnTree,
   isNumeric,
   NUMERIC_GROUPS,
@@ -63,11 +64,9 @@ const HParamsParallelCoords = ({
     const validIds = new Set(numericCols.map((c) => c.id));
     let ids = (selectedDims || []).filter((id) => validIds.has(id));
     if (ids.length === 0) {
-      const dense = numericCols.filter((c) =>
-        records.every((r) => isNumeric(c.accessor(r)))
+      ids = defaultDimIds(numericCols, (col) =>
+        records.every((record) => isNumeric(col.accessor(record)))
       );
-      const pick = dense.length >= 2 ? dense : numericCols;
-      ids = pick.slice(0, MAX_DIMS).map((c) => c.id);
     }
     return ids.slice(0, MAX_DIMS);
   }, [selectedDims, numericCols, records]);
