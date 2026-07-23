@@ -40,6 +40,7 @@ const AXIS_STYLE = {
 
 const HParamsSplom = ({
   records,
+  columnRecords,
   paramKeys,
   metricKeys,
   tagKeys,
@@ -51,13 +52,20 @@ const HParamsSplom = ({
   const plotRef = useRef(null);
   const prevDimCount = useRef(0);
 
+  /*
+   * Which columns can be plotted is derived from the unfiltered records, so a
+   * filter that empties a column does not make it vanish from the axis picker
+   * and silently reset the user's selection.
+   */
+  const pickerRecords = columnRecords || records;
+
   const columns = useMemo(
     () => buildColumns(paramKeys, metricKeys, tagKeys),
     [paramKeys, metricKeys, tagKeys]
   );
   const numericCols = useMemo(
-    () => selectNumericColumns(records, columns),
-    [records, columns]
+    () => selectNumericColumns(pickerRecords, columns),
+    [pickerRecords, columns]
   );
 
   const effectiveDims = useMemo(() => {

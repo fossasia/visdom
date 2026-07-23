@@ -256,3 +256,167 @@ export function buildParcoordsDimensions(records, columns, selectedIds) {
   });
   return dimensions;
 }
+
+/*
+ * A column with more distinct values than this is not offered as a checkbox
+ * list — the free-text search is the better tool for high-cardinality strings.
+ */
+const MAX_CATEGORIES = 12;
+
+/*
+ * Statuses come from the Python model (visdom.experiments.models), but the
+ * order here is lifecycle order rather than alphabetical so the sidebar reads
+ * the way a run progresses.
+ */
+export const STATUS_ORDER = ['running', 'finished', 'failed'];
+
+function distinctValues(records, accessor) {
+  const seen = new Map();
+  let missing = 0;
+  (records || []).forEach((record) => {
+    const value = accessor(record);
+    if (isMissing(value)) {
+      missing += 1;
+      return;
+    }
+    const key = typeof value + ':' + String(value);
+    if (!seen.has(key)) seen.set(key, value);
+  });
+  return { values: Array.from(seen.values()), missing };
+}
+
+/*
+ * Derive one filter control per column. A numeric param/metric with more than
+ * two distinct values becomes a range slider; anything with few enough distinct
+ * values becomes a checkbox list (this deliberately catches low-cardinality
+ * numerics such as batch size, where discrete choices beat a slider). Columns
+ * that are neither are skipped rather than rendered as an unusable control.
+ *
+ * Category values are ordered with the same comparator the table uses, which
+ * in turn mirrors the backend's _sort_pairs, so numbers precede strings.
+ */
+export function buildFilterSpecs(records, columns) {
+  const specs = [];
+  (columns || []).forEach((col) => {
+    const { values, missing } = distinctValues(records, col.accessor);
+    if (values.length === 0) return;
+    const numericColumn =
+      (col.group === 'param' || col.group === 'metric') &&
+      values.every((value) => isNumeric(value));
+    if (numericColumn && values.length > 2) {
+      const extent = numericExtent(records, col.accessor);
+      const integral = values.every((value) => Number.isInteger(value));
+      const span = extent.max - extent.min;
+      specs.push({
+        id: col.id,
+        label: col.label,
+        group: col.group,
+        accessor: col.accessor,
+        kind: 'range',
+        min: extent.min,
+        max: extent.max,
+        step: integral ? 1 : span / 100 || 1,
+        missing,
+      });
+      return;
+    }
+    if (values.length <= MAX_CATEGORIES) {
+      specs.push({
+        id: col.id,
+        label: col.label,
+        group: col.group,
+        accessor: col.accessor,
+        kind: 'category',
+        values: values
+          .slice()
+          .sort((a, b) => compareOrderKeys(orderKey(a), orderKey(b))),
+        missing,
+      });
+    }
+  });
+  return specs;
+}
+
+/*
+ * The statuses actually present in the data, in lifecycle order. Derived rather
+ * than hardcoded so a run in a status this build does not know about still gets
+ * a checkbox instead of silently becoming unfilterable.
+ */
+export function collectStatuses(records) {
+  const present = new Set();
+  (records || []).forEach((record) => {
+    if (record.status) present.add(record.status);
+  });
+  const known = STATUS_ORDER.filter((status) => present.has(status));
+  const extra = Array.from(present)
+    .filter((status) => STATUS_ORDER.indexOf(status) === -1)
+    .sort();
+  return known.concat(extra);
+}
+
+function passesSpec(record, spec, state, accessor) {
+  if (!state) return true;
+  const value = accessor(record);
+  if (isMissing(value)) return state.includeMissing !== false;
+  if (spec.kind === 'range') {
+    if (!isNumeric(value)) return state.includeMissing !== false;
+    return value >= state.lo && value <= state.hi;
+  }
+  if (!state.values || state.values.length === 0) return true;
+  return state.values.indexOf(value) !== -1;
+}
+
+/*
+ * Faceted semantics: every active column filter must pass (AND), but within one
+ * category list any checked value is enough (OR). A run whose value is missing
+ * survives only while that filter keeps missing values, which is what makes a
+ * range filter safe to apply to sparse metric columns.
+ */
+export function applyFilters(records, specs, filters) {
+  const state = filters || {};
+  const statuses = state.statuses;
+  const columns = state.columns || {};
+  const active = (specs || []).filter((spec) => columns[spec.id]);
+  if ((!statuses || statuses.length === 0) && active.length === 0) {
+    return records;
+  }
+  return (records || []).filter((record) => {
+    if (statuses && statuses.length > 0) {
+      if (statuses.indexOf(record.status) === -1) return false;
+    }
+    for (let i = 0; i < active.length; i++) {
+      const spec = active[i];
+      if (!passesSpec(record, spec, columns[spec.id], spec.accessor)) {
+        return false;
+      }
+    }
+    return true;
+  });
+}
+
+/*
+ * How many filters the badge should report. A range left at its full extent is
+ * not counted: it excludes nothing, so claiming it as active would make the
+ * badge disagree with what the user sees.
+ */
+export function countActiveFilters(filters, specs) {
+  const state = filters || {};
+  const columns = state.columns || {};
+  let count = state.statuses && state.statuses.length > 0 ? 1 : 0;
+  (specs || []).forEach((spec) => {
+    const entry = columns[spec.id];
+    if (!entry) return;
+    if (spec.kind === 'range') {
+      const bounded = entry.lo > spec.min || entry.hi < spec.max;
+      if (bounded || entry.includeMissing === false) count += 1;
+      return;
+    }
+    if (
+      (entry.values && entry.values.length > 0) ||
+      entry.includeMissing === false
+    ) {
+      count += 1;
+    }
+  });
+  return count;
+}
