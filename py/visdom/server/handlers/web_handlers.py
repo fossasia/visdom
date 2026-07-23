@@ -127,28 +127,32 @@ class UpdateHandler(BaseHandler):
 
         utype = None
         data = args.get("data")
+        first = None
         if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
-            utype = data[0].get("type")
+            first = data[0]
+            utype = first.get("type")
+
+        def _ops_with_selected(*extra_ops):
+            ops = list(extra_ops)
+            if "selected" in p:
+                ops.append({"op": "add", "path": "/selected", "value": p["selected"]})
+            ops.append({"op": "add", "path": "/contentID", "value": content_id})
+            return ops
 
         if pane_type == "image_history" and utype == "image_update_selected":
-            return p, [
-                {"op": "add", "path": "/selected", "value": p.get("selected")},
-                {"op": "add", "path": "/contentID", "value": content_id},
-            ]
+            return p, _ops_with_selected()
 
         if pane_type == "plot_history" and utype == "plot_update_selected":
-            return p, [
-                {"op": "add", "path": "/selected", "value": p.get("selected")},
-                {"op": "add", "path": "/contentID", "value": content_id},
-            ]
+            return p, _ops_with_selected()
 
-        # For append-style history updates, replacing content + selected is
-        # typically much smaller than building a full structural diff.
-        return p, [
-            {"op": "replace", "path": "/content", "value": p["content"]},
-            {"op": "add", "path": "/selected", "value": p.get("selected")},
-            {"op": "add", "path": "/contentID", "value": content_id},
-        ]
+        # Append-style history updates: add only the new item so clients avoid
+        # receiving the full content array on every streaming update.
+        new_item = first.get("content") if first is not None else None
+        if new_item is None and isinstance(p.get("content"), list) and p["content"]:
+            new_item = p["content"][-1]
+        return p, _ops_with_selected(
+            {"op": "add", "path": "/content/-", "value": new_item},
+        )
 
     @staticmethod
     def update_packet(p, args, max_text_lines, max_old_content, max_image_history):
@@ -629,7 +633,6 @@ class EnvHandler(BaseHandler):
                         escape_eid(args),
                         self.subs[sid],
                         self.storage,
-                        env_path=self.env_path,
                     )
                 except ValueError as e:
                     notify(
@@ -676,7 +679,7 @@ class CompareHandler(BaseHandler):
                     self.state,
                     args.split("+"),
                     self.subs[sid],
-                    self.env_path,
+                    self.storage,
                     show_all=show_all,
                 )
             except ValueError as e:
@@ -770,7 +773,7 @@ class IndexHandler(BaseHandler):
                 wrap_socket=self.wrap_socket,
             )
         elif self.login_enabled:
-            items = gather_envs(self.state, env_path=self.env_path)
+            items = gather_envs(self.state, self.storage)
             self.render(
                 "login.html",
                 user=getpass.getuser(),

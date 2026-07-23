@@ -6,8 +6,8 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-import errno
 import copy
+import errno
 import hashlib
 import json
 import logging
@@ -16,7 +16,7 @@ import re
 
 from visdom.data_model.base import DataStore
 from visdom.server.defaults import LAYOUT_FILE, UNDO_DIRNAME
-from visdom.utils.server_utils import escape_eid, serialize_env
+from visdom.utils.server_utils import escape_eid, LazyEnvData
 from visdom.utils.shared_utils import ensure_dir_exists, NanSafeEncoder
 
 HASHED_ENV_RE = re.compile(r"^hash_[a-f0-9]{64}\.json$", re.IGNORECASE)
@@ -91,14 +91,6 @@ class JSONStore(DataStore):
             return True
         return any(len(part) >= 240 for part in abs_path.split(os.sep))
 
-    def _write_hashed_env_file(self, safe_eid, env_data):
-        hashed_id = hashlib.sha256(safe_eid.encode("utf-8")).hexdigest()
-        hashed_path = os.path.join(self.env_path, "hash_{0}.json".format(hashed_id))
-        payload = copy.deepcopy(env_data)
-        payload["name"] = safe_eid
-        with open(hashed_path, "w", encoding="utf-8") as fn:
-            fn.write(json.dumps(payload, cls=NanSafeEncoder))
-
     def save_env(self, eid, env_data):
         """Persist a single environment; return ``True`` if written, else ``False``."""
         return bool(self.save_envs({eid: env_data}, [eid]))
@@ -117,28 +109,55 @@ class JSONStore(DataStore):
         for eid in eids:
             if eid not in state:
                 continue
-            safe_eid = self._safe_eid(eid)
-            primary = self._primary_path(eid)
-            if primary is None:
-                continue
-            if self._looks_like_windows_path_limit(primary):
-                self._write_hashed_env_file(safe_eid, state[eid])
+            if self.serialize_env(eid, state[eid]):
                 written.append(eid)
-                continue
-            try:
-                serialize_env(
-                    {safe_eid: state[eid]}, [safe_eid], env_path=self.env_path
-                )
-            except OSError as e:
-                if (
-                    e.errno != errno.ENAMETOOLONG
-                    and getattr(e, "winerror", None) != 206
-                    and not self._looks_like_windows_path_limit(primary)
-                ):
-                    raise
-                self._write_hashed_env_file(safe_eid, state[eid])
-            written.append(eid)
         return written
+
+    def serialize_env(self, eid, env_data):
+        """Write one environment to disk; return ``True`` if written.
+
+        A :class:`LazyEnvData` that was never materialised (``_raw_dict`` is
+        ``None``) is skipped and ``False`` is returned: its on-disk copy is
+        already current, so there is nothing to rewrite and no reason to force
+        it into memory. The write funnels through :meth:`_primary_path` /
+        :meth:`_hash_path` so it agrees with load/delete/exists on the file a
+        given ``eid`` maps to; over-long ids fall back to ``hash_<sha256>.json``
+        with the real id kept in a ``name`` field.
+        """
+        if isinstance(env_data, LazyEnvData):
+            if env_data._raw_dict is None:
+                return False
+            env_data.lazy_load_data()
+            payload = env_data._raw_dict
+        else:
+            payload = env_data
+
+        primary = self._primary_path(eid)
+
+        def _write_hashed():
+            data_to_save = copy.deepcopy(payload)
+            data_to_save["name"] = self._safe_eid(eid)
+            with open(self._hash_path(eid), "w") as fn:
+                fn.write(json.dumps(data_to_save, cls=NanSafeEncoder))
+
+        # Some Windows setups fail long paths with FileNotFoundError instead of
+        # ENAMETOOLONG, so pre-check and fall back to the hashed filename.
+        if primary is None or self._looks_like_windows_path_limit(primary):
+            _write_hashed()
+            return True
+
+        try:
+            with open(primary, "w") as fn:
+                fn.write(json.dumps(payload, cls=NanSafeEncoder))
+        except OSError as e:
+            if (
+                e.errno != errno.ENAMETOOLONG
+                and getattr(e, "winerror", None) != 206
+                and not self._looks_like_windows_path_limit(primary)
+            ):
+                raise
+            _write_hashed()
+        return True
 
     def save_all(self, state):
         """Persist every environment in ``state``; return the ids written."""
