@@ -666,15 +666,6 @@
   color: #888;
 }
 
-.hparams-filter-missing-none {
-  color: #b8b8b8;
-  cursor: default;
-}
-
-.hparams-filter-missing-none input {
-  cursor: default;
-}
-
 .hparams-filter-none {
   font-size: 12px;
   font-style: italic;

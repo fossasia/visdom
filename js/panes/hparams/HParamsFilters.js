@@ -108,10 +108,7 @@ const FilterSection = ({ spec, entry, onChange }) => {
         <CategoryFilter spec={spec} entry={entry} onChange={onChange} />
       )}
       <label
-        className={
-          'hparams-filter-check hparams-filter-missing' +
-          (spec.missing === 0 ? ' hparams-filter-missing-none' : '')
-        }
+        className="hparams-filter-check hparams-filter-missing"
         title={
           spec.missing === 0
             ? 'Every run has a value for ' + spec.label
@@ -122,7 +119,6 @@ const FilterSection = ({ spec, entry, onChange }) => {
           type="checkbox"
           checked={!entry || entry.includeMissing !== false}
           onChange={toggleMissing}
-          disabled={spec.missing === 0}
         />
         <span>include missing ({spec.missing})</span>
       </label>
