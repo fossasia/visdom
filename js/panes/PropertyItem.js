@@ -8,6 +8,7 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
+
 import { typesetMathJax } from './utils/mathjaxHelpers';
 
 const LATEX_PATTERN = /\$[^$]+\$|\\\([^)]+\\\)/;
