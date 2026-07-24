@@ -292,7 +292,7 @@ var PlotPane = (props) => {
               min="1"
               max={maxsmoothvalue}
               value={smoothvalue}
-              onInput={(ev) => updateSmoothSlider(ev.target.value)}
+              onChange={(ev) => updateSmoothSlider(ev.target.value)}
             />
             <span>&nbsp;&nbsp;&nbsp;&nbsp;</span>
           </div>
