@@ -271,4 +271,4 @@ const HParamsSplom = ({
   );
 };
 
-export default HParamsSplom;
+export default React.memo(HParamsSplom);

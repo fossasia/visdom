@@ -186,4 +186,4 @@ const HParamsParallelCoords = ({
   );
 };
 
-export default HParamsParallelCoords;
+export default React.memo(HParamsParallelCoords);

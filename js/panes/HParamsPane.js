@@ -7,7 +7,7 @@
  *
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 
 import HParamsCompare from './hparams/HParamsCompare';
 import HParamsFilters from './hparams/HParamsFilters';
@@ -51,7 +51,7 @@ function readContent(content) {
 
 var HParamsPane = (props) => {
   const { content } = props;
-  const data = readContent(content);
+  const data = useMemo(() => readContent(content), [content]);
   const [view, setView] = useState('table');
   const [tableSort, setTableSort] = useState({ by: null, dir: null });
   const [tableFilter, setTableFilter] = useState('');
@@ -95,11 +95,12 @@ var HParamsPane = (props) => {
         : visibleRecords,
     [selectionActive, visibleRecords, tableSelected]
   );
-  const clearSelection = () => setTableSelected(new Set());
+  const clearSelection = useCallback(() => setTableSelected(new Set()), []);
+  const closeFilters = useCallback(() => setFiltersOpen(false), []);
 
   const comparisonRecords = selectionActive ? selectedVisible : NO_RECORDS;
 
-  const handleDownload = () => {
+  const handleDownload = useCallback(() => {
     let blob = new Blob([JSON.stringify(content)], {
       type: 'application/json',
     });
@@ -108,7 +109,7 @@ var HParamsPane = (props) => {
     link.download = 'visdom_hparams.json';
     link.href = url;
     link.click();
-  };
+  }, [content]);
 
   let body;
   if (data === null) {
@@ -207,7 +208,7 @@ var HParamsPane = (props) => {
                 filters={filters}
                 setFilters={setFilters}
                 setSearch={setTableFilter}
-                onClose={() => setFiltersOpen(false)}
+                onClose={closeFilters}
                 visibleCount={visibleRecords.length}
                 totalCount={records.length}
               />

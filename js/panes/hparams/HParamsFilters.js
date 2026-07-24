@@ -8,7 +8,7 @@
  */
 
 import Slider from 'rc-slider';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { COLUMN_GROUPS, formatValue, keepsMissing } from './hparamsUtils';
 
@@ -79,7 +79,11 @@ const CategoryFilter = ({ spec, entry, onChange }) => {
   );
 };
 
-const FilterSection = ({ spec, entry, onChange }) => {
+const FilterSection = React.memo(function FilterSection({
+  spec,
+  entry,
+  onChange,
+}) {
   const toggleMissing = () => {
     onChange(spec.id, {
       ...entryFor(spec, entry),
@@ -114,7 +118,7 @@ const FilterSection = ({ spec, entry, onChange }) => {
       </label>
     </div>
   );
-};
+});
 
 const HParamsFilters = ({
   specs,
@@ -154,10 +158,14 @@ const HParamsFilters = ({
     setSearch('');
   }, [setFilters, setSearch]);
 
-  const groups = COLUMN_GROUPS.map((group) => ({
-    ...group,
-    specs: specs.filter((spec) => spec.group === group.key),
-  })).filter((group) => group.specs.length > 0);
+  const groups = useMemo(
+    () =>
+      COLUMN_GROUPS.map((group) => ({
+        ...group,
+        specs: specs.filter((spec) => spec.group === group.key),
+      })).filter((group) => group.specs.length > 0),
+    [specs]
+  );
 
   return (
     <div className="hparams-filters">
@@ -231,4 +239,4 @@ const HParamsFilters = ({
   );
 };
 
-export default HParamsFilters;
+export default React.memo(HParamsFilters);
