@@ -7,14 +7,6 @@
  *
  */
 
-/*
- * Pure helpers for the hyper-parameter table. Kept free of React so the
- * ordering and formatting rules live in one place and can mirror the Python
- * backend exactly. The comparator below intentionally matches
- * visdom.experiments.store._order_key / _sort_pairs so the table and the
- * server-side search agree on which run ranks first.
- */
-
 const SPINE_LIGHT = [235, 240, 249];
 const SPINE_DARK = [59, 89, 152];
 
@@ -192,11 +184,6 @@ export function spineStyle(value, extent) {
   return { backgroundColor: bg, color: t > 0.62 ? '#fff' : '#333' };
 }
 
-/*
- * Numeric param/metric columns only — the axes a scatter matrix (SPLOM) or a
- * "color by" ramp can actually plot. Tags are excluded (categorical) and any
- * column whose values are all missing/non-numeric is dropped.
- */
 export function selectNumericColumns(records, columns) {
   return (columns || []).filter(
     (col) =>
@@ -205,13 +192,6 @@ export function selectNumericColumns(records, columns) {
   );
 }
 
-/*
- * The axes a plot opens on: one param against one metric, so a freshly opened
- * view reads as a single relationship rather than every numeric column at once.
- * Callers may pass `isDense` to prefer columns that hold a value on every run,
- * since a sparse axis costs a parallel-coordinates plot whole lines. Falls back
- * to the first two columns when the data has no param/metric pair to offer.
- */
 export function defaultDimIds(numericCols, isDense) {
   const cols = numericCols || [];
   const dense = isDense ? cols.filter(isDense) : cols;
@@ -224,22 +204,38 @@ export function defaultDimIds(numericCols, isDense) {
   return cols.slice(0, 2).map((col) => col.id);
 }
 
-/*
- * Build Plotly `splom` dimensions from the chosen column ids. Order follows
- * selectedIds; unknown ids are skipped; missing/non-numeric cells become null
- * so Plotly leaves a gap instead of plotting a bogus 0.
- */
-export function buildSplomDimensions(records, columns, selectedIds) {
-  const byId = new Map((columns || []).map((col) => [col.id, col]));
-  const dimensions = [];
-  (selectedIds || []).forEach((id) => {
-    const col = byId.get(id);
-    if (!col) return;
-    const values = toNumericColumn(records, col.accessor);
-    if (values.every((v) => v === null)) return;
-    dimensions.push({ label: col.label, values });
+export function coincidentRuns(records, colX, colY, x, y) {
+  if (!colX || !colY) return [];
+  const names = [];
+  (records || []).forEach((record) => {
+    const vx = colX.accessor(record);
+    const vy = colY.accessor(record);
+    if (isNumeric(vx) && isNumeric(vy) && vx === x && vy === y) {
+      names.push(runLabel(record));
+    }
   });
-  return dimensions;
+  return names;
+}
+
+export function resolveColor(records, columns, colorById) {
+  const col = colorById
+    ? (columns || []).find((c) => c.id === colorById)
+    : null;
+  if (col) {
+    const ext = numericExtent(records, col.accessor);
+    return {
+      values: toNumericColumn(records, col.accessor),
+      label: col.label,
+      cmin: ext ? ext.min : 0,
+      cmax: ext ? ext.max : 1,
+    };
+  }
+  return {
+    values: (records || []).map((_, i) => i + 1),
+    label: 'run order',
+    cmin: 1,
+    cmax: Math.max((records || []).length, 1),
+  };
 }
 
 export function completeRecords(records, cols) {
@@ -248,13 +244,6 @@ export function completeRecords(records, cols) {
   );
 }
 
-/*
- * Build Plotly `parcoords` dimensions. Plotly cannot render null/NaN cells —
- * one sparse axis corrupts every line — so callers pass records that already
- * hold a numeric value on every axis (see completeRecords). Each axis spans its
- * exact data range; an axis whose values are all equal gets a small symmetric
- * range so it does not collapse to zero height.
- */
 export function buildParcoordsDimensions(records, columns, selectedIds) {
   const byId = new Map((columns || []).map((col) => [col.id, col]));
   const dimensions = [];
@@ -276,17 +265,8 @@ export function buildParcoordsDimensions(records, columns, selectedIds) {
   return dimensions;
 }
 
-/*
- * A column with more distinct values than this is not offered as a checkbox
- * list — the free-text search is the better tool for high-cardinality strings.
- */
 const MAX_CATEGORIES = 12;
 
-/*
- * Statuses come from the Python model (visdom.experiments.models), but the
- * order here is lifecycle order rather than alphabetical so the sidebar reads
- * the way a run progresses.
- */
 export const STATUS_ORDER = ['running', 'finished', 'failed'];
 
 function distinctValues(records, accessor) {
@@ -304,16 +284,6 @@ function distinctValues(records, accessor) {
   return { values: Array.from(seen.values()), missing };
 }
 
-/*
- * Derive one filter control per column. A numeric param/metric with more than
- * two distinct values becomes a range slider; anything with few enough distinct
- * values becomes a checkbox list (this deliberately catches low-cardinality
- * numerics such as batch size, where discrete choices beat a slider). Columns
- * that are neither are skipped rather than rendered as an unusable control.
- *
- * Category values are ordered with the same comparator the table uses, which
- * in turn mirrors the backend's _sort_pairs, so numbers precede strings.
- */
 export function buildFilterSpecs(records, columns) {
   const specs = [];
   (columns || []).forEach((col) => {
@@ -356,11 +326,6 @@ export function buildFilterSpecs(records, columns) {
   return specs;
 }
 
-/*
- * The statuses actually present in the data, in lifecycle order. Derived rather
- * than hardcoded so a run in a status this build does not know about still gets
- * a checkbox instead of silently becoming unfilterable.
- */
 export function collectStatuses(records) {
   const present = new Set();
   (records || []).forEach((record) => {
@@ -373,11 +338,6 @@ export function collectStatuses(records) {
   return known.concat(extra);
 }
 
-/*
- * Whether a filter still admits runs that have no value for its column. Absent
- * means yes: a filter should only ever remove runs it actually judged, so
- * excluding the unmeasured ones has to be asked for.
- */
 export function keepsMissing(entry) {
   return !entry || entry.includeMissing !== false;
 }
@@ -394,12 +354,6 @@ function passesSpec(record, spec, entry, accessor) {
   return entry.values.indexOf(value) !== -1;
 }
 
-/*
- * Faceted semantics: every active column filter must pass (AND), but within one
- * category list any checked value is enough (OR). A run whose value is missing
- * survives only while that filter keeps missing values, which is what makes a
- * range filter safe to apply to sparse metric columns.
- */
 export function applyFilters(records, specs, filters) {
   const state = filters || {};
   const statuses = state.statuses;
@@ -422,11 +376,6 @@ export function applyFilters(records, specs, filters) {
   });
 }
 
-/*
- * How many filters the badge should report. A range left at its full extent is
- * not counted: it excludes nothing, so claiming it as active would make the
- * badge disagree with what the user sees.
- */
 export function countActiveFilters(filters, specs) {
   const state = filters || {};
   const columns = state.columns || {};
@@ -441,4 +390,43 @@ export function countActiveFilters(filters, specs) {
     if (narrowed || !keepsMissing(entry)) count += 1;
   });
   return count;
+}
+
+export function sameValue(a, b) {
+  if (typeof a === 'boolean' || typeof b === 'boolean') return a === b;
+  if (typeof a === 'number' && typeof b === 'number') {
+    if (Number.isNaN(a) && Number.isNaN(b)) return true;
+    return a === b;
+  }
+  return a === b;
+}
+
+export function buildComparison(records, columns) {
+  const runs = records || [];
+  const sections = { param: [], metric: [], tag: [] };
+  (columns || []).forEach((col) => {
+    const cells = runs.map((record) => col.accessor(record));
+    let present = 0;
+    const groups = [];
+    cells.forEach((value) => {
+      if (isMissing(value)) return;
+      present += 1;
+      const group = groups.find((g) => sameValue(g.value, value));
+      if (group) group.count += 1;
+      else groups.push({ value, count: 1 });
+    });
+    if (present === 0) return;
+    const shared = present === runs.length && groups.length === 1;
+    if (!sections[col.group]) return;
+    sections[col.group].push({
+      id: col.id,
+      label: col.label,
+      group: col.group,
+      accessor: col.accessor,
+      cells,
+      groups,
+      shared,
+    });
+  });
+  return sections;
 }

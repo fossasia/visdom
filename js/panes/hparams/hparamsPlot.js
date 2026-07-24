@@ -7,13 +7,11 @@
  *
  */
 
-/*
- * Plotly-facing helpers shared by the hyper-parameter plot views (scatter
- * matrix and parallel coordinates). Unlike hparamsUtils these touch the global
- * Plotly instance and the DOM, so they live apart from the pure helpers.
- */
+import { useEffect } from 'react';
 
 const SNAPSHOT_NOTICE_DELAY = 700;
+
+export const PLOT_COLORSCALE = 'Viridis';
 
 export function notify(message, kind) {
   const lib = window.Plotly && window.Plotly.Lib;
@@ -78,4 +76,54 @@ export function observePlotResize(el) {
     resizeObserver.disconnect();
     if (window.Plotly && el._fullLayout) window.Plotly.purge(el);
   };
+}
+
+export function usePlotResize(ref) {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    return observePlotResize(el);
+  }, [ref]);
+}
+
+export function plotBaseLayout() {
+  return {
+    font: { family: '"Open Sans", sans-serif', size: 11, color: '#333' },
+    paper_bgcolor: '#ffffff',
+    plot_bgcolor: '#ffffff',
+  };
+}
+
+export function plotColorbar(label) {
+  return {
+    title: { text: label, side: 'right', font: { size: 11 } },
+    thickness: 12,
+    len: 0.6,
+    outlinewidth: 0,
+  };
+}
+
+export function renderPlot(el, data, layout, filename, onReady) {
+  if (!el || !window.Plotly) return;
+  const config = applySnapshotButton(
+    {
+      showLink: false,
+      displaylogo: false,
+      responsive: true,
+      doubleClick: 'reset',
+    },
+    filename
+  );
+  try {
+    window.Plotly.react(el, data, layout, config)
+      .then(() => {
+        if (el._fullLayout && el.offsetWidth > 0) {
+          window.Plotly.Plots.resize(el);
+        }
+        if (onReady) onReady(el);
+      })
+      .catch(() => window.Plotly.purge(el));
+  } catch (e) {
+    window.Plotly.purge(el);
+  }
 }

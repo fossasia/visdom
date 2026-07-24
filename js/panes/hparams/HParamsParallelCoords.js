@@ -10,21 +10,24 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 
 import HParamsAxisToolbar from './HParamsAxisToolbar';
-import { applySnapshotButton, observePlotResize } from './hparamsPlot';
+import {
+  PLOT_COLORSCALE,
+  plotBaseLayout,
+  plotColorbar,
+  renderPlot,
+  usePlotResize,
+} from './hparamsPlot';
 import {
   buildParcoordsDimensions,
   completeRecords,
-  numericExtent,
+  resolveColor,
   runLabel,
-  toNumericColumn,
 } from './hparamsUtils';
 import useHParamsAxes from './useHParamsAxes';
 
 const RUN_LABEL_MAX = 18;
 
 const MAX_DIMS = 10;
-
-const PARCOORDS_COLORSCALE = 'Viridis';
 
 const HParamsParallelCoords = ({
   records,
@@ -69,19 +72,11 @@ const HParamsParallelCoords = ({
     return completeRecords(records, requiredCols);
   }, [records, columns, effectiveDims, effectiveColorBy]);
 
-  useEffect(() => {
-    const el = plotRef.current;
-    if (!el) return;
-    return observePlotResize(el);
-  }, []);
+  usePlotResize(plotRef);
 
   useEffect(() => {
     const el = plotRef.current;
     if (!el || !window.Plotly) return;
-
-    const colorCol = effectiveColorBy
-      ? columns.find((c) => c.id === effectiveColorBy)
-      : null;
 
     const numericDimensions = buildParcoordsDimensions(
       rows,
@@ -108,37 +103,15 @@ const HParamsParallelCoords = ({
     };
     const dimensions = [runDimension, ...numericDimensions];
 
-    let line;
-    if (colorCol) {
-      const ext = numericExtent(rows, colorCol.accessor);
-      line = {
-        color: toNumericColumn(rows, colorCol.accessor),
-        colorscale: PARCOORDS_COLORSCALE,
-        showscale: true,
-        cmin: ext ? ext.min : 0,
-        cmax: ext ? ext.max : 1,
-        colorbar: {
-          title: { text: colorCol.label, side: 'right', font: { size: 11 } },
-          thickness: 12,
-          len: 0.6,
-          outlinewidth: 0,
-        },
-      };
-    } else {
-      line = {
-        color: rows.map((_, i) => i + 1),
-        colorscale: PARCOORDS_COLORSCALE,
-        showscale: true,
-        cmin: 1,
-        cmax: Math.max(rows.length, 1),
-        colorbar: {
-          title: { text: 'run order', side: 'right', font: { size: 11 } },
-          thickness: 12,
-          len: 0.6,
-          outlinewidth: 0,
-        },
-      };
-    }
+    const color = resolveColor(rows, columns, effectiveColorBy);
+    const line = {
+      color: color.values,
+      colorscale: PLOT_COLORSCALE,
+      showscale: true,
+      cmin: color.cmin,
+      cmax: color.cmax,
+      colorbar: plotColorbar(color.label),
+    };
 
     const data = [
       {
@@ -154,10 +127,8 @@ const HParamsParallelCoords = ({
     ];
 
     const layout = {
+      ...plotBaseLayout(),
       margin: { l: 120, r: 80, t: 64, b: 76 },
-      font: { family: '"Open Sans", sans-serif', size: 11, color: '#333' },
-      paper_bgcolor: '#ffffff',
-      plot_bgcolor: '#ffffff',
       datarevision:
         effectiveDims.join('|') +
         '::' +
@@ -166,27 +137,7 @@ const HParamsParallelCoords = ({
         rows.length,
     };
 
-    const config = applySnapshotButton(
-      {
-        showLink: false,
-        displaylogo: false,
-        responsive: true,
-        doubleClick: 'reset',
-      },
-      'hparams_parcoords.png'
-    );
-
-    try {
-      window.Plotly.react(el, data, layout, config)
-        .then(() => {
-          if (el._fullLayout && el.offsetWidth > 0) {
-            window.Plotly.Plots.resize(el);
-          }
-        })
-        .catch(() => window.Plotly.purge(el));
-    } catch (e) {
-      window.Plotly.purge(el);
-    }
+    renderPlot(el, data, layout, 'hparams_parcoords.png');
   }, [rows, columns, effectiveDims, effectiveColorBy]);
 
   if (!hasPlot) {

@@ -9,6 +9,7 @@
 
 import React, { useMemo, useState } from 'react';
 
+import HParamsCompare from './hparams/HParamsCompare';
 import HParamsFilters from './hparams/HParamsFilters';
 import HParamsParallelCoords from './hparams/HParamsParallelCoords';
 import HParamsSplom from './hparams/HParamsSplom';
@@ -27,6 +28,7 @@ const VIEWS = [
   { key: 'table', label: 'Table' },
   { key: 'parcoords', label: 'Parallel coordinates' },
   { key: 'splom', label: 'Scatter matrix' },
+  { key: 'compare', label: 'Compare' },
 ];
 
 const NO_RECORDS = [];
@@ -85,6 +87,18 @@ var HParamsPane = (props) => {
   const activeFilters =
     countActiveFilters(filters, specs) + (tableFilter.trim() ? 1 : 0);
 
+  const selectionActive = tableSelected.size > 0;
+  const selectedVisible = useMemo(
+    () =>
+      selectionActive
+        ? visibleRecords.filter((r) => tableSelected.has(r.env_id))
+        : visibleRecords,
+    [selectionActive, visibleRecords, tableSelected]
+  );
+  const clearSelection = () => setTableSelected(new Set());
+
+  const comparisonRecords = selectionActive ? selectedVisible : NO_RECORDS;
+
   const handleDownload = () => {
     let blob = new Blob([JSON.stringify(content)], {
       type: 'application/json',
@@ -128,6 +142,20 @@ var HParamsPane = (props) => {
           {visibleRecords.length !== records.length ? (
             <span className="hparams-stat hparams-stat-filtered">
               showing <b>{visibleRecords.length}</b> of {records.length}
+            </span>
+          ) : null}
+          {selectionActive ? (
+            <span className="hparams-stat hparams-stat-selected">
+              <b>{tableSelected.size}</b> selected for plots
+              <button
+                type="button"
+                className="hparams-chip-clear"
+                onClick={clearSelection}
+                aria-label="Clear selection"
+                title="Clear selection"
+              >
+                ×
+              </button>
             </span>
           ) : null}
         </div>
@@ -192,43 +220,82 @@ var HParamsPane = (props) => {
                   </div>
                 );
               }
+              const isPlot = view === 'splom' || view === 'parcoords';
+              const plotRecords =
+                isPlot && selectionActive ? selectedVisible : visibleRecords;
               const viewProps = {
-                records: visibleRecords,
                 columnRecords: records,
                 paramKeys: data.paramKeys,
                 metricKeys: data.metricKeys,
                 tagKeys: data.tagKeys,
               };
-              if (view === 'splom')
+
+              if (view === 'compare')
                 return (
+                  <HParamsCompare {...viewProps} records={comparisonRecords} />
+                );
+
+              let viewEl;
+              if (view === 'splom')
+                viewEl = (
                   <HParamsSplom
                     {...viewProps}
+                    records={plotRecords}
                     selectedDims={splomDims}
                     onSelectedDims={setSplomDims}
                     colorBy={splomColorBy}
                     onColorBy={setSplomColorBy}
                   />
                 );
-              if (view === 'parcoords')
-                return (
+              else if (view === 'parcoords')
+                viewEl = (
                   <HParamsParallelCoords
                     {...viewProps}
+                    records={plotRecords}
                     selectedDims={parcoordsDims}
                     onSelectedDims={setParcoordsDims}
                     colorBy={parcoordsColorBy}
                     onColorBy={setParcoordsColorBy}
                   />
                 );
+              else
+                viewEl = (
+                  <HParamsTable
+                    {...viewProps}
+                    records={visibleRecords}
+                    sort={tableSort}
+                    setSort={setTableSort}
+                    colorBy={tableColorBy}
+                    setColorBy={setTableColorBy}
+                    selected={tableSelected}
+                    setSelected={setTableSelected}
+                  />
+                );
+
+              if (!isPlot || !selectionActive) return viewEl;
               return (
-                <HParamsTable
-                  {...viewProps}
-                  sort={tableSort}
-                  setSort={setTableSort}
-                  colorBy={tableColorBy}
-                  setColorBy={setTableColorBy}
-                  selected={tableSelected}
-                  setSelected={setTableSelected}
-                />
+                <div className="hparams-plot-area">
+                  <div className="hparams-selection-banner">
+                    <span>
+                      Plotting <b>{plotRecords.length}</b> selected{' '}
+                      {plotRecords.length === 1 ? 'run' : 'runs'}
+                    </span>
+                    <button
+                      type="button"
+                      className="hparams-link-btn"
+                      onClick={clearSelection}
+                    >
+                      Show all
+                    </button>
+                  </div>
+                  {plotRecords.length === 0 ? (
+                    <div className="hparams-message hparams-empty">
+                      Every selected run is hidden by the current filters.
+                    </div>
+                  ) : (
+                    viewEl
+                  )}
+                </div>
               );
             })()}
           </div>

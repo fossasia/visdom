@@ -18,19 +18,6 @@ import {
   selectNumericColumns,
 } from './hparamsUtils';
 
-/*
- * Resolves which axes a plot should draw, shared by the scatter matrix and
- * parallel coordinates because both answer the question identically.
- *
- * `columnRecords` is the unfiltered set: which columns can be plotted at all is
- * decided from it, so a filter that empties a column cannot make it vanish from
- * the picker and silently reset a selection. `records` is what actually gets
- * drawn, and only informs which columns are dense.
- *
- * `preferDense` suits parallel coordinates, where a column with gaps costs the
- * plot whole lines and is a poor opening axis; a scatter matrix just leaves a
- * marker out, so it does not care.
- */
 export default function useHParamsAxes({
   records,
   columnRecords,

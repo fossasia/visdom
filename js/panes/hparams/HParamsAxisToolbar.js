@@ -10,12 +10,6 @@
 import TreeSelect from 'rc-tree-select';
 import React from 'react';
 
-/*
- * The axis picker and colour picker both plot views carry. Only the wording
- * differs between them: a scatter matrix talks about dimensions and falls back
- * to no colour, parallel coordinates talks about axes and falls back to run
- * order. `note` is the trailing status each view fills for itself.
- */
 const HParamsAxisToolbar = ({
   axesLabel,
   axesName,

@@ -23,6 +23,7 @@ import {
   selectNumericColumns,
   spineStyle,
 } from './hparamsUtils';
+import StatusBadge from './StatusBadge';
 
 const RUN_COLUMN_ID = 'run:name';
 
@@ -111,13 +112,7 @@ const HParamsRow = React.memo(function HParamsRow({
       <th scope="row" className="hparams-cell hparams-cell-run">
         <div className="hparams-run-cell" title={label}>
           <span className="hparams-run-name">{label}</span>
-          {record.status ? (
-            <span
-              className={'hparams-run-status hparams-status-' + record.status}
-            >
-              {record.status}
-            </span>
-          ) : null}
+          <StatusBadge status={record.status} />
         </div>
       </th>
       {columns.map((col) => {

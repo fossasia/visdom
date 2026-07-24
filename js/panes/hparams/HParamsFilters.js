@@ -12,23 +12,12 @@ import React, { useCallback, useEffect, useState } from 'react';
 
 import { COLUMN_GROUPS, formatValue, keepsMissing } from './hparamsUtils';
 
-/*
- * Every control edits one field of its filter and leaves the rest alone, so
- * they all build the next entry the same way: the current one where it exists,
- * the spec's full range or an empty tick list where it does not.
- */
 const entryFor = (spec, entry) =>
   entry ||
   (spec.kind === 'range'
     ? { lo: spec.min, hi: spec.max, includeMissing: true }
     : { values: [], includeMissing: true });
 
-/*
- * A range control that tracks the drag locally and lifts the value only once
- * the handle is released. Every commit re-filters the records feeding the
- * Plotly views, so committing per drag frame would rebuild those plots
- * continuously.
- */
 const RangeFilter = ({ spec, entry, onChange }) => {
   const bounds = [entry ? entry.lo : spec.min, entry ? entry.hi : spec.max];
   const [dragging, setDragging] = useState(null);
