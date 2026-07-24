@@ -6,13 +6,18 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import copy
+import errno
 import hashlib
 import json
+import logging
 import os
 import re
 
 from visdom.data_model.base import DataStore
-from visdom.utils.server_utils import escape_eid, serialize_env
+from visdom.server.defaults import LAYOUT_FILE, UNDO_DIRNAME
+from visdom.utils.server_utils import escape_eid, LazyEnvData
+from visdom.utils.shared_utils import ensure_dir_exists, NanSafeEncoder
 
 HASHED_ENV_RE = re.compile(r"^hash_[a-f0-9]{64}\.json$", re.IGNORECASE)
 
@@ -89,10 +94,43 @@ class JSONStore(DataStore):
         for eid in eids:
             if eid not in state:
                 continue
-            safe_eid = self._safe_eid(eid)
-            serialize_env({safe_eid: state[eid]}, [safe_eid], env_path=self.env_path)
-            written.append(eid)
+            if self.serialize_env(eid, state[eid]):
+                written.append(eid)
         return written
+
+    def serialize_env(self, eid, env_data):
+        """Write one environment to disk; return ``True`` if written.
+
+        A :class:`LazyEnvData` that was never materialised (``_raw_dict`` is
+        ``None``) is skipped and ``False`` is returned: its on-disk copy is
+        already current, so there is nothing to rewrite and no reason to force
+        it into memory. The write funnels through :meth:`_primary_path` /
+        :meth:`_hash_path` so it agrees with load/delete/exists on the file a
+        given ``eid`` maps to; over-long ids fall back to ``hash_<sha256>.json``
+        with the real id kept in a ``name`` field.
+        """
+        if isinstance(env_data, LazyEnvData):
+            if env_data._raw_dict is None:
+                return False
+            env_data.lazy_load_data()
+            payload = env_data._raw_dict
+        else:
+            payload = env_data
+
+        primary = self._primary_path(eid)
+        try:
+            if primary is None:
+                raise OSError(errno.ENAMETOOLONG, "env id maps outside env_path")
+            with open(primary, "w") as fn:
+                fn.write(json.dumps(payload, cls=NanSafeEncoder))
+        except OSError as e:
+            if e.errno != errno.ENAMETOOLONG and getattr(e, "winerror", None) != 206:
+                raise
+            data_to_save = copy.deepcopy(payload)
+            data_to_save["name"] = self._safe_eid(eid)
+            with open(self._hash_path(eid), "w") as fn:
+                fn.write(json.dumps(data_to_save, cls=NanSafeEncoder))
+        return True
 
     def save_all(self, state):
         """Persist every environment in ``state``; return the ids written."""
@@ -149,7 +187,10 @@ class JSONStore(DataStore):
             return False
         try:
             os.remove(path)
-        except OSError:
+        except FileNotFoundError:
+            return False
+        except OSError as e:
+            logging.error(f"Failed to delete {path}: {e}")
             return False
         return True
 
@@ -158,3 +199,90 @@ class JSONStore(DataStore):
         if self.env_path is None:
             return False
         return self._resolve_existing(eid) is not None
+
+    def _layout_path(self):
+        """Return the ``<env_path>/view/<LAYOUT_FILE>`` path for saved layouts."""
+        return os.path.join(self.env_path, "view", LAYOUT_FILE)
+
+    def save_layouts(self, layouts):
+        """Write the saved-views layout string; no-op when persistence is off."""
+        if self.env_path is None:
+            return
+        layout_path = self._layout_path()
+        ensure_dir_exists(os.path.dirname(layout_path))
+        with open(layout_path, "w") as fn:
+            fn.write(layouts)
+
+    def load_layouts(self):
+        """Read the saved-views layout string; return ``""`` if none is stored."""
+        if self.env_path is None:
+            return ""
+        layout_path = self._layout_path()
+        if os.path.isfile(layout_path):
+            with open(layout_path, "r") as fn:
+                return fn.read()
+        return ""
+
+    def _undo_paths(self, eid):
+        """Return ``(undo_dir, plain_path, hashed_path)`` for ``eid``'s undo file.
+
+        ``hashed_path`` mirrors ``serialize_env``'s fallback for env ids whose
+        plain filename would exceed the filesystem limit.
+        """
+        safe_eid = self._safe_eid(eid)
+        undo_dir = os.path.join(self.env_path, UNDO_DIRNAME)
+        plain = os.path.join(undo_dir, "{0}.json".format(safe_eid))
+        hashed_id = hashlib.sha256(safe_eid.encode("utf-8")).hexdigest()
+        hashed = os.path.join(undo_dir, "hash_{0}.json".format(hashed_id))
+        return undo_dir, plain, hashed
+
+    def load_undo(self, eid):
+        """Return ``eid``'s undo stack (a list), or ``[]`` if missing/corrupt."""
+        if self.env_path is None:
+            return []
+        _, plain, hashed = self._undo_paths(eid)
+        path = plain if os.path.exists(plain) else hashed
+        if not os.path.exists(path):
+            return []
+        try:
+            with open(path, "r") as fn:
+                data = json.loads(fn.read())
+        except (OSError, ValueError):
+            logging.warning(f"Could not read undo stack for env {eid}; ignoring it")
+            return []
+        return data if isinstance(data, list) else []
+
+    def save_undo(self, eid, stack):
+        """Atomically persist ``eid``'s undo stack; no-op when persistence is off."""
+        if self.env_path is None:
+            return
+        undo_dir, plain, hashed = self._undo_paths(eid)
+        os.makedirs(undo_dir, exist_ok=True)
+        payload = json.dumps(stack, cls=NanSafeEncoder)
+        try:
+            target = plain
+            tmp = plain + ".tmp"
+            with open(tmp, "w") as fn:
+                fn.write(payload)
+            os.replace(tmp, plain)
+        except OSError as e:
+            if e.errno != errno.ENAMETOOLONG and getattr(e, "winerror", None) != 206:
+                raise
+            target = hashed
+            tmp = hashed + ".tmp"
+            with open(tmp, "w") as fn:
+                fn.write(payload)
+            os.replace(tmp, hashed)
+        return target
+
+    def clear_undo(self, eid):
+        """Remove ``eid``'s on-disk undo history; no-op when persistence is off."""
+        if self.env_path is None:
+            return
+        _, plain, hashed = self._undo_paths(eid)
+        for path in (plain, hashed):
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except OSError as e:
+                    logging.error(f"Failed to delete undo file {path}: {e}")

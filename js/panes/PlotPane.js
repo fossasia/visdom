@@ -52,7 +52,7 @@ var PlotPane = (props) => {
   const handleDownload = () => {
     Plotly.downloadImage(plotlyRef.current, {
       format: 'svg',
-      filename: contentID,
+      filename: contentID || 'plot',
     });
   };
 
@@ -67,7 +67,7 @@ var PlotPane = (props) => {
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${contentID}_metadata.json`;
+    link.download = `${contentID || 'plot'}_metadata.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -183,7 +183,7 @@ var PlotPane = (props) => {
           smooth_d.showlegend = false;
 
           // turn off smoothing for smoothvalue of 3 or too small arrays
-          if (windowSize < 5 || smooth_d.x.length <= 5) {
+          if (windowSize < 5 || !smooth_d.x || smooth_d.x.length <= 5) {
             d.opacity = 1.0;
 
             return smooth_d;
@@ -240,6 +240,10 @@ var PlotPane = (props) => {
       }
     } else {
       layout.margin.t = 30;
+    }
+
+    if (content.caption) {
+      layout.margin.b = Math.max(layout.margin.b || 60, 100);
     }
 
     // draw / redraw plot with layout-options
@@ -321,11 +325,11 @@ var PlotPane = (props) => {
   }
 
   var caption_widget = '';
-  if (isHistory && content && content.caption) {
+  if (content && content.caption) {
     caption_widget = (
-      <span className="widget" key="plot_caption">
+      <div className="widget plot-caption" key="plot_caption">
         {content.caption}
-      </span>
+      </div>
     );
   }
 

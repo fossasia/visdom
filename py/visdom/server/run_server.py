@@ -16,6 +16,7 @@ import getpass
 import hashlib
 import logging
 import os
+import ssl
 import sys
 import errno
 import socket
@@ -30,7 +31,7 @@ from visdom.server.defaults import (
     DEFAULT_PORT,
 )
 from visdom.server.build import download_scripts
-from visdom.utils.server_utils import hash_password, serialize_all, set_cookie
+from visdom.utils.server_utils import hash_password, set_cookie
 
 MAX_PORT = 65535
 
@@ -70,6 +71,8 @@ def start_server(
     use_frontend_client_polling=False,
     bind_local=False,
     eager_data_loading=False,
+    ssl_certfile=None,
+    ssl_keyfile=None,
 ):
     logging.info("Server started")
     app = Application(
@@ -83,6 +86,21 @@ def start_server(
     )
     bind_addr = "127.0.0.1" if bind_local else None
     family = socket.AF_INET if bind_local else socket.AF_UNSPEC
+
+    ssl_ctx = None
+    if ssl_certfile and ssl_keyfile:
+        if not os.path.isfile(ssl_certfile):
+            raise FileNotFoundError(f"SSL certificate file not found: {ssl_certfile}")
+        if not os.path.isfile(ssl_keyfile):
+            raise FileNotFoundError(f"SSL key file not found: {ssl_keyfile}")
+        ssl_ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        ssl_ctx.load_cert_chain(ssl_certfile, ssl_keyfile)
+        logging.info("SSL enabled")
+
+    server = tornado.httpserver.HTTPServer(
+        app, max_buffer_size=1024**3, ssl_options=ssl_ctx
+    )
+
     try:
         sockets = tornado.netutil.bind_sockets(port, address=bind_addr, family=family)
     except OSError as e:
@@ -94,21 +112,23 @@ def start_server(
             raise
     port = sockets[0].getsockname()[1]
     app.port = port
-    server = tornado.httpserver.HTTPServer(app, max_buffer_size=1024**3)
     server.add_sockets(sockets)
 
     logging.info("Application Started")
     logging.info(f"Working directory: {os.path.abspath(env_path)}")
 
-    atexit.register(serialize_all, app.state, env_path=env_path)
+    atexit.register(app.storage.save_all, app.state)
 
     if "HOSTNAME" in os.environ and hostname == DEFAULT_HOSTNAME:
         hostname = os.environ["HOSTNAME"]
 
+    scheme = "https" if ssl_ctx else "http"
+
     if print_func is None:
-        print("You can navigate to http://%s:%s%s" % (hostname, port, base_url))
+        print("You can navigate to %s://%s:%s%s" % (scheme, hostname, port, base_url))
     else:
         print_func(port)
+
     ioloop.IOLoop.current().start()
     app.subs = []
     app.sources = []
@@ -188,6 +208,22 @@ def main(print_func=None):
         action="store_true",
         help="Load data from filesystem when starting server (and not lazily upon first request).",
     )
+    parser.add_argument(
+        "-ssl_certfile",
+        metavar="ssl_certfile",
+        type=str,
+        default=None,
+        help="Path to SSL certificate file (.pem or .crt) to enable HTTPS. "
+        "Must be used together with -ssl_keyfile.",
+    )
+    parser.add_argument(
+        "-ssl_keyfile",
+        metavar="ssl_keyfile",
+        type=str,
+        default=None,
+        help="Path to SSL private key file (.pem or .key) to enable HTTPS. "
+        "Must be used together with -ssl_certfile.",
+    )
     FLAGS = parser.parse_args()
 
     # Process base_url
@@ -196,6 +232,9 @@ def main(print_func=None):
     assert base_url == "" or not base_url.endswith(
         "/"
     ), "base_url should not end with / as it is appended automatically"
+
+    if bool(FLAGS.ssl_certfile) != bool(FLAGS.ssl_keyfile):
+        parser.error("-ssl_certfile and -ssl_keyfile must be provided together.")
 
     try:
         logging_level = int(FLAGS.logging_level)
@@ -274,6 +313,8 @@ def main(print_func=None):
         use_frontend_client_polling=FLAGS.use_frontend_client_polling,
         bind_local=FLAGS.bind_local,
         eager_data_loading=FLAGS.eager_data_loading,
+        ssl_certfile=FLAGS.ssl_certfile,
+        ssl_keyfile=FLAGS.ssl_keyfile,
     )
 
 
