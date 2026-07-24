@@ -353,17 +353,19 @@ const App = () => {
   };
 
   const onEnvUpdate = (data) => {
-    var layoutLists = storeMeta.layoutLists;
-    for (var envIdx in data) {
-      if (!layoutLists.has(data[envIdx])) {
-        layoutLists.set(data[envIdx], new Map([[DEFAULT_LAYOUT, new Map()]]));
+    setStoreMeta((prev) => {
+      const layoutLists = new Map(prev.layoutLists);
+      for (var envIdx in data) {
+        if (!layoutLists.has(data[envIdx])) {
+          layoutLists.set(data[envIdx], new Map([[DEFAULT_LAYOUT, new Map()]]));
+        }
       }
-    }
-    setStoreMeta((prev) => ({
-      ...prev,
-      envList: data,
-      layoutLists: layoutLists,
-    }));
+      return {
+        ...prev,
+        envList: data,
+        layoutLists: layoutLists,
+      };
+    });
   };
 
   // remove paneID from pane list
