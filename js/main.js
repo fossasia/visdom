@@ -808,6 +808,17 @@ const App = () => {
     localStorage.setItem('filter', filterString);
   }, [filterString]);
 
+  useEffect(() => {
+    $('[data-toggle="tooltip"]').tooltip({
+      container: 'body',
+      delay: {
+        show: 600,
+        hide: 100,
+      },
+      trigger: 'hover',
+    });
+  }, []);
+
   const onWidthChange = (width, cols) => {
     windowSize.current.cols = cols;
     windowSize.current.width = width;
@@ -1101,14 +1112,3 @@ function load() {
 }
 
 document.addEventListener('DOMContentLoaded', load);
-
-$(document).ready(function () {
-  $('[data-toggle="tooltip"]').tooltip({
-    container: 'body',
-    delay: {
-      show: 600,
-      hide: 100,
-    },
-    trigger: 'hover',
-  });
-});
