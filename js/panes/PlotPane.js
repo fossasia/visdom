@@ -183,7 +183,7 @@ var PlotPane = (props) => {
           smooth_d.showlegend = false;
 
           // turn off smoothing for smoothvalue of 3 or too small arrays
-          if (windowSize < 5 || smooth_d.x.length <= 5) {
+          if (windowSize < 5 || !smooth_d.x || smooth_d.x.length <= 5) {
             d.opacity = 1.0;
 
             return smooth_d;
