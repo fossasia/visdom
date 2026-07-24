@@ -12,8 +12,8 @@ import React, { useMemo, useState } from 'react';
 import {
   buildColumns,
   buildComparison,
+  cellClass,
   formatValue,
-  isNumeric,
   numericExtent,
   runLabel,
   spineStyle,
@@ -57,10 +57,7 @@ const HParamsCompare = ({ records, paramKeys, metricKeys, tagKeys }) => {
         </th>
         {field.cells.map((value, i) => {
           const style = extent ? spineStyle(value, extent) : null;
-          const cls =
-            'hparams-cell' +
-            (isNumeric(value) ? ' hparams-cell-num' : '') +
-            (style ? ' hparams-cell-spine' : '');
+          const cls = cellClass(value, { spine: !!style });
           return (
             <td key={i} className={cls} style={style || undefined}>
               {formatValue(value)}

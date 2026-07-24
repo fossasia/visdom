@@ -12,10 +12,10 @@ import React, { useCallback, useMemo } from 'react';
 
 import {
   buildColumns,
+  cellClass,
   COLUMN_GROUPS,
   formatValue,
   groupColumnTree,
-  isNumeric,
   makeComparator,
   NUMERIC_GROUPS,
   numericExtent,
@@ -119,11 +119,10 @@ const HParamsRow = React.memo(function HParamsRow({
         const value = col.accessor(record);
         const style =
           colorBy && col.id === colorBy ? spineStyle(value, extent) : null;
-        const cls =
-          'hparams-cell' +
-          (isNumeric(value) ? ' hparams-cell-num' : '') +
-          (style ? ' hparams-cell-spine' : '') +
-          (groupStartIds.has(col.id) ? ' hparams-col-sep' : '');
+        const cls = cellClass(value, {
+          spine: !!style,
+          separator: groupStartIds.has(col.id),
+        });
         return (
           <td key={col.id} className={cls} style={style || undefined}>
             {formatValue(value)}

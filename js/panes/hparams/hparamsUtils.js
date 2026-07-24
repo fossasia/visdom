@@ -184,6 +184,16 @@ export function spineStyle(value, extent) {
   return { backgroundColor: bg, color: t > 0.62 ? '#fff' : '#333' };
 }
 
+export function cellClass(value, options) {
+  const opts = options || {};
+  return (
+    'hparams-cell' +
+    (isNumeric(value) ? ' hparams-cell-num' : '') +
+    (opts.spine ? ' hparams-cell-spine' : '') +
+    (opts.separator ? ' hparams-col-sep' : '')
+  );
+}
+
 export function selectNumericColumns(records, columns) {
   return (columns || []).filter(
     (col) =>
