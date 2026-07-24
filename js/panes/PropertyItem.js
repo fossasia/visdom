@@ -53,6 +53,13 @@ function EditablePropertyText(props) {
     setIsEdited(true);
   };
 
+  const handlePreviewKeyDown = (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      setIsEdited(true);
+    }
+  };
+
   // Enter invokes blur and thus submits the change
   const handleKeyPress = (event) => {
     if (event.key === 'Enter') textInput.current.blur();
@@ -91,6 +98,7 @@ function EditablePropertyText(props) {
         style={{ cursor: 'text' }}
         onClick={handlePreviewClick}
         onFocus={handlePreviewClick}
+        onKeyDown={handlePreviewKeyDown}
       >
         {actualValue}
       </span>
