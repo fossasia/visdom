@@ -289,6 +289,10 @@ const HParamsTable = ({
 
       <div className="hparams-table-scroll">
         <table className="hparams-table">
+          <caption className="hparams-sr-only">
+            {rows.length} runs with their hyper-parameters, latest metric
+            values, and tags. Use the column headers to sort.
+          </caption>
           <thead>
             <tr className="hparams-group-row">
               <th

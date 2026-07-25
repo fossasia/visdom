@@ -14,14 +14,6 @@ import { buildMetricSeries } from './hparamsUtils';
 
 const NO_EXPERIMENTS = [];
 
-/**
- * Load per-step metric history for a set of runs.
- *
- * History is not part of the window content, which keeps only each
- * metric's latest value, so it has to be read from the server. The cache
- * is keyed per run rather than per selection so that ticking one more
- * checkbox fetches one run instead of re-downloading the whole set.
- */
 export default function useExperimentMetrics(records, cacheRef) {
   const [nonce, setNonce] = useState(0);
   const [state, setState] = useState({
@@ -48,8 +40,6 @@ export default function useExperimentMetrics(records, cacheRef) {
       return undefined;
     }
 
-    /* Read back in selection order so the traces and the legend follow
-       the table rather than whatever order the server replied in. */
     const readCache = () => envIds.map((id) => cache.get(id)).filter(Boolean);
     const wanted = envIds.filter((id) => !cache.has(id));
     if (wanted.length === 0) {
@@ -57,8 +47,6 @@ export default function useExperimentMetrics(records, cacheRef) {
       return undefined;
     }
 
-    /* abort() alone still leaves an already-resolved json() microtask
-       able to set state on an unmounted view, so guard with a flag too. */
     let cancelled = false;
     const controller = new AbortController();
     setState((prev) => ({ ...prev, status: 'loading', error: null }));

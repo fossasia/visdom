@@ -13,8 +13,6 @@ const SNAPSHOT_NOTICE_DELAY = 700;
 
 export const PLOT_COLORSCALE = 'Viridis';
 
-/* Plotly's own default colorway. PLOT_COLORSCALE is a continuous ramp
-   and cannot tell a handful of discrete runs apart. */
 export const RUN_PALETTE = [
   '#1f77b4',
   '#ff7f0e',
@@ -114,8 +112,6 @@ export function plotBaseLayout() {
   };
 }
 
-/* A fresh object per call: axis styles are spread per axis and a shared
-   constant would be a mutation hazard. */
 export function plotAxisStyle() {
   return {
     showline: true,

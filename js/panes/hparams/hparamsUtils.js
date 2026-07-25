@@ -441,19 +441,6 @@ export function buildComparison(records, columns) {
   return sections;
 }
 
-/**
- * Turn the raw observation list a comparison carries into per-run,
- * per-metric series.
- *
- * A series plots against real steps only when every one of its
- * observations has one; logging without a step is the SDK default, and
- * mixing real steps with fallback ordinals on a single axis would place
- * points at positions the data never claimed.
- *
- * Values arrive as null where the server encoded NaN or an infinity.
- * They stay in the series as null so the line breaks at the right place
- * rather than closing over the gap or shifting later ordinals.
- */
 export function buildMetricSeries(experiments) {
   const runs = [];
   const metricKeys = new Set();
@@ -478,8 +465,6 @@ export function buildMetricSeries(experiments) {
           y.push(isNumeric(obs.value) ? obs.value : null);
         });
       } else {
-        /* Later arrivals win a repeated step, matching how the backend
-           resolves a run's latest value for the table. */
         const byStep = new Map();
         observations.forEach((obs) => {
           byStep.set(obs.step, isNumeric(obs.value) ? obs.value : null);

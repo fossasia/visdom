@@ -946,8 +946,6 @@
 
 /* ---- HParamsMetrics (C2) ---- */
 
-/* min-height/min-width 0 lets the plot shrink with the pane; without them the
-   resize observer only ever grows it. */
 .hparams-metrics-wrap {
   position: relative;
   flex: 1 1 auto;
@@ -976,4 +974,55 @@
 .hparams-metric-select:focus {
   outline: none;
   border-color: #3b5998;
+}
+
+/* ---- Export + accessibility (C3) ---- */
+
+.hparams-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  border: 0;
+  clip: rect(0, 0, 0, 0);
+}
+
+.hparams-export {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.hparams-export-label {
+  font-size: 11px;
+  color: #888;
+}
+
+.hparams-export-btn {
+  padding: 3px 8px;
+  font-family: "Open Sans", sans-serif;
+  font-size: 11px;
+  color: #3b5998;
+  background-color: #fff;
+  border: 1px solid #dedede;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.hparams-export-btn:hover:not(:disabled) {
+  border-color: #3b5998;
+  background-color: #eaf0fb;
+}
+
+.hparams-export-btn:focus-visible {
+  outline: 2px solid #3b5998;
+  outline-offset: 1px;
+}
+
+.hparams-export-btn:disabled {
+  color: #bbb;
+  cursor: default;
 }

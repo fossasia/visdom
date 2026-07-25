@@ -1,10 +1,3 @@
-/**
- * Normalize window.location by removing specific path segments
- * and ensuring the pathname ends with a '/'.
- *
- * The pathname already carries the server's base_url, so deriving the
- * prefix from it keeps requests correct under -base_url deployments.
- */
 export default function serverPath() {
   var pathname = window.location.pathname;
   if (pathname.indexOf('/env/') > -1) {

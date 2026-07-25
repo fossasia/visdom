@@ -10,6 +10,7 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 
 import HParamsCompare from './hparams/HParamsCompare';
+import { exportCsv, exportJson } from './hparams/hparamsExport';
 import HParamsFilters from './hparams/HParamsFilters';
 import HParamsMetrics from './hparams/HParamsMetrics';
 import HParamsParallelCoords from './hparams/HParamsParallelCoords';
@@ -34,6 +35,21 @@ const VIEWS = [
 ];
 
 const NO_RECORDS = [];
+
+const TAB_KEYS = {
+  ArrowRight: 1,
+  ArrowLeft: -1,
+  ArrowDown: 1,
+  ArrowUp: -1,
+};
+
+function tabId(contentID, key) {
+  return 'hparams-tab-' + contentID + '-' + key;
+}
+
+function panelId(contentID) {
+  return 'hparams-panel-' + contentID;
+}
 
 function readContent(content) {
   if (!content || typeof content !== 'object' || Array.isArray(content)) {
@@ -101,9 +117,51 @@ var HParamsPane = (props) => {
     [selectionActive, visibleRecords, tableSelected]
   );
   const clearSelection = useCallback(() => setTableSelected(new Set()), []);
-  const closeFilters = useCallback(() => setFiltersOpen(false), []);
+  const filtersToggleRef = useRef(null);
+  const tablistRef = useRef(null);
+  const closeFilters = useCallback(() => {
+    setFiltersOpen(false);
+    if (filtersToggleRef.current) filtersToggleRef.current.focus();
+  }, []);
+
+  const handleTabKeyDown = useCallback(
+    (e) => {
+      let next = null;
+      if (e.key === 'Home') next = 0;
+      else if (e.key === 'End') next = VIEWS.length - 1;
+      else if (TAB_KEYS[e.key]) {
+        const at = VIEWS.findIndex((v) => v.key === view);
+        next = (at + TAB_KEYS[e.key] + VIEWS.length) % VIEWS.length;
+      }
+      if (next === null) return;
+      e.preventDefault();
+      setView(VIEWS[next].key);
+      const buttons = tablistRef.current
+        ? tablistRef.current.querySelectorAll('.hparams-viewtab')
+        : null;
+      if (buttons && buttons[next]) buttons[next].focus();
+    },
+    [view]
+  );
 
   const selectedRecords = selectionActive ? selectedVisible : NO_RECORDS;
+
+  const exportRecords = selectionActive ? selectedVisible : visibleRecords;
+  const exportScope = selectionActive ? 'selected' : 'shown';
+  const handleExportCsv = useCallback(() => {
+    exportCsv(exportRecords, columns, 'visdom_hparams.csv');
+  }, [exportRecords, columns]);
+  const handleExportJson = useCallback(() => {
+    exportJson(
+      exportRecords,
+      {
+        paramKeys: data ? data.paramKeys : [],
+        metricKeys: data ? data.metricKeys : [],
+        tagKeys: data ? data.tagKeys : [],
+      },
+      'visdom_hparams.json'
+    );
+  }, [exportRecords, data]);
 
   const handleDownload = useCallback(() => {
     let blob = new Blob([JSON.stringify(content)], {
@@ -166,18 +224,27 @@ var HParamsPane = (props) => {
           ) : null}
         </div>
         <div className="hparams-views">
-          <div className="hparams-viewtabs" role="tablist">
+          <div
+            className="hparams-viewtabs"
+            role="tablist"
+            aria-label="Hyper-parameter views"
+            ref={tablistRef}
+          >
             {VIEWS.map((v) => (
               <button
                 key={v.key}
                 type="button"
                 role="tab"
+                id={tabId(props.contentID, v.key)}
                 aria-selected={view === v.key}
+                aria-controls={panelId(props.contentID)}
+                tabIndex={view === v.key ? 0 : -1}
                 className={
                   'hparams-viewtab' +
                   (view === v.key ? ' hparams-viewtab-active' : '')
                 }
                 onClick={() => setView(v.key)}
+                onKeyDown={handleTabKeyDown}
               >
                 {v.label}
               </button>
@@ -193,6 +260,7 @@ var HParamsPane = (props) => {
               />
               <button
                 type="button"
+                ref={filtersToggleRef}
                 className={
                   'hparams-filters-toggle' +
                   (filtersOpen ? ' hparams-filters-toggle-active' : '')
@@ -203,9 +271,39 @@ var HParamsPane = (props) => {
               >
                 Filters{activeFilters ? ' (' + activeFilters + ')' : ''}
               </button>
+              <span className="hparams-export">
+                <span className="hparams-export-label">export</span>
+                <button
+                  type="button"
+                  className="hparams-export-btn"
+                  onClick={handleExportCsv}
+                  disabled={exportRecords.length === 0}
+                  title={'Download the ' + exportScope + ' runs as a CSV table'}
+                >
+                  CSV
+                </button>
+                <button
+                  type="button"
+                  className="hparams-export-btn"
+                  onClick={handleExportJson}
+                  disabled={exportRecords.length === 0}
+                  title={'Download the ' + exportScope + ' runs as JSON'}
+                >
+                  JSON
+                </button>
+              </span>
             </span>
           </div>
-          <div className="hparams-layout">
+          <p className="hparams-sr-only" role="status" aria-live="polite">
+            {visibleRecords.length} of {records.length} runs shown
+            {selectionActive ? ', ' + tableSelected.size + ' selected' : ''}
+          </p>
+          <div
+            className="hparams-layout"
+            role="tabpanel"
+            id={panelId(props.contentID)}
+            aria-labelledby={tabId(props.contentID, view)}
+          >
             {filtersOpen ? (
               <HParamsFilters
                 specs={specs}

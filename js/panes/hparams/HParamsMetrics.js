@@ -37,8 +37,6 @@ var HParamsMetrics = (props) => {
     cacheRef
   );
 
-  /* Colour by position in the unfiltered records so a run keeps its line
-     colour when the selection or the filters change. */
   const colorIndex = useMemo(() => {
     const index = new Map();
     (columnRecords || []).forEach((record, i) => {
