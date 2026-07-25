@@ -13,6 +13,7 @@ Contain the basic web request handlers that all other handlers derive from
 import logging
 import traceback
 import http.client
+import time
 
 import tornado.web
 import tornado.websocket
@@ -26,6 +27,10 @@ class BaseWebSocketHandler(StateAccessorsMixin, tornado.websocket.WebSocketHandl
     websocket handler. Also contains some shared logic for all WebSocketHandler
     classes.
     """
+
+    def initialize(self, app=None):
+        """Common initialization shared by WebSocket handlers."""
+        self.server_state = app.server_state if app is not None else None
 
     def get_current_user(self):
         """
@@ -58,6 +63,14 @@ class BaseHandler(StateAccessorsMixin, tornado.web.RequestHandler):
         such handlers simply never touch the state accessors.
         """
         self.server_state = app.server_state if app is not None else None
+
+    def is_authorized(self):
+        """Update access time and validate authentication for protected methods."""
+        self.last_access = time.time()
+        if self.login_enabled and not self.current_user:
+            self.set_status(401)
+            return False
+        return True
 
     def __init__(self, *request, **kwargs):
         self.include_host = False

@@ -26,6 +26,7 @@ from components.image import (
     image_history,
     image_grid,
     image_svg,
+    image_slider_sync,
     image_compare_basic,
     image_heatmap_basic,
 )
@@ -82,6 +83,7 @@ from components.plot_special import (
     plot_special_mesh,
     plot_special_sunburst,
     plot_special_graph,
+    plot_special_parallel_coordinates,
     plot_special_sankey,
 )
 from components.plot_roc_pr import (
@@ -135,6 +137,7 @@ def run_demo(viz, env, args):
     image_save_jpeg(viz, env, args)
     image_history(viz, env, args)
     image_grid(viz, env, args)
+    image_slider_sync(viz, env, args)
     image_heatmap_basic(viz, env, args)
 
     # ========== #
@@ -212,6 +215,7 @@ def run_demo(viz, env, args):
     plot_special_mesh(viz, env, args)
     plot_special_sunburst(viz, env, args)
     plot_special_graph(viz, env, args)
+    plot_special_parallel_coordinates(viz, env, args)
     plot_special_sankey(viz, env, args)
 
     # ============ #

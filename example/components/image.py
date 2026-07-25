@@ -133,6 +133,46 @@ def image_grid(viz, env, args):
         env=env,
     )
 
+# image slider sync demo — one slider drives two panes
+def image_slider_sync(viz, env, args):
+    n_frames = 4
+    colors = np.linspace(0.2, 0.8, n_frames)
+
+    win_a = None
+    win_b = None
+    for i, c in enumerate(colors):
+        frame = np.full((3, 128, 256), c)
+        win_a = viz.image(
+            frame,
+            win=win_a,
+            opts=dict(
+                title="Model A",
+                caption="Frame {}".format(i),
+                store_history=True,
+            ),
+            env=env,
+        )
+        win_b = viz.image(
+            1.0 - frame,
+            win=win_b,
+            opts=dict(
+                title="Model B (synced)",
+                caption="Frame {}".format(i),
+                store_history=True,
+            ),
+            env=env,
+        )
+
+    viz.update_image_slider(win_a, 0, env=env)
+    viz.update_image_slider(win_b, 0, env=env)
+
+    def on_slider_moved(event):
+        if event["event_type"] != "SliderMoved":
+            return
+        viz.update_image_slider(win_b, event["index"], env=env)
+
+    viz.register_event_handler(on_slider_moved, win_a)
+
 
 # SVG plotting
 def image_svg(viz, env, args):

@@ -140,6 +140,43 @@ button>span.glyphicon {
   left: 0;
 }
 
+.content.content-with-comment {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+}
+
+.content.content-with-comment > *:not(.comment-panel) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.comment-panel {
+  flex: 0 0 220px;
+  width: 220px;
+  height: 100%;
+  box-sizing: border-box;
+  border-left: 1px solid #dedede;
+  background: #ffffff;
+  padding: 6px;
+}
+
+.comment-panel .comment-textarea {
+  width: 100%;
+  height: 100%;
+  resize: none;
+  box-sizing: border-box;
+  border: 1px solid #dedede;
+  padding: 6px;
+  font-size: 12px;
+  font-family: inherit;
+  color: #333;
+}
+
+button[title="comment"].active > .glyphicon {
+  color: red;
+}
+
 .widgets {
   position: absolute;
   bottom: 0;
@@ -163,6 +200,13 @@ button>span.glyphicon {
   overflow-y: hidden;
   word-wrap: break-word;
   margin-bottom: 10px;
+}
+
+.plot-caption {
+  text-align: center;
+  color: #000000;
+  display: block;
+  width: 100%;
 }
 
 .content-image {

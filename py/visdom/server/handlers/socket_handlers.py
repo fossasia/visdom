@@ -16,10 +16,8 @@ the data_model itself.
 import copy
 import json
 import logging
-import os
 import time
 import types
-import hashlib
 from collections import deque
 from enum import Enum
 
@@ -30,8 +28,6 @@ from visdom.utils.shared_utils import get_rand_id, NanSafeEncoder
 from visdom.utils.server_utils import (
     check_auth,
     broadcast_envs,
-    serialize_env,
-    serialize_all,
     send_to_sources,
     broadcast,
     escape_eid,
@@ -39,14 +35,13 @@ from visdom.utils.server_utils import (
     pop_deleted,
     clear_deleted,
     broadcast_undo_state,
+    notify,
 )
 from visdom.server.defaults import MAX_SOCKET_WAIT
 
 
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
-# TODO move generalized initialization logic from these handlers into the
-# basehandler
 # TODO Try to standardize the code between the client-server and
 # visdom-server socket edges.
 
@@ -71,9 +66,6 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
     def __init__(self, *args, **kwargs):
         self.polling = False
         super().__init__(*args, **kwargs)
-
-    def initialize(self, app):
-        self.server_state = app.server_state
 
     def open(self, register_to="sources"):
         self.sid = get_rand_id()
@@ -101,7 +93,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     return
                 p_data = self.state[eid]["jsons"].pop(msg["data"], None)
                 if p_data is not None:
-                    push_deleted(self.env_path, eid, msg["data"], p_data)
+                    push_deleted(self.storage, eid, msg["data"], p_data)
                 env = self.state.get(msg["eid"])
                 if env is None:
                     return
@@ -113,14 +105,14 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     "pane_data": p_data,
                 }
                 send_to_sources(self, event)
-                broadcast_undo_state(self, eid, self.env_path)
+                broadcast_undo_state(self, eid, self.storage)
 
         elif cmd == "undo":
             if "eid" in msg:
                 eid = escape_eid(msg["eid"])
                 if eid not in self.state:
                     return
-                popped = pop_deleted(self.env_path, eid)
+                popped = pop_deleted(self.storage, eid)
                 if popped:
                     win_id, p_data = popped
                     env = self.state[eid]["jsons"]
@@ -134,7 +126,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                         json.dumps(broadcast_msg, cls=NanSafeEncoder),
                         eid,
                     )
-                broadcast_undo_state(self, eid, self.env_path)
+                broadcast_undo_state(self, eid, self.storage)
 
         elif cmd == "save":
             # save localStorage window metadata
@@ -146,11 +138,11 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 self.state[msg["eid"]] = copy.deepcopy(self.state[prev_eid])
                 self.state[msg["eid"]]["reload"] = msg["data"]
                 self.eid = msg["eid"]
-                serialize_env(self.state, [self.eid], env_path=self.env_path)
+                self.storage.save_env(self.eid, self.state[self.eid])
 
         elif cmd == "save_all":
             tornado.ioloop.IOLoop.current().run_in_executor(
-                None, serialize_all, self.state, self.env_path
+                None, self.storage.save_all, self.state
             )
 
         elif cmd == "delete_env":
@@ -160,28 +152,8 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     return
                 logging.info(f"closing environment {eid}")
                 self.state.pop(eid, None)
-                clear_deleted(self.env_path, eid)
-                if self.env_path is not None:
-                    p = os.path.join(self.env_path, "{0}.json".format(eid))
-                    if os.path.exists(p):
-                        try:
-                            os.remove(p)
-                        except FileNotFoundError:
-                            pass
-                        except OSError as e:
-                            logging.error(f"Failed to delete {p}: {e}")
-                    else:
-                        hashed_id = hashlib.sha256(eid.encode("utf-8")).hexdigest()
-                        p_hashed = os.path.join(
-                            self.env_path, "hash_{0}.json".format(hashed_id)
-                        )
-                        if os.path.exists(p_hashed):
-                            try:
-                                os.remove(p_hashed)
-                            except FileNotFoundError:
-                                pass
-                            except OSError as e:
-                                logging.error(f"Failed to delete {p_hashed}: {e}")
+                clear_deleted(self.storage, eid)
+                self.storage.delete_env(eid)
                 broadcast_envs(self)
 
         elif cmd == "save_layouts":
@@ -210,6 +182,12 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 logging.warning(
                     f"forward_to_vis: env {eid!r} not found, dropping event"
                 )
+                notify(
+                    self,
+                    f"Environment '{eid}' not found.",
+                    type="warning",
+                    target_subs=[self],
+                )
                 return
             if packet.get("pane_data") is not False:
                 pane = environment["jsons"].get(target)
@@ -217,6 +195,12 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     logging.warning(
                         f"forward_to_vis: pane {target!r} not found"
                         f" in env {eid!r}, dropping event"
+                    )
+                    notify(
+                        self,
+                        f"Pane '{target}' not found in environment '{eid}'.",
+                        type="warning",
+                        target_subs=[self],
                     )
                     return
                 packet["pane_data"] = pane
@@ -285,6 +269,56 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 layout = content.setdefault("layout", {})
 
             layout.update(patch)
+
+        elif cmd == "update_comment":
+            if self.readonly:
+                logging.warning("update_comment: rejected, server is in readonly mode")
+                return
+
+            eid = msg.get("eid")
+            win = msg.get("win")
+            comment = msg.get("data")
+            if eid is None or win is None or eid not in self.state:
+                logging.warning(
+                    f"update_comment: env {eid!r} or win {win!r}"
+                    f" not found, dropping event"
+                )
+                return
+            if not isinstance(comment, str):
+                logging.warning(
+                    f"update_comment: expected str data, got"
+                    f" {type(comment).__name__!r}, dropping event"
+                )
+                return
+
+            env = self.state[eid]["jsons"]
+            if win not in env:
+                logging.warning(
+                    f"update_comment: pane {win!r} not found"
+                    f" in env {eid!r}, dropping event"
+                )
+                return
+
+            p = env[win]
+            p["comment"] = comment
+            p["version"] = p.get("version", 1) + 1
+
+            diff_packet = [
+                {"op": "add", "path": "/comment", "value": comment},
+                {"op": "replace", "path": "/version", "value": p["version"]},
+            ]
+            broadcast_packet = {
+                "command": "window_update",
+                "win": win,
+                "eid": eid,
+                "content": diff_packet,
+                "version": p["version"],
+            }
+            broadcast(self, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
+
+            tornado.ioloop.IOLoop.current().run_in_executor(
+                None, self.storage.save_env, eid, self.state[eid]
+            )
 
         elif cmd == "pop_embeddings_pane":
             packet = msg.get("data")
@@ -516,7 +550,7 @@ class SocketFailureReason(Enum):
 def WrapSocketWrapper(BaseWrapper):
     class WrappedSocketWrap(BaseHandler):
         def initialize(self, app):
-            self.server_state = app.server_state
+            super().initialize(app)
 
         @check_auth
         def post(self):

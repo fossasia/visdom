@@ -6,11 +6,12 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from visdom.utils.shared_utils import get_new_window_id
+from visdom.utils.shared_utils import get_new_window_id, _coerce_image_slider_index
 from visdom import server
 import os
 import os.path
 import requests
+import ssl
 import traceback
 import threading
 import websocket  # type: ignore
@@ -678,10 +679,22 @@ class Visdom(object):
         use_polling=False,
         session_idle_timeout=SESSION_IDLE_TIMEOUT,
         session_idle_check_interval=SESSION_IDLE_CHECK_INTERVAL,
+        ssl_verify=None,
     ):
         parsed_url = urlparse(server)
         if not parsed_url.scheme:
             parsed_url = urlparse("http://{}".format(server))
+
+        if parsed_url.scheme == "http" and ssl_verify is not None:
+            raise ValueError(
+                "ssl_verify is only valid with HTTPS. "
+                "Use server='https://...' to enable HTTPS."
+            )
+
+        if ssl_verify is None:
+            ssl_verify = True
+
+        self.ssl_verify = ssl_verify
         self.server_base_name = parsed_url.netloc
         self.server = urlunparse((parsed_url.scheme, parsed_url.netloc, "", "", "", ""))
         self.endpoint = endpoint
@@ -748,13 +761,20 @@ class Visdom(object):
         # storage for data associated with specific windows
 
         # Setup for online interactions
-        self._send(
-            {
-                "eid": env,
-            },
-            endpoint="env/" + env,
-        )
-
+        result = self._send({"eid": env}, endpoint="env/" + env)
+        if self.send and result is False:
+            if self.raise_exceptions:
+                raise ConnectionError(
+                    "Could not connect to server at {}:{}.".format(
+                        self.server, self.port
+                    )
+                )
+            else:
+                logger.warning(
+                    "Could not connect to server at {}:{}.".format(
+                        self.server, self.port
+                    )
+                )
         # when talking to a server, get a backchannel
         if send and use_incoming_socket:
             self.setup_socket()
@@ -800,6 +820,10 @@ class Visdom(object):
             sess = requests.Session()
             if self.proxies:
                 sess.proxies.update(self.proxies)
+            if isinstance(self.ssl_verify, str):
+                sess.verify = self.ssl_verify
+            elif not self.ssl_verify:
+                sess.verify = False
             if self.username:
                 resp = sess.post(
                     "%s:%s%s" % (self.server, self.port, self.base_url),
@@ -995,11 +1019,22 @@ class Visdom(object):
                             + self.session.cookies.get("user_password", "")
                         },
                     )
-                    ws.run_forever(
-                        http_proxy_host=self.http_proxy_host,
-                        http_proxy_port=self.http_proxy_port,
-                        ping_timeout=100.0,
-                    )
+                    run_forever_kwargs = {
+                        "http_proxy_host": self.http_proxy_host,
+                        "http_proxy_port": self.http_proxy_port,
+                        "ping_timeout": 100.0,
+                    }
+                    if ws_scheme == "wss":
+                        if isinstance(self.ssl_verify, str):
+                            run_forever_kwargs["sslopt"] = {
+                                "cert_reqs": ssl.CERT_REQUIRED,
+                                "ca_certs": self.ssl_verify,
+                            }
+                        elif not self.ssl_verify:
+                            run_forever_kwargs["sslopt"] = {
+                                "cert_reqs": ssl.CERT_NONE,
+                            }
+                    ws.run_forever(**run_forever_kwargs)
                     ws.close()
                 except Exception as e:
                     logger.error("Socket had error {}, attempting restart".format(e))
@@ -1039,8 +1074,10 @@ class Visdom(object):
         self._last_post_time = time.time()
         had_session = self._session is not None
         try:
-            r = self.session.post(url, data=data)
+            r = self.session.post(url, data=data, timeout=(20, None))
             return r.text
+        except requests.exceptions.SSLError:
+            raise
         except (requests.ConnectionError, requests.Timeout):
             if not had_session:
                 raise
@@ -1052,7 +1089,7 @@ class Visdom(object):
                 except Exception:
                     pass
                 self._session = None
-            r = self.session.post(url, data=data)
+            r = self.session.post(url, data=data, timeout=(20, None))
             return r.text
 
     def _send(self, msg, endpoint="events", quiet=False, from_log=False, create=True):
@@ -1094,6 +1131,23 @@ class Visdom(object):
                 ),
                 data=json.dumps(msg, cls=NanSafeEncoder),
             )
+        except requests.exceptions.SSLError as e:
+            ssl_msg = (
+                "SSL certificate verification failed for {}:{}. "
+                "If using a self-signed certificate, pass ssl_verify=False. "
+                "If using mkcert, run: "
+                "export REQUESTS_CA_BUNDLE=$(mkcert -CAROOT)/rootCA.pem".format(
+                    self.server, self.port
+                )
+            )
+            if self.raise_exceptions:
+                raise ConnectionError(ssl_msg) from e
+            else:
+                if not quiet:
+                    print("SSL Error:")
+                    print("-" * 60)
+                    print(ssl_msg)
+                return False
         except (requests.RequestException, requests.ConnectionError, requests.Timeout):
             if self.raise_exceptions:
                 raise ConnectionError("Error connecting to Visdom server")
@@ -1943,6 +1997,30 @@ class Visdom(object):
         return self._send(
             {"data": data, "win": win, "eid": env, "opts": opts},
             endpoint="events",
+        )
+
+    @pytorch_wrap
+    def update_image_slider(self, win, index, env=None):
+        """
+        Set the displayed frame of an ``image_history`` window.
+
+        Args:
+            win (str): Window ID of an existing image_history pane.
+            index: Frame index to display (0-based). Accepts Python integers,
+                integral floats, and NumPy integer scalars or 0-d arrays.
+                Fractional or non-finite values raise an error. Clamped to
+                the valid range by the server.
+            env (str, optional): Environment ID. Defaults to ``self.env``.
+        """
+        assert win is not None, "update_image_slider requires a window id"
+        index = _coerce_image_slider_index(index)
+        return self._send(
+            {
+                "data": [{"type": "image_update_selected", "selected": index}],
+                "win": win,
+                "eid": env,
+            },
+            endpoint="update",
         )
 
     @pytorch_wrap
@@ -3984,6 +4062,156 @@ class Visdom(object):
 
         return self._send(
             {"data": data, "win": win, "eid": env, "opts": opts}, endpoint="events"
+        )
+
+    @pytorch_wrap
+    def parallel_coordinates(self, X, Y=None, win=None, env=None, opts=None):
+        """
+        This function draws a parallel coordinates plot for comparing multiple
+        experiments across different parameters. Each row in the `NxM` matrix
+        `X` represents one experiment and each column represents a dimension
+        (e.g., a hyperparameter or metric).
+
+        An optional `N`-length vector `Y` supplies per-experiment color values
+        (e.g., accuracy or loss) so that the lines are shaded according to
+        a continuous colorscale.
+
+        The following `opts` are supported:
+
+        - `opts.dimensions`:       `list` of dimension label strings (length M)
+        - `opts.colormap`:         colorscale name (default `'Electric'`)
+        - `opts.reversescale`:     reverse the colorscale direction (`bool`)
+        - `opts.ranges`:           `dict` mapping dimension index to `[min, max]`
+        - `opts.constraintranges`: `dict` mapping dimension index to `[min, max]`
+                                   preset filter ranges
+        - `opts.tickvals`:         `dict` mapping dimension index to a `list` of
+                                   tick positions
+        - `opts.ticktext`:         `dict` mapping dimension index to a `list` of
+                                   tick labels (requires matching `tickvals`)
+        - `opts.max_experiments`:  `int`, cap to top N experiments sorted by `Y`
+                                   descending (requires `Y`)
+        - `opts.title`:            plot title
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        X = np.asarray(X, dtype=float)
+        assert X.ndim == 2, "X must be a 2D matrix (N experiments x M dimensions)"
+        N, M = X.shape
+        assert N >= 1, "X must have at least 1 experiment (row)"
+        assert M >= 2, "X must have at least 2 dimensions (columns)"
+
+        if Y is not None:
+            Y = np.squeeze(np.asarray(Y, dtype=float))
+            assert Y.ndim == 1, "Y must be a 1D vector"
+            assert (
+                len(Y) == N
+            ), "Length of Y (%d) must match number of rows in X (%d)" % (len(Y), N)
+
+        max_exp = opts.get("max_experiments")
+        if max_exp is not None:
+            assert Y is not None, "opts.max_experiments requires Y to be provided"
+            if N > max_exp:
+                top_idx = np.argsort(Y)[::-1][:max_exp]
+                X = X[top_idx]
+                Y = Y[top_idx]
+                N = len(Y)
+
+        dim_labels = opts.get("dimensions")
+        if dim_labels is None:
+            dim_labels = ["Dim %d" % (i + 1) for i in range(M)]
+        assert isinstance(dim_labels, (list, tuple)), (
+            "opts.dimensions should be a list/tuple of length %d" % M
+        )
+        assert (
+            len(dim_labels) == M
+        ), "Length of opts.dimensions (%d) must match number of columns in X (%d)" % (
+            len(dim_labels),
+            M,
+        )
+
+        opt_ranges = opts.get("ranges") or {}
+        opt_constraints = opts.get("constraintranges") or {}
+        opt_tickvals = opts.get("tickvals") or {}
+        opt_ticktext = opts.get("ticktext") or {}
+
+        dimensions = []
+        for i in range(M):
+            col = X[:, i]
+            col_min, col_max = float(np.nanmin(col)), float(np.nanmax(col))
+            pad = (col_max - col_min) * 0.05 if col_max > col_min else 0.5
+            dim = {
+                "values": col.tolist(),
+                "label": str(dim_labels[i]),
+                "range": opt_ranges.get(i, [col_min - pad, col_max + pad]),
+            }
+            if i in opt_constraints:
+                dim["constraintrange"] = opt_constraints[i]
+            if i in opt_tickvals:
+                dim["tickvals"] = opt_tickvals[i]
+            if i in opt_ticktext:
+                assert (
+                    i in opt_tickvals
+                ), "opts.ticktext[%d] requires matching opts.tickvals[%d]" % (i, i)
+                assert len(opt_ticktext[i]) == len(opt_tickvals[i]), (
+                    "opts.ticktext[%d] and opts.tickvals[%d] must have the same length"
+                    % (i, i)
+                )
+                dim["ticktext"] = opt_ticktext[i]
+            dimensions.append(dim)
+
+        line_config = {}
+        if Y is not None:
+            line_config = {
+                "color": Y.tolist(),
+                "colorscale": opts.get("colormap", "Electric"),
+                "showscale": True,
+                "cmin": float(np.nanmin(Y)),
+                "cmax": float(np.nanmax(Y)),
+            }
+            if opts.get("reversescale"):
+                line_config["reversescale"] = True
+
+        title = opts.get("title")
+        trace = {
+            "type": "parcoords",
+            "dimensions": dimensions,
+            "line": line_config if line_config else None,
+            "labelfont": {"size": 13},
+            "tickfont": {"size": 11},
+            "rangefont": {"size": 11},
+        }
+        if title:
+            trace["domain"] = {"y": [0, 0.85]}
+
+        data = [_scrub_dict(trace)]
+
+        layout = _opts2layout(opts)
+        layout.setdefault("paper_bgcolor", "white")
+        layout.setdefault("plot_bgcolor", "white")
+        if title:
+            layout["title"] = {
+                "text": str(title),
+                "x": 0.5,
+                "xanchor": "center",
+            }
+
+        has_colorbar = bool(line_config)
+        if "width" not in opts:
+            colorbar_room = 100 if has_colorbar else 0
+            opts["width"] = max(600, M * 140 + colorbar_room)
+        if "height" not in opts:
+            opts["height"] = 450
+
+        return self._send(
+            {
+                "data": data,
+                "win": win,
+                "eid": env,
+                "layout": _scrub_dict(layout),
+                "opts": opts,
+            }
         )
 
     @pytorch_wrap

@@ -16,12 +16,9 @@ the "accessor functions on the state" abstraction referenced by the handler
 TODOs, and a natural future home for the data_model classes.
 """
 
-import os
-
 import tornado.ioloop
 
-from visdom.utils.shared_utils import warn_once, ensure_dir_exists
-from visdom.server.defaults import LAYOUT_FILE
+from visdom.utils.shared_utils import warn_once
 
 
 class StateAccessorsMixin:
@@ -44,6 +41,10 @@ class StateAccessorsMixin:
     @property
     def sources(self):
         return self.server_state.sources
+
+    @property
+    def storage(self):
+        return self.server_state.storage
 
     @property
     def env_path(self):
@@ -98,6 +99,7 @@ class ServerState:
         state,
         subs,
         sources,
+        storage,
         env_path,
         port,
         login_enabled,
@@ -118,6 +120,7 @@ class ServerState:
         self.state = state
         self.subs = subs
         self.sources = sources
+        self.storage = storage
 
         # Startup configuration (effectively immutable after construction).
         self.env_path = env_path
@@ -154,12 +157,7 @@ class ServerState:
                 RuntimeWarning,
             )
             return
-        layout_dir = os.path.join(self.env_path, "view")
-        ensure_dir_exists(layout_dir)
-
-        layout_filepath = os.path.join(layout_dir, LAYOUT_FILE)
-        with open(layout_filepath, "w") as fn:
-            fn.write(self._layouts)
+        self.storage.save_layouts(self._layouts)
 
     def _load_layouts(self):
         if self.env_path is None:
@@ -169,14 +167,7 @@ class ServerState:
                 RuntimeWarning,
             )
             return ""
-        layout_dir = os.path.join(self.env_path, "view")
-        layout_filepath = os.path.join(layout_dir, LAYOUT_FILE)
-        if os.path.isfile(layout_filepath):
-            with open(layout_filepath, "r") as fn:
-                return fn.read()
-        else:
-            ensure_dir_exists(layout_dir)
-            return ""
+        return self.storage.load_layouts()
 
     # ----- polling socket monitor ----- #
 

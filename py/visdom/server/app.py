@@ -15,13 +15,12 @@ import logging
 import os
 import platform
 import time
-import re
 
 import tornado.web  # noqa E402: gotta install ioloop first
-import tornado.escape  # noqa E402: gotta install ioloop first
 
 from visdom.utils.shared_utils import warn_once, ensure_dir_exists, get_visdom_path
-from visdom.utils.server_utils import serialize_env, LazyEnvData
+from visdom.utils.server_utils import LazyEnvData
+from visdom.data_model.json_store import JSONStore
 from visdom.server.handlers.socket_handlers import (
     SocketHandler,
     SocketWrap,
@@ -83,6 +82,7 @@ class Application(tornado.web.Application):
         self.max_old_content = DEFAULT_MAX_OLD_CONTENT
         self.max_text_lines = DEFAULT_MAX_TEXT_LINES
         self.env_path = env_path
+        self.storage = JSONStore(env_path)
         self.state = self.load_state()
         self.user_settings = self.load_user_settings()
         self.subs = {}
@@ -105,6 +105,7 @@ class Application(tornado.web.Application):
             state=self.state,
             subs=self.subs,
             sources=self.sources,
+            storage=self.storage,
             env_path=self.env_path,
             port=self.port,
             login_enabled=self.login_enabled,
@@ -151,6 +152,30 @@ class Application(tornado.web.Application):
             self.last_access = time.time()
         return self.last_access
 
+    @property
+    def layouts(self):
+        """Compatibility view of layouts owned by ``ServerState``."""
+        return self.server_state.get_layouts()
+
+    @layouts.setter
+    def layouts(self, layouts):
+        self.server_state.set_layouts(layouts)
+
+    def save_layouts(self):
+        """Compatibility wrapper for callers that still use ``Application``."""
+        self.server_state.save_layouts()
+
+    def load_layouts(self):
+        """Read layouts through the configured ``DataStore`` backend."""
+        if self.env_path is None:
+            warn_once(
+                "Saving and loading to disk has no effect when running with "
+                "env_path=None.",
+                RuntimeWarning,
+            )
+            return ""
+        return self.storage.load_layouts()
+
     def load_state(self):
         state = {}
         env_path = self.env_path
@@ -162,53 +187,26 @@ class Application(tornado.web.Application):
             )
             return {"main": {"jsons": {}, "reload": {}}}
         ensure_dir_exists(env_path)
-        env_jsons = [i for i in os.listdir(env_path) if i.endswith(".json")]
-        for env_json in env_jsons:
-            eid = env_json.replace(".json", "")
-            env_path_file = os.path.join(env_path, env_json)
-
-            is_hashed = bool(
-                re.match(r"^hash_[a-f0-9]{64}\.json$", env_json, re.IGNORECASE)
-            )
-
-            if self.eager_data_loading or is_hashed:
-                try:
-                    with open(env_path_file, "r") as fn:
-                        env_data = tornado.escape.json_decode(fn.read())
-                except Exception as e:
-                    logging.warning(
-                        f"Failed to load environment JSON file '{env_path_file}': {e!r}"
-                    )
-
-                    continue
-
-                if is_hashed and "name" in env_data:
-                    eid = env_data["name"]
+        for eid in self.storage.list_envs():
+            if self.eager_data_loading:
+                env_data = self.storage.load_env(eid)
 
                 if "jsons" not in env_data or "reload" not in env_data:
                     logging.warning(
-                        "Environment file %s is malformed or missing expected fields.",
-                        env_path_file,
+                        "Environment '%s' is malformed or missing expected fields.",
+                        eid,
                     )
 
                 state[eid] = {
                     "jsons": env_data.get("jsons", {}),
                     "reload": env_data.get("reload", {}),
                 }
-
-                if is_hashed and "name" not in env_data:
-                    logging.warning(
-                        "Hashed environment json missing 'name': %s; "
-                        "falling back to filename-derived env id '%s'",
-                        env_path_file,
-                        eid,
-                    )
             else:
-                state[eid] = LazyEnvData(env_path_file)
+                state[eid] = LazyEnvData(self.storage, eid)
 
-        if "main" not in state and "main.json" not in env_jsons:
+        if "main" not in state:
             state["main"] = {"jsons": {}, "reload": {}}
-            serialize_env(state, ["main"], env_path=self.env_path)
+            self.storage.save_env("main", state["main"])
 
         return state
 
