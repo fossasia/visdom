@@ -1,6 +1,7 @@
 import $ from 'jquery';
 import React, { useEffect, useRef, useState } from 'react';
 
+import { showToast } from '../toasts/toastEvents';
 import ApiContext from './ApiContext';
 import Poller from './Legacy';
 
@@ -181,6 +182,11 @@ const ApiProvider = ({ children }) => {
       case 'undo_state':
         apiHandlers.current.onUndoState(cmd);
         break;
+      case 'notification':
+        showToast(cmd.data.message, cmd.data.type, {
+          duration: cmd.data.duration,
+        });
+        break;
 
       default:
         // eslint-disable-next-line no-console
@@ -330,6 +336,18 @@ const ApiProvider = ({ children }) => {
     });
   };
 
+  const sendCommentUpdate = (envID, win, comment) => {
+    if (win === null || sessionInfo.readonly) {
+      return;
+    }
+    sendSocketMessage({
+      cmd: 'update_comment',
+      eid: envID,
+      win: win,
+      data: comment,
+    });
+  };
+
   // Save layout lists to the server
   const sendLayoutsSave = (layoutLists) => {
     // pushes layouts to the server
@@ -381,6 +399,7 @@ const ApiProvider = ({ children }) => {
       value={{
         apiHandlers,
         connected,
+        sendCommentUpdate,
         sendEmbeddingPop,
         sendEnvDelete,
         sendEnvQuery,
