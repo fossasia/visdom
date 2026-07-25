@@ -7,10 +7,11 @@
  *
  */
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 
 import HParamsCompare from './hparams/HParamsCompare';
 import HParamsFilters from './hparams/HParamsFilters';
+import HParamsMetrics from './hparams/HParamsMetrics';
 import HParamsParallelCoords from './hparams/HParamsParallelCoords';
 import HParamsSplom from './hparams/HParamsSplom';
 import HParamsTable from './hparams/HParamsTable';
@@ -29,6 +30,7 @@ const VIEWS = [
   { key: 'parcoords', label: 'Parallel coordinates' },
   { key: 'splom', label: 'Scatter matrix' },
   { key: 'compare', label: 'Compare' },
+  { key: 'metrics', label: 'Metrics' },
 ];
 
 const NO_RECORDS = [];
@@ -61,6 +63,9 @@ var HParamsPane = (props) => {
   const [splomColorBy, setSplomColorBy] = useState(null);
   const [parcoordsDims, setParcoordsDims] = useState(null);
   const [parcoordsColorBy, setParcoordsColorBy] = useState(null);
+  const [metricsKey, setMetricsKey] = useState(null);
+  const metricsCache = useRef(null);
+  if (metricsCache.current === null) metricsCache.current = new Map();
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [filters, setFilters] = useState({ statuses: [], columns: {} });
 
@@ -98,7 +103,7 @@ var HParamsPane = (props) => {
   const clearSelection = useCallback(() => setTableSelected(new Set()), []);
   const closeFilters = useCallback(() => setFiltersOpen(false), []);
 
-  const comparisonRecords = selectionActive ? selectedVisible : NO_RECORDS;
+  const selectedRecords = selectionActive ? selectedVisible : NO_RECORDS;
 
   const handleDownload = useCallback(() => {
     let blob = new Blob([JSON.stringify(content)], {
@@ -233,7 +238,18 @@ var HParamsPane = (props) => {
 
               if (view === 'compare')
                 return (
-                  <HParamsCompare {...viewProps} records={comparisonRecords} />
+                  <HParamsCompare {...viewProps} records={selectedRecords} />
+                );
+
+              if (view === 'metrics')
+                return (
+                  <HParamsMetrics
+                    {...viewProps}
+                    records={selectedRecords}
+                    metric={metricsKey}
+                    onMetric={setMetricsKey}
+                    cacheRef={metricsCache}
+                  />
                 );
 
               let viewEl;

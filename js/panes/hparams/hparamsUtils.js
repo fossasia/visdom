@@ -440,3 +440,86 @@ export function buildComparison(records, columns) {
   });
   return sections;
 }
+
+/**
+ * Turn the raw observation list a comparison carries into per-run,
+ * per-metric series.
+ *
+ * A series plots against real steps only when every one of its
+ * observations has one; logging without a step is the SDK default, and
+ * mixing real steps with fallback ordinals on a single axis would place
+ * points at positions the data never claimed.
+ *
+ * Values arrive as null where the server encoded NaN or an infinity.
+ * They stay in the series as null so the line breaks at the right place
+ * rather than closing over the gap or shifting later ordinals.
+ */
+export function buildMetricSeries(experiments) {
+  const runs = [];
+  const metricKeys = new Set();
+  (experiments || []).forEach((exp) => {
+    if (!exp || typeof exp !== 'object') return;
+    if (typeof exp.env_id !== 'string') return;
+    const raw = new Map();
+    (exp.metrics || []).forEach((metric) => {
+      if (!metric || typeof metric.key !== 'string') return;
+      if (!raw.has(metric.key)) raw.set(metric.key, []);
+      raw.get(metric.key).push(metric);
+      metricKeys.add(metric.key);
+    });
+    const series = {};
+    raw.forEach((observations, key) => {
+      const usesIndex = !observations.every((obs) => isNumeric(obs.step));
+      const x = [];
+      const y = [];
+      if (usesIndex) {
+        observations.forEach((obs, index) => {
+          x.push(index);
+          y.push(isNumeric(obs.value) ? obs.value : null);
+        });
+      } else {
+        /* Later arrivals win a repeated step, matching how the backend
+           resolves a run's latest value for the table. */
+        const byStep = new Map();
+        observations.forEach((obs) => {
+          byStep.set(obs.step, isNumeric(obs.value) ? obs.value : null);
+        });
+        Array.from(byStep.keys())
+          .sort((a, b) => a - b)
+          .forEach((step) => {
+            x.push(step);
+            y.push(byStep.get(step));
+          });
+      }
+      series[key] = { x, y, usesIndex };
+    });
+    runs.push({
+      env_id: exp.env_id,
+      label: runLabel(exp),
+      series,
+    });
+  });
+  return { runs, metricKeys: Array.from(metricKeys).sort() };
+}
+
+export function selectMetricSeries(runs, metricKey, colorIndex) {
+  const plotted = [];
+  const missing = [];
+  (runs || []).forEach((run) => {
+    const series = metricKey && run.series ? run.series[metricKey] : null;
+    if (!series || !series.y.some((value) => isNumeric(value))) {
+      missing.push(run.label);
+      return;
+    }
+    const index = colorIndex ? colorIndex.get(run.env_id) : undefined;
+    plotted.push({
+      env_id: run.env_id,
+      label: run.label,
+      x: series.x,
+      y: series.y,
+      usesIndex: series.usesIndex,
+      colorIndex: index === undefined ? plotted.length : index,
+    });
+  });
+  return { plotted, missing };
+}

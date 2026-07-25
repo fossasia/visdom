@@ -1,0 +1,102 @@
+/**
+ * Copyright 2017-present, The Visdom Authors
+ * All rights reserved.
+ *
+ * This source code is licensed under the license found in the
+ * LICENSE file in the root directory of this source tree.
+ *
+ */
+
+import { useCallback, useEffect, useMemo, useState } from 'react';
+
+import { fetchExperimentComparison } from '../../api/experimentsApi';
+import { buildMetricSeries } from './hparamsUtils';
+
+const NO_EXPERIMENTS = [];
+
+/**
+ * Load per-step metric history for a set of runs.
+ *
+ * History is not part of the window content, which keeps only each
+ * metric's latest value, so it has to be read from the server. The cache
+ * is keyed per run rather than per selection so that ticking one more
+ * checkbox fetches one run instead of re-downloading the whole set.
+ */
+export default function useExperimentMetrics(records, cacheRef) {
+  const [nonce, setNonce] = useState(0);
+  const [state, setState] = useState({
+    status: 'idle',
+    error: null,
+    experiments: NO_EXPERIMENTS,
+  });
+
+  const envIds = useMemo(
+    () => (records || []).map((r) => r.env_id).filter((id) => !!id),
+    [records]
+  );
+
+  const refresh = useCallback(() => {
+    const cache = cacheRef.current;
+    if (cache) envIds.forEach((id) => cache.delete(id));
+    setNonce((n) => n + 1);
+  }, [cacheRef, envIds]);
+
+  useEffect(() => {
+    const cache = cacheRef.current;
+    if (envIds.length === 0) {
+      setState({ status: 'idle', error: null, experiments: NO_EXPERIMENTS });
+      return undefined;
+    }
+
+    /* Read back in selection order so the traces and the legend follow
+       the table rather than whatever order the server replied in. */
+    const readCache = () => envIds.map((id) => cache.get(id)).filter(Boolean);
+    const wanted = envIds.filter((id) => !cache.has(id));
+    if (wanted.length === 0) {
+      setState({ status: 'ready', error: null, experiments: readCache() });
+      return undefined;
+    }
+
+    /* abort() alone still leaves an already-resolved json() microtask
+       able to set state on an unmounted view, so guard with a flag too. */
+    let cancelled = false;
+    const controller = new AbortController();
+    setState((prev) => ({ ...prev, status: 'loading', error: null }));
+
+    fetchExperimentComparison(wanted, controller.signal)
+      .then((reply) => {
+        if (cancelled) return;
+        const loaded = (reply && reply.experiments) || [];
+        loaded.forEach((exp) => {
+          if (exp && typeof exp.env_id === 'string') cache.set(exp.env_id, exp);
+        });
+        setState({ status: 'ready', error: null, experiments: readCache() });
+      })
+      .catch((err) => {
+        if (cancelled || (err && err.name === 'AbortError')) return;
+        setState({
+          status: 'error',
+          error: (err && err.message) || 'Could not load metric history.',
+          experiments: NO_EXPERIMENTS,
+        });
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [envIds, nonce, cacheRef]);
+
+  const parsed = useMemo(
+    () => buildMetricSeries(state.experiments),
+    [state.experiments]
+  );
+
+  return {
+    status: state.status,
+    error: state.error,
+    runs: parsed.runs,
+    metricKeys: parsed.metricKeys,
+    refresh,
+  };
+}

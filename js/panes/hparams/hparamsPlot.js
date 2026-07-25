@@ -13,6 +13,26 @@ const SNAPSHOT_NOTICE_DELAY = 700;
 
 export const PLOT_COLORSCALE = 'Viridis';
 
+/* Plotly's own default colorway. PLOT_COLORSCALE is a continuous ramp
+   and cannot tell a handful of discrete runs apart. */
+export const RUN_PALETTE = [
+  '#1f77b4',
+  '#ff7f0e',
+  '#2ca02c',
+  '#d62728',
+  '#9467bd',
+  '#8c564b',
+  '#e377c2',
+  '#7f7f7f',
+  '#bcbd22',
+  '#17becf',
+];
+
+export function runColor(index) {
+  const i = Number.isFinite(index) ? Math.abs(Math.trunc(index)) : 0;
+  return RUN_PALETTE[i % RUN_PALETTE.length];
+}
+
 export function notify(message, kind) {
   const lib = window.Plotly && window.Plotly.Lib;
   if (lib && typeof lib.notifier === 'function') lib.notifier(message, kind);
@@ -91,6 +111,21 @@ export function plotBaseLayout() {
     font: { family: '"Open Sans", sans-serif', size: 11, color: '#333' },
     paper_bgcolor: '#ffffff',
     plot_bgcolor: '#ffffff',
+  };
+}
+
+/* A fresh object per call: axis styles are spread per axis and a shared
+   constant would be a mutation hazard. */
+export function plotAxisStyle() {
+  return {
+    showline: true,
+    linecolor: '#aab8d8',
+    linewidth: 1,
+    gridcolor: '#f0f2f8',
+    zeroline: false,
+    ticklen: 3,
+    tickfont: { size: 10, color: '#666' },
+    automargin: true,
   };
 }
 
