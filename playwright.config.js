@@ -26,6 +26,7 @@ module.exports = defineConfig({
   retries: process.env.CI ? 2 : 0,
   workers: 1,
   outputDir: './playwright/test-results',
+  testIgnore: ['**/*.init.spec.js'],
   reporter: [['html', { outputFolder: 'playwright/playwright-report' }]],
   use: {
     baseURL: 'http://localhost:8098',
