@@ -63,6 +63,10 @@ export function downloadText(text, filename, mime) {
   window.URL.revokeObjectURL(url);
 }
 
+export function downloadJson(value, filename) {
+  downloadText(JSON.stringify(value), filename, JSON_MIME);
+}
+
 export function exportCsv(records, columns, filename) {
   downloadText(buildCsv(records, columns), filename, CSV_MIME);
 }

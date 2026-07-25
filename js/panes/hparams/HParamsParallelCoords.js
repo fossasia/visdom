@@ -10,10 +10,12 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 
 import HParamsAxisToolbar from './HParamsAxisToolbar';
+import HParamsMessage from './HParamsMessage';
 import {
   PLOT_COLORSCALE,
   plotBaseLayout,
   plotColorbar,
+  plotRevision,
   renderPlot,
   usePlotResize,
 } from './hparamsPlot';
@@ -129,12 +131,11 @@ const HParamsParallelCoords = ({
     const layout = {
       ...plotBaseLayout(),
       margin: { l: 120, r: 80, t: 64, b: 76 },
-      datarevision:
-        effectiveDims.join('|') +
-        '::' +
-        (effectiveColorBy || 'order') +
-        '::' +
-        rows.length,
+      datarevision: plotRevision(
+        effectiveDims.join('|'),
+        effectiveColorBy || 'order',
+        rows.length
+      ),
     };
 
     renderPlot(el, data, layout, 'hparams_parcoords.png');
@@ -142,11 +143,9 @@ const HParamsParallelCoords = ({
 
   if (!hasPlot) {
     return (
-      <div className="hparams-parcoords-wrap">
-        <div className="hparams-message hparams-empty">
-          Parallel coordinates need at least two numeric params or metrics.
-        </div>
-      </div>
+      <HParamsMessage wrapClass="hparams-parcoords-wrap">
+        Parallel coordinates need at least two numeric params or metrics.
+      </HParamsMessage>
     );
   }
 

@@ -7,11 +7,10 @@
  *
  */
 
-import TreeSelect from 'rc-tree-select';
 import React, { useCallback, useMemo } from 'react';
 
+import { ColumnSelect } from './ColumnSelect';
 import {
-  buildColumns,
   cellClass,
   COLUMN_GROUPS,
   formatValue,
@@ -24,8 +23,15 @@ import {
   spineStyle,
 } from './hparamsUtils';
 import StatusBadge from './StatusBadge';
+import useHParamsColumns from './useHParamsColumns';
 
 const RUN_COLUMN_ID = 'run:name';
+
+function sortGlyph(dir) {
+  if (dir === 'asc') return '▲';
+  if (dir === 'desc') return '▼';
+  return '⇅';
+}
 
 function nextSort(current, columnId) {
   if (current.by !== columnId) return { by: columnId, dir: 'asc' };
@@ -48,7 +54,6 @@ function accessorFor(sortBy, columns) {
 
 const SortCaret = ({ sort, columnId }) => {
   const active = sort.by === columnId;
-  const glyph = !active ? '⇅' : sort.dir === 'asc' ? '▲' : '▼';
   return (
     <span
       className={
@@ -57,7 +62,7 @@ const SortCaret = ({ sort, columnId }) => {
       }
       aria-hidden="true"
     >
-      {glyph}
+      {sortGlyph(active ? sort.dir : null)}
     </span>
   );
 };
@@ -145,10 +150,7 @@ const HParamsTable = ({
   selected,
   setSelected,
 }) => {
-  const columns = useMemo(
-    () => buildColumns(paramKeys, metricKeys, tagKeys),
-    [paramKeys, metricKeys, tagKeys]
-  );
+  const columns = useHParamsColumns(paramKeys, metricKeys, tagKeys);
   const colorCols = useMemo(
     () => selectNumericColumns(records, columns),
     [records, columns]
@@ -236,16 +238,12 @@ const HParamsTable = ({
       <div className="hparams-toolbar">
         <span className="hparams-sortby">
           sort by:
-          <TreeSelect
-            className="hparams-treeselect hparams-select-narrow"
-            value={sort.by || undefined}
+          <ColumnSelect
+            value={sort.by}
             placeholder="none"
-            allowClear
-            treeLine
-            treeDefaultExpandAll
-            dropdownMatchSelectWidth={false}
             treeData={sortTreeData}
-            onChange={(value) => handleSortSelect(value || '')}
+            onChange={handleSortSelect}
+            label="Sort runs by"
           />
           <button
             type="button"
@@ -261,22 +259,18 @@ const HParamsTable = ({
               sort.dir === 'desc' ? 'Sort descending' : 'Sort ascending'
             }
           >
-            {!sort.by ? '⇅' : sort.dir === 'asc' ? '▲' : '▼'}
+            {sortGlyph(sort.by ? sort.dir : null)}
           </button>
         </span>
         {colorCols.length ? (
           <span className="hparams-colorby">
             color by:
-            <TreeSelect
-              className="hparams-treeselect hparams-select-narrow"
-              value={colorBy || undefined}
+            <ColumnSelect
+              value={colorBy}
               placeholder="none"
-              allowClear
-              treeLine
-              treeDefaultExpandAll
-              dropdownMatchSelectWidth={false}
               treeData={colorTreeData}
-              onChange={(value) => setColorBy(value || null)}
+              onChange={setColorBy}
+              label="Color the table by"
             />
           </span>
         ) : null}

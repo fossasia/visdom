@@ -125,6 +125,10 @@ export function plotAxisStyle() {
   };
 }
 
+export function plotRevision(...parts) {
+  return parts.join('::');
+}
+
 export function plotColorbar(label) {
   return {
     title: { text: label, side: 'right', font: { size: 11 } },

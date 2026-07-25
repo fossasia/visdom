@@ -10,10 +10,13 @@
 import React, { useEffect, useRef } from 'react';
 
 import HParamsAxisToolbar from './HParamsAxisToolbar';
+import HParamsMessage from './HParamsMessage';
 import {
   PLOT_COLORSCALE,
+  plotAxisStyle,
   plotBaseLayout,
   plotColorbar,
+  plotRevision,
   renderPlot,
   usePlotResize,
 } from './hparamsPlot';
@@ -28,15 +31,9 @@ import useHParamsAxes from './useHParamsAxes';
 const MAX_DIMS = 6;
 
 const AXIS_STYLE = {
-  showline: true,
-  linecolor: '#aab8d8',
-  linewidth: 1,
+  ...plotAxisStyle(),
   mirror: 'all',
-  gridcolor: '#f0f2f8',
-  zeroline: false,
-  ticklen: 3,
   tickfont: { size: 9, color: '#666' },
-  automargin: true,
 };
 
 function axisDimIndex(axis) {
@@ -168,12 +165,11 @@ const HParamsSplom = ({
       dragmode: 'select',
       hovermode: 'closest',
       showlegend: false,
-      datarevision:
-        effectiveDims.join('|') +
-        '::' +
-        (effectiveColorBy || 'order') +
-        '::' +
-        records.length,
+      datarevision: plotRevision(
+        effectiveDims.join('|'),
+        effectiveColorBy || 'order',
+        records.length
+      ),
     };
     for (let i = 1; i <= dimensions.length; i++) {
       const suffix = i === 1 ? '' : String(i);
@@ -238,11 +234,9 @@ const HParamsSplom = ({
 
   if (!hasPlot) {
     return (
-      <div className="hparams-splom-wrap">
-        <div className="hparams-message hparams-empty">
-          A scatter matrix needs at least two numeric params or metrics.
-        </div>
-      </div>
+      <HParamsMessage wrapClass="hparams-splom-wrap">
+        A scatter matrix needs at least two numeric params or metrics.
+      </HParamsMessage>
     );
   }
 

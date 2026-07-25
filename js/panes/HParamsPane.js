@@ -10,20 +10,21 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 
 import HParamsCompare from './hparams/HParamsCompare';
-import { exportCsv, exportJson } from './hparams/hparamsExport';
+import { downloadJson, exportCsv, exportJson } from './hparams/hparamsExport';
 import HParamsFilters from './hparams/HParamsFilters';
+import HParamsMessage from './hparams/HParamsMessage';
 import HParamsMetrics from './hparams/HParamsMetrics';
 import HParamsParallelCoords from './hparams/HParamsParallelCoords';
 import HParamsSplom from './hparams/HParamsSplom';
 import HParamsTable from './hparams/HParamsTable';
 import {
   applyFilters,
-  buildColumns,
   buildFilterSpecs,
   collectStatuses,
   countActiveFilters,
   filterRecords,
 } from './hparams/hparamsUtils';
+import useHParamsColumns from './hparams/useHParamsColumns';
 import Pane from './Pane';
 
 const VIEWS = [
@@ -35,6 +36,8 @@ const VIEWS = [
 ];
 
 const NO_RECORDS = [];
+
+const NO_KEYS = [];
 
 const TAB_KEYS = {
   ArrowRight: 1,
@@ -86,11 +89,10 @@ var HParamsPane = (props) => {
   const [filters, setFilters] = useState({ statuses: [], columns: {} });
 
   const records = data ? data.records : NO_RECORDS;
-  const columns = useMemo(
-    () =>
-      data ? buildColumns(data.paramKeys, data.metricKeys, data.tagKeys) : [],
-    [data]
-  );
+  const paramKeys = data ? data.paramKeys : NO_KEYS;
+  const metricKeys = data ? data.metricKeys : NO_KEYS;
+  const tagKeys = data ? data.tagKeys : NO_KEYS;
+  const columns = useHParamsColumns(paramKeys, metricKeys, tagKeys);
   const specs = useMemo(
     () => buildFilterSpecs(records, columns),
     [records, columns]
@@ -154,38 +156,120 @@ var HParamsPane = (props) => {
   const handleExportJson = useCallback(() => {
     exportJson(
       exportRecords,
-      {
-        paramKeys: data ? data.paramKeys : [],
-        metricKeys: data ? data.metricKeys : [],
-        tagKeys: data ? data.tagKeys : [],
-      },
+      { paramKeys, metricKeys, tagKeys },
       'visdom_hparams.json'
     );
-  }, [exportRecords, data]);
+  }, [exportRecords, paramKeys, metricKeys, tagKeys]);
 
   const handleDownload = useCallback(() => {
-    let blob = new Blob([JSON.stringify(content)], {
-      type: 'application/json',
-    });
-    let url = window.URL.createObjectURL(blob);
-    let link = document.createElement('a');
-    link.download = 'visdom_hparams.json';
-    link.href = url;
-    link.click();
+    downloadJson(content, 'visdom_hparams.json');
   }, [content]);
+
+  const renderView = () => {
+    if (visibleRecords.length === 0) {
+      return <HParamsMessage>No runs match your filters.</HParamsMessage>;
+    }
+    const isPlot = view === 'splom' || view === 'parcoords';
+    const plotRecords =
+      isPlot && selectionActive ? selectedVisible : visibleRecords;
+    const viewProps = {
+      columnRecords: records,
+      paramKeys,
+      metricKeys,
+      tagKeys,
+    };
+
+    if (view === 'compare') {
+      return <HParamsCompare {...viewProps} records={selectedRecords} />;
+    }
+
+    if (view === 'metrics') {
+      return (
+        <HParamsMetrics
+          {...viewProps}
+          records={selectedRecords}
+          metric={metricsKey}
+          onMetric={setMetricsKey}
+          cacheRef={metricsCache}
+        />
+      );
+    }
+
+    let viewEl;
+    if (view === 'splom') {
+      viewEl = (
+        <HParamsSplom
+          {...viewProps}
+          records={plotRecords}
+          selectedDims={splomDims}
+          onSelectedDims={setSplomDims}
+          colorBy={splomColorBy}
+          onColorBy={setSplomColorBy}
+        />
+      );
+    } else if (view === 'parcoords') {
+      viewEl = (
+        <HParamsParallelCoords
+          {...viewProps}
+          records={plotRecords}
+          selectedDims={parcoordsDims}
+          onSelectedDims={setParcoordsDims}
+          colorBy={parcoordsColorBy}
+          onColorBy={setParcoordsColorBy}
+        />
+      );
+    } else {
+      viewEl = (
+        <HParamsTable
+          {...viewProps}
+          records={visibleRecords}
+          sort={tableSort}
+          setSort={setTableSort}
+          colorBy={tableColorBy}
+          setColorBy={setTableColorBy}
+          selected={tableSelected}
+          setSelected={setTableSelected}
+        />
+      );
+    }
+
+    if (!isPlot || !selectionActive) return viewEl;
+    return (
+      <div className="hparams-plot-area">
+        <div className="hparams-selection-banner">
+          <span>
+            Plotting <b>{plotRecords.length}</b> selected{' '}
+            {plotRecords.length === 1 ? 'run' : 'runs'}
+          </span>
+          <button
+            type="button"
+            className="hparams-link-btn"
+            onClick={clearSelection}
+          >
+            Show all
+          </button>
+        </div>
+        {plotRecords.length === 0 ? (
+          <HParamsMessage>
+            Every selected run is hidden by the current filters.
+          </HParamsMessage>
+        ) : (
+          viewEl
+        )}
+      </div>
+    );
+  };
 
   let body;
   if (data === null) {
     body = (
-      <div className="hparams-message hparams-error">
+      <HParamsMessage tone="error">
         Could not read hyper-parameter data for this window.
-      </div>
+      </HParamsMessage>
     );
   } else if (data.records.length === 0) {
     body = (
-      <div className="hparams-message hparams-empty">
-        No experiments match this selection.
-      </div>
+      <HParamsMessage>No experiments match this selection.</HParamsMessage>
     );
   } else {
     body = (
@@ -316,103 +400,7 @@ var HParamsPane = (props) => {
                 totalCount={records.length}
               />
             ) : null}
-            {(() => {
-              if (visibleRecords.length === 0) {
-                return (
-                  <div className="hparams-message hparams-empty">
-                    No runs match your filters.
-                  </div>
-                );
-              }
-              const isPlot = view === 'splom' || view === 'parcoords';
-              const plotRecords =
-                isPlot && selectionActive ? selectedVisible : visibleRecords;
-              const viewProps = {
-                columnRecords: records,
-                paramKeys: data.paramKeys,
-                metricKeys: data.metricKeys,
-                tagKeys: data.tagKeys,
-              };
-
-              if (view === 'compare')
-                return (
-                  <HParamsCompare {...viewProps} records={selectedRecords} />
-                );
-
-              if (view === 'metrics')
-                return (
-                  <HParamsMetrics
-                    {...viewProps}
-                    records={selectedRecords}
-                    metric={metricsKey}
-                    onMetric={setMetricsKey}
-                    cacheRef={metricsCache}
-                  />
-                );
-
-              let viewEl;
-              if (view === 'splom')
-                viewEl = (
-                  <HParamsSplom
-                    {...viewProps}
-                    records={plotRecords}
-                    selectedDims={splomDims}
-                    onSelectedDims={setSplomDims}
-                    colorBy={splomColorBy}
-                    onColorBy={setSplomColorBy}
-                  />
-                );
-              else if (view === 'parcoords')
-                viewEl = (
-                  <HParamsParallelCoords
-                    {...viewProps}
-                    records={plotRecords}
-                    selectedDims={parcoordsDims}
-                    onSelectedDims={setParcoordsDims}
-                    colorBy={parcoordsColorBy}
-                    onColorBy={setParcoordsColorBy}
-                  />
-                );
-              else
-                viewEl = (
-                  <HParamsTable
-                    {...viewProps}
-                    records={visibleRecords}
-                    sort={tableSort}
-                    setSort={setTableSort}
-                    colorBy={tableColorBy}
-                    setColorBy={setTableColorBy}
-                    selected={tableSelected}
-                    setSelected={setTableSelected}
-                  />
-                );
-
-              if (!isPlot || !selectionActive) return viewEl;
-              return (
-                <div className="hparams-plot-area">
-                  <div className="hparams-selection-banner">
-                    <span>
-                      Plotting <b>{plotRecords.length}</b> selected{' '}
-                      {plotRecords.length === 1 ? 'run' : 'runs'}
-                    </span>
-                    <button
-                      type="button"
-                      className="hparams-link-btn"
-                      onClick={clearSelection}
-                    >
-                      Show all
-                    </button>
-                  </div>
-                  {plotRecords.length === 0 ? (
-                    <div className="hparams-message hparams-empty">
-                      Every selected run is hidden by the current filters.
-                    </div>
-                  ) : (
-                    viewEl
-                  )}
-                </div>
-              );
-            })()}
+            {renderView()}
           </div>
         </div>
       </div>

@@ -9,9 +9,11 @@
 
 import React, { useEffect, useMemo, useRef } from 'react';
 
+import HParamsMessage from './HParamsMessage';
 import {
   plotAxisStyle,
   plotBaseLayout,
+  plotRevision,
   renderPlot,
   runColor,
   usePlotResize,
@@ -74,12 +76,13 @@ var HParamsMetrics = (props) => {
 
     const data = plotted.map((run) => ({
       type: 'scatter',
-      mode: 'lines',
+      mode: 'lines+markers',
       name: run.label,
       x: run.x,
       y: run.y,
       connectgaps: false,
       line: { color: runColor(run.colorIndex), width: 1.6 },
+      marker: { color: runColor(run.colorIndex), size: 4 },
       hovertemplate:
         '%{fullData.name}<br>' +
         xLabel +
@@ -103,12 +106,11 @@ var HParamsMetrics = (props) => {
       showlegend: true,
       legend: { font: { size: 10 } },
       hovermode: 'closest',
-      datarevision:
-        activeMetric +
-        '::' +
-        plotted.map((run) => run.env_id).join('|') +
-        '::' +
-        points,
+      datarevision: plotRevision(
+        activeMetric,
+        plotted.map((run) => run.env_id).join('|'),
+        points
+      ),
     };
 
     renderPlot(el, data, layout, 'hparams_metrics.png');
@@ -116,34 +118,28 @@ var HParamsMetrics = (props) => {
 
   if (records.length === 0) {
     return (
-      <div className="hparams-metrics-wrap">
-        <div className="hparams-message hparams-empty">
-          Pick one or more runs in the table to plot their metric history.
-        </div>
-      </div>
+      <HParamsMessage wrapClass="hparams-metrics-wrap">
+        Pick one or more runs in the table to plot their metric history.
+      </HParamsMessage>
     );
   }
 
   if (status === 'error') {
     return (
-      <div className="hparams-metrics-wrap">
-        <div className="hparams-message hparams-error">
-          {error}{' '}
-          <button type="button" className="hparams-link-btn" onClick={refresh}>
-            Retry
-          </button>
-        </div>
-      </div>
+      <HParamsMessage wrapClass="hparams-metrics-wrap" tone="error">
+        {error}{' '}
+        <button type="button" className="hparams-link-btn" onClick={refresh}>
+          Retry
+        </button>
+      </HParamsMessage>
     );
   }
 
   if (status === 'ready' && metricKeys.length === 0) {
     return (
-      <div className="hparams-metrics-wrap">
-        <div className="hparams-message hparams-empty">
-          None of these runs logged any metrics.
-        </div>
-      </div>
+      <HParamsMessage wrapClass="hparams-metrics-wrap">
+        None of these runs logged any metrics.
+      </HParamsMessage>
     );
   }
 
