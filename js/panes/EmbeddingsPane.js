@@ -1,5 +1,5 @@
 /**
- * Copyright 2017-present, The Visdom Authors
+ * Copyright 2017-present, The Visdom AuthorsSCALE_RAD
  * All rights reserved.
  *
  * This source code is licensed under the license found in the
@@ -21,6 +21,8 @@ import Pane from './Pane';
 
 const SCALE_RADIUS = 2000;
 const MIN_SELECTION = 22;
+
+const EXPORT_FORMATS = ['png', 'jpg'];
 
 class EmbeddingsPane extends React.Component {
   shouldComponentUpdate(nextProps) {
@@ -109,7 +111,7 @@ class EmbeddingsPane extends React.Component {
     EventSystem.unsubscribe('global.event', this.onEvent);
   }
 
-  handleDownload = () => {
+  handleMetadataExport = () => {
     var blob = new Blob([JSON.stringify(this.props.content.data)], {
       type: 'text/plain',
     });
@@ -122,9 +124,53 @@ class EmbeddingsPane extends React.Component {
     link.click();
   };
 
+  // Captures the WebGL canvas as a PNG/JPG. SVG is intentionally not
+  // supported here (see ExportDropdown's allowedFormats prop below) -
+  // this is a raster canvas, there's no vector source to export.
+  //
+  // To get a higher-resolution capture than what's on screen, we
+  // temporarily bump the renderer's pixel ratio, force a render, grab
+  // the data URL, then restore the original on-screen resolution.
+  handleExport = (format, dpi) => {
+    const { renderer, scene, camera } = this;
+    if (!renderer || !scene || !camera) return;
+
+    const width = Math.max(1, this.props.width);
+    const height = Math.max(1, this.props.height);
+    const scale = dpi ? dpi / 96 : 1;
+    const originalPixelRatio = renderer.getPixelRatio();
+
+    // `updateStyle=false` keeps the on-screen CSS size unchanged while
+    // only the internal render resolution increases
+    renderer.setPixelRatio(originalPixelRatio * scale);
+    renderer.setSize(width, height, false);
+    renderer.render(scene, camera);
+
+    const mime = format === 'jpg' ? 'image/jpeg' : 'image/png';
+    const dataUrl = renderer.domElement.toDataURL(
+      mime,
+      format === 'jpg' ? 0.92 : undefined
+    );
+
+    // restore the on-screen resolution and schedule a normal repaint
+    renderer.setPixelRatio(originalPixelRatio);
+    renderer.setSize(width, height, false);
+    this.scheduleRender();
+
+    const link = document.createElement('a');
+    link.download = `${this.props.contentID || 'plot'}.${format}`;
+    link.href = dataUrl;
+    link.click();
+  };
+
   render() {
     return (
-      <Pane {...this.props} handleDownload={this.handleDownload}>
+      <Pane
+        {...this.props}
+        handleExport={this.handleExport}
+        handleMetadataExport={this.handleMetadataExport}
+        exportFormats={EXPORT_FORMATS}
+      >
         {this.props.content.isLoading ? (
           <div
             style={{
@@ -359,7 +405,8 @@ class Scene extends React.Component {
     });
 
     let points = new THREE.Points(pointsGeometry, pointsMaterial);
-    let renderer = new THREE.WebGLRenderer();
+
+    let renderer = new THREE.WebGLRenderer({ preserveDrawingBuffer: true });
 
     let scene = new THREE.Scene();
     scene.add(points);
