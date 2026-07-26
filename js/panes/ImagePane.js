@@ -12,6 +12,7 @@ import React, { useContext, useEffect, useRef, useState } from 'react';
 import ApiContext from '../api/ApiContext';
 import EventSystem from '../EventSystem';
 import Pane from './Pane';
+import { typesetMathJax } from './utils/mathjaxHelpers';
 
 const DEFAULT_HEIGHT = 400;
 const DEFAULT_WIDTH = 300;
@@ -25,6 +26,7 @@ function ImagePane(props) {
   // --------------
   const paneRef = useRef();
   const imgRef = useRef();
+  const captionRef = useRef();
   const mouseLocationRef = useRef({ x: null, y: null });
   const [view, setView] = useState({ scale: 1, tx: 0, ty: 0 });
   const [imgDim, setImgDim] = useState({ width: null, height: 0 });
@@ -147,7 +149,11 @@ function ImagePane(props) {
   const commitSliderSelection = (value) => {
     const idx = parseInt(value, 10);
     if (Number.isNaN(idx)) return;
-    sendPaneMessage({ event_type: 'SliderMoved', index: idx, pane_data: false }, id, envID);
+    sendPaneMessage(
+      { event_type: 'SliderMoved', index: idx, pane_data: false },
+      id,
+      envID
+    );
   };
 
   const finalizeSlider = (evt) => {
@@ -307,12 +313,20 @@ function ImagePane(props) {
     content = content[actualSelected];
   }
 
+  useEffect(() => {
+    let cancelled = false;
+    typesetMathJax(captionRef.current, () => cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [content.caption]);
+
   // add caption as widget
   if (content.caption) {
     widgets.splice(
       0,
       0,
-      <span className="widget" key="img_caption">
+      <span className="widget" key="img_caption" ref={captionRef}>
         {content.caption}
       </span>
     );
