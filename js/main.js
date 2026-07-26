@@ -47,6 +47,8 @@ import WidthProvider from './Width';
 const jsonpatch = require('fast-json-patch');
 const GridLayout = WidthProvider(ReactGridLayout);
 
+let recoveredInvalidStateAtStartup = false;
+
 const safeJsonParse = (raw, fallback, onError) => {
   if (raw == null || raw === '') return fallback;
 
@@ -70,6 +72,7 @@ if (ACTIVE_ENV !== '') {
 } else {
   let storedEnvIDs = safeJsonParse(localStorage.getItem('envIDs'), null, () => {
     localStorage.removeItem('envIDs');
+    recoveredInvalidStateAtStartup = true;
   });
   use_envs = Array.isArray(storedEnvIDs) ? storedEnvIDs : ['main'];
 }
@@ -176,6 +179,8 @@ const App = () => {
   const _pendingPanesVersions = useRef({});
   const _envReloadInFlight = useRef(false);
   const localStorageTimer = useRef(null);
+  const savedStateRecoveryToastShown = useRef(false);
+  const serverLayoutErrorToastShown = useRef(false);
 
   // --------------------- //
   // grid helper functions //
@@ -210,6 +215,28 @@ const App = () => {
     } catch (e) {
       return new RegExp('', 'i');
     }
+  };
+
+  const showSavedStateRecoveryToast = () => {
+    if (savedStateRecoveryToastShown.current) return;
+
+    savedStateRecoveryToastShown.current = true;
+    showToast(
+      'Invalid saved UI data was detected and reset to defaults.',
+      'warning',
+      { duration: 6000 }
+    );
+  };
+
+  const showServerLayoutErrorToast = () => {
+    if (serverLayoutErrorToastShown.current) return;
+
+    serverLayoutErrorToastShown.current = true;
+    showToast(
+      'Saved views could not be loaded because the server returned invalid layout data.',
+      'error',
+      { duration: 6000 }
+    );
   };
 
   // ------------------ //
@@ -269,6 +296,7 @@ const App = () => {
       let layoutKey = keyLS(newPane.id);
       let stored = safeJsonParse(localStorage.getItem(layoutKey), null, () => {
         localStorage.removeItem(layoutKey);
+        showSavedStateRecoveryToast();
       });
       if (_bin.current == null) {
         rebin();
@@ -500,6 +528,7 @@ const App = () => {
         null,
         () => {
           localStorage.removeItem(layoutKey);
+          showSavedStateRecoveryToast();
         }
       );
       payload[paneID] =
@@ -710,7 +739,11 @@ const App = () => {
     if (layoutJSON.length == 0) {
       return; // Skip totally blank updates, these are empty inits
     }
-    let layoutsObj = safeJsonParse(layoutJSON, null);
+    let layoutsObj = safeJsonParse(
+      layoutJSON,
+      null,
+      showServerLayoutErrorToast
+    );
     if (!layoutsObj) {
       return;
     }
@@ -787,6 +820,12 @@ const App = () => {
   // -------
   // effects
   // -------
+
+  useEffect(() => {
+    if (recoveredInvalidStateAtStartup) {
+      showSavedStateRecoveryToast();
+    }
+  }, []);
 
   // flush pre-render callbacks
   const callbacks = useRef([]);
