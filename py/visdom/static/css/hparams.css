@@ -109,7 +109,7 @@
   line-height: 22px;
 }
 
-.bar-hparams .pull-right {
+.bar-hparams div.pull-right {
   float: none !important;
   position: absolute;
   left: 0;
