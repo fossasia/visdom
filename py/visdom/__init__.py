@@ -939,18 +939,14 @@ class Visdom(object):
                         "{0}:{1}{2}/vis_socket_wrap".format(
                             self.server, self.port, self.base_url
                         ),
-                        data=json.dumps(
-                            {"message_type": "query", "sid": self.vis_sid}
-                        ),
+                        data=json.dumps({"message_type": "query", "sid": self.vis_sid}),
                     )
                     resp = json.loads(resp_json)
                     for msg in resp["messages"]:
                         self._handle_incoming_message(msg)
                     time.sleep(0.1)
             except Exception as e:
-                logger.error(
-                    "Polling had error {}, attempting restart".format(e)
-                )
+                logger.error("Polling had error {}, attempting restart".format(e))
             finally:
                 self.socket_alive = False
             if self.use_socket:
