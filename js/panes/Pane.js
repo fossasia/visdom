@@ -7,20 +7,68 @@
  *
  */
 
-import React, { forwardRef, useRef, useState } from 'react';
+import React, {
+  forwardRef,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 
+import ApiContext from '../api/ApiContext';
 import PropertyItem from './PropertyItem';
 var classNames = require('classnames');
+
+const COMMENT_SAVE_DEBOUNCE_MS = 500;
 
 var Pane = forwardRef((props, ref) => {
   const { id, title, content, children, widgets, enablePropertyList } = props;
   var { barwidgets } = props;
   barwidgets = barwidgets || [];
+  const commentEnabled = !props.commentsDisabled;
 
   // state varibles
   // --------------
   const [propertyListShown, setPropertyListShown] = useState(false);
   const barRef = useRef();
+
+  const { sendCommentUpdate, sessionInfo } = useContext(ApiContext);
+  const [commentOpen, setCommentOpen] = useState(false);
+  const [commentText, setCommentText] = useState(props.comment || '');
+  const commentSaveTimeout = useRef(null);
+  const isEditingComment = useRef(false);
+  const latestCommentTextRef = useRef(commentText);
+
+  useEffect(() => {
+    if (!isEditingComment.current) {
+      setCommentText(props.comment || '');
+      latestCommentTextRef.current = props.comment || '';
+    }
+  }, [props.comment]);
+
+  useEffect(() => {
+    return () => {
+      if (commentSaveTimeout.current) {
+        flushCommentSave(latestCommentTextRef.current);
+      }
+    };
+  }, []);
+
+  const flushCommentSave = (value) => {
+    clearTimeout(commentSaveTimeout.current);
+    commentSaveTimeout.current = null;
+    sendCommentUpdate(props.envID, id, value);
+  };
+
+  const handleCommentChange = (ev) => {
+    const value = ev.target.value;
+    setCommentText(value);
+    latestCommentTextRef.current = value;
+    clearTimeout(commentSaveTimeout.current);
+    commentSaveTimeout.current = setTimeout(() => {
+      flushCommentSave(value);
+    }, COMMENT_SAVE_DEBOUNCE_MS);
+  };
 
   // public events
   // -------------
@@ -42,6 +90,11 @@ var Pane = forwardRef((props, ref) => {
     { bar: true, focus: props.isFocused },
     props.type && 'bar-' + props.type
   );
+
+  let contentClassNames = classNames({
+   content: true,
+   'content-with-comment': commentEnabled && commentOpen,
+  });
 
   // add property list button to barwidgets
   if (
@@ -135,10 +188,38 @@ var Pane = forwardRef((props, ref) => {
           {' '}
           &#10226;{' '}
         </button>
+        <button
+          title="comment"
+          onClick={() => setCommentOpen(!commentOpen)}
+          className={commentOpen ? 'pull-right active' : 'pull-right'}
+          hidden={!commentEnabled}
+        >
+          <span className="glyphicon glyphicon-comment" />
+        </button>
         {barwidgets}
         <div className="pull-right">{title}</div>
       </div>
-      <div className="content">{children}</div>
+      <div className={contentClassNames}>
+        {children}
+        {commentEnabled && commentOpen && (
+          <div className="comment-panel">
+            <textarea
+              className="comment-textarea"
+              placeholder="Add a note for this pane..."
+              value={commentText}
+              onFocus={() => {
+                isEditingComment.current = true;
+              }}
+              onBlur={() => {
+                isEditingComment.current = false;
+                flushCommentSave(commentText);
+              }}
+              onChange={handleCommentChange}
+              readOnly={!!sessionInfo?.readonly}
+            />
+          </div>
+        )}
+      </div>
       <div className="widgets">{widgets}</div>
       {propertyListOverlay}
     </div>
@@ -153,6 +234,7 @@ Pane = React.memo(Pane, (props, nextProps) => {
   else if (props.h !== nextProps.h || props.w !== nextProps.w) return false;
   else if (props.children !== nextProps.children) return false;
   else if (props.isFocused !== nextProps.isFocused) return false;
+  else if (props.comment !== nextProps.comment) return false;
   return true;
 });
 
