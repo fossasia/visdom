@@ -28,6 +28,14 @@ LICENSE file in the root directory of this source tree.
     <div class="header-sub">An unhandled exception occurred</div>
   </div>
 
+  <script>
+    try {
+      localStorage.removeItem('envIDs');
+    } catch (e) {
+      console.warn('Could not clear envIDs from localStorage:', e);
+    }
+  </script>
+
   {% if error is not None %}
 
     <div class="card">
