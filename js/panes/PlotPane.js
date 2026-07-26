@@ -11,6 +11,7 @@ import React, { useContext, useEffect, useRef, useState } from 'react';
 const { usePrevious } = require('../util');
 import ApiContext from '../api/ApiContext';
 import Pane from './Pane';
+import { typesetMathJax } from './utils/mathjaxHelpers';
 const { sgg } = require('ml-savitzky-golay-generalized');
 
 var PlotPane = (props) => {
@@ -20,6 +21,7 @@ var PlotPane = (props) => {
   // state variables
   // --------------
   const plotlyRef = useRef();
+  const captionRef = useRef();
   const maxsmoothvalue = 100;
   const [smoothWidgetActive, setSmoothWidgetActive] = useState(false);
   const [smoothvalue, setSmoothValue] = useState(1);
@@ -40,6 +42,14 @@ var PlotPane = (props) => {
       setActualSelected(selected);
     }
   }, [selected]);
+
+  useEffect(() => {
+    let cancelled = false;
+    typesetMathJax(captionRef.current, () => cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [content && content.caption]);
 
   // private events
   // -------------
@@ -183,7 +193,7 @@ var PlotPane = (props) => {
           smooth_d.showlegend = false;
 
           // turn off smoothing for smoothvalue of 3 or too small arrays
-          if (windowSize < 5 || smooth_d.x.length <= 5) {
+          if (windowSize < 5 || !smooth_d.x || smooth_d.x.length <= 5) {
             d.opacity = 1.0;
 
             return smooth_d;
@@ -327,7 +337,7 @@ var PlotPane = (props) => {
   var caption_widget = '';
   if (content && content.caption) {
     caption_widget = (
-      <div className="widget plot-caption" key="plot_caption">
+      <div className="widget plot-caption" key="plot_caption" ref={captionRef}>
         {content.caption}
       </div>
     );
