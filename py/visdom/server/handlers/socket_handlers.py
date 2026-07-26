@@ -42,8 +42,6 @@ from visdom.server.defaults import MAX_SOCKET_WAIT
 
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
-# TODO move generalized initialization logic from these handlers into the
-# basehandler
 # TODO abstract out any direct references to the app where possible from
 # all handlers. Can instead provide accessor functions on the state?
 # TODO Try to standardize the code between the client-server and
@@ -70,17 +68,6 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
     def __init__(self, *args, **kwargs):
         self.polling = False
         super().__init__(*args, **kwargs)
-
-    def initialize(self, app):
-        self.state = app.state
-        self.subs = app.subs
-        self.sources = app.sources
-        self.port = app.port
-        self.env_path = app.env_path
-        self.storage = app.storage
-        self.login_enabled = app.login_enabled
-        self.app = app
-        self.readonly = app.readonly
 
     def open(self, register_to="sources"):
         self.sid = get_rand_id()
@@ -284,6 +271,56 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 layout = content.setdefault("layout", {})
 
             layout.update(patch)
+
+        elif cmd == "update_comment":
+            if self.readonly:
+                logging.warning("update_comment: rejected, server is in readonly mode")
+                return
+
+            eid = msg.get("eid")
+            win = msg.get("win")
+            comment = msg.get("data")
+            if eid is None or win is None or eid not in self.state:
+                logging.warning(
+                    f"update_comment: env {eid!r} or win {win!r}"
+                    f" not found, dropping event"
+                )
+                return
+            if not isinstance(comment, str):
+                logging.warning(
+                    f"update_comment: expected str data, got"
+                    f" {type(comment).__name__!r}, dropping event"
+                )
+                return
+
+            env = self.state[eid]["jsons"]
+            if win not in env:
+                logging.warning(
+                    f"update_comment: pane {win!r} not found"
+                    f" in env {eid!r}, dropping event"
+                )
+                return
+
+            p = env[win]
+            p["comment"] = comment
+            p["version"] = p.get("version", 1) + 1
+
+            diff_packet = [
+                {"op": "add", "path": "/comment", "value": comment},
+                {"op": "replace", "path": "/version", "value": p["version"]},
+            ]
+            broadcast_packet = {
+                "command": "window_update",
+                "win": win,
+                "eid": eid,
+                "content": diff_packet,
+                "version": p["version"],
+            }
+            broadcast(self, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
+
+            tornado.ioloop.IOLoop.current().run_in_executor(
+                None, self.storage.save_env, eid, self.state[eid]
+            )
 
         elif cmd == "pop_embeddings_pane":
             packet = msg.get("data")
@@ -519,12 +556,7 @@ class SocketFailureReason(Enum):
 def WrapSocketWrapper(BaseWrapper):
     class WrappedSocketWrap(BaseHandler):
         def initialize(self, app):
-            self.state = app.state
-            self.subs = app.subs
-            self.sources = app.sources
-            self.port = app.port
-            self.env_path = app.env_path
-            self.login_enabled = app.login_enabled
+            super().initialize(app)
             self.app = app
 
         @check_auth

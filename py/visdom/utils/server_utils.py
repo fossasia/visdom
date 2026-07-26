@@ -20,7 +20,6 @@ import html
 import json
 import logging
 import os
-import time
 import errno
 from collections import OrderedDict
 
@@ -51,10 +50,7 @@ def check_auth(f):
     """
 
     def _check_auth(handler, *args, **kwargs):
-        # TODO this should call a shared method of the handler
-        handler.last_access = time.time()
-        if handler.login_enabled and not handler.current_user:
-            handler.set_status(401)
+        if not handler.is_authorized():
             return
         f(handler, *args, **kwargs)
 
@@ -202,6 +198,7 @@ def window(args):
         "width": opts.get("width"),
         "height": opts.get("height"),
         "contentID": get_rand_id(),  # to detected updated windows
+        "comment": opts.get("comment", ""),
     }
 
     if ptype in ["image_history", "plot_history"] and is_visdom_type:
@@ -423,6 +420,7 @@ def compare_envs(state, eids, socket, store, show_all=False):
         "layout": {"title": "compare_legend"},
         "i": 1,
         "has_compare": True,
+        "commentsDisabled": True,
     }
     if "reload" in res:
         socket.write_message(
@@ -585,6 +583,7 @@ def register_window(self, p, eid):
 
     if p["id"] in env:
         p["i"] = env[p["id"]]["i"]
+        p["comment"] = env[p["id"]].get("comment", p.get("comment", ""))
     else:
         p["i"] = len(env)
 
