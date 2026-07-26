@@ -404,6 +404,8 @@ button[title="smooth lines"].active {
   position: relative;
   display: inline-block;
   float: left;
+  font-size: 0;
+  line-height: 0;
 }
 
 .export-dropdown-menu {
