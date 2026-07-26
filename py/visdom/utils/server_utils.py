@@ -20,22 +20,17 @@ import html
 import json
 import logging
 import os
-import time
-import re
 import errno
-import tornado.escape
 from collections import OrderedDict
 
 MAX_ENV_NAME_LEN = 25
 from collections.abc import Mapping, Sequence
 from visdom.server.defaults import (
-    LAYOUT_FILE,
     DEFAULT_BASE_URL,
     DEFAULT_ENV_PATH,
     DEFAULT_HOSTNAME,
     DEFAULT_MAX_UNDO_HISTORY,
     DEFAULT_PORT,
-    UNDO_DIRNAME,
 )
 from visdom.utils.shared_utils import (
     warn_once,
@@ -55,10 +50,7 @@ def check_auth(f):
     """
 
     def _check_auth(handler, *args, **kwargs):
-        # TODO this should call a shared method of the handler
-        handler.last_access = time.time()
-        if handler.login_enabled and not handler.current_user:
-            handler.set_status(401)
+        if not handler.is_authorized():
             return
         f(handler, *args, **kwargs)
 
@@ -124,49 +116,6 @@ class LazyEnvData(Mapping):
     def __len__(self):
         self.lazy_load_data()
         return len(self._raw_dict)
-
-
-def serialize_env(state, eids, env_path=DEFAULT_ENV_PATH):
-    env_ids = [i for i in eids if i in state]
-    if env_path is not None:
-        for env_id in env_ids:
-            if isinstance(state[env_id], LazyEnvData):
-                if state[env_id]._raw_dict is None:
-                    continue
-            env_path_file = os.path.join(env_path, "{0}.json".format(env_id))
-            try:
-                with open(env_path_file, "w") as fn:
-                    if isinstance(state[env_id], LazyEnvData):
-                        state[env_id].lazy_load_data()
-                        fn.write(
-                            json.dumps(state[env_id]._raw_dict, cls=NanSafeEncoder)
-                        )
-                    else:
-                        fn.write(json.dumps(state[env_id], cls=NanSafeEncoder))
-            except OSError as e:
-                if (
-                    e.errno != errno.ENAMETOOLONG
-                    and getattr(e, "winerror", None) != 206
-                ):
-                    raise
-                hashed_id = hashlib.sha256(env_id.encode("utf-8")).hexdigest()
-                env_path_file = os.path.join(
-                    env_path, "hash_{0}.json".format(hashed_id)
-                )
-                with open(env_path_file, "w") as fn:
-                    if isinstance(state[env_id], LazyEnvData):
-                        state[env_id].lazy_load_data()
-                        data_to_save = copy.deepcopy(state[env_id]._raw_dict)
-                    else:
-                        data_to_save = copy.deepcopy(state[env_id])
-                    data_to_save["name"] = env_id
-                    fn.write(json.dumps(data_to_save, cls=NanSafeEncoder))
-
-    return env_ids
-
-
-def serialize_all(state, env_path=DEFAULT_ENV_PATH):
-    serialize_env(state, list(state.keys()), env_path=env_path)
 
 
 # ------- Environment management helpers ----- #
@@ -249,6 +198,7 @@ def window(args):
         "width": opts.get("width"),
         "height": opts.get("height"),
         "contentID": get_rand_id(),  # to detected updated windows
+        "comment": opts.get("comment", ""),
     }
 
     if ptype in ["image_history", "plot_history"] and is_visdom_type:
@@ -292,50 +242,23 @@ def window(args):
     return p
 
 
-def gather_envs(state, env_path=DEFAULT_ENV_PATH):
-    if env_path is not None:
-        items = [
-            i[:-5]
-            for i in os.listdir(env_path)
-            if i.endswith(".json") and not re.match(r"^hash_[a-fA-F0-9]{64}\.json$", i)
-        ]
-    else:
-        items = []
-    return sorted(list(set(items + list(state.keys()))))
+def gather_envs(state, store):
+    return sorted(set(store.list_envs() + list(state.keys())))
 
 
-def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH, show_all=False):
+def compare_envs(state, eids, socket, store, show_all=False):
     logging.info("comparing envs")
     use_env_names = all(len(str(eid)) <= MAX_ENV_NAME_LEN for eid in eids)
     eidNums = {e: e if use_env_names else str(i) for i, e in enumerate(eids)}
-    env = {}
     envs = {}
     for eid in eids:
         if eid in state:
             envs[eid] = state.get(eid)
-        elif env_path is not None:
-            safe_eid = escape_eid(eid.strip())
-            base_env_path = os.path.abspath(env_path)
-            p = os.path.abspath(
-                os.path.join(base_env_path, "{0}.json".format(safe_eid))
-            )
-            try:
-                is_safe = os.path.commonpath([p, base_env_path]) == base_env_path
-            except ValueError:
-                is_safe = False
-            if is_safe and os.path.exists(p):
-                with open(p, "r") as fn:
-                    env = tornado.escape.json_decode(fn.read())
-                    state[eid] = env
-                    envs[eid] = env
-            else:
-                hashed_id = hashlib.sha256(safe_eid.encode("utf-8")).hexdigest()
-                p = os.path.join(env_path, "hash_{0}.json".format(hashed_id))
-                if os.path.exists(p):
-                    with open(p, "r") as fn:
-                        env = tornado.escape.json_decode(fn.read())
-                        state[eid] = env
-                        envs[eid] = env
+        else:
+            env = store.load_env(eid)
+            if env:
+                state[eid] = env
+                envs[eid] = env
 
     valid_eids = [eid for eid in eids if eid in envs]
     if not valid_eids:
@@ -497,6 +420,7 @@ def compare_envs(state, eids, socket, env_path=DEFAULT_ENV_PATH, show_all=False)
         "layout": {"title": "compare_legend"},
         "i": 1,
         "has_compare": True,
+        "commentsDisabled": True,
     }
     if "reload" in res:
         socket.write_message(
@@ -533,30 +457,16 @@ def send_to_sources(handler, msg):
         source.write_message(json.dumps(msg, cls=NanSafeEncoder))
 
 
-def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
+def load_env(state, eid, socket, store):
     """load an environment to a client by socket"""
     env = {}
     if eid in state:
         env = state.get(eid)
-    elif env_path is not None:
-        safe_eid = escape_eid(eid.strip())
-        base_env_path = os.path.abspath(env_path)
-        p = os.path.abspath(os.path.join(base_env_path, "{0}.json".format(safe_eid)))
-        try:
-            is_safe = os.path.commonpath([p, base_env_path]) == base_env_path
-        except ValueError:
-            is_safe = False
-        if is_safe and os.path.exists(p):
-            with open(p, "r") as fn:
-                env = tornado.escape.json_decode(fn.read())
-                state[eid] = env
-        else:
-            hashed_id = hashlib.sha256(safe_eid.encode("utf-8")).hexdigest()
-            p = os.path.join(env_path, "hash_{0}.json".format(hashed_id))
-            if os.path.exists(p):
-                with open(p, "r") as fn:
-                    env = tornado.escape.json_decode(fn.read())
-                    state[eid] = env
+    else:
+        loaded = store.load_env(eid)
+        if loaded:
+            env = loaded
+            state[eid] = env
 
     if "reload" in env:
         socket.write_message(
@@ -576,7 +486,7 @@ def load_env(state, eid, socket, env_path=DEFAULT_ENV_PATH):
             {
                 "command": "undo_state",
                 "eid": eid,
-                "count": count_deleted(env_path, eid),
+                "count": count_deleted(store, eid),
             },
             cls=NanSafeEncoder,
         )
@@ -594,111 +504,48 @@ def broadcast(self, msg, eid):
                 self.subs[s].write_message(msg)
 
 
-def _undo_paths(env_path, eid):
-    """Return (undo_dir, plain_path, hashed_path) for an environment's undo file.
-
-    ``hashed_path`` mirrors ``serialize_env``'s fallback for env ids whose plain
-    filename would exceed the filesystem limit.
-    """
-    undo_dir = os.path.join(env_path, UNDO_DIRNAME)
-    plain = os.path.join(undo_dir, "{0}.json".format(eid))
-    hashed_id = hashlib.sha256(eid.encode("utf-8")).hexdigest()
-    hashed = os.path.join(undo_dir, "hash_{0}.json".format(hashed_id))
-    return undo_dir, plain, hashed
-
-
-def _read_undo(env_path, eid):
-    """Load an environment's undo stack from disk, or [] if missing/corrupt."""
-    _, plain, hashed = _undo_paths(env_path, eid)
-    path = plain if os.path.exists(plain) else hashed
-    if not os.path.exists(path):
-        return []
-    try:
-        with open(path, "r") as fn:
-            data = json.loads(fn.read())
-    except (OSError, ValueError):
-        logging.warning(f"Could not read undo stack for env {eid}; ignoring it")
-        return []
-    return data if isinstance(data, list) else []
-
-
-def _write_undo(env_path, eid, stack):
-    """Atomically write an environment's undo stack to disk."""
-    undo_dir, plain, hashed = _undo_paths(env_path, eid)
-    os.makedirs(undo_dir, exist_ok=True)
-    payload = json.dumps(stack, cls=NanSafeEncoder)
-    try:
-        target = plain
-        tmp = plain + ".tmp"
-        with open(tmp, "w") as fn:
-            fn.write(payload)
-        os.replace(tmp, plain)
-    except OSError as e:
-        if e.errno != errno.ENAMETOOLONG and getattr(e, "winerror", None) != 206:
-            raise
-        target = hashed
-        tmp = hashed + ".tmp"
-        with open(tmp, "w") as fn:
-            fn.write(payload)
-        os.replace(tmp, hashed)
-    return target
-
-
-def push_deleted(env_path, eid, win_id, p_data):
-    """Append a closed pane to the environment's on-disk undo stack (LIFO),
-    keeping at most DEFAULT_MAX_UNDO_HISTORY entries."""
-    if env_path is None:
-        return
-    stack = _read_undo(env_path, eid)
+def push_deleted(store, eid, win_id, p_data):
+    """Append a closed pane to the environment's undo stack (LIFO), keeping at
+    most DEFAULT_MAX_UNDO_HISTORY entries. Persistence is delegated to ``store``
+    (a DataStore), which no-ops when running without an env_path."""
+    stack = store.load_undo(eid)
     stack.append([win_id, p_data])
     if len(stack) > DEFAULT_MAX_UNDO_HISTORY:
         stack = stack[-DEFAULT_MAX_UNDO_HISTORY:]
-    _write_undo(env_path, eid, stack)
+    store.save_undo(eid, stack)
 
 
-def pop_deleted(env_path, eid):
+def pop_deleted(store, eid):
     """Pop and return the most recently closed pane as (win_id, p_data),
     or None if the environment has no undo history."""
-    if env_path is None:
-        return None
-    stack = _read_undo(env_path, eid)
+    stack = store.load_undo(eid)
     if not stack:
         return None
     win_id, p_data = stack.pop()
     if stack:
-        _write_undo(env_path, eid, stack)
+        store.save_undo(eid, stack)
     else:
-        clear_deleted(env_path, eid)
+        store.clear_undo(eid)
     return win_id, p_data
 
 
-def clear_deleted(env_path, eid):
-    """Remove an environment's on-disk undo history."""
-    if env_path is None:
-        return
-    _, plain, hashed = _undo_paths(env_path, eid)
-    for path in (plain, hashed):
-        if os.path.exists(path):
-            try:
-                os.remove(path)
-            except OSError as e:
-                logging.error(f"Failed to delete undo file {path}: {e}")
+def clear_deleted(store, eid):
+    """Remove an environment's undo history via the ``store`` backend."""
+    store.clear_undo(eid)
 
 
-def count_deleted(env_path, eid):
+def count_deleted(store, eid):
     """Return the number of closed panes available to undo for an env."""
-    if env_path is None:
-        return 0
-    return len(_read_undo(env_path, eid))
+    return len(store.load_undo(eid))
 
 
-def broadcast_undo_state(handler, eid, env_path):
+def broadcast_undo_state(handler, eid, store):
     """Tell subscribers of an env how many closed panes remain to undo."""
     msg = json.dumps(
         {
             "command": "undo_state",
             "eid": eid,
-            "count": count_deleted(env_path, eid),
+            "count": count_deleted(store, eid),
         },
         cls=NanSafeEncoder,
     )
@@ -736,6 +583,7 @@ def register_window(self, p, eid):
 
     if p["id"] in env:
         p["i"] = env[p["id"]]["i"]
+        p["comment"] = env[p["id"]].get("comment", p.get("comment", ""))
     else:
         p["i"] = len(env)
 
