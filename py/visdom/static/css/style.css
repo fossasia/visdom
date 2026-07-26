@@ -422,13 +422,25 @@ button[title="smooth lines"].active {
 
 .export-dropdown-item {
   position: relative;
-  padding: 4px 8px;
-  cursor: pointer;
   white-space: nowrap;
-  color: #333;
 }
 
-.export-dropdown-item:hover {
+.export-dropdown-menu .export-dropdown-button {
+  display: block;
+  float: none;
+  width: 100%;
+  margin: 0;
+  padding: 4px 8px;
+  cursor: pointer;
+  text-align: left;
+  color: #333;
+  background: transparent;
+  font-size: 11px;
+  line-height: normal;
+}
+
+.export-dropdown-menu .export-dropdown-button:hover,
+.export-dropdown-menu .export-dropdown-button:focus {
   background-color: #f0f0f0;
 }
 

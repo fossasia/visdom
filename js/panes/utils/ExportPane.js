@@ -52,8 +52,7 @@ function ExportPane({ onExport, allowedFormats = ['png', 'jpg', 'svg'] }) {
     setActiveSubmenu(format);
   };
 
-  const handleDpiClick = (ev, format, dpi) => {
-    ev.stopPropagation();
+  const handleDpiClick = (format, dpi) => {
     onExport(format, dpi);
     closeAll();
   };
@@ -73,25 +72,33 @@ function ExportPane({ onExport, allowedFormats = ['png', 'jpg', 'svg'] }) {
             <li
               key={format}
               className="export-dropdown-item has-submenu"
-              role="menuitem"
+              role="none"
               onMouseEnter={() => setActiveSubmenu(format)}
               onMouseLeave={() =>
                 setActiveSubmenu((prev) => (prev === format ? null : prev))
               }
-              onClick={() => handleFormatClick(format)}
             >
-              {format.toUpperCase()}
-              <span className="export-dropdown-caret">&#9656;</span>
+              <button
+                type="button"
+                role="menuitem"
+                className="export-dropdown-button"
+                onClick={() => handleFormatClick(format)}
+              >
+                {format.toUpperCase()}
+                <span className="export-dropdown-caret">&#9656;</span>
+              </button>
               {activeSubmenu === format && (
                 <ul className="export-dropdown-submenu" role="menu">
                   {DPI_OPTIONS.map((dpi) => (
-                    <li
-                      key={dpi}
-                      className="export-dropdown-item"
-                      role="menuitem"
-                      onClick={(ev) => handleDpiClick(ev, format, dpi)}
-                    >
-                      {dpi} DPI
+                    <li key={dpi} className="export-dropdown-item" role="none">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="export-dropdown-button"
+                        onClick={() => handleDpiClick(format, dpi)}
+                      >
+                        {dpi} DPI
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -99,12 +106,15 @@ function ExportPane({ onExport, allowedFormats = ['png', 'jpg', 'svg'] }) {
             </li>
           ))}
           {svgAllowed && (
-            <li
-              className="export-dropdown-item"
-              role="menuitem"
-              onClick={() => handleFormatClick('svg')}
-            >
-              SVG
+            <li className="export-dropdown-item" role="none">
+              <button
+                type="button"
+                role="menuitem"
+                className="export-dropdown-button"
+                onClick={() => handleFormatClick('svg')}
+              >
+                SVG
+              </button>
             </li>
           )}
         </ul>
