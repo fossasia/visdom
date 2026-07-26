@@ -7,16 +7,18 @@
  *
  */
 
-import React, { useContext, useEffect } from 'react';
+import React, { useContext, useEffect, useRef } from 'react';
 import ScrollToBottom from 'react-scroll-to-bottom';
 
 import ApiContext from '../api/ApiContext';
 import EventSystem from '../EventSystem';
 import Pane from './Pane';
+import { typesetMathJax } from './utils/mathjaxHelpers';
 
 function TextPane(props) {
   const { sendPaneMessage } = useContext(ApiContext);
   const { envID, id, content, isFocused } = props;
+  const contentRef = useRef();
 
   // private events
   // --------------
@@ -70,6 +72,14 @@ function TextPane(props) {
     };
   });
 
+  useEffect(() => {
+    let cancelled = false;
+    typesetMathJax(contentRef.current, () => cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [content]);
+
   // rendering
   // ---------
 
@@ -88,7 +98,7 @@ function TextPane(props) {
         initialScrollBehavior={initialScrollBehavior}
         mode="bottom"
       >
-        <div dangerouslySetInnerHTML={{ __html: content }} />
+        <div ref={contentRef} dangerouslySetInnerHTML={{ __html: content }} />
       </ScrollToBottom>
     </Pane>
   );
