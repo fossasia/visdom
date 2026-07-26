@@ -879,7 +879,19 @@ class Visdom(object):
         self.event_handlers.pop((env, target), None)
 
     def _handle_incoming_message(self, raw_message):
-        message = json.loads(raw_message)
+        try:
+            message = json.loads(raw_message)
+        except (TypeError, ValueError) as e:
+            logger.warning("Visdom failed to decode incoming message: %s", e)
+            return
+
+        if not isinstance(message, dict):
+            logger.warning(
+                "Visdom ignored incoming message with unexpected type %s",
+                type(message).__name__,
+            )
+            return
+
         if "command" in message:
             # Handle server commands
             if message["command"] == "alive":
@@ -912,28 +924,37 @@ class Visdom(object):
                     traceback.print_exc()
 
     def _run_polling(self):
-        try:
-            resp_json = self._handle_post(
-                "{0}:{1}{2}/vis_socket_wrap".format(
-                    self.server, self.port, self.base_url
-                ),
-                data=json.dumps({"message_type": "init"}),
-            )
-            resp = json.loads(resp_json)
-            self.vis_sid = resp["sid"]
-            while self.use_socket:
+        while self.use_socket:
+            try:
                 resp_json = self._handle_post(
                     "{0}:{1}{2}/vis_socket_wrap".format(
                         self.server, self.port, self.base_url
                     ),
-                    data=json.dumps({"message_type": "query", "sid": self.vis_sid}),
+                    data=json.dumps({"message_type": "init"}),
                 )
                 resp = json.loads(resp_json)
-                for msg in resp["messages"]:
-                    self._handle_incoming_message(msg)
-                time.sleep(0.1)
-        finally:
-            self.socket_alive = False
+                self.vis_sid = resp["sid"]
+                while self.use_socket:
+                    resp_json = self._handle_post(
+                        "{0}:{1}{2}/vis_socket_wrap".format(
+                            self.server, self.port, self.base_url
+                        ),
+                        data=json.dumps(
+                            {"message_type": "query", "sid": self.vis_sid}
+                        ),
+                    )
+                    resp = json.loads(resp_json)
+                    for msg in resp["messages"]:
+                        self._handle_incoming_message(msg)
+                    time.sleep(0.1)
+            except Exception as e:
+                logger.error(
+                    "Polling had error {}, attempting restart".format(e)
+                )
+            finally:
+                self.socket_alive = False
+            if self.use_socket:
+                time.sleep(3)
 
     def _run_websocket(self):
         def on_message(ws, message):
@@ -1001,7 +1022,8 @@ class Visdom(object):
                 ws.close()
             except Exception as e:
                 logger.error("Socket had error {}, attempting restart".format(e))
-            time.sleep(3)
+            if self.use_socket:
+                time.sleep(3)
 
     def setup_polling(self):
         self.setup_socket(polling=True)
