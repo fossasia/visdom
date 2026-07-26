@@ -46,11 +46,14 @@ function NetworkPane(props) {
     }
 
     const filename = `${props.contentID || 'plot'}.${format}`;
+
     const scale = dpi ? dpi / 96 : 2;
 
     requestAnimationFrame(() => {
       if (format === 'svg') {
-        const source = new XMLSerializer().serializeToString(svg);
+        const clone = svg.cloneNode(true);
+        inlineComputedStyles(svg, clone);
+        const source = new XMLSerializer().serializeToString(clone);
         const blob = new Blob([source], {
           type: 'image/svg+xml;charset=utf-8',
         });
@@ -72,6 +75,28 @@ function NetworkPane(props) {
         encoderOptions: format === 'jpg' ? 0.92 : undefined,
       });
     });
+  };
+
+  const SVG_STYLE_PROPS = [
+    'fill',
+    'stroke',
+    'stroke-width',
+    'stroke-opacity',
+    'fill-opacity',
+    'opacity',
+    'font-family',
+    'font-size',
+  ];
+  const inlineComputedStyles = (liveEl, cloneEl) => {
+    const computed = window.getComputedStyle(liveEl);
+    const styleStr = SVG_STYLE_PROPS.map(
+      (prop) => `${prop}:${computed.getPropertyValue(prop)}`
+    ).join(';');
+    cloneEl.setAttribute('style', styleStr);
+
+    for (let i = 0; i < liveEl.children.length; i++) {
+      inlineComputedStyles(liveEl.children[i], cloneEl.children[i]);
+    }
   };
 
   // effects
