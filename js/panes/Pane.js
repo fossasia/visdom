@@ -16,8 +16,8 @@ import React, {
 } from 'react';
 
 import ApiContext from '../api/ApiContext';
-import ExportDropdown from './utils/ExportPane';
 import PropertyItem from './PropertyItem';
+import ExportPane from './utils/ExportPane';
 var classNames = require('classnames');
 
 const COMMENT_SAVE_DEBOUNCE_MS = 500;
@@ -168,7 +168,7 @@ var Pane = forwardRef((props, ref) => {
           X{' '}
         </button>
         {props.handleExport ? (
-          <ExportDropdown
+          <ExportPane
             onExport={props.handleExport}
             allowedFormats={props.exportFormats}
           />

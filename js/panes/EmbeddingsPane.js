@@ -1,5 +1,5 @@
 /**
- * Copyright 2017-present, The Visdom AuthorsSCALE_RAD
+ * Copyright 2017-present, The Visdom Authors
  * All rights reserved.
  *
  * This source code is licensed under the license found in the
@@ -124,13 +124,6 @@ class EmbeddingsPane extends React.Component {
     link.click();
   };
 
-  // Captures the WebGL canvas as a PNG/JPG. SVG is intentionally not
-  // supported here (see ExportDropdown's allowedFormats prop below) -
-  // this is a raster canvas, there's no vector source to export.
-  //
-  // To get a higher-resolution capture than what's on screen, we
-  // temporarily bump the renderer's pixel ratio, force a render, grab
-  // the data URL, then restore the original on-screen resolution.
   handleExport = (format, dpi) => {
     const { renderer, scene, camera } = this;
     if (!renderer || !scene || !camera) return;
@@ -140,8 +133,6 @@ class EmbeddingsPane extends React.Component {
     const scale = dpi ? dpi / 96 : 1;
     const originalPixelRatio = renderer.getPixelRatio();
 
-    // `updateStyle=false` keeps the on-screen CSS size unchanged while
-    // only the internal render resolution increases
     renderer.setPixelRatio(originalPixelRatio * scale);
     renderer.setSize(width, height, false);
     renderer.render(scene, camera);

@@ -75,6 +75,9 @@ function ExportPane({ onExport, allowedFormats = ['png', 'jpg', 'svg'] }) {
               className="export-dropdown-item has-submenu"
               role="menuitem"
               onMouseEnter={() => setActiveSubmenu(format)}
+              onMouseLeave={() =>
+                setActiveSubmenu((prev) => (prev === format ? null : prev))
+              }
               onClick={() => handleFormatClick(format)}
             >
               {format.toUpperCase()}

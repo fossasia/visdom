@@ -7,384 +7,281 @@
  *
  */
 
-import React, { useContext, useEffect, useRef, useState } from 'react';
-const { usePrevious } = require('../util');
-import ApiContext from '../api/ApiContext';
+// ignoring errors due to statically loaded d3 and saveSvgAsPng
+/* eslint-disable no-undef */
+
+import React, { useEffect, useRef, useState } from 'react';
+
 import Pane from './Pane';
-import { typesetMathJax } from './utils/mathjaxHelpers';
-const { sgg } = require('ml-savitzky-golay-generalized');
 
-var PlotPane = (props) => {
-  const { contentID, type, selected } = props;
-  const isHistory = type === 'plot_history';
+function NetworkPane(props) {
+  const {
+    content,
+    directed,
+    showEdgeLabels,
+    showVertexLabels,
+    _width,
+    _height,
+  } = props;
 
-  // state variables
-  // --------------
-  const plotlyRef = useRef();
-  const captionRef = useRef();
-  const maxsmoothvalue = 100;
-  const [smoothWidgetActive, setSmoothWidgetActive] = useState(false);
-  const [smoothvalue, setSmoothValue] = useState(1);
-  const [actualSelected, setActualSelected] = useState(
-    isHistory ? selected || 0 : 0
-  );
-  const { sendPlotLayoutUpdate } = useContext(ApiContext);
-  const layoutUpdateTimeout = useRef(null);
-
-  const content = isHistory
-    ? props.content[Math.min(actualSelected, props.content.length - 1)]
-    : props.content;
-
-  const previousContent = usePrevious(content);
-
-  useEffect(() => {
-    if (isHistory && selected !== undefined) {
-      setActualSelected(selected);
-    }
-  }, [selected]);
-
-  useEffect(() => {
-    let cancelled = false;
-    typesetMathJax(captionRef.current, () => cancelled);
-    return () => {
-      cancelled = true;
-    };
-  }, [content && content.caption]);
+  const containerRef = useRef(null);
+  const timeoutRef = useRef(null);
+  const forceRef = useRef(null);
+  const [downloadError, setDownloadError] = useState(null);
 
   // private events
-  // -------------
-  const toggleSmoothWidget = () => {
-    setSmoothWidgetActive(!smoothWidgetActive);
-  };
-  const updateSmoothSlider = (value) => {
-    setSmoothValue(value);
-  };
-  // Plotly's `scale` option is a raster multiplier, not a real DPI value.
-  // We approximate "target DPI" by scaling relative to the 96 DPI CSS
-  // baseline. This affects pixel dimensions only - it does not embed
-  // DPI metadata into the exported file (tracked as a follow-up).
-  const dpiToScale = (dpi) => (dpi ? dpi / 96 : 1);
-
+  // --------------
   const handleExport = (format, dpi) => {
-    Plotly.downloadImage(plotlyRef.current, {
-      // plotly's image export API expects 'jpeg', not 'jpg'
-      format: format === 'jpg' ? 'jpeg' : format,
-      scale: dpiToScale(dpi),
-      filename: contentID || 'plot',
-    });
-  };
+    const svg = containerRef.current?.querySelector('svg');
 
-  const handleMetadataExport = () => {
-    const graph = plotlyRef.current;
-    const metadata = {
-      data: graph?.data ?? content?.data ?? [],
-      layout: graph?.layout ?? content?.layout ?? {},
-    };
-    const json = JSON.stringify(metadata, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${contentID || 'plot'}_metadata.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    setTimeout(() => window.URL.revokeObjectURL(url), 1000);
-  };
-
-  const updateHistorySlider = (ev) => {
-    setActualSelected(parseInt(ev.target.value));
-  };
-
-  // events
-  // ------
-  const isDisplayed = (el) =>
-    !!(el && el.offsetWidth > 0 && el.offsetHeight > 0);
-  useEffect(() => {
-    const plotElement = plotlyRef.current;
-    if (!plotElement) return;
-
-    const resizeObserver = new ResizeObserver(() => {
-      if (plotElement._fullLayout && isDisplayed(plotElement)) {
-        Plotly.Plots.resize(plotElement);
+    if (!svg) {
+      setDownloadError('Graph is not ready yet. Please try again.');
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
       }
-    });
-
-    resizeObserver.observe(plotElement);
-    return () => resizeObserver.disconnect();
-  }, []);
-  useEffect(() => {
-    if (previousContent && content) {
-      // Retain trace visibility between old and new plots
-      let trace_visibility_by_name = {};
-      let trace_idx = null;
-      for (trace_idx in previousContent.data) {
-        let trace = previousContent.data[trace_idx];
-        trace_visibility_by_name[trace.name] = trace.visible;
-      }
-      for (trace_idx in content.data) {
-        let trace = content.data[trace_idx];
-        trace.visible = trace_visibility_by_name[trace.name];
-      }
-
-      // Copy user modified zooms
-      let old_x = previousContent.layout.xaxis;
-      let new_x = content.layout.xaxis;
-      let new_range_set = new_x !== undefined && new_x.autorange === false;
-      if (old_x !== undefined && old_x.autorange === false && !new_range_set) {
-        // Take the old x axis layout if changed
-        content.layout.xaxis = old_x;
-      }
-      let old_y = previousContent.layout.yaxis;
-      let new_y = content.layout.yaxis;
-      new_range_set = new_y !== undefined && new_y.autorange === false;
-      if (old_y !== undefined && old_y.autorange === false && !new_range_set) {
-        // Take the old y axis layout if changed
-        content.layout.yaxis = old_y;
-      }
+      timeoutRef.current = setTimeout(() => {
+        setDownloadError(null);
+      }, 3000);
+      return;
     }
 
-    newPlot();
-  });
+    const filename = `${props.contentID || 'plot'}.${format}`;
+    const scale = dpi ? dpi / 96 : 2;
+
+    requestAnimationFrame(() => {
+      if (format === 'svg') {
+        const source = new XMLSerializer().serializeToString(svg);
+        const blob = new Blob([source], {
+          type: 'image/svg+xml;charset=utf-8',
+        });
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+        return;
+      }
+
+      saveSvgAsPng(svg, filename, {
+        scale,
+        backgroundColor: '#FFFFFF',
+        encoderType: format === 'jpg' ? 'image/jpeg' : 'image/png',
+        encoderOptions: format === 'jpg' ? 0.92 : undefined,
+      });
+    });
+  };
+
+  // effects
+  // -------
+
+  // initialize d3
+  useEffect(() => {
+    // stop the previous simulation's timer before starting a new one
+    if (forceRef.current) {
+      forceRef.current.stop();
+    }
+    d3.select(containerRef.current).selectAll('*').remove();
+    CreateNetwork(content);
+
+    return () => {
+      if (forceRef.current) {
+        forceRef.current.stop();
+        forceRef.current = null;
+      }
+    };
+  }, [content, directed, showEdgeLabels, showVertexLabels]);
 
   useEffect(() => {
-    const plotElement = plotlyRef.current;
-    if (!plotElement) return;
-
-    const handleRelayout = (eventdata) => {
-      const touchedShapes = Object.keys(eventdata).some((k) =>
-        k.includes('shapes')
-      );
-      if (!touchedShapes) return;
-
-      clearTimeout(layoutUpdateTimeout.current);
-      layoutUpdateTimeout.current = setTimeout(() => {
-        const shapes = plotElement.layout?.shapes || [];
-
-        if (content && content.layout) {
-          content.layout.shapes = shapes;
-        }
-
-        sendPlotLayoutUpdate(
-          props.envID,
-          props.id,
-          { shapes },
-          isHistory ? actualSelected : undefined
-        );
-      }, 300);
-    };
-
-    plotElement.on('plotly_relayout', handleRelayout);
     return () => {
-      plotElement.removeListener('plotly_relayout', handleRelayout);
-      clearTimeout(layoutUpdateTimeout.current);
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
     };
-  }, [props.envID, props.id, actualSelected, content]);
+  }, []);
+
+  const CreateNetwork = (graph) => {
+    var width = _width,
+      height = _height;
+    var color = d3.scale.category10();
+    var force = d3.layout
+      .force()
+      .charge(-120)
+      .linkDistance(120)
+      .size([width, height]);
+    forceRef.current = force;
+    var svg = d3
+      .select(containerRef.current)
+      .select('svg')
+      .attr('viewBox', '0 0 ' + width + ' ' + height)
+      .attr('preserveAspectRatio', 'xMinYMin meet')
+      .classed('svg-content', true);
+    if (svg.empty()) {
+      svg = d3
+        .select(containerRef.current)
+        .append('svg')
+        .attr('viewBox', '0 0 ' + width + ' ' + height)
+        .attr('preserveAspectRatio', 'xMinYMin meet')
+        .classed('svg-content', true);
+    }
+
+    if (directed) {
+      svg
+        .append('defs')
+        .append('marker')
+        .attrs({
+          id: 'arrowhead',
+          viewBox: '-0 -5 10 10',
+          refX: 13,
+          refY: 0,
+          orient: 'auto',
+          markerWidth: 13,
+          markerHeight: 13,
+          xoverflow: 'visible',
+        })
+        .append('svg:path')
+        .attr('d', 'M 0,-5 L 10 ,0 L 0,5')
+        .attr('fill', '#999')
+        .style('stroke', 'none');
+    }
+
+    force.nodes(graph.nodes).links(graph.edges).start();
+
+    var link = svg
+      .selectAll('.link')
+      .data(graph.edges)
+      .enter()
+      .append('line')
+      .attr('class', 'link')
+      .attr('marker-end', 'url(#arrowhead)');
+
+    link.append('title').text(function (d) {
+      return d.type;
+    });
+
+    var edgepaths = svg
+      .selectAll('.edgepath')
+      .data(graph.edges)
+      .enter()
+      .append('path')
+      .attrs({
+        class: 'edgepath',
+        'fill-opacity': 0,
+        'stroke-opacity': 0,
+        id: function (d, i) {
+          return 'edgepath' + i;
+        },
+      })
+      .style('pointer-events', 'none');
+
+    var edgelabels = svg
+      .selectAll('.edgelabel')
+      .data(graph.edges)
+      .enter()
+      .append('text')
+      .style('pointer-events', 'none')
+      .attrs({
+        class: 'edgelabel',
+        id: function (d, i) {
+          return 'edgelabel' + i;
+        },
+        'font-size': 10,
+        fill: '#aaa',
+      });
+    if (showEdgeLabels) {
+      edgelabels
+        .append('textPath')
+        .attr('xlink:href', (d, i) => '#edgepath' + i)
+        .style('text-anchor', 'middle')
+        .style('pointer-events', 'none')
+        .attr('startOffset', '50%')
+        .text((d) => d.label);
+    }
+
+    var node = svg
+      .selectAll('.node')
+      .data(graph.nodes)
+      .enter()
+      .append('g')
+      .attr('class', 'node')
+      .attr('r', 10) // radius
+      .style('fill', function (d) {
+        return color(d.club);
+      })
+      .call(force.drag);
+
+    node.append('circle').attr('r', 10);
+
+    node.append('title').text((d) => d.name);
+    if (showVertexLabels) {
+      node
+        .append('text')
+        .attr('dx', 12)
+        .attr('dy', '.35em')
+        .text((d) => d.label);
+    }
+
+    force.on('tick', function () {
+      link
+        .attr('x1', function (d) {
+          return d.source.x;
+        })
+        .attr('y1', function (d) {
+          return d.source.y;
+        })
+        .attr('x2', function (d) {
+          return d.target.x;
+        })
+        .attr('y2', function (d) {
+          return d.target.y;
+        });
+
+      node.attr('transform', function (d) {
+        return 'translate(' + d.x + ',' + d.y + ')';
+      });
+
+      edgepaths.attr('d', function (d) {
+        return (
+          'M ' +
+          d.source.x +
+          ' ' +
+          d.source.y +
+          ' L ' +
+          d.target.x +
+          ' ' +
+          d.target.y
+        );
+      });
+
+      edgelabels.attr('transform', function (d) {
+        if (d.target.x < d.source.x) {
+          var bbox = this.getBBox();
+
+          var rx = bbox.x + bbox.width / 2;
+          var ry = bbox.y + bbox.height / 2;
+          return 'rotate(180 ' + rx + ' ' + ry + ')';
+        } else {
+          return 'rotate(0)';
+        }
+      });
+    });
+  };
 
   // rendering
   // ---------
 
-  const newPlot = () => {
-    if (!content || !content.data) return;
-    var data = content.data;
-
-    // add smoothed line plots for existing line plots
-    var smooth_data = [];
-    if (smoothWidgetActive) {
-      smooth_data = data
-        .filter((d) => d['type'] == 'scatter' && d['mode'] == 'lines')
-        .map((d) => {
-          var smooth_d = JSON.parse(JSON.stringify(d));
-          var windowSize = 2 * smoothvalue + 1;
-
-          // remove legend of smoothed plot
-          smooth_d.showlegend = false;
-
-          // turn off smoothing for smoothvalue of 3 or too small arrays
-          if (windowSize < 5 || !smooth_d.x || smooth_d.x.length <= 5) {
-            d.opacity = 1.0;
-
-            return smooth_d;
-          }
-
-          // savitzky golay requires the window size to be ≥ 5
-          windowSize = Math.max(windowSize, 5);
-
-          // window size needs to be odd
-          if (smooth_d.x.length % 2 == 0)
-            windowSize = Math.min(windowSize, smooth_d.x.length - 1);
-          else windowSize = Math.min(windowSize, smooth_d.x.length);
-          smooth_d.y = sgg(smooth_d.y, smooth_d.x, {
-            windowSize: windowSize,
-          });
-
-          // adapt color & transparency
-          d.opacity = 0.35;
-          smooth_d.opacity = 1.0;
-          if (smooth_d.marker?.line) smooth_d.marker.line.color = 0;
-
-          return smooth_d;
-        });
-
-      // pad data in case we have some smoothed lines
-      // (lets plotly use the same colors if no colors are given by the user)
-      if (smooth_data.length > 0) {
-        data = Array.from(data);
-        let num_to_fill = 10 - (data.length % 10);
-        for (let i = 0; i < num_to_fill; i++) data.push({});
-      }
-    } else
-      content.data
-        .filter((data) => data['type'] == 'scatter' && data['mode'] == 'lines')
-        .map((d) => {
-          d.opacity = 1.0;
-        });
-
-    // required for Plotly.react to register the update
-    const layout = content.layout || (content.layout = {});
-    content.layout.datarevision = props.version + '_' + actualSelected;
-
-    // Adjust top margin and title position
-    layout.margin = layout.margin || {};
-
-    if (layout.title) {
-      if (typeof layout.title === 'string') {
-        layout.title = { text: layout.title };
-      }
-      if (layout.title.text) {
-        layout.margin.t = 85;
-      } else {
-        layout.margin.t = 30;
-      }
-    } else {
-      layout.margin.t = 30;
-    }
-
-    if (content.caption) {
-      layout.margin.b = Math.max(layout.margin.b || 60, 100);
-    }
-
-    // draw / redraw plot with layout-options
-    Plotly.react(contentID, data.concat(smooth_data), content.layout, {
-      showLink: false,
-      displaylogo: false,
-      doubleClick: 'reset',
-      doubleClickDelay: 500,
-      modeBarButtonsToAdd: ['drawopenpath', 'eraseshape'],
-    }).then(() => {
-      const plotElement = plotlyRef.current;
-      if (plotElement && plotElement._fullLayout && isDisplayed(plotElement)) {
-        Plotly.Plots.resize(plotElement);
-      }
-    });
-  };
-
-  // check if data can be smoothed
-  var contains_line_plots =
-    content &&
-    content.data &&
-    content.data.some((data) => {
-      return data['type'] == 'scatter' && data['mode'] == 'lines';
-    });
-
-  var smooth_widget_button = '';
-  var smooth_widget = '';
-  if (contains_line_plots) {
-    smooth_widget_button = (
-      <button
-        key="smooth_widget_button"
-        title="smooth lines"
-        onClick={toggleSmoothWidget}
-        className={smoothWidgetActive ? 'pull-right active' : 'pull-right'}
-      >
-        ~
-      </button>
-    );
-    if (smoothWidgetActive) {
-      smooth_widget = (
-        <div className="widget" key="smooth_widget">
-          <div style={{ display: 'flex' }}>
-            <span>Smoothing:&nbsp;&nbsp;</span>
-            <input
-              type="range"
-              min="1"
-              max={maxsmoothvalue}
-              value={smoothvalue}
-              onInput={(ev) => updateSmoothSlider(ev.target.value)}
-            />
-            <span>&nbsp;&nbsp;&nbsp;&nbsp;</span>
-          </div>
-        </div>
-      );
-    }
-  }
-
-  var history_widget = '';
-  if (isHistory && props.show_slider && props.content.length > 1) {
-    history_widget = (
-      <div className="widget" key="history_slider">
-        <div style={{ display: 'flex' }}>
-          <span>Frame:&nbsp;&nbsp;</span>
-          <input
-            type="range"
-            min="0"
-            max={props.content.length - 1}
-            value={actualSelected}
-            onChange={updateHistorySlider}
-          />
-          <span>
-            &nbsp;&nbsp;
-            {actualSelected}/{props.content.length - 1}
-            &nbsp;&nbsp;
-          </span>
-        </div>
-      </div>
-    );
-  }
-
-  var caption_widget = '';
-  if (content && content.caption) {
-    caption_widget = (
-      <div className="widget plot-caption" key="plot_caption" ref={captionRef}>
-        {content.caption}
-      </div>
-    );
-  }
-
   return (
-    <Pane
-      {...props}
-      handleExport={handleExport}
-      handleMetadataExport={handleMetadataExport}
-      barwidgets={[smooth_widget_button]}
-      widgets={[history_widget, caption_widget, smooth_widget]}
-      enablePropertyList
-    >
+    <Pane {...props} handleExport={handleExport}>
+      {downloadError && <div className="error-message">{downloadError}</div>}
       <div
-        id={contentID}
-        style={{ height: '100%', width: '100%' }}
-        className={`plotly-graph-div${
-          content.data?.[0]?.type === 'heatmap'
-            ? ' plotly-heatmap'
-            : content.data?.[0]?.type === 'contour'
-              ? ' plotly-contour'
-              : content.data?.[0]?.type === 'surface'
-                ? ' plotly-surface'
-                : ''
-        }`}
-        ref={plotlyRef}
+        ref={containerRef}
+        style={{ height: '100%', width: '100%', flex: 1 }}
+        className="Network_Div"
       />
     </Pane>
   );
-};
+}
 
-// prevent rerender unless we know we need one
-// (previously known as shouldComponentUpdate)
-PlotPane = React.memo(PlotPane, (props, nextProps) => {
-  if (props.contentID !== nextProps.contentID) return false;
-  else if (props.h !== nextProps.h || props.w !== nextProps.w) return false;
-  else if (props.isFocused !== nextProps.isFocused) return false;
-  return true;
-});
-
-export default PlotPane;
+export default NetworkPane;
