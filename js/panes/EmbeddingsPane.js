@@ -402,13 +402,6 @@ class Scene extends React.Component {
       '#cab2d6',
       '#cccc00',
     ];
-    // crossOrigin must be set before loading this cross-origin texture -
-    // otherwise the WebGL canvas becomes "tainted" and toDataURL() (used
-    // by handleExport below, for PNG/JPG export) throws a SecurityError,
-    // silently aborting the download with no visible error to the user.
-    // GitHub Pages already sends the necessary CORS headers for this
-    // asset, so requesting it in CORS mode is enough to keep the canvas
-    // exportable.
     const textureLoader = new THREE.TextureLoader();
     textureLoader.setCrossOrigin('anonymous');
     let circle_sprite = textureLoader.load(
@@ -459,10 +452,6 @@ class Scene extends React.Component {
     });
 
     let points = new THREE.Points(pointsGeometry, pointsMaterial);
-    // preserveDrawingBuffer is required so the canvas can be captured via
-    // toDataURL() for image export (handleExport below) - without it the
-    // drawing buffer is cleared right after compositing and captures come
-    // out blank.
     let renderer = new THREE.WebGLRenderer({ preserveDrawingBuffer: true });
 
     let scene = new THREE.Scene();
