@@ -856,9 +856,16 @@ class ExperimentLogHandler(BaseHandler):
     (:class:`ExperimentStore` over ``handler.storage``) and mirrored into the
     in-memory env state so a later full-env save writes it back rather than
     dropping it. The stored experiment is written back to the client as JSON.
+
+    All three actions write, so the endpoint is rejected with 403 while the
+    server runs in readonly mode.
     """
 
     VALID_ACTIONS = ("log", "metrics", "finish")
+
+    def initialize(self, app):
+        super().initialize(app)
+        self.readonly = app.readonly
 
     @staticmethod
     def _require_mapping(args, field):
@@ -928,6 +935,17 @@ class ExperimentLogHandler(BaseHandler):
 
     @check_auth
     def post(self):
+        if self.readonly:
+            self.set_status(403)
+            self.write(
+                {
+                    "success": False,
+                    "error": "Experiment logging is disabled while the server "
+                    "is in readonly mode",
+                }
+            )
+            return
+
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
