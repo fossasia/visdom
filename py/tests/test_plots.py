@@ -320,5 +320,308 @@ class TestHeatmap(unittest.TestCase):
         self.assertTrue(np.isnan(z[1][0]))
 
 
+class TestBar(unittest.TestCase):
+    def setUp(self):
+        self.viz = visdom.Visdom(send=False, use_incoming_socket=False)
+
+    def _bar(self, X, Y=None, **kwargs):
+        sent = {}
+
+        def capture(msg, endpoint="events", **_):
+            sent["payload"] = msg
+            sent["endpoint"] = endpoint
+            return "win1"
+
+        with patch.object(self.viz, "_send", side_effect=capture):
+            self.viz.bar(X, Y=Y, **kwargs)
+        return sent
+
+    def test_1d_x_one_trace(self):
+        """1D X produces a single bar trace."""
+        sent = self._bar(np.array([1.0, 2.0, 3.0]))
+        self.assertEqual(len(sent["payload"]["data"]), 1)
+        self.assertEqual(sent["payload"]["data"][0]["type"], "bar")
+
+    def test_2d_x_one_trace_per_column(self):
+        """NxM X produces M bar traces."""
+        X = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
+        sent = self._bar(X)
+        self.assertEqual(len(sent["payload"]["data"]), 2)
+
+    def test_3d_x_raises(self):
+        """3D X raises on the ndim check."""
+        with self.assertRaises(AssertionError):
+            self.viz.bar(np.ones((2, 3, 4)))
+
+    def test_x_y_length_mismatch_raises(self):
+        """Y with a different length than X raises."""
+        with self.assertRaises(AssertionError):
+            self.viz.bar(np.array([1.0, 2.0, 3.0]), Y=np.array([1.0, 2.0]))
+
+    def test_default_x_axis_is_one_based(self):
+        """Without Y the x-axis is 1..N."""
+        sent = self._bar(np.array([1.0, 2.0, 3.0]))
+        self.assertEqual(sent["payload"]["data"][0]["x"], [1, 2, 3])
+
+    def test_y_sets_x_axis_values(self):
+        """Y supplies the x-axis values."""
+        sent = self._bar(np.array([1.0, 2.0]), Y=np.array([10.0, 20.0]))
+        self.assertEqual(sent["payload"]["data"][0]["x"], [10.0, 20.0])
+
+    def test_column_values_go_to_y(self):
+        """Each trace carries its own column of X as bar heights."""
+        X = np.array([[1.0, 2.0], [3.0, 4.0]])
+        sent = self._bar(X)
+        self.assertEqual(sent["payload"]["data"][0]["y"], [1.0, 3.0])
+        self.assertEqual(sent["payload"]["data"][1]["y"], [2.0, 4.0])
+
+    def test_rownames_replace_x_axis(self):
+        """rownames are used as x-axis labels instead of Y."""
+        opts = {"rownames": ["a", "b", "c"]}
+        sent = self._bar(np.array([1.0, 2.0, 3.0]), opts=opts)
+        self.assertEqual(sent["payload"]["data"][0]["x"], ["a", "b", "c"])
+
+    def test_rownames_length_mismatch_raises(self):
+        """rownames shorter than the number of rows raises."""
+        with self.assertRaises(AssertionError):
+            self.viz.bar(np.array([1.0, 2.0, 3.0]), opts={"rownames": ["a", "b"]})
+
+    def test_legend_sets_trace_names(self):
+        """legend labels name each column trace."""
+        X = np.array([[1.0, 2.0], [3.0, 4.0]])
+        sent = self._bar(X, opts={"legend": ["first", "second"]})
+        names = [trace["name"] for trace in sent["payload"]["data"]]
+        self.assertEqual(names, ["first", "second"])
+
+    def test_legend_length_mismatch_raises(self):
+        """legend length not matching the column count raises."""
+        X = np.array([[1.0, 2.0], [3.0, 4.0]])
+        with self.assertRaises(AssertionError):
+            self.viz.bar(X, opts={"legend": ["only_one"]})
+
+    def test_legend_on_1d_x_transposes(self):
+        """1D X with a legend is treated as one row of grouped bars."""
+        sent = self._bar(np.array([1.0, 2.0, 3.0]), opts={"legend": ["a", "b", "c"]})
+        self.assertEqual(len(sent["payload"]["data"]), 3)
+
+    def test_legend_with_rownames_on_1d_raises(self):
+        """legend and rownames together on 1D X raise."""
+        opts = {"legend": ["a", "b", "c"], "rownames": ["x", "y", "z"]}
+        with self.assertRaises(AssertionError):
+            self.viz.bar(np.array([1.0, 2.0, 3.0]), opts=opts)
+
+    def test_stacked_sets_barmode(self):
+        """stacked=True stacks the columns instead of grouping them."""
+        X = np.array([[1.0, 2.0], [3.0, 4.0]])
+        sent = self._bar(X, opts={"stacked": True})
+        self.assertEqual(sent["payload"]["layout"]["barmode"], "stack")
+
+
+class TestHistogram(unittest.TestCase):
+    def setUp(self):
+        self.viz = visdom.Visdom(send=False, use_incoming_socket=False)
+
+    def _histogram(self, X, **kwargs):
+        sent = {}
+
+        def capture(msg, endpoint="events", **_):
+            sent["payload"] = msg
+            sent["endpoint"] = endpoint
+            return "win1"
+
+        with patch.object(self.viz, "_send", side_effect=capture):
+            self.viz.histogram(X, **kwargs)
+        return sent
+
+    def test_2d_x_raises(self):
+        """2D X raises on the one-dimensional check."""
+        with self.assertRaises(AssertionError):
+            self.viz.histogram(np.ones((3, 3)))
+
+    def test_default_bin_count_capped_at_30(self):
+        """A large sample is drawn with 30 bars by default."""
+        sent = self._histogram(np.arange(100.0))
+        self.assertEqual(len(sent["payload"]["data"][0]["y"]), 30)
+
+    def test_default_bin_count_is_sample_count_when_small(self):
+        """A sample smaller than 30 gets one bar per value by default."""
+        sent = self._histogram(np.arange(5.0))
+        self.assertEqual(len(sent["payload"]["data"][0]["y"]), 5)
+
+    def test_numbins_opt_sets_bin_count(self):
+        """numbins controls how many bars are produced."""
+        sent = self._histogram(np.arange(100.0), opts={"numbins": 10})
+        self.assertEqual(len(sent["payload"]["data"][0]["y"]), 10)
+
+    def test_counts_sum_to_sample_count(self):
+        """Every sample lands in exactly one bin."""
+        sent = self._histogram(np.arange(100.0), opts={"numbins": 10})
+        self.assertEqual(sum(sent["payload"]["data"][0]["y"]), 100)
+
+    def test_bin_edges_span_data_range(self):
+        """The x-axis runs from the minimum to the maximum of X."""
+        sent = self._histogram(np.arange(100.0), opts={"numbins": 10})
+        x = sent["payload"]["data"][0]["x"]
+        self.assertEqual(x[0], 0.0)
+        self.assertEqual(x[-1], 99.0)
+
+
+class TestBoxplot(unittest.TestCase):
+    def setUp(self):
+        self.viz = visdom.Visdom(send=False, use_incoming_socket=False)
+
+    def _boxplot(self, X, **kwargs):
+        sent = {}
+
+        def capture(msg, endpoint="events", **_):
+            sent["payload"] = msg
+            sent["endpoint"] = endpoint
+            return "win1"
+
+        with patch.object(self.viz, "_send", side_effect=capture):
+            self.viz.boxplot(X, **kwargs)
+        return sent
+
+    def test_1d_x_one_box(self):
+        """1D X produces a single box trace."""
+        sent = self._boxplot(np.array([1.0, 2.0, 3.0]))
+        self.assertEqual(len(sent["payload"]["data"]), 1)
+        self.assertEqual(sent["payload"]["data"][0]["type"], "box")
+
+    def test_2d_x_one_box_per_column(self):
+        """NxM X produces M box traces."""
+        X = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
+        sent = self._boxplot(X)
+        self.assertEqual(len(sent["payload"]["data"]), 2)
+
+    def test_3d_x_raises(self):
+        """3D X raises on the ndim check."""
+        with self.assertRaises(AssertionError):
+            self.viz.boxplot(np.ones((2, 3, 4)))
+
+    def test_column_values_go_to_y(self):
+        """Each box carries the values of its own column."""
+        X = np.array([[1.0, 2.0], [3.0, 4.0]])
+        sent = self._boxplot(X)
+        self.assertEqual(sent["payload"]["data"][0]["y"], [1.0, 3.0])
+        self.assertEqual(sent["payload"]["data"][1]["y"], [2.0, 4.0])
+
+    def test_default_names_are_column_indexed(self):
+        """Without a legend each box is named after its column index."""
+        X = np.array([[1.0, 2.0], [3.0, 4.0]])
+        sent = self._boxplot(X)
+        names = [trace["name"] for trace in sent["payload"]["data"]]
+        self.assertEqual(names, ["column 0", "column 1"])
+
+    def test_legend_sets_box_names(self):
+        """legend labels replace the default column names."""
+        X = np.array([[1.0, 2.0], [3.0, 4.0]])
+        sent = self._boxplot(X, opts={"legend": ["train", "test"]})
+        names = [trace["name"] for trace in sent["payload"]["data"]]
+        self.assertEqual(names, ["train", "test"])
+
+    def test_legend_length_mismatch_raises(self):
+        """legend length not matching the column count raises."""
+        X = np.array([[1.0, 2.0], [3.0, 4.0]])
+        with self.assertRaises(AssertionError):
+            self.viz.boxplot(X, opts={"legend": ["only_one"]})
+
+
+class TestSurf(unittest.TestCase):
+    def setUp(self):
+        self.viz = visdom.Visdom(send=False, use_incoming_socket=False)
+
+    def _surf(self, X, **kwargs):
+        sent = {}
+
+        def capture(msg, endpoint="events", **_):
+            sent["payload"] = msg
+            sent["endpoint"] = endpoint
+            return "win1"
+
+        with patch.object(self.viz, "_send", side_effect=capture):
+            self.viz.surf(X, **kwargs)
+        return sent
+
+    def test_1d_x_raises(self):
+        """1D X raises on the two-dimensional check."""
+        with self.assertRaises(AssertionError):
+            self.viz.surf(np.array([1.0, 2.0, 3.0]))
+
+    def test_type_is_surface(self):
+        """surf produces a surface trace."""
+        sent = self._surf(np.ones((3, 3)))
+        self.assertEqual(sent["payload"]["data"][0]["type"], "surface")
+
+    def test_z_matches_input(self):
+        """X is sent verbatim as the z values."""
+        X = np.array([[1.0, 2.0], [3.0, 4.0]])
+        sent = self._surf(X)
+        self.assertEqual(sent["payload"]["data"][0]["z"], [[1.0, 2.0], [3.0, 4.0]])
+
+    def test_colormap_defaults_to_viridis(self):
+        """colormap defaults to Viridis when not specified."""
+        sent = self._surf(np.ones((2, 2)))
+        self.assertEqual(sent["payload"]["data"][0]["colorscale"], "Viridis")
+
+    def test_colormap_opt_forwarded(self):
+        """An explicit colormap reaches the trace."""
+        sent = self._surf(np.ones((2, 2)), opts={"colormap": "Hot"})
+        self.assertEqual(sent["payload"]["data"][0]["colorscale"], "Hot")
+
+    def test_range_defaults_to_data_range(self):
+        """xmin and xmax default to the minimum and maximum of X."""
+        X = np.array([[1.0, 5.0], [3.0, 9.0]])
+        sent = self._surf(X)
+        self.assertEqual(sent["payload"]["data"][0]["cmin"], 1.0)
+        self.assertEqual(sent["payload"]["data"][0]["cmax"], 9.0)
+
+    def test_range_opts_override_data_range(self):
+        """xmin and xmax opts clip the color range."""
+        X = np.array([[1.0, 5.0], [3.0, 9.0]])
+        sent = self._surf(X, opts={"xmin": 2.0, "xmax": 4.0})
+        self.assertEqual(sent["payload"]["data"][0]["cmin"], 2.0)
+        self.assertEqual(sent["payload"]["data"][0]["cmax"], 4.0)
+
+    def test_nan_ignored_in_range(self):
+        """NaN values do not leak into the default color range."""
+        X = np.array([[1.0, np.nan], [3.0, 9.0]])
+        sent = self._surf(X)
+        self.assertEqual(sent["payload"]["data"][0]["cmin"], 1.0)
+        self.assertEqual(sent["payload"]["data"][0]["cmax"], 9.0)
+
+    def test_layout_is_3d(self):
+        """surf builds a 3D scene layout."""
+        sent = self._surf(np.ones((2, 2)))
+        self.assertIn("scene", sent["payload"]["layout"])
+
+
+class TestContour(unittest.TestCase):
+    def setUp(self):
+        self.viz = visdom.Visdom(send=False, use_incoming_socket=False)
+
+    def _contour(self, X, **kwargs):
+        sent = {}
+
+        def capture(msg, endpoint="events", **_):
+            sent["payload"] = msg
+            sent["endpoint"] = endpoint
+            return "win1"
+
+        with patch.object(self.viz, "_send", side_effect=capture):
+            self.viz.contour(X, **kwargs)
+        return sent
+
+    def test_type_is_contour(self):
+        """contour produces a contour trace."""
+        sent = self._contour(np.ones((3, 3)))
+        self.assertEqual(sent["payload"]["data"][0]["type"], "contour")
+
+    def test_layout_is_flat(self):
+        """contour renders flat, without the 3D scene surf builds."""
+        sent = self._contour(np.ones((2, 2)))
+        self.assertNotIn("scene", sent["payload"]["layout"])
+
+
 if __name__ == "__main__":
     unittest.main()
