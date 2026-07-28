@@ -92,6 +92,15 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
+    def update_hparams(
+        self,
+        win: Text,
+        query: _OptStr = ...,
+        env_ids: Optional[_EnvIds] = ...,
+        mode: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
     def get_window_data(
         self, win: _OptStr = ..., env: _OptStr = ...
     ) -> _SendReturn: ...

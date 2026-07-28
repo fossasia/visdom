@@ -366,6 +366,8 @@ Track experiment metadata (hyper-parameters, metrics, tags) alongside your plots
 - [`vis.search_experiments`](#vissearch_experiments)  : search experiments across envs with a query
 - [`vis.compare_experiments`](#viscompare_experiments)  : diff experiments field by field
 - [`vis.suggest_experiment`](#vissuggest_experiment)  : suggest parameters for the next run (reserved)
+- [`vis.hparams`](#vishparams)  : open a hyper-parameter pane over selected runs
+- [`vis.update_hparams`](#visupdate_hparams)  : change or refresh an existing hyper-parameter pane
 
 
 ## Loggers
@@ -1183,6 +1185,42 @@ Returns a dict with the compared runs (`env_ids`, full `experiments`) and a `par
 Arguments:
 - `params`: The search space to suggest over, as a dict of `{name: spec}`. Currently ignored by the stub.
 - `env`: Environment (study) to suggest against. Defaults to the client's env.
+
+#### vis.hparams
+
+This function opens a hyper-parameter pane over the experiments logged on the server: the selected runs are flattened into a table of hyper-parameters against their latest metric values (and tags) and registered as a dedicated `hparams` window. The environment is saved as soon as the pane exists, so it survives a server restart without an explicit save.
+
+```python
+vis.hparams("lr < 0.01 AND acc > 0.9")          # query
+vis.hparams(env_ids=["run-a", "run-b"])         # env_ids
+vis.hparams("acc > 0.9", ["run-a", "run-b"])    # both
+```
+
+Arguments:
+- `query`: Selection query, in the syntax of `search_experiments`.
+- `env_ids`: Explicit list of environment ids, kept in the order given.
+- `mode`: `"query"`, `"env_ids"` or `"both"`; inferred from which of `query`/`env_ids` were given when omitted. There is no "show everything" call — with neither argument the server rejects the request.
+- `win` / `env` / `opts`: As for the other plotting methods.
+
+Returns the created window id. The resolved selection is stored on the window, so `update_hparams` can re-run it later.
+
+#### vis.update_hparams
+
+This function changes or refreshes an existing hyper-parameter pane — the dedicated write path for `hparams` windows, since the generic update route only understands plot windows. Called with a `query`/`env_ids`/`mode` selection the pane's selection is replaced, under the rules of `hparams`; called with only `win` the selection stored on the window is re-run, a manual refresh that picks up runs logged (or newly matching) since the pane was built. The pane keeps its id and position, is rebuilt in place, and the environment is saved so the update reaches disk immediately.
+
+```python
+win = vis.hparams("lr < 0.01")
+vis.update_hparams(win, "lr < 0.1 AND acc > 0.9")  # replace the selection
+vis.update_hparams(win)                            # refresh as-is
+```
+
+Arguments:
+- `win`: Id of the pane to update (required). Unknown windows are a 404; non-hparams windows a 400.
+- `query` / `env_ids` / `mode`: The replacement selection, validated exactly as on `hparams`.
+- `env`: Environment holding the window. Defaults to the client's env.
+- `opts`: Overrides the pane's title/size; when omitted the current ones are kept.
+
+Returns the window id.
 
 ## Customizing Visdom
 The user config directory for visdom is
