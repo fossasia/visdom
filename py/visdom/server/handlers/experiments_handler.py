@@ -16,8 +16,12 @@ through the server's ``DataStore`` (:class:`ExperimentStore` over
 ``handler.storage``), so it stays backend-agnostic.
 
 The window is registered like any other pane (:func:`register_window`): written
-into the env state and broadcast to connected clients, so it appears live and is
-also served on the next env load.
+into the env state and broadcast to connected clients, and the environment is
+saved as soon as the pane exists, so a pane survives a server crash without
+waiting for an explicit save. ``/experiments/hparams/update`` is the matching
+write path for an existing pane — replace its selection or re-run the stored
+one — since the generic ``/update`` endpoint only understands plot-shaped
+windows.
 """
 
 import tornado.escape
@@ -59,13 +63,14 @@ class ExperimentHparamsHandler(BaseHandler):
     """
 
     @staticmethod
-    def _select(store, query, env_ids, mode):
-        """Resolve the mode, fetch the runs, and return them as experiments.
+    def _resolve_spec(query, env_ids, mode):
+        """Validate a selection and return it as the spec stored on the window.
 
-        Mirrors the selection the ``Visdom.hparams`` client used to do: a query
-        goes through search, an ``env_ids`` selection reads only those
-        environments, and ``both`` searches then narrows by ``env_ids``. Invalid
-        argument combinations raise ``HTTPError(400)``.
+        The spec — ``{"query", "env_ids", "mode"}`` with the mode resolved and
+        ``env_ids`` de-duplicated in caller order — is plain JSON data: it is
+        written onto the window dict, persists with the environment, and is what
+        a later bare ``/experiments/hparams/update`` replays. Invalid argument
+        combinations raise ``HTTPError(400)``.
         """
         if mode is not None and mode not in VALID_MODES:
             raise tornado.web.HTTPError(
@@ -125,18 +130,35 @@ class ExperimentHparamsHandler(BaseHandler):
                     400, reason="mode='both' requires a non-empty env_ids"
                 )
 
-        wanted = list(dict.fromkeys(env_ids)) if mode in ("env_ids", "both") else None
+        return {
+            "query": query if has_query else None,
+            "env_ids": (
+                list(dict.fromkeys(env_ids)) if mode in ("env_ids", "both") else None
+            ),
+            "mode": mode,
+        }
 
-        if mode == "env_ids":
+    @staticmethod
+    def _select(store, spec):
+        """Fetch the experiments a resolved spec names.
+
+        Mirrors the selection the ``Visdom.hparams`` client used to do: a query
+        goes through search, an ``env_ids`` selection reads only those
+        environments, and ``both`` searches then narrows by ``env_ids``. A
+        malformed query raises ``HTTPError(400)``.
+        """
+        wanted = spec.get("env_ids")
+
+        if spec.get("mode") == "env_ids":
             experiments = []
-            for env_id in wanted:
+            for env_id in wanted or []:
                 experiment = store.get_experiment(env_id)
                 if experiment is not None:
                     experiments.append(experiment)
             return experiments
 
         try:
-            experiments = store.search(query=query)
+            experiments = store.search(query=spec.get("query"))
         except QueryParseError as e:
             raise tornado.web.HTTPError(400, reason=str(e))
         if wanted is not None:
@@ -145,14 +167,18 @@ class ExperimentHparamsHandler(BaseHandler):
         return experiments
 
     @staticmethod
+    def _build_content(handler, spec):
+        """Select the runs ``spec`` names and flatten them into pane content."""
+        store = ExperimentStore(handler.storage, env_provider=handler.state.get)
+        experiments = ExperimentHparamsHandler._select(store, spec)
+        return flatten_experiments([experiment.to_dict() for experiment in experiments])
+
+    @staticmethod
     def wrap_func(handler, args):
-        store = ExperimentStore(handler.storage)
-        experiments = ExperimentHparamsHandler._select(
-            store, args.get("query"), args.get("env_ids"), args.get("mode")
+        spec = ExperimentHparamsHandler._resolve_spec(
+            args.get("query"), args.get("env_ids"), args.get("mode")
         )
-        content = flatten_experiments(
-            [experiment.to_dict() for experiment in experiments]
-        )
+        content = ExperimentHparamsHandler._build_content(handler, spec)
 
         eid = extract_eid(args)
         opts = dict(args.get("opts") or {})
@@ -164,7 +190,96 @@ class ExperimentHparamsHandler(BaseHandler):
                 "opts": opts,
             }
         )
+        p["hparams"] = spec
         register_window(handler, p, eid)
+        handler.storage.save_env(eid, handler.state[eid])
+
+    @check_auth
+    def post(self):
+        args = tornado.escape.json_decode(
+            tornado.escape.to_basestring(self.request.body)
+        )
+        self.wrap_func(self, args)
+
+
+class ExperimentHparamsUpdateHandler(BaseHandler):
+    """POST ``/experiments/hparams/update`` — change or refresh an hparams pane.
+
+    ``/update`` cannot touch an hparams window: it is gated on plot-shaped
+    content, and an hparams window holds a records matrix instead. This is the
+    dedicated write path for those panes, and it is *only* that — the target
+    ``win`` must name an existing window of type ``hparams`` (404 when the env
+    or window is unknown, 400 for any other window type).
+
+    With ``query``/``env_ids``/``mode`` in the body the pane's selection is
+    replaced, under exactly the rules of ``/experiments/hparams``. With none of
+    them the selection stored on the window is re-run — a manual refresh that
+    picks up runs logged since the pane was built (400 if the window predates
+    stored selections). ``opts`` may override title/size; absent opts keep the
+    window's current ones.
+
+    The rebuilt window keeps its id (and so its position) but carries a fresh
+    ``contentID``, which is what the client re-renders on; it is written into
+    the env state, broadcast to that env's subscribers, and the env is saved so
+    disk reflects the update immediately.
+    """
+
+    @staticmethod
+    def wrap_func(handler, args):
+        win = args.get("win")
+        if not isinstance(win, str) or not win:
+            raise tornado.web.HTTPError(400, reason="'win' is required")
+
+        eid = extract_eid(args)
+        if eid not in handler.state:
+            raise tornado.web.HTTPError(404, reason="unknown env {0!r}".format(eid))
+        existing = handler.state[eid]["jsons"].get(win)
+        if existing is None:
+            raise tornado.web.HTTPError(
+                404, reason="no window {0!r} in env {1!r}".format(win, eid)
+            )
+        if existing.get("type") != "hparams":
+            raise tornado.web.HTTPError(
+                400, reason="window {0!r} is not an hparams window".format(win)
+            )
+
+        has_selection = any(
+            args.get(key) is not None for key in ("query", "env_ids", "mode")
+        )
+        if has_selection:
+            spec = ExperimentHparamsHandler._resolve_spec(
+                args.get("query"), args.get("env_ids"), args.get("mode")
+            )
+        else:
+            spec = existing.get("hparams")
+            if not isinstance(spec, dict):
+                raise tornado.web.HTTPError(
+                    400,
+                    reason="window {0!r} has no stored selection; "
+                    "pass a query and/or env_ids".format(win),
+                )
+
+        content = ExperimentHparamsHandler._build_content(handler, spec)
+
+        opts = {
+            "title": existing.get("title", ""),
+            "inflate": existing.get("inflate", True),
+            "width": existing.get("width"),
+            "height": existing.get("height"),
+            "comment": existing.get("comment", ""),
+        }
+        opts.update(args.get("opts") or {})
+        p = window(
+            {
+                "data": [{"content": content, "type": "hparams"}],
+                "win": win,
+                "version": existing.get("version", 1),
+                "opts": opts,
+            }
+        )
+        p["hparams"] = spec
+        register_window(handler, p, eid)
+        handler.storage.save_env(eid, handler.state[eid])
 
     @check_auth
     def post(self):
