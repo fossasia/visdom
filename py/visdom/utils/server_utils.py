@@ -109,6 +109,10 @@ class LazyEnvData(Mapping):
         self.lazy_load_data()
         return self._raw_dict.__setitem__(key, value)
 
+    def __delitem__(self, key):
+        self.lazy_load_data()
+        return self._raw_dict.__delitem__(key)
+
     def __iter__(self):
         self.lazy_load_data()
         return iter(self._raw_dict)
