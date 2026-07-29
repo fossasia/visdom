@@ -37,8 +37,11 @@ from visdom.utils.server_utils import (
     check_auth,
     extract_eid,
     register_window,
+    reject_readonly,
     window,
 )
+
+READONLY_MESSAGE = "Experiment writes are disabled while the server is in readonly mode"
 
 VALID_MODES = ("query", "env_ids", "both")
 
@@ -60,6 +63,9 @@ class ExperimentHparamsHandler(BaseHandler):
     are flattened (:func:`~visdom.experiments.flatten_experiments`) into the
     window content and registered as a window (env state + broadcast); the reply
     is the created window id.
+
+    Creating the pane writes a window into the env, so the endpoint is rejected
+    with 403 while the server runs in readonly mode.
     """
 
     @staticmethod
@@ -195,6 +201,7 @@ class ExperimentHparamsHandler(BaseHandler):
         handler.storage.save_env(eid, handler.state[eid])
 
     @check_auth
+    @reject_readonly(READONLY_MESSAGE)
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -222,6 +229,9 @@ class ExperimentHparamsUpdateHandler(BaseHandler):
     ``contentID``, which is what the client re-renders on; it is written into
     the env state, broadcast to that env's subscribers, and the env is saved so
     disk reflects the update immediately.
+
+    That write reaches disk, so the endpoint is rejected with 403 while the
+    server runs in readonly mode.
     """
 
     @staticmethod
@@ -282,6 +292,7 @@ class ExperimentHparamsUpdateHandler(BaseHandler):
         handler.storage.save_env(eid, handler.state[eid])
 
     @check_auth
+    @reject_readonly(READONLY_MESSAGE)
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)

@@ -27,6 +27,7 @@ _COMMON_APP_ATTRIBUTES = (
     "env_path",
     "storage",
     "login_enabled",
+    "readonly",
 )
 
 _WEB_APP_ATTRIBUTES = _COMMON_APP_ATTRIBUTES + (
@@ -35,7 +36,7 @@ _WEB_APP_ATTRIBUTES = _COMMON_APP_ATTRIBUTES + (
     "max_image_history",
 )
 
-_SOCKET_APP_ATTRIBUTES = _COMMON_APP_ATTRIBUTES + ("readonly",)
+_SOCKET_APP_ATTRIBUTES = _COMMON_APP_ATTRIBUTES
 
 
 def _copy_app_attributes(handler, app, attrs, store_app=False):

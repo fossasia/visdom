@@ -48,6 +48,7 @@ from visdom.utils.server_utils import (
     push_deleted,
     clear_deleted,
     notify,
+    reject_readonly,
 )
 from visdom.server.handlers.base_handlers import BaseHandler
 from visdom.experiments import (
@@ -768,24 +769,11 @@ class ErrorHandler(BaseHandler):
 
 
 class UploadEnvHandler(BaseHandler):
-    def initialize(self, app):
-        super().initialize(app)
-        self.readonly = app.readonly
-
     @check_auth
+    @reject_readonly("Uploads are disabled while the server is in readonly mode")
     def post(self):
         # 100mb file size limit
         MAX_SIZE = 100 * 1024 * 1024
-
-        if self.readonly:
-            self.set_status(403)
-            self.write(
-                {
-                    "success": False,
-                    "error": "Uploads are disabled while the server is in readonly mode",
-                }
-            )
-            return
 
         if "file" not in self.request.files:
             self.set_status(400)
@@ -858,6 +846,9 @@ class ExperimentLogHandler(BaseHandler):
     (:class:`ExperimentStore` over ``handler.storage``) and mirrored into the
     in-memory env state so a later full-env save writes it back rather than
     dropping it. The stored experiment is written back to the client as JSON.
+
+    All three actions write, so the endpoint is rejected with 403 while the
+    server runs in readonly mode.
     """
 
     VALID_ACTIONS = ("log", "metrics", "finish")
@@ -929,6 +920,9 @@ class ExperimentLogHandler(BaseHandler):
         handler.write(json.dumps(experiment.to_dict(), cls=NanSafeEncoder))
 
     @check_auth
+    @reject_readonly(
+        "Experiment logging is disabled while the server is in readonly mode"
+    )
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)

@@ -409,6 +409,8 @@ paths:
 
         Once an experiment is terminal, `log` and `metrics` are rejected with
         `409` so a finished run's recorded data cannot change after the fact.
+        Every action writes, so the endpoint is rejected with `403` when the
+        server is running in readonly mode.
       requestBody:
         required: true
         content:
@@ -465,6 +467,10 @@ paths:
             Invalid request — unknown `action`, non-object `params`/`tags`/`metrics`,
             empty `metrics`, or a non-terminal `finish` status. Also returned when
             authentication is required but not provided.
+        "403":
+          description: >
+            Experiment logging is disabled because the server is in readonly
+            mode.
         "404":
           description: A `finish` was requested for an env that has no experiment.
         "409":
@@ -771,6 +777,10 @@ paths:
             Invalid request — no selection given, a mode/argument combination
             that is not allowed, a malformed `query`, or non-string `env_ids`.
             Also returned when authentication is required but not provided.
+        "403":
+          description: >
+            Creating a pane writes a window, so it is disabled because the
+            server is in readonly mode.
 
   /experiments/hparams/update:
     post:
@@ -838,6 +848,11 @@ paths:
             window, a bare refresh on a window with no stored selection, or an
             invalid replacement selection. Also returned when authentication
             is required but not provided.
+        "403":
+          description: >
+            Updating a pane writes to the env, so it is disabled because the
+            server is in readonly mode. Checked before the target window is
+            looked up, so a refused request reveals nothing about it.
         "404":
           description: The environment or the window does not exist.
 

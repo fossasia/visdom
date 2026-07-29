@@ -57,6 +57,33 @@ def check_auth(f):
     return _check_auth
 
 
+def reject_readonly(message):
+    """Wrapper for handler methods that write, refusing them in readonly mode.
+
+    A readonly server must not accept a request that changes stored state, so
+    the guarded method is never entered: the response is 403 with a JSON body
+    explaining which capability is disabled. ``message`` names that capability,
+    since "uploads" and "experiment logging" are refused for the same reason but
+    are not the same thing to the caller.
+
+    Written as a decorator, and applied under ``check_auth``, so that a handler
+    declares "this writes" once at its entry point rather than restating the
+    check in the body -- the omission that let readonly writes through before.
+    """
+
+    def _decorate(f):
+        def _reject_readonly(handler, *args, **kwargs):
+            if getattr(handler, "readonly", False):
+                handler.set_status(403)
+                handler.write({"success": False, "error": message})
+                return
+            f(handler, *args, **kwargs)
+
+        return _reject_readonly
+
+    return _decorate
+
+
 def set_cookie(value=None):
     """Create cookie secret key for authentication"""
     if value is not None:
