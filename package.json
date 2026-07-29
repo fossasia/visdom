@@ -38,6 +38,7 @@
     "test:visual": "cypress run --spec './cypress/integration/screenshots.js'",
     "test": "cypress run --config excludeSpecPattern=**/*.init.js",
     "test:pw": "playwright test --config=playwright.config.js",
+    "test:pw:polling": "playwright test --config=playwright.polling.config.js",
     "test:pw:init": "playwright test --config=playwright.init.config.js",
     "test:pw:visual": "playwright test --config=playwright.visual.config.js",
     "lint": "eslint js/.",
