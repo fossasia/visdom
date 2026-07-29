@@ -13,6 +13,15 @@ import { fetchExperimentComparison } from '../../api/experimentsApi';
 import { buildMetricSeries } from './hparamsUtils';
 
 const NO_EXPERIMENTS = [];
+const COMPARE_BATCH_SIZE = 1000;
+
+function batchIds(ids) {
+  const batches = [];
+  for (let i = 0; i < ids.length; i += COMPARE_BATCH_SIZE) {
+    batches.push(ids.slice(i, i + COMPARE_BATCH_SIZE));
+  }
+  return batches;
+}
 
 export default function useExperimentMetrics(records, cacheRef) {
   const [nonce, setNonce] = useState(0);
@@ -51,12 +60,19 @@ export default function useExperimentMetrics(records, cacheRef) {
     const controller = new AbortController();
     setState((prev) => ({ ...prev, status: 'loading', error: null }));
 
-    fetchExperimentComparison(wanted, controller.signal)
-      .then((reply) => {
+    Promise.all(
+      batchIds(wanted).map((ids) =>
+        fetchExperimentComparison(ids, controller.signal)
+      )
+    )
+      .then((replies) => {
         if (cancelled) return;
-        const loaded = (reply && reply.experiments) || [];
-        loaded.forEach((exp) => {
-          if (exp && typeof exp.env_id === 'string') cache.set(exp.env_id, exp);
+        replies.forEach((reply) => {
+          const loaded = (reply && reply.experiments) || [];
+          loaded.forEach((exp) => {
+            if (exp && typeof exp.env_id === 'string')
+              cache.set(exp.env_id, exp);
+          });
         });
         setState({ status: 'ready', error: null, experiments: readCache() });
       })

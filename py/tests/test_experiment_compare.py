@@ -19,6 +19,10 @@ from visdom import Visdom
 from visdom.data_model import JSONStore
 from visdom.experiments import Experiment, ExperimentStore, build_comparison
 from visdom.server.app import Application
+from visdom.server.handlers.web_handlers import (
+    ExperimentCompareHandler,
+    ExperimentSearchHandler,
+)
 
 
 def seed_experiments(store):
@@ -437,6 +441,38 @@ class TestCompareEndpoint(tornado.testing.AsyncHTTPTestCase):
 
     def test_non_string_env_id_is_400(self):
         self.assertEqual(self.compare({"env_ids": ["run-a", 7]}).code, 400)
+
+    def test_too_many_env_ids_is_400(self):
+        """Every named run is loaded and echoed back, so the list is bounded."""
+        ids = ["run-%d" % i for i in range(ExperimentCompareHandler.MAX_ENV_IDS + 1)]
+        resp = self.compare({"env_ids": ids})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("env_ids", resp.reason)
+
+    def test_too_many_env_ids_is_refused_before_loading(self):
+        """The cap is a 400 about the list, not a 404 about the runs in it.
+
+        Every id past the first two is unknown here, so a check that ran after
+        the load would answer 404 and hide the real reason.
+        """
+        ids = ["run-%d" % i for i in range(ExperimentCompareHandler.MAX_ENV_IDS + 1)]
+        self.assertEqual(self.compare({"env_ids": ids}).code, 400)
+
+    def test_a_full_search_page_can_be_compared(self):
+        """The cap is not below what one search page returns, so the documented
+        search-then-compare flow can never be refused for its length."""
+        self.assertGreaterEqual(
+            ExperimentCompareHandler.MAX_ENV_IDS,
+            ExperimentSearchHandler.MAX_LIMIT,
+        )
+
+    def test_the_cap_itself_is_not_refused(self):
+        """The boundary is inclusive: exactly MAX_ENV_IDS is a valid request,
+        so it fails on the unknown runs rather than on the list's length."""
+        ids = ["run-a"] + [
+            "run-%d" % i for i in range(ExperimentCompareHandler.MAX_ENV_IDS - 1)
+        ]
+        self.assertEqual(self.compare({"env_ids": ids}).code, 404)
 
     def test_unknown_keys_are_ignored(self):
         """A stale caller still sending query/limit is not an error, just ignored.

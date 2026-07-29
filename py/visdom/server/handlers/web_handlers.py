@@ -1116,7 +1116,17 @@ class ExperimentCompareHandler(BaseHandler):
 
     Experiments are read through the server's ``DataStore``, so as with search a
     server running with ``env_path=None`` has nothing to compare.
+
+    At most ``MAX_ENV_IDS`` runs are compared in one request: every named run is
+    loaded and echoed back in full, so the reply grows with the list. The list
+    is refused rather than truncated, for the same reason a missing run is a 404
+    — a diff of some of the runs asked for is a different answer, not a smaller
+    one, and nothing in the reply would reveal the difference. The cap matches
+    search's ``MAX_LIMIT``, so any single page of search results can be handed
+    straight to compare; a longer list is compared in batches.
     """
+
+    MAX_ENV_IDS = 1000
 
     @staticmethod
     def _require_env_ids(args):
@@ -1125,6 +1135,9 @@ class ExperimentCompareHandler(BaseHandler):
         A bare string is rejected rather than treated as a one-id list: it would
         otherwise be iterated character by character into a comparison of runs
         named ``"r"``, ``"u"``, ``"n"``.
+
+        Length is checked before the ids are read, since the cost being bounded
+        is loading them.
         """
         value = args.get("env_ids")
         if value is None:
@@ -1134,6 +1147,16 @@ class ExperimentCompareHandler(BaseHandler):
         if not value:
             raise tornado.web.HTTPError(
                 400, reason="'env_ids' must name at least one environment"
+            )
+        if len(value) > ExperimentCompareHandler.MAX_ENV_IDS:
+            raise tornado.web.HTTPError(
+                400,
+                reason=(
+                    "'env_ids' must not name more than {0} environments "
+                    "(got {1}); compare them in batches".format(
+                        ExperimentCompareHandler.MAX_ENV_IDS, len(value)
+                    )
+                ),
             )
         if not all(isinstance(env_id, str) for env_id in value):
             raise tornado.web.HTTPError(400, reason="'env_ids' must contain strings")

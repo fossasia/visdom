@@ -1327,6 +1327,11 @@ class Visdom(object):
             found = vis.search_experiments("lr < 0.01")
             vis.compare_experiments([e["env_id"] for e in found["experiments"]])
 
+        One search page always fits, since the server compares at most as many
+        runs as a page can hold. A longer list is compared in batches rather
+        than trimmed — a diff of some of the runs asked for would be a different
+        answer, not a shorter one, so it raises instead.
+
         Returns the server's reply as a dict: the compared runs (`env_ids` and
         the full `experiments`), plus a `params`, `metrics` and `tags` section.
         Each section holds the union of `fields`, the `shared` ones every run
