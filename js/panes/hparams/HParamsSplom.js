@@ -60,14 +60,14 @@ function tipHtml(names, colX, colY, x, y) {
       : '';
   const coord =
     colX.id === colY.id
-      ? escapeHtml(colX.label) + ': ' + formatValue(x)
+      ? escapeHtml(colX.label) + ': ' + escapeHtml(formatValue(x))
       : escapeHtml(colX.label) +
         ': ' +
-        formatValue(x) +
+        escapeHtml(formatValue(x)) +
         '<br>' +
         escapeHtml(colY.label) +
         ': ' +
-        formatValue(y);
+        escapeHtml(formatValue(y));
   return (
     '<div class="hparams-splom-tip-head">' +
     head +
