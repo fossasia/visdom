@@ -114,15 +114,27 @@ class UpdateHandler(BaseHandler):
         if pane_type not in {"text", "image_history", "plot_history"}:
             return None
 
+        # Capture key presence before update() mutates p so patch ops follow
+        # RFC 6902: replace existing paths, add only when absent.
+        had_content_id = "contentID" in p
+        had_selected = "selected" in p
+
         p = UpdateHandler.update(
             p, args, max_text_lines, max_old_content, max_image_history
         )
         p["contentID"] = content_id
 
+        def _set_op(path, key_present, value):
+            return {
+                "op": "replace" if key_present else "add",
+                "path": path,
+                "value": value,
+            }
+
         if pane_type == "text":
             return p, [
                 {"op": "replace", "path": "/content", "value": p["content"]},
-                {"op": "add", "path": "/contentID", "value": content_id},
+                _set_op("/contentID", had_content_id, content_id),
             ]
 
         utype = None
@@ -135,8 +147,8 @@ class UpdateHandler(BaseHandler):
         def _ops_with_selected(*extra_ops):
             ops = list(extra_ops)
             if "selected" in p:
-                ops.append({"op": "add", "path": "/selected", "value": p["selected"]})
-            ops.append({"op": "add", "path": "/contentID", "value": content_id})
+                ops.append(_set_op("/selected", had_selected, p["selected"]))
+            ops.append(_set_op("/contentID", had_content_id, content_id))
             return ops
 
         if pane_type == "image_history" and utype == "image_update_selected":
