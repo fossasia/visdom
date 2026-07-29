@@ -44,12 +44,8 @@ function ExportPane({ onExport, allowedFormats = ['png', 'jpg', 'svg'] }) {
   };
 
   const handleFormatClick = (format) => {
-    if (format === 'svg') {
-      onExport('svg');
-      closeAll();
-      return;
-    }
-    setActiveSubmenu(format);
+    onExport(format);
+    closeAll();
   };
 
   const handleDpiClick = (format, dpi) => {
