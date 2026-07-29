@@ -34,10 +34,16 @@ class VisdomXGBLogger(TrainingCallback):
     per inner fit. Or pass an instance directly via callbacks= for
     manual control.
 
-    cross_val_score/cross_validate are patched on the sklearn.model_selection
-    module object, so call autolog() before `from sklearn.model_selection
-    import cross_val_score` — importing the name first binds it to the
-    original, unpatched function.
+    cross_validate is patched both on sklearn.model_selection and on the
+    module that defines it, so cross_val_score is depth-tracked no matter
+    when it was imported. Importing cross_validate itself before autolog()
+    runs still binds the original, unpatched function.
+
+    One logger is active at a time. Calling autolog() again replaces it, and
+    every patched entry point then targets the new env; the previous env
+    keeps the windows it already has but receives nothing further. Switching
+    env this way is supported and warns, so the change is not silent.
+    autolog() returns the active logger.
 
     Usage::
 
@@ -77,7 +83,8 @@ class VisdomXGBLogger(TrainingCallback):
         """Patch xgb.train, xgb.cv, every XGBModel subclass's fit(), and
         (if scikit-learn is installed) GridSearchCV/RandomizedSearchCV.fit()
         and cross_val_score/cross_validate to log boosting rounds to
-        Visdom."""
+        Visdom. Replaces any previously active logger and returns the new
+        one."""
         if viz is None:
             import visdom as _visdom
 
@@ -96,6 +103,13 @@ class VisdomXGBLogger(TrainingCallback):
             or (_viz_env if _viz_env and _viz_env != "main" else None)
             or "xgboost_{}".format(datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
         )
+        previous = cls.active
+        if previous is not None and previous.env != env:
+            warnings.warn(
+                "VisdomXGBLogger.autolog() was already active for env "
+                "'{}'; logging moves to '{}' and '{}' receives nothing "
+                "further.".format(previous.env, env, previous.env)
+            )
         instance = cls(viz, env)
         cls.active = instance
         instance._patch_function(xgb, "train")
@@ -111,6 +125,17 @@ class VisdomXGBLogger(TrainingCallback):
                 instance._patch_depth(cv_cls)
             for fn_name in ("cross_val_score", "cross_validate"):
                 instance._patch_depth_function(sklearn_ms, fn_name)
+            # cross_val_score() calls cross_validate() as a global of
+            # _validation, so patching it here also covers callers that
+            # imported cross_val_score before autolog() ran.
+            try:
+                from sklearn.model_selection import _validation
+            except ImportError:
+                pass
+            else:
+                if hasattr(_validation, "cross_validate"):
+                    instance._patch_depth_function(_validation, "cross_validate")
+        return instance
 
     @staticmethod
     def _all_estimators(base_cls):
