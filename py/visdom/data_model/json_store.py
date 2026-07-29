@@ -160,6 +160,35 @@ class JSONStore(DataStore):
             env["experiment"] = data["experiment"]
         return env
 
+    def load_experiment(self, eid):
+        """Read only ``eid``'s experiment blob; return ``None`` if it has none.
+
+        One env is one JSON document, so the file still has to be parsed to
+        reach the metadata inside it -- but the windows are dropped the moment
+        the blob is taken, instead of being assembled into an env dict and
+        handed to a caller that never wanted them. That is what makes a search
+        across every environment cost one env's memory rather than all of them.
+
+        Reading the metadata without the env is only safe because the file is
+        authoritative for it: an experiment write persists immediately, and
+        :meth:`serialize_env` skips envs that were never materialised precisely
+        because their on-disk copy is current.
+        """
+        if self.env_path is None:
+            return None
+        path = self._resolve_existing(eid)
+        if path is None:
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as fn:
+                data = json.load(fn)
+        except (OSError, ValueError):
+            return None
+        if not isinstance(data, dict):
+            return None
+        blob = data.get("experiment")
+        return blob if isinstance(blob, dict) else None
+
     def list_envs(self):
         """Return the ids of all environments stored on disk.
 

@@ -113,6 +113,30 @@ class ExperimentStore:
         experiment = Experiment.from_dict(blob) if isinstance(blob, dict) else None
         return env, experiment
 
+    def _read_metadata(self, env_id):
+        """Return ``env_id``'s :class:`Experiment` without materialising its env.
+
+        The read path for callers that want metadata and nothing else. Unlike
+        :meth:`_read` it never assembles — or forces into memory — the env dict,
+        because reading one experiment must not be a reason to hold an env's
+        windows.
+
+        A live env is still preferred, but only when it is *already* resident:
+        an env the server is holding may carry changes the file has not seen, so
+        it wins; an env that has never been materialised cannot, so the store is
+        asked instead. ``LazyEnvData`` reports this through ``is_loaded()``;
+        anything else (a plain dict) is resident by definition.
+        """
+        env = self.env_provider(env_id) if self.env_provider is not None else None
+        if env is not None and getattr(env, "is_loaded", None) is not None:
+            if not env.is_loaded():
+                env = None
+        if env is not None:
+            blob = env.get(METADATA_KEY)
+        else:
+            blob = self.datastore.load_experiment(env_id)
+        return Experiment.from_dict(blob) if isinstance(blob, dict) else None
+
     def _write(self, env_id, env, experiment):
         """Attach ``experiment`` to ``env`` and persist it; return the experiment."""
         env[METADATA_KEY] = experiment.to_dict()
@@ -177,18 +201,28 @@ class ExperimentStore:
         return self._write(env_id, env, experiment)
 
     def get_experiment(self, env_id):
-        """Return ``env_id``'s :class:`Experiment`, or ``None`` if it has none."""
-        _, experiment = self._read(env_id)
-        return experiment
+        """Return ``env_id``'s :class:`Experiment`, or ``None`` if it has none.
+
+        A pure read, so it goes through :meth:`_read_metadata` and leaves an
+        env that was not already in memory out of it.
+        """
+        return self._read_metadata(env_id)
+
+    def iter_experiments(self):
+        """Yield every stored :class:`Experiment`, one environment at a time.
+
+        A generator rather than a list because the caller is usually filtering:
+        an experiment that does not survive the filter should be collectable
+        immediately, not held until the whole store has been walked.
+        """
+        for env_id in self.datastore.list_envs():
+            experiment = self._read_metadata(env_id)
+            if experiment is not None:
+                yield experiment
 
     def list_experiments(self):
         """Return every stored :class:`Experiment`, across all environments."""
-        experiments = []
-        for env_id in self.datastore.list_envs():
-            experiment = self.get_experiment(env_id)
-            if experiment is not None:
-                experiments.append(experiment)
-        return experiments
+        return list(self.iter_experiments())
 
     def search(self, query=None, sort_by=DEFAULT_SORT_FIELD, descending=True):
         """Return the experiments matching ``query``, sorted by ``sort_by``.

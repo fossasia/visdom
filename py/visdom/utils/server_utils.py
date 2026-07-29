@@ -113,6 +113,16 @@ class LazyEnvData(Mapping):
         self._eid = eid
         self._raw_dict = None
 
+    def is_loaded(self):
+        """Return whether this env has been materialised into memory yet.
+
+        Every mapping operation materialises the env, so a caller that only
+        wants to know *whether* it is resident cannot ask by touching it. Bulk
+        readers use this to leave an untouched env untouched: while it is not
+        loaded, nothing has changed it, so the store's copy is the current one.
+        """
+        return self._raw_dict is not None
+
     def lazy_load_data(self):
         if self._raw_dict is not None:
             return
