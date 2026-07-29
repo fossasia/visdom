@@ -409,6 +409,8 @@ paths:
 
         Once an experiment is terminal, `log` and `metrics` are rejected with
         `409` so a finished run's recorded data cannot change after the fact.
+        Every action writes, so the endpoint is rejected when the server is
+        running in readonly mode.
       requestBody:
         required: true
         content:
@@ -465,6 +467,10 @@ paths:
             Invalid request — unknown `action`, non-object `params`/`tags`/`metrics`,
             empty `metrics`, or a non-terminal `finish` status. Also returned when
             authentication is required but not provided.
+        "403":
+          description: >
+            Experiment logging is disabled because the server is in readonly
+            mode.
         "404":
           description: A `finish` was requested for an env that has no experiment.
         "409":
