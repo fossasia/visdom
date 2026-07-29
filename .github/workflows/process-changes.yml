@@ -296,3 +296,25 @@ jobs:
         with:
           name: playwright-report
           path: playwright/playwright-report/
+
+  playwright-test-polling:
+    name: 'Playwright Functional Test (Polling)'
+    runs-on: ubuntu-latest
+    needs: install-and-build
+    steps:
+      - name: 'Checkout Repository'
+        uses: actions/checkout@v7.0.0
+      - uses: ./.github/actions/prepare
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright tests with polling
+        run: npm run test:pw:polling
+
+      - name: Upload Playwright Polling Report
+        uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-report-polling
+          path: playwright/playwright-report-polling/
