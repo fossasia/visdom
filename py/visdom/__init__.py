@@ -1285,6 +1285,13 @@ class Visdom(object):
         one page is read by paging with `offset`, using the `total` to know how
         far to go.
 
+        Paging is not bottomless: `offset` + `limit` must stay within the
+        server's window, and a page past it raises rather than quietly moving
+        to a page you did not ask for. Deep pages are expensive to find, so
+        reaching the end of a large `total` means narrowing `query` — filtering
+        by a param, a tag or a metric threshold — rather than walking `offset`
+        out to it.
+
         Returns the server's reply as a dict of `experiments` (a list of
         experiment dicts, one page worth), the unpaged `total` matching the
         query, and the `limit` the server actually applied alongside the

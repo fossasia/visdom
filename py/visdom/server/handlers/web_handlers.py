@@ -954,10 +954,20 @@ class ExperimentSearchHandler(BaseHandler):
     ``limit`` it actually applied, so a caller can always see what it got; the
     ``total`` is unaffected and remains the count of every match. Without a cap
     one request could ask the server to serialize everything it stores.
+
+    Paging depth is capped too: a page at ``offset`` is found by ranking every
+    match down to ``offset + limit`` and discarding all but the last ``limit``
+    of them, so a deep page costs the server its whole depth even though it
+    returns one page. ``MAX_WINDOW`` bounds that depth, and a request past it is
+    refused with a 400 rather than coerced — a coerced ``limit`` returns fewer
+    experiments and says so, but a coerced ``offset`` would return a *different*
+    page than the one asked for, and the caller could not tell. Reaching further
+    than the window means narrowing the query, not paging deeper.
     """
 
     DEFAULT_LIMIT = 100
     MAX_LIMIT = 1000
+    MAX_WINDOW = 10000
 
     @staticmethod
     def _require_index(args, field, default, maximum=None):
@@ -987,6 +997,28 @@ class ExperimentSearchHandler(BaseHandler):
         if maximum is not None and value > maximum:
             return maximum
         return value
+
+    @staticmethod
+    def _require_window(offset, limit):
+        """Raise 400 if the page at ``offset`` reaches past ``MAX_WINDOW``.
+
+        ``offset`` is checked against ``limit`` rather than on its own because
+        the cost is the pair: the store ranks ``offset + limit`` matches to
+        answer either. Capping ``limit`` alone would leave a one-experiment page
+        at a large enough ``offset`` costing more than the whole-store reply the
+        ``limit`` cap exists to prevent.
+        """
+        window = offset + limit
+        if window > ExperimentSearchHandler.MAX_WINDOW:
+            raise tornado.web.HTTPError(
+                400,
+                reason=(
+                    "'offset' + 'limit' must not exceed {0} (got {1}); "
+                    "narrow the query instead of paging further".format(
+                        ExperimentSearchHandler.MAX_WINDOW, window
+                    )
+                ),
+            )
 
     @staticmethod
     def _require_text(args, field):
@@ -1025,6 +1057,7 @@ class ExperimentSearchHandler(BaseHandler):
         )
         offset = ExperimentSearchHandler._require_index(args, "offset", 0)
         descending = ExperimentSearchHandler._require_flag(args, "descending", True)
+        ExperimentSearchHandler._require_window(offset, limit)
 
         store = ExperimentStore(handler.storage, env_provider=handler.state.get)
         try:

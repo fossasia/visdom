@@ -288,6 +288,43 @@ class TestSearchEndpoint(tornado.testing.AsyncHTTPTestCase):
             self.assertEqual(body["limit"], expected)
             self.assertLessEqual(len(body["experiments"]), body["limit"])
 
+    def test_offset_past_the_window_is_400(self):
+        """A page deeper than the window is refused, since finding it costs
+        the whole depth even though it returns one page."""
+        resp = self.search({"offset": ExperimentSearchHandler.MAX_WINDOW, "limit": 1})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("offset", resp.reason)
+
+    def test_offset_is_never_coerced(self):
+        """A too-deep offset raises rather than answering a page nobody asked
+        for: a coerced limit is visible in the reply, a coerced offset is not."""
+        deep = ExperimentSearchHandler.MAX_WINDOW * 10
+        self.assertEqual(self.search({"offset": deep, "limit": 1}).code, 400)
+        self.assertEqual(self.search({"offset": deep, "limit": None}).code, 400)
+
+    def test_the_whole_window_is_reachable(self):
+        """The cap bounds the window without shrinking it: the deepest allowed
+        page is served, and one experiment further is not."""
+        edge = ExperimentSearchHandler.MAX_WINDOW - ExperimentSearchHandler.MAX_LIMIT
+        body = self.search_ok(
+            {"offset": edge, "limit": ExperimentSearchHandler.MAX_LIMIT}
+        )
+        self.assertEqual(body["offset"], edge)
+        self.assertEqual(body["total"], 3)
+        self.assertEqual(
+            self.search(
+                {"offset": edge + 1, "limit": ExperimentSearchHandler.MAX_LIMIT}
+            ).code,
+            400,
+        )
+
+    def test_capped_limit_counts_against_the_window(self):
+        """The window is checked against the limit actually applied, so a null
+        limit cannot buy a deeper page than the cap it was coerced to."""
+        offset = ExperimentSearchHandler.MAX_WINDOW - 1
+        self.assertEqual(self.search({"offset": offset, "limit": None}).code, 400)
+        self.assertEqual(self.search_ok({"offset": offset, "limit": 1})["total"], 3)
+
     def test_total_is_never_capped(self):
         """total counts every match even when the page cannot hold them."""
         body = self.search_ok({"limit": 1})

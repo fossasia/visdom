@@ -542,8 +542,15 @@ paths:
                 offset:
                   type: integer
                   minimum: 0
+                  maximum: 10000
                   default: 0
-                  description: Number of matches to skip before the returned page.
+                  description: >
+                    Number of matches to skip before the returned page.
+                    `offset` + `limit` must not exceed 10000: a deep page is
+                    found by ranking everything above it, so its cost is its
+                    depth. Unlike `limit` this is rejected rather than coerced,
+                    since a changed `offset` would silently return a different
+                    page. Read past the window by narrowing `query`.
       responses:
         "200":
           description: The matching page of experiments.
@@ -577,9 +584,9 @@ paths:
         "400":
           description: >
             Invalid request — malformed `query` syntax, a non-string
-            `query`/`sort_by`, or a `limit`/`offset` that is not a non-negative
-            integer. Also returned when authentication is required but not
-            provided.
+            `query`/`sort_by`, a `limit`/`offset` that is not a non-negative
+            integer, or an `offset` + `limit` past the 10000 window. Also
+            returned when authentication is required but not provided.
 
   /experiments/compare:
     post:
