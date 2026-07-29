@@ -4,14 +4,17 @@ The query language turns a human string such as ``lr < 0.01 AND acc > 90``
 into a predicate tree that is evaluated against a plain ``dict``. These tests
 cover tokenising, the full grammar (comparisons, AND/OR precedence, nested
 parentheses), type-aware casting (numeric vs string vs bool), the ``contains``
-operator, malformed input, injection-style strings (which must be inert), and
-the :func:`build_record` bridge from a real :class:`Experiment`.
+operator, malformed input, the length/depth limits enforced at the parse
+boundary, injection-style strings (which must be inert), and the
+:func:`build_record` bridge from a real :class:`Experiment`.
 """
 
 import unittest
 
 from visdom.experiments import (
     Experiment,
+    MAX_QUERY_DEPTH,
+    MAX_QUERY_LENGTH,
     Query,
     QueryParseError,
     build_record,
@@ -231,6 +234,53 @@ class TestMalformedInput(unittest.TestCase):
     def test_reserved_word_as_bare_value(self):
         with self.assertRaises(QueryParseError):
             parse_query("owner = and")
+
+
+class TestParseLimits(unittest.TestCase):
+    """Oversized queries are rejected at the boundary, not parsed into work."""
+
+    def test_query_at_the_length_limit_is_accepted(self):
+        padding = "x" * (MAX_QUERY_LENGTH - len("name = "))
+        text = "name = " + padding
+        self.assertEqual(len(text), MAX_QUERY_LENGTH)
+        self.assertTrue(parse_query(text).matches({"name": padding}))
+
+    def test_query_over_the_length_limit_is_rejected(self):
+        text = "name = " + "x" * MAX_QUERY_LENGTH
+        with self.assertRaises(QueryParseError) as ctx:
+            parse_query(text)
+        self.assertIn(str(MAX_QUERY_LENGTH), str(ctx.exception))
+
+    def test_length_limit_applies_to_the_wrapper_and_tokenizer(self):
+        text = "name = " + "x" * MAX_QUERY_LENGTH
+        with self.assertRaises(QueryParseError):
+            Query(text)
+        with self.assertRaises(QueryParseError):
+            tokenize(text)
+
+    def test_nesting_at_the_depth_limit_is_accepted(self):
+        text = "(" * MAX_QUERY_DEPTH + "lr < 0.01" + ")" * MAX_QUERY_DEPTH
+        self.assertTrue(parse_query(text).matches({"lr": 0.001}))
+
+    def test_nesting_over_the_depth_limit_is_rejected(self):
+        depth = MAX_QUERY_DEPTH + 1
+        text = "(" * depth + "lr < 0.01" + ")" * depth
+        with self.assertRaises(QueryParseError) as ctx:
+            parse_query(text)
+        self.assertIn(str(MAX_QUERY_DEPTH), str(ctx.exception))
+
+    def test_deep_nesting_within_length_limit_does_not_recurse_away(self):
+        """A query that fits the length cap can still out-nest the interpreter."""
+        depth = 1000
+        text = "(" * depth + "lr < 0.01" + ")" * depth
+        self.assertLessEqual(len(text), MAX_QUERY_LENGTH)
+        with self.assertRaises(QueryParseError):
+            parse_query(text)
+
+    def test_sibling_groups_do_not_accumulate_depth(self):
+        """Depth is nesting, not a count of parentheses seen."""
+        text = " OR ".join("(lr < 0.01)" for _ in range(MAX_QUERY_DEPTH * 2))
+        self.assertTrue(parse_query(text).matches({"lr": 0.001}))
 
 
 class TestInjectionSafety(unittest.TestCase):

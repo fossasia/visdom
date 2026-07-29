@@ -34,6 +34,13 @@ The grammar (lowest-to-highest precedence)::
 (unquoted) parse as booleans. Anything else on the value side is a string —
 quote it (``"..."`` or ``'...'``) if it contains spaces or a reserved word.
 
+Parsing is bounded at the point where text enters the module, so an
+attacker-supplied query cannot turn into unbounded work once this is wired to
+a search endpoint: :data:`MAX_QUERY_LENGTH` caps the source string and
+:data:`MAX_QUERY_DEPTH` caps parenthesis nesting (which drives recursion
+depth). Both overruns are ordinary :class:`QueryParseError` rejections, so the
+caller reports them like any other malformed query rather than crashing.
+
 The public surface is deliberately tiny: :func:`parse_query` (text → AST),
 the :class:`Query` convenience wrapper, :func:`build_record` (Experiment →
 queryable dict) with the :class:`ExperimentLike` shape it accepts, and
@@ -61,11 +68,21 @@ __all__ = [
     "Query",
     "build_record",
     "ExperimentLike",
+    "MAX_QUERY_LENGTH",
+    "MAX_QUERY_DEPTH",
     "Node",
     "And",
     "Or",
     "Comparison",
 ]
+
+#: Longest query string accepted, in characters. Far above any hand-written
+#: filter, low enough that tokenising a hostile request stays cheap.
+MAX_QUERY_LENGTH = 4096
+
+#: Deepest parenthesis nesting accepted. Each level costs interpreter stack
+#: frames, so this keeps a pathological query a 400 instead of a RecursionError.
+MAX_QUERY_DEPTH = 32
 
 _COMPARISON_OPS = ("<", "<=", ">", ">=", "=", "!=", "contains")
 
@@ -126,7 +143,17 @@ def tokenize(text: str) -> List[Token]:
     Keywords are recognised here so the parser sees dedicated ``AND``/``OR``
     tokens and a normalised ``contains`` operator, and never has to special-case
     identifiers by spelling.
+
+    This is where untrusted text first enters the module, so the
+    :data:`MAX_QUERY_LENGTH` cap is enforced here — before any scanning — and
+    every later stage works on a bounded token list.
     """
+    if len(text) > MAX_QUERY_LENGTH:
+        raise QueryParseError(
+            "query is {0} characters, over the {1} character limit".format(
+                len(text), MAX_QUERY_LENGTH
+            )
+        )
     tokens: List[Token] = []
     pos = 0
     length = len(text)
@@ -223,6 +250,7 @@ class _Parser:
     def __init__(self, tokens: List[Token]):
         self._tokens = tokens
         self._index = 0
+        self._depth = 0
 
     def parse(self) -> Node:
         if not self._tokens:
@@ -249,8 +277,16 @@ class _Parser:
 
     def _parse_term(self) -> Node:
         if self._match("LPAREN"):
+            self._depth += 1
+            if self._depth > MAX_QUERY_DEPTH:
+                raise QueryParseError(
+                    "query nests parentheses more than {0} levels deep".format(
+                        MAX_QUERY_DEPTH
+                    )
+                )
             node = self._parse_or()
             self._expect("RPAREN")
+            self._depth -= 1
             return node
         return self._parse_comparison()
 
@@ -319,7 +355,8 @@ class _Parser:
 def parse_query(text: str) -> Node:
     """Parse ``text`` into a predicate :class:`Node`.
 
-    Raises :class:`QueryParseError` for an empty or malformed query.
+    Raises :class:`QueryParseError` for an empty or malformed query, and for one
+    that exceeds :data:`MAX_QUERY_LENGTH` or :data:`MAX_QUERY_DEPTH`.
     """
     return _Parser(tokenize(text)).parse()
 
