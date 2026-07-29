@@ -531,10 +531,14 @@ paths:
                   type: integer
                   nullable: true
                   minimum: 0
+                  maximum: 1000
                   default: 100
                   description: >
-                    Maximum number of experiments in the reply. `0` returns just
-                    the count; `null` returns all matches.
+                    Maximum number of experiments in the reply, capped at 1000.
+                    `0` returns just the count; `null` asks for as many as the
+                    cap allows. A `limit` above the cap is coerced down to it
+                    rather than rejected, and the reply reports the `limit` it
+                    actually applied. `total` is never capped.
                 offset:
                   type: integer
                   minimum: 0
@@ -560,8 +564,10 @@ paths:
                       Total matches for the query, ignoring `limit`/`offset`.
                   limit:
                     type: integer
-                    nullable: true
-                    description: The limit applied to this reply.
+                    description: >
+                      The limit actually applied to this reply, after the cap.
+                      Never `null`: a request that asked for everything is
+                      answered with the number it was given.
                   offset:
                     type: integer
                     description: The offset applied to this reply.

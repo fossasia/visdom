@@ -17,6 +17,7 @@ from visdom import Visdom
 from visdom.data_model import JSONStore
 from visdom.experiments import ExperimentStore, QueryParseError
 from visdom.server.app import Application
+from visdom.server.handlers.web_handlers import ExperimentSearchHandler
 
 
 def seed_experiments(store):
@@ -264,11 +265,34 @@ class TestSearchEndpoint(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(body["experiments"], [])
         self.assertEqual(body["total"], 3)
 
-    def test_null_limit_returns_all(self):
-        """An explicit null limit lifts the cap."""
+    def test_null_limit_asks_for_as_many_as_allowed(self):
+        """A null limit means "everything you'll give me", which is the cap."""
         body = self.search_ok({"limit": None})
         self.assertEqual(len(body["experiments"]), 3)
-        self.assertIsNone(body["limit"])
+        self.assertEqual(body["limit"], ExperimentSearchHandler.MAX_LIMIT)
+
+    def test_limit_above_the_cap_is_coerced_down(self):
+        """An over-large page is answered at the cap, not refused."""
+        body = self.search_ok({"limit": ExperimentSearchHandler.MAX_LIMIT * 10})
+        self.assertEqual(body["limit"], ExperimentSearchHandler.MAX_LIMIT)
+        self.assertEqual(body["total"], 3)
+
+    def test_reply_reports_the_limit_it_applied(self):
+        """The cap is visible in the reply, so a client is never misled."""
+        for asked in (2, None, ExperimentSearchHandler.MAX_LIMIT + 1):
+            body = self.search_ok({"limit": asked})
+            expected = min(
+                ExperimentSearchHandler.MAX_LIMIT,
+                asked if asked is not None else ExperimentSearchHandler.MAX_LIMIT,
+            )
+            self.assertEqual(body["limit"], expected)
+            self.assertLessEqual(len(body["experiments"]), body["limit"])
+
+    def test_total_is_never_capped(self):
+        """total counts every match even when the page cannot hold them."""
+        body = self.search_ok({"limit": 1})
+        self.assertEqual(len(body["experiments"]), 1)
+        self.assertEqual(body["total"], 3)
 
     def test_default_limit_is_applied(self):
         """A body that omits limit is capped at the handler's default."""

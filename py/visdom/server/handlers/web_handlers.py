@@ -948,20 +948,32 @@ class ExperimentSearchHandler(BaseHandler):
     Experiments are read back through the server's ``DataStore``, which means a
     server running with ``env_path=None`` — where nothing is persisted at all —
     has nothing to search and returns no results.
+
+    A reply is capped at ``MAX_LIMIT`` experiments. A larger ``limit``, or a
+    ``null`` one, is coerced down rather than refused, and the reply reports the
+    ``limit`` it actually applied, so a caller can always see what it got; the
+    ``total`` is unaffected and remains the count of every match. Without a cap
+    one request could ask the server to serialize everything it stores.
     """
 
     DEFAULT_LIMIT = 100
+    MAX_LIMIT = 1000
 
     @staticmethod
-    def _require_index(args, field, default):
-        """Return ``args[field]`` as a non-negative int (``None`` = unbounded).
+    def _require_index(args, field, default, maximum=None):
+        """Return ``args[field]`` as a non-negative int, capped at ``maximum``.
 
         A JSON body has no int/float distinction, so a client that sends ``10.0``
         means the index 10; anything with a fractional part is a mistake.
+
+        ``None`` means "as many as allowed": with a ``maximum`` it becomes that
+        maximum, and without one it stays unbounded. A value above ``maximum``
+        is coerced down rather than rejected, so raising a page size can never
+        turn a working request into a failing one.
         """
         value = args.get(field, default)
         if value is None:
-            return None
+            return maximum
         if isinstance(value, float) and value.is_integer():
             value = int(value)
         if isinstance(value, bool) or not isinstance(value, int):
@@ -972,6 +984,8 @@ class ExperimentSearchHandler(BaseHandler):
             raise tornado.web.HTTPError(
                 400, reason="'{0}' must not be negative".format(field)
             )
+        if maximum is not None and value > maximum:
+            return maximum
         return value
 
     @staticmethod
@@ -1004,29 +1018,31 @@ class ExperimentSearchHandler(BaseHandler):
         query = ExperimentSearchHandler._require_text(args, "query")
         sort_by = ExperimentSearchHandler._require_text(args, "sort_by")
         limit = ExperimentSearchHandler._require_index(
-            args, "limit", ExperimentSearchHandler.DEFAULT_LIMIT
+            args,
+            "limit",
+            ExperimentSearchHandler.DEFAULT_LIMIT,
+            maximum=ExperimentSearchHandler.MAX_LIMIT,
         )
         offset = ExperimentSearchHandler._require_index(args, "offset", 0)
         descending = ExperimentSearchHandler._require_flag(args, "descending", True)
 
         store = ExperimentStore(handler.storage, env_provider=handler.state.get)
         try:
-            experiments = store.search(
+            page, total = store.search_page(
                 query=query,
                 sort_by=sort_by or DEFAULT_SORT_FIELD,
                 descending=descending,
+                offset=offset,
+                limit=limit,
             )
         except QueryParseError as e:
             raise tornado.web.HTTPError(400, reason=str(e))
-
-        end = None if limit is None else offset + limit
-        page = experiments[offset:end]
 
         handler.write(
             json.dumps(
                 {
                     "experiments": [e.to_dict() for e in page],
-                    "total": len(experiments),
+                    "total": total,
                     "limit": limit,
                     "offset": offset,
                     "query": query or "",

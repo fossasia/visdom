@@ -1277,11 +1277,18 @@ class Visdom(object):
         `tag.owner`) when it is ambiguous; metrics compare on their latest value.
         `query=None` returns everything. Results are sorted by `sort_by` (any of
         those same names, newest-created first by default) and paged with
-        `limit`/`offset`; pass `limit=None` for all of them.
+        `limit`/`offset`.
+
+        A page is capped by the server. `limit=None` asks for as many as it
+        allows rather than for all of them, and a `limit` above the cap is
+        answered at the cap instead of being refused — so a store larger than
+        one page is read by paging with `offset`, using the `total` to know how
+        far to go.
 
         Returns the server's reply as a dict of `experiments` (a list of
         experiment dicts, one page worth), the unpaged `total` matching the
-        query, and the `limit`/`offset`/`query` used.
+        query, and the `limit` the server actually applied alongside the
+        `offset`/`query` used.
         """
         if query is not None and not isstr(query):
             raise TypeError("query must be a string")
