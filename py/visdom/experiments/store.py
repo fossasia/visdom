@@ -33,9 +33,6 @@ DEFAULT_SORT_FIELD = "created_at"
 
 _MISSING = object()
 
-#: Floor for how large a bounded scan's working set may grow before it is
-#: trimmed. Trimming amortises to nothing over a scan, and for a small page
-#: this keeps a trim from running on nearly every match.
 _MIN_TRIM_AT = 64
 
 
@@ -276,7 +273,6 @@ class ExperimentStore:
                 continue
             total += 1
             if not sort_by:
-                # Backend order: the page can only be the first entries seen.
                 if keep is None or len(present) < keep:
                     present.append((total, None, experiment))
                 continue
@@ -347,7 +343,7 @@ class ExperimentStore:
         else:
             ordered = _rank(present, descending, keep)
             page = [experiment for _, _, experiment in ordered] + missing
-        end = keep  # None keeps everything from offset onwards
+        end = keep
         return page[offset:end], total
 
     def _load_named(self, env_ids):

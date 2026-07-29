@@ -31,8 +31,6 @@ class ReadonlyEndpointCase(tornado.testing.AsyncHTTPTestCase):
 
     def setUp(self):
         self._tmp_dir = tempfile.mkdtemp(prefix="visdom_readonly_test_")
-        # Seed through a separate writable store: the fixture is what the server
-        # already had, not something the readonly server is being asked to write.
         seed = ExperimentStore(JSONStore(self._tmp_dir))
         seed.log_experiment("run-a", params={"lr": 0.1})
         seed.log_metric("run-a", "acc", 0.9)
