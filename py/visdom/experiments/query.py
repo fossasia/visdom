@@ -494,16 +494,13 @@ class ExperimentLike(Protocol):
     finished_at: Optional[float]
 
     @property
-    def params(self) -> Sequence[_KeyValueLike]:
-        ...
+    def params(self) -> Sequence[_KeyValueLike]: ...
 
     @property
-    def metrics(self) -> Sequence[_KeyValueLike]:
-        ...
+    def metrics(self) -> Sequence[_KeyValueLike]: ...
 
     @property
-    def tags(self) -> Sequence[_KeyValueLike]:
-        ...
+    def tags(self) -> Sequence[_KeyValueLike]: ...
 
 
 def build_record(experiment: ExperimentLike) -> dict:
