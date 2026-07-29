@@ -227,6 +227,32 @@ VISDOM_USE_ENV_CREDENTIALS=1 visdom -enable_login
 You can also use `VISDOM_COOKIE` variable to provide cookies value if the cookie file wasn't generated, or the
 flag `-force_new_cookie` was set.
 
+#### HTTPS Support
+
+To run the visdom server over HTTPS,user need to provide an SSL certificate and key file:
+
+```bash
+# Generate a self-signed certificate (for development only)
+openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
+
+# Start the server with HTTPS
+python -m visdom.server -ssl_certfile cert.pem -ssl_keyfile key.pem
+```
+
+Access the server at `https://localhost:8097`.
+
+Connect via the Python client:
+```python
+# For Production - real CA-signed certificate (default)
+vis = visdom.Visdom(server="https://myserver.com")
+
+# For Development - self signed certificate
+vis = visdom.Visdom(server="https://localhost", ssl_verify=False)
+```
+
+> **Note**: `ssl_verify=False` disables certificate verification and should only be used in development with self-signed certificates. Do not use in production.
+
+
 #### Python example
 ```python
 import visdom
@@ -268,6 +294,7 @@ Other options are either currently unused (endpoint, ipv6) or used for internal 
 Visdom offers the following basic visualization functions:
 - [`vis.image`](#visimage)    : image
 - [`vis.image_heatmap`](#visimageheatmap) : image with heatmap overlay
+- [`vis.update_image_slider`](#visupdate_image_slider) : set visible frame of an image_history pane
 - [`vis.images`](#visimages)   : list of images
 - [`vis.text`](#vistext)     : arbitrary HTML
 - [`vis.properties`](#visproperties)     : properties grid
@@ -381,6 +408,49 @@ with VisdomLogger(viz, env="my_run", log_every=50) as tracker:
 
 Each unique name passed to `tracker.log()` gets its own window. The first call creates it; subsequent calls append. See `example/train_example.py` for a full working example.
 
+### scikit-learn
+
+`visdom.loggers.VisdomSklearnLogger` patches all sklearn `fit()` calls so every estimator trained after `autolog()` logs to Visdom automatically — no per-estimator code needed.
+
+**Plain estimators** (classifiers, regressors, clusterers) produce a text pane with the estimator name, dataset shape, training score, fit time, and all hyperparameters.
+
+**GridSearchCV / RandomizedSearchCV** produce a bar chart of `mean_test_score` per parameter combination and a text pane with `best_score_`, `best_params_`, and fit time.
+
+```python
+import visdom
+from visdom.loggers import VisdomSklearnLogger
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import Ridge
+from sklearn.model_selection import GridSearchCV
+
+viz = visdom.Visdom()
+VisdomSklearnLogger.autolog()
+
+clf = RandomForestClassifier(n_estimators=100)
+clf.fit(X_train, y_train)        # -> text pane
+
+reg = Ridge(alpha=1.0)
+reg.fit(X_train, y_train)        # -> text pane
+
+gs = GridSearchCV(clf, param_grid, cv=3)
+gs.fit(X_train, y_train)         # -> bar chart + text pane
+```
+
+If you have a custom Visdom connection (non-default port, remote server, auth), pass it explicitly:
+
+```python
+import visdom
+
+viz = visdom.Visdom(port=8098, server="http://myserver")
+VisdomSklearnLogger.autolog(viz, env="sklearn_run")
+```
+
+**Parameters:**
+- `viz`: a connected `visdom.Visdom()` instance (optional — created internally if not passed)
+- `env`: environment name (default: `viz.env` if set, otherwise auto-generated from timestamp)
+
+See `example/train_sklearn_example.py` for a full working example covering plain estimators and grid search.
+
 ## Details
 <img src="https://user-images.githubusercontent.com/19650074/198747904-7a8a580f-851a-45fb-8f45-94e54a910ee2.png"/>
 
@@ -404,6 +474,18 @@ The following `opts` are supported:
 - `jpgquality`: JPG quality (`number` 0-100). If defined image will be saved as JPG to reduce file size. If not defined image will be saved as PNG.
 - `caption`: Caption for the image
 - `store_history`: Keep all images stored to the same window and attach a slider to the bottom that will let you select the image to view. You must always provide this opt when sending new images to an image with history.
+
+#### vis.update_image_slider
+
+Programmatically set the visible frame of an `image_history` pane from Python:
+
+```python
+win = vis.image(img, opts=dict(store_history=True))
+vis.image(img2, win=win, opts=dict(store_history=True))
+vis.update_image_slider(win, index=1)  # show second frame
+```
+
+The `index` is 0-based and is clamped to the valid range by the server. NumPy integer scalars (e.g. `np.int64`) are accepted and coerced automatically. Passing a non-integer or a non-`image_history` window raises an error.
 
 > **Note** You can use alt on an image pane to view the x/y coordinates of the cursor. You can also ctrl-scroll to zoom, alt scroll to pan vertically, and alt-shift scroll to pan horizontally. Double click inside the pane to restore the image to default.
 

@@ -81,6 +81,16 @@ async function runDemo(page, name, opts = {}) {
 
 async function closeEnvs(page) {
   const clearButton = page.locator('.navbar-form .rc-tree-select-clear');
+
+  try {
+    await clearButton.first().waitFor({ state: 'attached', timeout: 10000 });
+  } catch (error) {
+    if ((await clearButton.count()) === 0) {
+      return;
+    }
+    throw error;
+  }
+
   const count = await clearButton.count();
   for (let i = 0; i < count; i++) {
     await clearButton.nth(i).click({ force: true });
@@ -159,10 +169,45 @@ async function openEnv(page, name) {
   await closeEnvDropdown(page);
 }
 
+async function waitForPlotRender(page) {
+  await page
+    .locator('.content')
+    .first()
+    .waitFor({ state: 'visible', timeout: 20000 });
+  await page.waitForTimeout(800);
+}
+
+async function waitForMathJax(page) {
+  await page.waitForTimeout(2000);
+  await page.evaluate(async () => {
+    if (window.MathJax && window.MathJax.Hub) {
+      await new Promise((resolve) => {
+        window.MathJax.Hub.Queue(() => resolve());
+      });
+    }
+
+    if (document.fonts && document.fonts.ready) {
+      await document.fonts.ready;
+    }
+  });
+  await page.waitForTimeout(2000);
+}
+
+async function screenshotContent(page, screenshotPath) {
+  fs.mkdirSync(path.dirname(screenshotPath), { recursive: true });
+
+  const content = page.locator('.content').first();
+  await content.waitFor({ state: 'visible', timeout: 20000 });
+  await content.screenshot({ path: screenshotPath });
+}
+
 module.exports = {
   runDemo,
   closeEnvs,
   expandAllEnvGroups,
   closeEnvDropdown,
   openEnv,
+  waitForPlotRender,
+  waitForMathJax,
+  screenshotContent,
 };

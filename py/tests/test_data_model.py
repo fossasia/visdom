@@ -10,6 +10,7 @@ import tempfile
 import unittest
 
 from visdom.data_model import JSONStore, DataStore
+from visdom.utils.server_utils import LazyEnvData
 
 
 def _env(win_id="win_0"):
@@ -101,6 +102,30 @@ class TestJSONStore(unittest.TestCase):
         self.assertEqual(sorted(ret), ["main", "other"])
         self.assertEqual(self.backend.load_env("main"), _env())
 
+    def test_save_skips_unmaterialised_lazy_env(self):
+        """A LazyEnvData never loaded into memory is not rewritten by save.
+
+        Its on-disk copy is already current, so save must not force it into
+        memory just to write it back — it is skipped and left out of the
+        returned ids.
+        """
+        lazy = LazyEnvData(self.backend, "lazy")
+        self.assertIsNone(lazy._raw_dict)
+        ret = self.backend.save_envs({"lazy": lazy}, ["lazy"])
+        self.assertEqual(ret, [])
+        self.assertFalse(self.backend.env_exists("lazy"))
+
+    def test_save_writes_materialised_lazy_env(self):
+        """A LazyEnvData that has been loaded is persisted by save."""
+        self.backend.save_env("lazy", _env())
+        lazy = LazyEnvData(self.backend, "lazy")
+        lazy.lazy_load_data()  # materialise from disk
+        self.backend.delete_env("lazy")  # prove the next save recreates it
+        self.assertFalse(self.backend.env_exists("lazy"))
+        ret = self.backend.save_envs({"lazy": lazy}, ["lazy"])
+        self.assertEqual(ret, ["lazy"])
+        self.assertEqual(self.backend.load_env("lazy"), _env())
+
     def test_env_named_like_hash_is_not_misread(self):
         """An env named 'hash_results' is not treated as a hash_<64hex> file."""
         self.backend.save_env("hash_results", _env())
@@ -114,6 +139,53 @@ class TestJSONStore(unittest.TestCase):
         self.assertTrue(self.backend.env_exists(long_eid))
         loaded = self.backend.load_env(long_eid)
         self.assertEqual(loaded["jsons"], _env()["jsons"])
+
+    def test_layouts_round_trip(self):
+        """Saved layouts read back byte-for-byte as the same string."""
+        blob = '[["view A", {"win_0": [0, 0, 3, 3]}]]'
+        self.backend.save_layouts(blob)
+        self.assertEqual(self.backend.load_layouts(), blob)
+
+    def test_save_layouts_writes_expected_file(self):
+        """save_layouts writes <env_path>/view/layouts.json."""
+        self.backend.save_layouts("[]")
+        expected = os.path.join(self.env_path, "view", "layouts.json")
+        self.assertTrue(os.path.exists(expected))
+        with open(expected) as fn:
+            self.assertEqual(fn.read(), "[]")
+
+    def test_load_layouts_missing_returns_empty(self):
+        """load_layouts returns '' when no layout file has been written."""
+        self.assertEqual(self.backend.load_layouts(), "")
+
+    def test_undo_round_trip(self):
+        """A saved undo stack reads back unchanged."""
+        stack = [["win_0", {"id": "win_0"}], ["win_1", {"id": "win_1"}]]
+        self.backend.save_undo("expt", stack)
+        self.assertEqual(self.backend.load_undo("expt"), stack)
+
+    def test_load_undo_missing_returns_empty(self):
+        """load_undo returns [] when no undo file exists."""
+        self.assertEqual(self.backend.load_undo("expt"), [])
+
+    def test_save_undo_writes_under_dot_undo(self):
+        """save_undo writes <env_path>/.undo/<eid>.json."""
+        self.backend.save_undo("expt", [["win_0", {"id": "win_0"}]])
+        expected = os.path.join(self.env_path, ".undo", "expt.json")
+        self.assertTrue(os.path.exists(expected))
+
+    def test_clear_undo_removes_history(self):
+        """clear_undo drops a previously saved undo stack."""
+        self.backend.save_undo("expt", [["win_0", {"id": "win_0"}]])
+        self.backend.clear_undo("expt")
+        self.assertEqual(self.backend.load_undo("expt"), [])
+
+    def test_undo_long_name_hash_fallback_round_trips(self):
+        """An over-long env name uses the hash_<sha256>.json undo fallback."""
+        long_eid = "e" * 5000
+        stack = [["win_0", {"id": "win_0"}]]
+        self.backend.save_undo(long_eid, stack)
+        self.assertEqual(self.backend.load_undo(long_eid), stack)
 
     def test_save_ignores_path_traversal_ids(self):
         """A crafted id like '../evil' cannot write outside env_path."""
@@ -183,6 +255,26 @@ class TestJSONStoreNoPath(unittest.TestCase):
     def test_delete_is_noop(self):
         """delete_env removes nothing and reports False."""
         self.assertFalse(self.backend.delete_env("main"))
+
+    def test_save_layouts_is_noop(self):
+        """save_layouts persists nothing when persistence is disabled."""
+        self.assertIsNone(self.backend.save_layouts("[]"))
+
+    def test_load_layouts_returns_empty(self):
+        """load_layouts returns '' when persistence is disabled."""
+        self.assertEqual(self.backend.load_layouts(), "")
+
+    def test_load_undo_returns_empty(self):
+        """load_undo returns [] when persistence is disabled."""
+        self.assertEqual(self.backend.load_undo("expt"), [])
+
+    def test_save_undo_is_noop(self):
+        """save_undo persists nothing when persistence is disabled."""
+        self.assertIsNone(self.backend.save_undo("expt", [["w", {}]]))
+
+    def test_clear_undo_is_noop(self):
+        """clear_undo removes nothing when persistence is disabled."""
+        self.assertIsNone(self.backend.clear_undo("expt"))
 
 
 if __name__ == "__main__":

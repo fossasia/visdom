@@ -13,7 +13,6 @@ necessary, but defers underlying manipulations of the server's data to
 the data_model itself.
 """
 
-import hashlib
 import copy
 import getpass
 import json
@@ -27,7 +26,11 @@ from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 
 import tornado.escape
-from visdom.utils.shared_utils import get_rand_id, NanSafeEncoder
+from visdom.utils.shared_utils import (
+    get_rand_id,
+    _coerce_image_slider_index,
+    NanSafeEncoder,
+)
 from visdom.utils.server_utils import (
     check_auth,
     extract_eid,
@@ -167,11 +170,11 @@ class UpdateHandler(BaseHandler):
                     p["content"] = p["content"][-max_image_history:]
                 p["selected"] = len(p["content"]) - 1
             elif utype == "image_update_selected":
-                # Bound the update to within the dims of the array
-                selected = args["data"][0]["selected"]
-                selected_not_neg = max(0, selected)
-                selected_exists = min(len(p["content"]) - 1, selected_not_neg)
-                p["selected"] = selected_exists
+                if not p["content"]:
+                    return p
+                selected = _coerce_image_slider_index(args["data"][0]["selected"])
+                selected = min(max(0, selected), len(p["content"]) - 1)
+                p["selected"] = selected
             return p
         if p["type"] == "plot_history":
             utype = args["data"][0]["type"]
@@ -381,6 +384,16 @@ class UpdateHandler(BaseHandler):
             return
 
         p = handler.state[eid]["jsons"][args["win"]]
+        data = args.get("data")
+        is_image_slider_update = isinstance(data, list) and any(
+            isinstance(entry, dict) and entry.get("type") == "image_update_selected"
+            for entry in data
+        )
+
+        if is_image_slider_update and p["type"] != "image_history":
+            handler.set_status(400)
+            handler.write("win is not image_history; was {}".format(p["type"]))
+            return
 
         if not (
             p["type"] == "text"
@@ -411,13 +424,20 @@ class UpdateHandler(BaseHandler):
             handler.write(p["id"])
             return
 
-        p, diff_packet = UpdateHandler.update_packet(
-            p,
-            args,
-            handler.max_text_lines,
-            handler.max_old_content,
-            handler.max_image_history,
-        )
+        try:
+            p, diff_packet = UpdateHandler.update_packet(
+                p,
+                args,
+                handler.max_text_lines,
+                handler.max_old_content,
+                handler.max_image_history,
+            )
+        except (TypeError, ValueError) as exc:
+            if is_image_slider_update:
+                handler.set_status(400)
+                handler.write(str(exc))
+                return
+            raise
         # send the smaller of the patch and the updated pane
         if len(stringify(p)) <= len(stringify(diff_packet)):
             broadcast_msg = dict(p)
@@ -448,7 +468,7 @@ class CloseHandler(BaseHandler):
         for win in keys:
             p_data = handler.state[eid]["jsons"].pop(win, None)
             if p_data is not None:
-                push_deleted(handler.env_path, eid, win, p_data)
+                push_deleted(handler.storage, eid, win, p_data)
             broadcast(handler, json.dumps({"command": "close", "data": win}), eid)
 
     @check_auth
@@ -468,28 +488,8 @@ class DeleteEnvHandler(BaseHandler):
             if eid == "main":
                 return
             handler.state.pop(eid, None)
-            clear_deleted(handler.env_path, eid)
-            if handler.env_path is not None:
-                p = os.path.join(handler.env_path, "{0}.json".format(eid))
-                if os.path.exists(p):
-                    try:
-                        os.remove(p)
-                    except FileNotFoundError:
-                        pass
-                    except OSError as e:
-                        logging.error(f"Failed to delete {p}: {e}")
-                else:
-                    hashed_id = hashlib.sha256(eid.encode("utf-8")).hexdigest()
-                    p = os.path.join(
-                        handler.env_path, "hash_{0}.json".format(hashed_id)
-                    )
-                    if os.path.exists(p):
-                        try:
-                            os.remove(p)
-                        except FileNotFoundError:
-                            pass
-                        except OSError as e:
-                            logging.error(f"Failed to delete {p}: {e}")
+            clear_deleted(handler.storage, eid)
+            handler.storage.delete_env(eid)
             broadcast_envs(handler)
 
     @check_auth
@@ -572,7 +572,7 @@ class EnvHandler(BaseHandler):
                         self.state,
                         escape_eid(args),
                         self.subs[sid],
-                        env_path=self.env_path,
+                        self.storage,
                     )
                 except ValueError as e:
                     notify(
@@ -619,7 +619,7 @@ class CompareHandler(BaseHandler):
                     self.state,
                     args.split("+"),
                     self.subs[sid],
-                    self.env_path,
+                    self.storage,
                     show_all=show_all,
                 )
             except ValueError as e:
@@ -713,7 +713,7 @@ class IndexHandler(BaseHandler):
                 wrap_socket=self.wrap_socket,
             )
         elif self.login_enabled:
-            items = gather_envs(self.state, env_path=self.env_path)
+            items = gather_envs(self.state, self.storage)
             self.render(
                 "login.html",
                 user=getpass.getuser(),

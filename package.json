@@ -38,6 +38,9 @@
     "test:visual": "cypress run --spec './cypress/integration/screenshots.js'",
     "test": "cypress run --config excludeSpecPattern=**/*.init.js",
     "test:pw": "playwright test --config=playwright.config.js",
+    "test:pw:polling": "playwright test --config=playwright.polling.config.js",
+    "test:pw:init": "playwright test --config=playwright.init.config.js",
+    "test:pw:visual": "playwright test --config=playwright.visual.config.js",
     "lint": "eslint js/.",
     "lint:fix": "eslint --fix --ext .js,.jsx js/"
   },
@@ -52,7 +55,7 @@
     "d3-selection": "^3.0.0",
     "d3-zoom": "^3.0.0",
     "debounce": "^3.0.0",
-    "eslint-plugin-simple-import-sort": "^13.0.0",
+    "eslint-plugin-simple-import-sort": "^14.0.0",
     "fast-json-patch": "^3.1.1",
     "https-browserify": "^1.0.0",
     "jquery": "^4.0.0",
