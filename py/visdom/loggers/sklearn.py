@@ -50,6 +50,7 @@ class VisdomSklearnLogger:
     pane (R2 alone can be misleading) and a predicted-vs-residual
     scatter plot. Like train_score, these are computed on the data
     passed to fit(), so they are in-sample and not held-out estimates.
+    A multioutput fit pools its targets into one residual plot.
 
     Every pane is keyed on the estimator instance, so refitting the same
     estimator replaces its panes instead of opening new ones. Distinct
@@ -286,31 +287,40 @@ class VisdomSklearnLogger:
             )
 
     def _log_regression_diagnostics(self, est, X, y, summary_rows):
-        """Add train_rmse/train_mae rows and a residual scatter for est.
+        """Add train_rmse/train_mae rows for est, return residual points.
 
         X and y are the arrays fit() was called with, so every value here
         is in-sample and optimistically biased; the train_ prefix and the
         plot title say so rather than implying a held-out estimate.
+
+        Both arrays are flattened first. sklearn ravels a single-column
+        target, so an (n, 1) y would otherwise broadcast against an (n,)
+        prediction into an n x n matrix, and a multioutput y would widen
+        the points past the two columns scatter() accepts.
         """
         from sklearn.base import is_regressor
 
         if not is_regressor(est) or y is None:
-            return
+            return None
         try:
             y_pred = est.predict(X)
         except Exception:
-            return
+            return None
 
-        y_true = np.asarray(y, dtype=float)
-        y_pred = np.asarray(y_pred, dtype=float)
+        y_true = np.asarray(y, dtype=float).ravel()
+        y_pred = np.asarray(y_pred, dtype=float).ravel()
+        if y_true.shape != y_pred.shape:
+            return None
         residuals = y_true - y_pred
         rmse = np.sqrt(np.mean(residuals**2))
         mae = np.mean(np.abs(residuals))
         summary_rows.append(self._row("train_rmse", "{:.4f}".format(rmse)))
         summary_rows.append(self._row("train_mae", "{:.4f}".format(mae)))
+        return np.column_stack([y_pred, residuals])
 
+    def _plot_residuals(self, est, points):
         self.viz.scatter(
-            X=np.column_stack([y_pred, residuals]),
+            X=points,
             win=self._win(est, "residuals"),
             env=self.env,
             opts={
@@ -337,7 +347,7 @@ class VisdomSklearnLogger:
         except Exception:
             pass
 
-        self._log_regression_diagnostics(est, X, y, summary_rows)
+        residuals = self._log_regression_diagnostics(est, X, y, summary_rows)
 
         param_rows = "".join(
             self._row(k, v) for k, v in sorted(est.get_params().items())
@@ -358,4 +368,6 @@ class VisdomSklearnLogger:
             params=param_rows,
         )
         self.viz.text(body, win=self._win(est, "summary"), env=self.env)
+        if residuals is not None:
+            self._plot_residuals(est, residuals)
         self._log_history(est)
