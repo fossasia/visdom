@@ -59,9 +59,13 @@ var PlotPane = (props) => {
   const updateSmoothSlider = (value) => {
     setSmoothValue(value);
   };
-  const handleDownload = () => {
+
+  const dpiToScale = (dpi) => (dpi ? dpi / 96 : 1);
+
+  const handleExport = (format, dpi) => {
     Plotly.downloadImage(plotlyRef.current, {
-      format: 'svg',
+      format: format === 'jpg' ? 'jpeg' : format,
+      scale: dpiToScale(dpi),
       filename: contentID || 'plot',
     });
   };
@@ -346,7 +350,7 @@ var PlotPane = (props) => {
   return (
     <Pane
       {...props}
-      handleDownload={handleDownload}
+      handleExport={handleExport}
       handleMetadataExport={handleMetadataExport}
       barwidgets={[smooth_widget_button]}
       widgets={[history_widget, caption_widget, smooth_widget]}
