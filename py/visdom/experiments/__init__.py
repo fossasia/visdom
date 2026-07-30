@@ -22,6 +22,11 @@ from visdom.experiments.models import (
     STATUS_RUNNING,
     VALID_STATUSES,
 )
+from visdom.experiments.live import (
+    DEFAULT_DEBOUNCE_SECONDS,
+    LiveUpdateQueue,
+    resolve_targets,
+)
 from visdom.experiments.query import (
     And,
     Comparison,
@@ -40,11 +45,13 @@ __all__ = [
     "And",
     "ComparableExperiment",
     "Comparison",
+    "DEFAULT_DEBOUNCE_SECONDS",
     "DEFAULT_SORT_FIELD",
     "Experiment",
     "ExperimentFinishedError",
     "ExperimentLike",
     "ExperimentStore",
+    "LiveUpdateQueue",
     "Metric",
     "Node",
     "Or",
@@ -57,6 +64,7 @@ __all__ = [
     "build_record",
     "flatten_experiments",
     "parse_query",
+    "resolve_targets",
     "STATUS_FAILED",
     "STATUS_FINISHED",
     "STATUS_RUNNING",
