@@ -13,7 +13,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 
 import Pane from './Pane';
-import { downloadImageAsPdf, PDF_EXPORT_DPI } from './utils/pdfExport';
+import { downloadImageAsPdf } from './utils/pdfExport';
 
 function NetworkPane(props) {
   const {

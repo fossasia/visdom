@@ -11,8 +11,8 @@ import React, { useContext, useEffect, useRef, useState } from 'react';
 const { usePrevious } = require('../util');
 import ApiContext from '../api/ApiContext';
 import Pane from './Pane';
-import { downloadImageAsPdf, PDF_EXPORT_DPI } from './utils/pdfExport';
 import { typesetMathJax } from './utils/mathjaxHelpers';
+import { downloadImageAsPdf } from './utils/pdfExport';
 const { sgg } = require('ml-savitzky-golay-generalized');
 
 var PlotPane = (props) => {

@@ -18,7 +18,7 @@ import ApiContext from '../api/ApiContext';
 import EventSystem from '../EventSystem';
 import lasso from '../lasso';
 import Pane from './Pane';
-import { downloadImageAsPdf, PDF_EXPORT_DPI } from './utils/pdfExport';
+import { downloadImageAsPdf } from './utils/pdfExport';
 
 const SCALE_RADIUS = 2000;
 const MIN_SELECTION = 22;
