@@ -1408,6 +1408,13 @@ class Visdom(object):
 
         `win`/`env`/`opts` behave as they do for the other plotting methods.
         Returns the created window id.
+
+        The pane keeps itself current afterwards: logging a run refreshes every
+        open pane whose selection that run could affect. A ``"query"`` pane is
+        re-run by any logged run, since one that did not match before may match
+        now; an ``"env_ids"`` pane only follows the runs it names.
+        :meth:`update_hparams` remains the way to change the selection, or to
+        refresh a pane the server has not loaded.
         """
         opts = {} if opts is None else opts
         _title2str(opts)
