@@ -81,6 +81,16 @@ async function runDemo(page, name, opts = {}) {
 
 async function closeEnvs(page) {
   const clearButton = page.locator('.navbar-form .rc-tree-select-clear');
+
+  try {
+    await clearButton.first().waitFor({ state: 'attached', timeout: 10000 });
+  } catch (error) {
+    if ((await clearButton.count()) === 0) {
+      return;
+    }
+    throw error;
+  }
+
   const count = await clearButton.count();
   for (let i = 0; i < count; i++) {
     await clearButton.nth(i).click({ force: true });
