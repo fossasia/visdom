@@ -34,6 +34,7 @@ _WEB_APP_ATTRIBUTES = _COMMON_APP_ATTRIBUTES + (
     "max_text_lines",
     "max_old_content",
     "max_image_history",
+    "live_updates",
 )
 
 _SOCKET_APP_ATTRIBUTES = _COMMON_APP_ATTRIBUTES

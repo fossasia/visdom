@@ -30,6 +30,7 @@ from visdom.server.handlers.socket_handlers import (
 from visdom.server.handlers.experiments_handler import (
     ExperimentHparamsHandler,
     ExperimentHparamsUpdateHandler,
+    make_live_queue,
 )
 from visdom.server.handlers.web_handlers import (
     CloseHandler,
@@ -95,6 +96,7 @@ class Application(tornado.web.Application):
         self.user_settings = self.load_user_settings()
         self.subs = {}
         self.sources = {}
+        self.live_updates = make_live_queue(self)
         self.port = port
         self.base_url = base_url
         self.readonly = readonly
