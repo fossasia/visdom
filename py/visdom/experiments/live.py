@@ -122,13 +122,23 @@ class LiveUpdateQueue:
         The pending marks are taken before anything is rebuilt, so a mark
         arriving while a rebuild runs opens the next round instead of being
         swallowed by this one.
+
+        Resolving is guarded as well as rebuilding: the marks it was handed
+        have already left ``_pending``, so letting it raise would lose that
+        batch outright rather than one pane of it.
         """
         self._scheduled = False
         changed, self._pending = self._pending, set()
         if not changed:
             return
 
-        for eid, win_id in self._resolve(changed):
+        try:
+            targets = self._resolve(changed)
+        except Exception:
+            logging.exception("could not resolve the hparams panes to live-update")
+            return
+
+        for eid, win_id in targets:
             try:
                 self._rebuild(eid, win_id)
             except Exception:

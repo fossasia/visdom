@@ -216,6 +216,39 @@ class TestLiveUpdateQueue(unittest.TestCase):
 
         self.assertEqual(attempted, ["hp1", "hp2"])
 
+    def test_a_failing_resolve_does_not_take_the_drain_down(self):
+        """A resolver that raises is logged, not propagated into the caller."""
+
+        def resolve(changed):
+            raise RuntimeError("bad state")
+
+        queue = self.queue(resolve=resolve)
+        queue.mark("run-a")
+        with self.assertLogs(level="ERROR"):
+            self.scheduled[0][1]()
+
+        self.assertEqual(self.rebuilt, [])
+
+    def test_the_queue_re_arms_after_a_failing_resolve(self):
+        """A lost batch must not leave the queue permanently disarmed."""
+        failing = [True]
+
+        def resolve(changed):
+            if failing[0]:
+                raise RuntimeError("bad state")
+            return [("main", "hp1")]
+
+        queue = self.queue(resolve=resolve)
+        queue.mark("run-a")
+        with self.assertLogs(level="ERROR"):
+            self.scheduled[0][1]()
+
+        failing[0] = False
+        queue.mark("run-b")
+        self.assertEqual(len(self.scheduled), 2)
+        self.scheduled[1][1]()
+        self.assertEqual(self.rebuilt, [("main", "hp1")])
+
     def test_a_failing_schedule_leaves_the_queue_usable(self):
         """A queue that could not arm itself must still arm on the next mark."""
 
