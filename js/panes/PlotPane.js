@@ -11,6 +11,7 @@ import React, { useContext, useEffect, useRef, useState } from 'react';
 const { usePrevious } = require('../util');
 import ApiContext from '../api/ApiContext';
 import Pane from './Pane';
+import { downloadImageAsPdf, PDF_EXPORT_DPI } from './utils/pdfExport';
 import { typesetMathJax } from './utils/mathjaxHelpers';
 const { sgg } = require('ml-savitzky-golay-generalized');
 
@@ -61,8 +62,19 @@ var PlotPane = (props) => {
   };
 
   const dpiToScale = (dpi) => (dpi ? dpi / 96 : 1);
+  const PDF_CAPTURE_DPI = 300;
 
   const handleExport = (format, dpi) => {
+    if (format === 'pdf') {
+      Plotly.toImage(plotlyRef.current, {
+        format: 'jpeg',
+        scale: dpiToScale(PDF_CAPTURE_DPI),
+      }).then((dataUrl) => {
+        downloadImageAsPdf(dataUrl, `${contentID || 'plot'}.pdf`);
+      });
+      return;
+    }
+
     Plotly.downloadImage(plotlyRef.current, {
       format: format === 'jpg' ? 'jpeg' : format,
       scale: dpiToScale(dpi),

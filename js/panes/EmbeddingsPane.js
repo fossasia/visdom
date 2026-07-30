@@ -18,11 +18,12 @@ import ApiContext from '../api/ApiContext';
 import EventSystem from '../EventSystem';
 import lasso from '../lasso';
 import Pane from './Pane';
+import { downloadImageAsPdf, PDF_EXPORT_DPI } from './utils/pdfExport';
 
 const SCALE_RADIUS = 2000;
 const MIN_SELECTION = 22;
 
-const EXPORT_FORMATS = ['png', 'jpg'];
+const EXPORT_FORMATS = ['png', 'jpg', 'pdf'];
 
 class EmbeddingsPane extends React.Component {
   state = { exportError: null };
@@ -159,16 +160,21 @@ class EmbeddingsPane extends React.Component {
       renderer.setSize(width, height, false);
       renderer.render(scene, camera);
 
-      const mime = format === 'jpg' ? 'image/jpeg' : 'image/png';
+      const mime =
+        format === 'jpg' || format === 'pdf' ? 'image/jpeg' : 'image/png';
       const dataUrl = renderer.domElement.toDataURL(
         mime,
-        format === 'jpg' ? 0.92 : undefined
+        format === 'jpg' || format === 'pdf' ? 0.95 : undefined
       );
 
-      const link = document.createElement('a');
-      link.download = `${this.props.contentID || 'plot'}.${format}`;
-      link.href = dataUrl;
-      link.click();
+      if (format === 'pdf') {
+        downloadImageAsPdf(dataUrl, `${this.props.contentID || 'plot'}.pdf`);
+      } else {
+        const link = document.createElement('a');
+        link.download = `${this.props.contentID || 'plot'}.${format}`;
+        link.href = dataUrl;
+        link.click();
+      }
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('EmbeddingsPane export failed:', err);
