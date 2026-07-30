@@ -92,9 +92,7 @@ class LiveUpdateQueue:
     other panes their update nor the caller its response.
     """
 
-    def __init__(
-        self, resolve, rebuild, delay=DEFAULT_DEBOUNCE_SECONDS, schedule=None
-    ):
+    def __init__(self, resolve, rebuild, delay=DEFAULT_DEBOUNCE_SECONDS, schedule=None):
         self._resolve = resolve
         self._rebuild = rebuild
         self._delay = delay
