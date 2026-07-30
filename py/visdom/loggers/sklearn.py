@@ -11,6 +11,7 @@ import html
 import threading
 import time
 import warnings
+import weakref
 
 import numpy as np
 
@@ -45,8 +46,14 @@ class VisdomSklearnLogger:
     train_score_) additionally produce a line chart of that history.
     MLPClassifier/MLPRegressor fit with early_stopping=True also produce
     a line chart of validation_scores_ per epoch.
-    Regressors additionally get rmse/mae rows in the text pane (R2 alone
-    can be misleading) and a predicted-vs-residual scatter plot.
+    Regressors additionally get train_rmse/train_mae rows in the text
+    pane (R2 alone can be misleading) and a predicted-vs-residual
+    scatter plot. Like train_score, these are computed on the data
+    passed to fit(), so they are in-sample and not held-out estimates.
+
+    Every pane is keyed on the estimator instance, so refitting the same
+    estimator replaces its panes instead of opening new ones. Distinct
+    estimator objects always get their own panes.
 
     Usage::
 
@@ -68,6 +75,8 @@ class VisdomSklearnLogger:
         self.viz = viz
         self.env = env
         self._local = threading.local()
+        self._wins = weakref.WeakKeyDictionary()
+        self._seq = 0
 
     @property
     def _depth(self):
@@ -164,6 +173,21 @@ class VisdomSklearnLogger:
         patched_fit._visdom_patched = True
         cls.fit = patched_fit
 
+    def _win(self, est, name):
+        """Window id for one of est's panes, stable across refits.
+
+        Keyed on the estimator instance so refitting replaces the panes
+        that estimator already owns, while a different estimator object
+        of the same class still gets its own. The mapping holds weak
+        references, so it never keeps a fitted model alive.
+        """
+        tag = self._wins.get(est)
+        if tag is None:
+            self._seq += 1
+            tag = "{}_{}".format(type(est).__name__, self._seq)
+            self._wins[est] = tag
+        return "{}_{}".format(tag, name)
+
     @staticmethod
     def _row(key, val):
         return "<tr><td {k}>{key}</td><td {v}>{val}</td></tr>".format(
@@ -185,6 +209,7 @@ class VisdomSklearnLogger:
         n = len(scores)
         self.viz.bar(
             X=scores,
+            win=self._win(est, "cv_scores"),
             env=self.env,
             opts={
                 "title": "{} CV scores".format(type(est).__name__),
@@ -229,12 +254,13 @@ class VisdomSklearnLogger:
             section=_SECTION,
             params=param_rows,
         )
-        self.viz.text(body, env=self.env)
+        self.viz.text(body, win=self._win(est, "summary"), env=self.env)
 
     def _plot_history(self, est, curve, attr, xlabel, ylabel):
         self.viz.line(
             X=list(range(1, len(curve) + 1)),
             Y=curve,
+            win=self._win(est, attr),
             env=self.env,
             opts={
                 "title": "{} {}".format(type(est).__name__, attr),
@@ -260,6 +286,12 @@ class VisdomSklearnLogger:
             )
 
     def _log_regression_diagnostics(self, est, X, y, summary_rows):
+        """Add train_rmse/train_mae rows and a residual scatter for est.
+
+        X and y are the arrays fit() was called with, so every value here
+        is in-sample and optimistically biased; the train_ prefix and the
+        plot title say so rather than implying a held-out estimate.
+        """
         from sklearn.base import is_regressor
 
         if not is_regressor(est) or y is None:
@@ -274,14 +306,15 @@ class VisdomSklearnLogger:
         residuals = y_true - y_pred
         rmse = np.sqrt(np.mean(residuals**2))
         mae = np.mean(np.abs(residuals))
-        summary_rows.append(self._row("rmse", "{:.4f}".format(rmse)))
-        summary_rows.append(self._row("mae", "{:.4f}".format(mae)))
+        summary_rows.append(self._row("train_rmse", "{:.4f}".format(rmse)))
+        summary_rows.append(self._row("train_mae", "{:.4f}".format(mae)))
 
         self.viz.scatter(
             X=np.column_stack([y_pred, residuals]),
+            win=self._win(est, "residuals"),
             env=self.env,
             opts={
-                "title": "{} residuals".format(type(est).__name__),
+                "title": "{} training residuals".format(type(est).__name__),
                 "xlabel": "predicted",
                 "ylabel": "residual",
                 "markersize": 5,
@@ -324,5 +357,5 @@ class VisdomSklearnLogger:
             section=_SECTION,
             params=param_rows,
         )
-        self.viz.text(body, env=self.env)
+        self.viz.text(body, win=self._win(est, "summary"), env=self.env)
         self._log_history(est)

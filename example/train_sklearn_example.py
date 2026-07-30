@@ -38,8 +38,8 @@ def main():
     clf = RandomForestClassifier(n_estimators=100, random_state=42)
     clf.fit(X_train_clf, y_train_clf)
 
-    # plain regressor -> text pane (dataset, train_score, rmse, mae, fit_time,
-    # params) + predicted-vs-residual scatter plot
+    # plain regressor -> text pane (dataset, train_score, train_rmse,
+    # train_mae, fit_time, params) + predicted-vs-residual scatter plot
     reg = Ridge(alpha=1.0)
     reg.fit(X_train_reg, y_train_reg)
 
@@ -71,8 +71,8 @@ def main():
     )
     mlp_es.fit(X_train_clf, y_train_clf)
 
-    # GradientBoostingRegressor -> text pane (+ rmse, mae, residual scatter)
-    # and a line chart of train_score_ per boosting iteration
+    # GradientBoostingRegressor -> text pane (+ train_rmse, train_mae,
+    # residual scatter) and a line chart of train_score_ per iteration
     gbr = GradientBoostingRegressor(n_estimators=100, random_state=42)
     gbr.fit(X_train_reg, y_train_reg)
 
