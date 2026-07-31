@@ -1,4 +1,12 @@
-"""Unit tests for the experiments metadata model and store (Layer 2, PR 1).
+#!/usr/bin/env python3
+
+# Copyright 2017-present, The Visdom Authors
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
+"""Unit tests for the experiments metadata model and store.
 
 Exercises :mod:`visdom.experiments` against a real ``JSONStore`` over a
 temporary directory, so no running visdom server is needed. These cover the

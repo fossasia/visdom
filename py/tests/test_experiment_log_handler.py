@@ -1,4 +1,12 @@
-"""End-to-end tests for the ``/experiments/log`` endpoint (Layer 2, PR 2).
+#!/usr/bin/env python3
+
+# Copyright 2017-present, The Visdom Authors
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
+"""End-to-end tests for the ``/experiments/log`` endpoint.
 
 Drives a real :class:`~visdom.server.app.Application` over a temp env dir with
 Tornado's ``AsyncHTTPTestCase``, so the full route -> handler -> ``ExperimentStore``
