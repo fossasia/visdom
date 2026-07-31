@@ -585,7 +585,9 @@ def register_window(self, p, eid):
         p["i"] = env[p["id"]]["i"]
         p["comment"] = env[p["id"]].get("comment", p.get("comment", ""))
     else:
-        p["i"] = len(env)
+        # not len(env): closing any window but the last would hand the next
+        # one an index that is still in use. Same rule as the undo path.
+        p["i"] = max((w.get("i", -1) for w in env.values()), default=-1) + 1
 
     env[p["id"]] = p
 

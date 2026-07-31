@@ -138,3 +138,26 @@ def test_recreating_a_window_keeps_its_index(visdom_server):
     pane = visdom_server.get_win_data("stable")
     assert pane["i"] == 0
     assert pane["content"] == "v2"
+
+
+def test_an_index_is_never_reused_after_a_close(visdom_server):
+    wins = [visdom_server.create_text_window(content=str(n)) for n in range(3)]
+    visdom_server.close_window(wins[1])
+
+    added = visdom_server.create_text_window(content="after the close")
+
+    panes = visdom_server.panes()
+    indices = [pane["i"] for pane in panes.values()]
+    assert sorted(indices) == [0, 2, 3]
+    assert panes[added]["i"] == 3
+
+
+def test_indices_stay_unique_while_windows_churn(visdom_server):
+    live = [visdom_server.create_text_window(content=str(n)) for n in range(4)]
+
+    for round_ in range(4):
+        visdom_server.close_window(live.pop(0))
+        live.append(visdom_server.create_text_window(content=f"round {round_}"))
+
+        indices = [pane["i"] for pane in visdom_server.panes().values()]
+        assert len(set(indices)) == len(indices), indices
