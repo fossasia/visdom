@@ -200,7 +200,10 @@ class UpdateHandler(BaseHandler):
         idxs = list(range(len(pdata)))
 
         if name is not None:
-            assert len(new_data) == 1 or args.get("delete")
+            if not args.get("delete") and len(new_data) != 1:
+                raise tornado.web.HTTPError(
+                    400, reason="a named trace update takes exactly one data entry"
+                )
             idxs = [i for i in idxs if pdata[i]["name"] == name]
 
         # Delete a trace
@@ -529,7 +532,10 @@ class ForkEnvHandler(BaseHandler):
         prev_eid = escape_eid(args.get("prev_eid"))
         eid = escape_eid(args.get("eid"))
 
-        assert prev_eid in handler.state, "env to be forked doesn't exist"
+        if prev_eid not in handler.state:
+            # the eid stays out of the reason: it is echoed on the status line,
+            # which is latin-1 only, and eids are free-form unicode.
+            raise tornado.web.HTTPError(400, reason="env to be forked doesn't exist")
 
         handler.state[eid] = copy.deepcopy(handler.state[prev_eid])
         handler.storage.save_env(eid, handler.state[eid])
@@ -674,9 +680,10 @@ class DataHandler(BaseHandler):
                     json.dumps(handler.state[eid]["jsons"], cls=NanSafeEncoder)
                 )
             else:
-                assert (
-                    args["win"] in handler.state[eid]["jsons"]
-                ), "Window {} doesn't exist in env {}".format(args["win"], eid)
+                if args["win"] not in handler.state[eid]["jsons"]:
+                    raise tornado.web.HTTPError(
+                        400, reason="window doesn't exist in this env"
+                    )
                 handler.write(
                     json.dumps(
                         handler.state[eid]["jsons"][args["win"]], cls=NanSafeEncoder

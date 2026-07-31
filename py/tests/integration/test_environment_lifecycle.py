@@ -70,9 +70,11 @@ def test_fork_is_independent_of_its_source(visdom_server):
     assert visdom_server.get_win_data("w1", eid="main")["content"] == "original"
 
 
-def test_forking_an_unknown_env_is_rejected(visdom_server):
+def test_forking_an_unknown_env_is_a_bad_request(visdom_server):
     resp = visdom_server.post_json("/fork_env", {"prev_eid": "no_exist", "eid": "new"})
-    assert resp.status_code == 500
+    assert resp.status_code == 400
+    assert "env to be forked doesn't exist" in resp.reason
+    assert "new" not in visdom_server.get_envs()
 
 
 # -- Save ---------------------------------------------------------------------

@@ -68,9 +68,29 @@ def test_the_server_survives_a_requested_error(visdom_server):
     assert visdom_server.get("/health").status_code == 200
 
 
-def test_reading_an_unknown_window_is_rejected(visdom_server):
+def test_reading_an_unknown_window_is_a_bad_request(visdom_server):
     resp = visdom_server.post_json("/win_data", {"eid": "main", "win": "nonexistent"})
-    assert resp.status_code == 500
+    assert resp.status_code == 400
+    assert "window doesn't exist" in resp.reason
+
+
+def test_naming_a_trace_while_sending_several_is_a_bad_request(visdom_server):
+    trace = {"type": "scatter", "x": [1, 2], "y": [3, 4], "name": "t1"}
+    win = visdom_server.create_window([trace])
+
+    resp = visdom_server.update(win, [trace, dict(trace, name="t2")], name="t1")
+
+    assert resp.status_code == 400
+    assert "exactly one data entry" in resp.reason
+
+
+def test_a_named_trace_update_with_one_entry_is_accepted(visdom_server):
+    trace = {"type": "scatter", "x": [1, 2], "y": [3, 4], "name": "t1"}
+    win = visdom_server.create_window([trace])
+
+    replacement = dict(trace, y=[9, 9])
+    assert visdom_server.update(win, [replacement], name="t1").status_code == 200
+    assert visdom_server.get_win_data(win)["content"]["data"][0]["y"] == [9, 9]
 
 
 def test_updating_a_window_in_an_unknown_env_does_not_crash(visdom_server):
