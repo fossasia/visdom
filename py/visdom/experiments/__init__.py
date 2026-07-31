@@ -8,6 +8,7 @@
 
 from visdom.experiments.models import (
     Experiment,
+    ExperimentFinishedError,
     Metric,
     Param,
     Tag,
@@ -20,6 +21,7 @@ from visdom.experiments.store import ExperimentStore
 
 __all__ = [
     "Experiment",
+    "ExperimentFinishedError",
     "ExperimentStore",
     "Metric",
     "Param",
