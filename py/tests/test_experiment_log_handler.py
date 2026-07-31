@@ -114,6 +114,19 @@ class TestExperimentLogEndpoint(tornado.testing.AsyncHTTPTestCase):
         )
         self.assertEqual(resp.code, 400)
 
+    def test_finish_on_finished_is_409(self):
+        self.post_json("/experiments/log", {"eid": "main", "params": {"lr": 0.01}})
+        self.post_json("/experiments/log", {"eid": "main", "action": "finish"})
+        finished_at = self.read_experiment("main").finished_at
+        resp = self.post_json(
+            "/experiments/log",
+            {"eid": "main", "action": "finish", "status": "failed"},
+        )
+        self.assertEqual(resp.code, 409)
+        stored = self.read_experiment("main")
+        self.assertEqual(stored.status, "finished")
+        self.assertEqual(stored.finished_at, finished_at)
+
     def test_log_to_finished_is_409(self):
         self.post_json("/experiments/log", {"eid": "main", "params": {"lr": 0.01}})
         self.post_json("/experiments/log", {"eid": "main", "action": "finish"})

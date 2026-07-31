@@ -849,8 +849,9 @@ class ExperimentLogHandler(BaseHandler):
       an optional ``step``, creating the experiment if it does not exist yet.
     * ``"finish"`` — mark the experiment terminal (``status`` finished/failed).
 
-    Once an experiment is terminal, ``"log"``/``"metrics"`` are rejected with
-    409 Conflict so a finished run's recorded data cannot change after the fact.
+    Once an experiment is terminal, every action — including a second
+    ``"finish"`` — is rejected with 409 Conflict, so neither a finished run's
+    recorded data nor its final status can change after the fact.
 
     Metadata is persisted through the server's existing ``DataStore``
     (:class:`ExperimentStore` over ``handler.storage``) and mirrored into the

@@ -173,6 +173,19 @@ class TestExperimentStore(unittest.TestCase):
         with self.assertRaises(KeyError):
             self.store.finish_experiment("nope")
 
+    def test_finish_on_finished_raises(self):
+        """Finishing a terminal experiment is rejected, whatever status is asked for."""
+        self.store.log_experiment("main")
+        self.store.finish_experiment("main")
+        finished_at = self.store.get_experiment("main").finished_at
+        with self.assertRaises(ExperimentFinishedError):
+            self.store.finish_experiment("main")
+        with self.assertRaises(ExperimentFinishedError):
+            self.store.finish_experiment("main", STATUS_FAILED)
+        stored = self.store.get_experiment("main")
+        self.assertEqual(stored.status, STATUS_FINISHED)
+        self.assertEqual(stored.finished_at, finished_at)
+
     def test_log_experiment_on_finished_raises(self):
         """Updating an experiment that is already terminal is rejected."""
         self.store.log_experiment("main", params={"lr": 0.1})
