@@ -11,6 +11,7 @@ import TreeSelect, { SHOW_CHILD } from 'rc-tree-select';
 import React, { useContext, useState } from 'react';
 
 import ApiContext from '../api/ApiContext';
+import { useTooltips } from '../util';
 
 function EnvControls(props) {
   const { connected, sessionInfo, sendSaveAll } = useContext(ApiContext);
@@ -26,6 +27,7 @@ function EnvControls(props) {
     onToggleShowAll,
   } = props;
   const [confirmClear, setConfirmClear] = useState(false);
+  useTooltips();
 
   // tree select setup
   // -------
