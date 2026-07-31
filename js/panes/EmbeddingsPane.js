@@ -153,6 +153,7 @@ class EmbeddingsPane extends React.Component {
     const PDF_CAPTURE_DPI = 300;
     const scale = format === 'pdf' ? PDF_CAPTURE_DPI / 96 : dpi ? dpi / 96 : 1;
     const originalPixelRatio = renderer.getPixelRatio();
+    const effectivePdfDpi = Math.round(PDF_CAPTURE_DPI * originalPixelRatio);
 
     try {
       // `updateStyle=false` keeps the on-screen CSS size unchanged while
@@ -172,7 +173,7 @@ class EmbeddingsPane extends React.Component {
         downloadImageAsPdf(
           dataUrl,
           `${this.props.contentID || 'plot'}.pdf`,
-          PDF_CAPTURE_DPI
+          effectivePdfDpi
         );
       } else {
         const link = document.createElement('a');
