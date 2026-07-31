@@ -1,9 +1,36 @@
 import unittest
+from unittest.mock import Mock, patch
 
 import numpy as np
 import visdom
 
 from visdom.server.handlers.web_handlers import UpdateHandler
+
+
+def _unconnected_visdom():
+    with (
+        patch.object(visdom.Visdom, "_handle_post", return_value=True),
+        patch.object(visdom.Visdom, "_start_session_reaper"),
+        patch.object(visdom.logger, "warning"),
+    ):
+        client = visdom.Visdom(use_incoming_socket=False)
+    client._handle_post = Mock(
+        side_effect=AssertionError("unexpected transport call in unit test")
+    )
+    return client
+
+
+def _capture_image_slider_update(viz, index):
+    sent = {}
+
+    def capture(msg, endpoint="events", **_):
+        sent["payload"] = msg
+        sent["endpoint"] = endpoint
+        return msg["win"]
+
+    with patch.object(viz, "_send", side_effect=capture):
+        viz.update_image_slider("win_a", index)
+    return sent
 
 
 class TestImageUpdateSelected(unittest.TestCase):
@@ -61,39 +88,41 @@ class TestImageUpdateSelected(unittest.TestCase):
             self._update(self._pane(), self._args(True))
 
     def test_client_rejects_bool_index(self):
-        viz = visdom.Visdom(send=False, use_incoming_socket=False)
+        viz = _unconnected_visdom()
         with self.assertRaises(TypeError):
             viz.update_image_slider("win_a", True)
 
     def test_client_rejects_non_finite_float(self):
-        viz = visdom.Visdom(send=False, use_incoming_socket=False)
+        viz = _unconnected_visdom()
         for bad_value in [float("inf"), float("-inf"), float("nan")]:
             with self.subTest(bad_value=bad_value):
                 with self.assertRaises(ValueError):
                     viz.update_image_slider("win_a", bad_value)
 
     def test_client_payload_coerces_numpy_scalars(self):
-        viz = visdom.Visdom(send=False, use_incoming_socket=False)
-        msg, endpoint = viz.update_image_slider("win_a", np.int64(2))
-        self.assertEqual(endpoint, "update")
+        viz = _unconnected_visdom()
+        sent = _capture_image_slider_update(viz, np.int64(2))
+        msg = sent["payload"]
+        self.assertEqual(sent["endpoint"], "update")
         self.assertEqual(msg["win"], "win_a")
         self.assertEqual(msg["data"][0]["type"], "image_update_selected")
         self.assertEqual(msg["data"][0]["selected"], 2)
         self.assertIsInstance(msg["data"][0]["selected"], int)
 
     def test_client_payload_accepts_integral_float_scalars(self):
-        viz = visdom.Visdom(send=False, use_incoming_socket=False)
-        msg, endpoint = viz.update_image_slider("win_a", np.float32(2.0))
-        self.assertEqual(endpoint, "update")
+        viz = _unconnected_visdom()
+        sent = _capture_image_slider_update(viz, np.float32(2.0))
+        msg = sent["payload"]
+        self.assertEqual(sent["endpoint"], "update")
         self.assertEqual(msg["data"][0]["selected"], 2)
 
     def test_client_payload_rejects_fractional_float(self):
-        viz = visdom.Visdom(send=False, use_incoming_socket=False)
+        viz = _unconnected_visdom()
         with self.assertRaises(ValueError):
             viz.update_image_slider("win_a", np.float32(2.5))
 
     def test_client_payload_rejects_non_numeric_values(self):
-        viz = visdom.Visdom(send=False, use_incoming_socket=False)
+        viz = _unconnected_visdom()
         for bad_value in ["2", None]:
             with self.subTest(bad_value=bad_value):
                 with self.assertRaises(TypeError):
@@ -156,13 +185,14 @@ class TestImageUpdateSelected(unittest.TestCase):
         )
 
     def test_client_payload_coerces_numpy_array_scalar(self):
-        viz = visdom.Visdom(send=False, use_incoming_socket=False)
-        msg, endpoint = viz.update_image_slider("win_a", np.array(2, dtype=np.int64))
+        viz = _unconnected_visdom()
+        sent = _capture_image_slider_update(viz, np.array(2, dtype=np.int64))
+        msg = sent["payload"]
         self.assertEqual(msg["data"][0]["selected"], 2)
         self.assertIsInstance(msg["data"][0]["selected"], int)
 
     def test_client_payload_rejects_numpy_array_multielement(self):
-        viz = visdom.Visdom(send=False, use_incoming_socket=False)
+        viz = _unconnected_visdom()
         with self.assertRaises(TypeError):
             viz.update_image_slider("win_a", np.array([1, 2], dtype=np.int64))
 
