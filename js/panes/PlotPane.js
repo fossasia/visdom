@@ -7,12 +7,121 @@
  *
  */
 
-import React, { useContext, useEffect, useRef, useState } from 'react';
+import React, {
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 const { usePrevious } = require('../util');
 import ApiContext from '../api/ApiContext';
 import Pane from './Pane';
 import { typesetMathJax } from './utils/mathjaxHelpers';
 const { sgg } = require('ml-savitzky-golay-generalized');
+
+const ANNOTATION_FONT_SIZE = 11;
+const ANNOTATION_ARROW_LEN = 30;
+const ANNOTATION_GAP = 6;
+const ANNOTATION_WIDTH_RATIO = 0.25;
+const ANNOTATION_HEIGHT_RATIO = 0.2;
+const ANNOTATION_CROWD_RATIO = 0.08;
+const CHAR_WIDTH_RATIO = 0.6;
+const LINE_HEIGHT_RATIO = 1.3;
+const THREE_D_TYPES = ['scatter3d', 'surface', 'mesh3d'];
+
+// not templateitemname: plotly hides items whose template entry is missing
+const PINNED = 'visdom_pinned';
+const isPinned = (a) => a[PINNED] === true;
+
+// heatmap and contour points carry a z as well, so the trace type decides
+const isThreeD = (trace) =>
+  !!trace && (!!trace.scene || THREE_D_TYPES.includes(trace.type));
+
+const noteBounds = (plotElement) => ({
+  perLine: Math.max(
+    8,
+    Math.floor(
+      (plotElement.clientWidth * ANNOTATION_WIDTH_RATIO) /
+        (ANNOTATION_FONT_SIZE * CHAR_WIDTH_RATIO)
+    )
+  ),
+  lines: Math.max(
+    1,
+    Math.floor(
+      (plotElement.clientHeight * ANNOTATION_HEIGHT_RATIO) /
+        (ANNOTATION_FONT_SIZE * LINE_HEIGHT_RATIO)
+    )
+  ),
+});
+
+const chipHeight = (annotation) =>
+  annotation.text.split('<br>').length *
+    ANNOTATION_FONT_SIZE *
+    LINE_HEIGHT_RATIO +
+  ANNOTATION_GAP;
+
+// <br> is a line break in plotly annotation text
+const wrapNote = (note, perLine, maxLines) => {
+  const words = [];
+  note
+    .trim()
+    .split(/\s+/)
+    .forEach((word) => {
+      for (let i = 0; i < word.length; i += perLine) {
+        words.push(word.slice(i, i + perLine));
+      }
+    });
+
+  const lines = [];
+  words.forEach((word) => {
+    const last = lines.length - 1;
+    if (last >= 0 && (lines[last] + ' ' + word).length <= perLine) {
+      lines[last] += ' ' + word;
+    } else {
+      lines.push(word);
+    }
+  });
+
+  if (lines.length <= maxLines) return lines.join('<br>');
+  return lines.slice(0, maxLines).join('<br>') + '\u2026';
+};
+
+// boxes on one point stack above it, nearby ones clear what is already
+// there, and a delete closes the gap. dragged boxes keep where they were put
+const restack = (annotations, span) => {
+  const placed = [];
+
+  return annotations.map((a) => {
+    if (!a.hovertext) return a;
+
+    const dragged = isPinned(a);
+    const auto = placed.filter((p) => !isPinned(p));
+    const onPoint = auto.filter((p) => p.x === a.x && p.y === a.y);
+    const nearby = auto.filter(
+      (p) => span > 0 && Math.abs(p.x - a.x) < span * ANNOTATION_CROWD_RATIO
+    );
+
+    const next = {
+      ...a,
+      showarrow: true,
+      // only a box stacked over another aimed at the same spot hides its arrow
+      arrowcolor:
+        !dragged && onPoint.length ? 'rgba(0,0,0,0)' : a.font && a.font.color,
+    };
+
+    if (!dragged) {
+      next.ax = 0;
+      next.ay = (onPoint.length ? onPoint : nearby).reduce(
+        (top, p) => Math.min(top, p.ay - chipHeight(p)),
+        -ANNOTATION_ARROW_LEN
+      );
+    }
+
+    placed.push(next);
+    return next;
+  });
+};
 
 var PlotPane = (props) => {
   const { contentID, type, selected } = props;
@@ -25,6 +134,11 @@ var PlotPane = (props) => {
   const maxsmoothvalue = 100;
   const [smoothWidgetActive, setSmoothWidgetActive] = useState(false);
   const [smoothvalue, setSmoothValue] = useState(1);
+  const [annotateActive, setAnnotateActive] = useState(false);
+  const [pendingPoint, setPendingPoint] = useState(null);
+  const [noteText, setNoteText] = useState('');
+  const noteInputRef = useRef(null);
+  const editorRef = useRef(null);
   const [actualSelected, setActualSelected] = useState(
     isHistory ? selected || 0 : 0
   );
@@ -58,6 +172,138 @@ var PlotPane = (props) => {
   };
   const updateSmoothSlider = (value) => {
     setSmoothValue(value);
+  };
+  const toggleAnnotateWidget = () => {
+    setAnnotateActive(!annotateActive);
+    setPendingPoint(null);
+  };
+
+  const traceColor = (point) => {
+    const trace = point.fullData || point.data || {};
+    const lineColor = trace.line && trace.line.color;
+    if (typeof lineColor === 'string') return lineColor;
+    const markerColor = trace.marker && trace.marker.color;
+    if (typeof markerColor === 'string') return markerColor;
+    if (Array.isArray(markerColor)) {
+      const pointColor = markerColor[point.pointIndex];
+      if (typeof pointColor === 'string') return pointColor;
+    }
+    return undefined;
+  };
+
+  const applyAnnotations = (annotations) => {
+    const positioned = restack(annotations, xSpan());
+    Plotly.relayout(plotlyRef.current, { annotations: positioned });
+
+    if (content && content.layout) {
+      content.layout.annotations = positioned;
+    }
+
+    sendPlotLayoutUpdate(
+      props.envID,
+      props.id,
+      { annotations: positioned },
+      isHistory ? actualSelected : undefined
+    );
+  };
+
+  const xSpan = () => {
+    let min = Infinity;
+    let max = -Infinity;
+    ((content && content.data) || []).forEach((trace) => {
+      (trace.x || []).forEach((v) => {
+        if (typeof v !== 'number') return;
+        if (v < min) min = v;
+        if (v > max) max = v;
+      });
+    });
+    return max > min ? max - min : 0;
+  };
+
+  const readAnnotations = (plotElement) =>
+    plotElement.layout?.annotations || [];
+
+  useEffect(() => {
+    if (pendingPoint && noteInputRef.current) noteInputRef.current.focus();
+  }, [pendingPoint]);
+
+  useLayoutEffect(() => {
+    const editor = editorRef.current;
+    const bounds = editor && editor.offsetParent;
+    if (!editor || !bounds || !pendingPoint) return;
+
+    const left = Math.min(
+      pendingPoint.left,
+      bounds.clientWidth - editor.offsetWidth
+    );
+    const top = Math.min(
+      pendingPoint.top,
+      bounds.clientHeight - editor.offsetHeight
+    );
+
+    editor.style.left = Math.max(0, left) + 'px';
+    editor.style.top = Math.max(0, top) + 'px';
+  }, [pendingPoint, noteText]);
+
+  const addAnnotation = () => {
+    const plotElement = plotlyRef.current;
+    if (!plotElement || !pendingPoint || !noteText.trim()) return;
+
+    const bounds = noteBounds(plotElement);
+    const annotation = {
+      x: pendingPoint.x,
+      y: pendingPoint.y,
+      xref: 'x',
+      yref: 'y',
+      text: wrapNote(noteText, bounds.perLine, bounds.lines),
+      align: 'left',
+      hovertext: noteText.trim(),
+      name: pendingPoint.name,
+      arrowhead: 2,
+      arrowsize: 1,
+      arrowwidth: 1.5,
+      captureevents: true,
+      font: { size: ANNOTATION_FONT_SIZE, color: pendingPoint.color },
+      bgcolor: '#fff',
+      bordercolor: pendingPoint.color,
+      borderwidth: 1,
+      borderpad: 3,
+    };
+
+    // restack positions everything, except boxes already dragged by hand
+    const current = readAnnotations(plotElement);
+    const previous = current[pendingPoint.index];
+
+    if (previous && isPinned(previous)) {
+      Object.assign(annotation, {
+        [PINNED]: true,
+        ax: previous.ax,
+        ay: previous.ay,
+      });
+    }
+
+    applyAnnotations(
+      pendingPoint.index === undefined
+        ? current.concat(annotation)
+        : current.map((a, i) => (i === pendingPoint.index ? annotation : a))
+    );
+
+    setPendingPoint(null);
+    setNoteText('');
+  };
+
+  const deleteAnnotation = () => {
+    const plotElement = plotlyRef.current;
+    if (!plotElement || !pendingPoint || pendingPoint.index === undefined) {
+      return;
+    }
+
+    applyAnnotations(
+      readAnnotations(plotElement).filter((_, i) => i !== pendingPoint.index)
+    );
+
+    setPendingPoint(null);
+    setNoteText('');
   };
 
   const dpiToScale = (dpi) => (dpi ? dpi / 96 : 1);
@@ -148,23 +394,33 @@ var PlotPane = (props) => {
     if (!plotElement) return;
 
     const handleRelayout = (eventdata) => {
-      const touchedShapes = Object.keys(eventdata).some((k) =>
-        k.includes('shapes')
-      );
-      if (!touchedShapes) return;
+      const keys = Object.keys(eventdata);
+      const touchedShapes = keys.some((k) => k.includes('shapes'));
+      // a drag reports annotations[i].ax, our own writes a bare annotations
+      const dragged = keys
+        .map((k) => k.match(/^annotations\[(\d+)]\./))
+        .filter(Boolean)
+        .map((match) => Number(match[1]));
+      if (!touchedShapes && !dragged.length) return;
 
       clearTimeout(layoutUpdateTimeout.current);
       layoutUpdateTimeout.current = setTimeout(() => {
         const shapes = plotElement.layout?.shapes || [];
+        const annotations = plotElement.layout?.annotations || [];
+
+        dragged.forEach((i) => {
+          if (annotations[i]) annotations[i][PINNED] = true;
+        });
 
         if (content && content.layout) {
           content.layout.shapes = shapes;
+          content.layout.annotations = annotations;
         }
 
         sendPlotLayoutUpdate(
           props.envID,
           props.id,
-          { shapes },
+          { shapes, annotations },
           isHistory ? actualSelected : undefined
         );
       }, 300);
@@ -176,6 +432,60 @@ var PlotPane = (props) => {
       clearTimeout(layoutUpdateTimeout.current);
     };
   }, [props.envID, props.id, actualSelected, content]);
+
+  useEffect(() => {
+    const plotElement = plotlyRef.current;
+    if (!plotElement || !annotateActive) return;
+
+    const handleClick = (eventdata) => {
+      const point = eventdata.points && eventdata.points[0];
+      // the button is hidden on 3d panes, but a mixed pane can still fire
+      if (!point || isThreeD(point.fullData)) return;
+
+      const rect = plotElement.getBoundingClientRect();
+      const mouse = eventdata.event || {};
+
+      setPendingPoint({
+        x: point.x,
+        y: point.y,
+        name: point.fullData && point.fullData.name,
+        color: traceColor(point),
+        left: (mouse.clientX || rect.left) - rect.left,
+        top: (mouse.clientY || rect.top) - rect.top,
+      });
+      setNoteText('');
+    };
+
+    // confusion_matrix labels its cells here too, and those have no hovertext
+    const handleAnnotationClick = (eventdata) => {
+      const clicked = readAnnotations(plotElement)[eventdata.index];
+      if (!clicked || !clicked.hovertext) return;
+
+      const rect = plotElement.getBoundingClientRect();
+      const mouse = eventdata.event || {};
+
+      setPendingPoint({
+        x: clicked.x,
+        y: clicked.y,
+        name: clicked.name,
+        color: clicked.font && clicked.font.color,
+        index: eventdata.index,
+        left: (mouse.clientX || rect.left) - rect.left,
+        top: (mouse.clientY || rect.top) - rect.top,
+      });
+      setNoteText(clicked.hovertext);
+    };
+
+    plotElement.on('plotly_click', handleClick);
+    plotElement.on('plotly_clickannotation', handleAnnotationClick);
+    return () => {
+      plotElement.removeListener('plotly_click', handleClick);
+      plotElement.removeListener(
+        'plotly_clickannotation',
+        handleAnnotationClick
+      );
+    };
+  }, [annotateActive, props.envID, props.id, actualSelected, content]);
 
   // rendering
   // ---------
@@ -267,6 +577,8 @@ var PlotPane = (props) => {
       doubleClick: 'reset',
       doubleClickDelay: 500,
       modeBarButtonsToAdd: ['drawopenpath', 'eraseshape'],
+      // dragging a note box leaves its arrow on the data point
+      edits: { annotationTail: true },
     }).then(() => {
       const plotElement = plotlyRef.current;
       if (plotElement && plotElement._fullLayout && isDisplayed(plotElement)) {
@@ -315,6 +627,65 @@ var PlotPane = (props) => {
     }
   }
 
+  // notes are anchored in 2d data coordinates
+  var annotate_widget_button = '';
+  if (content && content.data && !content.data.some(isThreeD)) {
+    annotate_widget_button = (
+      <button
+        key="annotate_widget_button"
+        title="annotate points"
+        onClick={toggleAnnotateWidget}
+        className={annotateActive ? 'pull-right active' : 'pull-right'}
+      >
+        <span className="glyphicon glyphicon-pencil" />
+      </button>
+    );
+  }
+
+  var annotate_widget = '';
+  if (annotateActive && !pendingPoint) {
+    annotate_widget = (
+      <div className="widget" key="annotate_widget">
+        Annotating: click a point to add a note, click a note to edit it
+      </div>
+    );
+  }
+
+  var annotate_editor = '';
+  if (annotateActive && pendingPoint) {
+    annotate_editor = (
+      <div
+        className="annotate-editor"
+        key="annotate_editor"
+        ref={editorRef}
+        style={{ left: pendingPoint.left, top: pendingPoint.top }}
+      >
+        <input
+          type="text"
+          ref={noteInputRef}
+          placeholder={
+            pendingPoint.name
+              ? 'note for ' + pendingPoint.name
+              : 'note for this point'
+          }
+          value={noteText}
+          onChange={(ev) => setNoteText(ev.target.value)}
+          onKeyDown={(ev) => {
+            if (ev.key === 'Enter') addAnnotation();
+            else if (ev.key === 'Escape') setPendingPoint(null);
+          }}
+        />
+        <button onClick={addAnnotation} disabled={!noteText.trim()}>
+          {pendingPoint.index === undefined ? 'add' : 'save'}
+        </button>
+        {pendingPoint.index !== undefined && (
+          <button onClick={deleteAnnotation}>delete</button>
+        )}
+        <button onClick={() => setPendingPoint(null)}>cancel</button>
+      </div>
+    );
+  }
+
   var history_widget = '';
   if (isHistory && props.show_slider && props.content.length > 1) {
     history_widget = (
@@ -352,8 +723,8 @@ var PlotPane = (props) => {
       {...props}
       handleExport={handleExport}
       handleMetadataExport={handleMetadataExport}
-      barwidgets={[smooth_widget_button]}
-      widgets={[history_widget, caption_widget, smooth_widget]}
+      barwidgets={[smooth_widget_button, annotate_widget_button]}
+      widgets={[history_widget, caption_widget, smooth_widget, annotate_widget]}
       enablePropertyList
     >
       <div
@@ -370,6 +741,7 @@ var PlotPane = (props) => {
         }`}
         ref={plotlyRef}
       />
+      {annotate_editor}
     </Pane>
   );
 };

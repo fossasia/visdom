@@ -336,6 +336,60 @@ button[title="smooth lines"].active {
   color: red;
 }
 
+button[title="annotate points"].active > .glyphicon {
+  color: red;
+}
+
+.annotate-editor {
+  position: absolute;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  max-width: 90%;
+  background-color: #fff;
+  border: 1px solid #dedede;
+  border-radius: 4px;
+  box-shadow: rgba(0, 0, 0, 0.15) 1px 1px 4px;
+}
+
+.annotate-editor input {
+  width: 190px;
+  min-width: 0;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: normal;
+  line-height: 16px;
+  color: #333;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+}
+
+.annotate-editor input:focus {
+  border-color: #999;
+  outline: none;
+}
+
+.annotate-editor button {
+  padding: 4px 10px;
+  font-size: 12px;
+  line-height: 16px;
+  color: #333;
+  background-color: #f4f4f4;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+}
+
+.annotate-editor button:hover:not(:disabled) {
+  background-color: #e8e8e8;
+}
+
+.annotate-editor button:disabled {
+  color: #aaa;
+  cursor: default;
+}
+
 .react-grid-item {
   min-height: 14px;
   min-width: fit-content;
