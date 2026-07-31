@@ -7,7 +7,7 @@
  *
  */
 
-/* global ACTIVE_ENV $ Bin */
+/* global ACTIVE_ENV Bin */
 
 'use strict';
 
@@ -42,6 +42,7 @@ import ConnectionIndicator from './topbar/ConnectionIndicator';
 import EnvControls from './topbar/EnvControls';
 import FilterControls from './topbar/FilterControls';
 import ViewControls from './topbar/ViewControls';
+import { destroyTooltips, useTooltips } from './util';
 import WidthProvider from './Width';
 
 const jsonpatch = require('fast-json-patch');
@@ -787,9 +788,6 @@ const App = () => {
         sendEnvQuery(['main'], showAllEnvWindows);
       }
     }
-
-    // Bootstrap tooltips need some encouragement
-    $('#clear-button').attr('data-original-title', 'Clear Current Environment');
   }, [mounted.current]);
 
   // define what mounted means for this app:
@@ -810,15 +808,10 @@ const App = () => {
     localStorage.setItem('filter', filterString);
   }, [filterString]);
 
+  useTooltips();
+
   useEffect(() => {
-    $('[data-toggle="tooltip"]').tooltip({
-      container: 'body',
-      delay: {
-        show: 600,
-        hide: 100,
-      },
-      trigger: 'hover',
-    });
+    return destroyTooltips;
   }, []);
 
   const onWidthChange = (width, cols) => {
