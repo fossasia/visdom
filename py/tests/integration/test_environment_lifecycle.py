@@ -18,131 +18,121 @@ separately in ``test_storage_wiring``.
 
 import json
 import os
+import unittest
 
 import pytest
+
+from visdom.server.app import Application
+
+from testutils.http import VisdomHTTPTestCase
 
 pytestmark = pytest.mark.integration
 
 
-# -- Startup state ------------------------------------------------------------
+class TestStartupState(VisdomHTTPTestCase):
+    def test_main_env_exists_and_is_empty_on_startup(self):
+        self.assertIn("main", self.get_envs())
+        self.assertEqual(self.get_win_data(), {})
+
+    def test_env_state_returns_a_list(self):
+        self.assertIsInstance(self.get_envs(), list)
 
 
-def test_main_env_exists_and_is_empty_on_startup(visdom_server):
-    assert "main" in visdom_server.get_envs()
-    assert visdom_server.get_win_data() == {}
+class TestImplicitCreation(VisdomHTTPTestCase):
+    def test_addressing_an_unknown_env_creates_it(self):
+        self.create_text_window(eid="new_env", content="hello")
+        self.assertIn("new_env", self.get_envs())
+
+    def test_env_state_lists_every_env_created(self):
+        self.create_text_window(eid="x_env")
+        self.create_text_window(eid="y_env")
+        self.assertTrue({"main", "x_env", "y_env"} <= set(self.get_envs()))
 
 
-def test_env_state_returns_a_list(visdom_server):
-    assert isinstance(visdom_server.get_envs(), list)
+class TestForkEnv(VisdomHTTPTestCase):
+    def test_fork_copies_the_panes_across(self):
+        self.create_text_window(eid="main", content="original", win="w1")
+        resp = self.post_json("/fork_env", {"prev_eid": "main", "eid": "fork1"})
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(resp.body.decode(), "fork1")
+        self.assertEqual(self.get_win_data("w1", eid="fork1")["content"], "original")
+
+    def test_fork_is_independent_of_its_source(self):
+        self.create_text_window(eid="main", content="original", win="w1")
+        self.post_json("/fork_env", {"prev_eid": "main", "eid": "fork2"})
+
+        self.update("w1", [{"content": "modified"}], eid="fork2")
+
+        self.assertEqual(self.get_win_data("w1", eid="main")["content"], "original")
+
+    def test_forking_an_unknown_env_is_a_bad_request(self):
+        resp = self.post_json("/fork_env", {"prev_eid": "no_exist", "eid": "new"})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("env to be forked doesn't exist", resp.reason)
+        self.assertNotIn("new", self.get_envs())
 
 
-# -- Implicit creation --------------------------------------------------------
+class TestSaveEnv(VisdomHTTPTestCase):
+    def test_save_writes_a_file_named_for_the_env(self):
+        self.create_text_window(eid="main", content="save me")
+        self.save(["main"])
+        self.assertTrue(os.path.exists(os.path.join(self.env_path, "main.json")))
+
+    def test_saved_file_carries_jsons_and_reload(self):
+        self.create_text_window(eid="main", content="save me")
+        self.save(["main"])
+        with open(os.path.join(self.env_path, "main.json")) as handle:
+            saved = json.load(handle)
+        self.assertIn("jsons", saved)
+        self.assertIn("reload", saved)
+
+    def test_save_handles_several_envs_at_once(self):
+        self.create_text_window(eid="env_a", content="a")
+        self.create_text_window(eid="env_b", content="b")
+        self.save(["env_a", "env_b"])
+        for eid in ("env_a", "env_b"):
+            self.assertTrue(os.path.exists(os.path.join(self.env_path, eid + ".json")))
+
+    def test_save_reports_only_the_envs_that_existed(self):
+        self.create_text_window(eid="main", content="x")
+        saved = json.loads(self.save(["main", "nonexistent"]).body)
+        self.assertIn("main", saved)
+        self.assertNotIn("nonexistent", saved)
 
 
-def test_addressing_an_unknown_env_creates_it(visdom_server):
-    visdom_server.create_text_window(eid="new_env", content="hello")
-    assert "new_env" in visdom_server.get_envs()
+class TestDeleteEnv(VisdomHTTPTestCase):
+    def test_delete_removes_the_env_from_state(self):
+        self.create_text_window(eid="del_me", content="bye")
+        self.post_json("/delete_env", {"eid": "del_me"})
+        self.assertNotIn("del_me", self.get_envs())
+
+    def test_delete_removes_the_saved_file_too(self):
+        self.create_text_window(eid="del_file", content="bye")
+        self.save(["del_file"])
+        path = os.path.join(self.env_path, "del_file.json")
+        self.assertTrue(os.path.exists(path))
+
+        self.post_json("/delete_env", {"eid": "del_file"})
+
+        self.assertFalse(os.path.exists(path))
+
+    def test_main_env_cannot_be_deleted(self):
+        self.post_json("/delete_env", {"eid": "main"})
+        self.assertIn("main", self.get_envs())
 
 
-def test_env_state_lists_every_env_created(visdom_server):
-    visdom_server.create_text_window(eid="x_env")
-    visdom_server.create_text_window(eid="y_env")
-    assert {"main", "x_env", "y_env"} <= set(visdom_server.get_envs())
+class TestReload(VisdomHTTPTestCase):
+    def test_a_saved_env_is_reloaded_by_a_fresh_application(self):
+        self.create_text_window(eid="persist", content="I survive", win="w1")
+        self.save(["persist"])
+
+        restarted = Application(port=8097, env_path=self.env_path)
+
+        self.assertIn("persist", restarted.state)
+        self.assertEqual(
+            restarted.state["persist"]["jsons"]["w1"]["content"], "I survive"
+        )
 
 
-# -- Fork ---------------------------------------------------------------------
-
-
-def test_fork_copies_the_panes_across(visdom_server):
-    visdom_server.create_text_window(eid="main", content="original", win="w1")
-    resp = visdom_server.post_json("/fork_env", {"prev_eid": "main", "eid": "fork1"})
-    assert resp.status_code == 200
-    assert resp.text == "fork1"
-    assert visdom_server.get_win_data("w1", eid="fork1")["content"] == "original"
-
-
-def test_fork_is_independent_of_its_source(visdom_server):
-    visdom_server.create_text_window(eid="main", content="original", win="w1")
-    visdom_server.post_json("/fork_env", {"prev_eid": "main", "eid": "fork2"})
-
-    visdom_server.update("w1", [{"content": "modified"}], eid="fork2")
-
-    assert visdom_server.get_win_data("w1", eid="main")["content"] == "original"
-
-
-def test_forking_an_unknown_env_is_a_bad_request(visdom_server):
-    resp = visdom_server.post_json("/fork_env", {"prev_eid": "no_exist", "eid": "new"})
-    assert resp.status_code == 400
-    assert "env to be forked doesn't exist" in resp.reason
-    assert "new" not in visdom_server.get_envs()
-
-
-# -- Save ---------------------------------------------------------------------
-
-
-def test_save_writes_a_file_named_for_the_env(visdom_server):
-    visdom_server.create_text_window(eid="main", content="save me")
-    visdom_server.save(["main"])
-    assert os.path.exists(os.path.join(visdom_server.env_path, "main.json"))
-
-
-def test_saved_file_carries_jsons_and_reload(visdom_server):
-    visdom_server.create_text_window(eid="main", content="save me")
-    visdom_server.save(["main"])
-    with open(os.path.join(visdom_server.env_path, "main.json")) as handle:
-        saved = json.load(handle)
-    assert "jsons" in saved
-    assert "reload" in saved
-
-
-def test_save_handles_several_envs_at_once(visdom_server):
-    visdom_server.create_text_window(eid="env_a", content="a")
-    visdom_server.create_text_window(eid="env_b", content="b")
-    visdom_server.save(["env_a", "env_b"])
-    for eid in ("env_a", "env_b"):
-        assert os.path.exists(os.path.join(visdom_server.env_path, eid + ".json"))
-
-
-def test_save_reports_only_the_envs_that_existed(visdom_server):
-    visdom_server.create_text_window(eid="main", content="x")
-    saved = visdom_server.save(["main", "nonexistent"]).json()
-    assert "main" in saved
-    assert "nonexistent" not in saved
-
-
-# -- Delete -------------------------------------------------------------------
-
-
-def test_delete_removes_the_env_from_state(visdom_server):
-    visdom_server.create_text_window(eid="del_me", content="bye")
-    visdom_server.post_json("/delete_env", {"eid": "del_me"})
-    assert "del_me" not in visdom_server.get_envs()
-
-
-def test_delete_removes_the_saved_file_too(visdom_server):
-    visdom_server.create_text_window(eid="del_file", content="bye")
-    visdom_server.save(["del_file"])
-    path = os.path.join(visdom_server.env_path, "del_file.json")
-    assert os.path.exists(path)
-
-    visdom_server.post_json("/delete_env", {"eid": "del_file"})
-
-    assert not os.path.exists(path)
-
-
-def test_main_env_cannot_be_deleted(visdom_server):
-    visdom_server.post_json("/delete_env", {"eid": "main"})
-    assert "main" in visdom_server.get_envs()
-
-
-# -- Reload -------------------------------------------------------------------
-
-
-def test_a_saved_env_is_reloaded_by_a_fresh_application(visdom_server, app_factory):
-    visdom_server.create_text_window(eid="persist", content="I survive", win="w1")
-    visdom_server.save(["persist"])
-
-    restarted = app_factory()
-
-    assert "persist" in restarted.state
-    assert restarted.state["persist"]["jsons"]["w1"]["content"] == "I survive"
+if __name__ == "__main__":
+    unittest.main()

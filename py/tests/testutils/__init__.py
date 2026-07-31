@@ -15,15 +15,14 @@ shipped to users as a top-level ``tests`` distribution.
 """
 
 from testutils.fakes import FakeHandler, FakeSocket, SpyStore
-from testutils.http import VisdomServer, run_loop_in_thread
+from testutils.http import VisdomHTTPTestCase
 from testutils.payloads import content_args, env_payload, plot_data, window_args
 
 __all__ = [
     "FakeHandler",
     "FakeSocket",
     "SpyStore",
-    "VisdomServer",
-    "run_loop_in_thread",
+    "VisdomHTTPTestCase",
     "content_args",
     "env_payload",
     "plot_data",

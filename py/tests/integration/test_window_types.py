@@ -16,169 +16,175 @@ the extra keys the server synthesises (``selected``, ``old_content``,
 trip intact.
 """
 
+import unittest
+
 import pytest
 
+from testutils.http import VisdomHTTPTestCase
 from testutils.payloads import content_args, window_args
 
 pytestmark = pytest.mark.integration
 
 
-def create(server, args, eid="main"):
-    """POST an args dict built by ``testutils.payloads`` and read the pane back."""
-    resp = server.post_json("/events", dict(args, eid=eid))
-    assert resp.status_code == 200, resp.text
-    pane = server.get_win_data(resp.text, eid=eid)
-    assert pane["id"] == resp.text
-    return pane
+class WindowTypeTestCase(VisdomHTTPTestCase):
+    """Adds a create-and-read-back helper shared by every case below."""
+
+    def create(self, args, eid="main"):
+        """POST an args dict built by ``testutils.payloads``, return the pane."""
+        resp = self.post_json("/events", dict(args, eid=eid))
+        self.assertEqual(resp.code, 200, resp.body)
+        win_id = resp.body.decode()
+        pane = self.get_win_data(win_id, eid=eid)
+        self.assertEqual(pane["id"], win_id)
+        return pane
+
+    def assert_plot_round_trip(self, trace, title):
+        pane = self.create(window_args(data=[trace], layout={"title": title}))
+        self.assertEqual(pane["type"], "plot")
+        self.assertEqual(pane["content"]["data"], [trace])
+        self.assertEqual(pane["content"]["layout"]["title"], title)
+        return pane
 
 
-# -- Plot panes ---------------------------------------------------------------
+class TestPlotPanes(WindowTypeTestCase):
+    def test_scatter_survives_the_round_trip(self):
+        self.assert_plot_round_trip(
+            {"type": "scatter", "x": [1, 2, 3], "y": [4, 5, 6], "name": "t1"}, "scatter"
+        )
 
-PLOT_TRACES = {
-    "scatter": {"type": "scatter", "x": [1, 2, 3], "y": [4, 5, 6], "name": "t1"},
-    "scatter3d": {"type": "scatter3d", "x": [1], "y": [2], "z": [3], "name": "3d"},
-    "heatmap": {
-        "type": "heatmap",
-        "z": [[1, 2], [3, 4]],
-        "x": ["a", "b"],
-        "y": ["c", "d"],
-    },
-    "bar": {"type": "bar", "x": ["a", "b"], "y": [10, 20], "name": "bars"},
-}
+    def test_scatter3d_survives_the_round_trip(self):
+        self.assert_plot_round_trip(
+            {"type": "scatter3d", "x": [1], "y": [2], "z": [3], "name": "3d"},
+            "scatter3d",
+        )
 
+    def test_heatmap_survives_the_round_trip(self):
+        self.assert_plot_round_trip(
+            {
+                "type": "heatmap",
+                "z": [[1, 2], [3, 4]],
+                "x": ["a", "b"],
+                "y": ["c", "d"],
+            },
+            "heatmap",
+        )
 
-@pytest.mark.parametrize("trace_type", sorted(PLOT_TRACES))
-def test_plot_traces_survive_the_round_trip(visdom_server, trace_type):
-    trace = PLOT_TRACES[trace_type]
-    pane = create(
-        visdom_server, window_args(data=[trace], layout={"title": trace_type})
-    )
-    assert pane["type"] == "plot"
-    assert pane["content"]["data"] == [trace]
-    assert pane["content"]["layout"]["title"] == trace_type
+    def test_bar_survives_the_round_trip(self):
+        self.assert_plot_round_trip(
+            {"type": "bar", "x": ["a", "b"], "y": [10, 20], "name": "bars"}, "bar"
+        )
 
-
-def test_parcoords_dimensions_are_preserved(visdom_server):
-    trace = {
-        "type": "parcoords",
-        "dimensions": [
-            {"label": "Learning Rate", "values": [0.01, 0.05, 0.1]},
-            {"label": "Batch Size", "values": [16, 32, 64]},
-            {"label": "Accuracy", "values": [85.0, 90.5, 78.2]},
-        ],
-        "line": {
-            "color": [85.0, 90.5, 78.2],
-            "colorscale": "Viridis",
-            "showscale": True,
-        },
-    }
-    pane = create(
-        visdom_server, window_args(data=[trace], layout={"title": "parallel coords"})
-    )
-    assert pane["type"] == "plot"
-    dimensions = pane["content"]["data"][0]["dimensions"]
-    assert [d["label"] for d in dimensions] == [
-        "Learning Rate",
-        "Batch Size",
-        "Accuracy",
-    ]
-    assert pane["content"]["layout"]["title"] == "parallel coords"
+    def test_parcoords_dimensions_are_preserved(self):
+        trace = {
+            "type": "parcoords",
+            "dimensions": [
+                {"label": "Learning Rate", "values": [0.01, 0.05, 0.1]},
+                {"label": "Batch Size", "values": [16, 32, 64]},
+                {"label": "Accuracy", "values": [85.0, 90.5, 78.2]},
+            ],
+            "line": {
+                "color": [85.0, 90.5, 78.2],
+                "colorscale": "Viridis",
+                "showscale": True,
+            },
+        }
+        pane = self.assert_plot_round_trip(trace, "parallel coords")
+        dimensions = pane["content"]["data"][0]["dimensions"]
+        self.assertEqual(
+            [d["label"] for d in dimensions],
+            ["Learning Rate", "Batch Size", "Accuracy"],
+        )
 
 
-# -- Text ---------------------------------------------------------------------
+class TestTextPane(WindowTypeTestCase):
+    def _assert_text_round_trip(self, content):
+        pane = self.create(content_args("text", content))
+        self.assertEqual(pane["type"], "text")
+        self.assertEqual(pane["content"], content)
+        self.assertEqual(pane["command"], "window")
+
+    def test_plain_text_is_stored_verbatim(self):
+        self._assert_text_round_trip("hello")
+
+    def test_html_in_text_is_stored_verbatim(self):
+        self._assert_text_round_trip("<b>bold</b> & <i>italic</i>")
 
 
-@pytest.mark.parametrize(
-    "content",
-    ["hello", "<b>bold</b> & <i>italic</i>"],
-    ids=["plain", "html"],
-)
-def test_text_pane_stores_its_content_verbatim(visdom_server, content):
-    pane = create(visdom_server, content_args("text", content))
-    assert pane["type"] == "text"
-    assert pane["content"] == content
-    assert pane["command"] == "window"
+class TestMediaPanes(WindowTypeTestCase):
+    def test_image_pane_stores_the_data_uri(self):
+        pane = self.create(content_args("image", "data:image/png;base64,AAAA"))
+        self.assertEqual(pane["type"], "image")
+        self.assertEqual(pane["content"], "data:image/png;base64,AAAA")
+
+    def test_image_history_pane_starts_a_one_entry_history(self):
+        frame = {"src": "data:image/png;base64,BBB", "caption": "img1"}
+        pane = self.create(content_args("image_history", frame))
+        self.assertEqual(pane["type"], "image_history")
+        self.assertEqual(pane["content"], [frame])
+        self.assertEqual(pane["selected"], 0)
+        self.assertTrue(pane["show_slider"])
 
 
-# -- Media --------------------------------------------------------------------
+class TestEmbeddingsPane(WindowTypeTestCase):
+    def test_embeddings_pane_starts_with_no_previous_state(self):
+        content = {
+            "data": [[1, 2], [3, 4], [5, 6]],
+            "labels": ["a", "b", "c"],
+            "selected": None,
+        }
+        pane = self.create(content_args("embeddings", content))
+        self.assertEqual(pane["type"], "embeddings")
+        self.assertEqual(pane["content"]["data"], content["data"])
+        self.assertEqual(pane["content"]["labels"], content["labels"])
+        self.assertFalse(pane["content"]["has_previous"])
+        self.assertEqual(pane["old_content"], [])
 
 
-def test_image_pane_stores_the_data_uri(visdom_server):
-    pane = create(visdom_server, content_args("image", "data:image/png;base64,AAAA"))
-    assert pane["type"] == "image"
-    assert pane["content"] == "data:image/png;base64,AAAA"
+class TestNetworkPane(WindowTypeTestCase):
+    def test_network_pane_takes_its_flags_from_opts(self):
+        content = {
+            "nodes": [{"id": 1, "label": "A"}, {"id": 2, "label": "B"}],
+            "links": [{"source": 1, "target": 2}],
+        }
+        pane = self.create(content_args("network", content, opts={"directed": True}))
+        self.assertEqual(pane["type"], "network")
+        self.assertTrue(pane["directed"])
+        self.assertEqual(pane["showEdgeLabels"], "hover")
+        self.assertEqual(pane["showVertexLabels"], "hover")
+        self.assertEqual(pane["content"], content)
 
 
-def test_image_history_pane_starts_a_one_entry_history(visdom_server):
-    frame = {"src": "data:image/png;base64,BBB", "caption": "img1"}
-    pane = create(visdom_server, content_args("image_history", frame))
-    assert pane["type"] == "image_history"
-    assert pane["content"] == [frame]
-    assert pane["selected"] == 0
-    assert pane["show_slider"] is True
+class TestPropertiesPane(WindowTypeTestCase):
+    def test_properties_pane_keeps_the_row_order(self):
+        rows = [
+            {"type": "text", "name": "prop1", "value": "val1"},
+            {"type": "number", "name": "prop2", "value": 42},
+            {"type": "button", "name": "prop3", "value": "click"},
+        ]
+        pane = self.create(content_args("properties", rows))
+        self.assertEqual(pane["type"], "properties")
+        self.assertEqual(pane["content"], rows)
 
 
-# -- Embeddings ---------------------------------------------------------------
+class TestOptsAndPlacement(WindowTypeTestCase):
+    def _assert_opt_flattened(self, key, value):
+        pane = self.create(content_args("text", "opts", opts={key: value}))
+        self.assertEqual(pane[key], value)
+
+    def test_title_opt_is_flattened_onto_the_pane(self):
+        self._assert_opt_flattened("title", "My Title")
+
+    def test_width_opt_is_flattened_onto_the_pane(self):
+        self._assert_opt_flattened("width", 400)
+
+    def test_height_opt_is_flattened_onto_the_pane(self):
+        self._assert_opt_flattened("height", 300)
+
+    def test_pane_is_created_in_the_named_env(self):
+        pane = self.create(content_args("text", "new env"), eid="brand_new_env")
+        self.assertEqual(pane["content"], "new env")
+        self.assertIn("brand_new_env", self.get_envs())
 
 
-def test_embeddings_pane_starts_with_no_previous_state(visdom_server):
-    content = {
-        "data": [[1, 2], [3, 4], [5, 6]],
-        "labels": ["a", "b", "c"],
-        "selected": None,
-    }
-    pane = create(visdom_server, content_args("embeddings", content))
-    assert pane["type"] == "embeddings"
-    assert pane["content"]["data"] == content["data"]
-    assert pane["content"]["labels"] == content["labels"]
-    assert pane["content"]["has_previous"] is False
-    assert pane["old_content"] == []
-
-
-# -- Network ------------------------------------------------------------------
-
-
-def test_network_pane_takes_its_flags_from_opts(visdom_server):
-    content = {
-        "nodes": [{"id": 1, "label": "A"}, {"id": 2, "label": "B"}],
-        "links": [{"source": 1, "target": 2}],
-    }
-    pane = create(
-        visdom_server, content_args("network", content, opts={"directed": True})
-    )
-    assert pane["type"] == "network"
-    assert pane["directed"] is True
-    assert pane["showEdgeLabels"] == "hover"
-    assert pane["showVertexLabels"] == "hover"
-    assert pane["content"] == content
-
-
-# -- Properties ---------------------------------------------------------------
-
-
-def test_properties_pane_keeps_the_row_order(visdom_server):
-    rows = [
-        {"type": "text", "name": "prop1", "value": "val1"},
-        {"type": "number", "name": "prop2", "value": 42},
-        {"type": "button", "name": "prop3", "value": "click"},
-    ]
-    pane = create(visdom_server, content_args("properties", rows))
-    assert pane["type"] == "properties"
-    assert pane["content"] == rows
-
-
-# -- Opts and environment placement -------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "key,value", [("title", "My Title"), ("width", 400), ("height", 300)]
-)
-def test_opts_are_flattened_onto_the_pane(visdom_server, key, value):
-    pane = create(visdom_server, content_args("text", "opts", opts={key: value}))
-    assert pane[key] == value
-
-
-def test_pane_is_created_in_the_named_env(visdom_server):
-    pane = create(visdom_server, content_args("text", "new env"), eid="brand_new_env")
-    assert pane["content"] == "new env"
-    assert "brand_new_env" in visdom_server.get_envs()
+if __name__ == "__main__":
+    unittest.main()

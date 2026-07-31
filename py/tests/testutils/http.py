@@ -6,92 +6,50 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""In-process HTTP client for tests that drive a real ``Application``.
+"""Base class for tests that drive a real Application over HTTP.
 
-``AsyncHTTPTestCase`` is a ``unittest.TestCase``, and pytest refuses to inject
-fixtures into those. So instead of a base class the server runs on a background
-event loop and tests talk to it over real HTTP with ``requests``, which is
-already a runtime dependency. No new test dependency, no async test functions.
-
-The ``Application`` must be built and told to listen *inside* the running loop:
-constructing it on the worker thread before the loop starts hangs.
+``AsyncHTTPTestCase`` starts the Tornado app in-process on an ephemeral port, so
+these stay hermetic: no externally launched server, nothing bound to 8097, and
+therefore no ``server`` marker.
 """
 
-import asyncio
 import json
-import threading
+import shutil
+import tempfile
 
-import requests
+import tornado.testing
 
 from visdom.server.app import Application
 
-STARTUP_TIMEOUT = 10
 
+class VisdomHTTPTestCase(tornado.testing.AsyncHTTPTestCase):
+    """Application-backed HTTP fixture with a disposable ``env_path``.
 
-def run_loop_in_thread():
-    """Start an asyncio loop on a daemon thread; return ``(loop, stop)``."""
-    loop = asyncio.new_event_loop()
-    ready = threading.Event()
+    Subclasses override ``app_kwargs`` to vary server configuration (for
+    example ``{"readonly": True}``) without reimplementing ``get_app``.
+    """
 
-    def run():
-        asyncio.set_event_loop(loop)
-        loop.call_soon(ready.set)
-        loop.run_forever()
+    app_kwargs = {}
 
-    thread = threading.Thread(target=run, daemon=True)
-    thread.start()
-    ready.wait(STARTUP_TIMEOUT)
+    def setUp(self):
+        self.env_path = tempfile.mkdtemp(prefix="visdom_test_")
+        super().setUp()
 
-    def stop():
-        loop.call_soon_threadsafe(loop.stop)
-        thread.join(timeout=STARTUP_TIMEOUT)
-        loop.close()
+    def tearDown(self):
+        super().tearDown()
+        shutil.rmtree(self.env_path, ignore_errors=True)
 
-    return loop, stop
-
-
-class VisdomServer:
-    """A listening ``Application`` plus the helpers the old base class had."""
-
-    def __init__(self, loop, env_path, **app_kwargs):
-        self._loop = loop
-
-        async def boot():
-            app = Application(port=0, env_path=env_path, **app_kwargs)
-            server = app.listen(0, address="127.0.0.1")
-            port = list(server._sockets.values())[0].getsockname()[1]
-            app.port = port
-            return app, server, port
-
-        self.app, self._server, self.port = self._call(boot()).result(STARTUP_TIMEOUT)
-        self.env_path = env_path
-        self.base_url = "http://127.0.0.1:{}".format(self.port)
-        self.session = requests.Session()
-
-    def _call(self, coro):
-        return asyncio.run_coroutine_threadsafe(coro, self._loop)
-
-    def close(self):
-        async def shutdown():
-            self._server.stop()
-
-        try:
-            self._call(shutdown()).result(STARTUP_TIMEOUT)
-        finally:
-            self.session.close()
-
-    # -- Raw requests ---------------------------------------------------------
-
-    def get(self, path, **kwargs):
-        kwargs.setdefault("timeout", STARTUP_TIMEOUT)
-        return self.session.get(self.base_url + path, **kwargs)
+    def get_app(self):
+        return Application(
+            port=self.get_http_port(), env_path=self.env_path, **self.app_kwargs
+        )
 
     def post_json(self, path, body):
-        return self.session.post(
-            self.base_url + path,
-            data=json.dumps(body),
+        return self.fetch(
+            path,
+            method="POST",
+            body=json.dumps(body),
             headers={"Content-Type": "application/json"},
-            timeout=STARTUP_TIMEOUT,
         )
 
     # -- Window helpers -------------------------------------------------------
@@ -103,9 +61,7 @@ class VisdomServer:
             payload["win"] = win
         if opts is not None:
             payload["opts"] = opts
-        resp = self.post_json("/events", payload)
-        assert resp.status_code == 200, resp.text
-        return resp.text
+        return self.post_json("/events", payload).body.decode()
 
     def create_text_window(self, eid="main", content="test", win=None, opts=None):
         return self.create_window(
@@ -121,20 +77,20 @@ class VisdomServer:
         return self.post_json("/close", {"win": win, "eid": eid})
 
     def win_exists(self, win, eid="main"):
-        return self.post_json("/win_exists", {"eid": eid, "win": win}).text == "true"
+        return self.post_json("/win_exists", {"eid": eid, "win": win}).body == b"true"
 
     def get_win_data(self, win=None, eid="main"):
         """Raw pane JSON for one window, or the whole env when ``win`` is None."""
-        return self.post_json("/win_data", {"eid": eid, "win": win}).json()
+        return json.loads(self.post_json("/win_data", {"eid": eid, "win": win}).body)
 
     # -- Environment helpers --------------------------------------------------
 
     def get_envs(self):
-        return self.post_json("/env_state", {}).json()
+        return json.loads(self.post_json("/env_state", {}).body)
 
     def save(self, eids):
         return self.post_json("/save", {"data": eids})
 
     def panes(self, eid="main"):
         """Live pane dict for ``eid`` straight off the application state."""
-        return self.app.state[eid]["jsons"]
+        return self._app.state[eid]["jsons"]
