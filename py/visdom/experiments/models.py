@@ -32,6 +32,10 @@ STATUS_FAILED = "failed"
 VALID_STATUSES = (STATUS_RUNNING, STATUS_FINISHED, STATUS_FAILED)
 
 
+class ExperimentFinishedError(Exception):
+    """Raised when logging to an experiment already in a terminal state."""
+
+
 def infer_dtype(value: Any) -> str:
     """Return a stable dtype tag (``bool``/``int``/``float``/``str``) for ``value``.
 
@@ -183,6 +187,10 @@ class Experiment:
                 return tag
         self.tags.append(tag)
         return tag
+
+    def is_terminal(self) -> bool:
+        """True if the experiment is in a terminal state (finished/failed)."""
+        return self.status in (STATUS_FINISHED, STATUS_FAILED)
 
     def finish(self, status: str = STATUS_FINISHED) -> None:
         """Mark the experiment terminal and stamp ``finished_at``.

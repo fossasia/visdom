@@ -102,6 +102,17 @@ class TestLoadStateWiring(unittest.TestCase):
         self.assertIsInstance(app.state["expt"], dict)
         self.assertEqual(app.state["expt"], env_payload())
 
+    def test_eager_preserves_extra_env_keys(self):
+        """Eager loading keeps env keys the server itself does not read.
+
+        Experiment metadata lives under the env's ``experiment`` key, so
+        dropping unknown keys here would lose it on the next full-env save.
+        """
+        experiment = {"env_id": "expt", "name": "run-1", "status": "running"}
+        self._seed("expt", dict(env_payload("w1"), experiment=experiment))
+        app = Application(port=8097, env_path=self.env_path, eager_data_loading=True)
+        self.assertEqual(app.state["expt"]["experiment"], experiment)
+
     def test_load_state_routes_through_storage(self):
         self._seed("expt")
         with mock.patch("visdom.server.app.JSONStore", SpyStore):
