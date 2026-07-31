@@ -1,3 +1,11 @@
+#!/usr/bin/env python3
+
+# Copyright 2017-present, The Visdom Authors
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Shared helpers for the visdom test suite.
 
 Importable as ``testutils`` because ``py/tests`` is on ``pythonpath`` (see
@@ -7,14 +15,15 @@ shipped to users as a top-level ``tests`` distribution.
 """
 
 from testutils.fakes import FakeHandler, FakeSocket, SpyStore
-from testutils.http import VisdomHTTPTestCase
+from testutils.http import VisdomServer, run_loop_in_thread
 from testutils.payloads import content_args, env_payload, plot_data, window_args
 
 __all__ = [
     "FakeHandler",
     "FakeSocket",
     "SpyStore",
-    "VisdomHTTPTestCase",
+    "VisdomServer",
+    "run_loop_in_thread",
     "content_args",
     "env_payload",
     "plot_data",

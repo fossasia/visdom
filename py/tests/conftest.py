@@ -1,3 +1,11 @@
+#!/usr/bin/env python3
+
+# Copyright 2017-present, The Visdom Authors
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Fixtures shared by the whole suite.
 
 Everything here is hermetic: temporary directories only, no listening sockets,
@@ -14,6 +22,7 @@ from visdom.server.app import Application
 from visdom.utils import shared_utils
 
 from testutils.fakes import FakeHandler, FakeSocket, SpyStore
+from testutils.http import VisdomServer, run_loop_in_thread
 
 
 @pytest.fixture
@@ -54,6 +63,27 @@ def app_factory(env_path):
         return Application(**kwargs)
 
     return build
+
+
+@pytest.fixture(scope="session")
+def http_loop():
+    """One background event loop for every HTTP-backed test in the session."""
+    loop, stop = run_loop_in_thread()
+    yield loop
+    stop()
+
+
+@pytest.fixture
+def visdom_server(request, env_path, http_loop):
+    """Listening Application on an ephemeral port, one per test.
+
+    Server options come from an indirect parameter::
+
+        @pytest.mark.parametrize("visdom_server", [{"readonly": True}], indirect=True)
+    """
+    server = VisdomServer(http_loop, env_path, **getattr(request, "param", {}))
+    yield server
+    server.close()
 
 
 @pytest.fixture

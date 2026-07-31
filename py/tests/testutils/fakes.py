@@ -1,3 +1,11 @@
+#!/usr/bin/env python3
+
+# Copyright 2017-present, The Visdom Authors
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Test doubles for handler, socket and storage collaborators.
 
 The server's handler entry points (``wrap_func``, ``on_message``) read a fixed
