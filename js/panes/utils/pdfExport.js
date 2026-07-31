@@ -7,6 +7,8 @@
  *
  */
 
+import { showToast } from '../../toasts/toastEvents';
+
 const POINTS_PER_INCH = 72;
 const DEFAULT_CAPTURE_DPI = 96;
 
@@ -177,6 +179,7 @@ export function downloadImageAsPdf(
     setTimeout(() => window.URL.revokeObjectURL(url), 1000);
   } catch (err) {
     // eslint-disable-next-line no-console
+    showToast('Failed to build PDF', 'error', { duration: 4000 });
     console.error('downloadImageAsPdf: failed to build PDF -', err);
   }
 }
