@@ -70,7 +70,11 @@ var PlotPane = (props) => {
         format: 'jpeg',
         scale: dpiToScale(PDF_CAPTURE_DPI),
       }).then((dataUrl) => {
-        downloadImageAsPdf(dataUrl, `${contentID || 'plot'}.pdf`);
+        downloadImageAsPdf(
+          dataUrl,
+          `${contentID || 'plot'}.pdf`,
+          PDF_CAPTURE_DPI
+        );
       });
       return;
     }

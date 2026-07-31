@@ -82,7 +82,7 @@ function NetworkPane(props) {
             encoderOptions: 0.92,
           },
           (uri) => {
-            downloadImageAsPdf(uri, filename);
+            downloadImageAsPdf(uri, filename, PDF_CAPTURE_DPI);
           }
         );
         return;

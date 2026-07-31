@@ -150,7 +150,8 @@ class EmbeddingsPane extends React.Component {
 
     const width = Math.max(1, this.props.width);
     const height = Math.max(1, this.props.height);
-    const scale = dpi ? dpi / 96 : 1;
+    const PDF_CAPTURE_DPI = 300;
+    const scale = format === 'pdf' ? PDF_CAPTURE_DPI / 96 : dpi ? dpi / 96 : 1;
     const originalPixelRatio = renderer.getPixelRatio();
 
     try {
@@ -168,7 +169,11 @@ class EmbeddingsPane extends React.Component {
       );
 
       if (format === 'pdf') {
-        downloadImageAsPdf(dataUrl, `${this.props.contentID || 'plot'}.pdf`);
+        downloadImageAsPdf(
+          dataUrl,
+          `${this.props.contentID || 'plot'}.pdf`,
+          PDF_CAPTURE_DPI
+        );
       } else {
         const link = document.createElement('a');
         link.download = `${this.props.contentID || 'plot'}.${format}`;
