@@ -36,6 +36,7 @@ from visdom.server.handlers.web_handlers import (
     EnvStateHandler,
     ErrorHandler,
     ExistsHandler,
+    ExperimentLogHandler,
     ForkEnvHandler,
     HealthHandler,
     IndexHandler,
@@ -120,6 +121,11 @@ class Application(tornado.web.Application):
             (r"%s/delete_env" % self.base_url, DeleteEnvHandler, {"app": self}),
             (r"%s/env_state" % self.base_url, EnvStateHandler, {"app": self}),
             (r"%s/fork_env" % self.base_url, ForkEnvHandler, {"app": self}),
+            (
+                r"%s/experiments/log" % self.base_url,
+                ExperimentLogHandler,
+                {"app": self},
+            ),
             (r"%s/user/(.*)" % self.base_url, UserSettingsHandler, {"app": self}),
             (r"%s/health" % self.base_url, HealthHandler),
             (r"%s(.*)" % self.base_url, IndexHandler, {"app": self}),
@@ -167,6 +173,8 @@ class Application(tornado.web.Application):
         for eid in self.storage.list_envs():
             if self.eager_data_loading:
                 env_data = self.storage.load_env(eid)
+                if not isinstance(env_data, dict):
+                    env_data = {}
 
                 if "jsons" not in env_data or "reload" not in env_data:
                     logging.warning(
@@ -174,10 +182,13 @@ class Application(tornado.web.Application):
                         eid,
                     )
 
-                state[eid] = {
-                    "jsons": env_data.get("jsons", {}),
-                    "reload": env_data.get("reload", {}),
-                }
+                # Copy the whole env rather than picking out jsons/reload, so
+                # keys the server does not read itself (such as the experiment
+                # metadata blob) survive the load and are still there when the
+                # env is saved back. LazyEnvData keeps them for the lazy path.
+                state[eid] = dict(env_data)
+                state[eid].setdefault("jsons", {})
+                state[eid].setdefault("reload", {})
             else:
                 state[eid] = LazyEnvData(self.storage, eid)
 

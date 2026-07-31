@@ -19,8 +19,10 @@ import tempfile
 import unittest
 
 from visdom.data_model import JSONStore
+from visdom.utils.server_utils import LazyEnvData
 from visdom.experiments import (
     Experiment,
+    ExperimentFinishedError,
     ExperimentStore,
     Metric,
     Param,
@@ -171,6 +173,35 @@ class TestExperimentStore(unittest.TestCase):
         with self.assertRaises(KeyError):
             self.store.finish_experiment("nope")
 
+    def test_finish_on_finished_raises(self):
+        """Finishing a terminal experiment is rejected, whatever status is asked for."""
+        self.store.log_experiment("main")
+        self.store.finish_experiment("main")
+        finished_at = self.store.get_experiment("main").finished_at
+        with self.assertRaises(ExperimentFinishedError):
+            self.store.finish_experiment("main")
+        with self.assertRaises(ExperimentFinishedError):
+            self.store.finish_experiment("main", STATUS_FAILED)
+        stored = self.store.get_experiment("main")
+        self.assertEqual(stored.status, STATUS_FINISHED)
+        self.assertEqual(stored.finished_at, finished_at)
+
+    def test_log_experiment_on_finished_raises(self):
+        """Updating an experiment that is already terminal is rejected."""
+        self.store.log_experiment("main", params={"lr": 0.1})
+        self.store.finish_experiment("main")
+        with self.assertRaises(ExperimentFinishedError):
+            self.store.log_experiment("main", params={"lr": 0.2})
+        self.assertEqual(self.store.get_experiment("main").get_param("lr").value, 0.1)
+
+    def test_log_metric_on_finished_raises(self):
+        """Appending a metric to a terminal experiment is rejected."""
+        self.store.log_metric("main", "acc", 0.9)
+        self.store.finish_experiment("main", STATUS_FAILED)
+        with self.assertRaises(ExperimentFinishedError):
+            self.store.log_metric("main", "acc", 0.95)
+        self.assertEqual(len(self.store.get_experiment("main").metrics), 1)
+
     def test_list_experiments(self):
         """list_experiments returns only envs that actually have a blob."""
         self.store.log_experiment("a")
@@ -205,6 +236,25 @@ class TestExperimentStore(unittest.TestCase):
         self.assertIn("win_0", env["jsons"])
         self.assertEqual(env["reload"], {"foo": 1})
         self.assertEqual(env["experiment"]["params"][0]["value"], 0.01)
+
+    def test_experiment_survives_lazy_env_reload_and_save(self):
+        """A prior-session experiment is not clobbered by a later full-env save.
+
+        Mirrors the server's cross-restart path: an env logged in one session is
+        reloaded as a LazyEnvData, materialised by an unrelated window write, and
+        persisted again by the shutdown save_all. The experiment blob must ride
+        through rather than being stripped to jsons/reload.
+        """
+        self.store.log_experiment("main", params={"lr": 0.01})
+
+        state = {"main": LazyEnvData(self.backend, "main")}
+        state["main"]["jsons"]["win_1"] = {"id": "win_1"}
+        self.backend.save_all(state)
+
+        reopened = ExperimentStore(JSONStore(self.env_path))
+        exp = reopened.get_experiment("main")
+        self.assertIsNotNone(exp, "experiment was clobbered by the full-env save")
+        self.assertEqual(exp.get_param("lr").value, 0.01)
 
 
 class TestExperimentStoreNoPersistence(unittest.TestCase):
