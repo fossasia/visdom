@@ -112,9 +112,14 @@ class TestWindowOrdering(VisdomHTTPTestCase):
         self.assertEqual([panes[win]["i"] for win in wins], [0, 1, 2])
 
     def test_recreating_a_window_keeps_its_index(self):
-        first = self.create_text_window(win="stable", content="v1")
-        second = self.create_text_window(win="stable", content="v2")
-        self.assertEqual(first, second)
+        """Posting the same win id twice replaces the pane instead of adding one."""
+        created_id = self.create_text_window(win="stable", content="v1")
+        recreated_id = self.create_text_window(win="stable", content="v2")
+
+        # both calls hand back the id they asked for, so only one pane exists
+        self.assertEqual(created_id, recreated_id)
+        self.assertEqual(len(self.panes()), 1)
+
         pane = self.get_win_data("stable")
         self.assertEqual(pane["i"], 0)
         self.assertEqual(pane["content"], "v2")
