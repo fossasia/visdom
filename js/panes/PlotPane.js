@@ -101,7 +101,7 @@ var PlotPane = (props) => {
     const dpiToEmbed = dpi || 96;
     Plotly.toImage(plotlyRef.current, {
       format: format === 'jpg' ? 'jpeg' : 'png',
-      scale: dpiToScale(dpi),
+      scale: dpiToScale(dpiToEmbed),
     })
       .then((dataUrl) => {
         const filename = `${contentID || 'plot'}.${format}`;
