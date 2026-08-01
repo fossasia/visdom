@@ -1,4 +1,12 @@
-"""End-to-end tests for the ``/experiments/log`` endpoint (Layer 2, PR 2).
+#!/usr/bin/env python3
+
+# Copyright 2017-present, The Visdom Authors
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
+"""End-to-end tests for the ``/experiments/log`` endpoint.
 
 Drives a real :class:`~visdom.server.app.Application` over a temp env dir with
 Tornado's ``AsyncHTTPTestCase``, so the full route -> handler -> ``ExperimentStore``
@@ -105,6 +113,19 @@ class TestExperimentLogEndpoint(tornado.testing.AsyncHTTPTestCase):
             {"eid": "main", "action": "finish", "status": "running"},
         )
         self.assertEqual(resp.code, 400)
+
+    def test_finish_on_finished_is_409(self):
+        self.post_json("/experiments/log", {"eid": "main", "params": {"lr": 0.01}})
+        self.post_json("/experiments/log", {"eid": "main", "action": "finish"})
+        finished_at = self.read_experiment("main").finished_at
+        resp = self.post_json(
+            "/experiments/log",
+            {"eid": "main", "action": "finish", "status": "failed"},
+        )
+        self.assertEqual(resp.code, 409)
+        stored = self.read_experiment("main")
+        self.assertEqual(stored.status, "finished")
+        self.assertEqual(stored.finished_at, finished_at)
 
     def test_log_to_finished_is_409(self):
         self.post_json("/experiments/log", {"eid": "main", "params": {"lr": 0.01}})
