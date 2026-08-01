@@ -76,8 +76,24 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
             self.eid = "main"
             register_list[self.sid] = self
 
-    def broadcast_layouts(self):
-        raise ValueError("Should be replaced in child class")
+    def broadcast_layouts(self, target_subs=None):
+        """Push the saved layouts to subscribers.
+
+        Lives on the base class because ``save_layouts`` is handled here, for
+        every kind of socket: a source connection sending it used to reach an
+        override that only subscriber sockets had, and raise ``ValueError`` out
+        of the message loop. Layouts are a view concern either way, so the
+        recipients are always the subscribers.
+        """
+        if target_subs is None:
+            target_subs = self.subs.values()
+        for sub in target_subs:
+            sub.write_message(
+                json.dumps(
+                    {"command": "layout_update", "data": self.app.layouts},
+                    cls=NanSafeEncoder,
+                )
+            )
 
     def on_message(self, message):
         logging.info(f"from visdom client: {message}")
@@ -487,17 +503,6 @@ class SocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
         )
         self.broadcast_layouts([self])
         broadcast_envs(self, [self])
-
-    def broadcast_layouts(self, target_subs=None):
-        if target_subs is None:
-            target_subs = self.subs.values()
-        for sub in target_subs:
-            sub.write_message(
-                json.dumps(
-                    {"command": "layout_update", "data": self.app.layouts},
-                    cls=NanSafeEncoder,
-                )
-            )
 
     def initialize(self, app):
         super().initialize(app)
