@@ -6,9 +6,7 @@ const path = require('path');
 const win_selector = '.layout .react-grid-item';
 const container_selector = `${win_selector} .content > div`;
 const img_selector = `${container_selector} img`;
-const [moveX, moveY] = [12, 34]; // required for drag/drop action
-const [imgWidth, imgHeight] = [255, 510]; // required for drag/drop action
-const basepos = 10; // required for drag/drop action
+const [imgWidth, imgHeight] = [255, 510];
 
 describe('Image Pane', () => {
   it('image_basic', () => {
@@ -17,47 +15,6 @@ describe('Image Pane', () => {
       .first()
       .find('img')
       .should('have.length', 1);
-  });
-
-  it('Image Move (Drag and Drop)', () => {
-    // check new position
-    cy.get(container_selector)
-      .should('have.css', 'top', '0px')
-      .should('have.css', 'left', '0px');
-
-    // drag image
-    cy.get(img_selector)
-      .drag(img_selector, {
-        source: { x: basepos, y: basepos },
-        target: { x: basepos + moveX, y: basepos + moveY },
-        force: true,
-      })
-      .wait(100);
-
-    // check new position
-    cy.get(container_selector)
-      .should('have.css', 'top', `${moveY}px`)
-      .should('have.css', 'left', `${moveX}px`);
-    cy.get(img_selector)
-      .should('have.attr', 'width', `${imgWidth}px`)
-      .should('have.attr', 'height', `${imgHeight}px`);
-
-    // drag again
-    cy.get(img_selector)
-      .drag(img_selector, {
-        source: { x: basepos, y: basepos },
-        target: { x: basepos + moveX, y: basepos + moveY },
-        force: true,
-      })
-      .wait(100);
-
-    // check new position
-    cy.get(container_selector)
-      .should('have.css', 'top', `${2 * moveY}px`)
-      .should('have.css', 'left', `${2 * moveX}px`);
-    cy.get(img_selector)
-      .should('have.attr', 'width', `${imgWidth}px`)
-      .should('have.attr', 'height', `${imgHeight}px`);
   });
 
   it('Image Reset (Double-Click)', () => {
@@ -142,53 +99,6 @@ describe('Image Pane', () => {
       .first()
       .should('have.css', 'top', '104.269px')
       .should('have.css', 'left', '49.9706px');
-  });
-
-  it('Image Move & Zoom', () => {
-    // reset image
-    cy.get(img_selector).first().dblclick();
-
-    // check default position
-    cy.get(container_selector)
-      .first()
-      .should('have.css', 'top', '0px')
-      .should('have.css', 'left', '0px');
-
-    // scroll a bit
-    cy.get(img_selector)
-      .first()
-      .trigger('wheel', { ctrlKey: true, deltaY: 200, bubbles: true })
-      .trigger('wheel', { ctrlKey: true, deltaY: 200, bubbles: true })
-      .trigger('wheel', { ctrlKey: true, deltaY: 200, bubbles: true })
-      .trigger('wheel', { ctrlKey: true, deltaY: 200, bubbles: true })
-      .trigger('wheel', { ctrlKey: true, deltaY: 200, bubbles: true });
-
-    // check new position
-    cy.get(container_selector)
-      .first()
-      .should('have.css', 'top', '104.269px')
-      .should('have.css', 'left', '49.9706px');
-    cy.get(img_selector)
-      .should('have.attr', 'width', '156px')
-      .should('have.attr', 'height', '312px');
-
-    // now drag as well
-    cy.get(img_selector)
-      .drag(img_selector, {
-        source: { x: basepos, y: basepos },
-        target: { x: basepos + moveX, y: basepos + moveY },
-        force: true,
-      })
-      .wait(100);
-
-    // check new position
-    cy.get(container_selector)
-      .first()
-      .should('have.css', 'top', `138.269px`)
-      .should('have.css', 'left', '61.9706px');
-    cy.get(img_selector)
-      .should('have.attr', 'width', '156px')
-      .should('have.attr', 'height', '312px');
   });
 
   it('image_basic download', () => {

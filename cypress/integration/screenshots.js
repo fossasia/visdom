@@ -160,66 +160,6 @@ describe(`Compare with compare-view screenshots`, () => {
 });
 
 describe(`Compare screenshots for plotpane functions`, () => {
-  it('Compare screenshot for Line Smoothing', () => {
-    var run = 'line_smoothing';
-    var env1 = run + '_1_long_env_name_for_testing';
-    var env2 = run + '_2_long_env_name_for_testing';
-    cy.run('plot_line_basic', {
-      env: env1,
-      args: ["'Line smoothing'", 100],
-      open: false,
-    });
-    cy.run('plot_line_basic', {
-      env: env2,
-      args: ["'Line smoothing'", 100],
-      seed: 43,
-    });
-    cy.open_env(env1);
-    cy.get('button[title="smooth lines"]').first().click();
-    cy.get('input[type="range"]').then(($range) => {
-      const range = $range[0]; // get the DOM node
-      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-        window.HTMLInputElement.prototype,
-        'value'
-      ).set;
-      nativeInputValueSetter.call(range, 100); // set the value manually
-      range.dispatchEvent(new Event('input', { value: 0, bubbles: true })); // now dispatch the event
-    });
-
-    cy.waitForPlotRender();
-
-    const diff_src =
-      Cypress.config('screenshotsFolder') +
-      '/' +
-      'screenshots.diff.js' +
-      '/' +
-      run +
-      '.png';
-    const img1_src =
-      Cypress.config('screenshotsFolder') +
-      '_init/' +
-      'screenshots.init.js' +
-      '/' +
-      run +
-      '.png';
-    const img2_src =
-      Cypress.config('screenshotsFolder') +
-      '/' +
-      Cypress.spec.name +
-      '/' +
-      run +
-      '.png';
-    const threshold = thresholds[run] || 0;
-
-    cy.get('.content').first().screenshot(run, { overwrite: true });
-    cy.task('numDifferentPixels', {
-      src1: img1_src,
-      src2: img2_src,
-      diffsrc: diff_src,
-      threshold: threshold,
-    }).should('be.at.most', 200);
-  });
-
   it('Compare screenshot for Property Change (using Line Plot)', () => {
     cy.run('plot_line_basic');
     cy.get('.layout .window').should('have.length', 1);

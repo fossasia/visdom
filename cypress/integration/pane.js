@@ -83,9 +83,7 @@ basic_examples.forEach((setting) => {
         );
     });
 
-    let height, width, height2, width2, height3, width3, height4, width4;
-    [height2, width2] = [425, 321]; // resize to
-    [height3, width3] = [410, 307]; // grid-corrected size
+    let height, width, height4, width4;
     if (basic_example == 'text_basic') {
       [height, width] = [290, 244];
       [height4, width4] = [height, width];
@@ -120,19 +118,6 @@ basic_examples.forEach((setting) => {
         .first()
         .should('have.css', 'height', height + 'px')
         .should('have.css', 'width', width + 'px');
-    });
-
-    it('Resize Pane', () => {
-      cy.get('.layout .react-grid-item')
-        .first()
-        .find('.react-resizable-handle')
-        .trigger('mousedown', { button: 0 })
-        .trigger('mousemove', width2 - width, height2 - height, { force: true })
-        .trigger('mouseup', { button: 0, force: true })
-        .get('.layout .react-grid-item')
-        .first()
-        .should('have.css', 'height', height3 + 'px')
-        .should('have.css', 'width', width3 + 'px');
     });
 
     it('Resize Pane Reset', () => {

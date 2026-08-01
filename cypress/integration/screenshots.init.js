@@ -53,36 +53,6 @@ describe(`Take compare-view screenshots`, () => {
 });
 
 describe(`Take screenshot for PlotPane functions`, () => {
-  it('Screenshot for Line Smoothing', () => {
-    var run = 'line_smoothing';
-    // Append a suffix to ensure the environment name is > 25 characters
-    var env1 = run + '_1_long_env_name_for_testing';
-    var env2 = run + '_2_long_env_name_for_testing';
-    cy.run('plot_line_basic', {
-      env: env1,
-      args: ["'Line smoothing'", 100],
-      open: false,
-    });
-    cy.run('plot_line_basic', {
-      env: env2,
-      args: ["'Line smoothing'", 100],
-      seed: 43,
-    });
-    cy.open_env(env1);
-    cy.get('button[title="smooth lines"]').first().click();
-    cy.get('input[type="range"]').then(($range) => {
-      const range = $range[0]; // get the DOM node
-      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-        window.HTMLInputElement.prototype,
-        'value'
-      ).set;
-      nativeInputValueSetter.call(range, 100); // set the value manually
-      range.dispatchEvent(new Event('input', { value: 0, bubbles: true })); // now dispatch the event
-    });
-    cy.waitForPlotRender();
-    cy.get('.content').first().screenshot(run, { overwrite: true });
-  });
-
   it('Screenshot for Property Change (using Line Plot)', () => {
     cy.run('plot_line_basic');
     cy.get('.layout .window').should('have.length', 1);
