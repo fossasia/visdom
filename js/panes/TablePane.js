@@ -47,6 +47,8 @@ function TablePane(props) {
 
   const editCell = (r, c, value) =>
     sendTableEdit(envID, id, 'edit_cell', { row: r, col: c, value });
+  const editHeader = (c, value) =>
+    sendTableEdit(envID, id, 'edit_header', { col: c, value });
   const addRow = () =>
     sendTableEdit(envID, id, 'add_row', { values: headers.map(() => '') });
   const deleteRow = (r) => sendTableEdit(envID, id, 'delete_row', { row: r });
@@ -116,7 +118,6 @@ function TablePane(props) {
       <div className="content-table">
         <table className="table-native" style={{ tableLayout: 'fixed' }}>
           <colgroup>
-            <col style={{ width: 28 }} />
             {colWidths.map((w, i) => (
               <col key={i} style={{ width: w }} />
             ))}
@@ -124,7 +125,6 @@ function TablePane(props) {
           </colgroup>
           <thead>
             <tr>
-              <th className="table-gutter" />
               {headers.map((h, c) => (
                 <th key={c} className="table-header-cell">
                   {editable && (
@@ -138,7 +138,17 @@ function TablePane(props) {
                       ×
                     </span>
                   )}
-                  <span className="table-header-text">{h}</span>
+                  {editable ? (
+                    <PropertyItem
+                      type="text"
+                      value={h}
+                      propId={c}
+                      updateValue={(_, value) => editHeader(c, value)}
+                      blurStopPropagation={true}
+                    />
+                  ) : (
+                    <span className="table-header-text">{h}</span>
+                  )}
                   {editable && (
                     <div
                       className="col-resize-handle"
@@ -163,28 +173,33 @@ function TablePane(props) {
           <tbody>
             {rows.map((row, r) => (
               <tr key={r} style={{ height: rowHeights[r] }}>
-                <td className="table-gutter">
-                  {editable && (
-                    <span
-                      className="table-delete-row"
-                      role="button"
-                      tabIndex={0}
-                      title="Delete row"
-                      onClick={() => deleteRow(r)}
+                {row.map((cell, c) => {
+                  const isFirst = c === 0;
+                  if (!editable) {
+                    return (
+                      <td key={c} className="table-cell table-cell-readonly">
+                        {cell}
+                      </td>
+                    );
+                  }
+                  return (
+                    <td
+                      key={c}
+                      className={
+                        isFirst ? 'table-cell table-cell-first' : 'table-cell'
+                      }
                     >
-                      ×
-                    </span>
-                  )}
-                  {editable && (
-                    <div
-                      className="row-resize-handle"
-                      onMouseDown={(ev) => startResize('row', r, ev)}
-                    />
-                  )}
-                </td>
-                {row.map((cell, c) =>
-                  editable ? (
-                    <td key={c} className="table-cell">
+                      {isFirst && (
+                        <span
+                          className="table-delete-row"
+                          role="button"
+                          tabIndex={0}
+                          title="Delete row"
+                          onClick={() => deleteRow(r)}
+                        >
+                          ×
+                        </span>
+                      )}
                       <PropertyItem
                         type="text"
                         value={cell}
@@ -192,20 +207,22 @@ function TablePane(props) {
                         updateValue={(_, value) => editCell(r, c, value)}
                         blurStopPropagation={true}
                       />
+                      {isFirst && (
+                        <div
+                          className="row-resize-handle"
+                          onMouseDown={(ev) => startResize('row', r, ev)}
+                        />
+                      )}
                     </td>
-                  ) : (
-                    <td key={c} className="table-cell table-cell-readonly">
-                      {cell}
-                    </td>
-                  )
-                )}
+                  );
+                })}
                 {editable && <td />}
               </tr>
             ))}
             {editable && (
               <tr>
                 <td
-                  colSpan={headers.length + 2}
+                  colSpan={headers.length + 1}
                   className="table-add-row"
                   role="button"
                   tabIndex={0}

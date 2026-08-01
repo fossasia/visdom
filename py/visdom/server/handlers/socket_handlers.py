@@ -398,6 +398,20 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     {"op": "replace", "path": f"/content/rows/{r}/{c}", "value": value}
                 ]
 
+            elif op == "edit_header":
+                c = _as_int(payload.get("col"))
+                value = payload.get("value")
+                if c is None or not (0 <= c < len(headers)):
+                    logging.warning(
+                        f"table_edit: edit_header out of range (col={c}),"
+                        f" dropping event"
+                    )
+                    return
+                headers[c] = value
+                patch = [
+                    {"op": "replace", "path": f"/content/headers/{c}", "value": value}
+                ]
+
             elif op == "add_row":
                 new_row = payload.get("values") or [""] * len(headers)
                 if len(new_row) != len(headers):

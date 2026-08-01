@@ -193,7 +193,6 @@ button[title="comment"].active > .glyphicon {
   cursor: se-resize;
   background: transparent;
   z-index: 10;
-  align: right;
 }
 
 .widget {
@@ -505,20 +504,18 @@ button[title="export"].active {
   display: block;
 }
  
-.table-gutter {
-  background-color: #F0F0F0;
-  width: 28px;
-  min-width: 28px;
-  text-align: center;
-}
- 
-.table-cell input[type="text"] {
+.table-native th input[type="text"],
+.table-native td input[type="text"] {
   width: 100%;
   border: none;
   padding: 2px 6px;
   background: transparent;
   font-family: inherit;
   font-size: inherit;
+}
+ 
+.table-cell-first {
+  padding-right: 18px;
 }
  
 .table-cell-readonly {
@@ -534,48 +531,3 @@ button[title="export"].active {
   cursor: col-resize;
   z-index: 5;
 }
- 
-.row-resize-handle {
-  position: absolute;
-  bottom: -3px;
-  left: 0;
-  height: 6px;
-  width: 100%;
-  cursor: row-resize;
-  z-index: 5;
-}
- 
-.table-add-row,
-.table-add-col {
-  text-align: center;
-  color: #999;
-  cursor: pointer;
-  background-color: #fafafa;
-  user-select: none;
-}
- 
-.table-add-row:hover,
-.table-add-col:hover {
-  background-color: #e0e0e0;
-  color: #333;
-}
- 
-.table-delete-row,
-.table-delete-col {
-  display: none;
-  cursor: pointer;
-  color: #c00;
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  font-size: 10px;
-  line-height: 1;
-  user-select: none;
-  z-index: 6;
-}
- 
-.table-header-cell:hover .table-delete-col,
-.table-gutter:hover .table-delete-row {
-  display: inline;
-}
- 
