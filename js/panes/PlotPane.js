@@ -10,6 +10,7 @@
 import React, { useContext, useEffect, useRef, useState } from 'react';
 const { usePrevious } = require('../util');
 import ApiContext from '../api/ApiContext';
+import { showToast } from '../toasts/toastEvents';
 import Pane from './Pane';
 import { typesetMathJax } from './utils/mathjaxHelpers';
 import { downloadImageAsPdf } from './utils/pdfExport';
@@ -75,7 +76,12 @@ var PlotPane = (props) => {
           `${contentID || 'plot'}.pdf`,
           PDF_CAPTURE_DPI
         );
-      });
+      })
+      .catch((err) => {
+          showToast('Failed to Export PDF', 'error', { duration: 4000 });
+          // eslint-disable-next-line no-console
+          console.error('PlotPane PDF export failed:', err);
+        });
       return;
     }
 
