@@ -4485,7 +4485,7 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
         opts.setdefault("editable", True)
- 
+
         if not data and not headers:
             raise AssertionError("either `data` or `headers` must be provided")
 
@@ -4500,7 +4500,7 @@ class Visdom(object):
         assert all(
             len(r) == len(headers) for r in rows
         ), "each row must have the same number of columns as headers"
- 
+
         rows = [[_table_cell_to_native(cell) for cell in row] for row in rows]
         headers = [_table_cell_to_native(h) for h in headers]
 
