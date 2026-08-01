@@ -32,8 +32,14 @@ function readJpegInfo(bytes) {
     if (bytes[pos] !== 0xff) {
       throw new Error('Malformed JPEG marker stream');
     }
-    const marker = bytes[pos + 1];
-    pos += 2;
+    while (pos < bytes.length && bytes[pos] === 0xff) {
+      pos++;
+    }
+    if (pos >= bytes.length) {
+      throw new Error('Malformed JPEG marker stream (truncated)');
+    }
+    const marker = bytes[pos];
+    pos += 1;
 
     if (
       marker === 0xd8 ||
@@ -178,8 +184,8 @@ export function downloadImageAsPdf(
     document.body.removeChild(link);
     setTimeout(() => window.URL.revokeObjectURL(url), 1000);
   } catch (err) {
-    // eslint-disable-next-line no-console
     showToast('Failed to build PDF', 'error', { duration: 4000 });
+    // eslint-disable-next-line no-console
     console.error('downloadImageAsPdf: failed to build PDF -', err);
   }
 }
