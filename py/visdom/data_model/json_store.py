@@ -137,7 +137,12 @@ class JSONStore(DataStore):
         return self.save_envs(state, list(state.keys()))
 
     def load_env(self, eid):
-        """Read one environment by ``eid``; return ``{}`` if it is absent."""
+        """Read one environment by ``eid``; return ``{}`` if it is absent.
+
+        Only the canonical env fields are returned: ``jsons`` and ``reload``,
+        plus the ``experiment`` metadata blob when present. Internal bookkeeping
+        such as the ``name`` field written for hashed long-id files is dropped.
+        """
         if self.env_path is None:
             return {}
         path = self._resolve_existing(eid)
@@ -148,9 +153,12 @@ class JSONStore(DataStore):
                 data = json.load(fn)
         except (OSError, ValueError):
             return {}
-        if isinstance(data, dict) and "jsons" in data and "reload" in data:
-            return {"jsons": data.get("jsons", {}), "reload": data.get("reload", {})}
-        return {}
+        if not (isinstance(data, dict) and "jsons" in data and "reload" in data):
+            return {}
+        env = {"jsons": data.get("jsons", {}), "reload": data.get("reload", {})}
+        if "experiment" in data:
+            env["experiment"] = data["experiment"]
+        return env
 
     def list_envs(self):
         """Return the ids of all environments stored on disk.

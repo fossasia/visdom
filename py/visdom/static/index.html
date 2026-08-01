@@ -9,10 +9,19 @@ LICENSE file in the root directory of this source tree.
 -->
 
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
+    <title>visdom</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self';
+                 script-src 'self' 'unsafe-inline';
+                 style-src 'self' 'unsafe-inline';
+                 connect-src 'self' ws: wss:;
+                 img-src 'self' data: blob:;
+                 media-src 'self' data: blob:;
+                 font-src 'self' data:;">
 
     <link rel="shortcut icon" href="favicon.png">
 
@@ -30,9 +39,15 @@ LICENSE file in the root directory of this source tree.
     <script src={{ static_url("js/layout_bin_packer.js") }}></script>
 
     <!-- Mathjax -->
-	  <script type='text/javascript' src={{ static_url('js/mathjax/2.7.5/MathJax.js') }}></script>
-    <script type='text/x-mathjax-config'>MathJax.Hub.Config({tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']], processEscapes: true}});</script>
-    <script type='text/javascript' src={{ static_url('js/mathjax/2.7.5/config/TeX-AMS-MML_HTMLorMML.js') }}></script>
+    <script type='text/javascript'>
+      window.MathJax = {
+        tex: {
+          inlineMath: [['$', '$'], ['\\(', '\\)']],
+          processEscapes: true
+        }
+      };
+    </script>
+    <script type='text/javascript' id="MathJax-script" src={{ static_url('js/mathjax/3.2.2/es5/tex-mml-svg.js') }}></script>
 
     <!-- Plotly -->
     <script src={{ static_url("js/plotly-plotly.min.js") }}></script>
@@ -79,8 +94,6 @@ LICENSE file in the root directory of this source tree.
     <link rel="stylesheet" href={{ static_url("../user/style.css") }}>
     <!-- Added Script for NetworkPane -->
     <link rel="stylesheet" href={{ static_url("css/network.css") }}>
-
-    <title>visdom</title>
     <!-- <link rel="icon" href="http://example.com/favicon.png"> -->
   </head>
 

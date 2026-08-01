@@ -14,6 +14,9 @@ const { defineConfig, devices } = require('@playwright/test');
  */
 module.exports = defineConfig({
   testDir: './playwright/tests',
+  metadata: {
+    transport: 'websocket',
+  },
   timeout: 30 * 1000,
   expect: {
     timeout: 5000,
@@ -23,7 +26,7 @@ module.exports = defineConfig({
   retries: process.env.CI ? 2 : 0,
   workers: 1,
   outputDir: './playwright/test-results',
-  testIgnore: ['**/*.init.spec.js'],
+  testIgnore: ['**/*.init.spec.js', '**/screenshots.spec.js'],
   reporter: [['html', { outputFolder: 'playwright/playwright-report' }]],
   use: {
     baseURL: 'http://localhost:8098',

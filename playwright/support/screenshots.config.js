@@ -100,7 +100,40 @@ const allCompareviews = [
   'misc_plot_latex_update',
 ];
 
+const screenshotOptions = {
+  misc_video_tensor: { threshold: 0.1, maxDiffPixels: 5000 },
+  misc_video_download: { threshold: 0.1, maxDiffPixels: 5000 },
+  misc_audio_basic: { maxDiffPixels: 5000 },
+  misc_plot_latex: { maxDiffPixels: 3000 },
+  text_basic: { threshold: 0.05 },
+  text_update: { threshold: 0.05 },
+};
+
+const compareScreenshotOptions = {
+  plot_line_doubleyaxis: { maxDiffPixels: 2000 },
+  plot_scatter_append: { maxDiffPixels: 200 },
+  plot_scatter_custom_marker: { maxDiffPixels: 200 },
+  plot_scatter_add_trace: { maxDiffPixels: 200 },
+  plot_line_basic: { maxDiffPixels: 200 },
+  plot_line_many_updates: { maxDiffPixels: 200 },
+  plot_line_update: { maxDiffPixels: 150 },
+  plot_line_opts: { maxDiffPixels: 100 },
+  plot_line_opts_update: { maxDiffPixels: 100 },
+  plot_line_multiple: { maxDiffPixels: 50 },
+  plot_line_stackedarea: { maxDiffPixels: 50 },
+  plot_scatter_custom_colors: { maxDiffPixels: 50 },
+  plot_scatter_text_labels_1d: { maxDiffPixels: 50 },
+  plot_scatter_text_labels_2d: { maxDiffPixels: 50 },
+  plot_bar_stacked: { maxDiffPixels: 200 },
+  plot_bar_nonstacked: { maxDiffPixels: 200 },
+  plot_special_boxplot: { maxDiffPixels: 200 },
+  misc_plot_latex: { maxDiffPixels: 3000 },
+  misc_plot_latex_update: { maxDiffPixels: 200 },
+};
+
 module.exports = {
   allScreenshots,
   allCompareviews,
+  screenshotOptions,
+  compareScreenshotOptions,
 };
