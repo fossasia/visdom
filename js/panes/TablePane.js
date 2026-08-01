@@ -34,12 +34,10 @@ function TablePane(props) {
 
   useEffect(() => {
     setColWidths((w) => headers.map((_, i) => w[i] ?? DEFAULT_COL_WIDTH));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [headers.length]);
 
   useEffect(() => {
     setRowHeights((h) => rows.map((_, i) => h[i] ?? DEFAULT_ROW_HEIGHT));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows.length]);
 
   // private events
@@ -113,10 +111,16 @@ function TablePane(props) {
   // rendering
   // ---------
 
+  const totalWidth =
+    colWidths.reduce((sum, w) => sum + w, 0) + (editable ? 24 : 0);
+
   return (
     <Pane {...props} handleDownload={handleDownload}>
       <div className="content-table">
-        <table className="table-native" style={{ tableLayout: 'fixed' }}>
+        <table
+          className="table-native"
+          style={{ tableLayout: 'fixed', width: totalWidth }}
+        >
           <colgroup>
             {colWidths.map((w, i) => (
               <col key={i} style={{ width: w }} />
@@ -140,34 +144,30 @@ function TablePane(props) {
                       <span className="table-header-text">{h}</span>
                     )}
                     {editable && (
-                      <span
+                      <button
+                        type="button"
                         className="table-delete-col"
-                        role="button"
-                        tabIndex={0}
                         title="Delete column"
                         onClick={() => deleteCol(c)}
                       >
                         ×
-                      </span>
+                      </button>
                     )}
                   </div>
                   {editable && (
                     <div
                       className="col-resize-handle"
+                      aria-hidden="true"
                       onMouseDown={(ev) => startResize('col', c, ev)}
                     />
                   )}
                 </th>
               ))}
               {editable && (
-                <th
-                  className="table-add-col"
-                  role="button"
-                  tabIndex={0}
-                  title="Add column"
-                  onClick={addCol}
-                >
-                  +
+                <th className="table-add-col">
+                  <button type="button" title="Add column" onClick={addCol}>
+                    +
+                  </button>
                 </th>
               )}
             </tr>
@@ -200,20 +200,20 @@ function TablePane(props) {
                           blurStopPropagation={true}
                         />
                         {isFirst && (
-                          <span
+                          <button
+                            type="button"
                             className="table-delete-row"
-                            role="button"
-                            tabIndex={0}
                             title="Delete row"
                             onClick={() => deleteRow(r)}
                           >
                             ×
-                          </span>
+                          </button>
                         )}
                       </div>
                       {isFirst && (
                         <div
                           className="row-resize-handle"
+                          aria-hidden="true"
                           onMouseDown={(ev) => startResize('row', r, ev)}
                         />
                       )}
@@ -225,14 +225,10 @@ function TablePane(props) {
             ))}
             {editable && (
               <tr>
-                <td
-                  colSpan={headers.length + 1}
-                  className="table-add-row"
-                  role="button"
-                  tabIndex={0}
-                  onClick={addRow}
-                >
-                  + Add row
+                <td colSpan={headers.length + 1} className="table-add-row">
+                  <button type="button" onClick={addRow}>
+                    + Add row
+                  </button>
                 </td>
               </tr>
             )}

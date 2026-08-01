@@ -481,7 +481,6 @@ button[title="export"].active {
 
 .table-native {
   border-collapse: collapse;
-  width: 100%;
 }
 
 .table-native th,
@@ -559,6 +558,21 @@ button[title="export"].active {
   cursor: pointer;
   background-color: #fafafa;
   user-select: none;
+  padding: 0;
+}
+
+.table-add-row button,
+.table-add-col button {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 4px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
 }
 
 .table-add-row:hover,
@@ -571,6 +585,7 @@ button[title="export"].active {
 .table-delete-col {
   flex: 0 0 14px;
   width: 14px;
+  height: 14px;
   text-align: center;
   cursor: pointer;
   color: #c00;
@@ -578,6 +593,10 @@ button[title="export"].active {
   line-height: 1;
   user-select: none;
   visibility: hidden;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
 }
 
 .table-header-cell:hover .table-delete-col,
