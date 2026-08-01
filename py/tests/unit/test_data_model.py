@@ -4,6 +4,7 @@ Exercises the JSONStore backend directly against a temporary directory: no
 running visdom server is needed, so these run under ``pytest -m "not server"``.
 """
 
+import copy
 import errno
 import hashlib
 import json
@@ -339,8 +340,12 @@ def test_interrupted_save_keeps_the_previous_env(store, monkeypatch):
     assert store.load_env("main") == _env("win_original")
 
 
-def test_interrupted_save_leaves_the_env_listed(store, monkeypatch):
-    """The environment is still discoverable after a failed rewrite."""
+def test_interrupted_save_leaves_a_usable_env(store, monkeypatch):
+    """The environment is still discoverable *and* readable after a failure.
+
+    A truncated file keeps its name, so listing and existence alone would pass
+    even with the env destroyed; the reload is what makes this meaningful.
+    """
     store.save_env("main", _env())
 
     _fail_after(monkeypatch, prefix_bytes=8)
@@ -349,6 +354,7 @@ def test_interrupted_save_leaves_the_env_listed(store, monkeypatch):
 
     assert store.list_envs() == ["main"]
     assert store.env_exists("main")
+    assert JSONStore(store.env_path).load_env("main") == _env()
 
 
 def test_stranded_staging_file_is_not_an_env(store, env_path, monkeypatch):
@@ -441,6 +447,145 @@ def test_hash_fallback_file_reports_the_real_id(store, env_path):
 
     assert _hashed_name(long_eid) in os.listdir(env_path)
     assert store.list_envs() == [long_eid]
+
+
+# -- LazyEnvData -------------------------------------------------------------
+
+
+def test_lazy_env_defers_the_read(spy_store):
+    """Constructing a LazyEnvData touches the backend not at all."""
+    spy_store.save_env("main", _env())
+
+    LazyEnvData(spy_store, "main")
+
+    assert spy_store.calls["load_env"] == []
+
+
+def test_lazy_env_reads_once_and_caches(spy_store):
+    """Repeated access hits the backend exactly once."""
+    spy_store.save_env("main", _env())
+    lazy = LazyEnvData(spy_store, "main")
+
+    lazy["jsons"]
+    lazy["reload"]
+    len(lazy)
+    list(lazy)
+
+    assert spy_store.calls["load_env"] == ["main"]
+
+
+def test_lazy_env_satisfies_the_mapping_contract(store):
+    """It behaves like the dict it stands in for."""
+    store.save_env("main", _env())
+    lazy = LazyEnvData(store, "main")
+
+    assert sorted(lazy.keys()) == ["jsons", "reload"]
+    assert lazy["jsons"] == _env()["jsons"]
+    assert lazy.get("reload") == {}
+    assert lazy.get("absent") is None
+    assert lazy.get("absent", "fallback") == "fallback"
+    assert "jsons" in lazy
+    assert "absent" not in lazy
+    assert len(lazy) == 2
+    assert dict(lazy.items()) == _env()
+    assert lazy == _env()
+
+
+def test_lazy_env_setitem_materialises_first(store):
+    """Writing a key loads the env, so the write lands on real data."""
+    store.save_env("main", _env())
+    lazy = LazyEnvData(store, "main")
+
+    lazy["reload"] = {"win_0": [0, 0, 3, 3]}
+
+    assert lazy["jsons"] == _env()["jsons"]
+    assert lazy["reload"] == {"win_0": [0, 0, 3, 3]}
+
+
+def test_lazy_env_raises_value_error_for_a_malformed_env(store, env_path):
+    """A file that is not a valid env becomes a ValueError naming the id."""
+    with open(os.path.join(env_path, "broken.json"), "w") as fn:
+        fn.write("{not valid json")
+
+    lazy = LazyEnvData(store, "broken")
+    with pytest.raises(ValueError, match="broken"):
+        lazy.lazy_load_data()
+
+
+def test_lazy_env_raises_value_error_for_a_missing_env(store):
+    """A never-saved env is malformed too: load_env returns {} with no jsons."""
+    with pytest.raises(ValueError, match="Failed loading environment json"):
+        LazyEnvData(store, "ghost").lazy_load_data()
+
+
+def test_lazy_env_keeps_the_experiment_blob(store):
+    """Metadata beyond jsons/reload survives the lazy load."""
+    payload = dict(_env(), experiment={"name": "run-1"})
+    store.save_env("main", payload)
+
+    assert LazyEnvData(store, "main")["experiment"] == {"name": "run-1"}
+
+
+# -- Deep copies of environment state ----------------------------------------
+#
+# ForkEnvHandler (web_handlers.py) and the socket "save" command both fork an
+# environment with copy.deepcopy. When the source is a LazyEnvData that means
+# the store reference is deep-copied alongside the data.
+
+
+def test_deep_copy_of_a_lazy_env_is_independent(store):
+    """Mutating the fork leaves the source environment alone."""
+    store.save_env("main", _env())
+    source = LazyEnvData(store, "main")
+    source.lazy_load_data()
+
+    fork = copy.deepcopy(source)
+    fork["jsons"]["win_1"] = {"id": "win_1"}
+
+    assert "win_1" not in source["jsons"]
+    assert sorted(fork["jsons"]) == ["win_0", "win_1"]
+
+
+def test_deep_copy_clones_the_store_reference(store):
+    """The fork gets its own JSONStore, not the one the source holds.
+
+    Harmless today because JSONStore's only state is the path, but it means the
+    fork does not observe a later swap of the source's backend.
+    """
+    store.save_env("main", _env())
+    source = LazyEnvData(store, "main")
+    source.lazy_load_data()
+
+    fork = copy.deepcopy(source)
+
+    assert fork._store is not source._store
+    assert fork._store.env_path == source._store.env_path
+    assert fork._store.load_env("main") == _env()
+
+
+def test_deep_copy_of_an_unmaterialised_lazy_env_still_loads(store):
+    """A fork taken before the first read resolves against the copied store."""
+    store.save_env("main", _env())
+    source = LazyEnvData(store, "main")
+
+    fork = copy.deepcopy(source)
+
+    assert fork["jsons"] == _env()["jsons"]
+    assert source._raw_dict is None
+
+
+def test_forked_env_persists_under_its_own_id(store):
+    """Saving a deep copy under a new id writes a second, separate file."""
+    store.save_env("main", _env())
+    source = LazyEnvData(store, "main")
+    source.lazy_load_data()
+
+    fork = copy.deepcopy(source)
+    fork["jsons"]["win_1"] = {"id": "win_1"}
+    store.save_env("forked", fork)
+
+    assert store.load_env("main") == _env()
+    assert sorted(store.load_env("forked")["jsons"]) == ["win_0", "win_1"]
 
 
 if __name__ == "__main__":
