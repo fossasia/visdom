@@ -128,17 +128,6 @@ function TablePane(props) {
               {headers.map((h, c) => (
                 <th key={c} className="table-header-cell">
                   <div className="table-header-inner">
-                    {editable && (
-                      <span
-                        className="table-delete-col"
-                        role="button"
-                        tabIndex={0}
-                        title="Delete column"
-                        onClick={() => deleteCol(c)}
-                      >
-                        ×
-                      </span>
-                    )}
                     {editable ? (
                       <PropertyItem
                         type="text"
@@ -149,6 +138,17 @@ function TablePane(props) {
                       />
                     ) : (
                       <span className="table-header-text">{h}</span>
+                    )}
+                    {editable && (
+                      <span
+                        className="table-delete-col"
+                        role="button"
+                        tabIndex={0}
+                        title="Delete column"
+                        onClick={() => deleteCol(c)}
+                      >
+                        ×
+                      </span>
                     )}
                   </div>
                   {editable && (
@@ -192,6 +192,13 @@ function TablePane(props) {
                       }
                     >
                       <div className="table-cell-inner">
+                        <PropertyItem
+                          type="text"
+                          value={cell}
+                          propId={c}
+                          updateValue={(_, value) => editCell(r, c, value)}
+                          blurStopPropagation={true}
+                        />
                         {isFirst && (
                           <span
                             className="table-delete-row"
@@ -203,13 +210,6 @@ function TablePane(props) {
                             ×
                           </span>
                         )}
-                        <PropertyItem
-                          type="text"
-                          value={cell}
-                          propId={c}
-                          updateValue={(_, value) => editCell(r, c, value)}
-                          blurStopPropagation={true}
-                        />
                       </div>
                       {isFirst && (
                         <div
