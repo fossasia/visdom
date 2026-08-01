@@ -371,8 +371,10 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 return
             headers, rows = content["headers"], content["rows"]
 
-            if not isinstance(headers, list) or not isinstance(rows, list) or not all(
-                 isinstance(r, list) for r in rows
+            if (
+                not isinstance(headers, list)
+                or not isinstance(rows, list)
+                or not all(isinstance(r, list) for r in rows)
              ):
                  logging.warning(
                      f"table_edit: pane {win!r} has non-list headers/rows, dropping event"
