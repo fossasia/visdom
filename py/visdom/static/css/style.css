@@ -336,7 +336,7 @@ button[title="smooth lines"].active {
   color: red;
 }
 
-/* read by js/panes/utils/annotationHelpers.js to size and place note boxes */
+/* read by js/panes/utils/annotations.js to size and place note boxes */
 :root {
   --annotation-font-size: 11;
   --annotation-arrow-length: 30;
