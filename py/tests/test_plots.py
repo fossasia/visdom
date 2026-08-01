@@ -6,6 +6,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import math
 import unittest
 from unittest.mock import patch
 import numpy as np
@@ -629,6 +630,53 @@ class TestContour(unittest.TestCase):
         """contour renders flat, without the 3D scene surf builds."""
         sent = self._contour(np.ones((2, 2)))
         self.assertNotIn("scene", sent["payload"]["layout"])
+
+
+class _FakePlot:
+    """Minimal stand-in for a matplotlib figure.
+
+    matplot() only calls plot.savefig(buffer, format="svg"), so we just
+    write a fixed SVG whose root <svg> carries height/width in points.
+    """
+
+    def __init__(self, height, width):
+        self._svg = (
+            '<?xml version="1.0"?>'
+            '<svg xmlns="http://www.w3.org/2000/svg" '
+            'height="{}" width="{}"></svg>'.format(height, width)
+        )
+
+    def savefig(self, buffer, format="svg"):
+        buffer.write(self._svg)
+
+
+@unittest.skipUnless(visdom.BS4_AVAILABLE, "requires bs4/lxml")
+class TestMatplotResizable(unittest.TestCase):
+    def setUp(self):
+        self.viz = visdom.Visdom(send=False, use_incoming_socket=False)
+
+    def _matplot(self, plot, **kwargs):
+        captured = {}
+
+        def capture(svgstr=None, opts=None, **_):
+            captured["opts"] = opts
+            return "win1"
+
+        with patch.object(self.viz, "svg", side_effect=capture):
+            self.viz.matplot(plot, **kwargs)
+        return captured["opts"]
+
+    def test_whole_number_pt_not_inflated(self):
+        """432pt must strip 'pt' -> 432, not become 43200 (the 100x bug)."""
+        opts = self._matplot(_FakePlot("432pt", "640pt"), opts={"resizable": True})
+        self.assertEqual(opts["height"], 1.4 * math.ceil(432))  # 604.8
+        self.assertEqual(opts["width"], 1.35 * math.ceil(640))  # 864.0
+
+    def test_decimal_pt_still_correct(self):
+        """Decimal dims (which worked before) must keep working."""
+        opts = self._matplot(_FakePlot("345.6pt", "460.8pt"), opts={"resizable": True})
+        self.assertEqual(opts["height"], 1.4 * math.ceil(345.6))  # 484.4
+        self.assertEqual(opts["width"], 1.35 * math.ceil(460.8))  # 622.35
 
 
 if __name__ == "__main__":
