@@ -20,7 +20,6 @@ import html
 import json
 import logging
 import os
-import time
 import errno
 from collections import OrderedDict
 
@@ -51,10 +50,7 @@ def check_auth(f):
     """
 
     def _check_auth(handler, *args, **kwargs):
-        # TODO this should call a shared method of the handler
-        handler.last_access = time.time()
-        if handler.login_enabled and not handler.current_user:
-            handler.set_status(401)
+        if not handler.is_authorized():
             return
         f(handler, *args, **kwargs)
 
@@ -96,10 +92,10 @@ class LazyEnvData(Mapping):
 
         try:
             env_data = self._store.load_env(self._eid)
-            self._raw_dict = {
-                "jsons": env_data["jsons"],
-                "reload": env_data["reload"],
-            }
+            raw = dict(env_data)
+            raw["jsons"] = env_data["jsons"]
+            raw["reload"] = env_data["reload"]
+            self._raw_dict = raw
         except (KeyError, TypeError) as e:
             raise ValueError(
                 "Failed loading environment json: {} - {}".format(self._eid, repr(e))
