@@ -18,7 +18,6 @@ import getpass
 import json
 import jsonpatch
 import logging
-import math
 import os
 import uuid
 from collections import OrderedDict
@@ -29,6 +28,7 @@ import tornado.escape
 from visdom.utils.shared_utils import (
     get_rand_id,
     _coerce_image_slider_index,
+    _is_missing_value,
     NanSafeEncoder,
 )
 from visdom.utils.server_utils import (
@@ -198,7 +198,7 @@ class UpdateHandler(BaseHandler):
         new_data = args.get("data")
         p = update_window(p, args)
         name = args.get("name")
-        if name is None and new_data is None:
+        if name is None and not new_data:
             return p  # we only updated the opts or layout
         append = args.get("append")
 
@@ -306,23 +306,17 @@ class UpdateHandler(BaseHandler):
 
             return p
 
-        # inject new trace
+        # inject new trace; the plot may hold none at all if every trace of it
+        # has been deleted
         if len(idxs) == 0:
-            idx = len(pdata)
-            pdata.append(dict(pdata[0]))  # plot is not empty, clone an entry
-            idxs = [idx]
-            append = False
-            pdata[idx] = new_data[0]
-            for k, v in new_data[0].items():
-                pdata[idx][k] = v
-            pdata[idx]["name"] = name
+            trace = dict(new_data[0])
+            trace["name"] = name
+            pdata.append(trace)
             return p
 
-        # Update traces
-        for n, idx in enumerate(idxs):
-            if all(
-                i is None or math.isnan(i) or math.isinf(i) for i in new_data[n]["x"]
-            ):
+        # Update traces, as far as the update supplies them
+        for idx, new_trace in zip(idxs, new_data):
+            if all(_is_missing_value(i) for i in new_trace["x"]):
                 continue
             # handle data for plotting
             axes = ["x", "y"]
@@ -330,26 +324,24 @@ class UpdateHandler(BaseHandler):
                 axes.append("z")
             for axis in axes:
                 pdata[idx][axis] = (
-                    (pdata[idx][axis] + new_data[n][axis])
-                    if append
-                    else new_data[n][axis]
+                    (pdata[idx][axis] + new_trace[axis]) if append else new_trace[axis]
                 )
 
             # handle marker properties
-            if "marker" not in new_data[n]:
+            if "marker" not in new_trace:
                 continue
             if "marker" not in pdata[idx]:
                 pdata[idx]["marker"] = {}
             pdata_marker = pdata[idx]["marker"]
             for marker_prop in ["color"]:
-                if marker_prop not in new_data[n]["marker"]:
+                if marker_prop not in new_trace["marker"]:
                     continue
                 if marker_prop not in pdata[idx]["marker"]:
                     pdata[idx]["marker"][marker_prop] = []
                 pdata_marker[marker_prop] = (
-                    (pdata_marker[marker_prop] + new_data[n]["marker"][marker_prop])
+                    (pdata_marker[marker_prop] + new_trace["marker"][marker_prop])
                     if append
-                    else new_data[n]["marker"][marker_prop]
+                    else new_trace["marker"][marker_prop]
                 )
 
         return p

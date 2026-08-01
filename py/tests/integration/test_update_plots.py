@@ -299,6 +299,104 @@ class TestLayoutAndOptsUpdates(PlotUpdateTestCase):
         self.assertEqual(self.traces(win)[0]["name"], "renamed_trace")
 
 
+class TestCategoricalXUpdate(PlotUpdateTestCase):
+    """A categorical x axis must survive the all-missing-points check.
+
+    That check exists to skip a trace whose points are all None/NaN/Inf. Only
+    numbers can be either, so handing a label to ``math.isnan`` used to raise
+    ``TypeError`` and answer 500.
+    """
+
+    def create_categorical(self):
+        return self.create_scatter(x=["a", "b"], y=[1, 2])
+
+    def test_appending_to_a_categorical_axis_succeeds(self):
+        win = self.create_categorical()
+        resp = self.update(
+            win,
+            [{"type": "scatter", "x": ["c"], "y": [3], "name": "t1"}],
+            name="t1",
+            append=True,
+        )
+        self.assertEqual(resp.code, 200, resp.body)
+
+    def test_appending_to_a_categorical_axis_keeps_the_labels(self):
+        win = self.create_categorical()
+        self.update(
+            win,
+            [{"type": "scatter", "x": ["c"], "y": [3], "name": "t1"}],
+            name="t1",
+            append=True,
+        )
+        trace = self.traces(win)[0]
+        self.assertEqual(trace["x"], ["a", "b", "c"])
+        self.assertEqual(trace["y"], [1, 2, 3])
+
+    def test_a_wholly_missing_numeric_update_is_still_skipped(self):
+        win = self.create_scatter()
+        self.update(
+            win,
+            [{"type": "scatter", "x": [None, None], "y": [9, 9], "name": "t1"}],
+            name="t1",
+            append=False,
+        )
+        self.assertEqual(self.traces(win)[0]["x"], [1, 2])
+
+
+class TestEmptyDataUpdate(PlotUpdateTestCase):
+    """Updates carrying fewer data entries than the plot has traces.
+
+    Each of these indexed into ``data`` without checking its length first and
+    answered 500 with an ``IndexError``.
+    """
+
+    def test_an_empty_data_list_applies_the_layout(self):
+        win = self.create_scatter()
+        resp = self.update(win, [], layout={"title": "new title"})
+        self.assertEqual(resp.code, 200, resp.body)
+        pane = self.get_win_data(win)
+        self.assertEqual(pane["content"]["layout"]["title"], "new title")
+
+    def test_an_empty_data_list_leaves_the_traces_alone(self):
+        win = self.create_scatter()
+        self.update(win, [], layout={"title": "new title"})
+        self.assertEqual(self.traces(win)[0]["x"], [1, 2])
+
+    def test_a_trace_can_be_injected_into_an_emptied_plot(self):
+        win = self.create_scatter()
+        self.update(win, [{}], name="t1", delete=True)
+        self.assertEqual(self.traces(win), [])
+
+        resp = self.update(
+            win,
+            [{"type": "scatter", "x": [7], "y": [8], "name": "t2"}],
+            name="t2",
+        )
+        self.assertEqual(resp.code, 200, resp.body)
+        traces = self.traces(win)
+        self.assertEqual(len(traces), 1)
+        self.assertEqual(traces[0]["name"], "t2")
+        self.assertEqual(traces[0]["x"], [7])
+
+    def test_an_unnamed_update_may_cover_only_the_first_traces(self):
+        win = self.create_window(
+            [
+                {"type": "scatter", "x": [1], "y": [2], "name": "t1"},
+                {"type": "scatter", "x": [3], "y": [4], "name": "t2"},
+            ],
+            layout={"title": "multi"},
+        )
+        resp = self.update(
+            win,
+            [{"type": "scatter", "x": [9], "y": [9]}],
+            append=True,
+        )
+        self.assertEqual(resp.code, 200, resp.body)
+        traces = self.traces(win)
+        self.assertEqual(traces[0]["x"], [1, 9])
+        self.assertEqual(traces[1]["x"], [3])
+
+
 class TestUnsupportedUpdate(PlotUpdateTestCase):
     """Only a handful of pane types accept ``/update`` at all."""
 
