@@ -12,6 +12,10 @@ const { usePrevious } = require('../util');
 import ApiContext from '../api/ApiContext';
 import { showToast } from '../toasts/toastEvents';
 import Pane from './Pane';
+import {
+  downloadJpegWithDpi,
+  downloadPngWithDpi,
+} from './utils/Embeddpimetadata';
 import { typesetMathJax } from './utils/mathjaxHelpers';
 import { downloadImageAsPdf } from './utils/pdfExport';
 const { sgg } = require('ml-savitzky-golay-generalized');
@@ -70,14 +74,15 @@ var PlotPane = (props) => {
       Plotly.toImage(plotlyRef.current, {
         format: 'jpeg',
         scale: dpiToScale(PDF_CAPTURE_DPI),
-      }).then((dataUrl) => {
-        downloadImageAsPdf(
-          dataUrl,
-          `${contentID || 'plot'}.pdf`,
-          PDF_CAPTURE_DPI
-        );
       })
-      .catch((err) => {
+        .then((dataUrl) => {
+          downloadImageAsPdf(
+            dataUrl,
+            `${contentID || 'plot'}.pdf`,
+            PDF_CAPTURE_DPI
+          );
+        })
+        .catch((err) => {
           showToast('Failed to Export PDF', 'error', { duration: 4000 });
           // eslint-disable-next-line no-console
           console.error('PlotPane PDF export failed:', err);
@@ -85,11 +90,31 @@ var PlotPane = (props) => {
       return;
     }
 
-    Plotly.downloadImage(plotlyRef.current, {
-      format: format === 'jpg' ? 'jpeg' : format,
+    if (format === 'svg') {
+      Plotly.downloadImage(plotlyRef.current, {
+        format: 'svg',
+        filename: contentID || 'plot',
+      });
+      return;
+    }
+
+    const dpiToEmbed = dpi || 96;
+    Plotly.toImage(plotlyRef.current, {
+      format: format === 'jpg' ? 'jpeg' : 'png',
       scale: dpiToScale(dpi),
-      filename: contentID || 'plot',
-    });
+    })
+      .then((dataUrl) => {
+        const filename = `${contentID || 'plot'}.${format}`;
+        if (format === 'jpg') {
+          downloadJpegWithDpi(dataUrl, filename, dpiToEmbed);
+        } else {
+          downloadPngWithDpi(dataUrl, filename, dpiToEmbed);
+        }
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error(`PlotPane ${format.toUpperCase()} export failed:`, err);
+      });
   };
 
   const handleMetadataExport = () => {

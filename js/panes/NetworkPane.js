@@ -14,6 +14,10 @@ import React, { useEffect, useRef, useState } from 'react';
 
 import Pane from './Pane';
 import { downloadImageAsPdf } from './utils/pdfExport';
+import {
+  downloadJpegWithDpi,
+  downloadPngWithDpi,
+} from './utils/Embeddpimetadata';
 
 function NetworkPane(props) {
   const {
@@ -88,12 +92,23 @@ function NetworkPane(props) {
         return;
       }
 
-      saveSvgAsPng(svg, filename, {
-        scale,
-        backgroundColor: '#FFFFFF',
-        encoderType: format === 'jpg' ? 'image/jpeg' : 'image/png',
-        encoderOptions: format === 'jpg' ? 0.92 : undefined,
-      });
+      const dpiToEmbed = dpi || 192;
+      svgAsPngUri(
+        svg,
+        {
+          scale,
+          backgroundColor: '#FFFFFF',
+          encoderType: format === 'jpg' ? 'image/jpeg' : 'image/png',
+          encoderOptions: format === 'jpg' ? 0.92 : undefined,
+        },
+        (uri) => {
+          if (format === 'jpg') {
+            downloadJpegWithDpi(uri, filename, dpiToEmbed);
+          } else {
+            downloadPngWithDpi(uri, filename, dpiToEmbed);
+          }
+        }
+      );
     });
   };
 

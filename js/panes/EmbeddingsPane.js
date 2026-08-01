@@ -19,6 +19,10 @@ import EventSystem from '../EventSystem';
 import lasso from '../lasso';
 import Pane from './Pane';
 import { downloadImageAsPdf } from './utils/pdfExport';
+import {
+  downloadJpegWithDpi,
+  downloadPngWithDpi,
+} from './utils/Embeddpimetadata';
 
 const SCALE_RADIUS = 2000;
 const MIN_SELECTION = 22;
@@ -176,10 +180,13 @@ class EmbeddingsPane extends React.Component {
           effectivePdfDpi
         );
       } else {
-        const link = document.createElement('a');
-        link.download = `${this.props.contentID || 'plot'}.${format}`;
-        link.href = dataUrl;
-        link.click();
+        const dpiToEmbed = dpi || 96;
+        const filename = `${this.props.contentID || 'plot'}.${format}`;
+        if (format === 'jpg') {
+          downloadJpegWithDpi(dataUrl, filename, dpiToEmbed);
+        } else {
+          downloadPngWithDpi(dataUrl, filename, dpiToEmbed);
+        }
       }
     } catch (err) {
       // eslint-disable-next-line no-console
