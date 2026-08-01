@@ -851,16 +851,24 @@ class ExperimentLogHandler(BaseHandler):
       an optional ``step``, creating the experiment if it does not exist yet.
     * ``"finish"`` — mark the experiment terminal (``status`` finished/failed).
 
-    Once an experiment is terminal, ``"log"``/``"metrics"`` are rejected with
-    409 Conflict so a finished run's recorded data cannot change after the fact.
+    Once an experiment is terminal, every action — including a second
+    ``"finish"`` — is rejected with 409 Conflict, so neither a finished run's
+    recorded data nor its final status can change after the fact.
 
     Metadata is persisted through the server's existing ``DataStore``
     (:class:`ExperimentStore` over ``handler.storage``) and mirrored into the
     in-memory env state so a later full-env save writes it back rather than
     dropping it. The stored experiment is written back to the client as JSON.
+
+    All three actions write, so the endpoint is rejected with 403 while the
+    server runs in readonly mode.
     """
 
     VALID_ACTIONS = ("log", "metrics", "finish")
+
+    def initialize(self, app):
+        super().initialize(app)
+        self.readonly = app.readonly
 
     @staticmethod
     def _require_mapping(args, field):
@@ -930,6 +938,17 @@ class ExperimentLogHandler(BaseHandler):
 
     @check_auth
     def post(self):
+        if self.readonly:
+            self.set_status(403)
+            self.write(
+                {
+                    "success": False,
+                    "error": "Experiment logging is disabled while the server "
+                    "is in readonly mode",
+                }
+            )
+            return
+
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )

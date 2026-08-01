@@ -1243,6 +1243,8 @@ class Visdom(object):
     def finish_experiment(self, status="finished", env=None):
         """Mark an env's experiment terminal (`"finished"` or `"failed"`).
 
+        An experiment that is already terminal cannot be finished again; the
+        server rejects the attempt rather than restamping the existing record.
         Returns the stored experiment as a dict.
         """
         return self._experiment_send({"action": "finish", "status": status}, env)
