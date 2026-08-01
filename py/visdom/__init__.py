@@ -171,7 +171,7 @@ def _title2str(opts):
 
 def _table_cell_to_native(cell):
     """Coerce a single table cell/header to a JSON-serializable native
-    type. Handles numpy scalars that json.dumps ad NanSafeEncoder cannot
+    type. Handles numpy scalars that json.dumps and NanSafeEncoder cannot
     serialize on their own.
     """
     if isinstance(cell, np.generic):
