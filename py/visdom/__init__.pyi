@@ -336,7 +336,7 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
-    def table(
+    def html_table(
         self,
         headers: List[Any],
         data: List[List[Any]],
@@ -371,4 +371,12 @@ class Visdom:
         opts: _OptOps = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
+    ) -> _SendReturn: ...
+    def table(
+        self,
+        data: List[Any],
+        headers: Optional[List[Any]] = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
     ) -> _SendReturn: ...

@@ -169,6 +169,19 @@ def _title2str(opts):
             return opts
 
 
+def _table_cell_to_native(cell):
+    """Coerce a single table cell/header to a JSON-serializable native
+    type. Handles numpy scalars that json.dumps ad NanSafeEncoder cannot
+    serialize on their own.
+    """
+    if isinstance(cell, np.generic):
+        return cell.item()
+    if cell is None or isinstance(cell, (str, int, float, bool)):
+        return cell
+    return str(cell)
+
+
+
 def _scrub_dict(d):
     if isinstance(d, dict):
         return {
@@ -4378,7 +4391,7 @@ class Visdom(object):
             }
         )
 
-    def table(self, headers, data, win=None, env=None, opts=None):
+    def html_table(self, headers, data, win=None, env=None, opts=None):
         """
         This function renders structured data as a styled HTML table.
 
@@ -4449,3 +4462,65 @@ class Visdom(object):
         ) % (style, header_html, rows_html)
 
         return self.text(text=table_html, win=win, env=env, opts=opts)
+
+
+    def table(self, data, headers=None, win=None, env=None, opts=None):
+        """
+        Renders a native, structured, editable table pane.
+ 
+        - `data`: a 2D list of rows (list of lists/tuples), OR a list of
+           dicts (in which case `headers` is derived from the first
+           dict's keys unless explicitly given).
+        - `headers`: list of column names. Required if `data` rows are
+           plain lists/tuples; optional (and used to reorder/filter
+           columns) if `data` is a list of dicts.
+ 
+        The following `opts` are supported:
+ 
+        - `opts.title`: title for the window (`string`; optional)
+        - `opts.editable`: whether cells/rows/columns can be edited by
+           anyone viewing the pane (`bool`; default `True`). Set to
+           `False` for a read-only display table (e.g. a live
+           leaderboard).
+ 
+        Note: edits made in the browser update the shared, persisted
+        pane state directly on the server (visible to every viewer,
+        saved with the environment). If you've also registered an
+        event handler via `register_event_handler`, your Python script
+        additionally receives a `TableEdit` event for each change.
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+        opts.setdefault("editable", True)
+ 
+        if not data and not headers:
+            raise AssertionError("either `data` or `headers` must be provided")
+ 
+        if data and isinstance(data[0], dict):
+            headers = headers or list(data[0].keys())
+            rows = [[row.get(h, "") for h in headers] for row in data]
+        else:
+            assert headers, "headers required when data rows are lists/tuples"
+            assert isinstance(headers, list), "headers should be a list"
+            rows = [list(r) for r in data] if data else []
+ 
+        assert all(
+            len(r) == len(headers) for r in rows
+        ), "each row must have the same number of columns as headers"
+ 
+        rows = [[_table_cell_to_native(cell) for cell in row] for row in rows]
+        headers = [_table_cell_to_native(h) for h in headers]
+ 
+        content = {"headers": headers, "rows": rows}
+ 
+        return self._send(
+            {
+                "data": [{"content": content, "type": "table"}],
+                "win": win,
+                "eid": env,
+                "opts": opts,
+            },
+            endpoint="events",
+        )
+ 

@@ -322,6 +322,169 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 None, self.storage.save_env, eid, self.state[eid]
             )
 
+        elif cmd == "table_edit":
+            if self.readonly:
+                logging.warning("table_edit: rejected, server is in readonly mode")
+                return
+
+            eid = msg.get("eid")
+            win = msg.get("win")
+            op = msg.get("op")
+            payload = msg.get("data")
+            if eid is None or win is None or eid not in self.state:
+                logging.warning(
+                    f"table_edit: env {eid!r} or win {win!r}"
+                    f" not found, dropping event"
+                )
+                return
+            if not isinstance(payload, dict):
+                logging.warning(
+                    f"table_edit: expected dict data, got"
+                    f" {type(payload).__name__!r}, dropping event"
+                )
+                return
+
+            env = self.state[eid]["jsons"]
+            p = env.get(win)
+            if p is None or p.get("type") != "table":
+                logging.warning(
+                    f"table_edit: pane {win!r} not found or not a table"
+                    f" pane in env {eid!r}, dropping event"
+                )
+                return
+            if p.get("editable") is False:
+                logging.warning(
+                    f"table_edit: pane {win!r} is read-only, dropping event"
+                )
+                return
+
+            content = p.get("content")
+            if (
+                not isinstance(content, dict)
+                or "headers" not in content
+                or "rows" not in content
+            ):
+                logging.warning(
+                    f"table_edit: pane {win!r} has malformed table content,"
+                    f" dropping event"
+                )
+                return
+            headers, rows = content["headers"], content["rows"]
+
+            def _as_int(v):
+                try:
+                    return int(v)
+                except (TypeError, ValueError):
+                    return None
+
+            patch = []
+
+            if op == "edit_cell":
+                r, c = _as_int(payload.get("row")), _as_int(payload.get("col"))
+                value = payload.get("value")
+                if (
+                    r is None
+                    or c is None
+                    or not (0 <= r < len(rows))
+                    or not (0 <= c < len(headers))
+                ):
+                    logging.warning(
+                        f"table_edit: edit_cell out of range (row={r}, "
+                        f"col={c}), dropping event"
+                    )
+                    return
+                rows[r][c] = value
+                patch = [
+                    {"op": "replace", "path": f"/content/rows/{r}/{c}", "value": value}
+                ]
+
+            elif op == "add_row":
+                new_row = payload.get("values") or [""] * len(headers)
+                if len(new_row) != len(headers):
+                    logging.warning(
+                        "table_edit: add_row values length mismatch, dropping event"
+                    )
+                    return
+                rows.append(new_row)
+                patch = [{"op": "add", "path": "/content/rows/-", "value": new_row}]
+
+            elif op == "delete_row":
+                r = _as_int(payload.get("row"))
+                if r is None or not (0 <= r < len(rows)):
+                    logging.warning(
+                        f"table_edit: delete_row out of range (row={r}),"
+                        f" dropping event"
+                    )
+                    return
+                rows.pop(r)
+                patch = [{"op": "remove", "path": f"/content/rows/{r}"}]
+
+            elif op == "add_col":
+                name = str(payload.get("name", f"Column {len(headers) + 1}"))
+                default = payload.get("default", "")
+                headers.append(name)
+                patch = [{"op": "add", "path": "/content/headers/-", "value": name}]
+                for i, row in enumerate(rows):
+                    row.append(default)
+                    patch.append(
+                        {"op": "add", "path": f"/content/rows/{i}/-", "value": default}
+                    )
+
+            elif op == "delete_col":
+                c = _as_int(payload.get("col"))
+                if c is None or not (0 <= c < len(headers)):
+                    logging.warning(
+                        f"table_edit: delete_col out of range (col={c}),"
+                        f" dropping event"
+                    )
+                    return
+                if len(headers) <= 1:
+                    logging.warning(
+                        "table_edit: refusing to delete the last remaining"
+                        " column, dropping event"
+                    )
+                    return
+                headers.pop(c)
+                patch = [{"op": "remove", "path": f"/content/headers/{c}"}]
+                for i, row in enumerate(rows):
+                    if c < len(row):
+                        row.pop(c)
+                        patch.append(
+                            {"op": "remove", "path": f"/content/rows/{i}/{c}"}
+                        )
+
+            else:
+                logging.warning(f"table_edit: unknown op {op!r}, dropping event")
+                return
+
+            p["version"] = p.get("version", 1) + 1
+            patch.append(
+                {"op": "replace", "path": "/version", "value": p["version"]}
+            )
+
+            broadcast_packet = {
+                "command": "window_update",
+                "win": win,
+                "eid": eid,
+                "content": patch,
+                "version": p["version"],
+            }
+            broadcast(self, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
+
+            tornado.ioloop.IOLoop.current().run_in_executor(
+                None, self.storage.save_env, eid, self.state[eid]
+            )
+            send_to_sources(
+                self,
+                {
+                    "event_type": "TableEdit",
+                    "target": win,
+                    "eid": eid,
+                    "op": op,
+                    "data": payload,
+                },
+            )
+
         elif cmd == "pop_embeddings_pane":
             packet = msg.get("data")
             if not isinstance(packet, dict):
