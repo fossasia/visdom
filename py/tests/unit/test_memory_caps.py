@@ -9,8 +9,8 @@
 """In-memory growth caps on the panes that append rather than replace.
 
 A long-running job appending to the same pane used to grow the server's state
-without bound (#1320). Three pane fields are capped today -- text content,
-embedding undo history and image history -- and each keeps the *newest*
+without bound (#1320). Four pane fields are capped -- text content, embedding
+undo history, image history and plot history -- and each keeps the *newest*
 entries, since those are what the frontend shows. The caps are passed in rather
 than read from ``defaults``, so these drive ``UpdateHandler`` directly with
 small limits instead of appending five hundred times.
@@ -23,6 +23,7 @@ import pytest
 from visdom.server.defaults import (
     DEFAULT_MAX_IMAGE_HISTORY,
     DEFAULT_MAX_OLD_CONTENT,
+    DEFAULT_MAX_PLOT_HISTORY,
     DEFAULT_MAX_TEXT_LINES,
 )
 from visdom.server.handlers.base_handlers import BaseHandler
@@ -83,9 +84,10 @@ def _update(
     max_text=DEFAULT_MAX_TEXT_LINES,
     max_old=DEFAULT_MAX_OLD_CONTENT,
     max_img=DEFAULT_MAX_IMAGE_HISTORY,
+    max_plot=DEFAULT_MAX_PLOT_HISTORY,
 ):
     """Call ``UpdateHandler.update`` with explicit caps."""
-    return UpdateHandler.update(p, args, max_text, max_old, max_img)
+    return UpdateHandler.update(p, args, max_text, max_old, max_img, max_plot)
 
 
 def _update_embeddings(p, args, max_old=DEFAULT_MAX_OLD_CONTENT):
@@ -123,6 +125,37 @@ def _append_images(count, cap):
             ]
         }
         p = _update(p, args, max_img=cap)
+    return p
+
+
+def _plot_history_pane(frames=None):
+    if frames is None:
+        frames = [{"data": [], "layout": {}, "caption": "frame0"}]
+    return _pane(
+        "plot_history",
+        content=list(frames),
+        selected=0,
+        show_slider=True,
+    )
+
+
+def _append_frames(count, cap):
+    """Append ``count`` numbered frames to a plot history held at ``cap``."""
+    p = _plot_history_pane()
+    for i in range(1, count + 1):
+        args = {
+            "data": [
+                {
+                    "type": "plot_history",
+                    "content": {
+                        "data": [{"type": "scatter", "x": [i], "y": [i]}],
+                        "layout": {},
+                        "caption": "frame{}".format(i),
+                    },
+                }
+            ]
+        }
+        p = _update(p, args, max_plot=cap)
     return p
 
 
@@ -247,6 +280,50 @@ def test_default_image_history_cap():
     assert DEFAULT_MAX_IMAGE_HISTORY == 4
 
 
+# -- Plot history ------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "appends, cap, expected",
+    [(1, 4, 2), (2, 4, 3), (5, 3, 3), (999, 4, 4)],
+    ids=["under-cap", "still-under-cap", "over-cap", "long-run"],
+)
+def test_plot_history_is_capped(appends, cap, expected):
+    assert len(_append_frames(appends, cap)["content"]) == expected
+
+
+def test_plot_history_truncation_keeps_the_newest_frame():
+    assert _append_frames(5, 3)["content"][-1]["caption"] == "frame5"
+
+
+def test_plot_history_truncation_drops_the_oldest_frames():
+    captions = [frame["caption"] for frame in _append_frames(5, 3)["content"]]
+    assert "frame0" not in captions
+    assert "frame1" not in captions
+
+
+@pytest.mark.parametrize("cap", [1, 2, 4])
+def test_plot_selected_stays_a_valid_index_after_truncation(cap):
+    p = _append_frames(9, cap)
+    assert 0 <= p["selected"] < len(p["content"])
+
+
+def test_explicit_frame_selection_is_unaffected_by_the_cap():
+    frames = [
+        {"data": [], "layout": {}, "caption": "frame{}".format(i)} for i in range(3)
+    ]
+    p = _plot_history_pane(frames)
+    p["selected"] = 2
+    args = {"data": [{"type": "plot_update_selected", "selected": 0}]}
+    p = _update(p, args, max_plot=4)
+    assert p["selected"] == 0
+    assert len(p["content"]) == 3
+
+
+def test_default_plot_history_cap():
+    assert DEFAULT_MAX_PLOT_HISTORY == 4
+
+
 # -- Handler wiring ----------------------------------------------------------
 
 
@@ -255,6 +332,7 @@ def test_handler_copies_the_caps_off_the_application():
     app.max_text_lines = 100
     app.max_old_content = 20
     app.max_image_history = 8
+    app.max_plot_history = 6
 
     handler = MagicMock(spec=BaseHandler)
     BaseHandler.initialize(handler, app=app)
@@ -262,3 +340,4 @@ def test_handler_copies_the_caps_off_the_application():
     assert handler.max_text_lines == 100
     assert handler.max_old_content == 20
     assert handler.max_image_history == 8
+    assert handler.max_plot_history == 6

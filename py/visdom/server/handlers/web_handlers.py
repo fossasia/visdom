@@ -107,7 +107,9 @@ class ExistsHandler(BaseHandler):
 
 class UpdateHandler(BaseHandler):
     @staticmethod
-    def update_packet(p, args, max_text_lines, max_old_content, max_image_history):
+    def update_packet(
+        p, args, max_text_lines, max_old_content, max_image_history, max_plot_history
+    ):
         # Shallow copy the packet to dynamically capture changes to top-level keys.
         old_p = p.copy()
 
@@ -118,7 +120,12 @@ class UpdateHandler(BaseHandler):
             old_p["old_content"] = copy.deepcopy(p["old_content"])
 
         p = UpdateHandler.update(
-            p, args, max_text_lines, max_old_content, max_image_history
+            p,
+            args,
+            max_text_lines,
+            max_old_content,
+            max_image_history,
+            max_plot_history,
         )
         p["contentID"] = get_rand_id()
 
@@ -159,7 +166,9 @@ class UpdateHandler(BaseHandler):
         return []
 
     @staticmethod
-    def update(p, args, max_text_lines, max_old_content, max_image_history):
+    def update(
+        p, args, max_text_lines, max_old_content, max_image_history, max_plot_history
+    ):
         # Update text in window, separated by a line break
         if p["type"] == "text":
             p["content"] += "<br>" + args["data"][0]["content"]
@@ -185,6 +194,8 @@ class UpdateHandler(BaseHandler):
             utype = args["data"][0]["type"]
             if utype == "plot_history":
                 p["content"].append(args["data"][0]["content"])
+                if len(p["content"]) > max_plot_history:
+                    p["content"] = p["content"][-max_plot_history:]
                 p["selected"] = len(p["content"]) - 1
             elif utype == "plot_update_selected":
                 selected = args["data"][0]["selected"]
@@ -431,6 +442,7 @@ class UpdateHandler(BaseHandler):
                 handler.max_text_lines,
                 handler.max_old_content,
                 handler.max_image_history,
+                handler.max_plot_history,
             )
         except (TypeError, ValueError) as exc:
             if is_image_slider_update:
