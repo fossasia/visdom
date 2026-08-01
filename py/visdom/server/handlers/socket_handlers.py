@@ -463,18 +463,14 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 for i, row in enumerate(rows):
                     if c < len(row):
                         row.pop(c)
-                        patch.append(
-                            {"op": "remove", "path": f"/content/rows/{i}/{c}"}
-                        )
+                        patch.append({"op": "remove", "path": f"/content/rows/{i}/{c}"})
 
             else:
                 logging.warning(f"table_edit: unknown op {op!r}, dropping event")
                 return
 
             p["version"] = p.get("version", 1) + 1
-            patch.append(
-                {"op": "replace", "path": "/version", "value": p["version"]}
-            )
+            patch.append({"op": "replace", "path": "/version", "value": p["version"]})
 
             broadcast_packet = {
                 "command": "window_update",
