@@ -18,117 +18,22 @@ const { usePrevious } = require('../util');
 import ApiContext from '../api/ApiContext';
 import { showToast } from '../toasts/toastEvents';
 import Pane from './Pane';
+import {
+  escapeNote,
+  fontSize,
+  isPinned,
+  isThreeD,
+  NOTE,
+  noteBackground,
+  noteBounds,
+  PINNED,
+  restack,
+  traceColor,
+  wrapNote,
+} from './utils/annotationHelpers';
 import { typesetMathJax } from './utils/mathjaxHelpers';
 import { downloadImageAsPdf } from './utils/pdfExport';
 const { sgg } = require('ml-savitzky-golay-generalized');
-
-const ANNOTATION_FONT_SIZE = 11;
-const ANNOTATION_ARROW_LEN = 30;
-const ANNOTATION_GAP = 6;
-const ANNOTATION_WIDTH_RATIO = 0.25;
-const ANNOTATION_HEIGHT_RATIO = 0.2;
-const ANNOTATION_CROWD_RATIO = 0.08;
-const CHAR_WIDTH_RATIO = 0.6;
-const LINE_HEIGHT_RATIO = 1.3;
-const THREE_D_TYPES = ['scatter3d', 'surface', 'mesh3d'];
-
-// not templateitemname: plotly hides items whose template entry is missing
-const PINNED = 'visdom_pinned';
-const NOTE = 'visdom_note';
-const isPinned = (a) => a[PINNED] === true;
-
-// plotly draws a subset of html, so a note is escaped before it is rendered
-const escapeNote = (note) =>
-  note.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-// heatmap and contour points carry a z as well, so the trace type decides
-const isThreeD = (trace) =>
-  !!trace && (!!trace.scene || THREE_D_TYPES.includes(trace.type));
-
-const noteBounds = (plotElement) => ({
-  perLine: Math.max(
-    8,
-    Math.floor(
-      (plotElement.clientWidth * ANNOTATION_WIDTH_RATIO) /
-        (ANNOTATION_FONT_SIZE * CHAR_WIDTH_RATIO)
-    )
-  ),
-  lines: Math.max(
-    1,
-    Math.floor(
-      (plotElement.clientHeight * ANNOTATION_HEIGHT_RATIO) /
-        (ANNOTATION_FONT_SIZE * LINE_HEIGHT_RATIO)
-    )
-  ),
-});
-
-const chipHeight = (annotation) =>
-  annotation.text.split('<br>').length *
-    ANNOTATION_FONT_SIZE *
-    LINE_HEIGHT_RATIO +
-  ANNOTATION_GAP;
-
-// <br> is a line break in plotly annotation text
-const wrapNote = (note, perLine, maxLines) => {
-  const words = [];
-  note
-    .trim()
-    .split(/\s+/)
-    .forEach((word) => {
-      for (let i = 0; i < word.length; i += perLine) {
-        words.push(word.slice(i, i + perLine));
-      }
-    });
-
-  const lines = [];
-  words.forEach((word) => {
-    const last = lines.length - 1;
-    if (last >= 0 && (lines[last] + ' ' + word).length <= perLine) {
-      lines[last] += ' ' + word;
-    } else {
-      lines.push(word);
-    }
-  });
-
-  const shown = lines.slice(0, maxLines).map(escapeNote).join('<br>');
-  return lines.length <= maxLines ? shown : shown + '\u2026';
-};
-
-// boxes on one point stack above it, nearby ones clear what is already
-// there, and a delete closes the gap. dragged boxes keep where they were put
-const restack = (annotations, span) => {
-  const placed = [];
-
-  return annotations.map((a) => {
-    if (!a.hovertext) return a;
-
-    const dragged = isPinned(a);
-    const auto = placed.filter((p) => !isPinned(p));
-    const onPoint = auto.filter((p) => p.x === a.x && p.y === a.y);
-    const nearby = auto.filter(
-      (p) => span > 0 && Math.abs(p.x - a.x) < span * ANNOTATION_CROWD_RATIO
-    );
-
-    const next = {
-      ...a,
-      showarrow: true,
-      // only a box stacked over another aimed at the same spot hides its arrow
-      arrowcolor:
-        !dragged && onPoint.length ? 'rgba(0,0,0,0)' : a.font && a.font.color,
-    };
-
-    if (!dragged) {
-      next.ax = 0;
-      next.ay = (onPoint.length ? onPoint : nearby).reduce(
-        (top, p) => Math.min(top, p.ay - chipHeight(p)),
-        -ANNOTATION_ARROW_LEN
-      );
-    }
-
-    placed.push(next);
-    return next;
-  });
-};
 
 var PlotPane = (props) => {
   const { contentID, type, selected } = props;
@@ -189,19 +94,6 @@ var PlotPane = (props) => {
   const toggleAnnotateWidget = () => {
     setAnnotateActive(!annotateActive);
     setPendingPoint(null);
-  };
-
-  const traceColor = (point) => {
-    const trace = point.fullData || point.data || {};
-    const lineColor = trace.line && trace.line.color;
-    if (typeof lineColor === 'string') return lineColor;
-    const markerColor = trace.marker && trace.marker.color;
-    if (typeof markerColor === 'string') return markerColor;
-    if (Array.isArray(markerColor)) {
-      const pointColor = markerColor[point.pointIndex];
-      if (typeof pointColor === 'string') return pointColor;
-    }
-    return undefined;
   };
 
   const applyAnnotations = (annotations) => {
@@ -277,8 +169,8 @@ var PlotPane = (props) => {
       arrowsize: 1,
       arrowwidth: 1.5,
       captureevents: true,
-      font: { size: ANNOTATION_FONT_SIZE, color: pendingPoint.color },
-      bgcolor: '#fff',
+      font: { size: fontSize(), color: pendingPoint.color },
+      bgcolor: noteBackground(),
       bordercolor: pendingPoint.color,
       borderwidth: 1,
       borderpad: 3,
