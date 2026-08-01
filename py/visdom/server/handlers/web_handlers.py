@@ -209,21 +209,24 @@ class UpdateHandler(BaseHandler):
         new_data = args.get("data")
         p = update_window(p, args)
         name = args.get("name")
-        if name is None and not new_data:
+        delete = args.get("delete")
+        # a heatmap removal names no trace and carries no data, so ask about the
+        # deletion before reading either as "nothing to do"
+        if not delete and name is None and not new_data:
             return p  # we only updated the opts or layout
         append = args.get("append")
 
         idxs = list(range(len(pdata)))
 
         if name is not None:
-            if not args.get("delete") and len(new_data) != 1:
+            if not delete and len(new_data) != 1:
                 raise tornado.web.HTTPError(
                     400, reason="a named trace update takes exactly one data entry"
                 )
             idxs = [i for i in idxs if pdata[i]["name"] == name]
 
         # Delete a trace
-        if args.get("delete"):
+        if delete:
             idxs_set = set(idxs)
             p["content"]["data"] = [e for i, e in enumerate(pdata) if i not in idxs_set]
             return p

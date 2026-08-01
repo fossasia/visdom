@@ -378,6 +378,17 @@ class TestEmptyDataUpdate(PlotUpdateTestCase):
         self.assertEqual(traces[0]["name"], "t2")
         self.assertEqual(traces[0]["x"], [7])
 
+    def test_an_unnamed_delete_still_empties_the_plot(self):
+        """``Visdom.heatmap(update="remove")`` names no trace.
+
+        It posts ``data: []`` with ``delete`` set (``__init__.py:3008``), which
+        the empty-data shortcut above must not mistake for an opts-only update.
+        """
+        win = self.create_heatmap()
+        resp = self.update(win, [], name=None, delete=True)
+        self.assertEqual(resp.code, 200, resp.body)
+        self.assertEqual(self.traces(win), [])
+
     def test_an_unnamed_update_may_cover_only_the_first_traces(self):
         win = self.create_window(
             [
