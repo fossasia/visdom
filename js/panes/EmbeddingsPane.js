@@ -18,11 +18,11 @@ import ApiContext from '../api/ApiContext';
 import EventSystem from '../EventSystem';
 import lasso from '../lasso';
 import Pane from './Pane';
-import { downloadImageAsPdf } from './utils/pdfExport';
 import {
   downloadJpegWithDpi,
   downloadPngWithDpi,
 } from './utils/Embeddpimetadata';
+import { downloadImageAsPdf } from './utils/pdfExport';
 
 const SCALE_RADIUS = 2000;
 const MIN_SELECTION = 22;
