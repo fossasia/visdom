@@ -53,6 +53,12 @@ py/tests/
 so a package there would ship a top-level `tests` distribution to users. `testutils/` is a
 package and is reachable because `py/tests` is on `pythonpath`.
 
+Everything under `py/tests/` must be **hermetic and collectable**: no externally launched
+server, no browser, no assertion a human has to make. A script that needs a live server and is
+judged by looking at the UI goes in `example/manual/` instead — see
+`example/manual/visual_check.py`. Pixel correctness is Playwright's and Cypress's job, not
+pytest's.
+
 - Name files `test_*.py`. **Which style you use depends on whether the test needs HTTP.**
 
   | Test needs | Write | Why |
