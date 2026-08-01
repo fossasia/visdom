@@ -32,7 +32,12 @@ const THREE_D_TYPES = ['scatter3d', 'surface', 'mesh3d'];
 
 // not templateitemname: plotly hides items whose template entry is missing
 const PINNED = 'visdom_pinned';
+const NOTE = 'visdom_note';
 const isPinned = (a) => a[PINNED] === true;
+
+// plotly draws a subset of html, so a note is escaped before it is rendered
+const escapeNote = (note) =>
+  note.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 // heatmap and contour points carry a z as well, so the trace type decides
 const isThreeD = (trace) =>
@@ -83,8 +88,8 @@ const wrapNote = (note, perLine, maxLines) => {
     }
   });
 
-  if (lines.length <= maxLines) return lines.join('<br>');
-  return lines.slice(0, maxLines).join('<br>') + '\u2026';
+  const shown = lines.slice(0, maxLines).map(escapeNote).join('<br>');
+  return lines.length <= maxLines ? shown : shown + '\u2026';
 };
 
 // boxes on one point stack above it, nearby ones clear what is already
@@ -142,7 +147,7 @@ var PlotPane = (props) => {
   const [actualSelected, setActualSelected] = useState(
     isHistory ? selected || 0 : 0
   );
-  const { sendPlotLayoutUpdate } = useContext(ApiContext);
+  const { sendPlotLayoutUpdate, sessionInfo } = useContext(ApiContext);
   const layoutUpdateTimeout = useRef(null);
 
   const content = isHistory
@@ -156,6 +161,12 @@ var PlotPane = (props) => {
       setActualSelected(selected);
     }
   }, [selected]);
+
+  // an open note points into the frame it was opened on
+  useEffect(() => {
+    setPendingPoint(null);
+    setNoteText('');
+  }, [actualSelected]);
 
   useEffect(() => {
     let cancelled = false;
@@ -257,7 +268,8 @@ var PlotPane = (props) => {
       yref: 'y',
       text: wrapNote(noteText, bounds.perLine, bounds.lines),
       align: 'left',
-      hovertext: noteText.trim(),
+      hovertext: escapeNote(noteText.trim()),
+      [NOTE]: noteText.trim(),
       name: pendingPoint.name,
       arrowhead: 2,
       arrowsize: 1,
@@ -473,7 +485,7 @@ var PlotPane = (props) => {
         left: (mouse.clientX || rect.left) - rect.left,
         top: (mouse.clientY || rect.top) - rect.top,
       });
-      setNoteText(clicked.hovertext);
+      setNoteText(clicked[NOTE] ?? clicked.hovertext);
     };
 
     plotElement.on('plotly_click', handleClick);
@@ -578,7 +590,7 @@ var PlotPane = (props) => {
       doubleClickDelay: 500,
       modeBarButtonsToAdd: ['drawopenpath', 'eraseshape'],
       // dragging a note box leaves its arrow on the data point
-      edits: { annotationTail: true },
+      edits: { annotationTail: !sessionInfo?.readonly },
     }).then(() => {
       const plotElement = plotlyRef.current;
       if (plotElement && plotElement._fullLayout && isDisplayed(plotElement)) {
@@ -629,7 +641,12 @@ var PlotPane = (props) => {
 
   // notes are anchored in 2d data coordinates
   var annotate_widget_button = '';
-  if (content && content.data && !content.data.some(isThreeD)) {
+  if (
+    content &&
+    content.data &&
+    !content.data.some(isThreeD) &&
+    !sessionInfo?.readonly
+  ) {
     annotate_widget_button = (
       <button
         key="annotate_widget_button"
