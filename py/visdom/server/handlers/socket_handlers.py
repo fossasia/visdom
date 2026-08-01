@@ -397,10 +397,12 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     or c is None
                     or not (0 <= r < len(rows))
                     or not (0 <= c < len(headers))
+                    or not (0 <= c < len(rows[r]))
                 ):
                     logging.warning(
                         f"table_edit: edit_cell out of range (row={r}, "
-                        f"col={c}), dropping event"
+                        f"col={c}, row_len={len(rows[r]) if r is not None and 0 <= r < len(rows) else 'n/a'}), "
+                        f"dropping event"
                     )
                     return
                 rows[r][c] = value
