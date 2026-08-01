@@ -12,7 +12,7 @@ const { usePrevious } = require('../util');
 import ApiContext from '../api/ApiContext';
 import { showToast } from '../toasts/toastEvents';
 import Pane from './Pane';
-import { draggedIndexes, PINNED, useAnnotations } from './utils/annotations';
+import { draggedIndexes, pinDragged, useAnnotations } from './utils/annotations';
 import { typesetMathJax } from './utils/mathjaxHelpers';
 import { downloadImageAsPdf } from './utils/pdfExport';
 const { sgg } = require('ml-savitzky-golay-generalized');
@@ -190,21 +190,26 @@ var PlotPane = (props) => {
       clearTimeout(layoutUpdateTimeout.current);
       layoutUpdateTimeout.current = setTimeout(() => {
         const shapes = plotElement.layout?.shapes || [];
-        const annotations = plotElement.layout?.annotations || [];
+        const patch = { shapes };
 
-        dragged.forEach((i) => {
-          if (annotations[i]) annotations[i][PINNED] = true;
-        });
+        if (dragged.length) {
+          patch.annotations = pinDragged(
+            plotElement.layout?.annotations,
+            dragged
+          );
+        }
 
         if (content && content.layout) {
           content.layout.shapes = shapes;
-          content.layout.annotations = annotations;
+          if (patch.annotations) {
+            content.layout.annotations = patch.annotations;
+          }
         }
 
         sendPlotLayoutUpdate(
           props.envID,
           props.id,
-          { shapes, annotations },
+          patch,
           isHistory ? actualSelected : undefined
         );
       }, 300);

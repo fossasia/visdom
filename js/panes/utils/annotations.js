@@ -47,6 +47,10 @@ const isPinned = (a) => a[PINNED] === true;
 const escapeNote = (note) =>
   note.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+// reading an escaped note back, so editing one does not escape it a second time
+const unescapeNote = (note) =>
+  note.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+
 // heatmap and contour points carry a z as well, so the trace type decides
 const isThreeD = (trace) =>
   !!trace && (!!trace.scene || THREE_D_TYPES.includes(trace.type));
@@ -197,6 +201,14 @@ const draggedIndexes = (eventdata) =>
     .map((k) => k.match(/^annotations\[(\d+)]\./))
     .filter(Boolean)
     .map((match) => Number(match[1]));
+
+const pinDragged = (annotations, dragged) => {
+  const current = annotations || [];
+  dragged.forEach((i) => {
+    if (current[i] && current[i].hovertext) current[i][PINNED] = true;
+  });
+  return current;
+};
 
 const buildAnnotation = (pendingPoint, noteText, plotElement, previous) => {
   const bounds = noteBounds(plotElement);
@@ -353,7 +365,7 @@ const useAnnotations = ({
       if (!clicked || !clicked.hovertext) return;
 
       setPendingPoint(pendingFromNote(eventdata, clicked, plotElement));
-      setNoteText(clicked[NOTE] ?? clicked.hovertext);
+      setNoteText(clicked[NOTE] ?? unescapeNote(clicked.hovertext));
     };
 
     plotElement.on('plotly_click', handleClick);
@@ -430,4 +442,4 @@ const useAnnotations = ({
   return { button, hint, editor };
 };
 
-export { draggedIndexes, PINNED, useAnnotations };
+export { draggedIndexes, pinDragged, useAnnotations };
