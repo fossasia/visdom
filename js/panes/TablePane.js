@@ -127,28 +127,30 @@ function TablePane(props) {
             <tr>
               {headers.map((h, c) => (
                 <th key={c} className="table-header-cell">
-                  {editable && (
-                    <span
-                      className="table-delete-col"
-                      role="button"
-                      tabIndex={0}
-                      title="Delete column"
-                      onClick={() => deleteCol(c)}
-                    >
-                      ×
-                    </span>
-                  )}
-                  {editable ? (
-                    <PropertyItem
-                      type="text"
-                      value={h}
-                      propId={c}
-                      updateValue={(_, value) => editHeader(c, value)}
-                      blurStopPropagation={true}
-                    />
-                  ) : (
-                    <span className="table-header-text">{h}</span>
-                  )}
+                  <div className="table-header-inner">
+                    {editable && (
+                      <span
+                        className="table-delete-col"
+                        role="button"
+                        tabIndex={0}
+                        title="Delete column"
+                        onClick={() => deleteCol(c)}
+                      >
+                        ×
+                      </span>
+                    )}
+                    {editable ? (
+                      <PropertyItem
+                        type="text"
+                        value={h}
+                        propId={c}
+                        updateValue={(_, value) => editHeader(c, value)}
+                        blurStopPropagation={true}
+                      />
+                    ) : (
+                      <span className="table-header-text">{h}</span>
+                    )}
+                  </div>
                   {editable && (
                     <div
                       className="col-resize-handle"
@@ -189,24 +191,26 @@ function TablePane(props) {
                         isFirst ? 'table-cell table-cell-first' : 'table-cell'
                       }
                     >
-                      {isFirst && (
-                        <span
-                          className="table-delete-row"
-                          role="button"
-                          tabIndex={0}
-                          title="Delete row"
-                          onClick={() => deleteRow(r)}
-                        >
-                          ×
-                        </span>
-                      )}
-                      <PropertyItem
-                        type="text"
-                        value={cell}
-                        propId={c}
-                        updateValue={(_, value) => editCell(r, c, value)}
-                        blurStopPropagation={true}
-                      />
+                      <div className="table-cell-inner">
+                        {isFirst && (
+                          <span
+                            className="table-delete-row"
+                            role="button"
+                            tabIndex={0}
+                            title="Delete row"
+                            onClick={() => deleteRow(r)}
+                          >
+                            ×
+                          </span>
+                        )}
+                        <PropertyItem
+                          type="text"
+                          value={cell}
+                          propId={c}
+                          updateValue={(_, value) => editCell(r, c, value)}
+                          blurStopPropagation={true}
+                        />
+                      </div>
                       {isFirst && (
                         <div
                           className="row-resize-handle"
