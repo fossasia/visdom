@@ -109,13 +109,14 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 eid = escape_eid(msg["eid"])
                 if eid not in self.state:
                     return
+                # One pop, under the escaped id. Popping a second time under the
+                # raw id used to blank out p_data before the event was built, so
+                # sources always saw pane_data: None -- and when the raw id was
+                # not itself a key in state, the lookup returned None and the
+                # close was never announced at all.
                 p_data = self.state[eid]["jsons"].pop(msg["data"], None)
                 if p_data is not None:
                     push_deleted(self.storage, eid, msg["data"], p_data)
-                env = self.state.get(msg["eid"])
-                if env is None:
-                    return
-                p_data = env["jsons"].pop(msg["data"], None)
                 event = {
                     "event_type": "close",
                     "target": msg["data"],
