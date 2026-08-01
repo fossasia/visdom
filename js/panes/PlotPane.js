@@ -11,6 +11,7 @@ import React, { useContext, useEffect, useRef, useState } from 'react';
 const { usePrevious } = require('../util');
 import ApiContext from '../api/ApiContext';
 import Pane from './Pane';
+import { typesetMathJax } from './utils/mathjaxHelpers';
 const { sgg } = require('ml-savitzky-golay-generalized');
 
 var PlotPane = (props) => {
@@ -20,6 +21,7 @@ var PlotPane = (props) => {
   // state variables
   // --------------
   const plotlyRef = useRef();
+  const captionRef = useRef();
   const maxsmoothvalue = 100;
   const [smoothWidgetActive, setSmoothWidgetActive] = useState(false);
   const [smoothvalue, setSmoothValue] = useState(1);
@@ -41,6 +43,14 @@ var PlotPane = (props) => {
     }
   }, [selected]);
 
+  useEffect(() => {
+    let cancelled = false;
+    typesetMathJax(captionRef.current, () => cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [content && content.caption]);
+
   // private events
   // -------------
   const toggleSmoothWidget = () => {
@@ -49,9 +59,13 @@ var PlotPane = (props) => {
   const updateSmoothSlider = (value) => {
     setSmoothValue(value);
   };
-  const handleDownload = () => {
+
+  const dpiToScale = (dpi) => (dpi ? dpi / 96 : 1);
+
+  const handleExport = (format, dpi) => {
     Plotly.downloadImage(plotlyRef.current, {
-      format: 'svg',
+      format: format === 'jpg' ? 'jpeg' : format,
+      scale: dpiToScale(dpi),
       filename: contentID || 'plot',
     });
   };
@@ -327,7 +341,7 @@ var PlotPane = (props) => {
   var caption_widget = '';
   if (content && content.caption) {
     caption_widget = (
-      <div className="widget plot-caption" key="plot_caption">
+      <div className="widget plot-caption" key="plot_caption" ref={captionRef}>
         {content.caption}
       </div>
     );
@@ -336,7 +350,7 @@ var PlotPane = (props) => {
   return (
     <Pane
       {...props}
-      handleDownload={handleDownload}
+      handleExport={handleExport}
       handleMetadataExport={handleMetadataExport}
       barwidgets={[smooth_widget_button]}
       widgets={[history_widget, caption_widget, smooth_widget]}
