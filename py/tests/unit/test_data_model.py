@@ -4,13 +4,20 @@ Exercises the JSONStore backend directly against a temporary directory: no
 running visdom server is needed, so these run under ``pytest -m "not server"``.
 """
 
+import errno
+import hashlib
 import json
 import os
 import tempfile
 import unittest
 
+import pytest
+
 from visdom.data_model import JSONStore, DataStore
+from visdom.data_model import json_store as json_store_module
 from visdom.utils.server_utils import LazyEnvData
+
+pytestmark = pytest.mark.unit
 
 
 def _env(win_id="win_0"):
@@ -275,6 +282,165 @@ class TestJSONStoreNoPath(unittest.TestCase):
     def test_clear_undo_is_noop(self):
         """clear_undo removes nothing when persistence is disabled."""
         self.assertIsNone(self.backend.clear_undo("expt"))
+
+
+# -- Durability of the env write --------------------------------------------
+#
+# Written as plain functions on the shared fixtures rather than as methods on
+# the classes above: the conversion of those two classes belongs to a later
+# clean-up, and fixtures cannot reach unittest.TestCase methods.
+
+
+def _fail_after(monkeypatch, prefix_bytes):
+    """Make writes inside json_store emit ``prefix_bytes`` then die.
+
+    Stands in for a process killed part-way through a save. ``open`` is looked
+    up in the module's globals before the builtins, so setting it on the module
+    intercepts only json_store's own writes.
+    """
+    real_open = open
+
+    class _DyingFile:
+        def __init__(self, handle):
+            self._handle = handle
+
+        def write(self, data):
+            self._handle.write(data[:prefix_bytes])
+            raise OSError(errno.EIO, "interrupted mid-write")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            self._handle.close()
+            return False
+
+    def dying_open(path, mode="r", *args, **kwargs):
+        if "w" not in mode:
+            return real_open(path, mode, *args, **kwargs)
+        return _DyingFile(real_open(path, mode, *args, **kwargs))
+
+    monkeypatch.setattr(json_store_module, "open", dying_open, raising=False)
+
+
+def test_interrupted_save_keeps_the_previous_env(store, monkeypatch):
+    """A save killed mid-write leaves the environment that was already there.
+
+    Without the staging file the real env is truncated on open and load_env's
+    ValueError handler then reports the environment as empty — data loss with
+    no signal at all.
+    """
+    store.save_env("main", _env("win_original"))
+
+    _fail_after(monkeypatch, prefix_bytes=8)
+    with pytest.raises(OSError):
+        store.save_env("main", _env("win_replacement"))
+
+    assert store.load_env("main") == _env("win_original")
+
+
+def test_interrupted_save_leaves_the_env_listed(store, monkeypatch):
+    """The environment is still discoverable after a failed rewrite."""
+    store.save_env("main", _env())
+
+    _fail_after(monkeypatch, prefix_bytes=8)
+    with pytest.raises(OSError):
+        store.save_env("main", _env("win_replacement"))
+
+    assert store.list_envs() == ["main"]
+    assert store.env_exists("main")
+
+
+def test_stranded_staging_file_is_not_an_env(store, env_path, monkeypatch):
+    """A leftover .tmp is on disk but never mistaken for an environment.
+
+    list_envs only considers names ending in .json, and the staging file is
+    named <eid>.json.tmp precisely so that stays true.
+    """
+    store.save_env("main", _env())
+
+    _fail_after(monkeypatch, prefix_bytes=8)
+    with pytest.raises(OSError):
+        store.save_env("main", _env("win_replacement"))
+
+    assert "main.json.tmp" in os.listdir(env_path)
+    assert store.list_envs() == ["main"]
+
+
+def test_successful_save_leaves_no_staging_file(store, env_path):
+    """The staging file is renamed away, not left behind."""
+    store.save_env("main", _env())
+    assert [n for n in os.listdir(env_path) if n.endswith(".tmp")] == []
+
+
+def test_failed_rename_keeps_the_previous_env(store, env_path, monkeypatch):
+    """If the rename itself fails, the old env is still the one on disk."""
+    store.save_env("main", _env("win_original"))
+
+    def boom(src, dst):
+        raise OSError(errno.EIO, "rename failed")
+
+    monkeypatch.setattr(json_store_module.os, "replace", boom)
+    with pytest.raises(OSError):
+        store.save_env("main", _env("win_replacement"))
+
+    monkeypatch.undo()
+    assert store.load_env("main") == _env("win_original")
+
+
+def test_long_name_fallback_leaves_no_staging_file(store, env_path):
+    """The hash fallback path stages and renames too."""
+    long_eid = "e" * 5000
+    assert store.save_env(long_eid, _env())
+    assert [n for n in os.listdir(env_path) if n.endswith(".tmp")] == []
+    assert store.load_env(long_eid)["jsons"] == _env()["jsons"]
+
+
+def test_interrupted_undo_save_keeps_the_previous_stack(store, monkeypatch):
+    """The undo stack was already written this way; it stays that way."""
+    store.save_undo("main", [["win_0", {"id": "win_0"}]])
+
+    _fail_after(monkeypatch, prefix_bytes=4)
+    with pytest.raises(OSError):
+        store.save_undo("main", [["win_1", {"id": "win_1"}]])
+
+    assert store.load_undo("main") == [["win_0", {"id": "win_0"}]]
+
+
+# -- Name collisions ---------------------------------------------------------
+
+
+def _hashed_name(eid):
+    """The hash-fallback filename JSONStore would pick for ``eid``."""
+    digest = hashlib.sha256(eid.encode("utf-8")).hexdigest()
+    return "hash_{0}.json".format(digest)
+
+
+def test_env_named_like_a_hash_file_is_dropped_from_the_listing(store):
+    """An env whose own name matches hash_<64 hex> disappears from list_envs.
+
+    HASHED_ENV_RE matches on the filename alone, so the file is read as a hash
+    fallback and skipped when the ``name`` field it expects is absent. The
+    environment is still saved, and still loads by id — only the listing loses
+    it. Documented here rather than fixed: changing the rule would break the
+    long-name files already on users' disks.
+    """
+    colliding_eid = "hash_" + "a" * 64
+    store.save_env(colliding_eid, _env())
+    store.save_env("main", _env())
+
+    assert store.env_exists(colliding_eid)
+    assert store.load_env(colliding_eid) == _env()
+    assert store.list_envs() == ["main"]
+
+
+def test_hash_fallback_file_reports_the_real_id(store, env_path):
+    """A genuine long-name fallback file does carry its id and is listed."""
+    long_eid = "e" * 5000
+    store.save_env(long_eid, _env())
+
+    assert _hashed_name(long_eid) in os.listdir(env_path)
+    assert store.list_envs() == [long_eid]
 
 
 if __name__ == "__main__":
