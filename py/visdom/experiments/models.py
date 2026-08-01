@@ -17,7 +17,7 @@ backend.
 
 The classes are deliberately thin: they validate and (de)serialise, and are
 the single definition of the on-disk metadata shape that the query and search
-layers (added in later PRs) build on.
+layers build on.
 """
 
 from __future__ import annotations
@@ -30,6 +30,10 @@ STATUS_RUNNING = "running"
 STATUS_FINISHED = "finished"
 STATUS_FAILED = "failed"
 VALID_STATUSES = (STATUS_RUNNING, STATUS_FINISHED, STATUS_FAILED)
+
+
+class ExperimentFinishedError(Exception):
+    """Raised when logging to an experiment already in a terminal state."""
 
 
 def infer_dtype(value: Any) -> str:
@@ -183,6 +187,10 @@ class Experiment:
                 return tag
         self.tags.append(tag)
         return tag
+
+    def is_terminal(self) -> bool:
+        """True if the experiment is in a terminal state (finished/failed)."""
+        return self.status in (STATUS_FINISHED, STATUS_FAILED)
 
     def finish(self, status: str = STATUS_FINISHED) -> None:
         """Mark the experiment terminal and stamp ``finished_at``.

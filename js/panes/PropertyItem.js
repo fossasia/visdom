@@ -9,14 +9,22 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 
+import { typesetMathJax } from './utils/mathjaxHelpers';
+
+const LATEX_PATTERN = /\$[^$]+\$|\\\([^)]+\\\)/;
+
 function EditablePropertyText(props) {
   const { value, validateHandler, submitHandler, blurStopPropagation } = props;
 
   // state varibles
   // --------------
   const textInput = useRef();
+  const previewRef = useRef();
   const [actualValue, setActualValue] = useState(value);
   const [isEdited, setIsEdited] = useState(false);
+
+  const hasLatex =
+    typeof actualValue === 'string' && LATEX_PATTERN.test(actualValue);
 
   // private events
   // --------------
@@ -42,6 +50,17 @@ function EditablePropertyText(props) {
     if (blurStopPropagation) event.stopPropagation();
   };
 
+  const handlePreviewClick = () => {
+    setIsEdited(true);
+  };
+
+  const handlePreviewKeyDown = (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      setIsEdited(true);
+    }
+  };
+
   // Enter invokes blur and thus submits the change
   const handleKeyPress = (event) => {
     if (event.key === 'Enter') textInput.current.blur();
@@ -55,8 +74,37 @@ function EditablePropertyText(props) {
     if (!isEdited) setActualValue(value);
   }, [value]);
 
+  useEffect(() => {
+    if (isEdited) textInput.current?.focus();
+  }, [isEdited]);
+
+  useEffect(() => {
+    if (isEdited || !hasLatex) return;
+    let cancelled = false;
+    typesetMathJax(previewRef.current, () => cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [isEdited, hasLatex, actualValue]);
+
   // rendering
   // ---------
+
+  if (!isEdited && hasLatex) {
+    return (
+      <span
+        ref={previewRef}
+        role="textbox"
+        tabIndex={0}
+        style={{ cursor: 'text' }}
+        onClick={handlePreviewClick}
+        onFocus={handlePreviewClick}
+        onKeyDown={handlePreviewKeyDown}
+      >
+        {actualValue}
+      </span>
+    );
+  }
 
   return (
     <input
