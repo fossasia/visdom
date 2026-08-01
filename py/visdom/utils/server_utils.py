@@ -92,10 +92,10 @@ class LazyEnvData(Mapping):
 
         try:
             env_data = self._store.load_env(self._eid)
-            self._raw_dict = {
-                "jsons": env_data["jsons"],
-                "reload": env_data["reload"],
-            }
+            raw = dict(env_data)
+            raw["jsons"] = env_data["jsons"]
+            raw["reload"] = env_data["reload"]
+            self._raw_dict = raw
         except (KeyError, TypeError) as e:
             raise ValueError(
                 "Failed loading environment json: {} - {}".format(self._eid, repr(e))
