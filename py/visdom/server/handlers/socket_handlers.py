@@ -266,9 +266,13 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
 
             if p.get("type") == "plot_history":
                 content_list = p.get("content")
+                # The range check has to come after a type check: a string or
+                # list frame from a client otherwise raises TypeError out of the
+                # message loop. bool is excluded because True would index as 1.
                 if (
                     not isinstance(content_list, list)
-                    or frame is None
+                    or not isinstance(frame, int)
+                    or isinstance(frame, bool)
                     or not (0 <= frame < len(content_list))
                 ):
                     logging.warning(
@@ -368,9 +372,19 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 )
                 return
             p = env["jsons"][win]
+            old_content = p.get("old_content")
+            if not old_content:
+                # Nothing left to drill back to. Popping regardless raised
+                # IndexError (or KeyError, for a pane that never had a history)
+                # straight out of the socket's message callback.
+                logging.warning(
+                    f"pop_embeddings_pane: pane {win!r} in env {eid!r} has no"
+                    f" previous content, dropping event"
+                )
+                return
             p["content"]["selected"] = None
-            p["content"]["data"] = p["old_content"].pop()
-            if len(p["old_content"]) == 0:
+            p["content"]["data"] = old_content.pop()
+            if len(old_content) == 0:
                 p["content"]["has_previous"] = False
             p["contentID"] = get_rand_id()
             # Attach eid so the frontend can filter stale messages after env switch.
