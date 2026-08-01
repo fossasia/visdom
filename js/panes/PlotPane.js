@@ -16,8 +16,10 @@ import React, {
 } from 'react';
 const { usePrevious } = require('../util');
 import ApiContext from '../api/ApiContext';
+import { showToast } from '../toasts/toastEvents';
 import Pane from './Pane';
 import { typesetMathJax } from './utils/mathjaxHelpers';
+import { downloadImageAsPdf } from './utils/pdfExport';
 const { sgg } = require('ml-savitzky-golay-generalized');
 
 const ANNOTATION_FONT_SIZE = 11;
@@ -319,8 +321,28 @@ var PlotPane = (props) => {
   };
 
   const dpiToScale = (dpi) => (dpi ? dpi / 96 : 1);
+  const PDF_CAPTURE_DPI = 300;
 
   const handleExport = (format, dpi) => {
+    if (format === 'pdf') {
+      Plotly.toImage(plotlyRef.current, {
+        format: 'jpeg',
+        scale: dpiToScale(PDF_CAPTURE_DPI),
+      }).then((dataUrl) => {
+        downloadImageAsPdf(
+          dataUrl,
+          `${contentID || 'plot'}.pdf`,
+          PDF_CAPTURE_DPI
+        );
+      })
+      .catch((err) => {
+          showToast('Failed to Export PDF', 'error', { duration: 4000 });
+          // eslint-disable-next-line no-console
+          console.error('PlotPane PDF export failed:', err);
+        });
+      return;
+    }
+
     Plotly.downloadImage(plotlyRef.current, {
       format: format === 'jpg' ? 'jpeg' : format,
       scale: dpiToScale(dpi),
@@ -589,6 +611,7 @@ var PlotPane = (props) => {
       doubleClick: 'reset',
       doubleClickDelay: 500,
       modeBarButtonsToAdd: ['drawopenpath', 'eraseshape'],
+      modeBarButtonsToRemove: ['toImage'],
       // dragging a note box leaves its arrow on the data point
       edits: { annotationTail: !sessionInfo?.readonly },
     }).then(() => {
