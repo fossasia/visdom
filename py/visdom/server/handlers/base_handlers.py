@@ -13,9 +13,40 @@ Contain the basic web request handlers that all other handlers derive from
 import logging
 import traceback
 import http.client
+import time
 
 import tornado.web
 import tornado.websocket
+
+
+_COMMON_APP_ATTRIBUTES = (
+    "state",
+    "subs",
+    "sources",
+    "port",
+    "env_path",
+    "storage",
+    "login_enabled",
+)
+
+_WEB_APP_ATTRIBUTES = _COMMON_APP_ATTRIBUTES + (
+    "max_text_lines",
+    "max_old_content",
+    "max_image_history",
+)
+
+_SOCKET_APP_ATTRIBUTES = _COMMON_APP_ATTRIBUTES + ("readonly",)
+
+
+def _copy_app_attributes(handler, app, attrs, store_app=False):
+    if app is None:
+        return
+
+    if store_app:
+        handler.app = app
+
+    for attr in attrs:
+        setattr(handler, attr, getattr(app, attr))
 
 
 class BaseWebSocketHandler(tornado.websocket.WebSocketHandler):
@@ -24,6 +55,10 @@ class BaseWebSocketHandler(tornado.websocket.WebSocketHandler):
     websocket handler. Also contains some shared logic for all WebSocketHandler
     classes.
     """
+
+    def initialize(self, app=None):
+        """Common initialization shared by WebSocket handlers."""
+        _copy_app_attributes(self, app, _SOCKET_APP_ATTRIBUTES, store_app=True)
 
     def get_current_user(self):
         """
@@ -53,17 +88,15 @@ class BaseHandler(tornado.web.RequestHandler):
         The ``app`` parameter defaults to ``None`` so that handlers
         registered without an ``app`` dict (e.g. HealthHandler) still work.
         """
-        if app is not None:
-            self.state = app.state
-            self.subs = app.subs
-            self.sources = app.sources
-            self.port = app.port
-            self.env_path = app.env_path
-            self.storage = app.storage
-            self.login_enabled = app.login_enabled
-            self.max_text_lines = app.max_text_lines
-            self.max_old_content = app.max_old_content
-            self.max_image_history = app.max_image_history
+        _copy_app_attributes(self, app, _WEB_APP_ATTRIBUTES)
+
+    def is_authorized(self):
+        """Update access time and validate authentication for protected methods."""
+        self.last_access = time.time()
+        if self.login_enabled and not self.current_user:
+            self.set_status(401)
+            return False
+        return True
 
     def __init__(self, *request, **kwargs):
         self.include_host = False
@@ -93,7 +126,7 @@ class BaseHandler(tornado.web.RequestHandler):
             # exc_info is a tuple consisting of:
             # 1. The class of the Exception
             # 2. The actual Exception that was thrown
-            # 3. The traceback opbject
+            # 3. The traceback object
             try:
                 params = {
                     "error": exc_info[1] if debug else None,
