@@ -12,7 +12,10 @@ import React, { useEffect, useRef, useState } from 'react';
 const DPI_OPTIONS = [200, 300, 600];
 const RASTER_FORMATS = ['png', 'jpg'];
 
-function ExportPane({ onExport, allowedFormats = ['png', 'jpg', 'svg'] }) {
+function ExportPane({
+  onExport,
+  allowedFormats = ['png', 'jpg', 'svg', 'pdf'],
+}) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeSubmenu, setActiveSubmenu] = useState(null);
   const containerRef = useRef();
@@ -20,6 +23,7 @@ function ExportPane({ onExport, allowedFormats = ['png', 'jpg', 'svg'] }) {
     allowedFormats.includes(f)
   );
   const svgAllowed = allowedFormats.includes('svg');
+  const pdfAllowed = allowedFormats.includes('pdf');
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -110,6 +114,18 @@ function ExportPane({ onExport, allowedFormats = ['png', 'jpg', 'svg'] }) {
                 onClick={() => handleFormatClick('svg')}
               >
                 SVG
+              </button>
+            </li>
+          )}
+          {pdfAllowed && (
+            <li className="export-dropdown-item" role="none">
+              <button
+                type="button"
+                role="menuitem"
+                className="export-dropdown-button"
+                onClick={() => handleFormatClick('pdf')}
+              >
+                PDF
               </button>
             </li>
           )}
