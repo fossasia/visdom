@@ -4378,7 +4378,7 @@ class Visdom(object):
             }
         )
 
-    def table(self, headers, data, win=None, env=None, opts=None):
+    def html_table(self, headers, data, win=None, env=None, opts=None):
         """
         This function renders structured data as a styled HTML table.
 
