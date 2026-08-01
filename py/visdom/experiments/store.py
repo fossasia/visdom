@@ -17,7 +17,11 @@ today — the feature is fully opt-in.
 """
 
 from visdom.data_model.base import DataStore
-from visdom.experiments.models import Experiment, STATUS_FINISHED
+from visdom.experiments.models import (
+    Experiment,
+    ExperimentFinishedError,
+    STATUS_FINISHED,
+)
 
 METADATA_KEY = "experiment"
 
@@ -55,6 +59,21 @@ class ExperimentStore:
         self.datastore.save_env(env_id, env)
         return experiment
 
+    @staticmethod
+    def _reject_if_terminal(env_id, experiment, action="log to"):
+        """Raise if ``experiment`` is finished/failed and so must not be written to.
+
+        ``action`` names the attempted operation so the error reads sensibly for
+        every caller (``"log to"`` for the logging paths, ``"finish"`` for a
+        second attempt at finishing an already terminal experiment).
+        """
+        if experiment.is_terminal():
+            raise ExperimentFinishedError(
+                "experiment {0!r} is {1}; cannot {2} a terminal experiment".format(
+                    env_id, experiment.status, action
+                )
+            )
+
     def log_experiment(
         self, env_id, name=None, params=None, tags=None, description=None
     ):
@@ -73,6 +92,7 @@ class ExperimentStore:
                 description=description or "",
             )
         else:
+            self._reject_if_terminal(env_id, experiment)
             if name is not None:
                 experiment.name = name
             if description is not None:
@@ -88,14 +108,22 @@ class ExperimentStore:
         env, experiment = self._read(env_id)
         if experiment is None:
             experiment = Experiment(env_id=env_id, name=env_id)
+        else:
+            self._reject_if_terminal(env_id, experiment)
         experiment.add_metric(key, value, step)
         return self._write(env_id, env, experiment)
 
     def finish_experiment(self, env_id, status=STATUS_FINISHED):
-        """Mark ``env_id``'s experiment terminal; raise if none was logged."""
+        """Mark ``env_id``'s experiment terminal; raise if none was logged.
+
+        An experiment that is already terminal is rejected rather than
+        re-finished, matching ``log_experiment``/``log_metric``: once a run has
+        stopped, neither its status nor its ``finished_at`` stamp may change.
+        """
         env, experiment = self._read(env_id)
         if experiment is None:
             raise KeyError("no experiment logged for env {0!r}".format(env_id))
+        self._reject_if_terminal(env_id, experiment, "finish")
         experiment.finish(status)
         return self._write(env_id, env, experiment)
 
