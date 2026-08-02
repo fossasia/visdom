@@ -15,6 +15,7 @@ the data_model itself.
 
 import copy
 import getpass
+import hmac
 import json
 import jsonpatch
 import logging
@@ -748,7 +749,19 @@ class IndexHandler(BaseHandler):
         salt = stored.split("$")[0]
         password = hash_password(json_obj["password"], salt=salt)
 
-        if (username == self.user_credential["username"]) and (password == stored):
+        # Constant-time comparison: `==` on the derived key returns as soon as
+        # two characters differ, so response timing tells an attacker how much
+        # of a guess was right. Both halves are always compared, which keeps a
+        # wrong username costing the same as a wrong password.
+        username_ok = hmac.compare_digest(
+            str(username).encode("utf-8"),
+            self.user_credential["username"].encode("utf-8"),
+        )
+        password_ok = hmac.compare_digest(
+            password.encode("utf-8"), stored.encode("utf-8")
+        )
+
+        if username_ok and password_ok:
             self.set_secure_cookie("user_password", username + password)
         else:
             self.set_status(400)
