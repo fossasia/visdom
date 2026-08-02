@@ -11,7 +11,7 @@
 Covers the routes a client touches for the whole life of a pane --
 ``/events``, ``/win_exists``, ``/win_data``, ``/update`` and ``/close`` --
 against a real ``Application``. Pane construction itself is unit-tested in
-``unit/test_window_builder.py``; here we assert what survives the round trip
+``unit/window_builder.py``; here we assert what survives the round trip
 through the server's state.
 """
 
