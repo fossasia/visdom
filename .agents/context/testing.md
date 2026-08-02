@@ -12,8 +12,9 @@ pytest -m "not server"                 # skip tests that need a live server (CI 
 
 Config lives in `pyproject.toml` (`[tool.pytest.ini_options]`): discovery is scoped to
 `py/tests/`, and `pythonpath = ["py", "py/tests"]` makes both `import visdom` and
-`import testutils` work without an editable install. Experimental `test_*.py` scripts in the
-repo root (and `test/`) are intentionally out of scope.
+`import testutils` work without an editable install. Because discovery is scoped by `testpaths`,
+experimental `test_*.py` scripts in the repo root (and `test/`) stay out of scope; `testutils/` is
+excluded via `norecursedirs` so helpers are importable but never collected.
 
 ## Run E2E / Visual Tests (Cypress)
 
@@ -53,7 +54,10 @@ py/tests/
 so a package there would ship a top-level `tests` distribution to users. `testutils/` is a
 package and is reachable because `py/tests` is on `pythonpath`.
 
-- Name files `test_*.py`. **Write plain `def test_*()` functions, not `unittest.TestCase`
+- Name a file after what it covers — `unit/window_builder.py`, not `unit/test_window_builder.py`.
+  The `unit/` and `integration/` directories already say these are tests, so the filename does not
+  repeat it; `python_files = ["*.py"]` in `pyproject.toml` collects them. Test *functions* still
+  need the `test_` prefix. **Write plain `def test_*()` functions, not `unittest.TestCase`
   subclasses.** pytest still runs `TestCase` (much of the suite predates this rule), but
   **pytest cannot inject fixtures into `TestCase` methods** — `def test_x(self, app)` fails.
   Only autouse fixtures reach them. A `TestCase` therefore cannot use anything in the table
