@@ -8,7 +8,11 @@ testpaths = ["py/tests"]
 # because setup.py runs find_packages(where="py") and would otherwise ship a
 # top-level `tests` package to users.
 pythonpath = ["py", "py/tests"]
-python_files = ["test_*.py"]
+# Test modules live under py/tests/{unit,integration}, so the directory already
+# says "test" and the files do not repeat it. Shared helpers are importable, not
+# collectable, so testutils is kept out of discovery.
+python_files = ["*.py"]
+norecursedirs = ["testutils", "__pycache__", ".*", "build", "dist", "*.egg"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-ra -q"

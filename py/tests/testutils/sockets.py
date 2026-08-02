@@ -9,7 +9,7 @@
 """Real socket handlers, built without a WebSocket connection.
 
 ``FakeHandler`` is enough to drive ``AnySocketHandlerOrWrapper.on_message`` as
-an unbound function, and ``test_storage_wiring.py`` does exactly that. It runs
+an unbound function, and ``storage_wiring.py`` does exactly that. It runs
 out of road for three things this suite needs:
 
 * ``save_layouts`` calls ``self.broadcast_layouts()`` and reads ``self.app`` —
