@@ -1,4 +1,12 @@
-"""End-to-end tests for the ``/experiments/log`` endpoint (Layer 2, PR 2).
+#!/usr/bin/env python3
+
+# Copyright 2017-present, The Visdom Authors
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
+"""End-to-end tests for the ``/experiments/log`` endpoint.
 
 Drives a real :class:`~visdom.server.app.Application` over a temp env dir with
 Tornado's ``AsyncHTTPTestCase``, so the full route -> handler -> ``ExperimentStore``
@@ -106,6 +114,19 @@ class TestExperimentLogEndpoint(tornado.testing.AsyncHTTPTestCase):
         )
         self.assertEqual(resp.code, 400)
 
+    def test_finish_on_finished_is_409(self):
+        self.post_json("/experiments/log", {"eid": "main", "params": {"lr": 0.01}})
+        self.post_json("/experiments/log", {"eid": "main", "action": "finish"})
+        finished_at = self.read_experiment("main").finished_at
+        resp = self.post_json(
+            "/experiments/log",
+            {"eid": "main", "action": "finish", "status": "failed"},
+        )
+        self.assertEqual(resp.code, 409)
+        stored = self.read_experiment("main")
+        self.assertEqual(stored.status, "finished")
+        self.assertEqual(stored.finished_at, finished_at)
+
     def test_log_to_finished_is_409(self):
         self.post_json("/experiments/log", {"eid": "main", "params": {"lr": 0.01}})
         self.post_json("/experiments/log", {"eid": "main", "action": "finish"})
@@ -160,6 +181,44 @@ class TestExperimentLogEndpoint(tornado.testing.AsyncHTTPTestCase):
         exp = self.read_experiment("main")
         self.assertIsNotNone(exp, "experiment was clobbered by the env save")
         self.assertEqual(exp.get_param("lr").value, 0.01)
+
+
+class TestExperimentLogReadonly(tornado.testing.AsyncHTTPTestCase):
+    """A readonly server must reject every write action with 403."""
+
+    def setUp(self):
+        self._tmp_dir = tempfile.mkdtemp(prefix="visdom_exp_ro_test_")
+        super().setUp()
+
+    def get_app(self):
+        return Application(
+            port=self.get_http_port(), env_path=self._tmp_dir, readonly=True
+        )
+
+    def post_json(self, body):
+        return self.fetch(
+            "/experiments/log",
+            method="POST",
+            body=json.dumps(body),
+            headers={"Content-Type": "application/json"},
+        )
+
+    def test_log_is_403(self):
+        resp = self.post_json({"eid": "main", "params": {"lr": 0.01}})
+        self.assertEqual(resp.code, 403)
+        self.assertFalse(json.loads(resp.body)["success"])
+        store = ExperimentStore(JSONStore(self._tmp_dir))
+        self.assertIsNone(store.get_experiment("main"))
+
+    def test_metrics_is_403(self):
+        resp = self.post_json(
+            {"eid": "main", "action": "metrics", "metrics": {"acc": 0.9}}
+        )
+        self.assertEqual(resp.code, 403)
+
+    def test_finish_is_403(self):
+        resp = self.post_json({"eid": "main", "action": "finish"})
+        self.assertEqual(resp.code, 403)
 
 
 class TestClientMessageShapes(unittest.TestCase):
