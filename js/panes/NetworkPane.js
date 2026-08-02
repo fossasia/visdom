@@ -13,6 +13,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 
 import Pane from './Pane';
+import { downloadImageAsPdf } from './utils/pdfExport';
 
 function NetworkPane(props) {
   const {
@@ -31,6 +32,7 @@ function NetworkPane(props) {
 
   // private events
   // --------------
+
   const handleExport = (format, dpi) => {
     const svg = containerRef.current?.querySelector('svg');
 
@@ -65,6 +67,24 @@ function NetworkPane(props) {
         link.click();
         document.body.removeChild(link);
         setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+        return;
+      }
+
+      if (format === 'pdf') {
+        const PDF_CAPTURE_DPI = 300;
+        const pdfScale = PDF_CAPTURE_DPI / 96;
+        svgAsPngUri(
+          svg,
+          {
+            scale: pdfScale,
+            backgroundColor: '#FFFFFF',
+            encoderType: 'image/jpeg',
+            encoderOptions: 0.92,
+          },
+          (uri) => {
+            downloadImageAsPdf(uri, filename, PDF_CAPTURE_DPI);
+          }
+        );
         return;
       }
 
