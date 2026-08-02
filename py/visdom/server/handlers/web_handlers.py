@@ -34,6 +34,8 @@ from visdom.utils.shared_utils import (
 )
 from visdom.utils.server_utils import (
     check_auth,
+    check_readonly,
+    reject_readonly,
     extract_eid,
     window,
     register_window,
@@ -68,6 +70,7 @@ logger = logging.getLogger(__name__)
 
 class PostHandler(BaseHandler):
     @check_auth
+    @check_readonly
     def post(self):
         req = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -464,6 +467,7 @@ class UpdateHandler(BaseHandler):
         handler.write(p["id"])
 
     @check_auth
+    @check_readonly
     def post(self):
         if self.login_enabled and not self.current_user:
             self.set_status(400)
@@ -488,6 +492,7 @@ class CloseHandler(BaseHandler):
             broadcast(handler, json.dumps({"command": "close", "data": win}), eid)
 
     @check_auth
+    @check_readonly
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -509,6 +514,7 @@ class DeleteEnvHandler(BaseHandler):
             broadcast_envs(handler)
 
     @check_auth
+    @check_readonly
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -557,6 +563,7 @@ class ForkEnvHandler(BaseHandler):
         handler.write(eid)
 
     @check_auth
+    @check_readonly
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -661,6 +668,7 @@ class SaveHandler(BaseHandler):
         handler.write(json.dumps(ret))
 
     @check_auth
+    @check_readonly
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -674,7 +682,12 @@ class DataHandler(BaseHandler):
         eid = extract_eid(args)
 
         if "data" in args:
-            # Load data from client
+            # Load data from client. This is the one write behind an endpoint
+            # that also reads, so it cannot be refused by the decorator.
+            if handler.readonly:
+                reject_readonly(handler)
+                return
+
             data = json.loads(args["data"])
 
             if eid not in handler.state:
@@ -793,10 +806,6 @@ class ErrorHandler(BaseHandler):
 
 
 class UploadEnvHandler(BaseHandler):
-    def initialize(self, app):
-        super().initialize(app)
-        self.readonly = app.readonly
-
     @check_auth
     def post(self):
         # 100mb file size limit
@@ -890,10 +899,6 @@ class ExperimentLogHandler(BaseHandler):
     """
 
     VALID_ACTIONS = ("log", "metrics", "finish")
-
-    def initialize(self, app):
-        super().initialize(app)
-        self.readonly = app.readonly
 
     @staticmethod
     def _require_mapping(args, field):

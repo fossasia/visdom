@@ -57,6 +57,32 @@ def check_auth(f):
     return _check_auth
 
 
+def reject_readonly(handler):
+    """Answer 403 for a write attempted against a readonly server."""
+    handler.set_status(403)
+    handler.write({"success": False, "error": "The server is running in readonly mode"})
+
+
+def check_readonly(f):
+    """
+    Wrapper for handler methods that change server state, so a server
+    started with ``-readonly`` refuses them instead of applying them.
+
+    Sockets are already short-circuited wholesale in
+    ``AnySocketHandlerOrWrapper.on_message``; this is the HTTP half of the
+    same rule. Stack it under ``check_auth`` so an unauthenticated request
+    still answers 401 rather than 403.
+    """
+
+    def _check_readonly(handler, *args, **kwargs):
+        if handler.readonly:
+            reject_readonly(handler)
+            return
+        f(handler, *args, **kwargs)
+
+    return _check_readonly
+
+
 def set_cookie(value=None):
     """Create cookie secret key for authentication"""
     if value is not None:

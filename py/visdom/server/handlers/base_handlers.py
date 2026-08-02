@@ -30,6 +30,7 @@ _COMMON_APP_ATTRIBUTES = (
 )
 
 _WEB_APP_ATTRIBUTES = _COMMON_APP_ATTRIBUTES + (
+    "readonly",
     "max_text_lines",
     "max_old_content",
     "max_image_history",
