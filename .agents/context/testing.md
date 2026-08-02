@@ -12,8 +12,9 @@ pytest -m "not server"                 # skip tests that need a live server (CI 
 
 Config lives in `pyproject.toml` (`[tool.pytest.ini_options]`): discovery is scoped to
 `py/tests/`, and `pythonpath = ["py", "py/tests"]` makes both `import visdom` and
-`import testutils` work without an editable install. Experimental `test_*.py` scripts in the
-repo root (and `test/`) are intentionally out of scope.
+`import testutils` work without an editable install. Because discovery is scoped by `testpaths`,
+experimental `test_*.py` scripts in the repo root (and `test/`) stay out of scope; `testutils/` is
+excluded via `norecursedirs` so helpers are importable but never collected.
 
 ## Run E2E / Visual Tests (Cypress)
 
@@ -59,7 +60,12 @@ judged by looking at the UI goes in `example/manual/` instead — see
 `example/manual/visual_check.py`. Pixel correctness is Playwright's and Cypress's job, not
 pytest's.
 
-- Name files `test_*.py`. **Which style you use depends on whether the test needs HTTP.**
+- Name a file after what it covers — `integration/window_types.py`, not
+  `integration/test_window_types.py`. The `unit/` and `integration/` directories already say these
+  are tests, so the filename does not repeat it; `python_files = ["*.py"]` in `pyproject.toml`
+  collects them, and `norecursedirs` keeps `testutils/` importable but uncollected. Test
+  *functions* and `Test*` classes still need their usual prefixes.
+- **Which style you use depends on whether the test needs HTTP.**
 
   | Test needs | Write | Why |
   |---|---|---|
@@ -108,7 +114,7 @@ reverted. The `TestCase` style is the accepted cost of using it.
 
 Because fixtures cannot reach these tests, anything shared goes on the class: `self.env_path` for
 the temp directory, and a small base class between `VisdomHTTPTestCase` and your test classes for
-helpers several of them need (see `WindowTypeTestCase` in `integration/test_window_types.py`).
+helpers several of them need (see `WindowTypeTestCase` in `integration/window_types.py`).
 Need a second `Application` over the same directory, for a reload assertion? Construct it directly
 with `Application(port=8097, env_path=self.env_path)` — `app_factory` is not available here.
 

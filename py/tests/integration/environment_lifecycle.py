@@ -13,7 +13,7 @@ addressed to it. From there ``/fork_env`` deep-copies it, ``/save`` writes it
 through the storage backend, ``/delete_env`` removes both the state and the
 file, and a fresh ``Application`` over the same directory picks it back up.
 That the writes go through the backend rather than around it is asserted
-separately in ``test_storage_wiring``.
+separately in ``storage_wiring``.
 """
 
 import json
