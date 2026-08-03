@@ -39,7 +39,6 @@ from visdom.utils.server_utils import (
 )
 from visdom.server.defaults import MAX_SOCKET_WAIT
 
-
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
 # TODO abstract out any direct references to the app where possible from
@@ -446,9 +445,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 patch = [{"op": "remove", "path": f"/content/rows/{r}"}]
 
             elif op == "add_col":
-                name = str(
-                    payload.get("name") or f"Column {len(headers) + 1}"
-                )
+                name = str(payload.get("name") or f"Column {len(headers) + 1}")
                 default = payload.get("default")
                 if default is None:
                     default = ""

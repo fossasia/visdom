@@ -4485,29 +4485,27 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
         opts.setdefault("editable", True)
- 
+
         if isinstance(data, np.ndarray):
-            assert data.ndim == 2, (
-                "`data` as a numpy array must be 2-dimensional (rows x columns)"
-            )
+            assert (
+                data.ndim == 2
+            ), "`data` as a numpy array must be 2-dimensional (rows x columns)"
             data = data.tolist()
         if isinstance(headers, np.ndarray):
-            assert headers.ndim == 1, (
-                "`headers` as a numpy array must be 1-dimensional"
-            )
+            assert headers.ndim == 1, "`headers` as a numpy array must be 1-dimensional"
             headers = headers.tolist()
- 
+
         has_data = data is not None and len(data) > 0
         has_headers = headers is not None and len(headers) > 0
- 
+
         if not has_data and not has_headers:
             raise AssertionError("either `data` or `headers` must be provided")
- 
+
         if has_headers:
             assert isinstance(headers, (list, tuple)), (
                 "headers should be a list (got %s)" % type(headers).__name__
             )
- 
+
         if has_data and isinstance(data[0], dict):
             assert all(
                 isinstance(row, dict) for row in data
@@ -4522,16 +4520,16 @@ class Visdom(object):
                 ), "each row in `data` should be a list or tuple"
             headers = list(headers)
             rows = [list(r) for r in data] if has_data else []
- 
+
         assert all(
             len(r) == len(headers) for r in rows
         ), "each row must have the same number of columns as headers"
- 
+
         rows = [[_table_cell_to_native(cell) for cell in row] for row in rows]
         headers = [_table_cell_to_native(h) for h in headers]
- 
+
         content = {"headers": headers, "rows": rows}
- 
+
         return self._send(
             {
                 "data": [{"content": content, "type": "table"}],
@@ -4541,4 +4539,3 @@ class Visdom(object):
             },
             endpoint="events",
         )
- 
