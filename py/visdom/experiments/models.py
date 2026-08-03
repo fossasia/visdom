@@ -17,7 +17,7 @@ backend.
 
 The classes are deliberately thin: they validate and (de)serialise, and are
 the single definition of the on-disk metadata shape that the query and search
-layers (added in later PRs) build on.
+layers build on.
 """
 
 from __future__ import annotations

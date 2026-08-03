@@ -47,6 +47,19 @@ import WidthProvider from './Width';
 const jsonpatch = require('fast-json-patch');
 const GridLayout = WidthProvider(ReactGridLayout);
 
+let recoveredInvalidStateAtStartup = false;
+
+const safeJsonParse = (raw, fallback, onError) => {
+  if (raw == null || raw === '') return fallback;
+
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    if (onError) onError(e);
+    return fallback;
+  }
+};
+
 var use_envs = null;
 if (ACTIVE_ENV !== '') {
   if (ACTIVE_ENV.indexOf('+') > -1) {
@@ -57,7 +70,11 @@ if (ACTIVE_ENV !== '') {
     use_envs = [ACTIVE_ENV];
   }
 } else {
-  use_envs = JSON.parse(localStorage.getItem('envIDs')) || ['main'];
+  let storedEnvIDs = safeJsonParse(localStorage.getItem('envIDs'), null, () => {
+    localStorage.removeItem('envIDs');
+    recoveredInvalidStateAtStartup = true;
+  });
+  use_envs = Array.isArray(storedEnvIDs) ? storedEnvIDs : ['main'];
 }
 
 const PaneWrapper = ({
@@ -162,6 +179,8 @@ const App = () => {
   const _pendingPanesVersions = useRef({});
   const _envReloadInFlight = useRef(false);
   const localStorageTimer = useRef(null);
+  const savedStateRecoveryToastShown = useRef(false);
+  const serverLayoutErrorToastShown = useRef(false);
 
   // --------------------- //
   // grid helper functions //
@@ -196,6 +215,28 @@ const App = () => {
     } catch (e) {
       return new RegExp('', 'i');
     }
+  };
+
+  const showSavedStateRecoveryToast = () => {
+    if (savedStateRecoveryToastShown.current) return;
+
+    savedStateRecoveryToastShown.current = true;
+    showToast(
+      'Invalid saved UI data was detected and reset to defaults.',
+      'warning',
+      { duration: 6000 }
+    );
+  };
+
+  const showServerLayoutErrorToast = () => {
+    if (serverLayoutErrorToastShown.current) return;
+
+    serverLayoutErrorToastShown.current = true;
+    showToast(
+      'Saved views could not be loaded because the server returned invalid layout data.',
+      'error',
+      { duration: 6000 }
+    );
   };
 
   // ------------------ //
@@ -252,7 +293,11 @@ const App = () => {
     newPanes[newPane.id] = newPane;
 
     if (!exists) {
-      let stored = JSON.parse(localStorage.getItem(keyLS(newPane.id)));
+      let layoutKey = keyLS(newPane.id);
+      let stored = safeJsonParse(localStorage.getItem(layoutKey), null, () => {
+        localStorage.removeItem(layoutKey);
+        showSavedStateRecoveryToast();
+      });
       if (_bin.current == null) {
         rebin();
       }
@@ -477,7 +522,17 @@ const App = () => {
 
     let payload = {};
     Object.keys(storeData.panes).map((paneID) => {
-      payload[paneID] = JSON.parse(localStorage.getItem(keyLS(paneID)));
+      let layoutKey = keyLS(paneID);
+      let storedLayout = safeJsonParse(
+        localStorage.getItem(layoutKey),
+        null,
+        () => {
+          localStorage.removeItem(layoutKey);
+          showSavedStateRecoveryToast();
+        }
+      );
+      payload[paneID] =
+        storedLayout || getLayoutItem(storeData.layout, paneID) || null;
     });
 
     sendEnvSave(env, selection.envIDs[0], payload);
@@ -684,7 +739,14 @@ const App = () => {
     if (layoutJSON.length == 0) {
       return; // Skip totally blank updates, these are empty inits
     }
-    let layoutsObj = JSON.parse(layoutJSON);
+    let layoutsObj = safeJsonParse(
+      layoutJSON,
+      null,
+      showServerLayoutErrorToast
+    );
+    if (!layoutsObj) {
+      return;
+    }
     let layoutLists = new Map();
     for (let envName of Object.keys(layoutsObj)) {
       let layoutList = new Map();
@@ -758,6 +820,12 @@ const App = () => {
   // -------
   // effects
   // -------
+
+  useEffect(() => {
+    if (recoveredInvalidStateAtStartup) {
+      showSavedStateRecoveryToast();
+    }
+  }, []);
 
   // flush pre-render callbacks
   const callbacks = useRef([]);

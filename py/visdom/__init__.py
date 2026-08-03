@@ -878,102 +878,83 @@ class Visdom(object):
     def clear_event_handlers(self, target, env=None):
         self.event_handlers.pop((env, target), None)
 
-    def setup_polling(self):
-        # TODO merge with setup_socket?
-        # Setup socket to server
-        def on_message(message):
-            message = json.loads(message)
-            if "command" in message:
-                # Handle server commands
-                if message["command"] == "alive":
-                    if "data" in message and message["data"] == "vis_alive":
-                        logger.info("Visdom successfully connected to server")
-                        self.socket_alive = True
-                        self.socket_connection_achieved = True
-                    else:
-                        logger.warning(
-                            "Visdom server failed handshake, may not "
-                            "be properly connected"
-                        )
-            if "target" in message:
-                env = message.get("eid")
-                key = (env, message["target"])
+    def _handle_incoming_message(self, raw_message):
+        try:
+            message = json.loads(raw_message)
+        except (TypeError, ValueError) as e:
+            logger.warning("Visdom failed to decode incoming message: %s", e)
+            return
 
-                for handler in list(self.event_handlers.get(key, [])):
-                    handler(message)
-
-                if env is not None:
-                    global_key = (None, message["target"])
-                    for handler in list(self.event_handlers.get(global_key, [])):
-                        handler(message)
-
-        def on_close(ws):
-            self.socket_alive = False
-
-        def run_socket(*args):
-            # open a socket
-            resp_json = self._handle_post(
-                "{0}:{1}{2}/vis_socket_wrap".format(
-                    self.server, self.port, self.base_url
-                ),
-                data=json.dumps({"message_type": "init"}),
+        if not isinstance(message, dict):
+            logger.warning(
+                "Visdom ignored incoming message with unexpected type %s",
+                type(message).__name__,
             )
-            resp = json.loads(resp_json)
-            self.vis_sid = resp["sid"]
-            while self.use_socket:
+            return
+
+        if "command" in message:
+            # Handle server commands
+            if message["command"] == "alive":
+                if "data" in message and message["data"] == "vis_alive":
+                    logger.info("Visdom successfully connected to server")
+                    self.socket_alive = True
+                    self.socket_connection_achieved = True
+                else:
+                    logger.warning(
+                        "Visdom server failed handshake, may not "
+                        "be properly connected"
+                    )
+        if "target" in message:
+            env = message.get("eid")
+            key = (env, message["target"])
+
+            handlers = list(self.event_handlers.get(key, []))
+            if env is not None:
+                global_key = (None, message["target"])
+                handlers.extend(list(self.event_handlers.get(global_key, [])))
+
+            for handler in handlers:
+                try:
+                    handler(message)
+                except Exception as e:
+                    logger.warning(
+                        "Visdom failed to handle a handler for {}: {}"
+                        "".format(message, e)
+                    )
+                    traceback.print_exc()
+
+    def _run_polling(self):
+        while self.use_socket:
+            try:
                 resp_json = self._handle_post(
                     "{0}:{1}{2}/vis_socket_wrap".format(
                         self.server, self.port, self.base_url
                     ),
-                    data=json.dumps({"message_type": "query", "sid": self.vis_sid}),
+                    data=json.dumps({"message_type": "init"}),
                 )
                 resp = json.loads(resp_json)
-                for msg in resp["messages"]:
-                    on_message(msg)
-                time.sleep(0.1)
+                self.vis_sid = resp["sid"]
+                while self.use_socket:
+                    resp_json = self._handle_post(
+                        "{0}:{1}{2}/vis_socket_wrap".format(
+                            self.server, self.port, self.base_url
+                        ),
+                        data=json.dumps({"message_type": "query", "sid": self.vis_sid}),
+                    )
+                    resp = json.loads(resp_json)
+                    for msg in resp["messages"]:
+                        self._handle_incoming_message(msg)
+                    time.sleep(0.1)
+            except Exception as e:
+                logger.error("Polling had error {}, attempting restart".format(e))
+            finally:
+                self.socket_alive = False
+            if self.use_socket:
+                time.sleep(3)
 
-        # Start listening thread
-        self.socket_thread = threading.Thread(
-            target=run_socket, name="Visdom-Socket-Thread"
-        )
-        self.socket_thread.start()
-
-    def setup_socket(self, polling=False):
-        # Setup socket to server
+    def _run_websocket(self):
         def on_message(ws, message):
-            message = json.loads(message)
-            if "command" in message:
-                # Handle server commands
-                if message["command"] == "alive":
-                    if "data" in message and message["data"] == "vis_alive":
-                        logger.info("Visdom successfully connected to server")
-                        self.socket_alive = True
-                        self.socket_connection_achieved = True
-                    else:
-                        logger.warning(
-                            "Visdom server failed handshake, may not "
-                            "be properly connected"
-                        )
-            if "target" in message:
-                env = message.get("eid")
-                key = (env, message["target"])
-
-                handlers = list(self.event_handlers.get(key, []))
-                if env is not None:
-                    global_key = (None, message["target"])
-                    handlers.extend(list(self.event_handlers.get(global_key, [])))
-
-                for handler in handlers:
-                    try:
-                        handler(message)
-                    except Exception as e:
-                        logger.warning(
-                            "Visdom failed to handle a handler for {}: {}"
-                            "".format(message, e)
-                        )
-                        import traceback
-
-                        traceback.print_exc()
+            self._handle_incoming_message(message)
 
         def on_error(ws, error):
             if hasattr(error, "errno") and error.errno == errno.ECONNREFUSED:
@@ -998,53 +979,58 @@ class Visdom(object):
                 )
                 self.use_socket = False
 
-        def run_socket(*args):
-            host_scheme = urlparse(self.server).scheme
-            if host_scheme == "https":
-                ws_scheme = "wss"
-            else:
-                ws_scheme = "ws"
-            while self.use_socket:
-                try:
-                    sock_addr = "{}://{}:{}{}/vis_socket".format(
-                        ws_scheme, self.server_base_name, self.port, self.base_url
-                    )
-                    ws = websocket.WebSocketApp(
-                        sock_addr,
-                        on_message=on_message,
-                        on_error=on_error,
-                        on_close=on_close,
-                        header={
-                            "Cookie": "user_password="
-                            + self.session.cookies.get("user_password", "")
-                        },
-                    )
-                    run_forever_kwargs = {
-                        "http_proxy_host": self.http_proxy_host,
-                        "http_proxy_port": self.http_proxy_port,
-                        "ping_timeout": 100.0,
-                    }
-                    if ws_scheme == "wss":
-                        if isinstance(self.ssl_verify, str):
-                            run_forever_kwargs["sslopt"] = {
-                                "cert_reqs": ssl.CERT_REQUIRED,
-                                "ca_certs": self.ssl_verify,
-                            }
-                        elif not self.ssl_verify:
-                            run_forever_kwargs["sslopt"] = {
-                                "cert_reqs": ssl.CERT_NONE,
-                            }
-                    ws.run_forever(**run_forever_kwargs)
-                    ws.close()
-                except Exception as e:
-                    logger.error("Socket had error {}, attempting restart".format(e))
+        host_scheme = urlparse(self.server).scheme
+        if host_scheme == "https":
+            ws_scheme = "wss"
+        else:
+            ws_scheme = "ws"
+        while self.use_socket:
+            try:
+                sock_addr = "{}://{}:{}{}/vis_socket".format(
+                    ws_scheme, self.server_base_name, self.port, self.base_url
+                )
+                ws = websocket.WebSocketApp(
+                    sock_addr,
+                    on_message=on_message,
+                    on_error=on_error,
+                    on_close=on_close,
+                    header={
+                        "Cookie": "user_password="
+                        + self.session.cookies.get("user_password", "")
+                    },
+                )
+                run_forever_kwargs = {
+                    "http_proxy_host": self.http_proxy_host,
+                    "http_proxy_port": self.http_proxy_port,
+                    "ping_timeout": 100.0,
+                }
+                if ws_scheme == "wss":
+                    if isinstance(self.ssl_verify, str):
+                        run_forever_kwargs["sslopt"] = {
+                            "cert_reqs": ssl.CERT_REQUIRED,
+                            "ca_certs": self.ssl_verify,
+                        }
+                    elif not self.ssl_verify:
+                        run_forever_kwargs["sslopt"] = {
+                            "cert_reqs": ssl.CERT_NONE,
+                        }
+                ws.run_forever(**run_forever_kwargs)
+                ws.close()
+            except Exception as e:
+                logger.error("Socket had error {}, attempting restart".format(e))
+            if self.use_socket:
                 time.sleep(3)
 
-        # Start listening thread
+    def setup_polling(self):
+        self.setup_socket(polling=True)
+
+    def setup_socket(self, polling=False):
+        run_socket = self._run_polling if polling else self._run_websocket
         self.socket_thread = threading.Thread(
-            target=run_socket, name="Visdom-Socket-Thread"
+            target=run_socket,
+            name="Visdom-Socket-Thread",
+            daemon=True,
         )
-        self.socket_thread.daemon = True
         self.socket_thread.start()
 
     # Utils
@@ -1256,6 +1242,9 @@ class Visdom(object):
 
     def finish_experiment(self, status="finished", env=None):
         """Mark an env's experiment terminal (`"finished"` or `"failed"`).
+
+        An experiment that is already terminal cannot be finished again; the
+        server rejects the attempt rather than restamping the existing record.
 
         Returns the stored experiment as a dict.
         """

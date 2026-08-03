@@ -10,8 +10,10 @@
 import React, { useContext, useEffect, useRef, useState } from 'react';
 const { usePrevious } = require('../util');
 import ApiContext from '../api/ApiContext';
+import { showToast } from '../toasts/toastEvents';
 import Pane from './Pane';
 import { typesetMathJax } from './utils/mathjaxHelpers';
+import { downloadImageAsPdf } from './utils/pdfExport';
 const { sgg } = require('ml-savitzky-golay-generalized');
 
 var PlotPane = (props) => {
@@ -59,9 +61,33 @@ var PlotPane = (props) => {
   const updateSmoothSlider = (value) => {
     setSmoothValue(value);
   };
-  const handleDownload = () => {
+
+  const dpiToScale = (dpi) => (dpi ? dpi / 96 : 1);
+  const PDF_CAPTURE_DPI = 300;
+
+  const handleExport = (format, dpi) => {
+    if (format === 'pdf') {
+      Plotly.toImage(plotlyRef.current, {
+        format: 'jpeg',
+        scale: dpiToScale(PDF_CAPTURE_DPI),
+      }).then((dataUrl) => {
+        downloadImageAsPdf(
+          dataUrl,
+          `${contentID || 'plot'}.pdf`,
+          PDF_CAPTURE_DPI
+        );
+      })
+      .catch((err) => {
+          showToast('Failed to Export PDF', 'error', { duration: 4000 });
+          // eslint-disable-next-line no-console
+          console.error('PlotPane PDF export failed:', err);
+        });
+      return;
+    }
+
     Plotly.downloadImage(plotlyRef.current, {
-      format: 'svg',
+      format: format === 'jpg' ? 'jpeg' : format,
+      scale: dpiToScale(dpi),
       filename: contentID || 'plot',
     });
   };
@@ -263,6 +289,7 @@ var PlotPane = (props) => {
       doubleClick: 'reset',
       doubleClickDelay: 500,
       modeBarButtonsToAdd: ['drawopenpath', 'eraseshape'],
+      modeBarButtonsToRemove: ['toImage'],
     }).then(() => {
       const plotElement = plotlyRef.current;
       if (plotElement && plotElement._fullLayout && isDisplayed(plotElement)) {
@@ -346,7 +373,7 @@ var PlotPane = (props) => {
   return (
     <Pane
       {...props}
-      handleDownload={handleDownload}
+      handleExport={handleExport}
       handleMetadataExport={handleMetadataExport}
       barwidgets={[smooth_widget_button]}
       widgets={[history_widget, caption_widget, smooth_widget]}
