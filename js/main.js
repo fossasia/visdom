@@ -299,7 +299,7 @@ const App = () => {
         showSavedStateRecoveryToast();
       });
       if (_bin.current == null) {
-        rebin();
+        _bin.current = createBin(newLayout, windowSize.current.cols);
       }
       let paneLayout;
       if (stored) {
@@ -443,7 +443,6 @@ const App = () => {
     Object.keys(storeData.panes).map((paneID) => {
       closePane(paneID, false, false);
     });
-    rebin();
     setStoreData((prev) => ({
       ...prev,
       layout: [],
@@ -617,12 +616,9 @@ const App = () => {
     updateLayout(layout);
   };
 
-  const rebin = (layout, layoutID = selection.layoutID) => {
-    layout = layout ? layout : storeData.layout;
+  const applySavedLayout = (layout, layoutID, layoutMap) => {
     if (layoutID !== DEFAULT_LAYOUT) {
-      let envLayoutList = getCurrLayoutList();
-      let layoutMap = envLayoutList.get(layoutID);
-      layout = layout.map((paneLayout) => {
+      return layout.map((paneLayout) => {
         if (layoutMap.has(paneLayout.i)) {
           let storedVals = layoutMap.get(paneLayout.i);
           return {
@@ -636,6 +632,11 @@ const App = () => {
         return paneLayout;
       });
     }
+
+    return layout;
+  };
+
+  const createBin = (layout, cols) => {
     let contents = layout.map((paneLayout) => {
       return {
         width: paneLayout.w,
@@ -643,8 +644,7 @@ const App = () => {
       };
     });
 
-    _bin.current = new Bin.ShelfFirst(contents, windowSize.current.cols);
-    return layout;
+    return new Bin.ShelfFirst(contents, cols);
   };
 
   const getCurrLayoutList = () => {
@@ -662,6 +662,7 @@ const App = () => {
     let envLayoutList = getCurrLayoutList();
     let layoutMap = envLayoutList.get(layoutID);
     let filter = getValidFilter(nextFilterString);
+    let cols = windowSize.current.cols;
 
     setStoreData((prev) => {
       let sorted = sortLayout(prev.layout);
@@ -689,10 +690,11 @@ const App = () => {
 
       // The bin packer indexes its dimensions by pane order, so initialize it
       // only after the final filtered/saved-view order has been determined.
-      sorted = rebin(sorted, layoutID);
+      sorted = applySavedLayout(sorted, layoutID, layoutMap);
+      let bin = createBin(sorted, cols);
 
       let newLayout = sorted.map((paneLayout, idx) => {
-        let pos = _bin.current.position(idx, windowSize.current.cols);
+        let pos = bin.position(idx, cols);
 
         newPanes[paneLayout.i] = {
           ...newPanes[paneLayout.i],
@@ -716,6 +718,9 @@ const App = () => {
   const resizePaneLive = (layout) => {
     updateLayout(layout);
   };
+  React.useLayoutEffect(() => {
+    _bin.current = createBin(storeData.layout, windowSize.current.cols);
+  }, [storeData.layout]);
   useEffect(() => {
     clearTimeout(localStorageTimer.current);
     localStorageTimer.current = setTimeout(() => {
