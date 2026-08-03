@@ -426,9 +426,10 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
 
             elif op == "add_row":
                 new_row = payload.get("values") or [""] * len(headers)
-                if len(new_row) != len(headers):
+                if not isinstance(new_row, list) or len(new_row) != len(headers):
                     logging.warning(
-                        "table_edit: add_row values length mismatch, dropping event"
+                        "table_edit: add_row values must be a list matching"
+                        " headers length, dropping event"
                     )
                     return
                 rows.append(new_row)
