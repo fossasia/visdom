@@ -1,4 +1,12 @@
-"""Unit tests for the experiments query parser (Layer 2, PR 3).
+#!/usr/bin/env python3
+
+# Copyright 2017-present, The Visdom Authors
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
+"""Unit tests for the experiments query parser.
 
 The query language turns a human string such as ``lr < 0.01 AND acc > 90``
 into a predicate tree that is evaluated against a plain ``dict``. These tests
@@ -234,6 +242,24 @@ class TestMalformedInput(unittest.TestCase):
     def test_reserved_word_as_bare_value(self):
         with self.assertRaises(QueryParseError):
             parse_query("owner = and")
+
+    def test_reserved_word_as_bare_field_name(self):
+        """A field named exactly after a keyword reads as an operator, not a name."""
+        for text in ("and = 5", "or = 1", "contains = 7"):
+            with self.assertRaises(QueryParseError):
+                parse_query(text)
+
+    def test_reserved_field_name_is_reachable_when_namespaced(self):
+        """The namespaced key is the way to query such a field."""
+        record = {"param.and": 5, "metric.contains": 7, "tag.or": "alice"}
+        self.assertTrue(match("param.and = 5", record))
+        self.assertTrue(match("metric.contains = 7", record))
+        self.assertTrue(match("tag.or = alice", record))
+
+    def test_names_merely_starting_with_a_keyword_are_ordinary(self):
+        """Only a whole token is reserved, so ``and_steps`` needs no escaping."""
+        record = {"and_steps": 5, "containsX": 1}
+        self.assertTrue(match("and_steps = 5 AND containsX = 1", record))
 
 
 class TestParseLimits(unittest.TestCase):

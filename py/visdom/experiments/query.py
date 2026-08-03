@@ -8,8 +8,8 @@
 
 """A small, injection-safe query language for filtering experiments.
 
-The search layer (added in a later PR) lets a user filter experiments with a
-human-readable expression such as::
+The search layer lets a user filter experiments with a human-readable
+expression such as::
 
     lr < 0.01 AND acc > 90
     status = finished AND (name contains resnet OR tag.owner = alice)
@@ -33,6 +33,14 @@ The grammar (lowest-to-highest precedence)::
 ``AND``/``OR``/``contains`` are case-insensitive keywords; ``true``/``false``
 (unquoted) parse as booleans. Anything else on the value side is a string —
 quote it (``"..."`` or ``'...'``) if it contains spaces or a reserved word.
+
+Those keywords are reserved on the field-name side too, so a param, metric or
+tag named exactly ``and``, ``or`` or ``contains`` cannot be written bare:
+``contains = 7`` reads as an operator where a field name should be and is
+rejected. Query it through its namespaced key instead — ``param.and``,
+``metric.contains``, ``tag.or`` — which is never mistaken for a keyword. Only
+a whole token is reserved, so ordinary names like ``and_steps`` or
+``containsX`` need nothing special.
 
 Parsing is bounded at the point where text enters the module, so an
 attacker-supplied query cannot turn into unbounded work once this is wired to
@@ -284,9 +292,11 @@ class _Parser:
                         MAX_QUERY_DEPTH
                     )
                 )
-            node = self._parse_or()
-            self._expect("RPAREN")
-            self._depth -= 1
+            try:
+                node = self._parse_or()
+                self._expect("RPAREN")
+            finally:
+                self._depth -= 1
             return node
         return self._parse_comparison()
 
