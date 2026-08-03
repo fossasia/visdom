@@ -574,10 +574,10 @@ paths:
                     description: The query used, `""` if none was given.
         "400":
           description: >
-            Invalid request — malformed `query` syntax, a non-string
-            `query`/`sort_by`, or a `limit`/`offset` that is not a non-negative
-            integer. Also returned when authentication is required but not
-            provided.
+            Invalid request — a body that is not a JSON object, malformed
+            `query` syntax, a non-string `query`/`sort_by`, or a `limit`/`offset`
+            that is not a non-negative integer. Also returned when
+            authentication is required but not provided.
 
   /upload_env:
     post:

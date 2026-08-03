@@ -208,6 +208,14 @@ class TestSearchEndpoint(tornado.testing.AsyncHTTPTestCase):
             headers={"Content-Type": "application/json"},
         )
 
+    def post_raw(self, body):
+        return self.fetch(
+            "/experiments/search",
+            method="POST",
+            body=body,
+            headers={"Content-Type": "application/json"},
+        )
+
     def search_ok(self, body):
         resp = self.search(body)
         self.assertEqual(resp.code, 200)
@@ -312,6 +320,23 @@ class TestSearchEndpoint(tornado.testing.AsyncHTTPTestCase):
     def test_non_string_sort_by_is_400(self):
         """sort_by must name a field."""
         self.assertEqual(self.search({"sort_by": 7}).code, 400)
+
+    def test_missing_body_returns_everything(self):
+        """The body is optional, so no body at all is a search for everything."""
+        resp = self.post_raw("")
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(json.loads(resp.body)["total"], 3)
+
+    def test_malformed_json_is_400(self):
+        """A body that is not JSON is the caller's error, not a 500."""
+        resp = self.post_raw("{not json")
+        self.assertEqual(resp.code, 400)
+
+    def test_non_object_body_is_400(self):
+        """A JSON list or scalar carries no arguments to read, so reject it."""
+        self.assertEqual(self.post_raw("[1, 2]").code, 400)
+        self.assertEqual(self.post_raw('"query"').code, 400)
+        self.assertEqual(self.post_raw("null").code, 400)
 
     def test_non_boolean_descending_is_400(self):
         """The string "false" is rejected rather than coerced to true."""
