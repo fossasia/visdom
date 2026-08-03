@@ -73,6 +73,12 @@ const paneCases = [
     targetX: 263,
     size: { height: 290, width: 244 },
   },
+  {
+    type: 'Table',
+    demo: 'table',
+    targetX: 391,
+    size: { height: 290, width: 370 },
+  },
   { type: 'Confusion Matrix', demo: 'plot_confusion_matrix_basic' },
 ].map((paneCase) => {
   const size = paneCase.size || { height: 350, width: 370 };

@@ -183,6 +183,35 @@ function renderContent(id, pane, pc) {
     return;
   }
 
+  // Table
+  if (t === 'table') {
+    const headers = (c && Array.isArray(c.headers)) ? c.headers : [];
+    const rows = (c && Array.isArray(c.rows)) ? c.rows : [];
+    if (!headers.length) {
+      pc.innerHTML = '<p class="note">Table: no data</p>';
+      return;
+    }
+    const tbl = mkEl('table');
+    const headRow = tbl.createTHead().insertRow();
+    headers.forEach((h) => {
+      const th = document.createElement('th');
+      th.textContent = h !== undefined && h !== null ? String(h) : '';
+      headRow.appendChild(th);
+    });
+    const tb = tbl.createTBody();
+    rows.forEach((row) => {
+      if (!Array.isArray(row)) return;
+      const r = tb.insertRow();
+      headers.forEach((_, i) => {
+        const cell = row[i];
+        r.insertCell().textContent =
+          cell !== undefined && cell !== null ? String(cell) : '';
+      });
+    });
+    pc.appendChild(tbl);
+    return;
+  }
+
   // Network -> Plotly scatter
   // Circular initial layout; edges as one line trace with null separators.
   if (t === 'network') {
