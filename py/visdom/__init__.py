@@ -4491,9 +4491,20 @@ class Visdom(object):
                 data.ndim == 2
             ), "`data` as a numpy array must be 2-dimensional (rows x columns)"
             data = data.tolist()
+        elif data is not None and not isinstance(data, (list, tuple)):
+            raise AssertionError(
+                "`data` must be a list, tuple, or numpy array (got %s)"
+                % type(data).__name__
+            )
+
         if isinstance(headers, np.ndarray):
             assert headers.ndim == 1, "`headers` as a numpy array must be 1-dimensional"
             headers = headers.tolist()
+        elif headers is not None and not isinstance(headers, (list, tuple)):
+            raise AssertionError(
+                "`headers` must be a list, tuple, or numpy array (got %s)"
+                % type(headers).__name__
+            )
 
         has_data = data is not None and len(data) > 0
         has_headers = headers is not None and len(headers) > 0
