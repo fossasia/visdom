@@ -361,8 +361,8 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
             content = p.get("content")
             if (
                 not isinstance(content, dict)
-                or "headers" not in content
-                or "rows" not in content
+                or not isinstance(content.get("headers"), list)
+                or not isinstance(content.get("rows"), list)
             ):
                 logging.warning(
                     f"table_edit: pane {win!r} has malformed table content,"
@@ -396,6 +396,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     r is None
                     or c is None
                     or not (0 <= r < len(rows))
+                    or not isinstance(rows[r], list)
                     or not (0 <= c < len(headers))
                     or not (0 <= c < len(rows[r]))
                 ):
@@ -454,6 +455,8 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 headers.append(name)
                 patch = [{"op": "add", "path": "/content/headers/-", "value": name}]
                 for i, row in enumerate(rows):
+                    if not isinstance(row, list):
+                        continue
                     row.append(default)
                     patch.append(
                         {"op": "add", "path": f"/content/rows/{i}/-", "value": default}
@@ -476,7 +479,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 headers.pop(c)
                 patch = [{"op": "remove", "path": f"/content/headers/{c}"}]
                 for i, row in enumerate(rows):
-                    if c < len(row):
+                    if isinstance(row, list) and c < len(row):
                         row.pop(c)
                         patch.append({"op": "remove", "path": f"/content/rows/{i}/{c}"})
 
