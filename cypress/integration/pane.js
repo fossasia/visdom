@@ -24,6 +24,7 @@ const basic_examples = [
   // ["Audio Pane", "misc_audio_basic"], // bug: disabled due to inconsistent resize
   ['Properties Pane', 'properties_basic'],
   ['HTML Table', 'html_table'],
+  ['Table', 'table'],
   ['Confusion Matrix', 'plot_confusion_matrix_basic'],
 ];
 
