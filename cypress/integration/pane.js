@@ -111,6 +111,9 @@ basic_examples.forEach((setting) => {
     } else if (basic_example == "html_table") {
       [ height, width ] = [ 290, 244 ];
       [ height4, width4 ] = [ height, width];
+    } else if (basic_example == 'table') {
+      [height, width] = [290, 370];
+      [height4, width4] = [height, width];
     } else {
       [height, width] = [350, 370];
       [height4, width4] = [height, width];
