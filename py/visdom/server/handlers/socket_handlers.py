@@ -446,8 +446,12 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 patch = [{"op": "remove", "path": f"/content/rows/{r}"}]
 
             elif op == "add_col":
-                name = str(payload.get("name", f"Column {len(headers) + 1}"))
-                default = payload.get("default", "")
+                name = str(
+                    payload.get("name") or f"Column {len(headers) + 1}"
+                )
+                default = payload.get("default")
+                if default is None:
+                    default = ""
                 headers.append(name)
                 patch = [{"op": "add", "path": "/content/headers/-", "value": name}]
                 for i, row in enumerate(rows):

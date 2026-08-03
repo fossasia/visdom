@@ -19,11 +19,10 @@ const MIN_COL_WIDTH = 40;
 const MIN_ROW_HEIGHT = 18;
 
 function TablePane(props) {
-  const { sendTableEdit } = useContext(ApiContext);
+  const { sendTableEdit, sessionInfo } = useContext(ApiContext);
   const { envID, id, content } = props;
-  const { headers, rows } = content;
-  const editable = props.editable !== false;
-
+  const { headers = [], rows = [] } = content || {};
+  const editable = props.editable !== false && !sessionInfo?.readonly;
   const [colWidths, setColWidths] = useState(() =>
     headers.map(() => DEFAULT_COL_WIDTH)
   );
@@ -39,6 +38,16 @@ function TablePane(props) {
   useEffect(() => {
     setRowHeights((h) => rows.map((_, i) => h[i] ?? DEFAULT_ROW_HEIGHT));
   }, [rows.length]);
+
+  useEffect(() => {
+    return () => {
+      if (dragState.current) {
+        document.removeEventListener('mousemove', dragState.current.onMove);
+        document.removeEventListener('mouseup', dragState.current.onUp);
+        dragState.current = null;
+      }
+    };
+  }, []);
 
   // private events
   // --------------
@@ -65,12 +74,11 @@ function TablePane(props) {
         ? (colWidths[idx] ?? DEFAULT_COL_WIDTH)
         : (rowHeights[idx] ?? DEFAULT_ROW_HEIGHT);
     const minSize = kind === 'col' ? MIN_COL_WIDTH : MIN_ROW_HEIGHT;
-    dragState.current = { kind, idx, startPos, startSize };
 
     const onMove = (moveEv) => {
       const pos = kind === 'col' ? moveEv.clientX : moveEv.clientY;
-      const delta = pos - dragState.current.startPos;
-      const newSize = Math.max(minSize, dragState.current.startSize + delta);
+      const delta = pos - startPos;
+      const newSize = Math.max(minSize, startSize + delta);
       if (kind === 'col') {
         setColWidths((w) => {
           const next = [...w];
@@ -90,12 +98,19 @@ function TablePane(props) {
       document.removeEventListener('mouseup', onUp);
       dragState.current = null;
     };
+    dragState.current = { onMove, onUp };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
   };
 
   const handleDownload = () => {
-    const escapeCsv = (v) => `"${String(v).replace(/"/g, '""')}"`;
+    const escapeCsv = (v) => {
+      let s = String(v);
+      if (/^[=+\-@\t\r]/.test(s)) {
+        s = `'${s}`;
+      }
+      return `"${s.replace(/"/g, '""')}"`;
+    };
     const csv = [headers, ...rows]
       .map((r) => r.map(escapeCsv).join(','))
       .join('\n');
@@ -173,56 +188,62 @@ function TablePane(props) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, r) => (
-              <tr key={r} style={{ height: rowHeights[r] }}>
-                {row.map((cell, c) => {
-                  const isFirst = c === 0;
-                  if (!editable) {
+            {rows.map((row, r) => {
+              const cells =
+                row.length === headers.length
+                  ? row
+                  : headers.map((_, i) => row[i] ?? '');
+              return (
+                <tr key={r} style={{ height: rowHeights[r] }}>
+                  {cells.map((cell, c) => {
+                    const isFirst = c === 0;
+                    if (!editable) {
+                      return (
+                        <td key={c} className="table-cell table-cell-readonly">
+                          {cell}
+                        </td>
+                      );
+                    }
                     return (
-                      <td key={c} className="table-cell table-cell-readonly">
-                        {cell}
+                      <td
+                        key={c}
+                        className={
+                          isFirst ? 'table-cell table-cell-first' : 'table-cell'
+                        }
+                      >
+                        <div className="table-cell-inner">
+                          <PropertyItem
+                            type="text"
+                            value={cell}
+                            propId={c}
+                            updateValue={(_, value) => editCell(r, c, value)}
+                            blurStopPropagation={true}
+                          />
+                          {isFirst && (
+                            <button
+                              type="button"
+                              className="table-delete-row"
+                              title="Delete row"
+                              onClick={() => deleteRow(r)}
+                            >
+                              ×
+                            </button>
+                          )}
+                        </div>
+                        {isFirst && (
+                          <div
+                            className="row-resize-handle"
+                            aria-hidden="true"
+                            onMouseDown={(ev) => startResize('row', r, ev)}
+                          />
+                        )}
                       </td>
                     );
-                  }
-                  return (
-                    <td
-                      key={c}
-                      className={
-                        isFirst ? 'table-cell table-cell-first' : 'table-cell'
-                      }
-                    >
-                      <div className="table-cell-inner">
-                        <PropertyItem
-                          type="text"
-                          value={cell}
-                          propId={c}
-                          updateValue={(_, value) => editCell(r, c, value)}
-                          blurStopPropagation={true}
-                        />
-                        {isFirst && (
-                          <button
-                            type="button"
-                            className="table-delete-row"
-                            title="Delete row"
-                            onClick={() => deleteRow(r)}
-                          >
-                            ×
-                          </button>
-                        )}
-                      </div>
-                      {isFirst && (
-                        <div
-                          className="row-resize-handle"
-                          aria-hidden="true"
-                          onMouseDown={(ev) => startResize('row', r, ev)}
-                        />
-                      )}
-                    </td>
-                  );
-                })}
-                {editable && <td />}
-              </tr>
-            ))}
+                  })}
+                  {editable && <td />}
+                </tr>
+              );
+            })}
             {editable && (
               <tr>
                 <td colSpan={headers.length + 1} className="table-add-row">
