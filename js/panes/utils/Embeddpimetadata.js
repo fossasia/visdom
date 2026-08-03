@@ -7,6 +7,12 @@
  *
  */
 
+function normalizeDpi(dpi) {
+  const n = Math.round(Number(dpi));
+  if (!Number.isFinite(n) || n <= 0) return 96;
+  return Math.min(n, 65535);
+}
+
 function dataUrlToBytes(dataUrl) {
   const base64 = dataUrl.substring(dataUrl.indexOf(',') + 1);
   const binaryString = atob(base64);
@@ -52,14 +58,15 @@ function setJpegDpi(jpegBytes, dpi) {
   if (jpegBytes[0] !== 0xff || jpegBytes[1] !== 0xd8) {
     throw new Error('Not a valid JPEG (missing SOI marker)');
   }
+  const safeDpi = normalizeDpi(dpi);
 
   if (isJfifApp0At(jpegBytes, 2)) {
     const out = jpegBytes.slice();
     out[2 + 11] = 1;
-    out[2 + 12] = (dpi >> 8) & 0xff;
-    out[2 + 13] = dpi & 0xff;
-    out[2 + 14] = (dpi >> 8) & 0xff;
-    out[2 + 15] = dpi & 0xff;
+    out[2 + 12] = (safeDpi >> 8) & 0xff;
+    out[2 + 13] = safeDpi & 0xff;
+    out[2 + 14] = (safeDpi >> 8) & 0xff;
+    out[2 + 15] = safeDpi & 0xff;
     return out;
   }
 
@@ -76,16 +83,16 @@ function setJpegDpi(jpegBytes, dpi) {
   app0[9] = 0x01;
   app0[10] = 0x02;
   app0[11] = 0x01;
-  app0[12] = (dpi >> 8) & 0xff;
-  app0[13] = dpi & 0xff;
-  app0[14] = (dpi >> 8) & 0xff;
-  app0[15] = dpi & 0xff;
+  app0[12] = (safeDpi >> 8) & 0xff;
+  app0[13] = safeDpi & 0xff;
+  app0[14] = (safeDpi >> 8) & 0xff;
+  app0[15] = safeDpi & 0xff;
   app0[16] = 0x00;
   app0[17] = 0x00;
 
   const out = new Uint8Array(2 + app0.length + (jpegBytes.length - 2));
   out[0] = 0xff;
-  out[1] = 0xd8; // SOI
+  out[1] = 0xd8;
   out.set(app0, 2);
   out.set(jpegBytes.subarray(2), 2 + app0.length);
   return out;
@@ -154,7 +161,7 @@ function setPngDpi(pngBytes, dpi) {
     }
   }
 
-  const pixelsPerMeter = Math.round(dpi / 0.0254);
+  const pixelsPerMeter = Math.round(normalizeDpi(dpi) / 0.0254);
   const physChunk = buildPhysChunk(pixelsPerMeter);
 
   let pos = 8;
@@ -190,7 +197,6 @@ function setPngDpi(pngBytes, dpi) {
   out.set(pngBytes.subarray(insertAt), insertAt + physChunk.length);
   return out;
 }
-
 
 export function downloadJpegWithDpi(dataUrl, filename, dpi) {
   try {
