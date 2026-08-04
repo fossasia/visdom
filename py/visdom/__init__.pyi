@@ -353,7 +353,7 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
-    def table(
+    def html_table(
         self,
         headers: List[Any],
         data: List[List[Any]],
