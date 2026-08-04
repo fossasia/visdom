@@ -199,15 +199,20 @@ function setPngDpi(pngBytes, dpi) {
 }
 
 export function downloadJpegWithDpi(dataUrl, filename, dpi) {
+  let bytes;
   try {
-    const bytes = dataUrlToBytes(dataUrl);
+    bytes = dataUrlToBytes(dataUrl);
     const stamped = setJpegDpi(bytes, dpi);
     triggerBlobDownload(stamped, 'image/jpeg', filename);
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('downloadJpegWithDpi: failed to embed DPI metadata -', err);
     try {
-      triggerBlobDownload(dataUrlToBytes(dataUrl), 'image/jpeg', filename);
+      triggerBlobDownload(
+        bytes || dataUrlToBytes(dataUrl),
+        'image/jpeg',
+        filename
+      );
     } catch (fallbackErr) {
       // eslint-disable-next-line no-console
       console.error(
@@ -219,15 +224,20 @@ export function downloadJpegWithDpi(dataUrl, filename, dpi) {
 }
 
 export function downloadPngWithDpi(dataUrl, filename, dpi) {
+  let bytes;
   try {
-    const bytes = dataUrlToBytes(dataUrl);
+    bytes = dataUrlToBytes(dataUrl);
     const stamped = setPngDpi(bytes, dpi);
     triggerBlobDownload(stamped, 'image/png', filename);
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('downloadPngWithDpi: failed to embed DPI metadata -', err);
     try {
-      triggerBlobDownload(dataUrlToBytes(dataUrl), 'image/png', filename);
+      triggerBlobDownload(
+        bytes || dataUrlToBytes(dataUrl),
+        'image/png',
+        filename
+      );
     } catch (fallbackErr) {
       // eslint-disable-next-line no-console
       console.error(
