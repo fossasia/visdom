@@ -404,11 +404,15 @@ paths:
         optional `step`, creating the experiment if it does not exist yet.
 
 
-        - `finish`: mark the experiment terminal (`finished` or `failed`).
+        - `finish`: mark the experiment terminal (`finished` or `failed`). An
+        experiment that is already terminal cannot be finished again.
 
 
-        Once an experiment is terminal, `log` and `metrics` are rejected with
-        `409` so a finished run's recorded data cannot change after the fact.
+        Once an experiment is terminal, every action is rejected with `409`, so
+        neither a finished run's recorded data nor its final status can change
+        after the fact.
+        Every action writes, so the endpoint is rejected when the server is
+        running in readonly mode.
       requestBody:
         required: true
         content:
@@ -465,10 +469,16 @@ paths:
             Invalid request — unknown `action`, non-object `params`/`tags`/`metrics`,
             empty `metrics`, or a non-terminal `finish` status. Also returned when
             authentication is required but not provided.
+        "403":
+          description: >
+            Experiment logging is disabled because the server is in readonly
+            mode.
         "404":
           description: A `finish` was requested for an env that has no experiment.
         "409":
-          description: A `log`/`metrics` write was attempted on a terminal (finished/failed) experiment.
+          description: >
+            A write was attempted on a terminal (finished/failed) experiment —
+            a `log`/`metrics` call, or a second `finish`.
 
   /experiments/search:
     post:

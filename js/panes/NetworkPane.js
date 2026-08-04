@@ -13,6 +13,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 
 import Pane from './Pane';
+import { downloadImageAsPdf } from './utils/pdfExport';
 
 function NetworkPane(props) {
   const {
@@ -31,7 +32,8 @@ function NetworkPane(props) {
 
   // private events
   // --------------
-  const handleDownload = () => {
+
+  const handleExport = (format, dpi) => {
     const svg = containerRef.current?.querySelector('svg');
 
     if (!svg) {
@@ -45,13 +47,76 @@ function NetworkPane(props) {
       return;
     }
 
+    const filename = `${props.contentID || 'plot'}.${format}`;
+
+    const scale = dpi ? dpi / 96 : 2;
+
     requestAnimationFrame(() => {
-      const filename = props.contentID ? `${props.contentID}.png` : 'plot.png';
+      if (format === 'svg') {
+        const clone = svg.cloneNode(true);
+        inlineComputedStyles(svg, clone);
+        const source = new XMLSerializer().serializeToString(clone);
+        const blob = new Blob([source], {
+          type: 'image/svg+xml;charset=utf-8',
+        });
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+        return;
+      }
+
+      if (format === 'pdf') {
+        const PDF_CAPTURE_DPI = 300;
+        const pdfScale = PDF_CAPTURE_DPI / 96;
+        svgAsPngUri(
+          svg,
+          {
+            scale: pdfScale,
+            backgroundColor: '#FFFFFF',
+            encoderType: 'image/jpeg',
+            encoderOptions: 0.92,
+          },
+          (uri) => {
+            downloadImageAsPdf(uri, filename, PDF_CAPTURE_DPI);
+          }
+        );
+        return;
+      }
+
       saveSvgAsPng(svg, filename, {
-        scale: 2,
+        scale,
         backgroundColor: '#FFFFFF',
+        encoderType: format === 'jpg' ? 'image/jpeg' : 'image/png',
+        encoderOptions: format === 'jpg' ? 0.92 : undefined,
       });
     });
+  };
+
+  const SVG_STYLE_PROPS = [
+    'fill',
+    'stroke',
+    'stroke-width',
+    'stroke-opacity',
+    'fill-opacity',
+    'opacity',
+    'font-family',
+    'font-size',
+  ];
+  const inlineComputedStyles = (liveEl, cloneEl) => {
+    const computed = window.getComputedStyle(liveEl);
+    const styleStr = SVG_STYLE_PROPS.map(
+      (prop) => `${prop}:${computed.getPropertyValue(prop)}`
+    ).join(';');
+    cloneEl.setAttribute('style', styleStr);
+
+    for (let i = 0; i < liveEl.children.length; i++) {
+      inlineComputedStyles(liveEl.children[i], cloneEl.children[i]);
+    }
   };
 
   // effects
@@ -253,7 +318,7 @@ function NetworkPane(props) {
   // ---------
 
   return (
-    <Pane {...props} handleDownload={handleDownload}>
+    <Pane {...props} handleExport={handleExport}>
       {downloadError && <div className="error-message">{downloadError}</div>}
       <div
         ref={containerRef}
