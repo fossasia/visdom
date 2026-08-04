@@ -180,18 +180,21 @@ def _scrub_dict(d):
         return d
 
 
+TICK_FIELD_SUFFIXES = (
+    "type",
+    "label",
+    "tickmin",
+    "tickmax",
+    "tickvals",
+    "ticklabels",
+    "tick",
+    "tickfont",
+    "tickstep",
+)
+
+
 def _axisformat(xy, opts):
-    fields = [
-        "type",
-        "label",
-        "tickmin",
-        "tickmax",
-        "tickvals",
-        "ticklabels",
-        "tick",
-        "tickfont",
-        "tickstep",
-    ]
+    fields = TICK_FIELD_SUFFIXES
     if any(opts.get(xy + i) is not None for i in fields):
         has_ticks = (
             opts.get(xy + "tickmin") is not None
@@ -215,17 +218,7 @@ def _axisformat(xy, opts):
 
 
 def _axisformat3d(xyz, opts):
-    fields = [
-        "type",
-        "label",
-        "tickmin",
-        "tickmax",
-        "tickvals",
-        "ticklabels",
-        "tick",
-        "tickfont",
-        "tickstep",
-    ]
+    fields = TICK_FIELD_SUFFIXES
     if any(opts.get(xyz + i) is not None for i in fields):
         has_ticks = (
             opts.get(xyz + "tickmin") is not None
@@ -250,6 +243,7 @@ def _axisformat3d(xyz, opts):
                 if has_step
                 else None
             ),
+            "dtick": opts.get(xyz + "tickstep"),
             "tickfont": opts.get(xyz + "tickfont"),
         }
 
