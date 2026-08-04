@@ -189,6 +189,7 @@ def _axisformat(xy, opts):
         "tickvals",
         "ticklabels",
         "tick",
+        "tickstep",
         "tickfont",
     ]
     if any(opts.get(xy + i) is not None for i in fields):
