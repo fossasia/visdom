@@ -298,11 +298,12 @@ def _normalize_labels(Y):
     Y = np.ravel(Y)
 
     try:
-        is_integer_labels = (
-            np.issubdtype(Y.dtype, np.number)
-            and np.equal(np.mod(Y, 1), 0).all()
-            and np.nanmin(Y) >= 1
-        )
+        with np.errstate(invalid="ignore"):
+            is_integer_labels = (
+                np.issubdtype(Y.dtype, np.number)
+                and np.equal(np.mod(Y, 1), 0).all()
+                and np.nanmin(Y) >= 1
+            )
     except TypeError:
         is_integer_labels = False
 
