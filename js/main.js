@@ -660,11 +660,11 @@ const App = () => {
     filterString: nextFilterString = filterString,
   } = {}) => {
     let envLayoutList = getCurrLayoutList();
-    let layoutMap = envLayoutList.get(layoutID);
     let filter = getValidFilter(nextFilterString);
     let cols = windowSize.current.cols;
 
     setStoreData((prev) => {
+      let layoutMap = envLayoutList.get(layoutID);
       let sorted = sortLayout(prev.layout);
       let old_sorted = sorted.slice();
       let newPanes = Object.assign({}, prev.panes);
