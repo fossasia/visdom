@@ -190,6 +190,7 @@ def _axisformat(xy, opts):
         "ticklabels",
         "tick",
         "tickfont",
+        "tickstep",
     ]
     if any(opts.get(xy + i) is not None for i in fields):
         has_ticks = (
@@ -223,6 +224,7 @@ def _axisformat3d(xyz, opts):
         "ticklabels",
         "tick",
         "tickfont",
+        "tickstep",
     ]
     if any(opts.get(xyz + i) is not None for i in fields):
         has_ticks = (
