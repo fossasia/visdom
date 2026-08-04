@@ -9,7 +9,7 @@ def html_table(viz, env, args):
         ["abc", 24, "ml eng", "90k"],
         ["pqr", 29, "backend dev", "110k"],
     ]
-    viz.table(
+    viz.html_table(
         headers=headers,
         data=data,
         env=env,
