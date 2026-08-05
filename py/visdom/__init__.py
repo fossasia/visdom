@@ -1173,7 +1173,7 @@ class Visdom(object):
         Shared plumbing for :meth:`experiment`, :meth:`log_metrics` and
         :meth:`finish_experiment`. Returns the stored experiment as a dict when
         the server replies with JSON, otherwise the raw response (e.g. an error
-        string, or the `(msg, endpoint)` tuple when this client has `send=False`).
+        string).
         """
         msg["eid"] = env if env is not None else self.env
         response = self._send(msg, endpoint="experiments/log", quiet=True)
