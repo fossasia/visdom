@@ -111,7 +111,7 @@ from components.plot_violin import (
     plot_violin_with_points,
     plot_violin_horizontal,
 )
-from components.plot_html_table import html_table
+from components.plot_table import html_table
 
 
 # This demo shows all features in a single environment.
