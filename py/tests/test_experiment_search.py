@@ -1,4 +1,12 @@
-"""Tests for experiment search (Layer 2, PR 4).
+#!/usr/bin/env python3
+
+# Copyright 2017-present, The Visdom Authors
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
+"""Tests for experiment search.
 
 Covers the three pieces the search layer is built from: ``ExperimentStore.search``
 (filtering via the query parser, plus sorting) against a real ``JSONStore`` over a
