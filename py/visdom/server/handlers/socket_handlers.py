@@ -293,8 +293,9 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
             }
             broadcast(self, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
 
+            env_snapshot = copy.deepcopy(dict(self.state[eid]))
             tornado.ioloop.IOLoop.current().run_in_executor(
-                None, self.storage.save_env, eid, self.state[eid]
+                None, self.storage.save_env, eid, env_snapshot
             )
 
         elif cmd == "update_comment":
