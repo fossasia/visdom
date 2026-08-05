@@ -14,7 +14,13 @@
 import 'fetch';
 import 'rc-tree-select/assets/index.less';
 
-import React, { useContext, useEffect, useRef, useState } from 'react';
+import React, {
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import ReactDOM from 'react-dom';
 import ReactGridLayout, {
   getLayoutItem,
@@ -718,7 +724,7 @@ const App = () => {
   const resizePaneLive = (layout) => {
     updateLayout(layout);
   };
-  React.useLayoutEffect(() => {
+  useLayoutEffect(() => {
     _bin.current = createBin(storeData.layout, windowSize.current.cols);
   }, [storeData.layout]);
   useEffect(() => {
