@@ -10,8 +10,14 @@
 import React, { useContext, useEffect, useRef, useState } from 'react';
 const { usePrevious } = require('../util');
 import ApiContext from '../api/ApiContext';
+import { showToast } from '../toasts/toastEvents';
 import Pane from './Pane';
+import {
+  downloadJpegWithDpi,
+  downloadPngWithDpi,
+} from './utils/Embeddpimetadata';
 import { typesetMathJax } from './utils/mathjaxHelpers';
+import { downloadImageAsPdf } from './utils/pdfExport';
 const { sgg } = require('ml-savitzky-golay-generalized');
 
 var PlotPane = (props) => {
@@ -59,11 +65,56 @@ var PlotPane = (props) => {
   const updateSmoothSlider = (value) => {
     setSmoothValue(value);
   };
-  const handleDownload = () => {
-    Plotly.downloadImage(plotlyRef.current, {
-      format: 'svg',
-      filename: contentID || 'plot',
-    });
+
+  const dpiToScale = (dpi) => (dpi ? dpi / 96 : 1);
+  const PDF_CAPTURE_DPI = 300;
+
+  const handleExport = (format, dpi) => {
+    if (format === 'pdf') {
+      Plotly.toImage(plotlyRef.current, {
+        format: 'jpeg',
+        scale: dpiToScale(PDF_CAPTURE_DPI),
+      })
+        .then((dataUrl) => {
+          downloadImageAsPdf(
+            dataUrl,
+            `${contentID || 'plot'}.pdf`,
+            PDF_CAPTURE_DPI
+          );
+        })
+        .catch((err) => {
+          showToast('Failed to Export PDF', 'error', { duration: 4000 });
+          // eslint-disable-next-line no-console
+          console.error('PlotPane PDF export failed:', err);
+        });
+      return;
+    }
+
+    if (format === 'svg') {
+      Plotly.downloadImage(plotlyRef.current, {
+        format: 'svg',
+        filename: contentID || 'plot',
+      });
+      return;
+    }
+
+    const dpiToEmbed = dpi || 96;
+    Plotly.toImage(plotlyRef.current, {
+      format: format === 'jpg' ? 'jpeg' : 'png',
+      scale: dpiToScale(dpiToEmbed),
+    })
+      .then((dataUrl) => {
+        const filename = `${contentID || 'plot'}.${format}`;
+        if (format === 'jpg') {
+          downloadJpegWithDpi(dataUrl, filename, dpiToEmbed);
+        } else {
+          downloadPngWithDpi(dataUrl, filename, dpiToEmbed);
+        }
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error(`PlotPane ${format.toUpperCase()} export failed:`, err);
+      });
   };
 
   const handleMetadataExport = () => {
@@ -263,6 +314,7 @@ var PlotPane = (props) => {
       doubleClick: 'reset',
       doubleClickDelay: 500,
       modeBarButtonsToAdd: ['drawopenpath', 'eraseshape'],
+      modeBarButtonsToRemove: ['toImage'],
     }).then(() => {
       const plotElement = plotlyRef.current;
       if (plotElement && plotElement._fullLayout && isDisplayed(plotElement)) {
@@ -346,7 +398,7 @@ var PlotPane = (props) => {
   return (
     <Pane
       {...props}
-      handleDownload={handleDownload}
+      handleExport={handleExport}
       handleMetadataExport={handleMetadataExport}
       barwidgets={[smooth_widget_button]}
       widgets={[history_widget, caption_widget, smooth_widget]}
