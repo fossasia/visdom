@@ -8,7 +8,12 @@ Two layers: **pytest** for Python unit tests (pure functions, server utils, wind
 pip install -r test-requirements.txt   # includes pytest, pytest-cov
 pytest                                 # runs the tracked suite under py/tests/
 pytest -m "not server"                 # skip tests that need a live server (CI default)
+pytest -m unit                         # fast loop while writing, ~2s
+pytest -m "not server" --cov=visdom --cov-report=term-missing   # what CI gates on
 ```
+
+`-q` is already in `addopts`, so passing another `-q` makes it `-qq` and hides the pass/fail
+summary. Add `-o addopts=""` when you want a usable `--collect-only` count.
 
 Config lives in `pyproject.toml` (`[tool.pytest.ini_options]`): discovery is scoped to
 `py/tests/`, and `pythonpath = ["py", "py/tests"]` makes both `import visdom` and
@@ -120,15 +125,57 @@ with `Application(port=8097, env_path=self.env_path)` — `app_factory` is not a
 
 ### Markers
 
-`unit`, `integration`, `slow`, and `server` are registered in `pyproject.toml`. Set
-`pytestmark = pytest.mark.unit` or `pytest.mark.integration` at the top of every new file; it
-works for both plain functions and `TestCase` classes. Many older files predate this and carry no
-marker, so `-m integration` currently under-selects.
+Registered in `pyproject.toml`:
+
+| Marker | Means | In the CI default run? |
+|---|---|---|
+| `unit` | no `Application`, no I/O beyond `tmp_path` | yes, and in the fast gate job |
+| `integration` | in-process `Application`, real HTTP, or handler dispatch | yes |
+| `slow` | takes more than a couple of seconds | yes, deselectable locally |
+| `server` | needs an **externally launched** visdom on a real port | **no** |
+
+Set `pytestmark = pytest.mark.unit` or `pytest.mark.integration` at the top of **every** file; it
+works for plain functions and `TestCase` classes alike. This is not decoration — CI runs `-m unit`
+as a gate, so an unmarked file is in neither job and is effectively only covered by the slower run.
+
+The invariant to preserve: **`-m unit` and `-m integration` must sum to the whole suite.**
+
+```bash
+pytest py/tests --collect-only -q -o addopts="" | tail -1   # 1502
+pytest -m unit --collect-only -q -o addopts="" | tail -1    # 1072
+pytest -m integration --collect-only -q -o addopts="" | tail -1  # 430
+```
+
+If those stop adding up, a file lost its marker.
+
+Nothing in the tracked suite is marked `server`; everything under `py/tests/` is hermetic by
+design. A script that needs a live server belongs in `example/manual/`.
+
+### Keeping the suite fast
+
+The whole suite runs in **under ten seconds**. It is worth keeping it there, and the way it stops
+being there is usually a client built without `use_incoming_socket=False`: that client waits out a
+socket connect timeout, costing 6.3 seconds per test. `integration/experiment_log_handler.py` once
+spent 38 of the suite's 43 seconds that way.
+
+Use the `offline_client` fixture rather than constructing a `Visdom` by hand. If you must build
+one, pass `send=False, use_incoming_socket=False`. `pytest --durations=10` shows the outliers.
 
 ## CI
 
-- `python-tests.yml` runs `pytest -m "not server"` on a Python version matrix for every pull
-  request (and on pushes to master/dev)
+- `python-tests.yml` runs two jobs on every pull request (and on pushes to master/dev):
+  - **`unit`** — `pytest -m unit` on 3.12 only. Finishes in a couple of seconds and gates the
+    matrix job, so an obvious break fails before three torch installs happen.
+  - **`pytest`** — `pytest -m "not server"` on a 3.12/3.13 matrix, with
+    `--cov=visdom --cov-report=term-missing --cov-fail-under=80`.
+- The coverage floor is **80** against a measured **84%**. The gap is deliberate headroom so an
+  unrelated PR does not go red on rounding. Raise the floor when coverage rises; do not lower it to
+  make a red build green. `loggers/sklearn.py` and `pytorch.py` sit at 0% on purpose —
+  `autolog()` monkey-patches every `sklearn` estimator with no un-patch API, so testing it would
+  corrupt the session.
+- The `--cov` flags live in the workflow, **not** in `pyproject.toml`'s `addopts`: a floor is
+  meaningless on the single-file runs you do while writing a test, and `addopts` would make every
+  local `pytest` hard-require pytest-cov.
 - Visual regression compares PR screenshots against base branch
 - `update-js-build-files.yml` auto-compiles JS on master
 - `pypi.yml` publishes to PyPI when VERSION changes

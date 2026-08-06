@@ -9,9 +9,12 @@
 import unittest
 
 import numpy as np
+import pytest
 import visdom
 
 from visdom.server.handlers.web_handlers import UpdateHandler
+
+pytestmark = pytest.mark.unit
 
 
 class TestImageUpdateSelected(unittest.TestCase):

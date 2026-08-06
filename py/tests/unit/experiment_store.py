@@ -18,6 +18,8 @@ persists to disk and coexists with ordinary environment window data.
 import tempfile
 import unittest
 
+import pytest
+
 from visdom.data_model import JSONStore
 from visdom.utils.server_utils import LazyEnvData
 from visdom.experiments import (
@@ -31,6 +33,8 @@ from visdom.experiments import (
     STATUS_FINISHED,
     STATUS_RUNNING,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class TestModels(unittest.TestCase):

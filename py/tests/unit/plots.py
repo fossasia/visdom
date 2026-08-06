@@ -9,7 +9,10 @@
 import unittest
 from unittest.mock import patch
 import numpy as np
+import pytest
 import visdom
+
+pytestmark = pytest.mark.unit
 
 
 class TestLine(unittest.TestCase):

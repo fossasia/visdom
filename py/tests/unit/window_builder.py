@@ -12,6 +12,8 @@ from visdom.utils.server_utils import update_window, window
 
 from testutils.payloads import content_args, plot_data, window_args
 
+pytestmark = pytest.mark.unit
+
 
 def test_command_is_window():
     assert window(window_args())["command"] == "window"

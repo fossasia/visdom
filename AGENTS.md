@@ -39,6 +39,8 @@ Version `0.2.4` · Python >= 3.12 · Apache 2.0
 ## Testing
 
 - Python unit tests: `pytest -m "not server"` (config in `pyproject.toml`, suite in `py/tests/`)
+- Fast loop: `pytest -m unit` — CI runs this as a gate, so mark every new file with a module-level
+  `pytestmark`; see `context/testing.md` for which marker and where the file goes
 - Start server (for Cypress): `visdom -port 8098 -env_path /tmp`
 - Baseline: `npm run test:init`
 - Run E2E tests: `npm run test`
@@ -47,6 +49,8 @@ Version `0.2.4` · Python >= 3.12 · Apache 2.0
 ## PR Checklist
 
 - Branch from `master`; add `pytest` tests in `py/tests/` for Python code and Cypress tests for frontend behavior
+- New test file: put it in `py/tests/unit/` or `py/tests/integration/`, give it the matching
+  `pytestmark`, and keep coverage at or above the `--cov-fail-under` floor
 - Update `README` for API changes, `__init__.pyi` for interface changes
 - Run linters, do not commit `py/visdom/static/`
 
