@@ -1,8 +1,16 @@
+#!/usr/bin/env python3
+
+# Copyright 2017-present, The Visdom Authors
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
 """
 Tests that the server routes persistence through ``Application.storage``
 (the DataStore backend) rather than writing environment files directly.
 
-These guard the PR-#2 wiring: end-to-end save/fork/reload behavior is already
+As end-to-end save/fork/reload behavior is already
 covered in ``test_environment_lifecycle``; here we assert the abstraction itself
 is in place so a future refactor cannot silently bypass the backend.
 """
@@ -121,6 +129,17 @@ class TestLoadStateWiring(unittest.TestCase):
         app = Application(port=8097, env_path=self.env_path, eager_data_loading=True)
         self.assertIsInstance(app.state["expt"], dict)
         self.assertEqual(app.state["expt"], _env())
+
+    def test_eager_preserves_extra_env_keys(self):
+        """Eager loading keeps env keys the server itself does not read.
+
+        Experiment metadata lives under the env's ``experiment`` key, so
+        dropping unknown keys here would lose it on the next full-env save.
+        """
+        experiment = {"env_id": "expt", "name": "run-1", "status": "running"}
+        self._seed("expt", dict(_env("w1"), experiment=experiment))
+        app = Application(port=8097, env_path=self.env_path, eager_data_loading=True)
+        self.assertEqual(app.state["expt"]["experiment"], experiment)
 
     def test_load_state_routes_through_storage(self):
         self._seed("expt")

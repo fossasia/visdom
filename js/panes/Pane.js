@@ -17,6 +17,7 @@ import React, {
 
 import ApiContext from '../api/ApiContext';
 import PropertyItem from './PropertyItem';
+import ExportPane from './utils/ExportPane';
 var classNames = require('classnames');
 
 const COMMENT_SAVE_DEBOUNCE_MS = 500;
@@ -92,8 +93,8 @@ var Pane = forwardRef((props, ref) => {
   );
 
   let contentClassNames = classNames({
-   content: true,
-   'content-with-comment': commentEnabled && commentOpen,
+    content: true,
+    'content-with-comment': commentEnabled && commentOpen,
   });
 
   // add property list button to barwidgets
@@ -172,10 +173,17 @@ var Pane = forwardRef((props, ref) => {
           {' '}
           X{' '}
         </button>
-        <button title="save" onClick={handleDownload}>
-          {' '}
-          &#8681;{' '}
-        </button>
+        {props.handleExport ? (
+          <ExportPane
+            onExport={props.handleExport}
+            allowedFormats={props.exportFormats}
+          />
+        ) : (
+          <button title="save" onClick={handleDownload}>
+            {' '}
+            &#8681;{' '}
+          </button>
+        )}
         <button
           title="export metadata"
           onClick={handleMetadataExport}
