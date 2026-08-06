@@ -49,8 +49,8 @@ Version `0.2.4` · Python >= 3.12 · Apache 2.0
 ## PR Checklist
 
 - Branch from `master`; add `pytest` tests in `py/tests/` for Python code and Cypress tests for frontend behavior
-- New test file: put it in `py/tests/unit/` or `py/tests/integration/`, give it the matching
-  `pytestmark`, and keep coverage at or above the `--cov-fail-under` floor
+- New test file: put it in `py/tests/unit/` or `py/tests/integration/`, and give it the matching
+  `pytestmark` — CI runs `-m unit` as a gate, so an unmarked file is in neither job
 - Update `README` for API changes, `__init__.pyi` for interface changes
 - Run linters, do not commit `py/visdom/static/`
 

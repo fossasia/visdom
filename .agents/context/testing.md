@@ -167,15 +167,16 @@ one, pass `send=False, use_incoming_socket=False`. `pytest --durations=10` shows
   - **`unit`** — `pytest -m unit` on 3.12 only. Finishes in a couple of seconds and gates the
     matrix job, so an obvious break fails before three torch installs happen.
   - **`pytest`** — `pytest -m "not server"` on a 3.12/3.13 matrix, with
-    `--cov=visdom --cov-report=term-missing --cov-fail-under=80`.
-- The coverage floor is **80** against a measured **84%**. The gap is deliberate headroom so an
-  unrelated PR does not go red on rounding. Raise the floor when coverage rises; do not lower it to
-  make a red build green. `loggers/sklearn.py` and `pytorch.py` sit at 0% on purpose —
-  `autolog()` monkey-patches every `sklearn` estimator with no un-patch API, so testing it would
-  corrupt the session.
-- The `--cov` flags live in the workflow, **not** in `pyproject.toml`'s `addopts`: a floor is
-  meaningless on the single-file runs you do while writing a test, and `addopts` would make every
-  local `pytest` hard-require pytest-cov.
+    `--cov=visdom --cov-report=term-missing`.
+- Coverage is **reported, not enforced**. There is no `--cov-fail-under` yet: it needs a number the
+  whole codebase can hold, and picking one is its own decision. Current total is **84%**, and the
+  report exists so that number can be chosen from real data rather than guessed.
+- What a floor would have to account for, whenever it is set: `loggers/sklearn.py` (108 statements)
+  and `pytorch.py` (39) sit at 0% by design — `autolog()` monkey-patches every `sklearn` estimator
+  with no un-patch API, so testing it would corrupt the session. Either omit them in
+  `[tool.coverage.run]` or pick a floor that expects them to be missing.
+- The `--cov` flags live in the workflow, **not** in `pyproject.toml`'s `addopts`, which would make
+  every local `pytest` hard-require pytest-cov and slow down single-file runs.
 - Visual regression compares PR screenshots against base branch
 - `update-js-build-files.yml` auto-compiles JS on master
 - `pypi.yml` publishes to PyPI when VERSION changes

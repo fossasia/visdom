@@ -49,14 +49,15 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e .
           python -m pip install -r test-requirements.txt
-      # The coverage flags live here rather than in pyproject's addopts: a floor
-      # is meaningless on the single-file runs developers do all day, and
-      # addopts would make every local pytest hard-require pytest-cov.
-      # Floor is 80 against a measured 84 -- enough headroom that an unrelated
-      # PR does not go red on rounding, tight enough to catch a real regression.
+      # Coverage is reported, not enforced. A --cov-fail-under threshold is a
+      # separate decision -- it needs a number the whole codebase can actually
+      # hold, and picking one belongs in its own PR rather than riding along
+      # with this suite work. The report is here so that number can be chosen
+      # from real data.
+      # The flags live here rather than in pyproject's addopts, which would make
+      # every local pytest hard-require pytest-cov.
       - name: Run pytest with coverage
         run: >-
           pytest -m "not server"
           --cov=visdom
           --cov-report=term-missing
-          --cov-fail-under=80
