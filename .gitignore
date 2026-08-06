@@ -40,3 +40,9 @@ playwright/tmp/
 playwright-report/
 test-results/
 tmp/
+
+# pytest-cov artifacts, written by the coverage run CI gates on
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
