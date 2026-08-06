@@ -98,7 +98,9 @@ async function closeEnvs(page) {
 }
 
 async function expandAllEnvGroups(page) {
-  const closedGroups = page.locator('.rc-tree-select-tree-switcher_close');
+  const closedGroups = page.locator(
+    '.rc-tree-select-tree-switcher_close:visible'
+  );
   let count = await closedGroups.count();
   let attempts = 0;
   while (count > 0 && attempts < 50) {
@@ -110,24 +112,60 @@ async function expandAllEnvGroups(page) {
 }
 
 async function closeEnvDropdown(page) {
-  await page.keyboard.press('Escape');
+  const dropdown = page.locator(
+    '.rc-tree-select-dropdown:not(.rc-tree-select-dropdown-hidden)'
+  );
+  if (await dropdown.isVisible()) {
+    await page
+      .locator('.navbar-form .rc-tree-select')
+      .first()
+      .click({ position: { x: 5, y: 10 }, force: true });
+    try {
+      await dropdown.waitFor({ state: 'hidden', timeout: 1000 });
+    } catch (e) {
+      await page.keyboard.press('Escape');
+      await dropdown.waitFor({ state: 'hidden', timeout: 2000 }).catch(() => {});
+    }
+  }
 }
 
 async function openEnv(page, name) {
-  await page.locator('.navbar-form .rc-tree-select').first().click();
+  const dropdown = page.locator(
+    '.rc-tree-select-dropdown:not(.rc-tree-select-dropdown-hidden)'
+  );
+  if (!(await dropdown.isVisible())) {
+    await page
+      .locator('.navbar-form .rc-tree-select')
+      .first()
+      .click({ position: { x: 5, y: 10 }, force: true });
+    try {
+      await dropdown.waitFor({ state: 'visible', timeout: 1000 });
+    } catch (e) {
+      await page
+        .locator('.navbar-form .rc-tree-select')
+        .first()
+        .click({ position: { x: 5, y: 10 }, force: true });
+      await dropdown.waitFor({ state: 'visible', timeout: 5000 });
+    }
+  }
 
   const idx = name.indexOf('_');
   const expectedText = idx > 0 ? name.substring(0, idx) : name;
 
   const tree = page.locator('.rc-tree-select-tree');
   await tree
-    .locator(`text=${expectedText}`)
+    .getByText(expectedText, { exact: true })
     .first()
     .waitFor({ state: 'visible', timeout: 10000 });
 
   await expandAllEnvGroups(page);
 
-  await tree.locator(`text=${name}`).first().click({ force: true });
+  await tree
+    .getByText(name, { exact: true })
+    .first()
+    .waitFor({ state: 'visible', timeout: 10000 });
+
+  await tree.getByText(name, { exact: true }).first().click({ force: true });
   await closeEnvDropdown(page);
 }
 
