@@ -36,7 +36,7 @@ class Visdom:
         http_proxy_host: _OptStr = ...,
         http_proxy_port: Optional[int] = ...,
         env: Text = ...,
-        send: bool = ...,
+        *,
         raise_exceptions: Optional[bool] = ...,
         use_incoming_socket: bool = ...,
         log_to_filename: _OptStr = ...,
