@@ -498,11 +498,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 "version": p["version"],
             }
             broadcast(self, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
-            state_snapshot = copy.deepcopy(self.state[eid])
 
-            tornado.ioloop.IOLoop.current().run_in_executor(
-                None, self.storage.save_env, eid, state_snapshot
-            )
             send_to_sources(
                 self,
                 {
