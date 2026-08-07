@@ -168,7 +168,11 @@ var PlotPane = (props) => {
       )
       .catch((err) => {
         console.error('PlotPane LaTeX export failed:', err);
-        showToast('Failed to copy LaTeX snippet', 'error', { duration: 4000 });
+        showToast('Failed to Copy', 'error', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        });
       });
   };
 
