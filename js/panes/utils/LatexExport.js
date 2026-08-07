@@ -23,12 +23,14 @@ const LATEX_SPECIAL_CHARS = {
   _: '\\_',
   '^': '\\textasciicircum{}',
   '~': '\\textasciitilde{}',
+  '<': '\\textless{}',
+  '>': '\\textgreater{}',
 };
 
 export function escapeLatex(input) {
   if (input === null || input === undefined) return '';
-  let str = String(input).replace(/<[^>]*>/g, '');
-  str = str.replace(/[\\{}$&#%_^~]/g, (ch) => LATEX_SPECIAL_CHARS[ch]);
+  let str = String(input);
+  str = str.replace(/[\\{}$&#%_^~<>]/g, (ch) => LATEX_SPECIAL_CHARS[ch]);
   return str.trim();
 }
 
