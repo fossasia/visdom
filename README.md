@@ -452,6 +452,36 @@ VisdomSklearnLogger.autolog(viz, env="sklearn_run")
 
 See `example/train_sklearn_example.py` for a full working example covering plain estimators and grid search.
 
+### XGBoost
+
+`visdom.loggers.VisdomXGBLogger` implements XGBoost's `TrainingCallback` protocol, plotting train/eval metrics to Visdom after every boosting round.
+
+There was no way to visualize XGBoost training runs in Visdom without manually attaching a `TrainingCallback` and wiring up `viz.line()` calls yourself. This adds opt-in auto-logging behind a single `autolog()` call, with no changes required to model, `train()`, or `fit()` code.
+
+```python
+import xgboost as xgb
+import visdom
+from visdom.loggers import VisdomXGBLogger
+
+viz = visdom.Visdom()
+VisdomXGBLogger.autolog(viz, env="xgb_run")
+
+booster = xgb.train(params, dtrain, evals=[(dtrain, "train"), (dval, "eval")])  # logged automatically
+clf = xgb.XGBClassifier().fit(X_train, y_train, eval_set=[(X_val, y_val)])      # logged automatically
+xgb.cv(params, dtrain, nfold=3)                                                 # logged automatically
+```
+
+Or attach a logger to a single run without patching anything:
+
+```python
+callback = VisdomXGBLogger(viz, env="xgb_run")
+booster = xgb.train(params, dtrain, evals=[(dtrain, "train"), (dval, "eval")], callbacks=[callback])
+```
+
+Each eval metric gets its own window with one trace per data name (`train`/`eval`), and `best_iteration`/`best_score` are logged as a text pane once training finishes. See `example/train_xgboost_example.py` for a full working example.
+
+**Note:** one logger is active at a time. Calling `autolog()` again for a different env moves logging there and warns; the previous env keeps the windows it already has. Import `cross_validate` after `autolog()` — importing it first binds the original function, and every fold then opens its own window instead of sharing one per metric.
+
 ## Details
 <img src="https://user-images.githubusercontent.com/19650074/198747904-7a8a580f-851a-45fb-8f45-94e54a910ee2.png"/>
 
