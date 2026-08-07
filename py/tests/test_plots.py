@@ -10,6 +10,7 @@ import math
 import unittest
 from unittest.mock import patch
 import numpy as np
+import pytest
 import visdom
 
 
@@ -650,7 +651,7 @@ class _FakePlot:
         buffer.write(self._svg)
 
 
-@unittest.skipUnless(visdom.BS4_AVAILABLE, "requires bs4/lxml")
+@pytest.mark.skipif(not visdom.BS4_AVAILABLE, reason="requires bs4/lxml")
 class TestMatplotResizable(unittest.TestCase):
     def setUp(self):
         self.viz = visdom.Visdom(send=False, use_incoming_socket=False)
