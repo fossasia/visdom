@@ -13,17 +13,17 @@ import { zoom as d3zoom, zoomIdentity } from 'd3-zoom';
 import debounce from 'debounce';
 import React from 'react';
 import * as THREE from 'three';
-import { showToast } from '../toasts/toastEvents';
-import { copyTextToClipboard } from './utils/LatexExport';
 
 import ApiContext from '../api/ApiContext';
 import EventSystem from '../EventSystem';
 import lasso from '../lasso';
+import { showToast } from '../toasts/toastEvents';
 import Pane from './Pane';
 import {
   downloadJpegWithDpi,
   downloadPngWithDpi,
 } from './utils/Embeddpimetadata';
+import { copyLatexToClipboard } from './utils/LatexExport';
 import { downloadImageAsPdf } from './utils/pdfExport';
 
 const SCALE_RADIUS = 2000;
