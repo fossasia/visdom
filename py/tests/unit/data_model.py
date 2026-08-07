@@ -17,8 +17,6 @@ import errno
 import hashlib
 import json
 import os
-import tempfile
-import unittest
 
 import pytest
 
@@ -34,270 +32,253 @@ def _env(win_id="win_0"):
     return {"jsons": {win_id: {"id": win_id}}, "reload": {}}
 
 
-class TestJSONStore(unittest.TestCase):
-    """JSONStore behaviour when persistence is enabled (a real env_path)."""
-
-    def setUp(self):
-        """Give each test a fresh, isolated temp directory as the env_path."""
-        self._tmp = tempfile.TemporaryDirectory()
-        self.env_path = self._tmp.name
-        self.backend = JSONStore(self.env_path)
-
-    def tearDown(self):
-        """Remove the temp directory after each test."""
-        self._tmp.cleanup()
-
-    def test_is_a_data_store(self):
-        """JSONStore satisfies the DataStore interface."""
-        self.assertIsInstance(self.backend, DataStore)
-
-    def test_save_then_load_round_trip(self):
-        """A saved environment is read back unchanged."""
-        env = _env()
-        self.assertTrue(self.backend.save_env("main", env))
-        self.assertEqual(self.backend.load_env("main"), env)
-
-    def test_save_writes_expected_file(self):
-        """save_env writes the env to <env_path>/<eid>.json on disk."""
-        self.backend.save_env("main", _env())
-        expected = os.path.join(self.env_path, "main.json")
-        self.assertTrue(os.path.exists(expected))
-        with open(expected) as fn:
-            self.assertEqual(json.load(fn), _env())
-
-    def test_load_missing_env_returns_empty(self):
-        """Loading an environment that was never saved returns {}."""
-        self.assertEqual(self.backend.load_env("nope"), {})
-
-    def test_env_exists(self):
-        """env_exists reflects whether the environment is on disk."""
-        self.assertFalse(self.backend.env_exists("main"))
-        self.backend.save_env("main", _env())
-        self.assertTrue(self.backend.env_exists("main"))
-
-    def test_list_envs(self):
-        """list_envs returns the ids of all saved environments."""
-        self.assertEqual(self.backend.list_envs(), [])
-        self.backend.save_env("main", _env())
-        self.backend.save_env("other", _env())
-        self.assertEqual(sorted(self.backend.list_envs()), ["main", "other"])
-
-    def test_list_ignores_subdirs(self):
-        """A view/layouts.json side-file is not mistaken for an environment."""
-        os.mkdir(os.path.join(self.env_path, "view"))
-        with open(os.path.join(self.env_path, "view", "layouts.json"), "w") as fn:
-            fn.write("{}")
-        self.backend.save_env("main", _env())
-        self.assertEqual(self.backend.list_envs(), ["main"])
-
-    def test_delete_env(self):
-        """delete_env removes the env and reports False when nothing to remove."""
-        self.backend.save_env("main", _env())
-        self.assertTrue(self.backend.delete_env("main"))
-        self.assertFalse(self.backend.env_exists("main"))
-        self.assertFalse(self.backend.delete_env("main"))
-
-    def test_save_envs_saves_named_subset(self):
-        """save_envs persists only the named subset of state."""
-        state = {"main": _env(), "other": _env()}
-        ret = self.backend.save_envs(state, ["main"])
-        self.assertEqual(ret, ["main"])
-        self.assertTrue(self.backend.env_exists("main"))
-        self.assertFalse(self.backend.env_exists("other"))
-
-    def test_save_envs_drops_unknown_ids(self):
-        """save_envs ignores ids that aren't present in state."""
-        state = {"main": _env()}
-        ret = self.backend.save_envs(state, ["main", "ghost"])
-        self.assertEqual(ret, ["main"])
-
-    def test_save_all_saves_everything(self):
-        """save_all persists every environment in state."""
-        state = {"main": _env(), "other": _env()}
-        ret = self.backend.save_all(state)
-        self.assertEqual(sorted(ret), ["main", "other"])
-        self.assertEqual(self.backend.load_env("main"), _env())
-
-    def test_save_skips_unmaterialised_lazy_env(self):
-        """A LazyEnvData never loaded into memory is not rewritten by save.
-
-        Its on-disk copy is already current, so save must not force it into
-        memory just to write it back — it is skipped and left out of the
-        returned ids.
-        """
-        lazy = LazyEnvData(self.backend, "lazy")
-        self.assertIsNone(lazy._raw_dict)
-        ret = self.backend.save_envs({"lazy": lazy}, ["lazy"])
-        self.assertEqual(ret, [])
-        self.assertFalse(self.backend.env_exists("lazy"))
-
-    def test_save_writes_materialised_lazy_env(self):
-        """A LazyEnvData that has been loaded is persisted by save."""
-        self.backend.save_env("lazy", _env())
-        lazy = LazyEnvData(self.backend, "lazy")
-        lazy.lazy_load_data()  # materialise from disk
-        self.backend.delete_env("lazy")  # prove the next save recreates it
-        self.assertFalse(self.backend.env_exists("lazy"))
-        ret = self.backend.save_envs({"lazy": lazy}, ["lazy"])
-        self.assertEqual(ret, ["lazy"])
-        self.assertEqual(self.backend.load_env("lazy"), _env())
-
-    def test_env_named_like_hash_is_not_misread(self):
-        """An env named 'hash_results' is not treated as a hash_<64hex> file."""
-        self.backend.save_env("hash_results", _env())
-        self.assertEqual(self.backend.list_envs(), ["hash_results"])
-
-    def test_long_name_hash_fallback_round_trips(self):
-        """An over-long env name uses the hash_<sha256>.json fallback and still round-trips."""
-        long_eid = "e" * 5000
-        self.backend.save_env(long_eid, _env())
-        self.assertEqual(self.backend.list_envs(), [long_eid])
-        self.assertTrue(self.backend.env_exists(long_eid))
-        loaded = self.backend.load_env(long_eid)
-        self.assertEqual(loaded["jsons"], _env()["jsons"])
-
-    def test_layouts_round_trip(self):
-        """Saved layouts read back byte-for-byte as the same string."""
-        blob = '[["view A", {"win_0": [0, 0, 3, 3]}]]'
-        self.backend.save_layouts(blob)
-        self.assertEqual(self.backend.load_layouts(), blob)
-
-    def test_save_layouts_writes_expected_file(self):
-        """save_layouts writes <env_path>/view/layouts.json."""
-        self.backend.save_layouts("[]")
-        expected = os.path.join(self.env_path, "view", "layouts.json")
-        self.assertTrue(os.path.exists(expected))
-        with open(expected) as fn:
-            self.assertEqual(fn.read(), "[]")
-
-    def test_load_layouts_missing_returns_empty(self):
-        """load_layouts returns '' when no layout file has been written."""
-        self.assertEqual(self.backend.load_layouts(), "")
-
-    def test_undo_round_trip(self):
-        """A saved undo stack reads back unchanged."""
-        stack = [["win_0", {"id": "win_0"}], ["win_1", {"id": "win_1"}]]
-        self.backend.save_undo("expt", stack)
-        self.assertEqual(self.backend.load_undo("expt"), stack)
-
-    def test_load_undo_missing_returns_empty(self):
-        """load_undo returns [] when no undo file exists."""
-        self.assertEqual(self.backend.load_undo("expt"), [])
-
-    def test_save_undo_writes_under_dot_undo(self):
-        """save_undo writes <env_path>/.undo/<eid>.json."""
-        self.backend.save_undo("expt", [["win_0", {"id": "win_0"}]])
-        expected = os.path.join(self.env_path, ".undo", "expt.json")
-        self.assertTrue(os.path.exists(expected))
-
-    def test_clear_undo_removes_history(self):
-        """clear_undo drops a previously saved undo stack."""
-        self.backend.save_undo("expt", [["win_0", {"id": "win_0"}]])
-        self.backend.clear_undo("expt")
-        self.assertEqual(self.backend.load_undo("expt"), [])
-
-    def test_undo_long_name_hash_fallback_round_trips(self):
-        """An over-long env name uses the hash_<sha256>.json undo fallback."""
-        long_eid = "e" * 5000
-        stack = [["win_0", {"id": "win_0"}]]
-        self.backend.save_undo(long_eid, stack)
-        self.assertEqual(self.backend.load_undo(long_eid), stack)
-
-    def test_save_ignores_path_traversal_ids(self):
-        """A crafted id like '../evil' cannot write outside env_path."""
-        parent = os.path.dirname(self.env_path)
-        before = set(os.listdir(parent))
-        for eid in ("../evil", "subdir/../evil", "/etc/evil"):
-            self.backend.save_env(eid, _env())
-            self.assertEqual(set(os.listdir(parent)) - before, set())
-            base = os.path.abspath(self.env_path)
-            for name in os.listdir(self.env_path):
-                resolved = os.path.abspath(os.path.join(self.env_path, name))
-                self.assertTrue(resolved.startswith(base + os.sep))
-
-    def test_traversal_id_round_trips_within_env_path(self):
-        """A crafted id is sanitised consistently across save/exists/list/load."""
-        self.backend.save_env("../evil", _env())
-        self.assertTrue(self.backend.env_exists("../evil"))
-        self.assertEqual(self.backend.list_envs(), [".._evil"])
-        self.assertEqual(self.backend.load_env("../evil"), _env())
-
-    def test_list_skips_unreadable_hash_files(self):
-        """Malformed hash_<64>.json files are ignored, not raised, by list_envs."""
-        hex64 = "a" * 64
-        with open(
-            os.path.join(self.env_path, "hash_{0}.json".format(hex64)), "w"
-        ) as fn:
-            fn.write("{not valid json")
-        with open(
-            os.path.join(self.env_path, "hash_{0}.json".format("b" * 64)), "w"
-        ) as fn:
-            fn.write(json.dumps({"jsons": {}, "reload": {}}))
-        self.backend.save_env("main", _env())
-        self.assertEqual(self.backend.list_envs(), ["main"])
+# -- JSONStore with persistence enabled --------------------------------------
 
 
-class TestJSONStoreNoPath(unittest.TestCase):
-    """JSONStore(None): persistence disabled (in-memory-only mode)."""
+def test_is_a_data_store(store):
+    """JSONStore satisfies the DataStore interface."""
+    assert isinstance(store, DataStore)
 
-    def setUp(self):
-        """Create a store with no env_path so all persistence is a no-op."""
-        self.backend = JSONStore(None)
 
-    def test_save_env_is_noop(self):
-        """save_env persists nothing and reports False."""
-        self.assertFalse(self.backend.save_env("main", _env()))
+def test_save_then_load_round_trip(store):
+    """A saved environment is read back unchanged."""
+    env = _env()
+    assert store.save_env("main", env)
+    assert store.load_env("main") == env
 
-    def test_save_envs_is_noop(self):
-        """save_envs persists nothing and returns an empty list."""
-        self.assertEqual(self.backend.save_envs({"main": _env()}, ["main"]), [])
 
-    def test_save_all_is_noop(self):
-        """save_all persists nothing and returns an empty list."""
-        self.assertEqual(self.backend.save_all({"main": _env()}), [])
+def test_save_writes_expected_file(store, env_path):
+    """save_env writes the env to <env_path>/<eid>.json on disk."""
+    store.save_env("main", _env())
+    expected = os.path.join(env_path, "main.json")
+    assert os.path.exists(expected)
+    with open(expected) as fn:
+        assert json.load(fn) == _env()
 
-    def test_load_returns_empty(self):
-        """load_env returns {} when persistence is disabled."""
-        self.assertEqual(self.backend.load_env("main"), {})
 
-    def test_list_returns_empty(self):
-        """list_envs returns [] when persistence is disabled."""
-        self.assertEqual(self.backend.list_envs(), [])
+def test_load_missing_env_returns_empty(store):
+    """Loading an environment that was never saved returns {}."""
+    assert store.load_env("nope") == {}
 
-    def test_exists_is_false(self):
-        """env_exists is always False when persistence is disabled."""
-        self.assertFalse(self.backend.env_exists("main"))
 
-    def test_delete_is_noop(self):
-        """delete_env removes nothing and reports False."""
-        self.assertFalse(self.backend.delete_env("main"))
+def test_env_exists(store):
+    """env_exists reflects whether the environment is on disk."""
+    assert not store.env_exists("main")
+    store.save_env("main", _env())
+    assert store.env_exists("main")
 
-    def test_save_layouts_is_noop(self):
-        """save_layouts persists nothing when persistence is disabled."""
-        self.assertIsNone(self.backend.save_layouts("[]"))
 
-    def test_load_layouts_returns_empty(self):
-        """load_layouts returns '' when persistence is disabled."""
-        self.assertEqual(self.backend.load_layouts(), "")
+def test_list_envs(store):
+    """list_envs returns the ids of all saved environments."""
+    assert store.list_envs() == []
+    store.save_env("main", _env())
+    store.save_env("other", _env())
+    assert sorted(store.list_envs()) == ["main", "other"]
 
-    def test_load_undo_returns_empty(self):
-        """load_undo returns [] when persistence is disabled."""
-        self.assertEqual(self.backend.load_undo("expt"), [])
 
-    def test_save_undo_is_noop(self):
-        """save_undo persists nothing when persistence is disabled."""
-        self.assertIsNone(self.backend.save_undo("expt", [["w", {}]]))
+def test_list_ignores_subdirs(store, env_path):
+    """A view/layouts.json side-file is not mistaken for an environment."""
+    os.mkdir(os.path.join(env_path, "view"))
+    with open(os.path.join(env_path, "view", "layouts.json"), "w") as fn:
+        fn.write("{}")
+    store.save_env("main", _env())
+    assert store.list_envs() == ["main"]
 
-    def test_clear_undo_is_noop(self):
-        """clear_undo removes nothing when persistence is disabled."""
-        self.assertIsNone(self.backend.clear_undo("expt"))
+
+def test_delete_env(store):
+    """delete_env removes the env and reports False when nothing to remove."""
+    store.save_env("main", _env())
+    assert store.delete_env("main")
+    assert not store.env_exists("main")
+    assert not store.delete_env("main")
+
+
+def test_save_envs_saves_named_subset(store):
+    """save_envs persists only the named subset of state."""
+    state = {"main": _env(), "other": _env()}
+    assert store.save_envs(state, ["main"]) == ["main"]
+    assert store.env_exists("main")
+    assert not store.env_exists("other")
+
+
+def test_save_envs_drops_unknown_ids(store):
+    """save_envs ignores ids that aren't present in state."""
+    assert store.save_envs({"main": _env()}, ["main", "ghost"]) == ["main"]
+
+
+def test_save_all_saves_everything(store):
+    """save_all persists every environment in state."""
+    state = {"main": _env(), "other": _env()}
+    assert sorted(store.save_all(state)) == ["main", "other"]
+    assert store.load_env("main") == _env()
+
+
+def test_save_skips_unmaterialised_lazy_env(store):
+    """A LazyEnvData never loaded into memory is not rewritten by save.
+
+    Its on-disk copy is already current, so save must not force it into
+    memory just to write it back — it is skipped and left out of the
+    returned ids.
+    """
+    lazy = LazyEnvData(store, "lazy")
+    assert lazy._raw_dict is None
+    assert store.save_envs({"lazy": lazy}, ["lazy"]) == []
+    assert not store.env_exists("lazy")
+
+
+def test_save_writes_materialised_lazy_env(store):
+    """A LazyEnvData that has been loaded is persisted by save."""
+    store.save_env("lazy", _env())
+    lazy = LazyEnvData(store, "lazy")
+    lazy.lazy_load_data()  # materialise from disk
+    store.delete_env("lazy")  # prove the next save recreates it
+    assert not store.env_exists("lazy")
+    assert store.save_envs({"lazy": lazy}, ["lazy"]) == ["lazy"]
+    assert store.load_env("lazy") == _env()
+
+
+def test_env_named_like_hash_is_not_misread(store):
+    """An env named 'hash_results' is not treated as a hash_<64hex> file."""
+    store.save_env("hash_results", _env())
+    assert store.list_envs() == ["hash_results"]
+
+
+def test_long_name_hash_fallback_round_trips(store):
+    """An over-long env name uses the hash_<sha256>.json fallback and round-trips."""
+    long_eid = "e" * 5000
+    store.save_env(long_eid, _env())
+    assert store.list_envs() == [long_eid]
+    assert store.env_exists(long_eid)
+    assert store.load_env(long_eid)["jsons"] == _env()["jsons"]
+
+
+def test_layouts_round_trip(store):
+    """Saved layouts read back byte-for-byte as the same string."""
+    blob = '[["view A", {"win_0": [0, 0, 3, 3]}]]'
+    store.save_layouts(blob)
+    assert store.load_layouts() == blob
+
+
+def test_save_layouts_writes_expected_file(store, env_path):
+    """save_layouts writes <env_path>/view/layouts.json."""
+    store.save_layouts("[]")
+    expected = os.path.join(env_path, "view", "layouts.json")
+    assert os.path.exists(expected)
+    with open(expected) as fn:
+        assert fn.read() == "[]"
+
+
+def test_load_layouts_missing_returns_empty(store):
+    """load_layouts returns '' when no layout file has been written."""
+    assert store.load_layouts() == ""
+
+
+def test_undo_round_trip(store):
+    """A saved undo stack reads back unchanged."""
+    stack = [["win_0", {"id": "win_0"}], ["win_1", {"id": "win_1"}]]
+    store.save_undo("expt", stack)
+    assert store.load_undo("expt") == stack
+
+
+def test_load_undo_missing_returns_empty(store):
+    """load_undo returns [] when no undo file exists."""
+    assert store.load_undo("expt") == []
+
+
+def test_save_undo_writes_under_dot_undo(store, env_path):
+    """save_undo writes <env_path>/.undo/<eid>.json."""
+    store.save_undo("expt", [["win_0", {"id": "win_0"}]])
+    assert os.path.exists(os.path.join(env_path, ".undo", "expt.json"))
+
+
+def test_clear_undo_removes_history(store):
+    """clear_undo drops a previously saved undo stack."""
+    store.save_undo("expt", [["win_0", {"id": "win_0"}]])
+    store.clear_undo("expt")
+    assert store.load_undo("expt") == []
+
+
+def test_undo_long_name_hash_fallback_round_trips(store):
+    """An over-long env name uses the hash_<sha256>.json undo fallback."""
+    long_eid = "e" * 5000
+    stack = [["win_0", {"id": "win_0"}]]
+    store.save_undo(long_eid, stack)
+    assert store.load_undo(long_eid) == stack
+
+
+@pytest.mark.parametrize("eid", ["../evil", "subdir/../evil", "/etc/evil"])
+def test_save_ignores_path_traversal_ids(store, env_path, eid):
+    """A crafted id like '../evil' cannot write outside env_path."""
+    parent = os.path.dirname(env_path)
+    before = set(os.listdir(parent))
+
+    store.save_env(eid, _env())
+
+    assert set(os.listdir(parent)) - before == set()
+    base = os.path.abspath(env_path)
+    for name in os.listdir(env_path):
+        resolved = os.path.abspath(os.path.join(env_path, name))
+        assert resolved.startswith(base + os.sep)
+
+
+def test_traversal_id_round_trips_within_env_path(store):
+    """A crafted id is sanitised consistently across save/exists/list/load."""
+    store.save_env("../evil", _env())
+    assert store.env_exists("../evil")
+    assert store.list_envs() == [".._evil"]
+    assert store.load_env("../evil") == _env()
+
+
+def test_list_skips_unreadable_hash_files(store, env_path):
+    """Malformed hash_<64>.json files are ignored, not raised, by list_envs."""
+    with open(os.path.join(env_path, "hash_{0}.json".format("a" * 64)), "w") as fn:
+        fn.write("{not valid json")
+    with open(os.path.join(env_path, "hash_{0}.json".format("b" * 64)), "w") as fn:
+        fn.write(json.dumps({"jsons": {}, "reload": {}}))
+    store.save_env("main", _env())
+    assert store.list_envs() == ["main"]
+
+
+# -- JSONStore(None): persistence disabled (in-memory-only mode) --------------
+
+
+@pytest.mark.parametrize(
+    "call, expected",
+    [
+        (lambda s: s.save_env("main", _env()), False),
+        (lambda s: s.save_envs({"main": _env()}, ["main"]), []),
+        (lambda s: s.save_all({"main": _env()}), []),
+        (lambda s: s.load_env("main"), {}),
+        (lambda s: s.list_envs(), []),
+        (lambda s: s.env_exists("main"), False),
+        (lambda s: s.delete_env("main"), False),
+        (lambda s: s.save_layouts("[]"), None),
+        (lambda s: s.load_layouts(), ""),
+        (lambda s: s.load_undo("expt"), []),
+        (lambda s: s.save_undo("expt", [["w", {}]]), None),
+        (lambda s: s.clear_undo("expt"), None),
+    ],
+    ids=[
+        "save_env",
+        "save_envs",
+        "save_all",
+        "load_env",
+        "list_envs",
+        "env_exists",
+        "delete_env",
+        "save_layouts",
+        "load_layouts",
+        "load_undo",
+        "save_undo",
+        "clear_undo",
+    ],
+)
+def test_no_env_path_makes_every_operation_inert(call, expected):
+    """With no env_path nothing is persisted and every call answers emptily."""
+    assert call(JSONStore(None)) == expected
 
 
 # -- Durability of the env write --------------------------------------------
-#
-# Written as plain functions on the shared fixtures rather than as methods on
-# the classes above: the conversion of those two classes belongs to a later
-# clean-up, and fixtures cannot reach unittest.TestCase methods.
 
 
 def _fail_after(monkeypatch, prefix_bytes):
@@ -594,7 +575,3 @@ def test_forked_env_persists_under_its_own_id(store):
 
     assert store.load_env("main") == _env()
     assert sorted(store.load_env("forked")["jsons"]) == ["win_0", "win_1"]
-
-
-if __name__ == "__main__":
-    unittest.main()
