@@ -30,6 +30,7 @@ const LATEX_SPECIAL_CHARS = {
 export function escapeLatex(input) {
   if (input === null || input === undefined) return '';
   let str = String(input);
+  str = str.replace(/\r\n|\r|\n/g, ' ').replace(/ {2,}/g, ' ');
   str = str.replace(/[\\{}$&#%_^~<>]/g, (ch) => LATEX_SPECIAL_CHARS[ch]);
   return str.trim();
 }
@@ -43,7 +44,6 @@ export function slugify(input, fallback = 'figure') {
   if (input === null || input === undefined) return fallback;
   const slug = String(input)
     .toLowerCase()
-    .replace(/<[^>]*>/g, '')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
   return slug || fallback;
@@ -107,7 +107,7 @@ function ieeeCompare({ images, caption, label }) {
     })
     .join('\n');
   return `% Requires \\usepackage{subcaption} in your preamble.
-\\begin{figure}[!htbp]
+\\begin{figure}[htbp]
 \\centering
 ${subs}
 \\caption{${caption}}
@@ -144,12 +144,15 @@ function genericCompare({ images, caption, label }) {
       (img) => `  \\begin{minipage}{${w}\\linewidth}
     \\centering
     \\includegraphics[width=\\linewidth]{${img.filename}}
-    \\caption{${img.caption}}
-    \\label{${img.label}}
+    \\par\\textbf{${img.caption}}
   \\end{minipage}%`
     )
     .join('\n  \\hfill\n');
   return `% Requires \\usepackage{graphicx} in your preamble.
+% Sub-images use a plain bold label (not \\caption) on purpose: \\caption
+% inside a minipage shares the same figure counter as top-level figures
+% and would throw off numbering for the rest of the document. Only this
+% figure's own \\caption below is numbered.
 \\begin{figure}[htbp]
   \\centering
 ${minipages}

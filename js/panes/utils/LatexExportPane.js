@@ -66,7 +66,7 @@ function LatexExportPane({ onExport, hidden }) {
                 className="export-dropdown-button"
                 onClick={() => handleSelect(style)}
               >
-                {STYLE_LABELS[style]}
+                {STYLE_LABELS[style] || style}
               </button>
             </li>
           ))}
