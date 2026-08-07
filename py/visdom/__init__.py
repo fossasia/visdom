@@ -664,7 +664,7 @@ class Visdom(object):
         http_proxy_host=None,
         http_proxy_port=None,
         env="main",
-        send=True,
+        *,
         raise_exceptions=None,
         use_incoming_socket=True,
         log_to_filename=None,
@@ -712,7 +712,6 @@ class Visdom(object):
             .replace("\r", "-")
         )
         self.env_list = {self.env}  # default env
-        self.send = send
         self.event_handlers = {}  # Haven't registered any events
         self.socket_alive = False
         self.socket_connection_achieved = False
@@ -758,7 +757,7 @@ class Visdom(object):
 
         # Setup for online interactions
         result = self._send({"eid": env}, endpoint="env/" + env)
-        if self.send and result is False:
+        if result is False:
             if self.raise_exceptions:
                 raise ConnectionError(
                     "Could not connect to server at {}:{}.".format(
@@ -772,17 +771,16 @@ class Visdom(object):
                     )
                 )
         # when talking to a server, get a backchannel
-        if send and use_incoming_socket:
+        if use_incoming_socket:
             self.setup_socket()
-        elif send and use_polling:
+        elif use_polling:
             self.setup_polling()
-        elif send and not use_incoming_socket:
+        else:
             logger.warning(
                 "Without the incoming socket you cannot receive events from "
                 "the server or register event handlers to your Visdom client."
             )
-        if send:
-            self._start_session_reaper()
+        self._start_session_reaper()
         # Wait for initialization before starting
         time_spent = 0
         inc = 0.1
@@ -1092,10 +1090,6 @@ class Visdom(object):
         if msg.get("eid", None) is not None:
             self.env_list.add(msg["eid"])
 
-        # TODO investigate send use cases, then deprecate
-        if not self.send:
-            return msg, endpoint
-
         if "win" in msg and msg["win"] is None and create:
             msg["win"] = "window_" + get_rand_id()
 
@@ -1177,8 +1171,7 @@ class Visdom(object):
         """POST to an experiment `endpoint` and decode the JSON reply.
 
         Returns the decoded reply when the server replies with JSON, otherwise
-        the raw response (e.g. an error string, or the `(msg, endpoint)` tuple
-        when this client has `send=False`).
+        the raw response (e.g. an error string).
         """
         response = self._send(msg, endpoint=endpoint, quiet=True)
         if not isstr(response):
