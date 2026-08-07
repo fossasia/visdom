@@ -8,7 +8,7 @@
 
 """Unit tests for the client's content panes and its env/window management.
 
-Everything here runs against a ``Visdom(send=False)`` client, so no server and
+Everything here runs against the ``offline_client`` fixture, so no server and
 no sockets are involved. The methods split in two on how they treat what
 ``_send`` hands back, and the tests follow that split:
 
@@ -17,10 +17,10 @@ no sockets are involved. The methods split in two on how they treat what
   ``table``, ``embeddings``, ``learning_curve``, ``update_window_opts`` and the
   window/env writes are asserted this way.
 * **Reply parsers** feed the response through ``json.loads`` or compare it
-  against a literal, so ``capture_send`` cannot be used — with ``send=False``
-  ``_send`` returns a ``(msg, endpoint)`` tuple and ``json.loads`` would choke
-  on it. ``win_exists``, ``get_env_list``, ``get_env_state`` and ``delete_envs``
-  patch ``_send`` with a canned reply instead.
+  against a literal, so ``capture_send`` cannot be used — it would hand them a
+  ``(msg, endpoint)`` tuple and ``json.loads`` would choke on it. ``win_exists``,
+  ``get_env_list``, ``get_env_state`` and ``delete_envs`` patch ``_send`` with a
+  canned reply instead.
 
 Two behaviours pinned here are current, not desired:
 
@@ -33,6 +33,7 @@ Two behaviours pinned here are current, not desired:
 """
 
 import json
+from contextlib import contextmanager
 from unittest.mock import patch
 
 import numpy as np
@@ -53,6 +54,30 @@ def block(sent):
 def replies(client, value):
     """Patch ``_send`` to answer with ``value`` and record the calls."""
     return patch.object(client, "_send", return_value=value)
+
+
+def echoes(client):
+    """Patch ``_send`` to hand back the ``(msg, endpoint)`` it would have posted."""
+    return patch.object(
+        client, "_send", side_effect=lambda msg, endpoint="events", **_: (msg, endpoint)
+    )
+
+
+@contextmanager
+def posted(client):
+    """Yield the message the transport under ``_send`` actually received.
+
+    Only ``_handle_post`` is replaced, so ``_send`` itself still runs and its own
+    ``eid`` handling is exercised rather than mocked away.
+    """
+    captured = {}
+
+    def capture(url, data=None):
+        captured.update(json.loads(data))
+        return True
+
+    with patch.object(client, "_handle_post", side_effect=capture):
+        yield captured
 
 
 def sends_to(send, endpoint):
@@ -533,13 +558,15 @@ def test_get_env_list_asks_for_every_env_not_just_this_one(offline_client):
 
 def test_send_defaults_the_eid_to_the_client_env(offline_client):
     offline_client.env = "myenv"
-    msg, _ = offline_client._send({"data": []})
+    with posted(offline_client) as msg:
+        offline_client._send({"data": []})
     assert msg["eid"] == "myenv"
 
 
 def test_send_leaves_the_eid_out_when_asked(offline_client):
     offline_client.env = "myenv"
-    msg, _ = offline_client._send({"data": []}, default_eid=False)
+    with posted(offline_client) as msg:
+        offline_client._send({"data": []}, default_eid=False)
     assert "eid" not in msg
 
 
@@ -588,9 +615,10 @@ def test_delete_envs_rejects_a_non_string_entry(offline_client):
 
 def test_experiment_message(offline_client):
     offline_client.env = "expenv"
-    msg, endpoint = offline_client.experiment(
-        name="r1", params={"lr": 0.01}, tags={"ds": "mnist"}, description="d"
-    )
+    with echoes(offline_client):
+        msg, endpoint = offline_client.experiment(
+            name="r1", params={"lr": 0.01}, tags={"ds": "mnist"}, description="d"
+        )
     assert endpoint == "experiments/log"
     assert msg["action"] == "log"
     assert msg["eid"] == "expenv"
@@ -601,12 +629,14 @@ def test_experiment_message(offline_client):
 
 def test_experiment_env_override(offline_client):
     offline_client.env = "expenv"
-    msg, _ = offline_client.experiment(params={"lr": 0.01}, env="other")
+    with echoes(offline_client):
+        msg, _ = offline_client.experiment(params={"lr": 0.01}, env="other")
     assert msg["eid"] == "other"
 
 
 def test_log_metrics_message(offline_client):
-    msg, endpoint = offline_client.log_metrics({"acc": 0.9}, step=5)
+    with echoes(offline_client):
+        msg, endpoint = offline_client.log_metrics({"acc": 0.9}, step=5)
     assert endpoint == "experiments/log"
     assert msg["action"] == "metrics"
     assert msg["metrics"] == {"acc": 0.9}
@@ -614,13 +644,15 @@ def test_log_metrics_message(offline_client):
 
 
 def test_finish_experiment_message(offline_client):
-    msg, _ = offline_client.finish_experiment(status="failed")
+    with echoes(offline_client):
+        msg, _ = offline_client.finish_experiment(status="failed")
     assert msg["action"] == "finish"
     assert msg["status"] == "failed"
 
 
 def test_finish_experiment_defaults_to_finished(offline_client):
-    msg, _ = offline_client.finish_experiment()
+    with echoes(offline_client):
+        msg, _ = offline_client.finish_experiment()
     assert msg["status"] == "finished"
 
 
