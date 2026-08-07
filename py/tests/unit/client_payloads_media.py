@@ -25,7 +25,7 @@ Three behaviours pinned here are current, not desired:
 * ``svg(svgfile=...)`` stringifies the raw bytes, so newlines in the file reach
   the browser as literal backslash-n.
 
-Everything runs against a ``Visdom(send=False)`` client through the
+Everything runs against an ``offline_client`` through the
 ``capture_send`` fixture — no server, no sockets. ``update_image_slider``'s
 index coercion is covered in ``unit/image_slider.py``; only its routing is
 asserted here.

@@ -16,7 +16,7 @@ regression shows up as a plot with the wrong number of line breaks rather than
 as an exception.
 
 Every test runs through the ``capture_send`` fixture, which patches ``_send``
-on a ``Visdom(send=False)`` client — no server, no I/O, no sockets.
+on an ``offline_client`` — no server, no I/O, no sockets.
 """
 
 import math

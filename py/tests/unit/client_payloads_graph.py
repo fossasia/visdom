@@ -20,7 +20,7 @@ Two of them are unusual:
 * ``parallel_coordinates`` runs its trace and layout through ``_scrub_dict``,
   so keys whose value is ``None`` are **removed** rather than sent as null.
 
-Everything here runs through ``capture_send`` against a ``Visdom(send=False)``
+Everything here runs through ``capture_send`` against an ``offline_client``
 client: no server, no I/O.
 """
 
