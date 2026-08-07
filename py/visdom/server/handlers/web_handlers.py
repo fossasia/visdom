@@ -192,6 +192,14 @@ class UpdateHandler(BaseHandler):
                 selected_exists = min(len(p["content"]) - 1, selected_not_neg)
                 p["selected"] = selected_exists
             return p
+        if p["type"] == "table":
+            logging.warning(
+                "update(): ignoring /update call on win %r, which is a "
+                "'table' pane; use vis.table() to replace its content "
+                "instead",
+                p.get("id"),
+            )
+            return p
 
         pdata = p["content"]["data"]
 
@@ -408,6 +416,7 @@ class UpdateHandler(BaseHandler):
             or p["type"] == "image_history"
             or p["type"] == "plot_history"
             or p["type"] == "embeddings"
+            or p["type"] == "table"
             or (
                 len(p["content"]["data"]) == 0
                 or p["content"]["data"][0]["type"]

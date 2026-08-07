@@ -169,6 +169,18 @@ def _title2str(opts):
             return opts
 
 
+def _table_cell_to_native(cell):
+    """Coerce a single table cell/header to a JSON-serializable native
+    type. Handles numpy scalars that json.dumps and NanSafeEncoder cannot
+    serialize on their own.
+    """
+    if isinstance(cell, np.generic):
+        cell = cell.item()
+    if cell is None or isinstance(cell, (str, int, float, bool)):
+        return cell
+    return str(cell)
+
+
 def _scrub_dict(d):
     if isinstance(d, dict):
         return {
@@ -180,17 +192,21 @@ def _scrub_dict(d):
         return d
 
 
+TICK_FIELD_SUFFIXES = (
+    "type",
+    "label",
+    "tickmin",
+    "tickmax",
+    "tickvals",
+    "ticklabels",
+    "tick",
+    "tickfont",
+    "tickstep",
+)
+
+
 def _axisformat(xy, opts):
-    fields = [
-        "type",
-        "label",
-        "tickmin",
-        "tickmax",
-        "tickvals",
-        "ticklabels",
-        "tick",
-        "tickfont",
-    ]
+    fields = TICK_FIELD_SUFFIXES
     if any(opts.get(xy + i) is not None for i in fields):
         has_ticks = (
             opts.get(xy + "tickmin") is not None
@@ -214,16 +230,7 @@ def _axisformat(xy, opts):
 
 
 def _axisformat3d(xyz, opts):
-    fields = [
-        "type",
-        "label",
-        "tickmin",
-        "tickmax",
-        "tickvals",
-        "ticklabels",
-        "tick",
-        "tickfont",
-    ]
+    fields = TICK_FIELD_SUFFIXES
     if any(opts.get(xyz + i) is not None for i in fields):
         has_ticks = (
             opts.get(xyz + "tickmin") is not None
@@ -248,6 +255,7 @@ def _axisformat3d(xyz, opts):
                 if has_step
                 else None
             ),
+            "dtick": opts.get(xyz + "tickstep"),
             "tickfont": opts.get(xyz + "tickfont"),
         }
 
@@ -668,7 +676,7 @@ class Visdom(object):
         http_proxy_host=None,
         http_proxy_port=None,
         env="main",
-        send=True,
+        *,
         raise_exceptions=None,
         use_incoming_socket=True,
         log_to_filename=None,
@@ -716,7 +724,6 @@ class Visdom(object):
             .replace("\r", "-")
         )
         self.env_list = {self.env}  # default env
-        self.send = send
         self.event_handlers = {}  # Haven't registered any events
         self.socket_alive = False
         self.socket_connection_achieved = False
@@ -762,7 +769,7 @@ class Visdom(object):
 
         # Setup for online interactions
         result = self._send({"eid": env}, endpoint="env/" + env)
-        if self.send and result is False:
+        if result is False:
             if self.raise_exceptions:
                 raise ConnectionError(
                     "Could not connect to server at {}:{}.".format(
@@ -776,17 +783,16 @@ class Visdom(object):
                     )
                 )
         # when talking to a server, get a backchannel
-        if send and use_incoming_socket:
+        if use_incoming_socket:
             self.setup_socket()
-        elif send and use_polling:
+        elif use_polling:
             self.setup_polling()
-        elif send and not use_incoming_socket:
+        else:
             logger.warning(
                 "Without the incoming socket you cannot receive events from "
                 "the server or register event handlers to your Visdom client."
             )
-        if send:
-            self._start_session_reaper()
+        self._start_session_reaper()
         # Wait for initialization before starting
         time_spent = 0
         inc = 0.1
@@ -1096,10 +1102,6 @@ class Visdom(object):
         if msg.get("eid", None) is not None:
             self.env_list.add(msg["eid"])
 
-        # TODO investigate send use cases, then deprecate
-        if not self.send:
-            return msg, endpoint
-
         if "win" in msg and msg["win"] is None and create:
             msg["win"] = "window_" + get_rand_id()
 
@@ -1183,7 +1185,7 @@ class Visdom(object):
         Shared plumbing for :meth:`experiment`, :meth:`log_metrics` and
         :meth:`finish_experiment`. Returns the stored experiment as a dict when
         the server replies with JSON, otherwise the raw response (e.g. an error
-        string, or the `(msg, endpoint)` tuple when this client has `send=False`).
+        string).
         """
         msg["eid"] = env if env is not None else self.env
         response = self._send(msg, endpoint="experiments/log", quiet=True)
@@ -4378,7 +4380,7 @@ class Visdom(object):
             }
         )
 
-    def table(self, headers, data, win=None, env=None, opts=None):
+    def html_table(self, headers, data, win=None, env=None, opts=None):
         """
         This function renders structured data as a styled HTML table.
 
@@ -4449,3 +4451,92 @@ class Visdom(object):
         ) % (style, header_html, rows_html)
 
         return self.text(text=table_html, win=win, env=env, opts=opts)
+
+    def table(self, data, headers=None, win=None, env=None, opts=None):
+        """
+        Renders a native, structured, editable table pane.
+
+        - `data`: a 2D list of rows (list of lists/tuples), OR a list of
+           dicts (in which case `headers` is derived from the first
+           dict's keys unless explicitly given).
+        - `headers`: list of column names. Required if `data` rows are
+           plain lists/tuples; optional (and used to reorder/filter
+           columns) if `data` is a list of dicts.
+
+        The following `opts` are supported:
+
+        - `opts.title`: title for the window (`string`; optional)
+        - `opts.editable`: whether cells/rows/columns can be edited by
+           anyone viewing the pane (`bool`; default `True`). Set to
+           `False` for a read-only display table (e.g. a live
+           leaderboard).
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+        opts.setdefault("editable", True)
+
+        if isinstance(data, np.ndarray):
+            assert (
+                data.ndim == 2
+            ), "`data` as a numpy array must be 2-dimensional (rows x columns)"
+            data = data.tolist()
+        elif data is not None and not isinstance(data, (list, tuple)):
+            raise AssertionError(
+                "`data` must be a list, tuple, or numpy array (got %s)"
+                % type(data).__name__
+            )
+
+        if isinstance(headers, np.ndarray):
+            assert headers.ndim == 1, "`headers` as a numpy array must be 1-dimensional"
+            headers = headers.tolist()
+        elif headers is not None and not isinstance(headers, (list, tuple)):
+            raise AssertionError(
+                "`headers` must be a list, tuple, or numpy array (got %s)"
+                % type(headers).__name__
+            )
+
+        has_data = data is not None and len(data) > 0
+        has_headers = headers is not None and len(headers) > 0
+
+        if not has_data and not has_headers:
+            raise AssertionError("either `data` or `headers` must be provided")
+
+        if has_headers:
+            assert isinstance(headers, (list, tuple)), (
+                "headers should be a list (got %s)" % type(headers).__name__
+            )
+
+        if has_data and isinstance(data[0], dict):
+            assert all(
+                isinstance(row, dict) for row in data
+            ), "all rows in `data` must be dicts if the first row is a dict"
+            headers = list(headers) if has_headers else list(data[0].keys())
+            rows = [[row.get(h, "") for h in headers] for row in data]
+        else:
+            assert has_headers, "headers required when data rows are lists/tuples"
+            if has_data:
+                assert all(
+                    isinstance(row, (list, tuple)) for row in data
+                ), "each row in `data` should be a list or tuple"
+            headers = list(headers)
+            rows = [list(r) for r in data] if has_data else []
+
+        assert all(
+            len(r) == len(headers) for r in rows
+        ), "each row must have the same number of columns as headers"
+
+        rows = [[_table_cell_to_native(cell) for cell in row] for row in rows]
+        headers = [_table_cell_to_native(h) for h in headers]
+
+        content = {"headers": headers, "rows": rows}
+
+        return self._send(
+            {
+                "data": [{"content": content, "type": "table"}],
+                "win": win,
+                "eid": env,
+                "opts": opts,
+            },
+            endpoint="events",
+        )
