@@ -160,8 +160,10 @@ var PlotPane = (props) => {
       caption: content?.caption || plotTitle,
     })
       .then(() =>
-        showToast('LaTeX snippet copied to clipboard', 'success', {
-          duration: 2000,
+        showToast('Copied!', 'success', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
         })
       )
       .catch((err) => {
