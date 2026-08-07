@@ -539,3 +539,134 @@ button[title="export"].active {
   pointer-events: auto;
   user-select: auto;
 }
+
+.content-table {
+  overflow: auto;
+  height: 100%;
+  background-color: #ffffff;
+}
+
+.table-native {
+  border-collapse: collapse;
+}
+
+.table-native th,
+.table-native td {
+  border: solid 1px #dedede;
+  position: relative;
+  overflow: hidden;
+}
+
+.table-native th.table-header-cell {
+  background-color: #F0F0F0;
+  padding: 0;
+  text-align: left;
+  font-weight: bold;
+}
+
+.table-header-inner {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+}
+
+.table-header-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+
+.table-cell-inner {
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
+.table-native th input[type="text"],
+.table-native td input[type="text"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  padding: 2px 6px;
+  background: transparent;
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.table-cell-readonly {
+  padding: 2px 6px;
+}
+
+.col-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 5;
+}
+
+.row-resize-handle {
+  position: absolute;
+  bottom: -3px;
+  left: 0;
+  height: 6px;
+  width: 100%;
+  cursor: row-resize;
+  z-index: 5;
+}
+
+.table-add-row,
+.table-add-col {
+  text-align: center;
+  color: #999;
+  cursor: pointer;
+  background-color: #fafafa;
+  user-select: none;
+  padding: 0;
+}
+
+.table-add-row button,
+.table-add-col button {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 4px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.table-add-row:hover,
+.table-add-col:hover {
+  background-color: #e0e0e0;
+  color: #333;
+}
+
+.table-delete-row,
+.table-delete-col {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  text-align: center;
+  cursor: pointer;
+  color: #c00;
+  font-size: 10px;
+  line-height: 1;
+  user-select: none;
+  visibility: hidden;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+}
+
+.table-header-cell:hover .table-delete-col,
+.table-cell-first:hover .table-delete-row {
+  visibility: visible;
+}

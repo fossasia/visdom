@@ -4,6 +4,7 @@ import ImagePane from './panes/ImagePane';
 import NetworkPane from './panes/NetworkPane';
 import PlotPane from './panes/PlotPane';
 import PropertiesPane from './panes/PropertiesPane';
+import TablePane from './panes/TablePane';
 import TextPane from './panes/TextPane';
 
 const ROW_HEIGHT = 5; // pixels
@@ -17,6 +18,7 @@ const PANES = {
   plot_history: PlotPane,
   text: TextPane,
   properties: PropertiesPane,
+  table: TablePane,
   embeddings: EmbeddingsPane,
   network: NetworkPane,
 };
@@ -29,6 +31,7 @@ const PANE_SIZE = {
   text: [20, 20],
   embeddings: [20, 20],
   properties: [20, 20],
+  table: [30, 20],
   network: [20, 20],
 };
 const MODAL_STYLE = {
