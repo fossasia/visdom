@@ -318,10 +318,6 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
             }
             broadcast(self, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
 
-            tornado.ioloop.IOLoop.current().run_in_executor(
-                None, self.storage.save_env, eid, self.state[eid]
-            )
-
         elif cmd == "table_edit":
             if self.readonly:
                 logging.warning("table_edit: rejected, server is in readonly mode")
