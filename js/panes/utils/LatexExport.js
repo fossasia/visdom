@@ -13,15 +13,22 @@ const DEFAULT_CAPTION = 'TODO: add caption';
 const DEFAULT_EXT = 'png';
 
 const LATEX_SPECIAL_CHARS = {
-  '%': '\\%',
+  '\\': '\\textbackslash{}',
+  '{': '\\{',
+  '}': '\\}',
+  $: '\\$',
   '&': '\\&',
   '#': '\\#',
+  '%': '\\%',
+  _: '\\_',
+  '^': '\\textasciicircum{}',
+  '~': '\\textasciitilde{}',
 };
 
 export function escapeLatex(input) {
   if (input === null || input === undefined) return '';
   let str = String(input).replace(/<[^>]*>/g, '');
-  str = str.replace(/[%&#]/g, (ch) => LATEX_SPECIAL_CHARS[ch]);
+  str = str.replace(/[\\{}$&#%_^~]/g, (ch) => LATEX_SPECIAL_CHARS[ch]);
   return str.trim();
 }
 
