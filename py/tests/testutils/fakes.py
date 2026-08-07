@@ -146,6 +146,8 @@ class SpyStore(JSONStore):
             "list_envs": 0,
             "load_env": [],
             "save_env": [],
+            "save_envs": [],
+            "save_layouts": [],
             "delete_env": [],
             "save_undo": [],
         }
@@ -161,6 +163,14 @@ class SpyStore(JSONStore):
     def save_env(self, eid, env_data):
         self.calls["save_env"].append(eid)
         return super().save_env(eid, env_data)
+
+    def save_envs(self, state, eids):
+        self.calls["save_envs"].append(list(eids))
+        return super().save_envs(state, eids)
+
+    def save_layouts(self, layouts):
+        self.calls["save_layouts"].append(layouts)
+        return super().save_layouts(layouts)
 
     def delete_env(self, eid):
         self.calls["delete_env"].append(eid)
