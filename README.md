@@ -298,6 +298,7 @@ Visdom offers the following basic visualization functions:
 - [`vis.images`](#visimages)   : list of images
 - [`vis.text`](#vistext)     : arbitrary HTML
 - [`vis.properties`](#visproperties)     : properties grid
+- [`vis.html_table`](#vishtml_table)     : static styled HTML table
 - [`vis.audio`](#visaudio)    : audio
 - [`vis.video`](#visvideo)    : videos
 - [`vis.svg`](#vissvg)      : SVG object
@@ -598,6 +599,34 @@ Callback are called on property value update:
  - `value`: new value
 
 No specific `opts` are currently supported.
+
+#### vis.html_table
+This function renders structured data as a styled, static HTML
+table (read-only — use `vis.table` if you need an editable pane).
+
+Arguments:
+- `data`: a 2D `list`/`tuple` of rows, a 2D numpy array, or a
+  `list` of `dict`s (in which case `headers` is derived from the
+  first dict's keys unless explicitly given). In case of an empty
+  list, a table with only the header row is rendered.
+- `headers`: a `list`/`tuple`/1D numpy array of column names.
+  Required unless `data` is a list of dicts.
+
+`vis.html_table` accepts the exact same `data`/`headers` input
+shapes as `vis.table` (including numpy arrays and lists of dicts),
+so the two functions are interchangeable in how you call them —
+only the rendered pane differs (editable native table vs. static
+HTML).
+
+The following `opts` are supported:
+- `opts.title`: title for the window (`string`; optional)
+
+```python
+vis.html_table(
+    data=[["Alice", 92], ["Bob", 87]],
+    headers=["Name", "Score"],
+)
+```
 
 #### vis.audio
 This function plays audio. It takes as input the filename of the audio
