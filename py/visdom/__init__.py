@@ -180,17 +180,18 @@ def _table_cell_to_native(cell):
         return cell
     return str(cell)
 
+
 def _normalize_table_data(data, headers):
     """Shared normalization/validation for tabular data, currently
-    used by both `table()` and `html_table()` so that the two can 
+    used by both `table()` and `html_table()` so that the two can
     accept identical set of input shapes:
- 
+
     - `data`: a 2D list/tuple of rows, a 2D numpy array, or a list of
       dicts (in which case `headers` is derived from the first dict's
       keys unless `headers` is explicitly given).
     - `headers`: a list/tuple/1D numpy array of column names. Optional
       only when `data` is a list of dicts.
- 
+
     Returns a `(headers, rows)` tuple, both already coerced to native
     (JSON/HTML-safe) types via `_table_cell_to_native`.
     """
@@ -204,7 +205,7 @@ def _normalize_table_data(data, headers):
             "`data` must be a list, tuple, or numpy array (got %s)"
             % type(data).__name__
         )
- 
+
     if isinstance(headers, np.ndarray):
         assert headers.ndim == 1, "`headers` as a numpy array must be 1-dimensional"
         headers = headers.tolist()
@@ -213,18 +214,18 @@ def _normalize_table_data(data, headers):
             "`headers` must be a list, tuple, or numpy array (got %s)"
             % type(headers).__name__
         )
- 
+
     has_data = data is not None and len(data) > 0
     has_headers = headers is not None and len(headers) > 0
- 
+
     if not has_data and not has_headers:
         raise AssertionError("either `data` or `headers` must be provided")
- 
+
     if has_headers:
         assert isinstance(headers, (list, tuple)), (
             "headers should be a list (got %s)" % type(headers).__name__
         )
- 
+
     if has_data and isinstance(data[0], dict):
         assert all(
             isinstance(row, dict) for row in data
@@ -239,14 +240,14 @@ def _normalize_table_data(data, headers):
             ), "each row in `data` should be a list or tuple"
         headers = list(headers)
         rows = [list(r) for r in data] if has_data else []
- 
+
     assert all(
         len(r) == len(headers) for r in rows
     ), "each row must have the same number of columns as headers"
- 
+
     rows = [[_table_cell_to_native(cell) for cell in row] for row in rows]
     headers = [_table_cell_to_native(h) for h in headers]
- 
+
     return headers, rows
 
 
@@ -4498,7 +4499,7 @@ class Visdom(object):
     def html_table(self, data, headers=None, win=None, env=None, opts=None):
         """
         This function renders structured data as a styled HTML table.
- 
+
         - `data`: a 2D `list`/`tuple` of row data, a 2D numpy array, or
            a list of `dict`s (in which case `headers` is derived from
            the first dict's keys unless explicitly given). In case of
@@ -4506,17 +4507,17 @@ class Visdom(object):
         - `headers`: a `list`/`tuple`/1D numpy array of column header
            names (`string` or any type convertible to `string`).
            Required unless `data` is a list of dicts.
- 
+
         The following `opts` are supported:
- 
+
         - `opts.title`: title for the window (`string`; optional)
         """
         opts = {} if opts is None else opts
         _title2str(opts)
         _assert_opts(opts)
- 
+
         headers, data = _normalize_table_data(data, headers)
- 
+
         style = """
             <style>
             .visdom-table {
@@ -4545,37 +4546,36 @@ class Visdom(object):
             }
             </style>
         """
- 
+
         header_html = "".join("<th>%s</th>" % html.escape(str(h)) for h in headers)
         rows_html = "".join(
             "<tr>%s</tr>"
             % "".join("<td>%s</td>" % html.escape(str(cell)) for cell in row)
             for row in data
         )
- 
+
         table_html = (
             "%s<table class='visdom-table'>"
             "<thead><tr>%s</tr></thead>"
             "<tbody>%s</tbody>"
             "</table>"
         ) % (style, header_html, rows_html)
- 
-        return self.text(text=table_html, win=win, env=env, opts=opts)
 
+        return self.text(text=table_html, win=win, env=env, opts=opts)
 
     def table(self, data, headers=None, win=None, env=None, opts=None):
         """
         Renders a native, structured, editable table pane.
- 
+
         - `data`: a 2D list of rows (list of lists/tuples), OR a list of
            dicts (in which case `headers` is derived from the first
            dict's keys unless explicitly given).
         - `headers`: list of column names. Required if `data` rows are
            plain lists/tuples; optional (and used to reorder/filter
            columns) if `data` is a list of dicts.
- 
+
         The following `opts` are supported:
- 
+
         - `opts.title`: title for the window (`string`; optional)
         - `opts.editable`: whether cells/rows/columns can be edited by
            anyone viewing the pane (`bool`; default `True`). Set to
@@ -4586,11 +4586,11 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
         opts.setdefault("editable", True)
- 
+
         headers, rows = _normalize_table_data(data, headers)
- 
+
         content = {"headers": headers, "rows": rows}
- 
+
         return self._send(
             {
                 "data": [{"content": content, "type": "table"}],
@@ -4600,4 +4600,3 @@ class Visdom(object):
             },
             endpoint="events",
         )
- 
