@@ -480,6 +480,105 @@ paths:
             A write was attempted on a terminal (finished/failed) experiment —
             a `log`/`metrics` call, or a second `finish`.
 
+  /experiments/search:
+    post:
+      operationId: searchExperiments
+      tags: [Experiments]
+      summary: Search experiments across all environments
+      description: >
+        Returns the experiments matching `query`, sorted and paged. The query is
+        a small readable syntax of comparisons (`<`, `<=`, `>`, `>=`, `=`, `!=`,
+        `contains`) combined with `AND`/`OR` and parentheses, for example
+        `lr < 0.01 AND (acc > 0.9 OR status = finished)`. Omitting `query`
+        matches every experiment.
+
+
+        Comparison names are the experiment's built-in fields (`name`,
+        `status`, `created_at`, ...), its params, its metrics and its tags. A
+        name may be given bare (`acc`) or namespaced when it is ambiguous
+        (`metric.acc`, `param.lr`, `tag.owner`); metrics compare on their latest
+        logged value. A name no experiment has simply matches nothing.
+
+
+        Queries are parsed into a predicate and evaluated in Python — never
+        eval'd and never turned into SQL — so a hostile query is rejected as a
+        parse error rather than executed.
+
+
+        Experiments are read back through the server's data store, so a server
+        running with no persistence path configured has nothing to search.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query:
+                  type: string
+                  nullable: true
+                  description: >
+                    Filter expression. Omitted, null or blank matches every
+                    experiment.
+                sort_by:
+                  type: string
+                  nullable: true
+                  default: created_at
+                  description: >
+                    Field to sort by — any name a query can compare on.
+                    Experiments lacking the field sort last in both directions.
+                descending:
+                  type: boolean
+                  default: true
+                  description: Sort direction; newest/highest first by default.
+                limit:
+                  type: integer
+                  nullable: true
+                  minimum: 0
+                  default: 100
+                  description: >
+                    Maximum number of experiments in the reply. `0` returns just
+                    the count; `null` returns all matches.
+                offset:
+                  type: integer
+                  minimum: 0
+                  default: 0
+                  description: Number of matches to skip before the returned page.
+      responses:
+        "200":
+          description: The matching page of experiments.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [experiments, total, limit, offset, query]
+                properties:
+                  experiments:
+                    type: array
+                    description: One page of matching experiments.
+                    items:
+                      $ref: "#/components/schemas/Experiment"
+                  total:
+                    type: integer
+                    description: >
+                      Total matches for the query, ignoring `limit`/`offset`.
+                  limit:
+                    type: integer
+                    nullable: true
+                    description: The limit applied to this reply.
+                  offset:
+                    type: integer
+                    description: The offset applied to this reply.
+                  query:
+                    type: string
+                    description: The query used, `""` if none was given.
+        "400":
+          description: >
+            Invalid request — a body that is not a JSON object, malformed
+            `query` syntax, a non-string `query`/`sort_by`, or a `limit`/`offset`
+            that is not a non-negative integer. Also returned when
+            authentication is required but not provided.
+
   /upload_env:
     post:
       operationId: uploadEnvironment

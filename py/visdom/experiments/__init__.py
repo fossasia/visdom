@@ -30,11 +30,12 @@ from visdom.experiments.query import (
     build_record,
     parse_query,
 )
-from visdom.experiments.store import ExperimentStore
+from visdom.experiments.store import DEFAULT_SORT_FIELD, ExperimentStore
 
 __all__ = [
     "And",
     "Comparison",
+    "DEFAULT_SORT_FIELD",
     "Experiment",
     "ExperimentFinishedError",
     "ExperimentLike",
