@@ -338,8 +338,8 @@ class Visdom:
     ) -> _SendReturn: ...
     def html_table(
         self,
-        headers: List[Any],
-        data: List[List[Any]],
+        data: List[Any],
+        headers: Optional[List[Any]] = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
