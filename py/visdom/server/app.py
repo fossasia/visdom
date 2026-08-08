@@ -37,6 +37,7 @@ from visdom.server.handlers.web_handlers import (
     ErrorHandler,
     ExistsHandler,
     ExperimentLogHandler,
+    ExperimentSearchHandler,
     ForkEnvHandler,
     HealthHandler,
     IndexHandler,
@@ -103,6 +104,7 @@ class Application(tornado.web.Application):
 
         tornado_settings["static_url_prefix"] = self.base_url + "/static/"
         tornado_settings["debug"] = True
+        experiments_url = "%s/experiments" % self.base_url
         handlers = [
             (r"%s/events" % self.base_url, PostHandler, {"app": self}),
             (r"%s/update" % self.base_url, UpdateHandler, {"app": self}),
@@ -121,11 +123,8 @@ class Application(tornado.web.Application):
             (r"%s/delete_env" % self.base_url, DeleteEnvHandler, {"app": self}),
             (r"%s/env_state" % self.base_url, EnvStateHandler, {"app": self}),
             (r"%s/fork_env" % self.base_url, ForkEnvHandler, {"app": self}),
-            (
-                r"%s/experiments/log" % self.base_url,
-                ExperimentLogHandler,
-                {"app": self},
-            ),
+            (r"%s/log" % experiments_url, ExperimentLogHandler, {"app": self}),
+            (r"%s/search" % experiments_url, ExperimentSearchHandler, {"app": self}),
             (r"%s/user/(.*)" % self.base_url, UserSettingsHandler, {"app": self}),
             (r"%s/health" % self.base_url, HealthHandler),
             (r"%s(.*)" % self.base_url, IndexHandler, {"app": self}),
