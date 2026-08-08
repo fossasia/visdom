@@ -39,7 +39,7 @@ def download_scripts(proxies=None, install_dir=None):
         # https://raw.githubusercontent.com/plotly/plotly.js/master/dist/plotly.min.js
         ## [shouldsee/visdom/package_version]:latest.min.js not pointing to latest.
         ## see https://github.com/plotly/plotly.py/issues/3651
-        "https://cdn.plot.ly/plotly-2.11.1.min.js": "plotly-plotly.min.js",
+        "https://cdn.plot.ly/plotly-3.7.0.min.js": "plotly-plotly.min.js",
         # Stanford Javascript Crypto Library for Password Hashing
         "%ssjcl@1.0.7/sjcl.js" % b: "sjcl.js",
         "%slayout-bin-packer@1.4.0/dist/layout-bin-packer.js.map"

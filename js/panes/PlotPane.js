@@ -336,13 +336,11 @@ var PlotPane = (props) => {
 
     // draw / redraw plot with layout-options
     Plotly.react(contentID, data.concat(smooth_data), content.layout, {
-      showLink: false,
       displaylogo: false,
       doubleClick: 'reset',
       doubleClickDelay: 500,
       modeBarButtonsToAdd: ['drawopenpath', 'eraseshape'],
-      modeBarButtonsToRemove: ['toImage'],
-      // dragging a note box leaves its arrow on the data point
+      modeBarButtonsToRemove: ['toImage', 'sendDataToCloud'],
       edits: { annotationTail: !sessionInfo?.readonly },
     }).then(() => {
       const plotElement = plotlyRef.current;
