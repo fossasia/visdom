@@ -340,9 +340,9 @@ var PlotPane = (props) => {
       displaylogo: false,
       doubleClick: 'reset',
       doubleClickDelay: 500,
-      modeBarButtonsToAdd: annotations.modebarButton
-        ? ['drawopenpath', 'eraseshape', annotations.modebarButton]
-        : ['drawopenpath', 'eraseshape'],
+      modeBarButtonsToAdd: ['drawopenpath', 'eraseshape'].concat(
+        annotations.modebarButton ? [annotations.modebarButton] : []
+      ),
       modeBarButtonsToRemove: ['toImage'],
       // dragging a note box leaves its arrow on the data point
       edits: { annotationTail: !sessionInfo?.readonly },
