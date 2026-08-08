@@ -212,6 +212,14 @@ def window(args):
         )
     elif ptype in ["image", "text", "properties"] and is_visdom_type:
         p.update({"content": args["data"][0]["content"], "type": ptype})
+    elif ptype == "table" and is_visdom_type:
+        p.update(
+            {
+                "content": args["data"][0]["content"],
+                "type": ptype,
+                "editable": opts.get("editable", True),
+            }
+        )
     elif ptype == "network" and is_visdom_type:
         p.update(
             {
