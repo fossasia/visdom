@@ -1034,6 +1034,27 @@ class ExperimentSearchHandler(BaseHandler):
         return value
 
     @staticmethod
+    def _decode_body(body):
+        """Return the request body decoded into a dict of arguments.
+
+        The body is optional — the endpoint documents it as such, and a search
+        with no arguments matches everything — so an empty body is read as an
+        empty object. Anything else that is not a JSON object is the caller's
+        error: without this, malformed JSON or a bare list would surface as an
+        unhandled exception and a 500.
+        """
+        try:
+            text = tornado.escape.to_basestring(body).strip()
+            if not text:
+                return {}
+            args = tornado.escape.json_decode(text)
+        except ValueError:
+            raise tornado.web.HTTPError(400, reason="request body must be valid JSON")
+        if not isinstance(args, Mapping):
+            raise tornado.web.HTTPError(400, reason="request body must be an object")
+        return args
+
+    @staticmethod
     def wrap_func(handler, args):
         query = ExperimentSearchHandler._require_text(args, "query")
         sort_by = ExperimentSearchHandler._require_text(args, "sort_by")
@@ -1071,10 +1092,7 @@ class ExperimentSearchHandler(BaseHandler):
 
     @check_auth
     def post(self):
-        args = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
-        self.wrap_func(self, args)
+        self.wrap_func(self, self._decode_body(self.request.body))
 
 
 class ExperimentCompareHandler(BaseHandler):

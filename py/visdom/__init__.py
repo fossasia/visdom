@@ -1182,9 +1182,6 @@ class Visdom(object):
     def _experiment_request(self, msg, endpoint):
         """POST to an experiment `endpoint` and decode the JSON reply.
 
-        Returns the decoded reply when the server replies with JSON, otherwise
-        the raw response (e.g. an error string, or the `(msg, endpoint)` tuple
-        when this client has `send=False`).
         Shared plumbing for :meth:`experiment`, :meth:`log_metrics` and
         :meth:`finish_experiment`. Returns the stored experiment as a dict when
         the server replies with JSON, otherwise the raw response (e.g. an error
