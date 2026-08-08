@@ -7,6 +7,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import logging
+import hashlib
 import os
 import visdom
 from urllib import request
@@ -39,7 +40,7 @@ def download_scripts(proxies=None, install_dir=None):
         # https://raw.githubusercontent.com/plotly/plotly.js/master/dist/plotly.min.js
         ## [shouldsee/visdom/package_version]:latest.min.js not pointing to latest.
         ## see https://github.com/plotly/plotly.py/issues/3651
-        "https://cdn.plot.ly/plotly-2.11.1.min.js": "plotly-plotly.min.js",
+        "https://cdn.plot.ly/plotly-3.7.0.min.js": "plotly-plotly.min.js",
         # Stanford Javascript Crypto Library for Password Hashing
         "%ssjcl@1.0.7/sjcl.js" % b: "sjcl.js",
         "%slayout-bin-packer@1.4.0/dist/layout-bin-packer.js.map"
@@ -89,11 +90,15 @@ def download_scripts(proxies=None, install_dir=None):
     request.install_opener(opener)
 
     built_path = os.path.join(install_dir, "static/version.built")
+    assets_hash = hashlib.sha256(
+        repr(sorted(ext_files.items())).encode("utf-8")
+    ).hexdigest()
+    build_marker = "{0}:{1}".format(visdom.__version__, assets_hash)
     is_built = visdom.__version__ == "no_version_file"
     if os.path.exists(built_path):
         with open(built_path, "r") as build_file:
             build_version = build_file.read().strip()
-        if build_version == visdom.__version__:
+        if build_version == build_marker:
             is_built = True
         else:
             os.remove(built_path)
@@ -146,4 +151,4 @@ def download_scripts(proxies=None, install_dir=None):
 
     if not is_built:
         with open(built_path, "w+") as build_file:
-            build_file.write(visdom.__version__)
+            build_file.write(build_marker)
