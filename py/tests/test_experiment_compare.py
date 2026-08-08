@@ -5,13 +5,15 @@ Covers the four pieces the compare layer is built from: the pure
 over the named runs against a real ``JSONStore`` over a temporary
 directory; the ``/experiments/compare`` endpoint end-to-end through a real
 :class:`~visdom.server.app.Application` with Tornado's ``AsyncHTTPTestCase``; and
-the ``Visdom.compare_experiments`` message shape with ``send=False`` (no server).
+the ``Visdom.compare_experiments`` message shape with a mocked transport (no
+server).
 """
 
 import json
 import math
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
 
 import tornado.testing
 
@@ -472,10 +474,22 @@ class TestCompareEndpoint(tornado.testing.AsyncHTTPTestCase):
 
 
 class TestCompareClientMessage(unittest.TestCase):
-    """Visdom.compare_experiments builds the message the endpoint expects."""
+    """Visdom.compare_experiments builds the message the endpoint expects.
+
+    The transport is mocked to return the ``(msg, endpoint)`` it would have
+    posted, so we can assert on it directly.
+    """
 
     def setUp(self):
-        self.vis = Visdom(send=False, raise_exceptions=True)
+        with (
+            patch.object(Visdom, "_handle_post", return_value=True),
+            patch.object(Visdom, "_start_session_reaper"),
+        ):
+            self.vis = Visdom(raise_exceptions=True, use_incoming_socket=False)
+
+        self.vis._send = Mock(
+            side_effect=lambda msg, endpoint="events", **_: (msg, endpoint)
+        )
 
     def test_compare_message_shape(self):
         """The message names the runs and carries no selection knobs.
