@@ -4032,14 +4032,18 @@ class Visdom(object):
         layout = {
             "title": opts.get("title", "Example Double Y axis"),
             "yaxis": {
-                "title": trace1["name"],
-                "titlefont": {"color": opts.get("color_title_y1", "black")},
+                "title": {
+                    "text": trace1["name"],
+                    "font": {"color": opts.get("color_title_y1", "black")},
+                },
                 "tickfont": {"color": opts.get("color_tick_y1", "black")},
             },
             "yaxis2": {
-                "title": trace2["name"],
-                "titlefont": {
-                    "color": opts.get("color_title_y2", "rgb(148, 103, 189)")
+                "title": {
+                    "text": trace2["name"],
+                    "font": {
+                        "color": opts.get("color_title_y2", "rgb(148, 103, 189)")
+                    },
                 },
                 "tickfont": {"color": opts.get("color_tick_y2", "rgb(148, 103, 189)")},
                 "overlaying": "y",
