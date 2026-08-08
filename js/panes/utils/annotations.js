@@ -379,21 +379,18 @@ const useAnnotations = ({
     };
   }, [active, envID, paneID, frame, content]);
 
-  const button = enabled ? (
-    <button
-      key="annotate_widget_button"
-      title="annotate points"
-      onClick={() => {
-        setActive(!active);
-        setPendingPoint(null);
-      }}
-      className={active ? 'pull-right active' : 'pull-right'}
-    >
-      <span className="glyphicon glyphicon-pencil" />
-    </button>
-  ) : (
-    ''
-  );
+  const modebarButton = enabled
+    ? {
+        name: 'annotate',
+        title: active ? 'stop annotating' : 'annotate points',
+        icon: Plotly.Icons.pencil,
+        toggle: true,
+        click: () => {
+          setActive(!active);
+          setPendingPoint(null);
+        },
+      }
+    : null;
 
   const hint =
     active && !pendingPoint ? (
@@ -439,7 +436,7 @@ const useAnnotations = ({
       ''
     );
 
-  return { button, hint, editor };
+  return { modebarButton, hint, editor };
 };
 
 export { draggedIndexes, pinDragged, useAnnotations };

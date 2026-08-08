@@ -340,7 +340,9 @@ var PlotPane = (props) => {
       displaylogo: false,
       doubleClick: 'reset',
       doubleClickDelay: 500,
-      modeBarButtonsToAdd: ['drawopenpath', 'eraseshape'],
+      modeBarButtonsToAdd: annotations.modebarButton
+        ? ['drawopenpath', 'eraseshape', annotations.modebarButton]
+        : ['drawopenpath', 'eraseshape'],
       modeBarButtonsToRemove: ['toImage'],
       // dragging a note box leaves its arrow on the data point
       edits: { annotationTail: !sessionInfo?.readonly },
@@ -429,7 +431,7 @@ var PlotPane = (props) => {
       {...props}
       handleExport={handleExport}
       handleMetadataExport={handleMetadataExport}
-      barwidgets={[smooth_widget_button, annotations.button]}
+      barwidgets={[smooth_widget_button]}
       widgets={[
         history_widget,
         caption_widget,
