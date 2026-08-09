@@ -425,7 +425,7 @@ def compare_envs(state, eids, socket, store, show_all=False):
         "contentID": "compare_legend",
         "content": tbl,
         "type": "text",
-        "layout": {"title": "compare_legend"},
+        "layout": {"title": {"text": "compare_legend"}},
         "i": 1,
         "has_compare": True,
         "commentsDisabled": True,
