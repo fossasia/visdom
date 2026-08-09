@@ -292,7 +292,7 @@ def _opts2layout(opts, is3d=False):
     if layout_opts is not None:
         if "plotly" in layout_opts:
             layout.update(layout_opts["plotly"])
-    return _scrub_dict(layout)
+    return _scrub_dict(_normalize_title_strings(layout))
 
 
 def _normalize_labels(Y):
@@ -2667,7 +2667,7 @@ class Visdom(object):
                 if trace_name in trace_opts:
                     _data.update(trace_opts[trace_name])
 
-                data.append(_scrub_dict(_data))
+                data.append(_scrub_dict(_normalize_title_strings(_data)))
 
         if opts:
             for marker_prop in ["markercolor"]:
