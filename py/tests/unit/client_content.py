@@ -166,47 +166,100 @@ def test_properties_routes_win_and_env(capture_send):
 # ----------------------------------------------------------------- table ----
 
 
-def test_table_renders_headers_and_rows_as_html(capture_send):
-    sent = capture_send(lambda v: v.table(["a", "b"], [[1, 2], [3, 4]]))
-    html = block(sent)["content"]
-    assert block(sent)["type"] == "text"
-    assert "<th>a</th><th>b</th>" in html
-    assert "<tr><td>1</td><td>2</td></tr>" in html
-    assert "<tr><td>3</td><td>4</td></tr>" in html
-    assert "class='visdom-table'" in html
+def test_table_sends_headers_and_rows_as_a_native_pane(capture_send):
+    """The pane carries structured data, not a rendered HTML string."""
+    sent = capture_send(lambda v: v.table([[1, 2], [3, 4]], headers=["a", "b"]))
+    assert block(sent)["type"] == "table"
+    assert block(sent)["content"] == {
+        "headers": ["a", "b"],
+        "rows": [[1, 2], [3, 4]],
+    }
 
 
-def test_table_escapes_markup_in_cells_and_headers(capture_send):
-    sent = capture_send(lambda v: v.table(["<b>h</b>"], [["<script>x</script>"]]))
-    html = block(sent)["content"]
-    assert "&lt;b&gt;h&lt;/b&gt;" in html
-    assert "<script>" not in html
+def test_table_passes_markup_through_as_data(capture_send):
+    """Cells are data, so markup is carried verbatim rather than escaped.
+
+    The old HTML table escaped on the way out because it built the markup
+    itself. Escaping now belongs to the frontend that renders the pane, and
+    doing it here as well would double-escape every angle bracket.
+    """
+    sent = capture_send(
+        lambda v: v.table([["<script>x</script>"]], headers=["<b>h</b>"])
+    )
+    assert block(sent)["content"] == {
+        "headers": ["<b>h</b>"],
+        "rows": [["<script>x</script>"]],
+    }
 
 
 def test_table_accepts_an_empty_body(capture_send):
-    sent = capture_send(lambda v: v.table(["a"], []))
-    assert "<tbody></tbody>" in block(sent)["content"]
+    """Headers alone build a table with no rows."""
+    sent = capture_send(lambda v: v.table([], headers=["a"]))
+    assert block(sent)["content"] == {"headers": ["a"], "rows": []}
 
 
-def test_table_accepts_tuple_rows(capture_send):
-    sent = capture_send(lambda v: v.table(["a", "b"], [("x", "y")]))
-    assert "<td>x</td><td>y</td>" in block(sent)["content"]
+def test_table_normalizes_tuple_rows_to_lists(capture_send):
+    sent = capture_send(lambda v: v.table([("x", "y")], headers=["a", "b"]))
+    assert block(sent)["content"]["rows"] == [["x", "y"]]
+
+
+def test_table_derives_headers_from_dict_rows(capture_send):
+    """A list of dicts needs no headers -- the first row's keys supply them."""
+    sent = capture_send(lambda v: v.table([{"a": 1, "b": 2}, {"a": 3, "b": 4}]))
+    assert block(sent)["content"] == {
+        "headers": ["a", "b"],
+        "rows": [[1, 2], [3, 4]],
+    }
+
+
+def test_table_headers_select_and_order_dict_columns(capture_send):
+    """Explicit headers reorder the dict columns and drop the rest."""
+    sent = capture_send(
+        lambda v: v.table([{"a": 1, "b": 2, "c": 3}], headers=["c", "a"])
+    )
+    assert block(sent)["content"]["rows"] == [[3, 1]]
+
+
+def test_table_fills_missing_dict_keys_with_blanks(capture_send):
+    sent = capture_send(lambda v: v.table([{"a": 1}, {"b": 2}], headers=["a", "b"]))
+    assert block(sent)["content"]["rows"] == [[1, ""], ["", 2]]
+
+
+def test_table_coerces_numpy_cells_to_native_types(capture_send):
+    """numpy scalars are not JSON-serializable, so they are unwrapped here."""
+    sent = capture_send(
+        lambda v: v.table([[np.int64(1), np.float32(2.5)]], headers=["a", "b"])
+    )
+    rows = block(sent)["content"]["rows"]
+    assert rows == [[1, 2.5]]
+    assert [type(cell) for cell in rows[0]] == [int, float]
 
 
 @requires_assertions
 @pytest.mark.parametrize(
-    "headers,data",
+    "data,headers",
     [
-        ("a", [["x"]]),
-        (["a"], "x"),
-        (["a"], ["x"]),
-        (["a", "b"], [["x"]]),
+        ([["x"]], "a"),
+        ("x", ["a"]),
+        (["x"], ["a"]),
+        ([["x"]], ["a", "b"]),
+        ([["x"]], None),
+        ([], None),
+        ([{"a": 1}, ["b"]], None),
     ],
-    ids=["headers_not_list", "data_not_list", "row_not_sequence", "width_mismatch"],
+    ids=[
+        "headers_not_list",
+        "data_not_list",
+        "row_not_sequence",
+        "width_mismatch",
+        "list_rows_without_headers",
+        "neither_data_nor_headers",
+        "mixed_dict_and_list_rows",
+    ],
 )
-def test_table_rejects_malformed_input(capture_send, headers, data):
+def test_table_rejects_malformed_input(capture_send, data, headers):
     with pytest.raises(AssertionError):
-        capture_send(lambda v: v.table(headers, data))
+        capture_send(lambda v: v.table(data, headers=headers))
 
 
 # -------------------------------------------------------- learning_curve ----

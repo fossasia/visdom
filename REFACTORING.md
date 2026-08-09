@@ -189,7 +189,7 @@ The TODO at `socket_handlers.py:238` notes inconsistent message JSON formatting 
 | `web_handlers.py:166` — python client function | Phase 5 |
 | `web_handlers.py:478` — env state handler | Phase 3 |
 | `__init__.py:602` — merge setup_polling/setup_socket | Phase 5 |
-| `__init__.py:779` — investigate/deprecate send | Phase 5 |
+| `__init__.py` — removed legacy send bypass | Phase 5 |
 | `server_utils.py:56` — shared method call | Phase 2 |
 | `base_handlers.py:80` — error.html page | Phase 2 |
 | `socket_handlers.py:238` — message format | Phase 6 |

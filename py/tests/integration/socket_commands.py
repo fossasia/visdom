@@ -557,13 +557,20 @@ def test_update_comment_broadcasts_a_json_patch(env, inline_executor):
     ]
 
 
-def test_update_comment_persists_the_environment(env, inline_executor):
+def test_update_comment_does_not_persist_on_its_own(env, inline_executor):
+    """The comment lands in memory only; writing it out is the save flow's job.
+
+    ``update_comment`` used to call ``storage.save_env`` itself. That separate
+    path was dropped so the command persists the same way every other one does,
+    which means nothing reaches disk until an ordinary save runs.
+    """
     sub = open_sub(env)
 
     send(sub, cmd="update_comment", eid="expt", win="win_0", data="looks good")
 
-    saved = env.storage.load_env("expt")
-    assert saved["jsons"]["win_0"]["comment"] == "looks good"
+    assert env.state["expt"]["jsons"]["win_0"]["comment"] == "looks good"
+    assert inline_executor == []
+    assert not env.storage.env_exists("expt")
 
 
 @pytest.mark.parametrize("comment", [42, None, ["a"], {"text": "a"}])

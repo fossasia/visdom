@@ -216,13 +216,16 @@ def test_axisformat3d_needs_bounds_before_it_uses_a_step():
     assert _axisformat3d("z", {"zlabel": "d", "ztickstep": 2})["nticks"] is None
 
 
-def test_axisformat3d_ignores_a_lone_tick_step():
-    """Unlike the 2d axis, a 3d step alone has nothing to apply itself to.
+def test_axisformat3d_applies_a_lone_tick_step():
+    """A 3d step alone reaches plotly as ``dtick``.
 
-    ``tickstep`` is deliberately absent from this gate: it only feeds
-    ``nticks``, which is separately gated on both bounds being present.
+    It used to feed only ``nticks``, which is gated on both bounds, so a lone
+    step built no axis at all. The 3d axis now carries ``dtick`` just like the
+    2d one, which is what makes the step meaningful on its own.
     """
-    assert _axisformat3d("z", {"ztickstep": 2}) is None
+    axis = _axisformat3d("z", {"ztickstep": 2})
+    assert axis["dtick"] == 2
+    assert axis["nticks"] is None
 
 
 def test_opts2layout_builds_flat_axes_in_2d():
