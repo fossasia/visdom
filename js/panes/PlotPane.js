@@ -341,6 +341,7 @@ var PlotPane = (props) => {
       doubleClickDelay: 500,
       modeBarButtonsToAdd: ['drawopenpath', 'eraseshape'],
       modeBarButtonsToRemove: ['toImage', 'sendDataToCloud'],
+      // dragging a note box leaves its arrow on the data point
       edits: { annotationTail: !sessionInfo?.readonly },
     }).then(() => {
       const plotElement = plotlyRef.current;
