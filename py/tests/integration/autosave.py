@@ -17,6 +17,7 @@ threshold) and the bookkeeping that keeps them from writing more than needed.
 
 import tempfile
 import unittest
+from unittest import mock
 
 from visdom.server.app import Application
 from visdom.server.handlers.web_handlers import CloseHandler, UpdateHandler
@@ -73,6 +74,19 @@ class TestDirtyTracking(AutosaveTestCase):
 
         self.assertEqual(self.app.flush_dirty(), [])
         self.assertEqual(self.app.flush_envs(["quiet"]), [])
+
+    def test_a_failed_write_is_retried_rather_than_dropped(self):
+        self.app.state["fragile"] = {"jsons": {}, "reload": {}}
+        self.app.mark_dirty("fragile")
+
+        with mock.patch.object(
+            self.app.storage, "save_envs", side_effect=OSError("disk full")
+        ):
+            with self.assertRaises(OSError):
+                self.app.flush_dirty()
+
+        self.assertEqual(self.dirty_count("fragile"), 1)
+        self.assertEqual(self.app.flush_dirty(), ["fragile"])
 
     def test_environment_is_rewritten_after_changing_again(self):
         self.app.state["repeat"] = {"jsons": {}, "reload": {}}

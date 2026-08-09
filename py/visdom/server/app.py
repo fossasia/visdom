@@ -165,9 +165,17 @@ class Application(tornado.web.Application):
         Runs on the IO loop rather than in an executor: saving serializes
         ``state``, and a background thread would be doing that while request
         handlers mutate the very dictionaries it is walking.
+
+        Environments stay marked until the write returns, so a failing backend
+        means they are retried on the next pass rather than silently dropped.
         """
-        pending = [eid for eid in eids if self.dirty_envs.pop(eid, 0)]
-        return self.storage.save_envs(self.state, pending) if pending else []
+        pending = [eid for eid in eids if self.dirty_envs.get(eid)]
+        if not pending:
+            return []
+        written = self.storage.save_envs(self.state, pending)
+        for eid in pending:
+            del self.dirty_envs[eid]
+        return written
 
     def flush_dirty(self):
         """Persist every environment changed since the last save."""
