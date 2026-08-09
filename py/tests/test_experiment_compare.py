@@ -1,4 +1,12 @@
-"""Tests for experiment comparison (Layer 2, PR 5).
+#!/usr/bin/env python3
+
+# Copyright 2017-present, The Visdom Authors
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
+"""Tests for experiment comparison.
 
 Covers the four pieces the compare layer is built from: the pure
 ``build_comparison`` diff over experiment objects; ``ExperimentStore.compare``
