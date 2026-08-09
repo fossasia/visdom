@@ -179,37 +179,35 @@ npm run build     # build js
 ```
 
 #### Test your changes
-This project has some Cypress tests (end-to-end tests and visual regression tests) so you can check for side effects of your changes.
+This project uses Playwright for end-to-end and visual regression tests so you
+can check for side effects of your changes.
 If you add or change functions, feel free to adjust the tests or add new ones if none exist for your case.
 (This will ensure that your function will continue to work in the future. ;) )
 
 To run the predefined tests
 
-**using Cypress GUI**:
-1. start a fresh visdom server instance on port `8098` , i.e. by just calling `visdom -port 8098`. (Just to make sure another instance is not interfering with our test.)
-2. run `npm run test:init`. This generates screenshots of all plots for the visual regression testing.
-3. Adapt the code now to your needs.
-4. run `npm run build` *or* `npm run dev` (enables automatic building)
-5. run `npm run test:gui` (a new window should appear)
-6. click through the test spec-files and observe the tests done automatically in a newly opened browser instance
+**using the Playwright UI**:
+1. Run `npx playwright install chromium` on first setup.
+2. Run `npm run build` *or* `npm run dev` to compile the frontend code.
+3. Make sure port `8098` is available; Playwright starts an isolated Visdom
+   server automatically.
+4. Run `npm run test:gui` and select the specs to inspect.
 
-**as CLI tests (Cypress)**:
-1. start a fresh visdom server instance on port `8098` , i.e. by just calling `visdom -port 8098` (Just to make sure another instance is not interfering with our test.)
-2. run `npm run test:init`. This generates screenshots of all plots for the visual regression testing.
-3. Adapt the code now to your needs.
-4. run `npm run build` *or* `npm run dev` (enables automatic building)
-5. run `npm run test`
+**as CLI tests**:
+1. Run `npx playwright install chromium` on first setup.
+2. Run `npm run build` *or* `npm run dev` to compile the frontend code.
+3. Run the WebSocket suite with `npm test`.
+4. Run the same functional tests with frontend polling using
+   `npm run test:polling`.
 
-**using Playwright (E2E tests)**:
-1. run `npx playwright install chromium` on first setup to install the browser.
-2. run `npm run build` *or* `npm run dev` to compile the frontend code.
-3. make sure port `8098` is available; Playwright starts an isolated Visdom server automatically.
-4. run the WebSocket test suite: `npm run test:pw`.
-5. run the same functional tests with frontend polling: `npm run test:pw:polling`.
+**visual regression tests**:
+1. Before making UI changes, run `npm run test:init` to generate baseline
+   screenshots.
+2. After making and building the changes, run `npm run test:visual` to compare
+   against those baselines.
 
-The polling suite starts Visdom with `-use_frontend_client_polling` and does not
-reuse an existing server. Playwright visual regression specs are excluded from
-the polling run.
+The polling suite starts Visdom with `-use_frontend_client_polling`, does not
+reuse an existing server, and excludes visual regression specs.
 
 ## Issues
 We use GitHub issues to track public bugs. Please ensure your description is

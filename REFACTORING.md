@@ -213,7 +213,7 @@ Phases 1 & 2 can start immediately in parallel. Phase 5 can proceed independentl
 
 For each phase:
 1. Run existing tests: `python -m pytest` (config in `pyproject.toml`; suite lives in `py/tests/`)
-2. Run Cypress E2E: `npm run test` (server on port 8098)
+2. Run Playwright E2E: `npm test` and `npm run test:polling`
 3. Manual smoke test: `python -m visdom.server -port 8098` then run `example/demo.py`
 4. Verify no regressions in visual regression screenshots
 5. Run linting: `black py` and `npm run lint`
