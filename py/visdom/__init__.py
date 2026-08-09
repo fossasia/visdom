@@ -648,6 +648,30 @@ def _compute_confusion_matrix(y_true, y_pred, labels):
     return cm
 
 
+def _normalize_title_strings(layout):
+    """Recursively wrap any plain-string 'title' value as {'text': ...}.
+ 
+    plotly.js v3.0+ no longer accepts a bare string for any 'title'
+    attribute (chart title, xaxis/yaxis title, scene axis title, legend
+    title, colorbar title, etc.). Visdom's own layout-building functions
+    already emit the object form, but plotlyplot() forwards a user-supplied
+    raw figure layout untouched, so a plain string can appear at any depth
+    (e.g. layout['scene']['xaxis']['title']). This walks the whole layout
+    and fixes every occurrence in place, returning a new structure.
+    """
+    if isinstance(layout, dict):
+        fixed = {}
+        for key, value in layout.items():
+            if key == "title" and isinstance(value, str):
+                fixed[key] = {"text": value}
+            else:
+                fixed[key] = _normalize_title_strings(value)
+        return fixed
+    if isinstance(layout, list):
+        return [_normalize_title_strings(v) for v in layout]
+    return layout
+
+
 def _decode_binary_arrays(obj):
     """Decode Plotly 6+ binary-encoded arrays back to plain Python lists."""
     if isinstance(obj, dict):
@@ -1654,6 +1678,7 @@ class Visdom(object):
             if '"bdata"' in figure_json:
                 figure_dict = _decode_binary_arrays(figure_dict)
 
+            figure_dict["layout"] = _normalize_title_strings(figure_dict["layout"])
             # If opts title is not added, the title is not added to the top right of the window.
             # We add the paramater to opts manually if it exists.
             opts = dict()
