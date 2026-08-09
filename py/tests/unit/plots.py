@@ -7,14 +7,27 @@
 # LICENSE file in the root directory of this source tree.
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import numpy as np
 import visdom
 
 
+def _unconnected_visdom():
+    with (
+        patch.object(visdom.Visdom, "_handle_post", return_value=True),
+        patch.object(visdom.Visdom, "_start_session_reaper"),
+        patch.object(visdom.logger, "warning"),
+    ):
+        client = visdom.Visdom(use_incoming_socket=False)
+    client._handle_post = Mock(
+        side_effect=AssertionError("unexpected transport call in unit test")
+    )
+    return client
+
+
 class TestLine(unittest.TestCase):
     def setUp(self):
-        self.viz = visdom.Visdom(send=False, use_incoming_socket=False)
+        self.viz = _unconnected_visdom()
 
     def _line(self, Y, X=None, **kwargs):
         sent = {}
@@ -142,7 +155,7 @@ class TestLine(unittest.TestCase):
 
 class TestScatter(unittest.TestCase):
     def setUp(self):
-        self.viz = visdom.Visdom(send=False, use_incoming_socket=False)
+        self.viz = _unconnected_visdom()
 
     def _scatter(self, X, Y=None, **kwargs):
         sent = {}
@@ -261,7 +274,7 @@ class TestScatter(unittest.TestCase):
 
 class TestHeatmap(unittest.TestCase):
     def setUp(self):
-        self.viz = visdom.Visdom(send=False, use_incoming_socket=False)
+        self.viz = _unconnected_visdom()
 
     def _heatmap(self, X, **kwargs):
         sent = {}
@@ -330,7 +343,7 @@ class TestHeatmap(unittest.TestCase):
 
 class TestBar(unittest.TestCase):
     def setUp(self):
-        self.viz = visdom.Visdom(send=False, use_incoming_socket=False)
+        self.viz = _unconnected_visdom()
 
     def _bar(self, X, Y=None, **kwargs):
         sent = {}
@@ -427,7 +440,7 @@ class TestBar(unittest.TestCase):
 
 class TestHistogram(unittest.TestCase):
     def setUp(self):
-        self.viz = visdom.Visdom(send=False, use_incoming_socket=False)
+        self.viz = _unconnected_visdom()
 
     def _histogram(self, X, **kwargs):
         sent = {}
@@ -476,7 +489,7 @@ class TestHistogram(unittest.TestCase):
 
 class TestBoxplot(unittest.TestCase):
     def setUp(self):
-        self.viz = visdom.Visdom(send=False, use_incoming_socket=False)
+        self.viz = _unconnected_visdom()
 
     def _boxplot(self, X, **kwargs):
         sent = {}
@@ -537,7 +550,7 @@ class TestBoxplot(unittest.TestCase):
 
 class TestSurf(unittest.TestCase):
     def setUp(self):
-        self.viz = visdom.Visdom(send=False, use_incoming_socket=False)
+        self.viz = _unconnected_visdom()
 
     def _surf(self, X, **kwargs):
         sent = {}
@@ -606,7 +619,7 @@ class TestSurf(unittest.TestCase):
 
 class TestContour(unittest.TestCase):
     def setUp(self):
-        self.viz = visdom.Visdom(send=False, use_incoming_socket=False)
+        self.viz = _unconnected_visdom()
 
     def _contour(self, X, **kwargs):
         sent = {}
