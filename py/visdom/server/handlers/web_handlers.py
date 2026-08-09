@@ -461,6 +461,7 @@ class UpdateHandler(BaseHandler):
             broadcast(handler, json.dumps(broadcast_msg, cls=NanSafeEncoder), eid)
         else:
             UpdateHandler.broadcast_window_update(handler, args, eid, p, diff_packet)
+        handler.mark_dirty(eid)
         handler.write(p["id"])
 
     @check_auth
@@ -485,6 +486,7 @@ class CloseHandler(BaseHandler):
             p_data = handler.state[eid]["jsons"].pop(win, None)
             if p_data is not None:
                 push_deleted(handler.storage, eid, win, p_data)
+                handler.mark_dirty(eid)
             broadcast(handler, json.dumps({"command": "close", "data": win}), eid)
 
     @check_auth
@@ -682,6 +684,7 @@ class DataHandler(BaseHandler):
             else:
                 handler.state[eid]["jsons"][args["win"]] = data
 
+            handler.mark_dirty(eid)
             broadcast_envs(handler)
         else:
             # Dump data to client
@@ -940,6 +943,7 @@ class ExperimentLogHandler(BaseHandler):
         if is_new_env:
             handler.state[eid] = {"jsons": {}, "reload": {}}
         handler.state[eid]["experiment"] = experiment.to_dict()
+        handler.mark_dirty(eid)
         if is_new_env:
             broadcast_envs(handler)
 
