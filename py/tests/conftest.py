@@ -1,3 +1,11 @@
+#!/usr/bin/env python3
+
+# Copyright 2017-present, The Visdom Authors
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Fixtures shared by the whole suite.
 
 Everything here is hermetic: temporary directories only, no listening sockets,
