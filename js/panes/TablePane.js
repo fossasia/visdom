@@ -141,7 +141,7 @@ function TablePane(props) {
           ? 'Lock editing for yourself'
           : 'Editing is locked for yourself -- click to unlock'
       }
-      aria-pressed={locked}
+      aria-pressed={editable}
       onClick={() => {
         const active = document.activeElement;
         if (
