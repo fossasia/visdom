@@ -392,3 +392,11 @@ class Visdom:
         win: _OptStr = ...,
         env: _OptStr = ...,
     ) -> _SendReturn: ...
+    def table(
+        self,
+        data: List[Any],
+        headers: Optional[List[Any]] = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
