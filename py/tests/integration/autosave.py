@@ -88,6 +88,23 @@ class TestDirtyTracking(AutosaveTestCase):
         self.assertEqual(self.dirty_count("fragile"), 1)
         self.assertEqual(self.app.flush_dirty(), ["fragile"])
 
+    def test_an_environment_the_backend_declined_stays_marked(self):
+        self.app.state["skipped"] = {"jsons": {}, "reload": {}}
+        self.app.mark_dirty("skipped")
+
+        with mock.patch.object(self.app.storage, "save_envs", return_value=[]):
+            self.assertEqual(self.app.flush_dirty(), [])
+
+        self.assertEqual(self.dirty_count("skipped"), 1)
+
+    def test_an_environment_deleted_since_it_was_marked_is_cleared(self):
+        self.app.state["gone"] = {"jsons": {}, "reload": {}}
+        self.app.mark_dirty("gone")
+        del self.app.state["gone"]
+
+        self.assertEqual(self.app.flush_dirty(), [])
+        self.assertEqual(self.dirty_count("gone"), 0)
+
     def test_environment_is_rewritten_after_changing_again(self):
         self.app.state["repeat"] = {"jsons": {}, "reload": {}}
         self.app.mark_dirty("repeat")

@@ -166,15 +166,19 @@ class Application(tornado.web.Application):
         ``state``, and a background thread would be doing that while request
         handlers mutate the very dictionaries it is walking.
 
-        Environments stay marked until the write returns, so a failing backend
-        means they are retried on the next pass rather than silently dropped.
+        Only environments the backend reports as written lose their mark, so one
+        it declines is retried on the next pass rather than silently dropped. An
+        environment deleted since it was marked has nothing left to save and is
+        cleared too.
         """
         pending = [eid for eid in eids if self.dirty_envs.get(eid)]
         if not pending:
             return []
         written = self.storage.save_envs(self.state, pending)
+        saved = set(written)
         for eid in pending:
-            del self.dirty_envs[eid]
+            if eid in saved or eid not in self.state:
+                del self.dirty_envs[eid]
         return written
 
     def flush_dirty(self):
