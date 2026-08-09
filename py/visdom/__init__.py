@@ -650,7 +650,7 @@ def _compute_confusion_matrix(y_true, y_pred, labels):
 
 def _normalize_title_strings(layout):
     """Recursively wrap any plain-string 'title' value as {'text': ...}.
- 
+
     plotly.js v3.0+ no longer accepts a bare string for any 'title'
     attribute (chart title, xaxis/yaxis title, scene axis title, legend
     title, colorbar title, etc.). Visdom's own layout-building functions
