@@ -20,12 +20,18 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
+import pytest
 import tornado.testing
 
 from visdom import Visdom
 from visdom.data_model import JSONStore
 from visdom.experiments import ExperimentStore, QueryParseError
 from visdom.server.app import Application
+
+# The endpoint class drives a real Application, so the whole module rides in
+# the integration bucket even though the store and client-message classes
+# would qualify as unit on their own.
+pytestmark = pytest.mark.integration
 
 
 def seed_experiments(store):
