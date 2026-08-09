@@ -212,9 +212,10 @@ def _axisformat(xy, opts):
             opts.get(xy + "tickmin") is not None
             and opts.get(xy + "tickmax") is not None
         )
+        label = opts.get(xy + "label")
         return {
             "type": opts.get(xy + "type"),
-            "title": opts.get(xy + "label"),
+            "title": {"text": label} if label is not None else None,
             "range": (
                 [opts.get(xy + "tickmin"), opts.get(xy + "tickmax")]
                 if has_ticks
@@ -237,9 +238,10 @@ def _axisformat3d(xyz, opts):
             and opts.get(xyz + "tickmax") is not None
         )
         has_step = has_ticks and opts.get(xyz + "tickstep") is not None
+        label = opts.get(xyz + "label")
         return {
             "type": opts.get(xyz + "type"),
-            "title": opts.get(xyz + "label"),
+            "title": {"text": label} if label is not None else None,
             "range": (
                 [opts.get(xyz + "tickmin"), opts.get(xyz + "tickmax")]
                 if has_ticks
@@ -264,7 +266,7 @@ def _opts2layout(opts, is3d=False):
     tight = opts.get("tight_layout", False)
     layout = {
         "showlegend": opts.get("showlegend", "legend" in opts),
-        "title": opts.get("title"),
+        "title": {"text": opts["title"]} if opts.get("title") is not None else None,
         "margin": {
             "l": opts.get("marginleft", 0 if (is3d or tight) else 60),
             "r": opts.get("marginright", 0 if tight else 60),
@@ -3284,10 +3286,10 @@ class Visdom(object):
         layout = _opts2layout(opts)
         layout["annotations"] = annotations
         layout["xaxis"] = layout.get("xaxis", {})
-        layout["xaxis"]["title"] = opts["xlabel"]
+        layout["xaxis"]["title"] = {"text": opts["xlabel"]}
         layout["xaxis"]["side"] = "bottom"
         layout["yaxis"] = layout.get("yaxis", {})
-        layout["yaxis"]["title"] = opts["ylabel"]
+        layout["yaxis"]["title"] = {"text": opts["ylabel"]}
         layout["yaxis"]["autorange"] = "reversed"
 
         data_to_send = {
@@ -4030,7 +4032,7 @@ class Visdom(object):
         data = [trace1, trace2]
 
         layout = {
-            "title": opts.get("title", "Example Double Y axis"),
+            "title": {"text": opts.get("title", "Example Double Y axis")},
             "yaxis": {
                 "title": {
                     "text": trace1["name"],
