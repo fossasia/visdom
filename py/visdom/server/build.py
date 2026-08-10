@@ -91,7 +91,7 @@ def download_scripts(proxies=None, install_dir=None):
 
     built_path = os.path.join(install_dir, "static/version.built")
     assets_hash = hashlib.sha256(
-    repr(sorted(ext_files.items())).encode("utf-8")
+        repr(sorted(ext_files.items())).encode("utf-8")
     ).hexdigest()
     build_marker = "{0}:{1}".format(visdom.__version__, assets_hash)
     is_built = visdom.__version__ == "no_version_file"
