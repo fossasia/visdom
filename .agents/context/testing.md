@@ -11,8 +11,10 @@ pytest -m "not server"                 # skip tests that need a live server (CI 
 ```
 
 Config lives in `pyproject.toml` (`[tool.pytest.ini_options]`): discovery is scoped to
-`py/tests/` and `pythonpath = ["py"]` makes `import visdom` work without an editable install.
-Experimental `test_*.py` scripts in the repo root (and `test/`) are intentionally out of scope.
+`py/tests/`, and `pythonpath = ["py", "py/tests"]` makes both `import visdom` and
+`import testutils` work without an editable install. Because discovery is scoped by `testpaths`,
+experimental `test_*.py` scripts in the repo root (and `test/`) stay out of scope; `testutils/` is
+excluded via `norecursedirs` so helpers are importable but never collected.
 
 ## Run E2E / Visual Tests (Cypress)
 
@@ -38,12 +40,60 @@ Always use port `8098` and `-env_path /tmp` for isolation.
 
 ## Writing Python Tests
 
-- Place in `py/tests/`, name files `test_*.py`, classes `Test*` (unittest `TestCase` or plain
-  pytest functions both work — pytest auto-discovers unittest).
-- Keep them hermetic (no running server). A test that genuinely needs a live server must be
-  marked `@pytest.mark.server` so CI can deselect it.
-- Start with simple hermetic tests (e.g., `test_smoke.py`) and add focused unit tests for
-  server/window/env lifecycle code as coverage grows.
+### Where a test goes
+
+```
+py/tests/
+  conftest.py        shared fixtures, auto-loaded by pytest
+  testutils/         importable helpers (fakes, payload builders, HTTP base class)
+  unit/              pure logic: no Application, no I/O beyond tmp_path
+  integration/       in-process Application, real HTTP, or handler dispatch
+```
+
+`py/tests/` has **no** `__init__.py` on purpose — `setup.py` runs `find_packages(where="py")`,
+so a package there would ship a top-level `tests` distribution to users. `testutils/` is a
+package and is reachable because `py/tests` is on `pythonpath`.
+
+- Name a file after what it covers — `unit/window_builder.py`, not `unit/test_window_builder.py`.
+  The `unit/` and `integration/` directories already say these are tests, so the filename does not
+  repeat it; `python_files = ["*.py"]` in `pyproject.toml` collects them. Test *functions* still
+  need the `test_` prefix. **Write plain `def test_*()` functions, not `unittest.TestCase`
+  subclasses.** pytest still runs `TestCase` (much of the suite predates this rule), but
+  **pytest cannot inject fixtures into `TestCase` methods** — `def test_x(self, app)` fails.
+  Only autouse fixtures reach them. A `TestCase` therefore cannot use anything in the table
+  below, and cannot use `@pytest.mark.parametrize` either.
+- Keep them hermetic. A test that needs an **externally launched** server must be marked
+  `@pytest.mark.server` so CI can deselect it; nothing in the tracked suite needs one today.
+
+### Shared fixtures (`py/tests/conftest.py`)
+
+| Fixture | Gives you |
+|---|---|
+| `env_path` | disposable environment directory |
+| `store` / `spy_store` | `JSONStore` / one that records backend calls |
+| `app` / `app_factory` | `Application` on a temp `env_path`; factory for reload assertions |
+| `handler` / `app_handler` | duck-typed handler, standalone or sharing an `Application`'s state |
+| `fake_socket` | records `write_message`; `.commands()` and `.last(cmd)` for assertions |
+| `offline_client` | `Visdom(send=False)` — never opens a connection |
+| `capture_send` | runs a client call and returns the payload it would have sent |
+
+`reset_warn_once` is autouse: `shared_utils.warn_once` dedupes against a module-level set, so
+without it a warning raised by one test silently suppresses the same warning in another.
+
+HTTP tests are the one exception to the plain-function rule today: subclass
+`testutils.VisdomHTTPTestCase`, which starts the app in-process on an ephemeral port, gives every
+test a fresh `env_path` that is cleaned up, and provides `post_json`, `create_window`,
+`create_text_window`, `get_envs`, `get_win_data`, `win_exists` and `panes`. Override the
+`app_kwargs` class attribute to vary server configuration.
+
+It is a `TestCase` only because `tornado.testing.AsyncHTTPTestCase` is one, so the fixtures above
+are unavailable inside it. It is scheduled to be replaced by an equivalent `visdom_server` fixture
+that runs the app on a background event loop and talks to it with `requests`, which removes the
+last reason for any `TestCase` in this suite.
+
+### Markers
+
+`unit`, `integration`, `slow`, and `server` are registered in `pyproject.toml`.
 
 ## CI
 
