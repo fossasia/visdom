@@ -369,6 +369,15 @@ class TestCompareEndpoint(tornado.testing.AsyncHTTPTestCase):
             headers={"Content-Type": "application/json"},
         )
 
+    def post_raw(self, body):
+        """POST a body verbatim, so malformed JSON reaches the handler."""
+        return self.fetch(
+            "/experiments/compare",
+            method="POST",
+            body=body,
+            headers={"Content-Type": "application/json"},
+        )
+
     def compare_ok(self, body):
         resp = self.compare(body)
         self.assertEqual(resp.code, 200)
@@ -438,6 +447,23 @@ class TestCompareEndpoint(tornado.testing.AsyncHTTPTestCase):
 
     def test_non_string_env_id_is_400(self):
         self.assertEqual(self.compare({"env_ids": ["run-a", 7]}).code, 400)
+
+    def test_malformed_json_is_400(self):
+        """A body that is not JSON is the caller's error, not a 500."""
+        resp = self.post_raw("{not json")
+        self.assertEqual(resp.code, 400)
+
+    def test_non_object_body_is_400(self):
+        """A JSON list or scalar names no runs to compare, so reject it."""
+        self.assertEqual(self.post_raw('["run-a", "run-b"]').code, 400)
+        self.assertEqual(self.post_raw('"run-a"').code, 400)
+        self.assertEqual(self.post_raw("null").code, 400)
+
+    def test_missing_body_is_400(self):
+        """An empty body reads as no arguments, so env_ids is still missing."""
+        resp = self.post_raw("")
+        self.assertEqual(resp.code, 400)
+        self.assertIn("required", resp.reason)
 
     def test_unknown_keys_are_ignored(self):
         """A stale caller still sending query/limit is not an error, just ignored.

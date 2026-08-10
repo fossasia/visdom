@@ -31,10 +31,14 @@ class TestSuggestEndpoint(tornado.testing.AsyncHTTPTestCase):
         return Application(port=self.get_http_port(), env_path=self._tmp_dir)
 
     def suggest(self, body):
+        return self.post_raw(json.dumps(body))
+
+    def post_raw(self, body):
+        """POST a body verbatim, so malformed JSON reaches the handler."""
         return self.fetch(
             "/experiments/suggest",
             method="POST",
-            body=json.dumps(body),
+            body=body,
             headers={"Content-Type": "application/json"},
         )
 
@@ -54,6 +58,21 @@ class TestSuggestEndpoint(tornado.testing.AsyncHTTPTestCase):
         resp = self.suggest({"eid": "run-a", "params": {"lr": [0.1, 0.01]}})
         self.assertEqual(resp.code, 501)
         self.assertIsNone(json.loads(resp.body)["suggestion"])
+
+    def test_missing_body_is_still_the_stub(self):
+        """The body is optional, so no body at all still reaches the stub."""
+        self.assertEqual(self.post_raw("").code, 501)
+
+    def test_malformed_json_is_400(self):
+        """A body that is not JSON is the caller's error, not a 500."""
+        resp = self.post_raw("{not json")
+        self.assertEqual(resp.code, 400)
+
+    def test_non_object_body_is_400(self):
+        """A JSON list or scalar carries no search space to read, so reject it."""
+        self.assertEqual(self.post_raw("[1, 2]").code, 400)
+        self.assertEqual(self.post_raw('"lr"').code, 400)
+        self.assertEqual(self.post_raw("null").code, 400)
 
 
 class TestSuggestClientMessage(unittest.TestCase):

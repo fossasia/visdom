@@ -849,6 +849,28 @@ class UploadEnvHandler(BaseHandler):
         )
 
 
+def _decode_json_body(body):
+    """Return a request body decoded into a dict of arguments.
+
+    Shared by the ``/experiments/*`` endpoints, whose bodies are all optional
+    JSON objects, so an empty body is read as an empty object and each handler
+    decides on its own whether the arguments it needs are missing. Anything else
+    that is not a JSON object is the caller's error: without this check,
+    malformed JSON or a bare list would surface as an unhandled exception and a
+    500 rather than a 400 naming what was wrong with the request.
+    """
+    try:
+        text = tornado.escape.to_basestring(body).strip()
+        if not text:
+            return {}
+        args = tornado.escape.json_decode(text)
+    except ValueError:
+        raise tornado.web.HTTPError(400, reason="request body must be valid JSON")
+    if not isinstance(args, Mapping):
+        raise tornado.web.HTTPError(400, reason="request body must be an object")
+    return args
+
+
 class ExperimentLogHandler(BaseHandler):
     """POST ``/experiments/log`` — record experiment metadata for an environment.
 
@@ -1034,27 +1056,6 @@ class ExperimentSearchHandler(BaseHandler):
         return value
 
     @staticmethod
-    def _decode_body(body):
-        """Return the request body decoded into a dict of arguments.
-
-        The body is optional — the endpoint documents it as such, and a search
-        with no arguments matches everything — so an empty body is read as an
-        empty object. Anything else that is not a JSON object is the caller's
-        error: without this, malformed JSON or a bare list would surface as an
-        unhandled exception and a 500.
-        """
-        try:
-            text = tornado.escape.to_basestring(body).strip()
-            if not text:
-                return {}
-            args = tornado.escape.json_decode(text)
-        except ValueError:
-            raise tornado.web.HTTPError(400, reason="request body must be valid JSON")
-        if not isinstance(args, Mapping):
-            raise tornado.web.HTTPError(400, reason="request body must be an object")
-        return args
-
-    @staticmethod
     def wrap_func(handler, args):
         query = ExperimentSearchHandler._require_text(args, "query")
         sort_by = ExperimentSearchHandler._require_text(args, "sort_by")
@@ -1092,7 +1093,7 @@ class ExperimentSearchHandler(BaseHandler):
 
     @check_auth
     def post(self):
-        self.wrap_func(self, self._decode_body(self.request.body))
+        self.wrap_func(self, _decode_json_body(self.request.body))
 
 
 class ExperimentCompareHandler(BaseHandler):
@@ -1155,10 +1156,7 @@ class ExperimentCompareHandler(BaseHandler):
 
     @check_auth
     def post(self):
-        args = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
-        self.wrap_func(self, args)
+        self.wrap_func(self, _decode_json_body(self.request.body))
 
 
 class ExperimentSuggestHandler(BaseHandler):
@@ -1174,9 +1172,11 @@ class ExperimentSuggestHandler(BaseHandler):
 
         {"status": "not_implemented", "detail": "...", "suggestion": null}
 
-    The request body is parsed and passed through like the sibling handlers so
-    that shape is already in place, but it is otherwise ignored until the
-    strategy lands.
+    The request body is validated and passed through like the sibling handlers
+    so that shape is already in place, but it is otherwise ignored until the
+    strategy lands. A body that is not a JSON object is still rejected with 400:
+    a caller sending a malformed search space should hear about it now rather
+    than have it silently accepted here and rejected once the strategy lands.
     """
 
     #: The stub reply, carrying ``suggestion: null`` so the eventual field is
@@ -1197,10 +1197,7 @@ class ExperimentSuggestHandler(BaseHandler):
 
     @check_auth
     def post(self):
-        args = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
-        self.wrap_func(self, args)
+        self.wrap_func(self, _decode_json_body(self.request.body))
 
 
 class HealthHandler(BaseHandler):
