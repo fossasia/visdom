@@ -23,8 +23,6 @@ const DEFAULT_HEIGHT = 400;
 const DEFAULT_WIDTH = 300;
 const IMAGE_EXPORT_FORMATS = ['png', 'jpg', 'pdf'];
 
-const IMAGE_EXPORT_DPI = 96;
-
 function ImagePane(props) {
   const { sendPaneMessage } = useContext(ApiContext);
   const { envID, id, title, type, selected, width, height } = props;
@@ -53,9 +51,10 @@ function ImagePane(props) {
 
   // private events
   // -------------
-  const handleExport = (format) => {
+  const handleExport = (format, dpi) => {
     try {
       const filename = `${title || 'visdom_image'}.${format}`;
+      const dpiToEmbed = dpi || 96;
       const canvas = document.createElement('canvas');
       canvas.width = imgRef.current.naturalWidth;
       canvas.height = imgRef.current.naturalHeight;
@@ -64,13 +63,13 @@ function ImagePane(props) {
 
       if (format === 'pdf') {
         const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
-        downloadImageAsPdf(dataUrl, filename, IMAGE_EXPORT_DPI);
+        downloadImageAsPdf(dataUrl, filename, dpiToEmbed);
       } else if (format === 'jpg') {
         const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
-        downloadJpegWithDpi(dataUrl, filename, IMAGE_EXPORT_DPI);
+        downloadJpegWithDpi(dataUrl, filename, dpiToEmbed);
       } else {
         const dataUrl = canvas.toDataURL('image/png');
-        downloadPngWithDpi(dataUrl, filename, IMAGE_EXPORT_DPI);
+        downloadPngWithDpi(dataUrl, filename, dpiToEmbed);
       }
     } catch (err) {
       // eslint-disable-next-line no-console
@@ -380,7 +379,6 @@ function ImagePane(props) {
       {...props}
       handleExport={handleExport}
       exportFormats={IMAGE_EXPORT_FORMATS}
-      showDpiOptions={false}
       handleReset={handleReset}
       handleZoom={handleZoom}
       handleMouseMove={handleMouseOver}
