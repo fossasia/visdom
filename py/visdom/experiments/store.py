@@ -155,6 +155,28 @@ class ExperimentStore:
         experiment.add_metric(key, value, step)
         return self._write(env_id, env, experiment)
 
+    def update_tags(self, env_id, tags, append=False):
+        """Replace or append organizational tags for ``env_id``.
+
+        ``tags`` is the model's ``{key: value}`` representation.  Unlike run
+        logging, tag management is allowed after an experiment reaches a
+        terminal state: tags organize completed runs and do not alter their
+        parameters, metrics, result status, or completion timestamp.
+        """
+        if not isinstance(tags, dict):
+            raise TypeError("tags must be a dict of {name: value}")
+        if not isinstance(append, bool):
+            raise TypeError("append must be a boolean")
+
+        env, experiment = self._read(env_id)
+        if experiment is None:
+            experiment = Experiment(env_id=env_id, name=env_id)
+        if not append:
+            experiment.tags = []
+        for key, value in tags.items():
+            experiment.set_tag(key, value)
+        return self._write(env_id, env, experiment)
+
     def finish_experiment(self, env_id, status=STATUS_FINISHED):
         """Mark ``env_id``'s experiment terminal; raise if none was logged.
 
