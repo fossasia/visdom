@@ -346,6 +346,37 @@ class TestStoreCompare(unittest.TestCase):
         with self.assertRaises(TypeError):
             self.store.compare(env_ids=["run-a", 7])
 
+    def test_experiment_answers_to_the_env_it_is_stored_under(self):
+        """A stale env_id in the blob loses to the env the blob was read from.
+
+        Cloning an env copies its metadata verbatim, so a copy can name the env
+        it was cloned from; the env it is stored under is the real one.
+        """
+        clone = self.store.datastore.load_env("run-a")
+        self.store.datastore.save_env("run-a-fork", clone)
+        self.assertEqual(clone["experiment"]["env_id"], "run-a")
+        self.assertEqual(self.store.get_experiment("run-a-fork").env_id, "run-a-fork")
+
+    def test_cloned_env_compares_as_its_own_run(self):
+        """A clone and its source are two runs, not one column keyed twice.
+
+        Comparison is keyed by env_id, so trusting the copied blob's stale id
+        would fold the two into a single entry and silently drop a run the
+        caller asked for.
+        """
+        self.store.datastore.save_env(
+            "run-a-fork", self.store.datastore.load_env("run-a")
+        )
+        self.store.log_metric("run-a-fork", "acc", 0.42)
+
+        comparison = self.store.compare(env_ids=["run-a", "run-a-fork"])
+        self.assertEqual(comparison["env_ids"], ["run-a", "run-a-fork"])
+        self.assertEqual(
+            comparison["metrics"]["values"]["acc"],
+            {"run-a": 0.80, "run-a-fork": 0.42},
+        )
+        self.assertEqual(comparison["params"]["shared"], {"lr": 0.1, "epochs": 10})
+
     def test_searching_then_comparing_the_matches(self):
         """Comparing a query's matches is search's job, then compare's.
 
@@ -381,6 +412,15 @@ class TestCompareEndpoint(tornado.testing.AsyncHTTPTestCase):
         resp = self.compare(body)
         self.assertEqual(resp.code, 200)
         return json.loads(resp.body)
+
+    def post_raw(self, body):
+        """POST a body that is not necessarily valid JSON."""
+        return self.fetch(
+            "/experiments/compare",
+            method="POST",
+            body=body,
+            headers={"Content-Type": "application/json"},
+        )
 
     def test_compare_by_env_ids(self):
         """The named runs are compared, in the order given."""
@@ -447,6 +487,28 @@ class TestCompareEndpoint(tornado.testing.AsyncHTTPTestCase):
     def test_non_string_env_id_is_400(self):
         self.assertEqual(self.compare({"env_ids": ["run-a", 7]}).code, 400)
 
+    def test_malformed_json_is_400(self):
+        """A body that is not JSON is the caller's error, not a 500.
+
+        Compare decodes the body with the same helper as search, so the two
+        endpoints reject the same bodies the same way.
+        """
+        resp = self.post_raw("{not json")
+        self.assertEqual(resp.code, 400)
+        self.assertIn("JSON", resp.reason)
+
+    def test_non_object_body_is_400(self):
+        """A JSON list or scalar carries no env_ids to read, so reject it."""
+        self.assertEqual(self.post_raw('["run-a"]').code, 400)
+        self.assertEqual(self.post_raw('"run-a"').code, 400)
+        self.assertEqual(self.post_raw("null").code, 400)
+
+    def test_empty_body_is_400(self):
+        """Unlike search, compare has nothing to do without env_ids."""
+        resp = self.post_raw("")
+        self.assertEqual(resp.code, 400)
+        self.assertIn("required", resp.reason)
+
     def test_unknown_keys_are_ignored(self):
         """A stale caller still sending query/limit is not an error, just ignored.
 
@@ -478,6 +540,60 @@ class TestCompareEndpoint(tornado.testing.AsyncHTTPTestCase):
         )
         body = self.compare_ok({"env_ids": ["run-a", "run-e"]})
         self.assertEqual(body["params"]["shared"], {"lr": 0.1})
+
+
+class TestCompareForkedEnv(tornado.testing.AsyncHTTPTestCase):
+    """A forked env compares as a run of its own, not as its parent.
+
+    The experiments are seeded before the app is built so the server loads them
+    into its state and ``/fork_env`` has something to fork.
+    """
+
+    def setUp(self):
+        self._tmp_dir = tempfile.mkdtemp(prefix="visdom_exp_compare_fork_")
+        seed_experiments(ExperimentStore(JSONStore(self._tmp_dir)))
+        super().setUp()
+
+    def get_app(self):
+        return Application(port=self.get_http_port(), env_path=self._tmp_dir)
+
+    def post_json(self, path, body):
+        return self.fetch(
+            path,
+            method="POST",
+            body=json.dumps(body),
+            headers={"Content-Type": "application/json"},
+        )
+
+    def fork(self, prev_eid, eid):
+        resp = self.post_json("/fork_env", {"prev_eid": prev_eid, "eid": eid})
+        self.assertEqual(resp.code, 200)
+        return resp
+
+    def test_fork_retargets_the_experiment_metadata(self):
+        """The clone's stored experiment names the env it now lives in."""
+        self.fork("run-a", "run-a-fork")
+        store = ExperimentStore(JSONStore(self._tmp_dir))
+        self.assertEqual(store.get_experiment("run-a-fork").env_id, "run-a-fork")
+        self.assertEqual(store.get_experiment("run-a").env_id, "run-a")
+
+    def test_compare_keeps_a_fork_and_its_parent_apart(self):
+        """Comparing a fork against its source diffs two runs, not one."""
+        self.fork("run-a", "run-a-fork")
+        resp = self.post_json(
+            "/experiments/compare", {"env_ids": ["run-a", "run-a-fork"]}
+        )
+        self.assertEqual(resp.code, 200)
+        body = json.loads(resp.body)
+        self.assertEqual(body["env_ids"], ["run-a", "run-a-fork"])
+        self.assertEqual(len(body["experiments"]), 2)
+        self.assertEqual(
+            body["params"]["values"]["lr"], {"run-a": 0.1, "run-a-fork": 0.1}
+        )
+        self.assertEqual(
+            body["params"]["groups"]["lr"],
+            [{"value": 0.1, "env_ids": ["run-a", "run-a-fork"]}],
+        )
 
 
 class TestCompareClientMessage(unittest.TestCase):
