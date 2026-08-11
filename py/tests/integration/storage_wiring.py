@@ -1,8 +1,16 @@
+#!/usr/bin/env python3
+
+# Copyright 2017-present, The Visdom Authors
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
 """
 Tests that the server routes persistence through ``Application.storage``
 (the DataStore backend) rather than writing environment files directly.
 
-These guard the PR-#2 wiring: end-to-end save/fork/reload behavior is already
+As end-to-end save/fork/reload behavior is already
 covered in ``test_environment_lifecycle``; here we assert the abstraction itself
 is in place so a future refactor cannot silently bypass the backend.
 """
@@ -10,7 +18,6 @@ is in place so a future refactor cannot silently bypass the backend.
 import json
 import os
 import tempfile
-import types
 import unittest
 from unittest import mock
 
@@ -31,10 +38,8 @@ from visdom.utils.server_utils import (
     push_deleted,
 )
 
-
-def _env(win_id="win_0"):
-    """Minimal environment payload (one window)."""
-    return {"jsons": {win_id: {"id": win_id}}, "reload": {}}
+from testutils.fakes import FakeHandler, FakeSocket, SpyStore
+from testutils.payloads import env_payload
 
 
 class TestStorageWiring(unittest.TestCase):
@@ -63,31 +68,12 @@ class TestStorageWiring(unittest.TestCase):
 
         self.app.storage.save_envs = spy
 
-        written = []
-        handler = types.SimpleNamespace(
-            storage=self.app.storage, state=self.app.state, write=written.append
-        )
+        handler = FakeHandler(state=self.app.state, storage=self.app.storage)
         SaveHandler.wrap_func(handler, {"data": ["main"]})
 
         self.assertEqual(len(calls), 1)
         self.assertIn("main", calls[0])
-        self.assertIn("main", json.loads(written[0]))
-
-
-class _SpyStore(JSONStore):
-    """JSONStore that records load-path calls while delegating to the real impl."""
-
-    def __init__(self, env_path):
-        super().__init__(env_path)
-        self.calls = {"list_envs": 0, "load_env": []}
-
-    def list_envs(self):
-        self.calls["list_envs"] += 1
-        return super().list_envs()
-
-    def load_env(self, eid):
-        self.calls["load_env"].append(eid)
-        return super().load_env(eid)
+        self.assertIn("main", handler.json_body())
 
 
 class TestLoadStateWiring(unittest.TestCase):
@@ -101,26 +87,28 @@ class TestLoadStateWiring(unittest.TestCase):
         self._tmp.cleanup()
 
     def _seed(self, eid, env=None):
-        JSONStore(self.env_path).save_env(eid, env if env is not None else _env())
+        JSONStore(self.env_path).save_env(
+            eid, env if env is not None else env_payload()
+        )
 
     def test_saved_envs_load_into_state(self):
         self._seed("main")
-        self._seed("expt", _env("w1"))
+        self._seed("expt", env_payload("w1"))
         app = Application(port=8097, env_path=self.env_path)
         self.assertIn("expt", app.state)
-        self.assertEqual(dict(app.state["expt"]), _env("w1"))
+        self.assertEqual(dict(app.state["expt"]), env_payload("w1"))
 
     def test_lazy_by_default(self):
         self._seed("expt")
         app = Application(port=8097, env_path=self.env_path)
         self.assertIsInstance(app.state["expt"], LazyEnvData)
-        self.assertEqual(app.state["expt"]["jsons"], _env()["jsons"])
+        self.assertEqual(app.state["expt"]["jsons"], env_payload()["jsons"])
 
     def test_eager_loads_plain_dicts(self):
         self._seed("expt")
         app = Application(port=8097, env_path=self.env_path, eager_data_loading=True)
         self.assertIsInstance(app.state["expt"], dict)
-        self.assertEqual(app.state["expt"], _env())
+        self.assertEqual(app.state["expt"], env_payload())
 
     def test_eager_preserves_extra_env_keys(self):
         """Eager loading keeps env keys the server itself does not read.
@@ -129,13 +117,13 @@ class TestLoadStateWiring(unittest.TestCase):
         dropping unknown keys here would lose it on the next full-env save.
         """
         experiment = {"env_id": "expt", "name": "run-1", "status": "running"}
-        self._seed("expt", dict(_env("w1"), experiment=experiment))
+        self._seed("expt", dict(env_payload("w1"), experiment=experiment))
         app = Application(port=8097, env_path=self.env_path, eager_data_loading=True)
         self.assertEqual(app.state["expt"]["experiment"], experiment)
 
     def test_load_state_routes_through_storage(self):
         self._seed("expt")
-        with mock.patch("visdom.server.app.JSONStore", _SpyStore):
+        with mock.patch("visdom.server.app.JSONStore", SpyStore):
             app = Application(port=8097, env_path=self.env_path)
         self.assertEqual(app.storage.calls["list_envs"], 1)
         self.assertEqual(app.storage.calls["load_env"], [])
@@ -176,19 +164,15 @@ class TestDeleteWiring(unittest.TestCase):
 
     def _handler(self, state, **extra):
         """A stand-in handler exposing only what the delete paths read."""
-        return types.SimpleNamespace(
-            storage=self.store,
-            state=state,
-            env_path=self.env_path,
-            subs={},
-            **extra,
+        return FakeHandler(
+            state=state, storage=self.store, env_path=self.env_path, **extra
         )
 
     def test_web_delete_routes_through_storage(self):
-        self.store.save_env("expt", _env())
+        self.store.save_env("expt", env_payload())
         self.assertTrue(self.store.env_exists("expt"))
         calls = self._spy_delete()
-        handler = self._handler({"expt": _env()})
+        handler = self._handler({"expt": env_payload()})
         DeleteEnvHandler.wrap_func(handler, {"eid": "expt"})
         self.assertEqual(calls, ["expt"])
         self.assertNotIn("expt", handler.state)
@@ -196,17 +180,17 @@ class TestDeleteWiring(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.env_path, "expt.json")))
 
     def test_web_delete_protects_main(self):
-        self.store.save_env("main", _env())
+        self.store.save_env("main", env_payload())
         calls = self._spy_delete()
-        handler = self._handler({"main": _env()})
+        handler = self._handler({"main": env_payload()})
         DeleteEnvHandler.wrap_func(handler, {"eid": "main"})
         self.assertEqual(calls, [])
         self.assertTrue(self.store.env_exists("main"))
 
     def test_socket_delete_routes_through_storage(self):
-        self.store.save_env("expt", _env())
+        self.store.save_env("expt", env_payload())
         calls = self._spy_delete()
-        fake = self._handler({"expt": _env()}, readonly=False)
+        fake = self._handler({"expt": env_payload()}, readonly=False)
         AnySocketHandlerOrWrapper.on_message(
             fake, json.dumps({"cmd": "delete_env", "eid": "expt"})
         )
@@ -302,7 +286,7 @@ class TestLazyEnvDataBackend(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_defers_until_access_then_caches(self):
-        self._store.save_env("main", _env())
+        self._store.save_env("main", env_payload())
         reads = []
         real_load = self._store.load_env
 
@@ -313,7 +297,7 @@ class TestLazyEnvDataBackend(unittest.TestCase):
         self._store.load_env = spy
         lazy = LazyEnvData(self._store, "main")
         self.assertEqual(reads, [])
-        self.assertEqual(lazy["jsons"], _env()["jsons"])
+        self.assertEqual(lazy["jsons"], env_payload()["jsons"])
         self.assertEqual(reads, ["main"])
         _ = lazy["reload"]
         self.assertEqual(reads, ["main"])
@@ -324,55 +308,44 @@ class TestLazyEnvDataBackend(unittest.TestCase):
             _ = lazy["jsons"]
 
 
-class _FakeSocket:
-    """Minimal stand-in for a client socket used by the read helpers."""
-
-    def __init__(self):
-        self.messages = []
-        self.eid = None
-
-    def write_message(self, msg):
-        self.messages.append(msg)
-
-
 class TestReadHelperWiring(unittest.TestCase):
     """``load_env`` reads a cold env through the store, not raw env_path."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.store = _SpyStore(self._tmp.name)
+        self.store = SpyStore(self._tmp.name)
 
     def tearDown(self):
         self._tmp.cleanup()
 
     def test_load_env_reads_cold_env_through_store(self):
-        JSONStore(self.store.env_path).save_env("expt", _env())
+        JSONStore(self.store.env_path).save_env("expt", env_payload())
         state = {}
-        socket = _FakeSocket()
+        socket = FakeSocket()
         load_env(state, "expt", socket, self.store)
         self.assertEqual(self.store.calls["load_env"], ["expt"])
-        self.assertEqual(dict(state["expt"]), _env())
+        self.assertEqual(dict(state["expt"]), env_payload())
 
     def test_load_env_skips_store_when_already_in_state(self):
-        state = {"expt": _env()}
-        socket = _FakeSocket()
+        state = {"expt": env_payload()}
+        socket = FakeSocket()
         load_env(state, "expt", socket, self.store)
         self.assertEqual(self.store.calls["load_env"], [])
 
     def test_gather_envs_lists_through_store(self):
-        JSONStore(self.store.env_path).save_env("on_disk", _env())
-        items = gather_envs({"in_memory": _env()}, self.store)
+        JSONStore(self.store.env_path).save_env("on_disk", env_payload())
+        items = gather_envs({"in_memory": env_payload()}, self.store)
         self.assertEqual(self.store.calls["list_envs"], 1)
         self.assertEqual(items, ["in_memory", "on_disk"])
 
     def test_gather_envs_in_memory_only(self):
-        store = _SpyStore(None)
-        self.assertEqual(gather_envs({"main": _env()}, store), ["main"])
+        store = SpyStore(None)
+        self.assertEqual(gather_envs({"main": env_payload()}, store), ["main"])
 
     def test_compare_envs_reads_cold_env_through_store(self):
-        JSONStore(self.store.env_path).save_env("cold", _env())
-        state = {"warm": _env("w1")}
-        socket = _FakeSocket()
+        JSONStore(self.store.env_path).save_env("cold", env_payload())
+        state = {"warm": env_payload("w1")}
+        socket = FakeSocket()
         compare_envs(state, ["warm", "cold"], socket, self.store)
         self.assertEqual(self.store.calls["load_env"], ["cold"])
         self.assertIn("cold", state)

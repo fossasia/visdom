@@ -18,11 +18,16 @@ import ApiContext from '../api/ApiContext';
 import EventSystem from '../EventSystem';
 import lasso from '../lasso';
 import Pane from './Pane';
+import {
+  downloadJpegWithDpi,
+  downloadPngWithDpi,
+} from './utils/Embeddpimetadata';
+import { downloadImageAsPdf } from './utils/pdfExport';
 
 const SCALE_RADIUS = 2000;
 const MIN_SELECTION = 22;
 
-const EXPORT_FORMATS = ['png', 'jpg'];
+const EXPORT_FORMATS = ['png', 'jpg', 'pdf'];
 
 class EmbeddingsPane extends React.Component {
   state = { exportError: null };
@@ -149,8 +154,10 @@ class EmbeddingsPane extends React.Component {
 
     const width = Math.max(1, this.props.width);
     const height = Math.max(1, this.props.height);
-    const scale = dpi ? dpi / 96 : 1;
+    const PDF_CAPTURE_DPI = 300;
+    const scale = format === 'pdf' ? PDF_CAPTURE_DPI / 96 : dpi ? dpi / 96 : 1;
     const originalPixelRatio = renderer.getPixelRatio();
+    const effectiveDpi = Math.round(scale * 96 * originalPixelRatio);
 
     try {
       // `updateStyle=false` keeps the on-screen CSS size unchanged while
@@ -159,16 +166,27 @@ class EmbeddingsPane extends React.Component {
       renderer.setSize(width, height, false);
       renderer.render(scene, camera);
 
-      const mime = format === 'jpg' ? 'image/jpeg' : 'image/png';
+      const mime =
+        format === 'jpg' || format === 'pdf' ? 'image/jpeg' : 'image/png';
       const dataUrl = renderer.domElement.toDataURL(
         mime,
-        format === 'jpg' ? 0.92 : undefined
+        format === 'jpg' || format === 'pdf' ? 0.95 : undefined
       );
 
-      const link = document.createElement('a');
-      link.download = `${this.props.contentID || 'plot'}.${format}`;
-      link.href = dataUrl;
-      link.click();
+      if (format === 'pdf') {
+        downloadImageAsPdf(
+          dataUrl,
+          `${this.props.contentID || 'plot'}.pdf`,
+          effectiveDpi
+        );
+      } else {
+        const filename = `${this.props.contentID || 'plot'}.${format}`;
+        if (format === 'jpg') {
+          downloadJpegWithDpi(dataUrl, filename, effectiveDpi);
+        } else {
+          downloadPngWithDpi(dataUrl, filename, effectiveDpi);
+        }
+      }
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('EmbeddingsPane export failed:', err);

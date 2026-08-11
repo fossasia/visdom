@@ -9,9 +9,10 @@ LICENSE file in the root directory of this source tree.
 -->
 
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
+    <title>visdom</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
     <link rel="shortcut icon" href="favicon.png">
@@ -50,9 +51,6 @@ LICENSE file in the root directory of this source tree.
 
     <!-- Custom styles for this template -->
     <script>
-    // TODO: this is not great. Should probably be an endpoint with a JSON
-    // response or the first thing the socket sends back.
-    var ENV_LIST = [];
     function getActiveEnvFromPath() {
       var path = window.location.pathname || '';
       if (path.includes('/env/')) {
@@ -85,8 +83,6 @@ LICENSE file in the root directory of this source tree.
     <link rel="stylesheet" href={{ static_url("../user/style.css") }}>
     <!-- Added Script for NetworkPane -->
     <link rel="stylesheet" href={{ static_url("css/network.css") }}>
-
-    <title>visdom</title>
     <!-- <link rel="icon" href="http://example.com/favicon.png"> -->
   </head>
 
