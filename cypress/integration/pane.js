@@ -24,6 +24,7 @@ const basic_examples = [
   // ["Audio Pane", "misc_audio_basic"], // bug: disabled due to inconsistent resize
   ['Properties Pane', 'properties_basic'],
   ['HTML Table', 'html_table'],
+  ['Table', 'table'],
   ['Confusion Matrix', 'plot_confusion_matrix_basic'],
 ];
 
@@ -110,6 +111,9 @@ basic_examples.forEach((setting) => {
     } else if (basic_example == "html_table") {
       [ height, width ] = [ 290, 244 ];
       [ height4, width4 ] = [ height, width];
+    } else if (basic_example == 'table') {
+      [height, width] = [290, 370];
+      [height4, width4] = [height, width];
     } else {
       [height, width] = [350, 370];
       [height4, width4] = [height, width];
