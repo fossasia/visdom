@@ -59,6 +59,11 @@ function ImagePane(props) {
       canvas.width = imgRef.current.naturalWidth;
       canvas.height = imgRef.current.naturalHeight;
       const ctx = canvas.getContext('2d');
+
+      if (format === 'jpg' || format === 'pdf') {
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
       ctx.drawImage(imgRef.current, 0, 0);
 
       if (format === 'pdf') {
