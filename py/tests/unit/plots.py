@@ -667,7 +667,7 @@ class _FakePlot:
 @pytest.mark.skipif(not visdom.BS4_AVAILABLE, reason="requires bs4/lxml")
 class TestMatplotResizable(unittest.TestCase):
     def setUp(self):
-        self.viz = visdom.Visdom(send=False, use_incoming_socket=False)
+        self.viz = visdom.Visdom(use_incoming_socket=False)
 
     def _matplot(self, plot, **kwargs):
         captured = {}
