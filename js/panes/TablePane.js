@@ -22,7 +22,10 @@ function TablePane(props) {
   const { sendTableEdit, sessionInfo } = useContext(ApiContext);
   const { envID, id, content } = props;
   const { headers = [], rows = [] } = content || {};
-  const editable = props.editable !== false && !sessionInfo?.readonly;
+  const canEdit = props.editable !== false && !sessionInfo?.readonly;
+  const [locked, setLocked] = useState(false);
+  const editable = canEdit && !locked;
+
   const [colWidths, setColWidths] = useState(() =>
     headers.map(() => DEFAULT_COL_WIDTH)
   );
@@ -30,6 +33,7 @@ function TablePane(props) {
     rows.map(() => DEFAULT_ROW_HEIGHT)
   );
   const dragState = useRef(null);
+  const tableRef = useRef(null);
 
   useEffect(() => {
     setColWidths((w) => headers.map((_, i) => w[i] ?? DEFAULT_COL_WIDTH));
@@ -129,9 +133,46 @@ function TablePane(props) {
   const totalWidth =
     colWidths.reduce((sum, w) => sum + w, 0) + (editable ? 24 : 0);
 
+  const editToggleButton = canEdit ? (
+    <button
+      key="table-edit-toggle-button"
+      title={
+        editable
+          ? 'Lock editing for yourself'
+          : 'Editing is locked for yourself -- click to unlock'
+      }
+      aria-pressed={editable}
+      onClick={() => {
+        const active = document.activeElement;
+        if (
+          tableRef.current &&
+          active &&
+          tableRef.current.contains(active) &&
+          typeof active.blur === 'function'
+        ) {
+          active.blur();
+        }
+        setLocked((v) => !v);
+      }}
+      className={
+        editable
+          ? 'table-edit-toggle pull-right active'
+          : 'table-edit-toggle pull-right'
+      }
+    >
+      <span className="glyphicon glyphicon-pencil" />
+    </button>
+  ) : (
+    ''
+  );
+
   return (
-    <Pane {...props} handleDownload={handleDownload}>
-      <div className="content-table">
+    <Pane
+      {...props}
+      handleDownload={handleDownload}
+      barwidgets={[editToggleButton]}
+    >
+      <div className="content-table" ref={tableRef}>
         <table
           className="table-native"
           style={{ tableLayout: 'fixed', width: totalWidth }}
