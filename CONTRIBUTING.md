@@ -133,7 +133,7 @@ Blindly copy-pasting AI-generated code that you cannot explain or debug is not p
 We actively welcome your pull requests.
 
 1. Fork the repo and create your branch from `dev`.
-2. If you've added code that should be tested, add tests.
+2. If you've added code that should be tested, add tests. For Python, see [Python Tests](#python-tests) below.
 3. If you've changed APIs, update the documentation.
 4. Ensure the Lua and Python interfaces to Visdom are in sync.
 5. If you change `js/`, commit the React-compiled version of `main.js`. For details, please see `Contributing to the UI` below.
@@ -144,6 +144,56 @@ We actively welcome your pull requests.
     - To do that automatically before each `git commit`, enable pre-commit hooks: `pre-commit install`.
 8. If you haven't already, complete the Contributor License Agreement ("CLA").
 
+
+## Python Tests
+The Python test suite uses [pytest](https://docs.pytest.org/) and lives under `py/tests/`. It is
+hermetic: no visdom server has to be running, and no test touches the network. Visdom itself
+requires Python 3.12 or newer, so run the tests on 3.12+.
+
+#### Running the tests
+```bash
+pip install -e .                       # install visdom
+pip install -r test-requirements.txt   # pytest and the test dependencies
+pytest                                 # the whole suite
+pytest -m "not server"                 # what CI runs
+```
+Discovery is configured in `pyproject.toml`, so `pytest` finds the suite from anywhere in the
+repository and you do not need to pass a path.
+
+While working on a change, narrow the run down:
+```bash
+pytest py/tests/unit                     # the fast subset: no HTTP
+pytest py/tests/unit/window_builder.py   # a single file
+pytest -k window_builder                 # tests matching a name
+pytest -x --lf                           # stop at the first failure, then re-run just that one
+```
+The `unit`, `integration`, `slow` and `server` markers are registered in `pyproject.toml` for
+selecting with `-m`; a run only picks up the files that carry the marker.
+
+Note that `-q` is already set in `addopts`; passing another `-q` hides the summary line. Use
+`-o addopts=""` if you want pytest's full default output.
+
+#### Adding a test
+```
+py/tests/
+  conftest.py    shared fixtures, loaded automatically
+  testutils/     importable helpers — never collected as tests
+  unit/          pure logic: no Application, no I/O beyond tmp_path
+  integration/   in-process Application, real HTTP, or handler dispatch
+```
+- Put the file in `unit/` or `integration/`, depending on what it needs.
+- Name the file after what it covers — `unit/window_builder.py`, not `unit/test_window_builder.py`.
+  The directory already says these are tests. Test **functions** still need the `test_` prefix, or
+  pytest will not run them.
+- Prefer plain `def test_*()` functions. pytest cannot pass fixtures into `unittest.TestCase`
+  methods, so a `TestCase` cannot use anything in `conftest.py` or `@pytest.mark.parametrize`.
+  Tests that need a real HTTP round trip are the exception: subclass
+  `testutils.VisdomHTTPTestCase`, which runs the app in-process on an ephemeral port.
+- A test that needs an externally launched server must be marked `@pytest.mark.server` so CI can
+  deselect it. Nothing in the suite needs one today.
+- Test files carry the same license header as the rest of the repository.
+
+`.agents/context/testing.md` has the longer version, including a reference for every shared fixture.
 
 ## Contributing to the UI
 The UI is built with [React](https://facebook.github.io/react/). For testing,
