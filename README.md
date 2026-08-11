@@ -298,8 +298,8 @@ Visdom offers the following basic visualization functions:
 - [`vis.images`](#visimages)   : list of images
 - [`vis.text`](#vistext)     : arbitrary HTML
 - [`vis.properties`](#visproperties)     : properties grid
-- [`vis.html_table`](#vishtml_table)     : static styled HTML table
 - [`vis.table`](#vistable)     : editable, resizable table pane
+- [`vis.html_table`](#vishtml_table)     : static styled HTML table
 - [`vis.audio`](#visaudio)    : audio
 - [`vis.video`](#visvideo)    : videos
 - [`vis.svg`](#vissvg)      : SVG object
