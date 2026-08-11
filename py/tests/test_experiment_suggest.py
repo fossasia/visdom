@@ -5,13 +5,14 @@
 ``501 Not Implemented`` with a JSON stub. These tests pin that contract from
 both ends — the endpoint through a real
 :class:`~visdom.server.app.Application` with Tornado's ``AsyncHTTPTestCase``,
-and the ``Visdom.suggest_experiment`` message shape with ``send=False`` (no
+and the ``Visdom.suggest_experiment`` message shape with a mocked transport (no
 server) — so the surface stays stable until the strategy is wired in.
 """
 
 import json
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
 
 import tornado.testing
 
@@ -56,20 +57,33 @@ class TestSuggestEndpoint(tornado.testing.AsyncHTTPTestCase):
 
 
 class TestSuggestClientMessage(unittest.TestCase):
-    """Visdom.suggest_experiment builds the message the endpoint expects."""
+    """Visdom.suggest_experiment builds the message the endpoint expects.
+
+    The transport is mocked to return the ``(msg, endpoint)`` it would have
+    posted, so we can assert on it directly.
+    """
 
     def setUp(self):
-        self.vis = Visdom(send=False, raise_exceptions=True)
+        with (
+            patch.object(Visdom, "_handle_post", return_value=True),
+            patch.object(Visdom, "_start_session_reaper"),
+        ):
+            self.vis = Visdom(raise_exceptions=True, use_incoming_socket=False)
+
+        self.vis._send = Mock(
+            side_effect=lambda msg, endpoint="events", **_: (msg, endpoint)
+        )
 
     def test_suggest_message_shape(self):
         """The message posts to the suggest endpoint and carries params.
 
-        ``_send`` stamps an ``eid`` on every message; the stub ignores it.
+        Called bare it names no env: the real ``_send`` stamps the client's own
+        ``eid`` on the way out, and the stub ignores it either way.
         """
         msg, endpoint = self.vis.suggest_experiment()
         self.assertEqual(endpoint, "experiments/suggest")
         self.assertIsNone(msg["params"])
-        self.assertIn("eid", msg)
+        self.assertNotIn("eid", msg)
 
     def test_params_are_passed_through(self):
         """The search space rides along untouched for the eventual strategy."""

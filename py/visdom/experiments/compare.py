@@ -34,8 +34,7 @@ class ComparableExperiment(ExperimentLike, Protocol):
     the query layer's protocol alone does not cover.
     """
 
-    def to_dict(self) -> dict:
-        ...
+    def to_dict(self) -> dict: ...
 
 
 def _param_values(experiment: ComparableExperiment) -> dict:
