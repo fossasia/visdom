@@ -32,8 +32,8 @@ from visdom.experiments.query import (
 )
 from visdom.experiments.store import DEFAULT_SORT_FIELD, ExperimentStore
 from visdom.experiments.tags import (
-    labels_to_tags,
-    tags_to_labels,
+    normalize_tags,
+    tags_to_mapping,
 )
 
 __all__ = [
@@ -53,8 +53,8 @@ __all__ = [
     "Query",
     "QueryParseError",
     "Tag",
-    "labels_to_tags",
-    "tags_to_labels",
+    "normalize_tags",
+    "tags_to_mapping",
     "build_record",
     "parse_query",
     "STATUS_FAILED",

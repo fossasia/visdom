@@ -6,36 +6,43 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""Validate string tags used by the environment tagging API."""
+"""Normalize key/value tags used by the environment tagging API."""
 
 
 MAX_TAG_LENGTH = 50
 MAX_TAGS_PER_ENV = 20
 
 
-def tags_to_labels(tags):
-    """Return the string names of model tags."""
-    return [str(tag.key) for tag in tags]
+def tags_to_mapping(tags) -> dict[str, str]:
+    """Return model tags as a key/value mapping without discarding values."""
+    return {tag.key: tag.value for tag in tags}
 
 
-def labels_to_tags(labels) -> dict[str, str]:
-    """Validate string labels and map them to empty-valued model tags."""
-    if not isinstance(labels, list) or not all(isinstance(tag, str) for tag in labels):
-        raise TypeError("tags must be a list of strings")
+def normalize_tags(tags) -> dict[str, str]:
+    """Validate and normalize a ``{name: value}`` tag mapping.
 
-    parsed = {}
-    for raw_label in labels:
-        label = raw_label.strip()
-        if not label:
+    Tag values are part of the experiment data model and are deliberately
+    preserved. Only names are stripped because surrounding whitespace would
+    otherwise create visually indistinguishable tags.
+    """
+    if not isinstance(tags, dict):
+        raise TypeError("tags must be a dict of {name: value}")
+
+    normalized = {}
+    for raw_name, value in tags.items():
+        if not isinstance(raw_name, str) or not isinstance(value, str):
+            raise TypeError("tag names and values must be strings")
+        name = raw_name.strip()
+        if not name:
             continue
-        if len(label) > MAX_TAG_LENGTH:
+        if len(name) > MAX_TAG_LENGTH:
             raise ValueError(
-                "tag labels must not exceed {0} characters".format(MAX_TAG_LENGTH)
+                "tag names must not exceed {0} characters".format(MAX_TAG_LENGTH)
             )
-        parsed[label] = ""
+        normalized[name] = value
 
-    if len(parsed) > MAX_TAGS_PER_ENV:
+    if len(normalized) > MAX_TAGS_PER_ENV:
         raise ValueError(
             "environments may have at most {0} tags".format(MAX_TAGS_PER_ENV)
         )
-    return parsed
+    return normalized

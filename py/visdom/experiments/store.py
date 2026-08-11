@@ -23,6 +23,7 @@ from visdom.experiments.models import (
     STATUS_FINISHED,
 )
 from visdom.experiments.query import Query, build_record
+from visdom.experiments.tags import normalize_tags
 
 METADATA_KEY = "experiment"
 
@@ -163,10 +164,9 @@ class ExperimentStore:
         terminal state: tags organize completed runs and do not alter their
         parameters, metrics, result status, or completion timestamp.
         """
-        if not isinstance(tags, dict):
-            raise TypeError("tags must be a dict of {name: value}")
         if not isinstance(append, bool):
             raise TypeError("append must be a boolean")
+        tags = normalize_tags(tags)
 
         env, experiment = self._read(env_id)
         if experiment is None:
