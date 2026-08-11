@@ -2339,6 +2339,10 @@ class Visdom(object):
             ), "dimension argument should be LxHxWxC or LxCxHxW"
             if dim == "LxCxHxW":
                 tensor = tensor.transpose([0, 2, 3, 1])
+            if tensor.shape[-1] not in (1, 3):
+                raise ValueError(
+                    "video tensor's channel dim should be 1 (grayscale) or 3 (bgr)"
+                )
             bytestr, mimetype = self._encode(tensor, opts["fps"])
 
         flags = " ".join([k for k in ("autoplay", "loop") if opts[k]])
