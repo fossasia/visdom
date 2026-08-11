@@ -4,7 +4,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Optional, List, Any, Union, Mapping, overload, Text, Callable
+from typing import Optional, List, Any, Union, Mapping, overload, Text, Tuple, Callable
 
 ### Type aliases for commonly-used types.
 # For optional 'options' parameters.
@@ -12,6 +12,14 @@ from typing import Optional, List, Any, Union, Mapping, overload, Text, Callable
 # See  http://mypy.readthedocs.io/en/latest/more_types.html#typeddict.
 _OptOps = Optional[Mapping[Text, Any]]
 _OptStr = Optional[Text]  # For optional string parameters, like 'window' and 'env'.
+
+# For the list of environments to compare. Spelled out rather than Sequence[Text]
+# because a bare str is itself a Sequence[str]: 'compare_experiments' rejects one
+# at runtime, so a checker must not accept it here.
+_EnvIds = Union[List[Text], Tuple[Text, ...]]
+
+# The decoded JSON reply of the experiment endpoints.
+_ExperimentReply = Mapping[Text, Any]
 
 # No widely-deployed stubs exist at the moment for torch or numpy. When they are available, the correct type of the tensor-like inputs
 # to the plotting commands should be
@@ -63,6 +71,15 @@ class Visdom:
     def finish_experiment(
         self, status: Text = ..., env: _OptStr = ...
     ) -> Mapping[Text, Any]: ...
+    def search_experiments(
+        self,
+        query: _OptStr = ...,
+        limit: Optional[int] = ...,
+        offset: int = ...,
+        sort_by: _OptStr = ...,
+        descending: bool = ...,
+    ) -> _ExperimentReply: ...
+    def compare_experiments(self, env_ids: _EnvIds) -> _ExperimentReply: ...
     def get_window_data(
         self, win: _OptStr = ..., env: _OptStr = ...
     ) -> _SendReturn: ...
