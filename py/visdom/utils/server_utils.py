@@ -459,6 +459,18 @@ def broadcast_envs(handler, target_subs=None):
         )
 
 
+def broadcast_tags(handler, eid, tags, target_subs=None):
+    """Broadcast one environment's key/value tags to browser clients."""
+    if target_subs is None:
+        target_subs = handler.subs.values()
+    message = json.dumps(
+        {"command": "tags_update", "data": {"eid": eid, "tags": tags}},
+        cls=NanSafeEncoder,
+    )
+    for sub in target_subs:
+        sub.write_message(message)
+
+
 def send_to_sources(handler, msg):
     target_sources = handler.sources.values()
     for source in target_sources:
