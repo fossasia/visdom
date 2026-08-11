@@ -417,6 +417,14 @@ Each unique name passed to `tracker.log()` gets its own window. The first call c
 
 **GridSearchCV / RandomizedSearchCV** produce a bar chart of `mean_test_score` per parameter combination and a text pane with `best_score_`, `best_params_`, and fit time.
 
+**Iterative estimators** additionally get a line chart of their per-iteration training history: `MLPClassifier`/`MLPRegressor` plot `loss_curve_` (plus `validation_scores_` when fit with `early_stopping=True`), and `GradientBoostingClassifier`/`GradientBoostingRegressor` plot `train_score_`.
+
+**Regressors** get `train_rmse` and `train_mae` rows in the text pane alongside the R2 `train_score` (R2 alone can be misleading), plus a predicted-vs-residual scatter plot.
+
+**Note:** `train_score`, `train_rmse`, `train_mae` and the residual scatter are all measured on the data passed to `fit()`. They describe fit quality on the training set and are not held-out estimates — score your own test set for that.
+
+**Note:** panes are keyed on the estimator instance, so refitting the same estimator updates the panes it already owns instead of opening new ones. Two different estimator objects always get their own panes, even of the same class.
+
 ```python
 import visdom
 from visdom.loggers import VisdomSklearnLogger

@@ -271,6 +271,27 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 layout = content.setdefault("layout", {})
 
             layout.update(patch)
+            p["version"] = p.get("version", 1) + 1
+            p["contentID"] = get_rand_id()
+
+            if p.get("type") == "plot_history":
+                layout_path = f"/content/{frame}/layout"
+            else:
+                layout_path = "/content/layout"
+
+            diff_packet = [
+                {"op": "add", "path": layout_path, "value": layout},
+                {"op": "replace", "path": "/version", "value": p["version"]},
+                {"op": "replace", "path": "/contentID", "value": p["contentID"]},
+            ]
+            broadcast_packet = {
+                "command": "window_update",
+                "win": win,
+                "eid": eid,
+                "content": diff_packet,
+                "version": p["version"],
+            }
+            broadcast(self, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
 
         elif cmd == "update_comment":
             if self.readonly:
@@ -317,10 +338,6 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 "version": p["version"],
             }
             broadcast(self, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
-
-            tornado.ioloop.IOLoop.current().run_in_executor(
-                None, self.storage.save_env, eid, self.state[eid]
-            )
 
         elif cmd == "table_edit":
             if self.readonly:

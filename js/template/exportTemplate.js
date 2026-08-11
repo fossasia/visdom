@@ -19,7 +19,7 @@ function buildExportHtml(title, paneData, validIds) {
 <head>
 <meta charset="utf-8">
 <title>${title}</title>
-<script src="https://cdn.plot.ly/plotly-2.27.0.min.js">${S}
+<script src="https://cdn.plot.ly/plotly-3.7.0.min.js">${S}
 <style>
 *{box-sizing:border-box}
 body{margin:0;padding:14px;font-family:Arial,sans-serif;background:#f0f2f5}
@@ -73,7 +73,11 @@ function renderContent(id, pane, pc) {
       w,
       c.data,
       layout,
-      { responsive: true, scrollZoom: true }
+      {
+        responsive: true,
+        scrollZoom: true,
+        modeBarButtonsToRemove: ['sendDataToCloud'],
+      }
     );
     plotEls[id] = w;
     return;
@@ -266,7 +270,7 @@ function renderContent(id, pane, pc) {
       margin:   { t: 10, b: 10, l: 10, r: 10 },
       xaxis:    { showgrid: false, zeroline: false, showticklabels: false },
       yaxis:    { showgrid: false, zeroline: false, showticklabels: false },
-    }, { responsive: true });
+    }, { responsive: true, modeBarButtonsToRemove: ['sendDataToCloud'] });
     plotEls[id] = w;
     return;
   }
@@ -304,7 +308,7 @@ function renderContent(id, pane, pc) {
       }], {
         autosize: true,
         margin: { t: 20, b: 30, l: 30, r: 10 },
-      }, { responsive: true });
+      }, { responsive: true, modeBarButtonsToRemove: ['sendDataToCloud'] });
       plotEls[id] = w;
       return;
     }
