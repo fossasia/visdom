@@ -15,16 +15,18 @@ These cover the two triggers that replace it (the timer and the update
 threshold) and the bookkeeping that keeps them from writing more than needed.
 """
 
+import json
 import tempfile
 import unittest
 from unittest import mock
 
 from visdom.server.app import Application
+from visdom.server.handlers.socket_handlers import AnySocketHandlerOrWrapper
 from visdom.server.handlers.web_handlers import CloseHandler, UpdateHandler
 from visdom.utils.server_utils import register_window, window
 
 from testutils.fakes import FakeHandler
-from testutils.payloads import window_args
+from testutils.payloads import embeddings_pane, table_pane, window_args
 
 
 class AutosaveTestCase(unittest.TestCase):
@@ -207,6 +209,141 @@ class TestHandlersMarkTheirWrites(unittest.TestCase):
         CloseHandler.wrap_func(self.handler, {"eid": "main", "win": "win_0"})
 
         self.assertEqual(self.handler.dirtied, ["main"])
+
+    def test_updating_an_embeddings_window(self):
+        self.handler.state["main"] = {
+            "jsons": {"win_0": embeddings_pane()},
+            "reload": {},
+        }
+
+        UpdateHandler.wrap_func(
+            self.handler,
+            {
+                "win": "win_0",
+                "eid": "main",
+                "data": {"update_type": "EntitySelected", "selected": [2]},
+            },
+        )
+
+        pane = self.handler.state["main"]["jsons"]["win_0"]
+        self.assertEqual(pane["content"]["selected"], [2])
+        self.assertEqual(self.handler.dirtied, ["main"])
+
+
+class TestSocketCommandsMarkTheirWrites(unittest.TestCase):
+    """The socket commands that mutate state mark it too.
+
+    These reach state without going through the ``/events`` route, so a mark
+    missing here is a change the timer and threshold never learn about and only
+    the shutdown save can rescue.
+    """
+
+    def setUp(self):
+        # A real env_path, because the undo stack close/undo trade through is
+        # persisted by the store and drops on the floor without one.
+        self._tmp = tempfile.TemporaryDirectory()
+        self.handler = FakeHandler(env_path=self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def send(self, **msg):
+        AnySocketHandlerOrWrapper.on_message(self.handler, json.dumps(msg))
+
+    def register(self, win="win_0"):
+        register_window(self.handler, window(window_args(win=win)), "main")
+        self.handler.dirtied.clear()
+
+    def test_closing_a_window(self):
+        self.register()
+
+        self.send(cmd="close", eid="main", data="win_0")
+
+        self.assertEqual(self.handler.dirtied, ["main"])
+
+    def test_undoing_a_close(self):
+        self.register()
+        self.send(cmd="close", eid="main", data="win_0")
+        self.handler.dirtied.clear()
+
+        self.send(cmd="undo", eid="main")
+
+        self.assertIn("win_0", self.handler.state["main"]["jsons"])
+        self.assertEqual(self.handler.dirtied, ["main"])
+
+    def test_undo_with_nothing_to_restore_changes_nothing(self):
+        self.register()
+
+        self.send(cmd="undo", eid="main")
+
+        self.assertEqual(self.handler.dirtied, [])
+
+    def test_moving_a_window(self):
+        self.register()
+
+        self.send(
+            cmd="layout_item_update", eid="main", win="win_0", data={"x": 1, "y": 2}
+        )
+
+        self.assertEqual(
+            self.handler.state["main"]["reload"]["win_0"], {"x": 1, "y": 2}
+        )
+        self.assertEqual(self.handler.dirtied, ["main"])
+
+    def test_editing_a_plot_layout(self):
+        self.register()
+
+        self.send(
+            cmd="update_plot_layout", eid="main", win="win_0", data={"title": "renamed"}
+        )
+
+        pane = self.handler.state["main"]["jsons"]["win_0"]
+        self.assertEqual(pane["content"]["layout"]["title"], "renamed")
+        self.assertEqual(self.handler.dirtied, ["main"])
+
+    def test_commenting_on_a_window(self):
+        self.register()
+
+        self.send(cmd="update_comment", eid="main", win="win_0", data="a note")
+
+        pane = self.handler.state["main"]["jsons"]["win_0"]
+        self.assertEqual(pane["comment"], "a note")
+        self.assertEqual(self.handler.dirtied, ["main"])
+
+    def test_editing_a_table_cell(self):
+        self.handler.state["main"] = {"jsons": {"win_0": table_pane()}, "reload": {}}
+
+        self.send(
+            cmd="table_edit",
+            eid="main",
+            win="win_0",
+            op="edit_cell",
+            data={"row": 0, "col": 1, "value": "changed"},
+        )
+
+        pane = self.handler.state["main"]["jsons"]["win_0"]
+        self.assertEqual(pane["content"]["rows"][0][1], "changed")
+        self.assertEqual(self.handler.dirtied, ["main"])
+
+    def test_popping_an_embeddings_pane(self):
+        pane = embeddings_pane()
+        pane["old_content"] = [[{"previous": True}]]
+        self.handler.state["main"] = {"jsons": {"win_0": pane}, "reload": {}}
+
+        self.send(cmd="pop_embeddings_pane", data={"eid": "main", "target": "win_0"})
+
+        restored = self.handler.state["main"]["jsons"]["win_0"]
+        self.assertEqual(restored["content"]["data"], [{"previous": True}])
+        self.assertEqual(self.handler.dirtied, ["main"])
+
+    def test_a_readonly_server_neither_changes_nor_marks(self):
+        self.register()
+        self.handler.readonly = True
+
+        self.send(cmd="close", eid="main", data="win_0")
+
+        self.assertIn("win_0", self.handler.state["main"]["jsons"])
+        self.assertEqual(self.handler.dirtied, [])
 
 
 if __name__ == "__main__":

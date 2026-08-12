@@ -437,6 +437,7 @@ class UpdateHandler(BaseHandler):
                 p, args, handler.max_old_content
             )
             UpdateHandler.broadcast_window_update(handler, args, eid, p, diff_packet)
+            handler.mark_dirty(eid)
             handler.write(p["id"])
             return
 

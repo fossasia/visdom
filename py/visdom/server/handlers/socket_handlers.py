@@ -107,6 +107,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     "pane_data": p_data,
                 }
                 send_to_sources(self, event)
+                self.mark_dirty(eid)
                 broadcast_undo_state(self, eid, self.storage)
 
         elif cmd == "undo":
@@ -128,6 +129,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                         json.dumps(broadcast_msg, cls=NanSafeEncoder),
                         eid,
                     )
+                    self.mark_dirty(eid)
                 broadcast_undo_state(self, eid, self.storage)
 
         elif cmd == "save":
@@ -218,6 +220,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 )
                 return
             self.state[eid]["reload"][win] = msg.get("data")
+            self.mark_dirty(eid)
 
         elif cmd == "update_plot_layout":
             eid = msg.get("eid")
@@ -292,6 +295,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 "version": p["version"],
             }
             broadcast(self, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
+            self.mark_dirty(eid)
 
         elif cmd == "update_comment":
             if self.readonly:
@@ -338,6 +342,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 "version": p["version"],
             }
             broadcast(self, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
+            self.mark_dirty(eid)
 
         elif cmd == "table_edit":
             if self.readonly:
@@ -526,6 +531,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     "data": payload,
                 },
             )
+            self.mark_dirty(eid)
 
         elif cmd == "pop_embeddings_pane":
             packet = msg.get("data")
@@ -565,6 +571,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
             broadcast_msg = dict(p)
             broadcast_msg["eid"] = eid
             broadcast(self, json.dumps(broadcast_msg, cls=NanSafeEncoder), eid)
+            self.mark_dirty(eid)
 
 
 class AnySocketWrapper(AnySocketHandlerOrWrapper):
