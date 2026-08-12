@@ -311,14 +311,20 @@ test.describe('Test Plot Rendering Errors', () => {
 
     const env = `plot_rapid_update_${Math.floor(Math.random() * 1e6)}`;
 
-    // Repeatedly re-send the same window in quick succession, with no
-    // wait between runs. Each update re-triggers PlotPane's render
-    // effect (newPlot -> Plotly.react) on an already-mounted pane,
-    // which is where a contentID-vs-plotlyRef race is most likely to
-    // surface, since the effect can fire again before the browser has
-    // settled the previous paint.
+    // Mount once so the pane exists, then keep sending updates into the
+    // same window with open: false so the pane stays mounted rather than
+    // being closed and reopened on every call. Each update re-triggers
+    // PlotPane's render effect (newPlot -> Plotly.react) on an
+    // already-mounted pane, which is where a contentID-vs-plotlyRef race
+    // is most likely to surface, since the effect can fire again before
+    // the browser has settled the previous paint.
+    await runDemo(page, 'plot_line_basic', { env });
     for (let i = 0; i < 8; i++) {
-      await runDemo(page, 'plot_line_basic', { env, asyncrun: true });
+      await runDemo(page, 'plot_line_basic', {
+        env,
+        open: false,
+        asyncrun: true,
+      });
     }
     await waitForPlotRender(page);
     await expect(page.locator(windowSelector).first()).toBeVisible();
