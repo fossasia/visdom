@@ -231,7 +231,7 @@ test.describe('Image Pane', () => {
       page.waitForEvent('download'),
       pane
         .locator('.export-dropdown-menu')
-        .getByRole('button', { name: 'JPG' })
+        .getByRole('menuitem', { name: 'JPG' })
         .click(),
     ]);
 
