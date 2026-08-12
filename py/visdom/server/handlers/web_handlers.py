@@ -55,6 +55,7 @@ from visdom.experiments import (
     ExperimentStore,
     ExperimentFinishedError,
     QueryParseError,
+    retarget_experiment,
     STATUS_FINISHED,
 )
 
@@ -547,7 +548,14 @@ class ForkEnvHandler(BaseHandler):
 
         assert prev_eid in handler.state, "env to be forked doesn't exist"
 
-        handler.state[eid] = copy.deepcopy(handler.state[prev_eid])
+        # The copy carries the source env's experiment metadata, whose env_id
+        # still names the env it was forked from; retarget it so the fork does
+        # not answer to its parent's id. Reading the copy also materialises it
+        # when the source was still lazy, which is what makes the save below
+        # write the fork out: an unmaterialised LazyEnvData is skipped.
+        handler.state[eid] = retarget_experiment(
+            copy.deepcopy(handler.state[prev_eid]), eid
+        )
         handler.storage.save_env(eid, handler.state[eid])
         broadcast_envs(handler)
 
@@ -1119,7 +1127,11 @@ class ExperimentCompareHandler(BaseHandler):
          "metrics": {...}, "tags": {...}}
 
     Experiments are read through the server's ``DataStore``, so as with search a
-    server running with ``env_path=None`` has nothing to compare.
+    server running with ``env_path=None`` has nothing to compare. The body is
+    decoded by the shared ``_decode_json_body``, so the two endpoints
+    answer malformed JSON and non-object bodies with the same 400; unlike
+    search, an empty body is not a valid request here, since ``env_ids`` is
+    required and there is no comparison to make without it.
     """
 
     @staticmethod
