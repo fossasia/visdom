@@ -32,6 +32,24 @@ DEFAULT_SORT_FIELD = "created_at"
 _MISSING = object()
 
 
+def retarget_experiment(env, env_id):
+    """Point ``env``'s experiment metadata, if it has any, at ``env_id``.
+
+    Cloning an environment copies its persisted data wholesale, metadata blob
+    included, which leaves the copy recording the env it was cloned from. The
+    callers that clone an env re-point the copy through here so what lands on
+    disk names the env it actually lives in.
+
+    Returns ``env`` so a clone can be retargeted in the same expression that
+    copies it. ``env`` may be any mutable mapping — the server holds
+    environments as plain dicts or as ``LazyEnvData``.
+    """
+    blob = env.get(METADATA_KEY)
+    if isinstance(blob, dict):
+        blob["env_id"] = env_id
+    return env
+
+
 def _order_key(value):
     """Return a sort key that totally orders values of mixed types.
 
@@ -86,6 +104,13 @@ class ExperimentStore:
         The env dict always has ``jsons``/``reload`` keys so that persisting it
         back never strips an environment of the fields the rest of the server
         relies on, even for an env that did not exist before.
+
+        The env an experiment is stored under is the authoritative one, so the
+        loaded experiment is re-pointed at ``env_id`` rather than trusting the
+        ``env_id`` recorded in the blob. Forking an environment deep-copies the
+        whole env dict, metadata included, which leaves the copy's blob naming
+        the env it was forked from; a comparison keyed by experiment env_id
+        would then fold the fork and its parent into one column.
         """
         env = self.datastore.load_env(env_id)
         if not isinstance(env, dict):
@@ -94,6 +119,8 @@ class ExperimentStore:
         env.setdefault("reload", {})
         blob = env.get(METADATA_KEY)
         experiment = Experiment.from_dict(blob) if isinstance(blob, dict) else None
+        if experiment is not None:
+            experiment.env_id = env_id
         return env, experiment
 
     def _write(self, env_id, env, experiment):
