@@ -18,6 +18,7 @@ server) — so the surface stays stable until the strategy is wired in.
 """
 
 import json
+import os
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -135,6 +136,54 @@ class TestSuggestClientMessage(unittest.TestCase):
         """The client type-checks before any request is made."""
         with self.assertRaises(TypeError):
             self.vis.suggest_experiment(params="lr")
+
+
+class TestExperimentQueriesOffline(unittest.TestCase):
+    """The query endpoints say there is no answer offline, rather than True.
+
+    An offline client never reaches a server, so search/compare/suggest have
+    nothing to report. Left to the generic ``_send`` short circuit they would
+    return ``True``, which a caller expecting a reply dict cannot use and cannot
+    tell apart from a real one.
+    """
+
+    def setUp(self):
+        self._log = tempfile.NamedTemporaryFile(suffix=".log", delete=False)
+        self._log.close()
+        self.vis = Visdom(
+            offline=True,
+            log_to_filename=self._log.name,
+            use_incoming_socket=False,
+        )
+
+    def tearDown(self):
+        os.unlink(self._log.name)
+
+    def test_search_returns_none(self):
+        self.assertIsNone(self.vis.search_experiments("lr < 0.01"))
+
+    def test_compare_returns_none(self):
+        self.assertIsNone(self.vis.compare_experiments(["run-a", "run-b"]))
+
+    def test_suggest_returns_none(self):
+        self.assertIsNone(self.vis.suggest_experiment({"lr": [0.1, 0.01]}))
+
+    def test_the_argument_checks_still_run_offline(self):
+        """Being offline is no reason to accept a call that is malformed."""
+        with self.assertRaises(TypeError):
+            self.vis.search_experiments(query=42)
+        with self.assertRaises(TypeError):
+            self.vis.compare_experiments("run-a")
+        with self.assertRaises(TypeError):
+            self.vis.suggest_experiment(params="lr")
+
+    def test_a_query_never_reaches_the_transport(self):
+        """No request is attempted, so nothing can be waiting on a timeout."""
+        with patch.object(Visdom, "_handle_post") as post:
+            self.assertIsNone(self.vis.search_experiments())
+            self.assertIsNone(self.vis.compare_experiments(["run-a"]))
+            self.assertIsNone(self.vis.suggest_experiment())
+        post.assert_not_called()
 
 
 if __name__ == "__main__":

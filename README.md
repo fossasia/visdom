@@ -1252,6 +1252,8 @@ Arguments:
 
 Returns a dict of `experiments` (one page's worth), the unpaged `total` matching the query, and the `limit`/`offset`/`query` used.
 
+`search_experiments`, `compare_experiments` and `suggest_experiment` ask the server a question rather than record something, so an offline client (`Visdom(offline=True)`) has nothing to answer with and each returns `None`.
+
 #### vis.compare_experiments
 
 This function compares the named experiments field by field to see what differs. Finding the runs is `search_experiments`' job — it answers "which runs match?"; this answers "how do these runs differ?". To compare a query's matches, search first and pass the resulting ids on.
