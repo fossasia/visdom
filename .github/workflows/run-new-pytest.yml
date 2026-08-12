@@ -22,7 +22,7 @@ jobs:
         python-version: ["3.12", "3.13"]
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
 

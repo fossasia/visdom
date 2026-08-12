@@ -579,6 +579,81 @@ paths:
             that is not a non-negative integer. Also returned when
             authentication is required but not provided.
 
+  /experiments/compare:
+    post:
+      operationId: compareExperiments
+      tags: [Experiments]
+      summary: Compare experiments field by field
+      description: >
+        Lines several experiments up beside each other and reports, per section
+        (params, metrics and tags), which fields they agree on and which they do
+        not — the short list of knobs that actually changed between runs.
+
+
+        The runs are named by `env_ids` and compared in the order given; every id
+        must have an experiment, otherwise `404`.
+
+
+        Finding the runs is `/experiments/search`'s job: it answers "which runs
+        match?", this answers "how do these runs differ?". To compare a query's
+        matches, search first and pass the resulting ids on.
+
+
+        Metrics are a time series, so a comparison uses each metric's latest
+        observation — the same value a search compares on.
+
+
+        Experiments are read back through the server's data store, so a server
+        running with no persistence path configured has nothing to compare.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [env_ids]
+              properties:
+                env_ids:
+                  type: array
+                  minItems: 1
+                  description: >
+                    Environments to compare, in the order given. Duplicate ids
+                    collapse to one.
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: The comparison of the selected experiments.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [env_ids, experiments, params, metrics, tags]
+                properties:
+                  env_ids:
+                    type: array
+                    description: The runs compared, in the order compared.
+                    items:
+                      type: string
+                  experiments:
+                    type: array
+                    description: The compared experiments, in full.
+                    items:
+                      $ref: "#/components/schemas/Experiment"
+                  params:
+                    $ref: "#/components/schemas/ExperimentComparisonSection"
+                  metrics:
+                    $ref: "#/components/schemas/ExperimentComparisonSection"
+                  tags:
+                    $ref: "#/components/schemas/ExperimentComparisonSection"
+        "400":
+          description: >
+            Invalid request — `env_ids` missing, empty, not a list, or holding
+            something other than strings. Also returned when authentication is
+            required but not provided.
+        "404":
+          description: One or more of the given `env_ids` has no experiment.
+
   /upload_env:
     post:
       operationId: uploadEnvironment
@@ -1041,6 +1116,63 @@ components:
         the server is started with `--enable_login`.
 
   schemas:
+
+    ExperimentComparisonSection:
+      type: object
+      description: >
+        One section (params, metrics or tags) of an experiment comparison,
+        diffed across the compared runs.
+      required: [fields, shared, differing, values, groups]
+      properties:
+        fields:
+          type: array
+          description: Every field name any compared run has, sorted.
+          items:
+            type: string
+        shared:
+          type: object
+          additionalProperties: true
+          description: >
+            The fields every compared run carries with the same value, as
+            `{name: value}`.
+        differing:
+          type: array
+          description: >
+            The remaining fields — those whose value varies between runs, or
+            that some run is missing.
+          items:
+            type: string
+        values:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties: true
+          description: >
+            Per-field, per-run values as `{field: {env_id: value}}`. A run that
+            never logged the field is omitted from that field's map.
+        groups:
+          type: object
+          description: >
+            Per field, the runs clustered by the value they used — the finer
+            question "which runs agree?", where `shared`/`differing` answer only
+            "do they all?". With three runs on two learning rates, the two that
+            match share a group. A field appears in `shared` exactly when its
+            groups are a single cluster holding every compared run, so the two
+            never disagree. Groups are ordered by first appearance, and a run
+            that never logged the field is in no group.
+          additionalProperties:
+            type: array
+            items:
+              type: object
+              required: [value, env_ids]
+              properties:
+                value:
+                  description: The value these runs share.
+                env_ids:
+                  type: array
+                  description: The runs that used it, in compared order.
+                  items:
+                    type: string
 
     Experiment:
       type: object
