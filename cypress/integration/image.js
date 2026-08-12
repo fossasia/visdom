@@ -191,7 +191,7 @@ describe('Image Pane', () => {
       .should('have.attr', 'height', '312px');
   });
 
-  it.only('image_basic download', () => {
+  it('image_basic download', () => {
     cy.run('image_basic')
       .get(img_selector)
       .parents(win_selector)
