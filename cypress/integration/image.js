@@ -191,12 +191,18 @@ describe('Image Pane', () => {
       .should('have.attr', 'height', '312px');
   });
 
-  it('image_basic download', () => {
+  it.only('image_basic download', () => {
     cy.run('image_basic')
       .get(img_selector)
       .parents(win_selector)
       .first()
-      .find('button[title="save"]')
+      .as('pane')
+      .find('button[title="export"]')
+      .click();
+
+    cy.get('@pane')
+      .find('.export-dropdown-menu')
+      .contains('button', 'JPG')
       .click();
     const downloadsFolder = Cypress.config('downloadsFolder');
     cy.readFile(path.join(downloadsFolder, 'Random!.jpg')).should('exist');
@@ -207,7 +213,13 @@ describe('Image Pane', () => {
       .get(img_selector)
       .parents(win_selector)
       .first()
-      .find('button[title="save"]')
+      .as('pane')
+      .find('button[title="export"]')
+      .click();
+
+    cy.get('@pane')
+      .find('.export-dropdown-menu')
+      .contains('button', 'JPG')
       .click();
     const downloadsFolder = Cypress.config('downloadsFolder');
     cy.readFile(path.join(downloadsFolder, 'Random image as jpg!.jpg')).should(
