@@ -12,8 +12,13 @@ const baseConfig = require('./playwright.config');
 
 module.exports = defineConfig({
   ...baseConfig,
+  retries: 0,
   testIgnore: [],
   testMatch: '**/screenshots.spec.js',
   snapshotPathTemplate:
     '{testDir}/../screenshots_init/screenshots.init.spec.js/{arg}{ext}',
+  use: {
+    ...baseConfig.use,
+    trace: 'retain-on-failure',
+  },
 });
