@@ -20,6 +20,7 @@ _EnvIds = Union[List[Text], Tuple[Text, ...]]
 
 # The decoded JSON reply of the experiment endpoints.
 _ExperimentReply = Mapping[Text, Any]
+_TagMap = Mapping[Text, Text]
 
 # No widely-deployed stubs exist at the moment for torch or numpy. When they are available, the correct type of the tensor-like inputs
 # to the plotting commands should be
@@ -71,6 +72,13 @@ class Visdom:
     def finish_experiment(
         self, status: Text = ..., env: _OptStr = ...
     ) -> Mapping[Text, Any]: ...
+    def set_tags(
+        self,
+        tags: _TagMap,
+        env: _OptStr = ...,
+        append: bool = ...,
+    ) -> _TagMap: ...
+    def get_tags(self, env: _OptStr = ...) -> _TagMap: ...
     def search_experiments(
         self,
         query: _OptStr = ...,
