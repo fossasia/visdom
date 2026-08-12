@@ -8,7 +8,7 @@
  */
 
 const { test, expect } = require('@playwright/test');
-const { runDemo } = require('../support/helpers');
+const { runDemo, waitForPlotRender } = require('../support/helpers');
 
 const winSelector = '.layout .react-grid-item';
 const windowSelector = '.layout .window';
@@ -275,5 +275,57 @@ test.describe('Test Pane Filter', () => {
 
     await filter.fill('pane3|pane2', { force: true });
     await expect(visibleWindows).toHaveCount(2);
+  });
+});
+
+test.describe('Test Plot Rendering Errors', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+  });
+
+  test('line plot renders without uncaught page errors', async ({
+    page,
+  }) => {
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(err));
+
+    // A fresh line plot mounts its Plotly div for the first time here,
+    // exercising the same effect (PlotPane's newPlot -> Plotly.react)
+    // that must resolve the graph div via plotlyRef rather than the
+    // contentID string, or the pane fails to render entirely.
+    await runDemo(page, 'plot_line_basic');
+    await waitForPlotRender(page);
+    await expect(page.locator(windowSelector)).toHaveCount(1);
+    await expect(page.locator('.js-plotly-plot')).toBeVisible();
+
+    expect(pageErrors, pageErrors.map((e) => e.message).join('\n')).toEqual(
+      []
+    );
+  });
+
+  test('rapid successive updates to the same plot do not throw', async ({
+    page,
+  }) => {
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(err));
+
+    const env = `plot_rapid_update_${Math.floor(Math.random() * 1e6)}`;
+
+    // Repeatedly re-send the same window in quick succession, with no
+    // wait between runs. Each update re-triggers PlotPane's render
+    // effect (newPlot -> Plotly.react) on an already-mounted pane,
+    // which is where a contentID-vs-plotlyRef race is most likely to
+    // surface, since the effect can fire again before the browser has
+    // settled the previous paint.
+    for (let i = 0; i < 8; i++) {
+      await runDemo(page, 'plot_line_basic', { env, asyncrun: true });
+    }
+    await waitForPlotRender(page);
+    await expect(page.locator(windowSelector).first()).toBeVisible();
+    await expect(page.locator('.js-plotly-plot').first()).toBeVisible();
+
+    expect(pageErrors, pageErrors.map((e) => e.message).join('\n')).toEqual(
+      []
+    );
   });
 });
