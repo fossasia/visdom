@@ -17,7 +17,7 @@ jobs:
       with:
           node-version: '24'
     - name: "Install Dependencies"
-      run: ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm install
+      run: CYPRESS_INSTALL_BINARY=0 ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm install
     - name: "Linter Check (ESLint)"
       run: npm run lint
 
@@ -98,7 +98,7 @@ jobs:
           git checkout PR-HEAD -- ./playwright.visual.config.js
 
       - name: "Install PR npm dependencies"
-        run: ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm install
+        run: CYPRESS_INSTALL_BINARY=0 ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm install
 
       - name: "Install Playwright Chromium"
         run: npx playwright install --with-deps chromium
