@@ -6,6 +6,11 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+from visdom.experiments.compare import (
+    ComparableExperiment,
+    SECTIONS,
+    build_comparison,
+)
 from visdom.experiments.models import (
     Experiment,
     ExperimentFinishedError,
@@ -30,10 +35,16 @@ from visdom.experiments.query import (
     build_record,
     parse_query,
 )
-from visdom.experiments.store import DEFAULT_SORT_FIELD, ExperimentStore
+from visdom.experiments.store import (
+    DEFAULT_SORT_FIELD,
+    ExperimentStore,
+    METADATA_KEY,
+    retarget_experiment,
+)
 
 __all__ = [
     "And",
+    "ComparableExperiment",
     "Comparison",
     "DEFAULT_SORT_FIELD",
     "Experiment",
@@ -42,15 +53,19 @@ __all__ = [
     "ExperimentStore",
     "MAX_QUERY_DEPTH",
     "MAX_QUERY_LENGTH",
+    "METADATA_KEY",
     "Metric",
     "Node",
     "Or",
     "Param",
     "Query",
     "QueryParseError",
+    "SECTIONS",
     "Tag",
+    "build_comparison",
     "build_record",
     "parse_query",
+    "retarget_experiment",
     "STATUS_FAILED",
     "STATUS_FINISHED",
     "STATUS_RUNNING",

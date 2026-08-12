@@ -336,7 +336,6 @@ var PlotPane = (props) => {
 
     // draw / redraw plot with layout-options
     Plotly.react(contentID, data.concat(smooth_data), content.layout, {
-      showLink: false,
       displaylogo: false,
       doubleClick: 'reset',
       doubleClickDelay: 500,
