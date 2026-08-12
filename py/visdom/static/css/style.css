@@ -325,6 +325,10 @@ button[title="properties"].active>.glyphicon {
   color: red;
 }
 
+button.table-edit-toggle.active > .glyphicon {
+  color: red;
+}
+
 button[title="smooth lines"] {
   font-size: 200%;
   margin-top: -1px;
