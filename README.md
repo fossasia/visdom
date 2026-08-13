@@ -402,10 +402,26 @@ with VisdomLogger(viz, env="my_run", log_every=50) as tracker:
             tracker.log("LR",         optimizer.param_groups[0]["lr"], xlabel="step")
 ```
 
+**Experiment tracking with `params`** — pass hyperparameters to also record the run as a queryable experiment, alongside the usual charts:
+
+```python
+params = {"lr": 1e-2, "batch_size": 32}
+with VisdomLogger(viz, env="my_run", params=params) as tracker:
+    for epoch in range(num_epochs):
+        tracker.log("Train Loss", train_loss)
+
+# later, from anywhere
+viz.search_experiments("lr < 0.01 AND status = finished")
+viz.compare_experiments(["my_run", "my_other_run"])
+```
+
+Tracking is opt-in: without `params`, `VisdomLogger` only ever calls `viz.line()`, unchanged from before this existed. With `params`, the run's status is recorded as `finished` on a normal exit or `failed` if the `with`-block raised, and every logged metric is mirrored into the experiment alongside the chart it's plotted on.
+
 **Parameters:**
 - `viz`: a connected `visdom.Visdom()` instance
 - `env`: environment name (default: auto-generated from timestamp)
 - `log_every`: send every N calls per metric — use with per-batch logging on large datasets (default: `1`)
+- `params`: dict of hyperparameters; opts into experiment tracking (default: `None`, tracking off)
 
 Each unique name passed to `tracker.log()` gets its own window. The first call creates it; subsequent calls append. See `example/train_example.py` for a full working example.
 
