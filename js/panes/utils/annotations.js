@@ -7,6 +7,8 @@
  *
  */
 
+import { Pencil } from 'lucide-react';
+
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 const THREE_D_TYPES = ['scatter3d', 'surface', 'mesh3d'];
@@ -389,7 +391,7 @@ const useAnnotations = ({
       }}
       className={active ? 'pull-right active' : 'pull-right'}
     >
-      <span className="glyphicon glyphicon-pencil" />
+      <Pencil size={14} />
     </button>
   ) : (
     ''
