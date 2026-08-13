@@ -17,8 +17,4 @@ module.exports = defineConfig({
   testMatch: '**/screenshots.spec.js',
   snapshotPathTemplate:
     '{testDir}/../screenshots_init/screenshots.init.spec.js/{arg}{ext}',
-  use: {
-    ...baseConfig.use,
-    trace: 'retain-on-failure',
-  },
 });
