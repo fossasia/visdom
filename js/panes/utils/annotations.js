@@ -8,7 +8,6 @@
  */
 
 import { Pencil } from 'lucide-react';
-
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 const THREE_D_TYPES = ['scatter3d', 'surface', 'mesh3d'];
