@@ -5,13 +5,14 @@
 ``501 Not Implemented`` with a JSON stub. These tests pin that contract from
 both ends — the endpoint through a real
 :class:`~visdom.server.app.Application` with Tornado's ``AsyncHTTPTestCase``,
-and the ``Visdom.suggest_experiment`` message shape with ``send=False`` (no
-server) — so the surface stays stable until the strategy is wired in.
+and the ``Visdom.suggest_experiment`` message shape with the transport mocked
+(no server) — so the surface stays stable until the strategy is wired in.
 """
 
 import json
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
 
 import tornado.testing
 
@@ -56,10 +57,25 @@ class TestSuggestEndpoint(tornado.testing.AsyncHTTPTestCase):
 
 
 class TestSuggestClientMessage(unittest.TestCase):
-    """Visdom.suggest_experiment builds the message the endpoint expects."""
+    """Visdom.suggest_experiment builds the message the endpoint expects.
+
+    The transport is mocked to return the ``(msg, endpoint)`` it would have
+    posted, stamping a default ``eid`` the way the real ``_send`` does.
+    """
 
     def setUp(self):
-        self.vis = Visdom(send=False, raise_exceptions=True)
+        with (
+            patch.object(Visdom, "_handle_post", return_value=True),
+            patch.object(Visdom, "_start_session_reaper"),
+        ):
+            self.vis = Visdom(raise_exceptions=True, use_incoming_socket=False)
+
+        def capture(msg, endpoint="events", **_):
+            if msg.get("eid") is None:
+                msg["eid"] = self.vis.env
+            return msg, endpoint
+
+        self.vis._send = Mock(side_effect=capture)
 
     def test_suggest_message_shape(self):
         """The message posts to the suggest endpoint and carries params.

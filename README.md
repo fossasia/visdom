@@ -298,6 +298,7 @@ Visdom offers the following basic visualization functions:
 - [`vis.images`](#visimages)   : list of images
 - [`vis.text`](#vistext)     : arbitrary HTML
 - [`vis.properties`](#visproperties)     : properties grid
+- [`vis.table`](#vistable)     : editable, resizable table pane
 - [`vis.audio`](#visaudio)    : audio
 - [`vis.video`](#visvideo)    : videos
 - [`vis.svg`](#vissvg)      : SVG object
@@ -425,6 +426,14 @@ Each unique name passed to `tracker.log()` gets its own window. The first call c
 
 **GridSearchCV / RandomizedSearchCV** produce a bar chart of `mean_test_score` per parameter combination and a text pane with `best_score_`, `best_params_`, and fit time.
 
+**Iterative estimators** additionally get a line chart of their per-iteration training history: `MLPClassifier`/`MLPRegressor` plot `loss_curve_` (plus `validation_scores_` when fit with `early_stopping=True`), and `GradientBoostingClassifier`/`GradientBoostingRegressor` plot `train_score_`.
+
+**Regressors** get `train_rmse` and `train_mae` rows in the text pane alongside the R2 `train_score` (R2 alone can be misleading), plus a predicted-vs-residual scatter plot.
+
+**Note:** `train_score`, `train_rmse`, `train_mae` and the residual scatter are all measured on the data passed to `fit()`. They describe fit quality on the training set and are not held-out estimates — score your own test set for that.
+
+**Note:** panes are keyed on the estimator instance, so refitting the same estimator updates the panes it already owns instead of opening new ones. Two different estimator objects always get their own panes, even of the same class.
+
 ```python
 import visdom
 from visdom.loggers import VisdomSklearnLogger
@@ -459,6 +468,36 @@ VisdomSklearnLogger.autolog(viz, env="sklearn_run")
 - `env`: environment name (default: `viz.env` if set, otherwise auto-generated from timestamp)
 
 See `example/train_sklearn_example.py` for a full working example covering plain estimators and grid search.
+
+### XGBoost
+
+`visdom.loggers.VisdomXGBLogger` implements XGBoost's `TrainingCallback` protocol, plotting train/eval metrics to Visdom after every boosting round.
+
+There was no way to visualize XGBoost training runs in Visdom without manually attaching a `TrainingCallback` and wiring up `viz.line()` calls yourself. This adds opt-in auto-logging behind a single `autolog()` call, with no changes required to model, `train()`, or `fit()` code.
+
+```python
+import xgboost as xgb
+import visdom
+from visdom.loggers import VisdomXGBLogger
+
+viz = visdom.Visdom()
+VisdomXGBLogger.autolog(viz, env="xgb_run")
+
+booster = xgb.train(params, dtrain, evals=[(dtrain, "train"), (dval, "eval")])  # logged automatically
+clf = xgb.XGBClassifier().fit(X_train, y_train, eval_set=[(X_val, y_val)])      # logged automatically
+xgb.cv(params, dtrain, nfold=3)                                                 # logged automatically
+```
+
+Or attach a logger to a single run without patching anything:
+
+```python
+callback = VisdomXGBLogger(viz, env="xgb_run")
+booster = xgb.train(params, dtrain, evals=[(dtrain, "train"), (dval, "eval")], callbacks=[callback])
+```
+
+Each eval metric gets its own window with one trace per data name (`train`/`eval`), and `best_iteration`/`best_score` are logged as a text pane once training finishes. See `example/train_xgboost_example.py` for a full working example.
+
+**Note:** one logger is active at a time. Calling `autolog()` again for a different env moves logging there and warns; the previous env keeps the windows it already has. Import `cross_validate` after `autolog()` — importing it first binds the original function, and every fold then opens its own window instead of sharing one per metric.
 
 ## Details
 <img src="https://user-images.githubusercontent.com/19650074/198747904-7a8a580f-851a-45fb-8f45-94e54a910ee2.png"/>
@@ -569,6 +608,52 @@ Callback are called on property value update:
  - `value`: new value
 
 No specific `opts` are currently supported.
+
+#### vis.table
+This function renders a native, structured, editable table pane. Cells
+(including the column headers) are editable in place, rows/columns can
+be added or removed via `+`/`×` controls, and columns/rows can be
+resized by dragging -- purely a client-side visual convenience, not
+persisted server-side.
+
+It takes as input `data`, either:
+ - a 2D list of rows (list of lists/tuples), with `headers` required, or
+ - a list of dicts, in which case `headers` is derived from the first
+   dict's keys unless explicitly given (and can be used to reorder or
+   select a subset of columns)
+
+`data`/`headers` may also be passed as numpy arrays (e.g. `df.values` /
+`df.columns.values`); they are converted to plain lists internally.
+
+```python
+vis.table(
+    data=[['Alpha', 92], ['Beta', 87]],
+    headers=['Name', 'Score'],
+)
+
+# or, from a list of dicts:
+vis.table(data=[
+    {'Name': 'Alpha', 'Score': 92},
+    {'Name': 'Beta', 'Score': 87},
+])
+```
+
+Supported `opts`:
+ - `editable`: whether cells/rows/columns can be edited by anyone
+   viewing the pane (boolean; default `True`). Set to `False` for a
+   read-only display table (e.g. a live leaderboard).
+
+Edits made in the browser update the shared, persisted pane state
+directly on the server (visible to every viewer, saved with the
+environment). If you've also registered an event handler via
+`register_event_handler`, your Python script additionally receives a
+`TableEdit` event for each change:
+ - `event_type`: `"TableEdit"`
+ - `target`: pane id
+ - `op`: one of `"edit_cell"`, `"edit_header"`, `"add_row"`,
+   `"delete_row"`, `"add_col"`, `"delete_col"`
+ - `data`: the raw edit payload for that op (e.g. `{"row": 0, "col": 1,
+   "value": "new value"}` for `"edit_cell"`)
 
 #### vis.audio
 This function plays audio. It takes as input the filename of the audio
