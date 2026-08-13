@@ -6,6 +6,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import datetime
+import warnings
 
 
 class VisdomLogger:
@@ -59,37 +60,50 @@ class VisdomLogger:
 
     def __enter__(self):
         if self._params is not None:
-            self.viz.experiment(params=self._params, env=self.env)
+            try:
+                self.viz.experiment(params=self._params, env=self.env)
+            except Exception as e:
+                warnings.warn(
+                    "VisdomLogger failed to start experiment tracking: {}".format(e)
+                )
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         for name, (x_val, value, xlabel) in self._pending.items():
             self._plot(name, x_val, value, xlabel)
         if self._params is not None:
-            self.viz.finish_experiment(
-                status="failed" if exc_type else "finished", env=self.env
-            )
+            try:
+                self.viz.finish_experiment(
+                    status="failed" if exc_type else "finished", env=self.env
+                )
+            except Exception as e:
+                warnings.warn(
+                    "VisdomLogger failed to finish experiment tracking: {}".format(e)
+                )
         return False
 
     def _plot(self, name, x_val, value, xlabel):
-        if name not in self._wins:
-            win = self.viz.line(
-                X=[x_val],
-                Y=[value],
-                env=self.env,
-                opts={"title": name, "xlabel": xlabel, "ylabel": name},
-            )
-            self._wins[name] = win
-        else:
-            self.viz.line(
-                X=[x_val],
-                Y=[value],
-                win=self._wins[name],
-                env=self.env,
-                update="append",
-            )
-        if self._params is not None:
-            self.viz.log_metrics({name: value}, step=x_val, env=self.env)
+        try:
+            if name not in self._wins:
+                win = self.viz.line(
+                    X=[x_val],
+                    Y=[value],
+                    env=self.env,
+                    opts={"title": name, "xlabel": xlabel, "ylabel": name},
+                )
+                self._wins[name] = win
+            else:
+                self.viz.line(
+                    X=[x_val],
+                    Y=[value],
+                    win=self._wins[name],
+                    env=self.env,
+                    update="append",
+                )
+            if self._params is not None:
+                self.viz.log_metrics({name: value}, step=x_val, env=self.env)
+        except Exception as e:
+            warnings.warn("VisdomLogger failed to log {!r}: {}".format(name, e))
 
     def log(self, name, value, x=None, xlabel="epoch"):
         """Log a scalar value under the given metric name.
