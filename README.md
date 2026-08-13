@@ -298,6 +298,7 @@ Visdom offers the following basic visualization functions:
 - [`vis.images`](#visimages)   : list of images
 - [`vis.text`](#vistext)     : arbitrary HTML
 - [`vis.properties`](#visproperties)     : properties grid
+- [`vis.table`](#vistable)     : editable, resizable table pane
 - [`vis.audio`](#visaudio)    : audio
 - [`vis.video`](#visvideo)    : videos
 - [`vis.svg`](#vissvg)      : SVG object
@@ -424,6 +425,14 @@ Each unique name passed to `tracker.log()` gets its own window. The first call c
 **Plain estimators** (classifiers, regressors, clusterers) produce a text pane with the estimator name, dataset shape, training score, fit time, and all hyperparameters.
 
 **GridSearchCV / RandomizedSearchCV** produce a bar chart of `mean_test_score` per parameter combination and a text pane with `best_score_`, `best_params_`, and fit time.
+
+**Iterative estimators** additionally get a line chart of their per-iteration training history: `MLPClassifier`/`MLPRegressor` plot `loss_curve_` (plus `validation_scores_` when fit with `early_stopping=True`), and `GradientBoostingClassifier`/`GradientBoostingRegressor` plot `train_score_`.
+
+**Regressors** get `train_rmse` and `train_mae` rows in the text pane alongside the R2 `train_score` (R2 alone can be misleading), plus a predicted-vs-residual scatter plot.
+
+**Note:** `train_score`, `train_rmse`, `train_mae` and the residual scatter are all measured on the data passed to `fit()`. They describe fit quality on the training set and are not held-out estimates — score your own test set for that.
+
+**Note:** panes are keyed on the estimator instance, so refitting the same estimator updates the panes it already owns instead of opening new ones. Two different estimator objects always get their own panes, even of the same class.
 
 ```python
 import visdom
@@ -599,6 +608,52 @@ Callback are called on property value update:
  - `value`: new value
 
 No specific `opts` are currently supported.
+
+#### vis.table
+This function renders a native, structured, editable table pane. Cells
+(including the column headers) are editable in place, rows/columns can
+be added or removed via `+`/`×` controls, and columns/rows can be
+resized by dragging -- purely a client-side visual convenience, not
+persisted server-side.
+
+It takes as input `data`, either:
+ - a 2D list of rows (list of lists/tuples), with `headers` required, or
+ - a list of dicts, in which case `headers` is derived from the first
+   dict's keys unless explicitly given (and can be used to reorder or
+   select a subset of columns)
+
+`data`/`headers` may also be passed as numpy arrays (e.g. `df.values` /
+`df.columns.values`); they are converted to plain lists internally.
+
+```python
+vis.table(
+    data=[['Alpha', 92], ['Beta', 87]],
+    headers=['Name', 'Score'],
+)
+
+# or, from a list of dicts:
+vis.table(data=[
+    {'Name': 'Alpha', 'Score': 92},
+    {'Name': 'Beta', 'Score': 87},
+])
+```
+
+Supported `opts`:
+ - `editable`: whether cells/rows/columns can be edited by anyone
+   viewing the pane (boolean; default `True`). Set to `False` for a
+   read-only display table (e.g. a live leaderboard).
+
+Edits made in the browser update the shared, persisted pane state
+directly on the server (visible to every viewer, saved with the
+environment). If you've also registered an event handler via
+`register_event_handler`, your Python script additionally receives a
+`TableEdit` event for each change:
+ - `event_type`: `"TableEdit"`
+ - `target`: pane id
+ - `op`: one of `"edit_cell"`, `"edit_header"`, `"add_row"`,
+   `"delete_row"`, `"add_col"`, `"delete_col"`
+ - `data`: the raw edit payload for that op (e.g. `{"row": 0, "col": 1,
+   "value": "new value"}` for `"edit_cell"`)
 
 #### vis.audio
 This function plays audio. It takes as input the filename of the audio

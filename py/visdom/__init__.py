@@ -169,6 +169,18 @@ def _title2str(opts):
             return opts
 
 
+def _table_cell_to_native(cell):
+    """Coerce a single table cell/header to a JSON-serializable native
+    type. Handles numpy scalars that json.dumps and NanSafeEncoder cannot
+    serialize on their own.
+    """
+    if isinstance(cell, np.generic):
+        cell = cell.item()
+    if cell is None or isinstance(cell, (str, int, float, bool)):
+        return cell
+    return str(cell)
+
+
 def _scrub_dict(d):
     if isinstance(d, dict):
         return {
@@ -200,9 +212,10 @@ def _axisformat(xy, opts):
             opts.get(xy + "tickmin") is not None
             and opts.get(xy + "tickmax") is not None
         )
+        label = opts.get(xy + "label")
         return {
             "type": opts.get(xy + "type"),
-            "title": opts.get(xy + "label"),
+            "title": {"text": label} if label is not None else None,
             "range": (
                 [opts.get(xy + "tickmin"), opts.get(xy + "tickmax")]
                 if has_ticks
@@ -225,9 +238,10 @@ def _axisformat3d(xyz, opts):
             and opts.get(xyz + "tickmax") is not None
         )
         has_step = has_ticks and opts.get(xyz + "tickstep") is not None
+        label = opts.get(xyz + "label")
         return {
             "type": opts.get(xyz + "type"),
-            "title": opts.get(xyz + "label"),
+            "title": {"text": label} if label is not None else None,
             "range": (
                 [opts.get(xyz + "tickmin"), opts.get(xyz + "tickmax")]
                 if has_ticks
@@ -252,7 +266,7 @@ def _opts2layout(opts, is3d=False):
     tight = opts.get("tight_layout", False)
     layout = {
         "showlegend": opts.get("showlegend", "legend" in opts),
-        "title": opts.get("title"),
+        "title": {"text": opts["title"]} if opts.get("title") is not None else None,
         "margin": {
             "l": opts.get("marginleft", 0 if (is3d or tight) else 60),
             "r": opts.get("marginright", 0 if tight else 60),
@@ -278,7 +292,7 @@ def _opts2layout(opts, is3d=False):
     if layout_opts is not None:
         if "plotly" in layout_opts:
             layout.update(layout_opts["plotly"])
-    return _scrub_dict(layout)
+    return _scrub_dict(_normalize_title_strings(layout))
 
 
 def _normalize_labels(Y):
@@ -634,6 +648,30 @@ def _compute_confusion_matrix(y_true, y_pred, labels):
     return cm
 
 
+def _normalize_title_strings(layout):
+    """Recursively wrap any plain-string 'title' value as {'text': ...}.
+
+    plotly.js v3.0+ no longer accepts a bare string for any 'title'
+    attribute (chart title, xaxis/yaxis title, scene axis title, legend
+    title, colorbar title, etc.). Visdom's own layout-building functions
+    already emit the object form, but plotlyplot() forwards a user-supplied
+    raw figure layout untouched, so a plain string can appear at any depth
+    (e.g. layout['scene']['xaxis']['title']). This walks the whole layout
+    and fixes every occurrence in place, returning a new structure.
+    """
+    if isinstance(layout, dict):
+        fixed = {}
+        for key, value in layout.items():
+            if key == "title" and isinstance(value, str):
+                fixed[key] = {"text": value}
+            else:
+                fixed[key] = _normalize_title_strings(value)
+        return fixed
+    if isinstance(layout, list):
+        return [_normalize_title_strings(v) for v in layout]
+    return layout
+
+
 def _decode_binary_arrays(obj):
     """Decode Plotly 6+ binary-encoded arrays back to plain Python lists."""
     if isinstance(obj, dict):
@@ -664,7 +702,7 @@ class Visdom(object):
         http_proxy_host=None,
         http_proxy_port=None,
         env="main",
-        send=True,
+        *,
         raise_exceptions=None,
         use_incoming_socket=True,
         log_to_filename=None,
@@ -712,7 +750,6 @@ class Visdom(object):
             .replace("\r", "-")
         )
         self.env_list = {self.env}  # default env
-        self.send = send
         self.event_handlers = {}  # Haven't registered any events
         self.socket_alive = False
         self.socket_connection_achieved = False
@@ -758,7 +795,7 @@ class Visdom(object):
 
         # Setup for online interactions
         result = self._send({"eid": env}, endpoint="env/" + env)
-        if self.send and result is False:
+        if result is False:
             if self.raise_exceptions:
                 raise ConnectionError(
                     "Could not connect to server at {}:{}.".format(
@@ -772,17 +809,16 @@ class Visdom(object):
                     )
                 )
         # when talking to a server, get a backchannel
-        if send and use_incoming_socket:
+        if use_incoming_socket:
             self.setup_socket()
-        elif send and use_polling:
+        elif use_polling:
             self.setup_polling()
-        elif send and not use_incoming_socket:
+        else:
             logger.warning(
                 "Without the incoming socket you cannot receive events from "
                 "the server or register event handlers to your Visdom client."
             )
-        if send:
-            self._start_session_reaper()
+        self._start_session_reaper()
         # Wait for initialization before starting
         time_spent = 0
         inc = 0.1
@@ -1092,10 +1128,6 @@ class Visdom(object):
         if msg.get("eid", None) is not None:
             self.env_list.add(msg["eid"])
 
-        # TODO investigate send use cases, then deprecate
-        if not self.send:
-            return msg, endpoint
-
         if "win" in msg and msg["win"] is None and create:
             msg["win"] = "window_" + get_rand_id()
 
@@ -1177,8 +1209,7 @@ class Visdom(object):
         """POST to an experiment `endpoint` and decode the JSON reply.
 
         Returns the decoded reply when the server replies with JSON, otherwise
-        the raw response (e.g. an error string, or the `(msg, endpoint)` tuple
-        when this client has `send=False`).
+        the raw response (e.g. an error string).
         """
         response = self._send(msg, endpoint=endpoint, quiet=True)
         if not isstr(response):
@@ -1241,6 +1272,7 @@ class Visdom(object):
 
         An experiment that is already terminal cannot be finished again; the
         server rejects the attempt rather than restamping the existing record.
+
         Returns the stored experiment as a dict.
         """
         return self._experiment_send({"action": "finish", "status": status}, env)
@@ -1753,6 +1785,7 @@ class Visdom(object):
             if '"bdata"' in figure_json:
                 figure_dict = _decode_binary_arrays(figure_dict)
 
+            figure_dict["layout"] = _normalize_title_strings(figure_dict["layout"])
             # If opts title is not added, the title is not added to the top right of the window.
             # We add the paramater to opts manually if it exists.
             opts = dict()
@@ -2413,6 +2446,10 @@ class Visdom(object):
             ), "dimension argument should be LxHxWxC or LxCxHxW"
             if dim == "LxCxHxW":
                 tensor = tensor.transpose([0, 2, 3, 1])
+            if tensor.shape[-1] not in (1, 3):
+                raise ValueError(
+                    "video tensor's channel dim should be 1 (grayscale) or 3 (bgr)"
+                )
             bytestr, mimetype = self._encode(tensor, opts["fps"])
 
         flags = " ".join([k for k in ("autoplay", "loop") if opts[k]])
@@ -2741,7 +2778,7 @@ class Visdom(object):
                 if trace_name in trace_opts:
                     _data.update(trace_opts[trace_name])
 
-                data.append(_scrub_dict(_data))
+                data.append(_scrub_dict(_normalize_title_strings(_data)))
 
         if opts:
             for marker_prop in ["markercolor"]:
@@ -3385,10 +3422,10 @@ class Visdom(object):
         layout = _opts2layout(opts)
         layout["annotations"] = annotations
         layout["xaxis"] = layout.get("xaxis", {})
-        layout["xaxis"]["title"] = opts["xlabel"]
+        layout["xaxis"]["title"] = {"text": opts["xlabel"]}
         layout["xaxis"]["side"] = "bottom"
         layout["yaxis"] = layout.get("yaxis", {})
-        layout["yaxis"]["title"] = opts["ylabel"]
+        layout["yaxis"]["title"] = {"text": opts["ylabel"]}
         layout["yaxis"]["autorange"] = "reversed"
 
         data_to_send = {
@@ -4131,16 +4168,18 @@ class Visdom(object):
         data = [trace1, trace2]
 
         layout = {
-            "title": opts.get("title", "Example Double Y axis"),
+            "title": {"text": opts.get("title", "Example Double Y axis")},
             "yaxis": {
-                "title": trace1["name"],
-                "titlefont": {"color": opts.get("color_title_y1", "black")},
+                "title": {
+                    "text": trace1["name"],
+                    "font": {"color": opts.get("color_title_y1", "black")},
+                },
                 "tickfont": {"color": opts.get("color_tick_y1", "black")},
             },
             "yaxis2": {
-                "title": trace2["name"],
-                "titlefont": {
-                    "color": opts.get("color_title_y2", "rgb(148, 103, 189)")
+                "title": {
+                    "text": trace2["name"],
+                    "font": {"color": opts.get("color_title_y2", "rgb(148, 103, 189)")},
                 },
                 "tickfont": {"color": opts.get("color_tick_y2", "rgb(148, 103, 189)")},
                 "overlaying": "y",
@@ -4598,3 +4637,92 @@ class Visdom(object):
         ) % (style, header_html, rows_html)
 
         return self.text(text=table_html, win=win, env=env, opts=opts)
+
+    def table(self, data, headers=None, win=None, env=None, opts=None):
+        """
+        Renders a native, structured, editable table pane.
+
+        - `data`: a 2D list of rows (list of lists/tuples), OR a list of
+           dicts (in which case `headers` is derived from the first
+           dict's keys unless explicitly given).
+        - `headers`: list of column names. Required if `data` rows are
+           plain lists/tuples; optional (and used to reorder/filter
+           columns) if `data` is a list of dicts.
+
+        The following `opts` are supported:
+
+        - `opts.title`: title for the window (`string`; optional)
+        - `opts.editable`: whether cells/rows/columns can be edited by
+           anyone viewing the pane (`bool`; default `True`). Set to
+           `False` for a read-only display table (e.g. a live
+           leaderboard).
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+        opts.setdefault("editable", True)
+
+        if isinstance(data, np.ndarray):
+            assert (
+                data.ndim == 2
+            ), "`data` as a numpy array must be 2-dimensional (rows x columns)"
+            data = data.tolist()
+        elif data is not None and not isinstance(data, (list, tuple)):
+            raise AssertionError(
+                "`data` must be a list, tuple, or numpy array (got %s)"
+                % type(data).__name__
+            )
+
+        if isinstance(headers, np.ndarray):
+            assert headers.ndim == 1, "`headers` as a numpy array must be 1-dimensional"
+            headers = headers.tolist()
+        elif headers is not None and not isinstance(headers, (list, tuple)):
+            raise AssertionError(
+                "`headers` must be a list, tuple, or numpy array (got %s)"
+                % type(headers).__name__
+            )
+
+        has_data = data is not None and len(data) > 0
+        has_headers = headers is not None and len(headers) > 0
+
+        if not has_data and not has_headers:
+            raise AssertionError("either `data` or `headers` must be provided")
+
+        if has_headers:
+            assert isinstance(headers, (list, tuple)), (
+                "headers should be a list (got %s)" % type(headers).__name__
+            )
+
+        if has_data and isinstance(data[0], dict):
+            assert all(
+                isinstance(row, dict) for row in data
+            ), "all rows in `data` must be dicts if the first row is a dict"
+            headers = list(headers) if has_headers else list(data[0].keys())
+            rows = [[row.get(h, "") for h in headers] for row in data]
+        else:
+            assert has_headers, "headers required when data rows are lists/tuples"
+            if has_data:
+                assert all(
+                    isinstance(row, (list, tuple)) for row in data
+                ), "each row in `data` should be a list or tuple"
+            headers = list(headers)
+            rows = [list(r) for r in data] if has_data else []
+
+        assert all(
+            len(r) == len(headers) for r in rows
+        ), "each row must have the same number of columns as headers"
+
+        rows = [[_table_cell_to_native(cell) for cell in row] for row in rows]
+        headers = [_table_cell_to_native(h) for h in headers]
+
+        content = {"headers": headers, "rows": rows}
+
+        return self._send(
+            {
+                "data": [{"content": content, "type": "table"}],
+                "win": win,
+                "eid": env,
+                "opts": opts,
+            },
+            endpoint="events",
+        )

@@ -55,6 +55,7 @@ from visdom.experiments import (
     ExperimentStore,
     ExperimentFinishedError,
     QueryParseError,
+    retarget_experiment,
     STATUS_FINISHED,
 )
 
@@ -193,6 +194,14 @@ class UpdateHandler(BaseHandler):
                 selected_not_neg = max(0, selected)
                 selected_exists = min(len(p["content"]) - 1, selected_not_neg)
                 p["selected"] = selected_exists
+            return p
+        if p["type"] == "table":
+            logging.warning(
+                "update(): ignoring /update call on win %r, which is a "
+                "'table' pane; use vis.table() to replace its content "
+                "instead",
+                p.get("id"),
+            )
             return p
 
         pdata = p["content"]["data"]
@@ -407,6 +416,7 @@ class UpdateHandler(BaseHandler):
             or p["type"] == "image_history"
             or p["type"] == "plot_history"
             or p["type"] == "embeddings"
+            or p["type"] == "table"
             or (
                 len(p["content"]["data"]) == 0
                 or p["content"]["data"][0]["type"]
@@ -538,7 +548,14 @@ class ForkEnvHandler(BaseHandler):
 
         assert prev_eid in handler.state, "env to be forked doesn't exist"
 
-        handler.state[eid] = copy.deepcopy(handler.state[prev_eid])
+        # The copy carries the source env's experiment metadata, whose env_id
+        # still names the env it was forked from; retarget it so the fork does
+        # not answer to its parent's id. Reading the copy also materialises it
+        # when the source was still lazy, which is what makes the save below
+        # write the fork out: an unmaterialised LazyEnvData is skipped.
+        handler.state[eid] = retarget_experiment(
+            copy.deepcopy(handler.state[prev_eid]), eid
+        )
         handler.storage.save_env(eid, handler.state[eid])
         broadcast_envs(handler)
 
@@ -1025,6 +1042,27 @@ class ExperimentSearchHandler(BaseHandler):
         return value
 
     @staticmethod
+    def _decode_body(body):
+        """Return the request body decoded into a dict of arguments.
+
+        The body is optional — the endpoint documents it as such, and a search
+        with no arguments matches everything — so an empty body is read as an
+        empty object. Anything else that is not a JSON object is the caller's
+        error: without this, malformed JSON or a bare list would surface as an
+        unhandled exception and a 500.
+        """
+        try:
+            text = tornado.escape.to_basestring(body).strip()
+            if not text:
+                return {}
+            args = tornado.escape.json_decode(text)
+        except ValueError:
+            raise tornado.web.HTTPError(400, reason="request body must be valid JSON")
+        if not isinstance(args, Mapping):
+            raise tornado.web.HTTPError(400, reason="request body must be an object")
+        return args
+
+    @staticmethod
     def wrap_func(handler, args):
         query = ExperimentSearchHandler._require_text(args, "query")
         sort_by = ExperimentSearchHandler._require_text(args, "sort_by")
@@ -1062,10 +1100,7 @@ class ExperimentSearchHandler(BaseHandler):
 
     @check_auth
     def post(self):
-        args = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
-        self.wrap_func(self, args)
+        self.wrap_func(self, self._decode_body(self.request.body))
 
 
 class ExperimentCompareHandler(BaseHandler):
@@ -1091,7 +1126,11 @@ class ExperimentCompareHandler(BaseHandler):
          "metrics": {...}, "tags": {...}}
 
     Experiments are read through the server's ``DataStore``, so as with search a
-    server running with ``env_path=None`` has nothing to compare.
+    server running with ``env_path=None`` has nothing to compare. The body is
+    decoded by ``ExperimentSearchHandler._decode_body``, so the two endpoints
+    answer malformed JSON and non-object bodies with the same 400; unlike
+    search, an empty body is not a valid request here, since ``env_ids`` is
+    required and there is no comparison to make without it.
     """
 
     @staticmethod
@@ -1128,10 +1167,7 @@ class ExperimentCompareHandler(BaseHandler):
 
     @check_auth
     def post(self):
-        args = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
-        self.wrap_func(self, args)
+        self.wrap_func(self, ExperimentSearchHandler._decode_body(self.request.body))
 
 
 class ExperimentSuggestHandler(BaseHandler):
