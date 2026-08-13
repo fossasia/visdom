@@ -189,7 +189,7 @@ The TODO at `socket_handlers.py:238` notes inconsistent message JSON formatting 
 | `web_handlers.py:166` — python client function | Phase 5 |
 | `web_handlers.py:478` — env state handler | Phase 3 |
 | `__init__.py:602` — merge setup_polling/setup_socket | Phase 5 |
-| `__init__.py:779` — investigate/deprecate send | Phase 5 |
+| `__init__.py` — removed legacy send bypass | Phase 5 |
 | `server_utils.py:56` — shared method call | Phase 2 |
 | `base_handlers.py:80` — error.html page | Phase 2 |
 | `socket_handlers.py:238` — message format | Phase 6 |
@@ -213,7 +213,7 @@ Phases 1 & 2 can start immediately in parallel. Phase 5 can proceed independentl
 
 For each phase:
 1. Run existing tests: `python -m pytest` (config in `pyproject.toml`; suite lives in `py/tests/`)
-2. Run Cypress E2E: `npm run test` (server on port 8098)
+2. Run Playwright E2E: `npm test` and `npm run test:polling`
 3. Manual smoke test: `python -m visdom.server -port 8098` then run `example/demo.py`
 4. Verify no regressions in visual regression screenshots
 5. Run linting: `black py` and `npm run lint`

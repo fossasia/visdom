@@ -35,7 +35,9 @@ test-bin
 bin
 
 playwright/playwright-report/
+playwright/playwright-report-polling/
 playwright/test-results/
+playwright/test-results-polling/
 playwright/tmp/
 playwright-report/
 test-results/
