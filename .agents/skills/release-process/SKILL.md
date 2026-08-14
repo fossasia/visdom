@@ -17,7 +17,7 @@ Use this skill when preparing a new release or updating the version.
    - `npm run lint` (JavaScript)
    - `black py` (Python)
    - `pre-commit run --all-files`
-   - Cypress tests pass
+   - Playwright WebSocket and polling tests pass
 
 3. Submit PR to `master` with version change.
 
