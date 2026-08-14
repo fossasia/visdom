@@ -270,7 +270,8 @@ test.describe('Image Pane', () => {
     await expect(slider).toBeVisible();
 
     // Use native input value setter — required because React overrides the setter.
-    // This mirrors the identical technique used in the Cypress test.
+    // Trigger the range input through its native setter so React receives the
+    // same input and change events as a user interaction.
     await slider.evaluate((range) => {
       const nativeSet = Object.getOwnPropertyDescriptor(
         window.HTMLInputElement.prototype,
