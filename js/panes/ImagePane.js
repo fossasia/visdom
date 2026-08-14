@@ -55,6 +55,17 @@ function ImagePane(props) {
     try {
       const filename = `${title || 'visdom_image'}.${format}`;
       const dpiToEmbed = dpi || 96;
+      const isSourceJpeg = /^data:image\/jpe?g/i.test(content.src || '');
+
+      if (isSourceJpeg && format === 'jpg') {
+        downloadJpegWithDpi(content.src, filename, dpiToEmbed);
+        return;
+      }
+      if (isSourceJpeg && format === 'pdf') {
+        downloadImageAsPdf(content.src, filename, dpiToEmbed);
+        return;
+      }
+
       const canvas = document.createElement('canvas');
       canvas.width = imgRef.current.naturalWidth;
       canvas.height = imgRef.current.naturalHeight;
