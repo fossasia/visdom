@@ -169,6 +169,7 @@ function ViewControls(props) {
             type="button"
             id="viewDropdown"
             aria-haspopup="true"
+            aria-expanded={isViewMenuOpen}
             disabled={!(connected && envIDs.length > 0)}
             onClick={() => setViewMenuOpen((open) => !open)}
           >
