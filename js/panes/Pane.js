@@ -109,7 +109,7 @@ var Pane = forwardRef((props, ref) => {
         }}
         className={propertyListShown ? 'pull-right active' : 'pull-right'}
       >
-        <Tags size={14} />
+        <Tags size={12} />
       </button>,
     ];
   }
@@ -197,7 +197,7 @@ var Pane = forwardRef((props, ref) => {
           className={commentOpen ? 'pull-right active' : 'pull-right'}
           hidden={!commentEnabled}
         >
-          <MessageSquare size={14} />
+          <MessageSquare size={10} />
         </button>
         {barwidgets}
         <div className="pull-right">{title}</div>
