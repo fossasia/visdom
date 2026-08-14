@@ -200,7 +200,7 @@ test.describe('Test Pane Actions', () => {
         const pane = firstPane(page);
         await expectPaneTranslate(pane, 10, 10);
         await dragMouse(page, pane.locator('.bar').first(), 600);
-        await page.locator('[data-original-title="Repack"]').click();
+        await page.locator('[title="Repack"]').click();
         await expectPaneTranslate(pane, paneCase.targetX, 10);
       });
 
