@@ -16,6 +16,7 @@ import getpass
 import hashlib
 import logging
 import os
+import signal
 import ssl
 import sys
 import errno
@@ -29,6 +30,8 @@ from visdom.server.defaults import (
     DEFAULT_ENV_PATH,
     DEFAULT_HOSTNAME,
     DEFAULT_PORT,
+    DEFAULT_SAVE_INTERVAL,
+    DEFAULT_SAVE_THRESHOLD,
 )
 from visdom.server.build import download_scripts
 from visdom.utils.server_utils import hash_password, set_cookie
@@ -60,6 +63,16 @@ def valid_port(value):
     return port
 
 
+def _exit_cleanly(signum, frame):
+    """Turn a termination signal into a normal interpreter shutdown.
+
+    Python's default disposition for SIGTERM ends the process outright, so the
+    ``atexit`` save never runs and ``docker stop`` discards every unsaved
+    environment. Raising SystemExit instead unwinds and lets that handler fire.
+    """
+    sys.exit(0)
+
+
 def start_server(
     port=DEFAULT_PORT,
     hostname=DEFAULT_HOSTNAME,
@@ -73,6 +86,8 @@ def start_server(
     eager_data_loading=False,
     ssl_certfile=None,
     ssl_keyfile=None,
+    save_interval=DEFAULT_SAVE_INTERVAL,
+    save_threshold=DEFAULT_SAVE_THRESHOLD,
 ):
     logging.info("Server started")
     app = Application(
@@ -83,6 +98,8 @@ def start_server(
         user_credential=user_credential,
         use_frontend_client_polling=use_frontend_client_polling,
         eager_data_loading=eager_data_loading,
+        save_interval=save_interval,
+        save_threshold=save_threshold,
     )
     bind_addr = "127.0.0.1" if bind_local else None
     family = socket.AF_INET if bind_local else socket.AF_UNSPEC
@@ -118,6 +135,9 @@ def start_server(
     logging.info(f"Working directory: {os.path.abspath(env_path)}")
 
     atexit.register(app.storage.save_all, app.state)
+    signal.signal(signal.SIGTERM, _exit_cleanly)
+
+    app.start_autosave()
 
     if "HOSTNAME" in os.environ and hostname == DEFAULT_HOSTNAME:
         hostname = os.environ["HOSTNAME"]
@@ -207,6 +227,23 @@ def main(print_func=None):
         default=False,
         action="store_true",
         help="Load data from filesystem when starting server (and not lazily upon first request).",
+    )
+    parser.add_argument(
+        "-save_interval",
+        metavar="save_interval",
+        type=int,
+        default=DEFAULT_SAVE_INTERVAL,
+        help="Seconds between automatic saves of changed environments. "
+        "0 disables the timer; with -save_threshold 0 as well, environments are "
+        "only written to disk when asked and at shutdown.",
+    )
+    parser.add_argument(
+        "-save_threshold",
+        metavar="save_threshold",
+        type=int,
+        default=DEFAULT_SAVE_THRESHOLD,
+        help="Save an environment early once it has taken this many updates, "
+        "so a busy one is not left unsaved for a whole interval. 0 disables.",
     )
     parser.add_argument(
         "-ssl_certfile",
@@ -315,6 +352,8 @@ def main(print_func=None):
         eager_data_loading=FLAGS.eager_data_loading,
         ssl_certfile=FLAGS.ssl_certfile,
         ssl_keyfile=FLAGS.ssl_keyfile,
+        save_interval=FLAGS.save_interval,
+        save_threshold=FLAGS.save_threshold,
     )
 
 
