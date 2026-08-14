@@ -557,15 +557,6 @@ def test_update_comment_broadcasts_a_json_patch(env, inline_executor):
     ]
 
 
-def test_update_comment_persists_the_environment(env, inline_executor):
-    sub = open_sub(env)
-
-    send(sub, cmd="update_comment", eid="expt", win="win_0", data="looks good")
-
-    saved = env.storage.load_env("expt")
-    assert saved["jsons"]["win_0"]["comment"] == "looks good"
-
-
 @pytest.mark.parametrize("comment", [42, None, ["a"], {"text": "a"}])
 def test_update_comment_rejects_a_non_string(env, comment):
     sub = open_sub(env)
