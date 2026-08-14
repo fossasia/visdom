@@ -123,7 +123,8 @@
 
 .btn-group > .btn {
   position: relative;
-  float: left;
+  display: inline-block;
+  vertical-align: middle;
   border-radius: 0;
 }
 
@@ -252,24 +253,22 @@
 
 .input-group {
   position: relative;
-  display: table;
-  border-collapse: separate;
-  width: 100%;
+  display: inline-flex;
+  vertical-align: middle;
+  width: 200px;
 }
 
 .input-group .form-control {
   position: relative;
   z-index: 2;
-  float: left;
-  width: 100%;
+  flex: 1 1 auto;
+  width: 1%;
   margin-bottom: 0;
-  display: table-cell;
 }
 
 .input-group-btn {
   position: relative;
-  display: table-cell;
-  width: 1%;
+  display: flex;
   white-space: nowrap;
   vertical-align: middle;
 }
@@ -358,4 +357,8 @@
 
 .font-weight-normal {
   font-weight: normal;
+}
+
+.pull-right {
+  float: right !important;
 }
