@@ -5,13 +5,15 @@
 ``501 Not Implemented`` with a JSON stub. These tests pin that contract from
 both ends — the endpoint through a real
 :class:`~visdom.server.app.Application` with Tornado's ``AsyncHTTPTestCase``,
-and the ``Visdom.suggest_experiment`` message shape with ``send=False`` (no
-server) — so the surface stays stable until the strategy is wired in.
+and the ``Visdom.suggest_experiment`` message shape against a captured
+transport (no server) — so the surface stays stable until the strategy is
+wired in.
 """
 
 import json
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
 
 import tornado.testing
 
@@ -56,29 +58,58 @@ class TestSuggestEndpoint(tornado.testing.AsyncHTTPTestCase):
 
 
 class TestSuggestClientMessage(unittest.TestCase):
-    """Visdom.suggest_experiment builds the message the endpoint expects."""
+    """Visdom.suggest_experiment builds the message the endpoint expects.
+
+    The transport is captured at ``_handle_post``, one layer below ``_send``,
+    so what is asserted on is the message that would have gone out -- including
+    the ``eid`` that ``_send`` stamps on every message, which a mock in place
+    of ``_send`` would never add.
+    """
 
     def setUp(self):
-        self.vis = Visdom(send=False, raise_exceptions=True)
+        with (
+            patch.object(Visdom, "_handle_post", return_value=True),
+            patch.object(Visdom, "_start_session_reaper"),
+        ):
+            self.vis = Visdom(raise_exceptions=True, use_incoming_socket=False)
+
+        self.posted = []
+        self.vis._handle_post = Mock(side_effect=self._capture)
+
+    def _capture(self, url, data=None):
+        self.posted.append((url, json.loads(data)))
+        return "{}"
+
+    def sent(self):
+        """The last message posted, as ``(msg, endpoint)``."""
+        url, msg = self.posted[-1]
+        prefix = "{}:{}{}/".format(self.vis.server, self.vis.port, self.vis.base_url)
+        return msg, url[len(prefix) :]
 
     def test_suggest_message_shape(self):
         """The message posts to the suggest endpoint and carries params.
 
         ``_send`` stamps an ``eid`` on every message; the stub ignores it.
         """
-        msg, endpoint = self.vis.suggest_experiment()
+        self.vis.suggest_experiment()
+
+        msg, endpoint = self.sent()
         self.assertEqual(endpoint, "experiments/suggest")
         self.assertIsNone(msg["params"])
         self.assertIn("eid", msg)
 
     def test_params_are_passed_through(self):
         """The search space rides along untouched for the eventual strategy."""
-        msg, _ = self.vis.suggest_experiment(params={"lr": [0.1, 0.01]})
+        self.vis.suggest_experiment(params={"lr": [0.1, 0.01]})
+
+        msg, _ = self.sent()
         self.assertEqual(msg["params"], {"lr": [0.1, 0.01]})
 
     def test_env_overrides_the_target_eid(self):
         """An explicit env names the study to suggest against."""
-        msg, _ = self.vis.suggest_experiment(env="run-x")
+        self.vis.suggest_experiment(env="run-x")
+
+        msg, _ = self.sent()
         self.assertEqual(msg["eid"], "run-x")
 
     def test_client_rejects_bad_params(self):
