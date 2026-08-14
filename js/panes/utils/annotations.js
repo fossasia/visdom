@@ -390,7 +390,7 @@ const useAnnotations = ({
       }}
       className={active ? 'pull-right active' : 'pull-right'}
     >
-      <Pencil size={14} />
+      <Pencil size={11} />
     </button>
   ) : (
     ''
