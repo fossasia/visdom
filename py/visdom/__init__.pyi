@@ -44,7 +44,7 @@ class Visdom:
         http_proxy_host: _OptStr = ...,
         http_proxy_port: Optional[int] = ...,
         env: Text = ...,
-        send: bool = ...,
+        *,
         raise_exceptions: Optional[bool] = ...,
         use_incoming_socket: bool = ...,
         log_to_filename: _OptStr = ...,
@@ -365,7 +365,7 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
-    def table(
+    def html_table(
         self,
         headers: List[Any],
         data: List[List[Any]],
@@ -400,4 +400,12 @@ class Visdom:
         opts: _OptOps = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
+    ) -> _SendReturn: ...
+    def table(
+        self,
+        data: List[Any],
+        headers: Optional[List[Any]] = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
     ) -> _SendReturn: ...

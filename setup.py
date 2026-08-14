@@ -65,7 +65,7 @@ setup(
     license="Apache-2.0",
     python_requires=">=3.12",
     # Package info
-    packages=find_packages(where="py"),
+    packages=find_packages(where="py", exclude=["tests", "tests.*"]),
     package_dir={"": "py"},
     package_data={"visdom": ["static/*.*", "static/**/*", "py.typed", "*.pyi"]},
     include_package_data=True,

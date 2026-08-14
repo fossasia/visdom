@@ -107,6 +107,7 @@ class Application(tornado.web.Application):
 
         tornado_settings["static_url_prefix"] = self.base_url + "/static/"
         tornado_settings["debug"] = True
+        experiments_url = "%s/experiments" % self.base_url
         handlers = [
             (r"%s/events" % self.base_url, PostHandler, {"app": self}),
             (r"%s/update" % self.base_url, UpdateHandler, {"app": self}),
@@ -125,31 +126,11 @@ class Application(tornado.web.Application):
             (r"%s/delete_env" % self.base_url, DeleteEnvHandler, {"app": self}),
             (r"%s/env_state" % self.base_url, EnvStateHandler, {"app": self}),
             (r"%s/fork_env" % self.base_url, ForkEnvHandler, {"app": self}),
-            (
-                r"%s/experiments/log" % self.base_url,
-                ExperimentLogHandler,
-                {"app": self},
-            ),
-            (
-                r"%s/experiments/search" % self.base_url,
-                ExperimentSearchHandler,
-                {"app": self},
-            ),
-            (
-                r"%s/experiments/compare" % self.base_url,
-                ExperimentCompareHandler,
-                {"app": self},
-            ),
-            (
-                r"%s/experiments/suggest" % self.base_url,
-                ExperimentSuggestHandler,
-                {"app": self},
-            ),
-            (
-                r"%s/experiments/hparams" % self.base_url,
-                ExperimentHparamsHandler,
-                {"app": self},
-            ),
+            (r"%s/log" % experiments_url, ExperimentLogHandler, {"app": self}),
+            (r"%s/search" % experiments_url, ExperimentSearchHandler, {"app": self}),
+            (r"%s/compare" % experiments_url, ExperimentCompareHandler, {"app": self}),
+            (r"%s/suggest" % experiments_url, ExperimentSuggestHandler, {"app": self}),
+            (r"%s/hparams" % experiments_url, ExperimentHparamsHandler, {"app": self}),
             (r"%s/user/(.*)" % self.base_url, UserSettingsHandler, {"app": self}),
             (r"%s/health" % self.base_url, HealthHandler),
             (r"%s(.*)" % self.base_url, IndexHandler, {"app": self}),
@@ -197,6 +178,8 @@ class Application(tornado.web.Application):
         for eid in self.storage.list_envs():
             if self.eager_data_loading:
                 env_data = self.storage.load_env(eid)
+                if not isinstance(env_data, dict):
+                    env_data = {}
 
                 if "jsons" not in env_data or "reload" not in env_data:
                     logging.warning(
@@ -204,10 +187,13 @@ class Application(tornado.web.Application):
                         eid,
                     )
 
-                state[eid] = {
-                    "jsons": env_data.get("jsons", {}),
-                    "reload": env_data.get("reload", {}),
-                }
+                # Copy the whole env rather than picking out jsons/reload, so
+                # keys the server does not read itself (such as the experiment
+                # metadata blob) survive the load and are still there when the
+                # env is saved back. LazyEnvData keeps them for the lazy path.
+                state[eid] = dict(env_data)
+                state[eid].setdefault("jsons", {})
+                state[eid].setdefault("reload", {})
             else:
                 state[eid] = LazyEnvData(self.storage, eid)
 

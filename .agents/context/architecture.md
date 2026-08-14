@@ -47,7 +47,7 @@ visdom/
 │   ├── panes/                           — Visualization pane components
 │   ├── topbar/                          — Top bar controls
 │   └── modals/                          — Dialog components
-├── cypress/                             — End-to-end + visual regression tests
+├── playwright/                          — End-to-end + visual regression tests
 ├── example/                             — Demo scripts
 └── .github/workflows/                   — CI/CD workflows
 ```

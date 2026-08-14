@@ -14,7 +14,13 @@
 import 'fetch';
 import 'rc-tree-select/assets/index.less';
 
-import React, { useContext, useEffect, useRef, useState } from 'react';
+import React, {
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import ReactDOM from 'react-dom';
 import ReactGridLayout, {
   getLayoutItem,
@@ -47,6 +53,19 @@ import WidthProvider from './Width';
 const jsonpatch = require('fast-json-patch');
 const GridLayout = WidthProvider(ReactGridLayout);
 
+let recoveredInvalidStateAtStartup = false;
+
+const safeJsonParse = (raw, fallback, onError) => {
+  if (raw == null || raw === '') return fallback;
+
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    if (onError) onError(e);
+    return fallback;
+  }
+};
+
 var use_envs = null;
 if (ACTIVE_ENV !== '') {
   if (ACTIVE_ENV.indexOf('+') > -1) {
@@ -57,7 +76,11 @@ if (ACTIVE_ENV !== '') {
     use_envs = [ACTIVE_ENV];
   }
 } else {
-  use_envs = JSON.parse(localStorage.getItem('envIDs')) || ['main'];
+  let storedEnvIDs = safeJsonParse(localStorage.getItem('envIDs'), null, () => {
+    localStorage.removeItem('envIDs');
+    recoveredInvalidStateAtStartup = true;
+  });
+  use_envs = Array.isArray(storedEnvIDs) ? storedEnvIDs : ['main'];
 }
 
 const PaneWrapper = ({
@@ -162,6 +185,8 @@ const App = () => {
   const _pendingPanesVersions = useRef({});
   const _envReloadInFlight = useRef(false);
   const localStorageTimer = useRef(null);
+  const savedStateRecoveryToastShown = useRef(false);
+  const serverLayoutErrorToastShown = useRef(false);
 
   // --------------------- //
   // grid helper functions //
@@ -196,6 +221,28 @@ const App = () => {
     } catch (e) {
       return new RegExp('', 'i');
     }
+  };
+
+  const showSavedStateRecoveryToast = () => {
+    if (savedStateRecoveryToastShown.current) return;
+
+    savedStateRecoveryToastShown.current = true;
+    showToast(
+      'Invalid saved UI data was detected and reset to defaults.',
+      'warning',
+      { duration: 6000 }
+    );
+  };
+
+  const showServerLayoutErrorToast = () => {
+    if (serverLayoutErrorToastShown.current) return;
+
+    serverLayoutErrorToastShown.current = true;
+    showToast(
+      'Saved views could not be loaded because the server returned invalid layout data.',
+      'error',
+      { duration: 6000 }
+    );
   };
 
   // ------------------ //
@@ -252,9 +299,13 @@ const App = () => {
     newPanes[newPane.id] = newPane;
 
     if (!exists) {
-      let stored = JSON.parse(localStorage.getItem(keyLS(newPane.id)));
+      let layoutKey = keyLS(newPane.id);
+      let stored = safeJsonParse(localStorage.getItem(layoutKey), null, () => {
+        localStorage.removeItem(layoutKey);
+        showSavedStateRecoveryToast();
+      });
       if (_bin.current == null) {
-        rebin();
+        _bin.current = createBin(newLayout, windowSize.current.cols);
       }
       let paneLayout;
       if (stored) {
@@ -387,7 +438,7 @@ const App = () => {
         return { ...prev, panes: newPanes, layout: newLayout };
       });
       setFocusedPaneID(focusedPaneID === paneID ? null : focusedPaneID);
-      callbacks.current.push('relayout');
+      relayout();
     }
   };
 
@@ -398,7 +449,6 @@ const App = () => {
     Object.keys(storeData.panes).map((paneID) => {
       closePane(paneID, false, false);
     });
-    rebin();
     setStoreData((prev) => ({
       ...prev,
       layout: [],
@@ -477,7 +527,17 @@ const App = () => {
 
     let payload = {};
     Object.keys(storeData.panes).map((paneID) => {
-      payload[paneID] = JSON.parse(localStorage.getItem(keyLS(paneID)));
+      let layoutKey = keyLS(paneID);
+      let storedLayout = safeJsonParse(
+        localStorage.getItem(layoutKey),
+        null,
+        () => {
+          localStorage.removeItem(layoutKey);
+          showSavedStateRecoveryToast();
+        }
+      );
+      payload[paneID] =
+        storedLayout || getLayoutItem(storeData.layout, paneID) || null;
     });
 
     sendEnvSave(env, selection.envIDs[0], payload);
@@ -562,23 +622,27 @@ const App = () => {
     updateLayout(layout);
   };
 
-  const rebin = (layout) => {
-    layout = layout ? layout : storeData.layout;
-    let layoutID = selection.layoutID;
+  const applySavedLayout = (layout, layoutID, layoutMap) => {
     if (layoutID !== DEFAULT_LAYOUT) {
-      let envLayoutList = getCurrLayoutList();
-      let layoutMap = envLayoutList.get(selection.layoutID);
-      layout = layout.map((paneLayout) => {
+      return layout.map((paneLayout) => {
         if (layoutMap.has(paneLayout.i)) {
           let storedVals = layoutMap.get(paneLayout.i);
-          paneLayout.h = storedVals[1];
-          paneLayout.height = storedVals[1];
-          paneLayout.w = storedVals[2];
-          paneLayout.width = storedVals[2];
+          return {
+            ...paneLayout,
+            h: storedVals[1],
+            height: storedVals[1],
+            w: storedVals[2],
+            width: storedVals[2],
+          };
         }
         return paneLayout;
       });
     }
+
+    return layout;
+  };
+
+  const createBin = (layout, cols) => {
     let contents = layout.map((paneLayout) => {
       return {
         width: paneLayout.w,
@@ -586,8 +650,7 @@ const App = () => {
       };
     });
 
-    _bin.current = new Bin.ShelfFirst(contents, windowSize.current.cols);
-    return layout;
+    return new Bin.ShelfFirst(contents, cols);
   };
 
   const getCurrLayoutList = () => {
@@ -598,59 +661,72 @@ const App = () => {
     }
   };
 
-  const relayout = () => {
-    let layout = rebin();
-
-    let sorted = sortLayout(layout);
-    let newPanes = Object.assign({}, storeData.panes);
-    let filter = getValidFilter(filterString);
-    let old_sorted = sorted.slice();
-    let layoutID = selection.layoutID;
+  const relayout = ({
+    layoutID = selection.layoutID,
+    filterString: nextFilterString = filterString,
+  } = {}) => {
     let envLayoutList = getCurrLayoutList();
-    let layoutMap = envLayoutList.get(selection.layoutID);
-    // Sort out things that were filtered away
-    sorted = sorted.sort(function (a, b) {
-      let diff =
-        (newPanes[a.i].title.match(filter) != null) -
-        (newPanes[b.i].title.match(filter) != null);
-      if (diff != 0) {
-        return -diff;
-      } else if (layoutID !== DEFAULT_LAYOUT) {
-        let aVal = layoutMap.has(a.i) ? -layoutMap.get(a.i)[0] : 1;
-        let bVal = layoutMap.has(b.i) ? -layoutMap.get(b.i)[0] : 1;
-        let diff = bVal - aVal;
+    let filter = getValidFilter(nextFilterString);
+    let cols = windowSize.current.cols;
+
+    setStoreData((prev) => {
+      let layoutMap = envLayoutList.get(layoutID);
+      let sorted = sortLayout(prev.layout);
+      let old_sorted = sorted.slice();
+      let newPanes = Object.assign({}, prev.panes);
+
+      // Sort out things that were filtered away
+      sorted = sorted.sort(function (a, b) {
+        let diff =
+          (newPanes[a.i].title.match(filter) != null) -
+          (newPanes[b.i].title.match(filter) != null);
         if (diff != 0) {
-          // At least one of the two was in the layout map.
-          return diff;
+          return -diff;
+        } else if (layoutID !== DEFAULT_LAYOUT) {
+          let aVal = layoutMap.has(a.i) ? -layoutMap.get(a.i)[0] : 1;
+          let bVal = layoutMap.has(b.i) ? -layoutMap.get(b.i)[0] : 1;
+          let diff = bVal - aVal;
+          if (diff != 0) {
+            // At least one of the two was in the layout map.
+            return diff;
+          }
         }
-      }
-      return old_sorted.indexOf(a) - old_sorted.indexOf(b); // stable sort
+        return old_sorted.indexOf(a) - old_sorted.indexOf(b); // stable sort
+      });
+
+      // The bin packer indexes its dimensions by pane order, so initialize it
+      // only after the final filtered/saved-view order has been determined.
+      sorted = applySavedLayout(sorted, layoutID, layoutMap);
+      let bin = createBin(sorted, cols);
+
+      let newLayout = sorted.map((paneLayout, idx) => {
+        let pos = bin.position(idx, cols);
+
+        newPanes[paneLayout.i] = {
+          ...newPanes[paneLayout.i],
+          i: idx,
+        };
+
+        return Object.assign({}, paneLayout, pos);
+      });
+
+      return {
+        ...prev,
+        panes: newPanes,
+        layout: newLayout,
+      };
     });
-
-    let newLayout = sorted.map((paneLayout, idx) => {
-      let pos = _bin.current.position(idx, windowSize.current.cols);
-
-      newPanes[paneLayout.i].i = idx;
-
-      return Object.assign({}, paneLayout, pos);
-    });
-
-    setStoreData((prev) => ({
-      ...prev,
-      panes: newPanes,
-    }));
-    updateLayout(newLayout);
   };
 
   const updateLayout = (layout) => {
     setStoreData((prev) => ({ ...prev, layout: layout }));
-    // TODO this is very non-conventional react, someday it shall be fixed but
-    // for now it's important to fix relayout grossness
-    storeData.layout = layout;
   };
   const resizePaneLive = (layout) => {
     updateLayout(layout);
   };
+  useLayoutEffect(() => {
+    _bin.current = createBin(storeData.layout, windowSize.current.cols);
+  }, [storeData.layout]);
   useEffect(() => {
     clearTimeout(localStorageTimer.current);
     localStorageTimer.current = setTimeout(() => {
@@ -669,13 +745,8 @@ const App = () => {
       ...prev,
       layoutID: newLayoutID,
     }));
-    // TODO this is very non-conventional react, someday it shall be fixed but
-    // for now it's important to fix relayout grossness
-    selection.layoutID = newLayoutID;
-    if (selection.layoutID !== DEFAULT_LAYOUT) {
-      callbacks.current.push('relayout');
-      callbacks.current.push('relayout');
-      callbacks.current.push('relayout');
+    if (newLayoutID !== DEFAULT_LAYOUT) {
+      relayout({ layoutID: newLayoutID });
     }
   };
 
@@ -684,7 +755,14 @@ const App = () => {
     if (layoutJSON.length == 0) {
       return; // Skip totally blank updates, these are empty inits
     }
-    let layoutsObj = JSON.parse(layoutJSON);
+    let layoutsObj = safeJsonParse(
+      layoutJSON,
+      null,
+      showServerLayoutErrorToast
+    );
+    if (!layoutsObj) {
+      return;
+    }
     let layoutLists = new Map();
     for (let envName of Object.keys(layoutsObj)) {
       let layoutList = new Map();
@@ -759,13 +837,19 @@ const App = () => {
   // effects
   // -------
 
-  // flush pre-render callbacks
+  useEffect(() => {
+    if (recoveredInvalidStateAtStartup) {
+      showSavedStateRecoveryToast();
+    }
+  }, []);
+
+  // Run callbacks after state updates have been committed.
   const callbacks = useRef([]);
-  callbacks.current.forEach((cb) => {
-    if (cb === 'relayout') relayout();
-    else if (cb) cb();
+  useEffect(() => {
+    let pendingCallbacks = callbacks.current;
+    callbacks.current = [];
+    pendingCallbacks.forEach((cb) => cb());
   });
-  callbacks.current = [];
 
   // ask server for envs after registration succeeded
   useEffect(() => {
@@ -986,7 +1070,6 @@ const App = () => {
       layoutList={getCurrLayoutList()}
       onRepackButton={() => {
         relayout();
-        relayout();
       }}
       onViewChange={updateToLayout}
       onViewManageButton={() => setShowViewModal(!showViewModal)}
@@ -1003,12 +1086,13 @@ const App = () => {
     <FilterControls
       filter={filterString}
       onFilterChange={(ev) => {
-        setFilterString(ev.target.value);
-        callbacks.current.push('relayout');
+        let nextFilterString = ev.target.value;
+        setFilterString(nextFilterString);
+        relayout({ filterString: nextFilterString });
       }}
       onFilterClear={() => {
         setFilterString('');
-        callbacks.current.push('relayout');
+        relayout({ filterString: '' });
       }}
     />
   );
