@@ -161,7 +161,7 @@ function TablePane(props) {
           : 'table-edit-toggle pull-right'
       }
     >
-      <Pencil size={14} />
+      <Pencil size={11} />
     </button>
   ) : (
     ''
