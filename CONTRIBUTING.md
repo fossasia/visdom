@@ -133,7 +133,7 @@ Blindly copy-pasting AI-generated code that you cannot explain or debug is not p
 We actively welcome your pull requests.
 
 1. Fork the repo and create your branch from `dev`.
-2. If you've added code that should be tested, add tests.
+2. If you've added code that should be tested, add tests. For Python, see [Python Tests](#python-tests) below.
 3. If you've changed APIs, update the documentation.
 4. Ensure the Lua and Python interfaces to Visdom are in sync.
 5. If you change `js/`, commit the React-compiled version of `main.js`. For details, please see `Contributing to the UI` below.
@@ -144,6 +144,56 @@ We actively welcome your pull requests.
     - To do that automatically before each `git commit`, enable pre-commit hooks: `pre-commit install`.
 8. If you haven't already, complete the Contributor License Agreement ("CLA").
 
+
+## Python Tests
+The Python test suite uses [pytest](https://docs.pytest.org/) and lives under `py/tests/`. It is
+hermetic: no visdom server has to be running, and no test touches the network. Visdom itself
+requires Python 3.12 or newer, so run the tests on 3.12+.
+
+#### Running the tests
+```bash
+pip install -e .                       # install visdom
+pip install -r test-requirements.txt   # pytest and the test dependencies
+pytest                                 # the whole suite
+pytest -m "not server"                 # what CI runs
+```
+Discovery is configured in `pyproject.toml`, so `pytest` finds the suite from anywhere in the
+repository and you do not need to pass a path.
+
+While working on a change, narrow the run down:
+```bash
+pytest py/tests/unit                     # the fast subset: no HTTP
+pytest py/tests/unit/window_builder.py   # a single file
+pytest -k window_builder                 # tests matching a name
+pytest -x --lf                           # stop at the first failure, then re-run just that one
+```
+The `unit`, `integration`, `slow` and `server` markers are registered in `pyproject.toml` for
+selecting with `-m`; a run only picks up the files that carry the marker.
+
+Note that `-q` is already set in `addopts`; passing another `-q` hides the summary line. Use
+`-o addopts=""` if you want pytest's full default output.
+
+#### Adding a test
+```
+py/tests/
+  conftest.py    shared fixtures, loaded automatically
+  testutils/     importable helpers — never collected as tests
+  unit/          pure logic: no Application, no I/O beyond tmp_path
+  integration/   in-process Application, real HTTP, or handler dispatch
+```
+- Put the file in `unit/` or `integration/`, depending on what it needs.
+- Name the file after what it covers — `unit/window_builder.py`, not `unit/test_window_builder.py`.
+  The directory already says these are tests. Test **functions** still need the `test_` prefix, or
+  pytest will not run them.
+- Prefer plain `def test_*()` functions. pytest cannot pass fixtures into `unittest.TestCase`
+  methods, so a `TestCase` cannot use anything in `conftest.py` or `@pytest.mark.parametrize`.
+  Tests that need a real HTTP round trip are the exception: subclass
+  `testutils.VisdomHTTPTestCase`, which runs the app in-process on an ephemeral port.
+- A test that needs an externally launched server must be marked `@pytest.mark.server` so CI can
+  deselect it. Nothing in the suite needs one today.
+- Test files carry the same license header as the rest of the repository.
+
+`.agents/context/testing.md` has the longer version, including a reference for every shared fixture.
 
 ## Contributing to the UI
 The UI is built with [React](https://facebook.github.io/react/). For testing,
@@ -179,37 +229,35 @@ npm run build     # build js
 ```
 
 #### Test your changes
-This project has some Cypress tests (end-to-end tests and visual regression tests) so you can check for side effects of your changes.
+This project uses Playwright for end-to-end and visual regression tests so you
+can check for side effects of your changes.
 If you add or change functions, feel free to adjust the tests or add new ones if none exist for your case.
 (This will ensure that your function will continue to work in the future. ;) )
 
 To run the predefined tests
 
-**using Cypress GUI**:
-1. start a fresh visdom server instance on port `8098` , i.e. by just calling `visdom -port 8098`. (Just to make sure another instance is not interfering with our test.)
-2. run `npm run test:init`. This generates screenshots of all plots for the visual regression testing.
-3. Adapt the code now to your needs.
-4. run `npm run build` *or* `npm run dev` (enables automatic building)
-5. run `npm run test:gui` (a new window should appear)
-6. click through the test spec-files and observe the tests done automatically in a newly opened browser instance
+**using the Playwright UI**:
+1. Run `npx playwright install chromium` on first setup.
+2. Run `npm run build` *or* `npm run dev` to compile the frontend code.
+3. Make sure port `8098` is available; Playwright starts an isolated Visdom
+   server automatically.
+4. Run `npm run test:gui` and select the specs to inspect.
 
-**as CLI tests (Cypress)**:
-1. start a fresh visdom server instance on port `8098` , i.e. by just calling `visdom -port 8098` (Just to make sure another instance is not interfering with our test.)
-2. run `npm run test:init`. This generates screenshots of all plots for the visual regression testing.
-3. Adapt the code now to your needs.
-4. run `npm run build` *or* `npm run dev` (enables automatic building)
-5. run `npm run test`
+**as CLI tests**:
+1. Run `npx playwright install chromium` on first setup.
+2. Run `npm run build` *or* `npm run dev` to compile the frontend code.
+3. Run the WebSocket suite with `npm test`.
+4. Run the same functional tests with frontend polling using
+   `npm run test:polling`.
 
-**using Playwright (E2E tests)**:
-1. run `npx playwright install chromium` on first setup to install the browser.
-2. run `npm run build` *or* `npm run dev` to compile the frontend code.
-3. make sure port `8098` is available; Playwright starts an isolated Visdom server automatically.
-4. run the WebSocket test suite: `npm run test:pw`.
-5. run the same functional tests with frontend polling: `npm run test:pw:polling`.
+**visual regression tests**:
+1. Before making UI changes, run `npm run test:init` to generate baseline
+   screenshots.
+2. After making and building the changes, run `npm run test:visual` to compare
+   against those baselines.
 
-The polling suite starts Visdom with `-use_frontend_client_polling` and does not
-reuse an existing server. Playwright visual regression specs are excluded from
-the polling run.
+The polling suite starts Visdom with `-use_frontend_client_polling`, does not
+reuse an existing server, and excludes visual regression specs.
 
 ## Issues
 We use GitHub issues to track public bugs. Please ensure your description is

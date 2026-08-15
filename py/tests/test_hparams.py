@@ -3,12 +3,14 @@
 ``Visdom.hparams`` is a thin wrapper: it validates ``opts`` like the other
 plotting methods and posts the selection (``query``/``env_ids``/``mode``) to the
 ``experiments/hparams`` endpoint, which does the selecting, flattening and
-window creation. These tests pin the request it builds with ``send=False`` (no
-server); the selection rules and flattening are tested against the endpoint in
-``test_experiment_hparams``.
+window creation. These tests pin the request it builds by mocking the transport
+under ``_send``; the selection rules and flattening are tested against the
+endpoint in ``test_experiment_hparams``.
 """
 
+import json
 import unittest
+from unittest.mock import patch
 
 from visdom import Visdom
 
@@ -17,11 +19,29 @@ class TestHparamsClientMessage(unittest.TestCase):
     """Visdom.hparams posts the selection to the experiments/hparams endpoint."""
 
     def setUp(self):
-        self.vis = Visdom(send=False, raise_exceptions=True)
+        with (
+            patch.object(Visdom, "_handle_post", return_value=True),
+            patch.object(Visdom, "_start_session_reaper"),
+        ):
+            self.vis = Visdom(raise_exceptions=True, use_incoming_socket=False)
+
+    def hparams(self, *args, **kwargs):
+        """Return the (msg, endpoint) hparams would have posted."""
+        posted = {}
+        prefix = "{0}:{1}{2}/".format(self.vis.server, self.vis.port, self.vis.base_url)
+
+        def capture(url, data=None):
+            posted["msg"] = json.loads(data)
+            posted["endpoint"] = url[len(prefix) :]
+            return True
+
+        with patch.object(self.vis, "_handle_post", side_effect=capture):
+            self.vis.hparams(*args, **kwargs)
+        return posted["msg"], posted["endpoint"]
 
     def test_posts_to_hparams_endpoint(self):
         """The selection goes to the experiments/hparams endpoint."""
-        msg, endpoint = self.vis.hparams("acc > 0.9")
+        msg, endpoint = self.hparams("acc > 0.9")
         self.assertEqual(endpoint, "experiments/hparams")
         self.assertEqual(msg["query"], "acc > 0.9")
         self.assertIsNone(msg["mode"])
@@ -29,20 +49,20 @@ class TestHparamsClientMessage(unittest.TestCase):
 
     def test_env_ids_and_mode_pass_through(self):
         """env_ids and an explicit mode ride along untouched for the server."""
-        msg, _ = self.vis.hparams(env_ids=["run-a", "run-b"], mode="env_ids")
+        msg, _ = self.hparams(env_ids=["run-a", "run-b"], mode="env_ids")
         self.assertEqual(msg["env_ids"], ["run-a", "run-b"])
         self.assertEqual(msg["mode"], "env_ids")
 
     def test_win_and_env_pass_through(self):
         """win/env target a specific pane like the other plotting methods."""
-        msg, _ = self.vis.hparams("acc > 0.9", win="hp1", env="run-x")
+        msg, _ = self.hparams("acc > 0.9", win="hp1", env="run-x")
         self.assertEqual(msg["win"], "hp1")
         self.assertEqual(msg["eid"], "run-x")
 
     def test_opts_are_validated_client_side(self):
         """opts are asserted before the request, like the other methods."""
         with self.assertRaises(AssertionError):
-            self.vis.hparams("acc > 0.9", opts={"opacity": 5})
+            self.hparams("acc > 0.9", opts={"opacity": 5})
 
 
 if __name__ == "__main__":

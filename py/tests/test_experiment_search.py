@@ -1,15 +1,24 @@
-"""Tests for experiment search (Layer 2, PR 4).
+#!/usr/bin/env python3
+
+# Copyright 2017-present, The Visdom Authors
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
+"""Tests for experiment search.
 
 Covers the three pieces the search layer is built from: ``ExperimentStore.search``
 (filtering via the query parser, plus sorting) against a real ``JSONStore`` over a
 temporary directory; the ``/experiments/search`` endpoint end-to-end through a real
 :class:`~visdom.server.app.Application` with Tornado's ``AsyncHTTPTestCase``; and
-the ``Visdom.search_experiments`` message shape with ``send=False`` (no server).
+the ``Visdom.search_experiments`` message shape with a mocked transport (no server).
 """
 
 import json
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
 
 import tornado.testing
 
@@ -208,6 +217,14 @@ class TestSearchEndpoint(tornado.testing.AsyncHTTPTestCase):
             headers={"Content-Type": "application/json"},
         )
 
+    def post_raw(self, body):
+        return self.fetch(
+            "/experiments/search",
+            method="POST",
+            body=body,
+            headers={"Content-Type": "application/json"},
+        )
+
     def search_ok(self, body):
         resp = self.search(body)
         self.assertEqual(resp.code, 200)
@@ -313,6 +330,23 @@ class TestSearchEndpoint(tornado.testing.AsyncHTTPTestCase):
         """sort_by must name a field."""
         self.assertEqual(self.search({"sort_by": 7}).code, 400)
 
+    def test_missing_body_returns_everything(self):
+        """The body is optional, so no body at all is a search for everything."""
+        resp = self.post_raw("")
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(json.loads(resp.body)["total"], 3)
+
+    def test_malformed_json_is_400(self):
+        """A body that is not JSON is the caller's error, not a 500."""
+        resp = self.post_raw("{not json")
+        self.assertEqual(resp.code, 400)
+
+    def test_non_object_body_is_400(self):
+        """A JSON list or scalar carries no arguments to read, so reject it."""
+        self.assertEqual(self.post_raw("[1, 2]").code, 400)
+        self.assertEqual(self.post_raw('"query"').code, 400)
+        self.assertEqual(self.post_raw("null").code, 400)
+
     def test_non_boolean_descending_is_400(self):
         """The string "false" is rejected rather than coerced to true."""
         self.assertEqual(self.search({"descending": "false"}).code, 400)
@@ -340,10 +374,22 @@ class TestSearchEndpoint(tornado.testing.AsyncHTTPTestCase):
 
 
 class TestSearchClientMessage(unittest.TestCase):
-    """Visdom.search_experiments builds the message the endpoint expects."""
+    """Visdom.search_experiments builds the message the endpoint expects.
+
+    The transport is mocked to return the ``(msg, endpoint)`` it would have
+    posted, so we can assert on it directly.
+    """
 
     def setUp(self):
-        self.vis = Visdom(send=False, raise_exceptions=True)
+        with (
+            patch.object(Visdom, "_handle_post", return_value=True),
+            patch.object(Visdom, "_start_session_reaper"),
+        ):
+            self.vis = Visdom(raise_exceptions=True, use_incoming_socket=False)
+
+        self.vis._send = Mock(
+            side_effect=lambda msg, endpoint="events", **_: (msg, endpoint)
+        )
 
     def test_search_message_shape(self):
         """The client sends the query and paging to the search endpoint."""
