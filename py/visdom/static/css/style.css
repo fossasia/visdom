@@ -117,7 +117,7 @@ button {
   border-color: transparent;
 }
 
-button>span.glyphicon {
+button>svg {
   color: grey;
 }
 
@@ -173,7 +173,7 @@ button>span.glyphicon {
   color: #333;
 }
 
-button[title="comment"].active > .glyphicon {
+button[title="comment"].active > svg {
   color: red;
 }
 
@@ -321,11 +321,11 @@ doesn't override our desire to make them non-interactable */
   border: none;
 }
 
-button[title="properties"].active>.glyphicon {
+button[title="properties"].active>svg {
   color: red;
 }
 
-button.table-edit-toggle.active > .glyphicon {
+button.table-edit-toggle.active > svg {
   color: red;
 }
 
@@ -353,7 +353,7 @@ button[title="smooth lines"].active {
   --annotation-background: #fff;
 }
 
-button[title="annotate points"].active > .glyphicon {
+button[title="annotate points"].active > svg {
   color: red;
 }
 
@@ -534,6 +534,10 @@ button[title="annotate points"].active > .glyphicon {
 }
 
 button[title="export"].active {
+  background-color: #dedede;
+}
+
+button[title="export latex"].active {
   background-color: #dedede;
 }
 
