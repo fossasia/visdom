@@ -6,7 +6,9 @@
  * LICENSE file in the root directory of this source tree.
  *
  */
-import React, { useContext, useRef } from 'react';
+
+import { Download, FolderOpen, LayoutGrid, Undo2, Upload } from 'lucide-react';
+import React, { useContext, useEffect, useRef, useState } from 'react';
 
 import ApiContext from '../api/ApiContext';
 import { showToast } from '../toasts/toastEvents';
@@ -27,6 +29,40 @@ function ViewControls(props) {
   } = props;
 
   const fileInputRef = useRef(null);
+
+  const [isViewMenuOpen, setViewMenuOpen] = useState(false);
+  const viewDropdownRef = useRef(null);
+
+  useEffect(() => {
+    if (!isViewMenuOpen) return undefined;
+
+    const handleOutsideClick = (event) => {
+      if (
+        viewDropdownRef.current &&
+        !viewDropdownRef.current.contains(event.target)
+      ) {
+        setViewMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setViewMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isViewMenuOpen]);
+
+  useEffect(() => {
+    if (!(connected && envIDs.length > 0)) {
+      setViewMenuOpen(false);
+    }
+  }, [connected, envIDs.length]);
 
   const handleUploadDashboard = async (e) => {
     const file = e.target.files[0];
@@ -110,7 +146,13 @@ function ViewControls(props) {
 
     return (
       <li key={view}>
-        <a href={'#' + view} onClick={() => onViewChange(view)}>
+        <a
+          href={'#' + view}
+          onClick={() => {
+            onViewChange(view);
+            setViewMenuOpen(false);
+          }}
+        >
           {view}
           {check_space}
         </a>
@@ -121,66 +163,58 @@ function ViewControls(props) {
     <span>
       <span>View&nbsp;</span>
       <div className="btn-group navbar-btn" role="group" aria-label="View:">
-        <div className="btn-group" role="group">
+        <div className="btn-group" role="group" ref={viewDropdownRef}>
           <button
             className="btn btn-default btn-sm dropdown-toggle"
             type="button"
             id="viewDropdown"
-            data-toggle="dropdown"
             aria-haspopup="true"
-            aria-expanded="true"
+            aria-expanded={isViewMenuOpen}
             disabled={!(connected && envIDs.length > 0)}
+            onClick={() => setViewMenuOpen((open) => !open)}
           >
             {envIDs.length > 1 ? 'compare' : activeLayout}
             &nbsp;
             <span className="caret" />
           </button>
-          <ul className="dropdown-menu" aria-labelledby="viewDropdown">
+          <ul
+            className={'dropdown-menu' + (isViewMenuOpen ? ' show' : '')}
+            aria-labelledby="viewDropdown"
+          >
             {view_options}
           </ul>
         </div>
         <button
-          data-toggle="tooltip"
           title="Repack"
-          data-placement="bottom"
           className="btn btn-default btn-sm"
           onClick={onRepackButton}
         >
-          <span className="glyphicon glyphicon-th" />
+          <LayoutGrid size={14} />
         </button>
         <button
-          data-toggle="tooltip"
           title="Manage Views"
-          data-placement="bottom"
           className="btn btn-default btn-sm"
           disabled={!(connected && envIDs.length > 0 && !readonly)}
           onClick={onViewManageButton}
         >
-          <span className="glyphicon glyphicon-folder-open" />
+          <FolderOpen size={14} />
         </button>
         <button
-          data-toggle="tooltip"
           title="Undo Close"
-          data-placement="bottom"
           className="btn btn-default btn-sm"
           disabled={!(connected && envIDs.length === 1 && !readonly && canUndo)}
           onClick={onUndoButton}
         >
-          <span
-            className="glyphicon glyphicon-share-alt"
-            style={{ transform: 'scaleX(-1)' }}
-          />
+          <Undo2 size={14} />
         </button>
         <button
-          data-toggle="tooltip"
           title="Upload Dashboard JSON"
-          data-placement="bottom"
           className="btn btn-default btn-sm"
           onClick={() => fileInputRef.current && fileInputRef.current.click()}
           disabled={!(connected && !readonly)}
           aria-label="Upload JSON file"
         >
-          <span className="glyphicon glyphicon-upload" />
+          <Upload size={14} />
         </button>
 
         <input
@@ -191,15 +225,13 @@ function ViewControls(props) {
           onChange={handleUploadDashboard}
         />
         <button
-          data-toggle="tooltip"
           title="Export as HTML"
-          data-placement="bottom"
           className="btn btn-default btn-sm"
           disabled={!(connected && envIDs.length > 0)}
           onClick={onExportHtml}
           aria-label="Export as HTML"
         >
-          <span className="glyphicon glyphicon-download" />
+          <Download size={14} />
         </button>
       </div>
     </span>
