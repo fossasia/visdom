@@ -348,6 +348,19 @@ const ApiProvider = ({ children }) => {
     });
   };
 
+  const sendTableEdit = (envID, win, op, data) => {
+    if (win === null || sessionInfo.readonly) {
+      return;
+    }
+    sendSocketMessage({
+      cmd: 'table_edit',
+      eid: envID,
+      win: win,
+      op: op,
+      data: data,
+    });
+  };
+
   // Save layout lists to the server
   const sendLayoutsSave = (layoutLists) => {
     // pushes layouts to the server
@@ -410,6 +423,7 @@ const ApiProvider = ({ children }) => {
         sendPlotLayoutUpdate,
         sendPaneMessage,
         sendSaveAll,
+        sendTableEdit,
         sendUndo,
         sessionInfo,
         setConnected,

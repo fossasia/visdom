@@ -9,9 +9,10 @@ LICENSE file in the root directory of this source tree.
 -->
 
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
+    <title>visdom</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
     <link rel="shortcut icon" href="favicon.png">
@@ -50,9 +51,6 @@ LICENSE file in the root directory of this source tree.
 
     <!-- Custom styles for this template -->
     <script>
-    // TODO: this is not great. Should probably be an endpoint with a JSON
-    // response or the first thing the socket sends back.
-    var ENV_LIST = [];
     function getActiveEnvFromPath() {
       var path = window.location.pathname || '';
       if (path.includes('/env/')) {
@@ -74,10 +72,6 @@ LICENSE file in the root directory of this source tree.
     var ACTIVE_ENV = getActiveEnvFromPath();
     var USE_POLLING = ('{{wrap_socket}}' == 'True');
 
-    // Plotly setup
-    window.PLOTLYENV = window.PLOTLYENV || {};
-    window.PLOTLYENV.BASE_URL = 'https://plot.ly';
-
     </script>
     <script src={{ static_url("js/main.js") }}></script>
     <link rel="stylesheet" href={{ static_url("css/style.css") }}>
@@ -88,8 +82,6 @@ LICENSE file in the root directory of this source tree.
     <!-- Styles for HParamsPane -->
     <link rel="stylesheet" href={{ static_url("css/hparams.css") }}>
     <link rel="stylesheet" href={{ static_url("css/rc-slider-overrides.css") }}>
-
-    <title>visdom</title>
     <!-- <link rel="icon" href="http://example.com/favicon.png"> -->
   </head>
 
