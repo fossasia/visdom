@@ -11,12 +11,14 @@ import React, { useContext, useEffect, useRef, useState } from 'react';
 
 import ApiContext from '../api/ApiContext';
 import EventSystem from '../EventSystem';
+import { showToast } from '../toasts/toastEvents';
 import Pane from './Pane';
 import {
   downloadJpegWithDpi,
   downloadPngWithDpi,
 } from './utils/Embeddpimetadata';
 import { typesetMathJax } from './utils/mathjaxHelpers';
+import { copyLatexToClipboard } from './utils/LatexExport';
 import { downloadImageAsPdf } from './utils/pdfExport';
 
 const DEFAULT_HEIGHT = 400;
