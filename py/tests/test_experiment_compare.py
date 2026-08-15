@@ -408,6 +408,15 @@ class TestCompareEndpoint(tornado.testing.AsyncHTTPTestCase):
             headers={"Content-Type": "application/json"},
         )
 
+    def post_raw(self, body):
+        """POST a body verbatim, so malformed JSON reaches the handler."""
+        return self.fetch(
+            "/experiments/compare",
+            method="POST",
+            body=body,
+            headers={"Content-Type": "application/json"},
+        )
+
     def compare_ok(self, body):
         resp = self.compare(body)
         self.assertEqual(resp.code, 200)

@@ -596,6 +596,7 @@ def register_window(self, p, eid):
         p["i"] = len(env)
 
     env[p["id"]] = p
+    self.mark_dirty(eid)
 
     broadcast_msg = dict(p)
     broadcast_msg["eid"] = eid
