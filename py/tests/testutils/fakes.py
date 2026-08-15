@@ -100,6 +100,11 @@ class FakeHandler:
         self.eid = "main"
         self.sid = "sid_handler"
         self.broadcasted = []
+        self.dirtied = []
+
+    def mark_dirty(self, eid):
+        """Record an environment the server flagged as needing a save."""
+        self.dirtied.append(eid)
 
     def write(self, chunk):
         self.written.append(chunk)

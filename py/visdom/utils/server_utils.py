@@ -210,7 +210,7 @@ def window(args):
                 "show_slider": opts.get("show_slider", True),
             }
         )
-    elif ptype in ["image", "text", "properties"] and is_visdom_type:
+    elif ptype in ["image", "text", "properties", "hparams"] and is_visdom_type:
         p.update({"content": args["data"][0]["content"], "type": ptype})
     elif ptype == "table" and is_visdom_type:
         p.update(
@@ -388,11 +388,11 @@ def compare_envs(state, eids, socket, store, show_all=False):
                 )
                 win_copy["title"] = label
                 if isinstance(win_copy.get("layout"), dict):
-                    win_copy["layout"]["title"] = label
+                    win_copy["layout"]["title"] = {"text": label}
                 if isinstance(win_copy.get("content"), dict) and isinstance(
                     win_copy["content"].get("layout"), dict
                 ):
-                    win_copy["content"]["layout"]["title"] = label
+                    win_copy["content"]["layout"]["title"] = {"text": label}
                 win_copy["has_compare"] = True
                 res["jsons"][new_wid] = win_copy
 
@@ -425,7 +425,7 @@ def compare_envs(state, eids, socket, store, show_all=False):
         "contentID": "compare_legend",
         "content": tbl,
         "type": "text",
-        "layout": {"title": "compare_legend"},
+        "layout": {"title": {"text": "compare_legend"}},
         "i": 1,
         "has_compare": True,
         "commentsDisabled": True,
@@ -598,6 +598,7 @@ def register_window(self, p, eid):
         p["i"] = max((w.get("i", -1) for w in env.values()), default=-1) + 1
 
     env[p["id"]] = p
+    self.mark_dirty(eid)
 
     broadcast_msg = dict(p)
     broadcast_msg["eid"] = eid

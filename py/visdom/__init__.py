@@ -6,7 +6,11 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from visdom.utils.shared_utils import get_new_window_id, _coerce_image_slider_index
+from visdom.utils.shared_utils import (
+    get_new_window_id,
+    _coerce_image_slider_index,
+    _normalize_table_data,
+)
 from visdom import server
 import os
 import os.path
@@ -169,18 +173,6 @@ def _title2str(opts):
             return opts
 
 
-def _table_cell_to_native(cell):
-    """Coerce a single table cell/header to a JSON-serializable native
-    type. Handles numpy scalars that json.dumps and NanSafeEncoder cannot
-    serialize on their own.
-    """
-    if isinstance(cell, np.generic):
-        cell = cell.item()
-    if cell is None or isinstance(cell, (str, int, float, bool)):
-        return cell
-    return str(cell)
-
-
 def _scrub_dict(d):
     if isinstance(d, dict):
         return {
@@ -212,9 +204,10 @@ def _axisformat(xy, opts):
             opts.get(xy + "tickmin") is not None
             and opts.get(xy + "tickmax") is not None
         )
+        label = opts.get(xy + "label")
         return {
             "type": opts.get(xy + "type"),
-            "title": opts.get(xy + "label"),
+            "title": {"text": label} if label is not None else None,
             "range": (
                 [opts.get(xy + "tickmin"), opts.get(xy + "tickmax")]
                 if has_ticks
@@ -237,9 +230,10 @@ def _axisformat3d(xyz, opts):
             and opts.get(xyz + "tickmax") is not None
         )
         has_step = has_ticks and opts.get(xyz + "tickstep") is not None
+        label = opts.get(xyz + "label")
         return {
             "type": opts.get(xyz + "type"),
-            "title": opts.get(xyz + "label"),
+            "title": {"text": label} if label is not None else None,
             "range": (
                 [opts.get(xyz + "tickmin"), opts.get(xyz + "tickmax")]
                 if has_ticks
@@ -264,7 +258,7 @@ def _opts2layout(opts, is3d=False):
     tight = opts.get("tight_layout", False)
     layout = {
         "showlegend": opts.get("showlegend", "legend" in opts),
-        "title": opts.get("title"),
+        "title": {"text": opts["title"]} if opts.get("title") is not None else None,
         "margin": {
             "l": opts.get("marginleft", 0 if (is3d or tight) else 60),
             "r": opts.get("marginright", 0 if tight else 60),
@@ -290,7 +284,7 @@ def _opts2layout(opts, is3d=False):
     if layout_opts is not None:
         if "plotly" in layout_opts:
             layout.update(layout_opts["plotly"])
-    return _scrub_dict(layout)
+    return _scrub_dict(_normalize_title_strings(layout))
 
 
 def _normalize_labels(Y):
@@ -644,6 +638,30 @@ def _compute_confusion_matrix(y_true, y_pred, labels):
             UserWarning,
         )
     return cm
+
+
+def _normalize_title_strings(layout):
+    """Recursively wrap any plain-string 'title' value as {'text': ...}.
+
+    plotly.js v3.0+ no longer accepts a bare string for any 'title'
+    attribute (chart title, xaxis/yaxis title, scene axis title, legend
+    title, colorbar title, etc.). Visdom's own layout-building functions
+    already emit the object form, but plotlyplot() forwards a user-supplied
+    raw figure layout untouched, so a plain string can appear at any depth
+    (e.g. layout['scene']['xaxis']['title']). This walks the whole layout
+    and fixes every occurrence in place, returning a new structure.
+    """
+    if isinstance(layout, dict):
+        fixed = {}
+        for key, value in layout.items():
+            if key == "title" and isinstance(value, str):
+                fixed[key] = {"text": value}
+            else:
+                fixed[key] = _normalize_title_strings(value)
+        return fixed
+    if isinstance(layout, list):
+        return [_normalize_title_strings(v) for v in layout]
+    return layout
 
 
 def _decode_binary_arrays(obj):
@@ -1182,10 +1200,8 @@ class Visdom(object):
     def _experiment_request(self, msg, endpoint):
         """POST to an experiment `endpoint` and decode the JSON reply.
 
-        Shared plumbing for :meth:`experiment`, :meth:`log_metrics` and
-        :meth:`finish_experiment`. Returns the stored experiment as a dict when
-        the server replies with JSON, otherwise the raw response (e.g. an error
-        string).
+        Returns the decoded reply when the server replies with JSON, otherwise
+        the raw response (e.g. an error string).
         """
         response = self._send(msg, endpoint=endpoint, quiet=True)
         if not isstr(response):
@@ -1194,6 +1210,22 @@ class Visdom(object):
             return json.loads(response)
         except ValueError:
             return response
+
+    def _experiment_query(self, msg, endpoint):
+        """Ask an experiment `endpoint` a question and decode the JSON reply.
+
+        Unlike the endpoints reached through :meth:`_experiment_send`, which
+        record something, these ones ask a question that only a server can
+        answer. An offline client never reaches one, and would otherwise fall
+        through to the generic `_send` short circuit and hand back `True` — a
+        value a caller expecting a reply dict cannot use and cannot tell apart
+        from a real answer.
+
+        Returns None when offline, as the other read methods do.
+        """
+        if self.offline:
+            return None
+        return self._experiment_request(msg, endpoint)
 
     def _experiment_send(self, msg, env):
         """POST an experiment action for `env` and decode the JSON reply.
@@ -1248,6 +1280,7 @@ class Visdom(object):
 
         An experiment that is already terminal cannot be finished again; the
         server rejects the attempt rather than restamping the existing record.
+
         Returns the stored experiment as a dict.
         """
         return self._experiment_send({"action": "finish", "status": status}, env)
@@ -1272,13 +1305,14 @@ class Visdom(object):
 
         Returns the server's reply as a dict of `experiments` (a list of
         experiment dicts, one page worth), the unpaged `total` matching the
-        query, and the `limit`/`offset`/`query` used.
+        query, and the `limit`/`offset`/`query` used. Returns None on an offline
+        client, which has no server to search.
         """
         if query is not None and not isstr(query):
             raise TypeError("query must be a string")
         if sort_by is not None and not isstr(sort_by):
             raise TypeError("sort_by must be a string")
-        return self._experiment_request(
+        return self._experiment_query(
             {
                 "query": query,
                 "limit": limit,
@@ -1287,6 +1321,120 @@ class Visdom(object):
                 "descending": descending,
             },
             "experiments/search",
+        )
+
+    def compare_experiments(self, env_ids):
+        """Compare the named experiments field by field, to see what differs.
+
+        `env_ids` names the runs to compare, in the order given, and each must
+        exist:
+
+            vis.compare_experiments(["run-a", "run-b"])
+
+        Finding the runs is :meth:`search_experiments`' job — it answers "which
+        runs match?", this answers "how do these runs differ?". To compare a
+        query's matches, search first and pass the ids on:
+
+            found = vis.search_experiments("lr < 0.01")
+            vis.compare_experiments([e["env_id"] for e in found["experiments"]])
+
+        Returns the server's reply as a dict: the compared runs (`env_ids` and
+        the full `experiments`), plus a `params`, `metrics` and `tags` section.
+        Each section holds the union of `fields`, the `shared` ones every run
+        agrees on, the `differing` rest, the per-run `values`, and `groups`.
+
+        `shared`/`differing` answer "what changed?"; `groups` answers "which runs
+        agree?", clustering the runs by value per field. Comparing three runs on
+        two learning rates gives a `params` section whose `differing` is `['lr']`,
+        whose `values['lr']` is `{'run-a': 0.1, 'run-b': 0.001, 'run-c': 0.1}`,
+        and whose `groups['lr']` is
+        `[{'value': 0.1, 'env_ids': ['run-a', 'run-c']},
+          {'value': 0.001, 'env_ids': ['run-b']}]`.
+
+        Returns None on an offline client, which has no server to compare on.
+        """
+        if isstr(env_ids) or not isinstance(env_ids, (list, tuple)):
+            raise TypeError("env_ids must be a list of environment ids")
+        if not all(isstr(env_id) for env_id in env_ids):
+            raise TypeError("env_ids must contain strings")
+        return self._experiment_query(
+            {"env_ids": list(env_ids)},
+            "experiments/compare",
+        )
+
+    def suggest_experiment(self, params=None, env=None):
+        """Ask the server to suggest parameters for the next run.
+
+        Reserved: the suggestion strategy (Optuna-backed) is not implemented
+        yet, so this returns the server's stub reply — a dict of
+        `{"status": "not_implemented", "suggestion": None, ...}` — rather than a
+        real suggestion. The method, its `params` search space (a dict of
+        `{name: spec}`) and the endpoint are in place so callers and the docs
+        are ready for when the strategy is wired in.
+
+        Returns the server's reply as a dict, or None on an offline client,
+        which has no server to ask.
+        """
+        if params is not None and not isinstance(params, dict):
+            raise TypeError("params must be a dict of {name: spec}")
+        msg = {"params": params}
+        if env is not None:
+            msg["eid"] = env
+        return self._experiment_query(msg, "experiments/suggest")
+
+    def hparams(
+        self, query=None, env_ids=None, mode=None, win=None, env=None, opts=None
+    ):
+        """Open a hyper-parameter pane over the experiments logged on the server.
+
+        Posts the selection to the ``experiments/hparams`` endpoint, which picks
+        the runs, flattens them into a table of hyper-parameters against their
+        latest metric values (and tags), and registers a dedicated ``hparams``
+        window with that content. The window persists/reloads like any pane.
+
+        `mode` chooses how the runs to show are selected; when it is left as
+        `None` the server infers it from which of `query`/`env_ids` were given:
+
+        * ``"query"`` — the runs matching `query` (the readable syntax of
+          :meth:`search_experiments`). The query must be non-empty and `env_ids`
+          must not be given.
+        * ``"env_ids"`` — the runs named in `env_ids`, in that order. `env_ids`
+          must be non-empty and `query` must not be given; only those
+          environments are read rather than every experiment.
+        * ``"both"`` — the intersection: runs that match `query` *and* are named
+          in `env_ids`, ordered by `env_ids`. Both must be given and non-empty.
+
+        There is no "show everything" call: with neither `query` nor `env_ids`
+        the server has nothing to select and rejects the request. A blank or
+        whitespace-only `query` counts as no query. Every id in `env_ids` must
+        name an environment that has an experiment: one that does not — a typo,
+        a deleted run — is answered with a ``404`` naming it rather than left
+        out of the pane unremarked.
+
+        ::
+
+            vis.hparams("lr < 0.01 AND acc > 0.9")          # query
+            vis.hparams(env_ids=["run-a", "run-b"])         # env_ids
+            vis.hparams("acc > 0.9", ["run-a", "run-b"])    # both
+            vis.hparams("acc > 0.9", ["run-a"], mode="query")   # forced, errors
+
+        `win`/`env`/`opts` behave as they do for the other plotting methods.
+        Returns the created window id.
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        return self._send(
+            {
+                "query": query,
+                "env_ids": env_ids,
+                "mode": mode,
+                "win": win,
+                "eid": env,
+                "opts": opts,
+            },
+            endpoint="experiments/hparams",
         )
 
     def get_window_data(self, win=None, env=None):
@@ -1652,6 +1800,7 @@ class Visdom(object):
             if '"bdata"' in figure_json:
                 figure_dict = _decode_binary_arrays(figure_dict)
 
+            figure_dict["layout"] = _normalize_title_strings(figure_dict["layout"])
             # If opts title is not added, the title is not added to the top right of the window.
             # We add the paramater to opts manually if it exists.
             opts = dict()
@@ -2312,6 +2461,10 @@ class Visdom(object):
             ), "dimension argument should be LxHxWxC or LxCxHxW"
             if dim == "LxCxHxW":
                 tensor = tensor.transpose([0, 2, 3, 1])
+            if tensor.shape[-1] not in (1, 3):
+                raise ValueError(
+                    "video tensor's channel dim should be 1 (grayscale) or 3 (bgr)"
+                )
             bytestr, mimetype = self._encode(tensor, opts["fps"])
 
         flags = " ".join([k for k in ("autoplay", "loop") if opts[k]])
@@ -2640,7 +2793,7 @@ class Visdom(object):
                 if trace_name in trace_opts:
                     _data.update(trace_opts[trace_name])
 
-                data.append(_scrub_dict(_data))
+                data.append(_scrub_dict(_normalize_title_strings(_data)))
 
         if opts:
             for marker_prop in ["markercolor"]:
@@ -3284,10 +3437,10 @@ class Visdom(object):
         layout = _opts2layout(opts)
         layout["annotations"] = annotations
         layout["xaxis"] = layout.get("xaxis", {})
-        layout["xaxis"]["title"] = opts["xlabel"]
+        layout["xaxis"]["title"] = {"text": opts["xlabel"]}
         layout["xaxis"]["side"] = "bottom"
         layout["yaxis"] = layout.get("yaxis", {})
-        layout["yaxis"]["title"] = opts["ylabel"]
+        layout["yaxis"]["title"] = {"text": opts["ylabel"]}
         layout["yaxis"]["autorange"] = "reversed"
 
         data_to_send = {
@@ -4030,16 +4183,18 @@ class Visdom(object):
         data = [trace1, trace2]
 
         layout = {
-            "title": opts.get("title", "Example Double Y axis"),
+            "title": {"text": opts.get("title", "Example Double Y axis")},
             "yaxis": {
-                "title": trace1["name"],
-                "titlefont": {"color": opts.get("color_title_y1", "black")},
+                "title": {
+                    "text": trace1["name"],
+                    "font": {"color": opts.get("color_title_y1", "black")},
+                },
                 "tickfont": {"color": opts.get("color_tick_y1", "black")},
             },
             "yaxis2": {
-                "title": trace2["name"],
-                "titlefont": {
-                    "color": opts.get("color_title_y2", "rgb(148, 103, 189)")
+                "title": {
+                    "text": trace2["name"],
+                    "font": {"color": opts.get("color_title_y2", "rgb(148, 103, 189)")},
                 },
                 "tickfont": {"color": opts.get("color_tick_y2", "rgb(148, 103, 189)")},
                 "overlaying": "y",
@@ -4426,15 +4581,17 @@ class Visdom(object):
             }
         )
 
-    def html_table(self, headers, data, win=None, env=None, opts=None):
+    def html_table(self, data, headers=None, win=None, env=None, opts=None):
         """
         This function renders structured data as a styled HTML table.
 
-        - `headers`: a `list` of column header names (`string` or any
-           type convertible to `string`).
-        - `data`: a 2D `list` of row data, where each row is list or
-          `tuple` with same number of elements as `headers`. In case
-           of empty list, a table with only header will be rendered.
+        - `data`: a 2D `list`/`tuple` of row data, a 2D numpy array, or
+           a list of `dict`s (in which case `headers` is derived from
+           the first dict's keys unless explicitly given). In case of
+           an empty list, a table with only headers will be rendered.
+        - `headers`: a `list`/`tuple`/1D numpy array of column header
+           names (`string` or any type convertible to `string`).
+           Required unless `data` is a list of dicts.
 
         The following `opts` are supported:
 
@@ -4444,14 +4601,7 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
-        assert isinstance(headers, list), "headers should be a list"
-        assert isinstance(data, list), "data should be a list of rows"
-        assert all(
-            isinstance(row, (list, tuple)) for row in data
-        ), "each row in data should be a list or tuple"
-        assert all(
-            len(row) == len(headers) for row in data
-        ), "each data row must have the same number of columns as headers"
+        headers, data = _normalize_table_data(data, headers)
 
         style = """
             <style>
@@ -4522,58 +4672,7 @@ class Visdom(object):
         _assert_opts(opts)
         opts.setdefault("editable", True)
 
-        if isinstance(data, np.ndarray):
-            assert (
-                data.ndim == 2
-            ), "`data` as a numpy array must be 2-dimensional (rows x columns)"
-            data = data.tolist()
-        elif data is not None and not isinstance(data, (list, tuple)):
-            raise AssertionError(
-                "`data` must be a list, tuple, or numpy array (got %s)"
-                % type(data).__name__
-            )
-
-        if isinstance(headers, np.ndarray):
-            assert headers.ndim == 1, "`headers` as a numpy array must be 1-dimensional"
-            headers = headers.tolist()
-        elif headers is not None and not isinstance(headers, (list, tuple)):
-            raise AssertionError(
-                "`headers` must be a list, tuple, or numpy array (got %s)"
-                % type(headers).__name__
-            )
-
-        has_data = data is not None and len(data) > 0
-        has_headers = headers is not None and len(headers) > 0
-
-        if not has_data and not has_headers:
-            raise AssertionError("either `data` or `headers` must be provided")
-
-        if has_headers:
-            assert isinstance(headers, (list, tuple)), (
-                "headers should be a list (got %s)" % type(headers).__name__
-            )
-
-        if has_data and isinstance(data[0], dict):
-            assert all(
-                isinstance(row, dict) for row in data
-            ), "all rows in `data` must be dicts if the first row is a dict"
-            headers = list(headers) if has_headers else list(data[0].keys())
-            rows = [[row.get(h, "") for h in headers] for row in data]
-        else:
-            assert has_headers, "headers required when data rows are lists/tuples"
-            if has_data:
-                assert all(
-                    isinstance(row, (list, tuple)) for row in data
-                ), "each row in `data` should be a list or tuple"
-            headers = list(headers)
-            rows = [list(r) for r in data] if has_data else []
-
-        assert all(
-            len(r) == len(headers) for r in rows
-        ), "each row must have the same number of columns as headers"
-
-        rows = [[_table_cell_to_native(cell) for cell in row] for row in rows]
-        headers = [_table_cell_to_native(h) for h in headers]
+        headers, rows = _normalize_table_data(data, headers)
 
         content = {"headers": headers, "rows": rows}
 
