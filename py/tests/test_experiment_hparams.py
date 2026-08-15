@@ -1,4 +1,12 @@
-"""Tests for the hyper-parameter endpoint (Layer 3).
+#!/usr/bin/env python3
+
+# Copyright 2017-present, The Visdom Authors
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
+"""Tests for the hyper-parameter endpoint.
 
 Covers the two pieces the endpoint is built from: the ``flatten_experiments``
 transform, and the ``/experiments/hparams`` endpoint end-to-end through a real
