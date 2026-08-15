@@ -1266,7 +1266,7 @@ Returns a dict with the compared runs (`env_ids`, full `experiments`) and a `par
 
 #### vis.suggest_experiment
 
-> **Reserved**: this endpoint is a stub. Choosing the next set of hyper-parameters to try (an Optuna-backed search strategy) is planned for a later layer, so the server currently replies `501 Not Implemented` and this function returns a stub dict `{"status": "not_implemented", "suggestion": None, ...}` rather than a real suggestion. The method, its arguments and the endpoint are in place so callers and docs are ready for when the strategy is wired in.
+> **Reserved**: this endpoint is a stub. Choosing the next set of hyper-parameters to try (an Optuna-backed search strategy) is planned for a later release, so the server currently replies `501 Not Implemented` and this function returns a stub dict `{"status": "not_implemented", "suggestion": None, ...}` rather than a real suggestion. The method, its arguments and the endpoint are in place so callers and docs are ready for when the strategy is wired in.
 
 Arguments:
 - `params`: The search space to suggest over, as a dict of `{name: spec}`. Currently ignored by the stub.

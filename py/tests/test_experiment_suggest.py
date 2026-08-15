@@ -6,10 +6,10 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""Tests for the experiment suggest stub (Layer 2, PR 6).
+"""Tests for the experiment suggest stub.
 
 ``/experiments/suggest`` is a reserved endpoint: the suggestion strategy
-(Optuna-backed) lands in a later layer, so for now the server replies
+(Optuna-backed) lands in a later release, so for now the server replies
 ``501 Not Implemented`` with a JSON stub. These tests pin that contract from
 both ends — the endpoint through a real
 :class:`~visdom.server.app.Application` with Tornado's ``AsyncHTTPTestCase``,
