@@ -219,34 +219,32 @@ function buildDataRows(rows, columnCount, indent = '') {
           .map((cell) => escapeLatex(cell))
           .join(' & ')} \\\\`
     )
-    .join('\n');
+    .join(`\n${indent}\\hline\n`);
 }
 
 function ieeeTable({ colSpec, headerRow, dataRows, caption, label }) {
-  const dataSection = dataRows ? `${dataRows}\n\\hline\n` : '';
+  const bodyLines = ['\\hline', headerRow, '\\hline'];
+  if (dataRows) bodyLines.push(dataRows, '\\hline');
   return `\\begin{table}[htbp]
 \\centering
 \\caption{${caption}}
 \\label{${label}}
 \\begin{tabular}{${colSpec}}
-\\hline
-${headerRow}
-\\hline
-${dataSection}\\end{tabular}
+${bodyLines.join('\n')}
+\\end{tabular}
 \\end{table}`;
 }
 
 function springerTable({ colSpec, headerRow, dataRows, caption, label }) {
-  const dataSection = dataRows ? `${dataRows}\n\\hline\n` : '';
+  const bodyLines = ['\\hline', headerRow, '\\hline'];
+  if (dataRows) bodyLines.push(dataRows, '\\hline');
   return `\\begin{table}
 \\centering
 \\caption{${caption}}
 \\label{${label}}
 \\begin{tabular}{${colSpec}}
-\\hline
-${headerRow}
-\\hline
-${dataSection}\\end{tabular}
+${bodyLines.join('\n')}
+\\end{tabular}
 \\end{table}`;
 }
 
