@@ -147,16 +147,27 @@ class TestHparamsEndpoint(tornado.testing.AsyncHTTPTestCase):
         resp = self.hparams({"env_ids": ["run-c", "run-a"]})
         self.assertEqual(self._env_ids(resp), ["run-c", "run-a"])
 
-    def test_env_ids_skips_missing(self):
-        """An env_id without an experiment is skipped, not an error."""
+    def test_unknown_env_id_is_404(self):
+        """An env_id without an experiment is an error, not a quiet omission."""
         resp = self.hparams({"env_ids": ["run-a", "ghost"]})
-        self.assertEqual(resp.code, 200)
-        self.assertEqual(self._env_ids(resp), ["run-a"])
+        self.assertEqual(resp.code, 404)
+        self.assertIn("ghost", resp.reason)
+
+    def test_unknown_env_id_reason_is_ascii(self):
+        """A non-latin-1 id is escaped into the reason rather than crashing it."""
+        resp = self.hparams({"env_ids": ["ruñ-✓"]})
+        self.assertEqual(resp.code, 404)
+        resp.reason.encode("ascii")
 
     def test_both_intersects_ordered(self):
         """query + env_ids returns the intersection, ordered by env_ids."""
         resp = self.hparams({"query": "acc > 0.9", "env_ids": ["run-b", "run-a"]})
         self.assertEqual(self._env_ids(resp), ["run-b"])
+
+    def test_both_rejects_unknown_env_id(self):
+        """Under both, an id that names no experiment is still a 404."""
+        resp = self.hparams({"query": "acc > 0.9", "env_ids": ["run-b", "ghost"]})
+        self.assertEqual(resp.code, 404)
 
     def test_win_id_is_honoured(self):
         """A supplied win id is the window the pane is registered under."""

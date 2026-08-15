@@ -1414,7 +1414,10 @@ class Visdom(object):
 
         There is no "show everything" call: with neither `query` nor `env_ids`
         the server has nothing to select and rejects the request. A blank or
-        whitespace-only `query` counts as no query.
+        whitespace-only `query` counts as no query. Every id in `env_ids` must
+        name an environment that has an experiment: one that does not — a typo,
+        a deleted run — is answered with a ``404`` naming it rather than left
+        out of the pane unremarked.
 
         ::
 
