@@ -19,6 +19,7 @@ import React, {
 import ApiContext from '../api/ApiContext';
 import PropertyItem from './PropertyItem';
 import ExportPane from './utils/ExportPane';
+import LatexExportPane from './utils/LatexExportPane';
 var classNames = require('classnames');
 
 const COMMENT_SAVE_DEBOUNCE_MS = 500;
@@ -187,6 +188,10 @@ var Pane = forwardRef((props, ref) => {
           {' '}
           &#128196;{' '}
         </button>
+        <LatexExportPane
+          onExport={props.handleLatexExport}
+          hidden={!props.handleLatexExport}
+        />
         <button title="reset" onClick={handleReset} hidden={!props.handleReset}>
           {' '}
           &#10226;{' '}

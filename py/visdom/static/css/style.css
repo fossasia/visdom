@@ -537,6 +537,10 @@ button[title="export"].active {
   background-color: #dedede;
 }
 
+button[title="export latex"].active {
+  background-color: #dedede;
+}
+
 /* Override RGL v2 default pointer-events:none on grid-item images.
    Visdom images are interactive (drag, zoom, click callbacks). */
 .react-grid-item img {
