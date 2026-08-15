@@ -1252,6 +1252,8 @@ Arguments:
 
 Returns a dict of `experiments` (one page's worth), the unpaged `total` matching the query, and the `limit`/`offset`/`query` used.
 
+`search_experiments`, `compare_experiments` and `suggest_experiment` ask the server a question rather than record something, so an offline client (`Visdom(offline=True)`) has nothing to answer with and each returns `None`.
+
 #### vis.compare_experiments
 
 This function compares the named experiments field by field to see what differs. Finding the runs is `search_experiments`' job — it answers "which runs match?"; this answers "how do these runs differ?". To compare a query's matches, search first and pass the resulting ids on.
@@ -1285,7 +1287,7 @@ visdom is Apache 2.0 licensed, as found in the LICENSE file.
 Support for Lua Torch was deprecated following `v0.1.8.4`. If you'd like to use torch support, you'll need to download that release. You can follow the usage instructions there, but it is no longer officially supported.
 
 ## Contributing
-See guidelines for contributing and running E2E/visual tests (Cypress and Playwright) [here.](./CONTRIBUTING.md)
+See guidelines for contributing and running E2E/visual tests with Playwright [here.](./CONTRIBUTING.md)
 
 ## Acknowledgments
 Visdom was inspired by tools like [display](https://github.com/szym/display) and relies on [Plotly](https://plot.ly/) as a plotting front-end.

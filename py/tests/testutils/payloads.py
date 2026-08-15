@@ -74,3 +74,28 @@ def content_args(ptype, content, opts=None, win=None, eid=None):
         win=win,
         eid=eid,
     )
+
+
+def embeddings_pane(win_id="win_0"):
+    """A stored embeddings pane, as ``state[eid]["jsons"][win]`` holds it.
+
+    ``old_content`` is the region-selection history the pane pops back through.
+    """
+    return {
+        "id": win_id,
+        "type": "embeddings",
+        "content": {"data": [], "selected": None, "has_previous": False},
+        "old_content": [],
+        "contentID": "content_0",
+    }
+
+
+def table_pane(win_id="win_0"):
+    """A stored, editable table pane."""
+    return {
+        "id": win_id,
+        "type": "table",
+        "editable": True,
+        "content": {"headers": ["a", "b"], "rows": [["1", "2"]]},
+        "contentID": "content_0",
+    }
