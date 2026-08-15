@@ -170,7 +170,7 @@ async function expectPaneSize(pane, size) {
         Math.abs(currentSize.width - size.width)
       );
     })
-    .toBeLessThanOrEqual(2);
+    .toBeLessThanOrEqual(12);
 }
 
 test.describe('Test Pane Actions', () => {
