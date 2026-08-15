@@ -1274,15 +1274,7 @@ Arguments:
 
 #### vis.hparams
 
-This function opens a hyper-parameter pane over the experiments logged on the server. The selection is resolved server-side: the matching runs are flattened into a table of hyper-parameters against their latest metric values (and tags), and registered as an `hparams` window, so the pane appears in the browser like any other visualization and reloads with its environment.
-
-`mode` chooses how the runs to show are selected; when it is left as `None` the server infers it from which of `query`/`env_ids` were given:
-
-- `query`: the runs matching `query`, using the same readable syntax as [`vis.search_experiments`](#vissearch_experiments). The query must be non-empty and `env_ids` must not be given.
-- `env_ids`: the runs named in `env_ids`, in that order; only those environments are read rather than every experiment. `env_ids` must be non-empty and `query` must not be given.
-- `both`: the intersection — runs that match `query` *and* are named in `env_ids`, ordered by `env_ids`. Both must be given and non-empty.
-
-There is no "show everything" call: with neither `query` nor `env_ids` the server has nothing to select and rejects the request. A blank or whitespace-only `query` counts as no query.
+This function opens a hyper-parameter pane over the experiments logged on the server. The selection is resolved server-side: the matching runs are flattened into one record each — the run's hyper-parameters, the latest value of each of its metrics, and its tags — and registered as an `hparams` window, so the pane appears in the browser like any other visualization and reloads with its environment. The pane heads the window with how many runs, params, metrics and tags the selection holds and lists the runs by name with their status; its download button saves the records as JSON.
 
 ```python
 vis.hparams("lr < 0.01 AND acc > 0.9")          # by query
@@ -1291,7 +1283,7 @@ vis.hparams("acc > 0.9", ["run-a", "run-b"])    # both
 ```
 
 Arguments:
-- `query`: Filter string selecting the runs to show. Defaults to `None`.
+- `query`: Filter string selecting the runs to show, in the same readable syntax as [`vis.search_experiments`](#vissearch_experiments). Defaults to `None`.
 - `env_ids`: Explicit list of environment ids to show, kept in the order given. Defaults to `None`.
 - `mode`: One of `query`, `env_ids` or `both`. Defaults to `None`, which infers the mode from the arguments given; passing it explicitly rejects the argument that mode does not accept.
 - `win`: Window id to draw into, as for the plotting functions.
@@ -1299,6 +1291,14 @@ Arguments:
 - `opts`: Window options (`title`, `width`, `height`, ...), as for the plotting functions.
 
 Returns the id of the created window.
+
+The modes select as follows:
+
+- `query`: the runs matching `query`. The query must be non-empty and `env_ids` must not be given.
+- `env_ids`: the runs named in `env_ids`, in that order; only those environments are read rather than every experiment. `env_ids` must be non-empty and `query` must not be given.
+- `both`: the intersection — runs that match `query` *and* are named in `env_ids`, ordered by `env_ids`. Both must be given and non-empty.
+
+There is no "show everything" call: with neither `query` nor `env_ids` the server has nothing to select and rejects the request. A blank or whitespace-only `query` counts as no query. Every id in `env_ids` must name an environment that has an experiment: a mistyped or deleted one is a `404` naming it rather than a run quietly missing from the pane. Under `both`, an id that does have an experiment but does not match the query is filtered out as the query asked.
 
 ## Customizing Visdom
 The user config directory for visdom is
