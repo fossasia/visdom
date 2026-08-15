@@ -21,6 +21,10 @@ _EnvIds = Union[List[Text], Tuple[Text, ...]]
 # The decoded JSON reply of the experiment endpoints.
 _ExperimentReply = Mapping[Text, Any]
 
+# The reply of the experiment endpoints that only answer questions. An offline
+# client has no server to ask, so those hand back None rather than a reply.
+_ExperimentQueryReply = Optional[_ExperimentReply]
+
 # No widely-deployed stubs exist at the moment for torch or numpy. When they are available, the correct type of the tensor-like inputs
 # to the plotting commands should be
 # Tensor = Union[torch.Tensor, numpy.ndarray, List]
@@ -78,8 +82,20 @@ class Visdom:
         offset: int = ...,
         sort_by: _OptStr = ...,
         descending: bool = ...,
-    ) -> _ExperimentReply: ...
-    def compare_experiments(self, env_ids: _EnvIds) -> _ExperimentReply: ...
+    ) -> _ExperimentQueryReply: ...
+    def compare_experiments(self, env_ids: _EnvIds) -> _ExperimentQueryReply: ...
+    def suggest_experiment(
+        self, params: _OptOps = ..., env: _OptStr = ...
+    ) -> _ExperimentQueryReply: ...
+    def hparams(
+        self,
+        query: _OptStr = ...,
+        env_ids: Optional[_EnvIds] = ...,
+        mode: _OptStr = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
     def get_window_data(
         self, win: _OptStr = ..., env: _OptStr = ...
     ) -> _SendReturn: ...
@@ -355,8 +371,8 @@ class Visdom:
     ) -> _SendReturn: ...
     def html_table(
         self,
-        headers: List[Any],
-        data: List[List[Any]],
+        data: List[Any],
+        headers: Optional[List[Any]] = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
