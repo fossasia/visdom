@@ -49,8 +49,8 @@ export function slugify(input, fallback = 'figure') {
   return slug || fallback;
 }
 
-export function buildLabel(contentID, fallbackId) {
-  return `fig:${slugify(contentID, slugify(fallbackId))}`;
+export function buildLabel(contentID, fallbackId, prefix = 'fig') {
+  return `${prefix}:${slugify(contentID, slugify(fallbackId))}`;
 }
 
 export function buildFilename(contentID, fallbackId, ext) {
@@ -195,6 +195,117 @@ export function buildLatexSnippet(style, meta = {}) {
   return SINGLE_TEMPLATES[style]({ filename, caption, label });
 }
 
+function normalizeRow(row, columnCount) {
+  if (!Array.isArray(row)) return new Array(columnCount).fill('');
+  if (row.length === columnCount) return row;
+  return Array.from({ length: columnCount }, (_, i) => row[i] ?? '');
+}
+
+function buildColSpec(columnCount) {
+  return '|' + 'c|'.repeat(columnCount);
+}
+
+function buildHeaderRow(headers) {
+  return (
+    headers.map((h) => `\\textbf{${escapeLatex(h)}}`).join(' & ') + ' \\\\'
+  );
+}
+
+function buildDataRows(rows, columnCount, indent = '') {
+  return rows
+    .map(
+      (row) =>
+        `${indent}${normalizeRow(row, columnCount)
+          .map((cell) => escapeLatex(cell))
+          .join(' & ')} \\\\`
+    )
+    .join('\n');
+}
+
+function ieeeTable({ colSpec, headerRow, dataRows, caption, label }) {
+  const dataSection = dataRows ? `${dataRows}\n\\hline\n` : '';
+  return `\\begin{table}[htbp]
+\\centering
+\\caption{${caption}}
+\\label{${label}}
+\\begin{tabular}{${colSpec}}
+\\hline
+${headerRow}
+\\hline
+${dataSection}\\end{tabular}
+\\end{table}`;
+}
+
+function springerTable({ colSpec, headerRow, dataRows, caption, label }) {
+  const dataSection = dataRows ? `${dataRows}\n\\hline\n` : '';
+  return `\\begin{table}
+\\centering
+\\caption{${caption}}
+\\label{${label}}
+\\begin{tabular}{${colSpec}}
+\\hline
+${headerRow}
+\\hline
+${dataSection}\\end{tabular}
+\\end{table}`;
+}
+
+function genericTable({ colSpec, headerRow, dataRows, caption, label }) {
+  const bodyLines = ['    \\toprule', `    ${headerRow}`];
+  if (dataRows) {
+    bodyLines.push('    \\midrule', dataRows);
+  }
+  bodyLines.push('    \\bottomrule');
+  return `% Requires \\usepackage{booktabs} in your preamble.
+\\begin{table}[htbp]
+  \\centering
+  \\caption{${caption}}
+  \\label{${label}}
+  \\begin{tabular}{${colSpec}}
+${bodyLines.join('\n')}
+  \\end{tabular}
+\\end{table}`;
+}
+
+const TABLE_TEMPLATES = {
+  ieee: ieeeTable,
+  springer: springerTable,
+  generic: genericTable,
+};
+
+export function buildLatexTableSnippet(style, meta = {}) {
+  if (!LATEX_STYLES.includes(style)) {
+    throw new Error(`Unknown LaTeX export style: "${style}"`);
+  }
+
+  const headers = Array.isArray(meta.headers) ? meta.headers : [];
+  const rows = Array.isArray(meta.rows) ? meta.rows : [];
+  const columnCount = headers.length;
+
+  if (columnCount === 0) {
+    return '% This table has no columns -- nothing to export.';
+  }
+
+  const fallbackId = meta.id || 'table';
+  const label = buildLabel(meta.contentID, fallbackId, 'tab');
+  const caption = resolveCaption(meta.caption);
+  const colSpec = buildColSpec(columnCount);
+  const headerRow = buildHeaderRow(headers);
+  const dataRows = buildDataRows(
+    rows,
+    columnCount,
+    style === 'generic' ? '    ' : ''
+  );
+
+  return TABLE_TEMPLATES[style]({
+    colSpec,
+    headerRow,
+    dataRows,
+    caption,
+    label,
+  });
+}
+
 function legacyCopyToClipboard(text) {
   return new Promise((resolve, reject) => {
     try {
@@ -237,5 +348,10 @@ export function copyTextToClipboard(text) {
 
 export async function copyLatexToClipboard(style, meta) {
   const snippet = buildLatexSnippet(style, meta);
+  return copyTextToClipboard(snippet);
+}
+
+export async function copyLatexTableToClipboard(style, meta) {
+  const snippet = buildLatexTableSnippet(style, meta);
   return copyTextToClipboard(snippet);
 }

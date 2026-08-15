@@ -11,8 +11,10 @@ import { Pencil } from 'lucide-react';
 import React, { useContext, useEffect, useRef, useState } from 'react';
 
 import ApiContext from '../api/ApiContext';
+import { showToast } from '../toasts/toastEvents';
 import Pane from './Pane';
 import PropertyItem from './PropertyItem';
+import { copyLatexTableToClipboard } from './utils/LatexExport';
 
 const DEFAULT_COL_WIDTH = 120;
 const DEFAULT_ROW_HEIGHT = 28;
@@ -21,7 +23,7 @@ const MIN_ROW_HEIGHT = 18;
 
 function TablePane(props) {
   const { sendTableEdit, sessionInfo } = useContext(ApiContext);
-  const { envID, id, content } = props;
+  const { envID, id, contentID, content } = props;
   const { headers = [], rows = [] } = content || {};
   const canEdit = props.editable !== false && !sessionInfo?.readonly;
   const [locked, setLocked] = useState(false);
@@ -128,6 +130,34 @@ function TablePane(props) {
     setTimeout(() => window.URL.revokeObjectURL(url), 1000);
   };
 
+  const handleLatexExport = (style) => {
+    if (headers.length === 0) {
+      showToast('This table has no columns to export', 'error', {
+        duration: 3000,
+      });
+      return;
+    }
+    copyLatexTableToClipboard(style, {
+      contentID,
+      id,
+      caption: props.title,
+      headers,
+      rows,
+    })
+      .then(() =>
+        showToast('LaTeX snippet copied to clipboard', 'success', {
+          duration: 2000,
+        })
+      )
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error('TablePane LaTeX export failed:', err);
+        showToast('Failed to copy LaTeX snippet', 'error', {
+          duration: 4000,
+        });
+      });
+  };
+
   // rendering
   // ---------
 
@@ -171,6 +201,7 @@ function TablePane(props) {
     <Pane
       {...props}
       handleDownload={handleDownload}
+      handleLatexExport={handleLatexExport}
       barwidgets={[editToggleButton]}
     >
       <div className="content-table" ref={tableRef}>
