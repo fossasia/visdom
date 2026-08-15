@@ -1,7 +1,3 @@
-cypress/screenshots
-cypress/screenshots_init
-cypress/downloads
-cypress/fixtures
 playwright/screenshots
 playwright/screenshots_init
 playwright/screenshots_diff
