@@ -21,6 +21,7 @@ import {
   downloadJpegWithDpi,
   downloadPngWithDpi,
 } from './utils/Embeddpimetadata';
+import { copyLatexToClipboard } from './utils/LatexExport';
 import { typesetMathJax } from './utils/mathjaxHelpers';
 import { downloadImageAsPdf } from './utils/pdfExport';
 const { sgg } = require('ml-savitzky-golay-generalized');
@@ -148,6 +149,31 @@ var PlotPane = (props) => {
     link.click();
     document.body.removeChild(link);
     setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+  };
+
+  const handleLatexExport = (style) => {
+    const rawTitle = content?.layout?.title;
+    const plotTitle = typeof rawTitle === 'string' ? rawTitle : rawTitle?.text;
+    copyLatexToClipboard(style, {
+      contentID,
+      id: props.id,
+      caption: content?.caption || plotTitle,
+    })
+      .then(() =>
+        showToast('Copied!', 'success', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        })
+      )
+      .catch((err) => {
+        console.error('PlotPane LaTeX export failed:', err);
+        showToast('Failed to Copy', 'error', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        });
+      });
   };
 
   const updateHistorySlider = (ev) => {
@@ -428,6 +454,7 @@ var PlotPane = (props) => {
       {...props}
       handleExport={handleExport}
       handleMetadataExport={handleMetadataExport}
+      handleLatexExport={handleLatexExport}
       barwidgets={[smooth_widget_button, annotations.button]}
       widgets={[
         history_widget,

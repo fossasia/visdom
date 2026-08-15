@@ -11,11 +11,13 @@ import React, { useContext, useEffect, useRef, useState } from 'react';
 
 import ApiContext from '../api/ApiContext';
 import EventSystem from '../EventSystem';
+import { showToast } from '../toasts/toastEvents';
 import Pane from './Pane';
 import {
   downloadJpegWithDpi,
   downloadPngWithDpi,
 } from './utils/Embeddpimetadata';
+import { copyLatexToClipboard } from './utils/LatexExport';
 import { typesetMathJax } from './utils/mathjaxHelpers';
 import { downloadImageAsPdf } from './utils/pdfExport';
 
@@ -25,7 +27,7 @@ const IMAGE_EXPORT_FORMATS = ['png', 'jpg', 'pdf'];
 
 function ImagePane(props) {
   const { sendPaneMessage } = useContext(ApiContext);
-  const { envID, id, title, type, selected, width, height } = props;
+  const { envID, id, contentID, title, type, selected, width, height } = props;
   var { isFocused, content } = props;
 
   // state variables
@@ -98,6 +100,29 @@ function ImagePane(props) {
         setExportError(null);
       }, 3000);
     }
+  };
+
+  const handleLatexExport = (style) => {
+    copyLatexToClipboard(style, {
+      contentID,
+      id,
+      caption: content.caption || title,
+    })
+      .then(() =>
+        showToast('Copied!', 'success', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        })
+      )
+      .catch((err) => {
+        console.error('ImagePane LaTeX export failed:', err);
+        showToast('Failed to Copy', 'error', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        });
+      });
   };
 
   const handleZoom = (ev) => {
@@ -398,6 +423,7 @@ function ImagePane(props) {
       handleReset={handleReset}
       handleZoom={handleZoom}
       handleMouseMove={handleMouseOver}
+      handleLatexExport={handleLatexExport}
       ref={paneRef}
       widgets={widgets}
     >

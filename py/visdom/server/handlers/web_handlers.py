@@ -1180,7 +1180,7 @@ class ExperimentSuggestHandler(BaseHandler):
     """POST ``/experiments/suggest`` — suggest parameters for the next run.
 
     Reserved endpoint. Choosing the next set of hyper-parameters to try is a
-    search-strategy problem (Optuna-backed) that belongs to a later layer, so
+    search-strategy problem (Optuna-backed) that belongs to a later release, so
     this is a stub: it accepts the request and replies ``501 Not Implemented``
     with a JSON body rather than a made-up suggestion. Wiring the route, the
     :meth:`Visdom.suggest_experiment` client method and the API docs now means
@@ -1202,7 +1202,7 @@ class ExperimentSuggestHandler(BaseHandler):
         "status": "not_implemented",
         "detail": (
             "experiment suggestion is not implemented yet; the endpoint is "
-            "reserved for a later layer"
+            "reserved for a later release"
         ),
         "suggestion": None,
     }
