@@ -132,8 +132,10 @@ function TablePane(props) {
 
   const handleLatexExport = (style) => {
     if (headers.length === 0) {
-      showToast('This table has no columns to export', 'error', {
-        duration: 3000,
+      showToast('This Table has no column to export', 'error', {
+        position: 'bottom-center',
+        shape: 'pill',
+        duration: 1500,
       });
       return;
     }
@@ -145,15 +147,19 @@ function TablePane(props) {
       rows,
     })
       .then(() =>
-        showToast('LaTeX snippet copied to clipboard', 'success', {
-          duration: 2000,
+        showToast('Copied!', 'success', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
         })
       )
       .catch((err) => {
         // eslint-disable-next-line no-console
         console.error('TablePane LaTeX export failed:', err);
-        showToast('Failed to copy LaTeX snippet', 'error', {
-          duration: 4000,
+        showToast('Failed to Copy', 'error', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
         });
       });
   };
