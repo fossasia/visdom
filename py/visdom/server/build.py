@@ -31,9 +31,6 @@ def download_scripts(proxies=None, install_dir=None):
     ext_files = {
         # - js
         "%sjquery@3.1.1/dist/jquery.min.js" % b: "jquery.min.js",
-        "%sreact@16.2.0/umd/react.production.min.js" % b: "react-react.min.js",
-        "%sreact-dom@16.2.0/umd/react-dom.production.min.js" % b: "react-dom.min.js",
-        "%sreact-modal@3.1.10/dist/react-modal.min.js" % b: "react-modal.min.js",
         # here is another url in case the cdn breaks down again.
         # https://raw.githubusercontent.com/plotly/plotly.js/master/dist/plotly.min.js
         ## [shouldsee/visdom/package_version]:latest.min.js not pointing to latest.
@@ -52,7 +49,6 @@ def download_scripts(proxies=None, install_dir=None):
         "%sreact-resizable@3.1.3/css/styles.css" % b: "react-resizable-styles.css",
         "%sreact-grid-layout@2.2.3/css/styles.css" % b: "react-grid-layout-styles.css",
         # - fonts
-        "%sclassnames@2.2.5" % b: "classnames",
         "%slayout-bin-packer@1.4.0/dist/layout-bin-packer.js"
         % b: "layout_bin_packer.js",
     }
