@@ -48,7 +48,7 @@ def download_scripts(proxies=None, install_dir=None):
         # - css
         "%sreact-resizable@3.1.3/css/styles.css" % b: "react-resizable-styles.css",
         "%sreact-grid-layout@2.2.3/css/styles.css" % b: "react-grid-layout-styles.css",
-        # - fonts
+        # .js extension routes this to js/, not css/
         "%slayout-bin-packer@1.4.0/dist/layout-bin-packer.js"
         % b: "layout_bin_packer.js",
     }
