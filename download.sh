@@ -1,7 +1,6 @@
 #!/bin/sh
 
 mkdir -p py/static/js
-wget https://unpkg.com/jquery@3.1.1/dist/jquery.min.js -O py/static/js/jquery.min.js
 wget https://unpkg.com/bootstrap@3.3.7/dist/js/bootstrap.min.js -O py/static/js/bootstrap.min.js
 wget https://unpkg.com/react@16.2.0/umd/react.production.min.js -O py/static/js/react-react.min.js
 wget https://unpkg.com/react-dom@16.2.0/umd/react-dom.production.min.js -O py/static/js/react-dom.min.js
