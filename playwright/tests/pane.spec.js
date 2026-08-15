@@ -73,6 +73,12 @@ const paneCases = [
     targetX: 263,
     size: { height: 290, width: 244 },
   },
+  {
+    type: 'Table',
+    demo: 'table',
+    targetX: 391,
+    size: { height: 290, width: 370 },
+  },
   { type: 'Confusion Matrix', demo: 'plot_confusion_matrix_basic' },
 ].map((paneCase) => {
   const size = paneCase.size || { height: 350, width: 370 };
@@ -194,7 +200,7 @@ test.describe('Test Pane Actions', () => {
         const pane = firstPane(page);
         await expectPaneTranslate(pane, 10, 10);
         await dragMouse(page, pane.locator('.bar').first(), 600);
-        await page.locator('[data-original-title="Repack"]').click();
+        await page.locator('[title="Repack"]').click();
         await expectPaneTranslate(pane, paneCase.targetX, 10);
       });
 

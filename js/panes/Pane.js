@@ -7,6 +7,7 @@
  *
  */
 
+import { MessageSquare, Tags } from 'lucide-react';
 import React, {
   forwardRef,
   useContext,
@@ -108,7 +109,7 @@ var Pane = forwardRef((props, ref) => {
         }}
         className={propertyListShown ? 'pull-right active' : 'pull-right'}
       >
-        <span className="glyphicon glyphicon-tags" />
+        <Tags size={12} />
       </button>,
     ];
   }
@@ -196,7 +197,7 @@ var Pane = forwardRef((props, ref) => {
           className={commentOpen ? 'pull-right active' : 'pull-right'}
           hidden={!commentEnabled}
         >
-          <span className="glyphicon glyphicon-comment" />
+          <MessageSquare size={10} />
         </button>
         {barwidgets}
         <div className="pull-right">{title}</div>

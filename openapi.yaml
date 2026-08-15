@@ -480,6 +480,235 @@ paths:
             A write was attempted on a terminal (finished/failed) experiment —
             a `log`/`metrics` call, or a second `finish`.
 
+  /experiments/search:
+    post:
+      operationId: searchExperiments
+      tags: [Experiments]
+      summary: Search experiments across all environments
+      description: >
+        Returns the experiments matching `query`, sorted and paged. The query is
+        a small readable syntax of comparisons (`<`, `<=`, `>`, `>=`, `=`, `!=`,
+        `contains`) combined with `AND`/`OR` and parentheses, for example
+        `lr < 0.01 AND (acc > 0.9 OR status = finished)`. Omitting `query`
+        matches every experiment.
+
+
+        Comparison names are the experiment's built-in fields (`name`,
+        `status`, `created_at`, ...), its params, its metrics and its tags. A
+        name may be given bare (`acc`) or namespaced when it is ambiguous
+        (`metric.acc`, `param.lr`, `tag.owner`); metrics compare on their latest
+        logged value. A name no experiment has simply matches nothing.
+
+
+        Queries are parsed into a predicate and evaluated in Python — never
+        eval'd and never turned into SQL — so a hostile query is rejected as a
+        parse error rather than executed.
+
+
+        Experiments are read back through the server's data store, so a server
+        running with no persistence path configured has nothing to search.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query:
+                  type: string
+                  nullable: true
+                  description: >
+                    Filter expression. Omitted, null or blank matches every
+                    experiment.
+                sort_by:
+                  type: string
+                  nullable: true
+                  default: created_at
+                  description: >
+                    Field to sort by — any name a query can compare on.
+                    Experiments lacking the field sort last in both directions.
+                descending:
+                  type: boolean
+                  default: true
+                  description: Sort direction; newest/highest first by default.
+                limit:
+                  type: integer
+                  nullable: true
+                  minimum: 0
+                  default: 100
+                  description: >
+                    Maximum number of experiments in the reply. `0` returns just
+                    the count; `null` returns all matches.
+                offset:
+                  type: integer
+                  minimum: 0
+                  default: 0
+                  description: Number of matches to skip before the returned page.
+      responses:
+        "200":
+          description: The matching page of experiments.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [experiments, total, limit, offset, query]
+                properties:
+                  experiments:
+                    type: array
+                    description: One page of matching experiments.
+                    items:
+                      $ref: "#/components/schemas/Experiment"
+                  total:
+                    type: integer
+                    description: >
+                      Total matches for the query, ignoring `limit`/`offset`.
+                  limit:
+                    type: integer
+                    nullable: true
+                    description: The limit applied to this reply.
+                  offset:
+                    type: integer
+                    description: The offset applied to this reply.
+                  query:
+                    type: string
+                    description: The query used, `""` if none was given.
+        "400":
+          description: >
+            Invalid request — a body that is not a JSON object, malformed
+            `query` syntax, a non-string `query`/`sort_by`, or a `limit`/`offset`
+            that is not a non-negative integer. Also returned when
+            authentication is required but not provided.
+
+  /experiments/compare:
+    post:
+      operationId: compareExperiments
+      tags: [Experiments]
+      summary: Compare experiments field by field
+      description: >
+        Lines several experiments up beside each other and reports, per section
+        (params, metrics and tags), which fields they agree on and which they do
+        not — the short list of knobs that actually changed between runs.
+
+
+        The runs are named by `env_ids` and compared in the order given; every id
+        must have an experiment, otherwise `404`.
+
+
+        Finding the runs is `/experiments/search`'s job: it answers "which runs
+        match?", this answers "how do these runs differ?". To compare a query's
+        matches, search first and pass the resulting ids on.
+
+
+        Metrics are a time series, so a comparison uses each metric's latest
+        observation — the same value a search compares on.
+
+
+        Experiments are read back through the server's data store, so a server
+        running with no persistence path configured has nothing to compare.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [env_ids]
+              properties:
+                env_ids:
+                  type: array
+                  minItems: 1
+                  description: >
+                    Environments to compare, in the order given. Duplicate ids
+                    collapse to one.
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: The comparison of the selected experiments.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [env_ids, experiments, params, metrics, tags]
+                properties:
+                  env_ids:
+                    type: array
+                    description: The runs compared, in the order compared.
+                    items:
+                      type: string
+                  experiments:
+                    type: array
+                    description: The compared experiments, in full.
+                    items:
+                      $ref: "#/components/schemas/Experiment"
+                  params:
+                    $ref: "#/components/schemas/ExperimentComparisonSection"
+                  metrics:
+                    $ref: "#/components/schemas/ExperimentComparisonSection"
+                  tags:
+                    $ref: "#/components/schemas/ExperimentComparisonSection"
+        "400":
+          description: >
+            Invalid request — the body is not a JSON object, or `env_ids` is
+            missing, empty, not a list, or holds something other than strings.
+            Also returned when authentication is required but not provided.
+        "404":
+          description: One or more of the given `env_ids` has no experiment.
+
+  /experiments/suggest:
+    post:
+      operationId: suggestExperiment
+      tags: [Experiments]
+      summary: Suggest parameters for the next run (reserved)
+      description: >
+        Reserved endpoint for hyper-parameter suggestion. Choosing the next set
+        of parameters to try is a search-strategy problem (Optuna-backed) that
+        lands in a later layer, so this is currently a stub: it accepts the
+        request and replies `501 Not Implemented` with a JSON body carrying a
+        `suggestion: null` placeholder, rather than a made-up suggestion. The
+        route, the `suggest_experiment` client method and this documentation are
+        in place so the strategy can be wired in later without changing the
+        surface.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                eid:
+                  type: string
+                  description: Target environment ID. Defaults to `main`.
+                params:
+                  type: object
+                  additionalProperties: true
+                  description: >
+                    The search space to suggest over, as `{name: spec}`. Ignored
+                    by the stub; reserved for the eventual strategy.
+      responses:
+        "501":
+          description: >
+            Not implemented — the suggestion strategy is reserved for a later
+            layer. The body is a JSON stub.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, detail, suggestion]
+                properties:
+                  status:
+                    type: string
+                    example: not_implemented
+                  detail:
+                    type: string
+                  suggestion:
+                    nullable: true
+                    description: Always `null` while the endpoint is a stub.
+        "400":
+          description: >
+            Invalid request — the body is present but is not valid JSON, or is
+            not a JSON object. Also returned when authentication is required
+            but not provided.
+
   /upload_env:
     post:
       operationId: uploadEnvironment
@@ -942,6 +1171,63 @@ components:
         the server is started with `--enable_login`.
 
   schemas:
+
+    ExperimentComparisonSection:
+      type: object
+      description: >
+        One section (params, metrics or tags) of an experiment comparison,
+        diffed across the compared runs.
+      required: [fields, shared, differing, values, groups]
+      properties:
+        fields:
+          type: array
+          description: Every field name any compared run has, sorted.
+          items:
+            type: string
+        shared:
+          type: object
+          additionalProperties: true
+          description: >
+            The fields every compared run carries with the same value, as
+            `{name: value}`.
+        differing:
+          type: array
+          description: >
+            The remaining fields — those whose value varies between runs, or
+            that some run is missing.
+          items:
+            type: string
+        values:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties: true
+          description: >
+            Per-field, per-run values as `{field: {env_id: value}}`. A run that
+            never logged the field is omitted from that field's map.
+        groups:
+          type: object
+          description: >
+            Per field, the runs clustered by the value they used — the finer
+            question "which runs agree?", where `shared`/`differing` answer only
+            "do they all?". With three runs on two learning rates, the two that
+            match share a group. A field appears in `shared` exactly when its
+            groups are a single cluster holding every compared run, so the two
+            never disagree. Groups are ordered by first appearance, and a run
+            that never logged the field is in no group.
+          additionalProperties:
+            type: array
+            items:
+              type: object
+              required: [value, env_ids]
+              properties:
+                value:
+                  description: The value these runs share.
+                env_ids:
+                  type: array
+                  description: The runs that used it, in compared order.
+                  items:
+                    type: string
 
     Experiment:
       type: object

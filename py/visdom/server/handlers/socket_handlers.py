@@ -37,6 +37,7 @@ from visdom.utils.server_utils import (
     broadcast_undo_state,
     notify,
 )
+from visdom.experiments import retarget_experiment
 from visdom.server.defaults import MAX_SOCKET_WAIT
 
 
@@ -107,6 +108,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     "pane_data": p_data,
                 }
                 send_to_sources(self, event)
+                self.mark_dirty(eid)
                 broadcast_undo_state(self, eid, self.storage)
 
         elif cmd == "undo":
@@ -128,6 +130,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                         json.dumps(broadcast_msg, cls=NanSafeEncoder),
                         eid,
                     )
+                    self.mark_dirty(eid)
                 broadcast_undo_state(self, eid, self.storage)
 
         elif cmd == "save":
@@ -137,7 +140,12 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 prev_eid = escape_eid(msg["prev_eid"]) if msg.get("prev_eid") else None
                 if prev_eid not in self.state:
                     return
-                self.state[msg["eid"]] = copy.deepcopy(self.state[prev_eid])
+                # Saving under a new eid clones the env, metadata blob and all,
+                # so retarget the copy rather than leave it recording the env
+                # it was cloned from.
+                self.state[msg["eid"]] = retarget_experiment(
+                    copy.deepcopy(self.state[prev_eid]), msg["eid"]
+                )
                 self.state[msg["eid"]]["reload"] = msg["data"]
                 self.eid = msg["eid"]
                 self.storage.save_env(self.eid, self.state[self.eid])
@@ -218,6 +226,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 )
                 return
             self.state[eid]["reload"][win] = msg.get("data")
+            self.mark_dirty(eid)
 
         elif cmd == "update_plot_layout":
             eid = msg.get("eid")
@@ -271,6 +280,28 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 layout = content.setdefault("layout", {})
 
             layout.update(patch)
+            p["version"] = p.get("version", 1) + 1
+            p["contentID"] = get_rand_id()
+
+            if p.get("type") == "plot_history":
+                layout_path = f"/content/{frame}/layout"
+            else:
+                layout_path = "/content/layout"
+
+            diff_packet = [
+                {"op": "add", "path": layout_path, "value": layout},
+                {"op": "replace", "path": "/version", "value": p["version"]},
+                {"op": "replace", "path": "/contentID", "value": p["contentID"]},
+            ]
+            broadcast_packet = {
+                "command": "window_update",
+                "win": win,
+                "eid": eid,
+                "content": diff_packet,
+                "version": p["version"],
+            }
+            broadcast(self, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
+            self.mark_dirty(eid)
 
         elif cmd == "update_comment":
             if self.readonly:
@@ -317,10 +348,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 "version": p["version"],
             }
             broadcast(self, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
-
-            tornado.ioloop.IOLoop.current().run_in_executor(
-                None, self.storage.save_env, eid, self.state[eid]
-            )
+            self.mark_dirty(eid)
 
         elif cmd == "table_edit":
             if self.readonly:
@@ -509,6 +537,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     "data": payload,
                 },
             )
+            self.mark_dirty(eid)
 
         elif cmd == "pop_embeddings_pane":
             packet = msg.get("data")
@@ -548,6 +577,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
             broadcast_msg = dict(p)
             broadcast_msg["eid"] = eid
             broadcast(self, json.dumps(broadcast_msg, cls=NanSafeEncoder), eid)
+            self.mark_dirty(eid)
 
 
 class AnySocketWrapper(AnySocketHandlerOrWrapper):

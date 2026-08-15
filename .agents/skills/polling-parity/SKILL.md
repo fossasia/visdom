@@ -2,7 +2,7 @@
 name: polling-parity
 description: Keep feature behavior identical across WebSocket and polling transport modes. Use when adding socket commands, event flows, or transport-sensitive UI updates.
 license: Apache-2.0
-compatibility: Requires access to Visdom server runtime, Cypress tests, and both socket/polling execution paths.
+compatibility: Requires access to Visdom server runtime, Playwright tests, and both socket/polling execution paths.
 ---
 
 # Skill: Polling and WebSocket Parity

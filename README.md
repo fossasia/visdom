@@ -298,6 +298,7 @@ Visdom offers the following basic visualization functions:
 - [`vis.images`](#visimages)   : list of images
 - [`vis.text`](#vistext)     : arbitrary HTML
 - [`vis.properties`](#visproperties)     : properties grid
+- [`vis.table`](#vistable)     : editable, resizable table pane
 - [`vis.audio`](#visaudio)    : audio
 - [`vis.video`](#visvideo)    : videos
 - [`vis.svg`](#vissvg)      : SVG object
@@ -358,6 +359,15 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 - [`vis.check_connection`](#vischeck_connection): check if the server is connected
 - [`vis.replay_log`](#visreplay_log): replay the actions from the provided log file
 
+### Experiments
+Track experiment metadata (hyper-parameters, metrics, tags) alongside your plots, then search and compare runs across your server:
+- [`vis.experiment`](#visexperiment)  : create or update experiment metadata for an env
+- [`vis.log_metrics`](#vislog_metrics)  : append metric observations to an env's experiment
+- [`vis.finish_experiment`](#visfinish_experiment)  : mark an experiment terminal (finished/failed)
+- [`vis.search_experiments`](#vissearch_experiments)  : search experiments across envs with a query
+- [`vis.compare_experiments`](#viscompare_experiments)  : diff experiments field by field
+- [`vis.suggest_experiment`](#vissuggest_experiment)  : suggest parameters for the next run (reserved)
+
 
 ## Loggers
 
@@ -415,6 +425,14 @@ Each unique name passed to `tracker.log()` gets its own window. The first call c
 **Plain estimators** (classifiers, regressors, clusterers) produce a text pane with the estimator name, dataset shape, training score, fit time, and all hyperparameters.
 
 **GridSearchCV / RandomizedSearchCV** produce a bar chart of `mean_test_score` per parameter combination and a text pane with `best_score_`, `best_params_`, and fit time.
+
+**Iterative estimators** additionally get a line chart of their per-iteration training history: `MLPClassifier`/`MLPRegressor` plot `loss_curve_` (plus `validation_scores_` when fit with `early_stopping=True`), and `GradientBoostingClassifier`/`GradientBoostingRegressor` plot `train_score_`.
+
+**Regressors** get `train_rmse` and `train_mae` rows in the text pane alongside the R2 `train_score` (R2 alone can be misleading), plus a predicted-vs-residual scatter plot.
+
+**Note:** `train_score`, `train_rmse`, `train_mae` and the residual scatter are all measured on the data passed to `fit()`. They describe fit quality on the training set and are not held-out estimates — score your own test set for that.
+
+**Note:** panes are keyed on the estimator instance, so refitting the same estimator updates the panes it already owns instead of opening new ones. Two different estimator objects always get their own panes, even of the same class.
 
 ```python
 import visdom
@@ -590,6 +608,52 @@ Callback are called on property value update:
  - `value`: new value
 
 No specific `opts` are currently supported.
+
+#### vis.table
+This function renders a native, structured, editable table pane. Cells
+(including the column headers) are editable in place, rows/columns can
+be added or removed via `+`/`×` controls, and columns/rows can be
+resized by dragging -- purely a client-side visual convenience, not
+persisted server-side.
+
+It takes as input `data`, either:
+ - a 2D list of rows (list of lists/tuples), with `headers` required, or
+ - a list of dicts, in which case `headers` is derived from the first
+   dict's keys unless explicitly given (and can be used to reorder or
+   select a subset of columns)
+
+`data`/`headers` may also be passed as numpy arrays (e.g. `df.values` /
+`df.columns.values`); they are converted to plain lists internally.
+
+```python
+vis.table(
+    data=[['Alpha', 92], ['Beta', 87]],
+    headers=['Name', 'Score'],
+)
+
+# or, from a list of dicts:
+vis.table(data=[
+    {'Name': 'Alpha', 'Score': 92},
+    {'Name': 'Beta', 'Score': 87},
+])
+```
+
+Supported `opts`:
+ - `editable`: whether cells/rows/columns can be edited by anyone
+   viewing the pane (boolean; default `True`). Set to `False` for a
+   read-only display table (e.g. a live leaderboard).
+
+Edits made in the browser update the shared, persisted pane state
+directly on the server (visible to every viewer, saved with the
+environment). If you've also registered an event handler via
+`register_event_handler`, your Python script additionally receives a
+`TableEdit` event for each change:
+ - `event_type`: `"TableEdit"`
+ - `target`: pane id
+ - `op`: one of `"edit_cell"`, `"edit_header"`, `"add_row"`,
+   `"delete_row"`, `"add_col"`, `"delete_col"`
+ - `data`: the raw edit payload for that op (e.g. `{"row": 0, "col": 1,
+   "value": "new value"}` for `"edit_cell"`)
 
 #### vis.audio
 This function plays audio. It takes as input the filename of the audio
@@ -1136,6 +1200,77 @@ This function takes the contents of a visdom log and replays them to the current
 Arguments:
 - `log_filename`: log file to replay the contents of.
 
+### Experiments
+
+Attach experiment metadata — hyper-parameters, metric observations and tags — to an environment, then search and compare runs across your server. Metadata is stored under the environment's `experiment` key and persisted through the server's data store, so a server started without a persistence path (`env_path=None`) has nothing to store, search or compare. Each function returns the server's reply decoded as a dict.
+
+#### vis.experiment
+
+This function creates or updates the experiment metadata for an environment. Calling it again for the same env merges in new params/tags and overwrites the name/description, so it is safe to call at the start of and again during a run.
+
+Arguments:
+- `name`: Display name for the experiment. Defaults to the env id.
+- `params`: Hyper-parameters as a dict of `{name: value}`.
+- `tags`: Free-form tags as a dict of `{name: value}`.
+- `description`: Free-form description.
+- `env`: Environment to attach the experiment to. Defaults to the client's env.
+
+#### vis.log_metrics
+
+This function appends one or more metric observations to an env's experiment, creating the experiment automatically if it does not exist yet.
+
+Arguments:
+- `metrics`: A non-empty dict of `{name: value}` observations.
+- `step`: Optional training step the observations were recorded at.
+- `env`: Environment whose experiment to log to. Defaults to the client's env.
+
+> **Note**: once an experiment is finished (see `finish_experiment`), further `experiment`/`log_metrics` writes are rejected so a completed run's recorded data cannot change after the fact.
+
+#### vis.finish_experiment
+
+This function marks an env's experiment terminal so its recorded data is frozen.
+
+Arguments:
+- `status`: Terminal status, either `finished` (default) or `failed`.
+- `env`: Environment whose experiment to finish. Defaults to the client's env.
+
+#### vis.search_experiments
+
+This function searches the experiments logged on the server, across all environments. The `query` uses a small readable syntax — comparisons (`<`, `<=`, `>`, `>=`, `=`, `!=`, `contains`) over param, metric and tag names, combined with `AND`/`OR` and parentheses. A name is matched bare (`acc`) or namespaced (`metric.acc`, `param.lr`, `tag.owner`) when ambiguous; metrics compare on their latest value. Queries are evaluated in Python, never `eval`'d, so a hostile query is a parse error rather than code execution.
+
+```python
+vis.search_experiments("lr < 0.01 AND acc > 0.9")
+vis.search_experiments("status = finished AND (dataset contains mnist)")
+```
+
+Arguments:
+- `query`: The filter string. `None` (default) returns everything.
+- `limit`: Maximum results to return (default `100`). `None` returns all matches.
+- `offset`: Number of results to skip, for paging (default `0`).
+- `sort_by`: Field to sort by (any of the same names). Defaults to newest-created first.
+- `descending`: Sort direction (default `True`).
+
+Returns a dict of `experiments` (one page's worth), the unpaged `total` matching the query, and the `limit`/`offset`/`query` used.
+
+`search_experiments`, `compare_experiments` and `suggest_experiment` ask the server a question rather than record something, so an offline client (`Visdom(offline=True)`) has nothing to answer with and each returns `None`.
+
+#### vis.compare_experiments
+
+This function compares the named experiments field by field to see what differs. Finding the runs is `search_experiments`' job — it answers "which runs match?"; this answers "how do these runs differ?". To compare a query's matches, search first and pass the resulting ids on.
+
+Arguments:
+- `env_ids`: A list (or tuple) of environment ids to compare, in the order given. Each must have an experiment.
+
+Returns a dict with the compared runs (`env_ids`, full `experiments`) and a `params`, `metrics` and `tags` section. Each section lists the union of `fields`, the `shared` ones every run agrees on, the `differing` rest, the per-run `values`, and `groups` clustering the runs that agree per field.
+
+#### vis.suggest_experiment
+
+> **Reserved**: this endpoint is a stub. Choosing the next set of hyper-parameters to try (an Optuna-backed search strategy) is planned for a later layer, so the server currently replies `501 Not Implemented` and this function returns a stub dict `{"status": "not_implemented", "suggestion": None, ...}` rather than a real suggestion. The method, its arguments and the endpoint are in place so callers and docs are ready for when the strategy is wired in.
+
+Arguments:
+- `params`: The search space to suggest over, as a dict of `{name: spec}`. Currently ignored by the stub.
+- `env`: Environment (study) to suggest against. Defaults to the client's env.
+
 ## Customizing Visdom
 The user config directory for visdom is
 - `~/.config/visdom` for Linux
@@ -1152,7 +1287,7 @@ visdom is Apache 2.0 licensed, as found in the LICENSE file.
 Support for Lua Torch was deprecated following `v0.1.8.4`. If you'd like to use torch support, you'll need to download that release. You can follow the usage instructions there, but it is no longer officially supported.
 
 ## Contributing
-See guidelines for contributing and running E2E/visual tests (Cypress and Playwright) [here.](./CONTRIBUTING.md)
+See guidelines for contributing and running E2E/visual tests with Playwright [here.](./CONTRIBUTING.md)
 
 ## Acknowledgments
 Visdom was inspired by tools like [display](https://github.com/szym/display) and relies on [Plotly](https://plot.ly/) as a plotting front-end.
