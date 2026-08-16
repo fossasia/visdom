@@ -20,6 +20,7 @@ const {
   prepareLineSmoothing,
   preparePropertyChange,
 } = require('../support/screenshots');
+const { installPlotRenderObserver } = require('../support/helpers');
 
 const screenshotTimeout = 120000;
 
@@ -30,6 +31,7 @@ test.use({
 test.describe.configure({ mode: 'serial' });
 
 test.beforeEach(async ({ page }) => {
+  await installPlotRenderObserver(page);
   await page.goto('/');
 });
 

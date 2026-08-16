@@ -107,12 +107,6 @@ async function expandAllEnvGroups(page) {
   while (count > 0 && attempts < 50) {
     const countBeforeClick = count;
     await closedGroups.first().click({ force: true });
-    // wait for the switcher count to actually change after the click,
-    // instead of guessing a fixed delay. 150ms is plenty for a local React
-    // state update (no network involved) -- kept short and bounded so the
-    // worst case (all 50 attempts stalling) stays at 50 x 150ms = 7.5s,
-    // safely under this project's 30s per-test timeout. A larger per-attempt
-    // timeout here previously risked exceeding that ceiling on its own.
     await expect
       .poll(() => closedGroups.count(), { timeout: 150 })
       .not.toBe(countBeforeClick)
@@ -182,12 +176,68 @@ async function openEnv(page, name) {
   await closeEnvDropdown(page);
 }
 
+async function installPlotRenderObserver(page) {
+  await page.addInitScript(() => {
+    const hookDiv = (div) => {
+      if (typeof div.on !== 'function') return; // Plotly hasn't initialized this div yet
+
+      const bump = () => {
+        const n = parseInt(
+          div.getAttribute('data-plotly-render-count') || '0',
+          10
+        );
+        div.setAttribute('data-plotly-render-count', String(n + 1));
+      };
+
+      if (div.__plotlyListener && typeof div.removeListener === 'function') {
+        div.removeListener('plotly_afterplot', div.__plotlyListener);
+      }
+      div.__plotlyListener = bump;
+      div.on('plotly_afterplot', div.__plotlyListener);
+    };
+
+    const scan = () => {
+      document.querySelectorAll('.js-plotly-plot').forEach(hookDiv);
+    };
+
+    const observer = new MutationObserver(scan);
+    observer.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+    });
+
+    const retryLoop = () => {
+      scan();
+      requestAnimationFrame(retryLoop);
+    };
+    retryLoop();
+  });
+}
+
 async function waitForPlotRender(page) {
-  await page
-    .locator('.content')
-    .first()
-    .waitFor({ state: 'visible', timeout: 20000 });
-  await page.waitForTimeout(800);
+  const content = page.locator('.content').first();
+  await content.waitFor({ state: 'visible', timeout: 20000 });
+
+  const plotDiv = content.locator('.js-plotly-plot').first();
+  if ((await plotDiv.count()) === 0) {
+    return;
+  }
+
+  const before = parseInt(
+    (await plotDiv.getAttribute('data-plotly-render-count')) || '0',
+    10
+  );
+
+  await expect
+    .poll(
+      async () =>
+        parseInt(
+          (await plotDiv.getAttribute('data-plotly-render-count')) || '0',
+          10
+        ),
+      { timeout: 20000 }
+    )
+    .toBeGreaterThan(before);
 }
 
 async function waitForMathJax(page) {
@@ -220,6 +270,7 @@ module.exports = {
   expandAllEnvGroups,
   closeEnvDropdown,
   openEnv,
+  installPlotRenderObserver,
   waitForPlotRender,
   waitForMathJax,
   screenshotContent,

@@ -9,7 +9,10 @@
 
 const path = require('path');
 const { test } = require('@playwright/test');
-const { screenshotContent } = require('../support/helpers');
+const {
+  screenshotContent,
+  installPlotRenderObserver,
+} = require('../support/helpers');
 const {
   allScreenshots,
   allCompareviews,
@@ -36,6 +39,7 @@ test.use({
 test.describe.configure({ mode: 'serial' });
 
 test.beforeEach(async ({ page }) => {
+  await installPlotRenderObserver(page);
   await page.goto('/');
 });
 
