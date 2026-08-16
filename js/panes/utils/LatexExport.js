@@ -201,7 +201,8 @@ function normalizeRow(row, columnCount) {
   return Array.from({ length: columnCount }, (_, i) => row[i] ?? '');
 }
 
-function buildColSpec(columnCount) {
+function buildColSpec(columnCount, bordered) {
+  if (!bordered) return 'c'.repeat(columnCount);
   return '|' + 'c|'.repeat(columnCount);
 }
 
@@ -211,7 +212,8 @@ function buildHeaderRow(headers) {
   );
 }
 
-function buildDataRows(rows, columnCount, indent = '') {
+function buildDataRows(rows, columnCount, indent = '', rowLines = false) {
+  const separator = rowLines ? `\n${indent}\\hline\n` : '\n';
   return rows
     .map(
       (row) =>
@@ -219,7 +221,7 @@ function buildDataRows(rows, columnCount, indent = '') {
           .map((cell) => escapeLatex(cell))
           .join(' & ')} \\\\`
     )
-    .join(`\n${indent}\\hline\n`);
+    .join(separator);
 }
 
 function ieeeTable({ colSpec, headerRow, dataRows, caption, label }) {
@@ -287,12 +289,14 @@ export function buildLatexTableSnippet(style, meta = {}) {
   const fallbackId = meta.id || 'table';
   const label = buildLabel(meta.contentID, fallbackId, 'tab');
   const caption = resolveCaption(meta.caption);
-  const colSpec = buildColSpec(columnCount);
+  const bordered = style !== 'generic';
+  const colSpec = buildColSpec(columnCount, bordered);
   const headerRow = buildHeaderRow(headers);
   const dataRows = buildDataRows(
     rows,
     columnCount,
-    style === 'generic' ? '    ' : ''
+    style === 'generic' ? '    ' : '',
+    bordered
   );
 
   return TABLE_TEMPLATES[style]({
