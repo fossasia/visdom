@@ -106,8 +106,15 @@ async function expandAllEnvGroups(page) {
   let attempts = 0;
   while (count > 0 && attempts < 50) {
     const countBeforeClick = count;
+    await closedGroups.first().click({ force: true });
+    // wait for the switcher count to actually change after the click,
+    // instead of guessing a fixed delay. 150ms is plenty for a local React
+    // state update (no network involved) -- kept short and bounded so the
+    // worst case (all 50 attempts stalling) stays at 50 x 150ms = 7.5s,
+    // safely under this project's 30s per-test timeout. A larger per-attempt
+    // timeout here previously risked exceeding that ceiling on its own.
     await expect
-      .poll(() => closedGroups.count(), { timeout: 1000 })
+      .poll(() => closedGroups.count(), { timeout: 150 })
       .not.toBe(countBeforeClick)
       .catch(() => {});
     count = await closedGroups.count();
