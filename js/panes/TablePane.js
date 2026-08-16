@@ -132,7 +132,7 @@ function TablePane(props) {
 
   const handleLatexExport = (style) => {
     if (headers.length === 0) {
-      showToast('This Table has no column to export', 'error', {
+      showToast('This Table has no columns to export', 'error', {
         position: 'bottom-center',
         shape: 'pill',
         duration: 1500,
