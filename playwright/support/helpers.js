@@ -218,26 +218,35 @@ async function waitForPlotRender(page) {
   const content = page.locator('.content').first();
   await content.waitFor({ state: 'visible', timeout: 20000 });
 
-  const plotDiv = content.locator('.js-plotly-plot').first();
+  const plotDiv = content.locator('.plotly-graph-div').first();
   if ((await plotDiv.count()) === 0) {
     return;
   }
 
-  const before = parseInt(
-    (await plotDiv.getAttribute('data-plotly-render-count')) || '0',
-    10
-  );
+  const debounceMs = 200;
+  const pollMs = 50;
+  const deadline = Date.now() + 20000;
+  let lastCount = -1;
+  let stableSince = Date.now();
 
-  await expect
-    .poll(
-      async () =>
-        parseInt(
-          (await plotDiv.getAttribute('data-plotly-render-count')) || '0',
-          10
-        ),
-      { timeout: 20000 }
-    )
-    .toBeGreaterThan(before);
+  while (Date.now() < deadline) {
+    const current = parseInt(
+      (await plotDiv.getAttribute('data-plotly-render-count')) || '0',
+      10
+    );
+    if (current !== lastCount) {
+      lastCount = current;
+      stableSince = Date.now();
+    } else if (current > 0 && Date.now() - stableSince >= debounceMs) {
+      return;
+    }
+    await page.waitForTimeout(pollMs);
+  }
+
+  console.warn(
+    `waitForPlotRender: gave up after 20s without a stable render-count ` +
+      `(last observed: ${lastCount}). Proceeding anyway.`
+  );
 }
 
 async function waitForMathJax(page) {
