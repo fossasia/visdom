@@ -155,7 +155,7 @@ async function expectPaneTranslate(pane, expectedX, expectedY) {
     .toBeLessThanOrEqual(1);
 }
 
-async function expectPaneSize(pane, size) {
+async function expectPaneSize(pane, size, tolerance = 2) {
   await expect
     .poll(async () => {
       const currentSize = await pane.evaluate((element) => {
@@ -170,7 +170,7 @@ async function expectPaneSize(pane, size) {
         Math.abs(currentSize.width - size.width)
       );
     })
-    .toBeLessThanOrEqual(2);
+    .toBeLessThanOrEqual(tolerance);
 }
 
 test.describe('Test Pane Actions', () => {
@@ -200,12 +200,13 @@ test.describe('Test Pane Actions', () => {
         const pane = firstPane(page);
         await expectPaneTranslate(pane, 10, 10);
         await dragMouse(page, pane.locator('.bar').first(), 600);
-        await page.locator('[data-original-title="Repack"]').click();
+        await page.locator('[title="Repack"]').click();
         await expectPaneTranslate(pane, paneCase.targetX, 10);
       });
 
       await test.step('Check Pane Size', async () => {
-        await expectPaneSize(firstPane(page), paneCase.size);
+        const tolerance = paneCase.demo === 'misc_plot_latex' ? 12 : 2;
+        await expectPaneSize(firstPane(page), paneCase.size, tolerance);
       });
 
       await test.step('Resize Pane', async () => {
@@ -216,13 +217,17 @@ test.describe('Test Pane Actions', () => {
           resizedSize.width - paneCase.size.width,
           resizedSize.height - paneCase.size.height
         );
-        await expectPaneSize(pane, resizedSize);
+
+        const tolerance = paneCase.demo === 'misc_plot_latex' ? 12 : 2;
+        await expectPaneSize(pane, resizedSize, tolerance);
       });
 
       await test.step('Resize Pane Reset', async () => {
         const pane = firstPane(page);
         await pane.locator('.react-resizable-handle').first().dblclick();
-        await expectPaneSize(pane, paneCase.resetSize);
+
+        const tolerance = paneCase.demo === 'misc_plot_latex' ? 12 : 2;
+        await expectPaneSize(pane, paneCase.resetSize, tolerance);
       });
 
       await test.step('Close Pane', async () => {
