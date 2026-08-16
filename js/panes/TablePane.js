@@ -7,6 +7,7 @@
  *
  */
 
+import { Pencil } from 'lucide-react';
 import React, { useContext, useEffect, useRef, useState } from 'react';
 
 import ApiContext from '../api/ApiContext';
@@ -160,7 +161,7 @@ function TablePane(props) {
           : 'table-edit-toggle pull-right'
       }
     >
-      <span className="glyphicon glyphicon-pencil" />
+      <Pencil size={11} />
     </button>
   ) : (
     ''

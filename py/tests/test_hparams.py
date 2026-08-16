@@ -1,11 +1,19 @@
-"""Tests for the hyper-parameter pane client method (Layer 3, PR A1).
+#!/usr/bin/env python3
+
+# Copyright 2017-present, The Visdom Authors
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
+"""Tests for the hyper-parameter pane client method.
 
 ``Visdom.hparams`` is a thin wrapper: it validates ``opts`` like the other
 plotting methods and posts the selection (``query``/``env_ids``/``mode``) to the
 ``experiments/hparams`` endpoint, which does the selecting, flattening and
-window creation. These tests pin the request it builds with the transport
-mocked (no server); the selection rules and flattening are tested against the
-endpoint in ``test_experiment_hparams``.
+window creation. These tests pin the request it builds with a mocked transport
+(no server); the selection rules and flattening are tested against the endpoint
+in ``test_experiment_hparams``.
 """
 
 import unittest

@@ -12,11 +12,13 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 
+import { showToast } from '../toasts/toastEvents';
 import Pane from './Pane';
 import {
   downloadJpegWithDpi,
   downloadPngWithDpi,
 } from './utils/Embeddpimetadata';
+import { copyLatexToClipboard } from './utils/LatexExport';
 import { downloadImageAsPdf } from './utils/pdfExport';
 
 function NetworkPane(props) {
@@ -119,6 +121,30 @@ function NetworkPane(props) {
         }
       );
     });
+  };
+
+  const handleLatexExport = (style) => {
+    copyLatexToClipboard(style, {
+      contentID: props.contentID,
+      id: props.id,
+      caption: props.title,
+      ext: 'pdf',
+    })
+      .then(() =>
+        showToast('Copied!', 'success', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        })
+      )
+      .catch((err) => {
+        console.error('NetworkPane LaTeX export failed:', err);
+        showToast('Failed to Copy', 'error', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        });
+      });
   };
 
   const SVG_STYLE_PROPS = [
@@ -342,7 +368,11 @@ function NetworkPane(props) {
   // ---------
 
   return (
-    <Pane {...props} handleExport={handleExport}>
+    <Pane
+      {...props}
+      handleExport={handleExport}
+      handleLatexExport={handleLatexExport}
+    >
       {downloadError && <div className="error-message">{downloadError}</div>}
       <div
         ref={containerRef}
