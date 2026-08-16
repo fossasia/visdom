@@ -105,10 +105,6 @@ test.describe.serial('Test Env Modal', () => {
     await page.locator('button', { hasText: 'Delete Selected' }).click();
     await expect(page.locator(envmodal)).toHaveCount(0);
 
-    // check that both forks do not exist anymore, but original env still exists.
-    // no fixed sleep needed here: the expect() calls below retry (poll) until
-    // their condition is met or the default timeout elapses, which comfortably
-    // covers the 500ms env_update polling interval mentioned by the server.
     await page.locator('.rc-tree-select').click();
     await expandAllEnvGroups(page);
     const tree = page.locator('.rc-tree-select-tree');
@@ -170,19 +166,18 @@ test.describe.serial('Test View Modal', () => {
     await page.locator('button', { hasText: 'fork' }).click();
     await page.locator(viewmodal).press('Escape');
 
-    // apply a change to the same view
-    await dragMouse(
-      page,
-      paneByTitle(page, 'Text Pane').locator('.bar'),
-      1000,
-      300
+    // capture the pane's position before dragging, so the post-drag check
+    // doesn't depend on knowing/hardcoding its exact starting coordinates
+    const textPane = paneByTitle(page, 'Text Pane');
+    const initialTransform = await textPane.evaluate(
+      (el) => getComputedStyle(el).transform
     );
+
+    // apply a change to the same view
+    await dragMouse(page, textPane.locator('.bar'), 1000, 300);
     // wait for the drag to actually reposition the pane before saving the
     // view, instead of guessing a fixed delay
-    await expect(paneByTitle(page, 'Text Pane')).not.toHaveCSS(
-      'transform',
-      'matrix(1, 0, 0, 1, 10, 10)'
-    );
+    await expect(textPane).not.toHaveCSS('transform', initialTransform);
 
     // save the view at this point
     await page.locator(viewbutton).click();
