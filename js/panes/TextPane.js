@@ -7,15 +7,18 @@
  *
  */
 
-import React, { useContext, useEffect } from 'react';
+import React, { useContext, useEffect, useRef } from 'react';
+import ScrollToBottom from 'react-scroll-to-bottom';
 
 import ApiContext from '../api/ApiContext';
 import EventSystem from '../EventSystem';
 import Pane from './Pane';
+import { typesetMathJax } from './utils/mathjaxHelpers';
 
 function TextPane(props) {
   const { sendPaneMessage } = useContext(ApiContext);
   const { envID, id, content, isFocused } = props;
+  const contentRef = useRef();
 
   // private events
   // --------------
@@ -24,9 +27,16 @@ function TextPane(props) {
 
     switch (e.type) {
       case 'keydown':
-      case 'keypress':
-        e.preventDefault();
+      case 'keypress': {
+        const tag = e.target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+          break;
+        }
+        if (!(e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+        }
         break;
+      }
       case 'keyup':
         sendPaneMessage(
           {
@@ -62,14 +72,34 @@ function TextPane(props) {
     };
   });
 
+  useEffect(() => {
+    let cancelled = false;
+    typesetMathJax(contentRef.current, () => cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [content]);
+
   // rendering
   // ---------
 
+  const LARGE_BACKLOG_CONTENT_LENGTH = 50000;
+  const initialScrollBehavior =
+    content && content.length > LARGE_BACKLOG_CONTENT_LENGTH
+      ? 'auto'
+      : 'smooth';
+
   return (
     <Pane {...props} handleDownload={handleDownload}>
-      <div className="content-text">
-        <div dangerouslySetInnerHTML={{ __html: content }} />
-      </div>
+      <ScrollToBottom
+        className="content-text"
+        scrollViewClassName="content-text-scroll-view"
+        followButtonClassName="content-text-follow-button"
+        initialScrollBehavior={initialScrollBehavior}
+        mode="bottom"
+      >
+        <div ref={contentRef} dangerouslySetInnerHTML={{ __html: content }} />
+      </ScrollToBottom>
     </Pane>
   );
 }

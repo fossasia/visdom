@@ -1,6 +1,7 @@
 import $ from 'jquery';
 import React, { useEffect, useRef, useState } from 'react';
 
+import { showToast } from '../toasts/toastEvents';
 import ApiContext from './ApiContext';
 import Poller from './Legacy';
 
@@ -36,12 +37,30 @@ const ApiProvider = ({ children }) => {
   // Send a low-level message to the server
   const sendSocketMessage = (data) => {
     if (!_socket.current) {
-      // TODO: error? warn?
+      // eslint-disable-next-line no-console
+      console.error(
+        '[Visdom API] Cannot send message: WebSocket is not connected.',
+        data
+      );
       return;
     }
 
-    let msg = JSON.stringify(data);
-    return _socket.current.send(msg);
+    let msg = null;
+    try {
+      msg = JSON.stringify(data);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[Visdom API] Failed to serialize message:', e, data);
+      return;
+    }
+
+    try {
+      _socket.current.send(msg);
+    } catch (e) {
+      // WebSocket may be CLOSING or CLOSED state
+      // eslint-disable-next-line no-console
+      console.error('[Visdom API] Failed to send message:', e, data);
+    }
   };
 
   // Establish a connection to the server
@@ -54,6 +73,7 @@ const ApiProvider = ({ children }) => {
       setConnected(true);
     };
     const _onDisconnect = () => {
+      // Silent cleanup - logging handled by event handlers
       apiHandlers.current.onDisconnect(_socket);
       setConnected(false);
     };
@@ -76,20 +96,43 @@ const ApiProvider = ({ children }) => {
     } else {
       ws_protocol = 'ws';
     }
-    var socket = new WebSocket(
-      ws_protocol + '://' + url.host + correctPathname() + 'socket'
-    );
+
+    const wsUrl = ws_protocol + '://' + url.host + correctPathname() + 'socket';
+
+    var socket = new WebSocket(wsUrl);
 
     socket.onmessage = handleMessage;
     socket.onopen = _onConnect;
-    socket.onerror = socket.onclose = _onDisconnect;
+    socket.onerror = (event) => {
+      // Log error but don't call _onDisconnect here (let onclose handle it)
+      // eslint-disable-next-line no-console
+      console.error(
+        '[Visdom API] WebSocket error - the socket will likely close next',
+        event
+      );
+    };
+    socket.onclose = (event) => {
+      // Determine if this was a clean close or an error
+      if (!event.wasClean) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[Visdom API] WebSocket closed unexpectedly.',
+          `Code: ${event.code}`,
+          `Reason: ${event.reason || '(no reason provided)'}`
+        );
+      }
+      // Only call _onDisconnect from onclose to avoid duplicate handling
+      _onDisconnect();
+    };
     _socket.current = socket;
   };
 
   // Close the server connection and reset the _socket ref
   const disconnect = () => {
-    _socket.current.close();
-    _socket.current = null;
+    if (_socket.current) {
+      _socket.current.close();
+      _socket.current = null;
+    }
   };
 
   // ------------------ //
@@ -108,13 +151,16 @@ const ApiProvider = ({ children }) => {
           id: cmd.data,
           readonly: cmd.readonly,
         }));
+        if (cmd.envList) {
+          apiHandlers.current.onEnvUpdate(cmd.envList);
+        }
         break;
       case 'pane':
       case 'window':
       case 'window_update':
         apiHandlers.current.onWindowMessage({
           cmd: cmd,
-          update: cmd.commmand == 'window_update',
+          update: cmd.command === 'window_update',
         });
         break;
       case 'reload':
@@ -127,14 +173,23 @@ const ApiProvider = ({ children }) => {
       case 'layout_update':
         apiHandlers.current.onLayoutMessage({
           data: cmd.data,
-          update: cmd.commmand == 'layout_update',
+          update: cmd.command === 'layout_update',
         });
         break;
       case 'env_update':
         apiHandlers.current.onEnvUpdate(cmd.data);
         break;
+      case 'undo_state':
+        apiHandlers.current.onUndoState(cmd);
+        break;
+      case 'notification':
+        showToast(cmd.data.message, cmd.data.type, {
+          duration: cmd.data.duration,
+        });
+        break;
 
       default:
+        // eslint-disable-next-line no-console
         console.error('unrecognized command', cmd);
     }
   };
@@ -147,7 +202,7 @@ const ApiProvider = ({ children }) => {
   // ----------------//
 
   // Request environment data from the server
-  const sendEnvQuery = (envIDs) => {
+  const sendEnvQuery = (envIDs, showAll) => {
     // This kicks off a new stream of events from the socket so there's nothing
     // to handle here. We might want to surface the error state.
     if (envIDs.length == 1) {
@@ -156,14 +211,23 @@ const ApiProvider = ({ children }) => {
         JSON.stringify({
           sid: sessionInfo.id,
         })
-      );
+      ).fail((xhr) => {
+        document.open();
+        document.write(xhr.responseText);
+        document.close();
+      });
     } else if (envIDs.length > 1) {
       $.post(
         correctPathname() + 'compare/' + envIDs.join('+'),
         JSON.stringify({
           sid: sessionInfo.id,
+          show_all: !!showAll,
         })
-      );
+      ).fail((xhr) => {
+        document.open();
+        document.write(xhr.responseText);
+        document.close();
+      });
     }
   };
 
@@ -217,6 +281,13 @@ const ApiProvider = ({ children }) => {
     });
   };
 
+  const sendUndo = (envID) => {
+    sendSocketMessage({
+      cmd: 'undo',
+      eid: envID,
+    });
+  };
+
   // Send request to delete an environment
   const sendEnvDelete = (envID, previousEnv) => {
     sendSocketMessage({
@@ -236,6 +307,12 @@ const ApiProvider = ({ children }) => {
     });
   };
 
+  const sendSaveAll = () => {
+    sendSocketMessage({
+      cmd: 'save_all',
+    });
+  };
+
   // Update the pane layout item in the backend.
   const sendPaneLayoutUpdate = (
     envID,
@@ -246,6 +323,41 @@ const ApiProvider = ({ children }) => {
       eid: envID,
       win: i,
       data: { i, h, w, x, y, moved, static: staticBool },
+    });
+  };
+
+  const sendPlotLayoutUpdate = (envID, win, layoutPatch, frame) => {
+    sendSocketMessage({
+      cmd: 'update_plot_layout',
+      eid: envID,
+      win: win,
+      data: layoutPatch,
+      frame: frame,
+    });
+  };
+
+  const sendCommentUpdate = (envID, win, comment) => {
+    if (win === null || sessionInfo.readonly) {
+      return;
+    }
+    sendSocketMessage({
+      cmd: 'update_comment',
+      eid: envID,
+      win: win,
+      data: comment,
+    });
+  };
+
+  const sendTableEdit = (envID, win, op, data) => {
+    if (win === null || sessionInfo.readonly) {
+      return;
+    }
+    sendSocketMessage({
+      cmd: 'table_edit',
+      eid: envID,
+      win: win,
+      op: op,
+      data: data,
     });
   };
 
@@ -273,6 +385,17 @@ const ApiProvider = ({ children }) => {
   // Effects //
   // ------- //
 
+  // Redirect for POST request errors
+  useEffect(() => {
+    $(document).on('ajaxError', () => {
+      window.location.href = correctPathname() + 'error/500';
+    });
+
+    return () => {
+      $(document).off('ajaxError');
+    };
+  }, []);
+
   // connect on mount, disconnect on unmount
   useEffect(() => {
     connect();
@@ -289,6 +412,7 @@ const ApiProvider = ({ children }) => {
       value={{
         apiHandlers,
         connected,
+        sendCommentUpdate,
         sendEmbeddingPop,
         sendEnvDelete,
         sendEnvQuery,
@@ -296,7 +420,11 @@ const ApiProvider = ({ children }) => {
         sendLayoutsSave,
         sendPaneClose,
         sendPaneLayoutUpdate,
+        sendPlotLayoutUpdate,
         sendPaneMessage,
+        sendSaveAll,
+        sendTableEdit,
+        sendUndo,
         sessionInfo,
         setConnected,
         toggleOnlineState,

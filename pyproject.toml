@@ -1,0 +1,35 @@
+[tool.pytest.ini_options]
+# Scope discovery to the tracked suite under py/ so the experimental scratch
+# scripts in the repo root (test_*.py, test/) are ignored.
+testpaths = ["py/tests"]
+# The visdom package lives under py/ (see setup.py package_dir). Adding it to the
+# path lets `import visdom` resolve without an editable install. py/tests is on
+# the path so tests can `import testutils`; it deliberately has no __init__.py,
+# because setup.py runs find_packages(where="py") and would otherwise ship a
+# top-level `tests` package to users.
+pythonpath = ["py", "py/tests"]
+# Test modules live under py/tests/{unit,integration}, so the directory already
+# says "test" and the files do not repeat it. Shared helpers are importable, not
+# collectable, so testutils is kept out of discovery. `visdom` is excluded too:
+# testpaths only applies when pytest is given no arguments, so `pytest .` from
+# py/ would otherwise import every module of the package as a test file and die
+# on the optional deps in visdom/loggers.
+python_files = ["*.py"]
+norecursedirs = [
+    "visdom",
+    "testutils",
+    "__pycache__",
+    ".*",
+    "build",
+    "dist",
+    "*.egg",
+]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-ra -q"
+markers = [
+    "server: test requires an externally launched visdom server (deselect with -m 'not server')",
+    "unit: pure logic, no Application and no I/O beyond tmp_path",
+    "integration: in-process Application, real HTTP or handler dispatch",
+    "slow: takes more than a couple of seconds",
+]

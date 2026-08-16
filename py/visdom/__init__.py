@@ -6,25 +6,26 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from visdom.utils.shared_utils import get_new_window_id
+from visdom.utils.shared_utils import (
+    get_new_window_id,
+    _coerce_image_slider_index,
+    _normalize_table_data,
+)
 from visdom import server
+import os
 import os.path
 import requests
+import ssl
 import traceback
 import threading
 import websocket  # type: ignore
 import json
 import hashlib
 
-try:
-    # for after python 3.8
-    from collections.abc import Sequence
-except ImportError:
-    # for python 3.7 and below
-    from collections import Sequence
 import math
 import re
 import base64
+import binascii
 import numpy as np  # type: ignore
 from PIL import Image  # type: ignore
 import base64 as b64  # type: ignore
@@ -36,6 +37,7 @@ import time
 import errno
 from io import BytesIO, StringIO
 from functools import wraps
+import html
 
 try:
     import bs4  # type: ignore
@@ -46,46 +48,71 @@ except ImportError:
 
 import sys
 
-assert sys.version_info[0] >= 3, "To use visdom with python 2, downgrade to v0.1.8.9"
+if sys.version_info < (3, 12):
+    raise RuntimeError("Visdom requires Python 3.12 or newer.")
+
+
+def _normalize_tsne(Y):
+    Y = np.asarray(Y)
+    xmin, xmax = np.min(Y[:, 0]), np.max(Y[:, 0])
+    ymin, ymax = np.min(Y[:, 1]), np.max(Y[:, 1])
+    xrange = xmax - xmin
+    yrange = ymax - ymin
+    normx = (
+        ((Y[:, 0] - xmin) / xrange) * 2 - 1 if xrange > 0 else np.zeros_like(Y[:, 0])
+    )
+    normy = (
+        ((Y[:, 1] - ymin) / yrange) * 2 - 1 if yrange > 0 else np.zeros_like(Y[:, 1])
+    )
+    return list(zip(normx, normy))
+
+
+def _get_perplexity(num_entities):
+    if num_entities >= 150:
+        base = 50
+    elif num_entities >= 21:
+        base = num_entities // 3
+    else:
+        base = 7
+    max_perplexity = max(1, (num_entities - 1) // 3)
+    return min(base, max_perplexity)
+
 
 try:
-    # TODO try to import https://github.com/CannyLab/tsne-cuda first? will be
-    # faster but requires more setup
-    import visdom.extra_deps.bhtsne.bhtsne as bhtsne
+    from openTSNE import TSNE as TSNE_OPEN
 
     def do_tsne(X):
-        num_entities = len(X)
-
-        # the number of entities provided must be at least 3x the perplexity
-        perplexity = (
-            50
-            if num_entities >= 150
-            else num_entities // 3
-            if num_entities >= 21
-            else 7
-        )
-        Y = bhtsne.run_bh_tsne(
-            X, initial_dims=X.shape[1], perplexity=perplexity, verbose=True
-        )
-        xmin, xmax = min(Y[:, 0]), max(Y[:, 0])
-        ymin, ymax = min(Y[:, 1]), max(Y[:, 1])
-        normx = ((Y[:, 0] - xmin) / (xmax - xmin)) * 2 - 1
-        normy = ((Y[:, 1] - ymin) / (ymax - ymin)) * 2 - 1
-        normY = list(zip(normx, normy))
-        return normY
+        perplexity = _get_perplexity(len(X))
+        tsne = TSNE_OPEN(n_components=2, perplexity=perplexity, verbose=True)
+        Y = tsne.fit(X)
+        return _normalize_tsne(Y)
 
 except ImportError:
+    try:
+        import visdom.extra_deps.bhtsne.bhtsne as bhtsne
 
-    def do_tsne(X):
-        raise Exception(
-            "In order to use the embeddings feature, you'll "
-            "need to install a backend to support the calculation. "
-            "Currently we support the bhtsne implementation at "
-            "https://github.com/lvdmaaten/bhtsne/, and you can install "
-            "this by cloning it into the /py/visdom/extra_deps/ directory "
-            "and running the installation steps as listed on that github "
-            "in the created /py/visdom/extra_deps/bhtsne directory."
-        )
+        def do_tsne(X):
+            perplexity = _get_perplexity(len(X))
+            Y = bhtsne.run_bh_tsne(
+                X, initial_dims=X.shape[1], perplexity=perplexity, verbose=True
+            )
+            return _normalize_tsne(Y)
+
+    except ImportError:
+
+        def do_tsne(X):
+            raise Exception(
+                "In order to use the embeddings feature, you'll "
+                "need to install a backend to support the calculation. "
+                "Currently we support openTSNE "
+                "(https://github.com/pavlin-policar/openTSNE) for "
+                "t-SNE computation, or the bhtsne implementation at "
+                "https://github.com/lvdmaaten/bhtsne/. Install openTSNE via "
+                "pip install openTSNE, or install bhtsne by cloning it into "
+                "the /py/visdom/extra_deps/ directory and running the "
+                "installation steps as listed on that github "
+                "in the created /py/visdom/extra_deps/bhtsne directory."
+            )
 
 
 here = os.path.abspath(os.path.dirname(__file__))
@@ -100,6 +127,9 @@ logging.getLogger("requests").setLevel(logging.CRITICAL)
 logging.getLogger("urllib3").setLevel(logging.CRITICAL)
 logger = logging.getLogger(__name__)
 
+SESSION_IDLE_TIMEOUT = 600
+SESSION_IDLE_CHECK_INTERVAL = 60
+
 
 def get_rand_id():
     return str(hex(int(time.time() * 10000000))[2:])
@@ -110,26 +140,17 @@ def isstr(s):
 
 
 def isnum(n):
-    return isinstance(n, numbers.Number)
+    return isinstance(n, numbers.Number) and not isinstance(n, bool)
 
 
 def isndarray(n):
     return isinstance(n, (np.ndarray))
 
 
-# Only works on (possibly nested) lists of numbers
-# TODO: Create our own JSONEncoder that automatically does this.
-#       Maybe we can port plotly's over:
-#       https://github.com/plotly/plotly.py/blob/81629273ff6d7a30257a42572ed0e4e6ad436009/_plotly_utils/utils.py#L16
-# TODO: Also, in appropriate places, we need to change many numpy calls to use
+from visdom.utils.shared_utils import NanSafeEncoder
+
+# TODO: In appropriate places, we need to change many numpy calls to use
 #       nan-aware ones, e.g., `X.max` => `np.nanmax(X)`.
-def nan2none(l):
-    for idx, val in enumerate(l):
-        if isinstance(val, Sequence):
-            l[idx] = nan2none(l[idx])
-        elif isnum(val) and math.isnan(val):
-            l[idx] = None
-    return l
 
 
 def loadfile(filename):
@@ -142,10 +163,10 @@ def loadfile(filename):
 
 
 def _title2str(opts):
-    if opts.get("title"):
+    if opts.get("title") is not None:
         if isnum(opts.get("title")):
             title = str(opts.get("title"))
-            logger.warn("Numerical title %s has been casted to a string" % title)
+            logger.warning("Numerical title %s has been cast to a string" % title)
             opts["title"] = title
             return opts
         else:
@@ -163,76 +184,86 @@ def _scrub_dict(d):
         return d
 
 
+TICK_FIELD_SUFFIXES = (
+    "type",
+    "label",
+    "tickmin",
+    "tickmax",
+    "tickvals",
+    "ticklabels",
+    "tick",
+    "tickfont",
+    "tickstep",
+)
+
+
 def _axisformat(xy, opts):
-    fields = [
-        "type",
-        "label",
-        "tickmin",
-        "tickmax",
-        "tickvals",
-        "ticklabels",
-        "tick",
-        "tickfont",
-    ]
-    if any(opts.get(xy + i) for i in fields):
-        has_ticks = (opts.get(xy + "tickmin") and opts.get(xy + "tickmax")) is not None
+    fields = TICK_FIELD_SUFFIXES
+    if any(opts.get(xy + i) is not None for i in fields):
+        has_ticks = (
+            opts.get(xy + "tickmin") is not None
+            and opts.get(xy + "tickmax") is not None
+        )
+        label = opts.get(xy + "label")
         return {
             "type": opts.get(xy + "type"),
-            "title": opts.get(xy + "label"),
-            "range": [opts.get(xy + "tickmin"), opts.get(xy + "tickmax")]
-            if has_ticks
-            else None,
+            "title": {"text": label} if label is not None else None,
+            "range": (
+                [opts.get(xy + "tickmin"), opts.get(xy + "tickmax")]
+                if has_ticks
+                else None
+            ),
             "tickvals": opts.get(xy + "tickvals"),
             "ticktext": opts.get(xy + "ticklabels"),
             "dtick": opts.get(xy + "tickstep"),
             "showticklabels": opts.get(xy + "tick"),
             "tickfont": opts.get(xy + "tickfont"),
+            "automargin": opts.get("tight_layout", False) or None,
         }
 
 
 def _axisformat3d(xyz, opts):
-    fields = [
-        "type",
-        "label",
-        "tickmin",
-        "tickmax",
-        "tickvals",
-        "ticklabels",
-        "tick",
-        "tickfont",
-    ]
-    if any(opts.get(xyz + i) for i in fields):
+    fields = TICK_FIELD_SUFFIXES
+    if any(opts.get(xyz + i) is not None for i in fields):
         has_ticks = (
-            opts.get(xyz + "tickmin") and opts.get(xyz + "tickmax")
-        ) is not None
+            opts.get(xyz + "tickmin") is not None
+            and opts.get(xyz + "tickmax") is not None
+        )
         has_step = has_ticks and opts.get(xyz + "tickstep") is not None
+        label = opts.get(xyz + "label")
         return {
             "type": opts.get(xyz + "type"),
-            "title": opts.get(xyz + "label"),
-            "range": [opts.get(xyz + "tickmin"), opts.get(xyz + "tickmax")]
-            if has_ticks
-            else None,
+            "title": {"text": label} if label is not None else None,
+            "range": (
+                [opts.get(xyz + "tickmin"), opts.get(xyz + "tickmax")]
+                if has_ticks
+                else None
+            ),
             "tickvals": opts.get(xyz + "tickvals"),
             "ticktext": opts.get(xyz + "ticklabels"),
             "nticks": (
-                (opts.get(xyz + "tickmax") - opts.get(xyz + "tickmin"))
-                / opts.get(xyz + "tickstep")
-            )
-            if has_step
-            else None,
+                (
+                    (opts.get(xyz + "tickmax") - opts.get(xyz + "tickmin"))
+                    / opts.get(xyz + "tickstep")
+                )
+                if has_step
+                else None
+            ),
+            "dtick": opts.get(xyz + "tickstep"),
             "tickfont": opts.get(xyz + "tickfont"),
         }
 
 
 def _opts2layout(opts, is3d=False):
+    tight = opts.get("tight_layout", False)
     layout = {
         "showlegend": opts.get("showlegend", "legend" in opts),
-        "title": opts.get("title"),
+        "title": {"text": opts["title"]} if opts.get("title") is not None else None,
         "margin": {
-            "l": opts.get("marginleft", 0 if is3d else 60),
-            "r": opts.get("marginright", 60),
-            "t": opts.get("margintop", 20 if is3d else 60),
-            "b": opts.get("marginbottom", 0 if is3d else 60),
+            "l": opts.get("marginleft", 0 if (is3d or tight) else 60),
+            "r": opts.get("marginright", 0 if tight else 60),
+            "t": opts.get("margintop", 20 if is3d else (30 if tight else 60)),
+            "b": opts.get("marginbottom", 0 if (is3d or tight) else 60),
         },
     }
 
@@ -253,21 +284,61 @@ def _opts2layout(opts, is3d=False):
     if layout_opts is not None:
         if "plotly" in layout_opts:
             layout.update(layout_opts["plotly"])
+    return _scrub_dict(_normalize_title_strings(layout))
 
-    return _scrub_dict(layout)
+
+def _normalize_labels(Y):
+    """
+    Normalizes arbitrary labels (int, float, string) to 1-based indices.
+    Returns:
+        Y_normalized (np.ndarray): 1-based integer labels
+        label_values (np.ndarray or None): Original unique label values, or None if Y
+                                           was already a valid set of 1-based integer labels.
+        K (int): Number of unique labels
+    """
+    Y = np.ravel(Y)
+
+    try:
+        is_integer_labels = (
+            np.issubdtype(Y.dtype, np.number)
+            and np.equal(np.mod(Y, 1), 0).all()
+            and np.nanmin(Y) >= 1
+        )
+    except TypeError:
+        is_integer_labels = False
+
+    if is_integer_labels:
+        Y_normalized = Y.astype(int, copy=False)
+        K = int(np.nanmax(Y_normalized))
+        label_values = None
+    else:
+        if np.issubdtype(Y.dtype, np.number):
+            assert np.isfinite(Y).all(), "labels must be finite (no NaN/Inf)"
+        label_values = np.unique(Y)
+        K = len(label_values)
+        Y_normalized = (np.searchsorted(label_values, Y) + 1).astype(int)
+
+    return Y_normalized, label_values, K
 
 
 def _markerColorCheck(mc, X, Y, L):
     assert isndarray(mc), "mc should be a numpy ndarray"
-    assert mc.shape[0] == L or (
-        mc.shape[0] == X.shape[0]
-        and (mc.ndim == 1 or mc.ndim == 2 and mc.shape[1] == 3)
-    ), (
+    if mc.ndim == 1:
+        valid = (mc.shape[0] >= L) or (mc.shape[0] == X.shape[0])
+    elif mc.ndim == 2:
+        valid = (mc.shape[1] == 3) and (
+            (mc.shape[0] >= L) or (mc.shape[0] == X.shape[0])
+        )
+    else:
+        valid = False
+
+    assert valid, (
         "marker colors have to be of size `%d` or `%d x 3` "
-        + " or `%d` or `%d x 3`, but got: %s"
+        "(per-point) or at least `%d` or at least `%d x 3` "
+        "(palette), but got: %s"
     ) % (
         X.shape[0],
-        X.shape[1],
+        X.shape[0],
         L,
         L,
         "x".join(map(str, mc.shape)),
@@ -294,6 +365,26 @@ def _markerColorCheck(mc, X, Y, L):
     return ret
 
 
+def _markerSizeCheck(ms, X, Y):
+    """Validate and return per-point marker sizes as a numpy array."""
+    if isinstance(ms, (list, tuple)):
+        ms = np.array(ms, dtype=float)
+    assert isndarray(ms), "markersize array should be a numpy ndarray"
+    assert ms.ndim == 1, "markersize array should be 1-dimensional"
+    assert (ms > 0).all(), "all marker sizes must be positive"
+
+    if ms.shape[0] == X.shape[0]:
+        return np.array(ms, dtype=float)
+
+    K = int(np.nanmax(Y)) if len(Y) > 0 else 0
+    assert ms.shape[0] >= K, (
+        "markersize should be of size `%d` (per-point) or at least `%d` "
+        "(per-label), but got: %d" % (X.shape[0], K, ms.shape[0])
+    )
+
+    return np.array([ms[Y[i] - 1] for i in range(len(Y))], dtype=float)
+
+
 def _lineColorCheck(lc, K):
     assert isndarray(lc), "lc should be a numpy ndarray"
     assert lc.shape[0] == K, "lc should be same shape as K"
@@ -316,7 +407,7 @@ def _assert_opts(opts):
     remove_nones = ["title"]
     for to_remove in remove_nones:
         if to_remove in opts and opts[to_remove] is None:
-            logger.warn(
+            logger.warning(
                 "None-incompatible opt {} was provided None value "
                 "and was thus ignored".format(to_remove)
             )
@@ -334,10 +425,12 @@ def _assert_opts(opts):
     if opts.get("markersymbol"):
         assert isstr(opts.get("markersymbol")), "marker symbol should be string"
 
-    if opts.get("markersize"):
-        assert (
-            isnum(opts.get("markersize")) and opts.get("markersize") > 0
-        ), "marker size should be a positive number"
+    if opts.get("markersize") is not None:
+        ms = opts.get("markersize")
+        if isinstance(ms, (list, tuple, np.ndarray)):
+            assert all(m > 0 for m in ms), "all marker sizes must be positive"
+        else:
+            assert isnum(ms) and ms > 0, "marker size should be a positive number"
 
     if opts.get("markerborderwidth"):
         assert (
@@ -370,7 +463,7 @@ def _assert_opts(opts):
         assert isnum(opts.get("fps")), "fps should be a number"
         assert opts.get("fps") > 0, "fps must be greater than 0"
 
-    if opts.get("title"):
+    if "title" in opts and opts.get("title") is not None:
         assert isstr(opts.get("title")), "title should be a string"
 
 
@@ -387,22 +480,9 @@ except (ImportError, AttributeError):
 def _to_numpy(a):
     if isinstance(a, list):
         return np.array(a)
-    if len(torch_types) > 0:
-        if isinstance(a, torch.autograd.Variable):
-            # For PyTorch < 0.4 comptability.
-            warnings.warn(
-                "Support for versions of PyTorch less than 0.4 is deprecated "
-                "and will eventually be removed.",
-                DeprecationWarning,
-            )
-            a = a.data
     for kind in torch_types:
         if isinstance(a, kind):
-            # For PyTorch < 0.4 comptability, where non-Variable
-            # tensors do not have a 'detach' method. Will be removed.
-            if hasattr(a, "detach"):
-                a = a.detach()
-            return a.cpu().numpy()
+            return a.detach().cpu().numpy()
     return a
 
 
@@ -416,6 +496,193 @@ def pytorch_wrap(f):
     return wrapped_f
 
 
+def _binary_clf_curve(y_true, y_score, pos_label=1):
+    """Compute true/false positives per distinct score threshold."""
+    y_true = np.asarray(y_true)
+    y_score = np.asarray(y_score)
+
+    if y_true.ndim != 1:
+        raise ValueError("y_true should have 1 dim")
+    if y_score.ndim != 1:
+        raise ValueError("y_score should have 1 dim")
+    if y_true.shape[0] != y_score.shape[0]:
+        raise ValueError("y_true and y_score should match")
+    if y_true.shape[0] == 0:
+        raise ValueError("y_true and y_score should be non-empty")
+    if not np.all(np.isfinite(y_score)):
+        raise ValueError("y_score should only contain finite values")
+
+    y_true = y_true == pos_label
+    desc_score_indices = np.argsort(y_score, kind="mergesort")[::-1]
+    y_score = y_score[desc_score_indices]
+    y_true = y_true[desc_score_indices]
+
+    distinct_value_indices = np.where(np.diff(y_score))[0]
+    threshold_idxs = np.r_[distinct_value_indices, y_true.size - 1]
+
+    tps = np.cumsum(y_true, dtype=float)[threshold_idxs]
+    fps = 1 + threshold_idxs - tps
+    return fps, tps
+
+
+def _compute_roc_curve(y_true, y_score, pos_label=1):
+    """Compute ROC curve (fpr, tpr) from raw labels and scores."""
+    fps, tps = _binary_clf_curve(y_true=y_true, y_score=y_score, pos_label=pos_label)
+    pos_total = float(tps[-1])
+    neg_total = float(fps[-1])
+    if pos_total <= 0:
+        raise ValueError("y_true has no positive samples")
+    if neg_total <= 0:
+        raise ValueError("y_true has no negative samples")
+
+    fpr = np.r_[0.0, fps / neg_total]
+    tpr = np.r_[0.0, tps / pos_total]
+    return fpr, tpr
+
+
+def _compute_pr_curve(y_true, y_score, pos_label=1):
+    """Compute precision-recall curve from raw labels and scores."""
+    fps, tps = _binary_clf_curve(y_true=y_true, y_score=y_score, pos_label=pos_label)
+    pos_total = float(tps[-1])
+    if pos_total <= 0:
+        raise ValueError("y_true has no positive samples")
+
+    precision = tps / (tps + fps)
+    recall = tps / pos_total
+
+    precision = np.r_[1.0, precision]
+    recall = np.r_[0.0, recall]
+    return precision, recall
+
+
+def _coerce_curve_xy(x, y, x_name, y_name):
+    """Validate and sort precomputed curve arrays by x."""
+    x = np.asarray(x)
+    y = np.asarray(y)
+    if x.ndim != 1:
+        raise ValueError("{} should have 1 dim".format(x_name))
+    if y.ndim != 1:
+        raise ValueError("{} should have 1 dim".format(y_name))
+    if x.shape[0] != y.shape[0]:
+        raise ValueError("{} and {} should match".format(x_name, y_name))
+    if x.shape[0] <= 1:
+        raise ValueError(
+            "{} and {} should have at least 2 points".format(x_name, y_name)
+        )
+
+    order = np.argsort(x, kind="mergesort")
+    return x[order], y[order]
+
+
+def _validate_curve_range(values, name):
+    """Validate that values are finite and within [0, 1]."""
+    values = np.asarray(values)
+    if not np.all(np.isfinite(values)):
+        raise ValueError("{} should only contain finite values".format(name))
+    if not np.all((values >= 0.0) & (values <= 1.0)):
+        raise ValueError("{} should be within [0, 1]".format(name))
+
+
+def _curve_legend(legend, default_legend):
+    """Return user-provided legend or default 2-element list."""
+    if not isinstance(legend, (tuple, list)) or len(legend) < 2:
+        if legend is not None:
+            warnings.warn(
+                "legend should be a list/tuple with at least 2 elements, "
+                "falling back to default: {}".format(default_legend),
+                UserWarning,
+            )
+        return list(default_legend)
+    return list(legend)
+
+
+def _trapz_area(y, x):
+    """Compute trapezoidal area under curve, compatible with numpy >= 2.0."""
+    trapezoid = getattr(np, "trapezoid", None)
+    if trapezoid is not None:
+        return float(trapezoid(y, x))
+    return float(np.trapz(y, x))
+
+
+def _average_precision(precision, recall):
+    """Compute average precision: AP = sum((R_n - R_{n-1}) * P_n)."""
+    precision = np.asarray(precision)
+    recall = np.asarray(recall)
+    return float(np.sum(np.diff(recall) * precision[1:]))
+
+
+def _compute_confusion_matrix(y_true, y_pred, labels):
+    """Build an NxN confusion matrix from label vectors (numpy only).
+
+    ``y_true``/``y_pred`` are expected to be 1-D numpy arrays; the public
+    ``confusion_matrix`` caller ravels them before calling this helper.
+    """
+    if y_true.shape[0] != y_pred.shape[0]:
+        raise ValueError("y_true and y_pred must have the same length")
+    if y_true.shape[0] == 0:
+        raise ValueError("y_true and y_pred must be non-empty")
+
+    label_to_idx = {label: i for i, label in enumerate(labels)}
+    n = len(labels)
+    cm = np.zeros((n, n), dtype=int)
+    skipped = 0
+    for t, p in zip(y_true, y_pred):
+        if t in label_to_idx and p in label_to_idx:
+            cm[label_to_idx[t], label_to_idx[p]] += 1
+        else:
+            skipped += 1
+    if skipped > 0:
+        warnings.warn(
+            "{} samples had labels not in the provided labels list "
+            "and were ignored".format(skipped),
+            UserWarning,
+        )
+    return cm
+
+
+def _normalize_title_strings(layout):
+    """Recursively wrap any plain-string 'title' value as {'text': ...}.
+
+    plotly.js v3.0+ no longer accepts a bare string for any 'title'
+    attribute (chart title, xaxis/yaxis title, scene axis title, legend
+    title, colorbar title, etc.). Visdom's own layout-building functions
+    already emit the object form, but plotlyplot() forwards a user-supplied
+    raw figure layout untouched, so a plain string can appear at any depth
+    (e.g. layout['scene']['xaxis']['title']). This walks the whole layout
+    and fixes every occurrence in place, returning a new structure.
+    """
+    if isinstance(layout, dict):
+        fixed = {}
+        for key, value in layout.items():
+            if key == "title" and isinstance(value, str):
+                fixed[key] = {"text": value}
+            else:
+                fixed[key] = _normalize_title_strings(value)
+        return fixed
+    if isinstance(layout, list):
+        return [_normalize_title_strings(v) for v in layout]
+    return layout
+
+
+def _decode_binary_arrays(obj):
+    """Decode Plotly 6+ binary-encoded arrays back to plain Python lists."""
+    if isinstance(obj, dict):
+        if "dtype" in obj and "bdata" in obj:
+            try:
+                arr = np.frombuffer(
+                    base64.b64decode(obj["bdata"]), dtype=np.dtype(obj["dtype"])
+                )
+                if "shape" in obj:
+                    arr = arr.reshape(obj["shape"])
+                return arr.tolist()
+            except (binascii.Error, ValueError, TypeError):
+                return obj
+        return {k: _decode_binary_arrays(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_decode_binary_arrays(v) for v in obj]
+    return obj
+
+
 class Visdom(object):
     def __init__(
         self,
@@ -427,7 +694,7 @@ class Visdom(object):
         http_proxy_host=None,
         http_proxy_port=None,
         env="main",
-        send=True,
+        *,
         raise_exceptions=None,
         use_incoming_socket=True,
         log_to_filename=None,
@@ -436,10 +703,24 @@ class Visdom(object):
         proxies=None,
         offline=False,
         use_polling=False,
+        session_idle_timeout=SESSION_IDLE_TIMEOUT,
+        session_idle_check_interval=SESSION_IDLE_CHECK_INTERVAL,
+        ssl_verify=None,
     ):
         parsed_url = urlparse(server)
         if not parsed_url.scheme:
             parsed_url = urlparse("http://{}".format(server))
+
+        if parsed_url.scheme == "http" and ssl_verify is not None:
+            raise ValueError(
+                "ssl_verify is only valid with HTTPS. "
+                "Use server='https://...' to enable HTTPS."
+            )
+
+        if ssl_verify is None:
+            ssl_verify = True
+
+        self.ssl_verify = ssl_verify
         self.server_base_name = parsed_url.netloc
         self.server = urlunparse((parsed_url.scheme, parsed_url.netloc, "", "", "", ""))
         self.endpoint = endpoint
@@ -454,9 +735,13 @@ class Visdom(object):
         ), "base_url should not end with / as it is appended automatically"
 
         self.ipv6 = ipv6
-        self.env = env
-        self.env_list = {f"{env}"}  # default env
-        self.send = send
+        self.env = (
+            env.replace("/", "_")
+            .replace("\\", "_")
+            .replace("\n", "-")
+            .replace("\r", "-")
+        )
+        self.env_list = {self.env}  # default env
         self.event_handlers = {}  # Haven't registered any events
         self.socket_alive = False
         self.socket_connection_achieved = False
@@ -466,6 +751,11 @@ class Visdom(object):
         self.log_to_filename = log_to_filename
         self.offline = offline
         self._session = None
+        self._pid = os.getpid()
+        self._session_lock = threading.Lock()
+        self._last_post_time = time.time()
+        self.session_idle_timeout = session_idle_timeout
+        self.session_idle_check_interval = session_idle_check_interval
         self.proxies = proxies
         self.http_proxy_host = None
         self.http_proxy_port = None
@@ -496,23 +786,31 @@ class Visdom(object):
         # storage for data associated with specific windows
 
         # Setup for online interactions
-        self._send(
-            {
-                "eid": env,
-            },
-            endpoint="env/" + env,
-        )
-
+        result = self._send({"eid": env}, endpoint="env/" + env)
+        if result is False:
+            if self.raise_exceptions:
+                raise ConnectionError(
+                    "Could not connect to server at {}:{}.".format(
+                        self.server, self.port
+                    )
+                )
+            else:
+                logger.warning(
+                    "Could not connect to server at {}:{}.".format(
+                        self.server, self.port
+                    )
+                )
         # when talking to a server, get a backchannel
-        if send and use_incoming_socket:
+        if use_incoming_socket:
             self.setup_socket()
-        elif send and use_polling:
+        elif use_polling:
             self.setup_polling()
-        elif send and not use_incoming_socket:
-            logger.warn(
+        else:
+            logger.warning(
                 "Without the incoming socket you cannot receive events from "
                 "the server or register event handlers to your Visdom client."
             )
+        self._start_session_reaper()
         # Wait for initialization before starting
         time_spent = 0
         inc = 0.1
@@ -521,7 +819,7 @@ class Visdom(object):
             time_spent += inc
             inc *= 2
         if time_spent > 5:
-            logger.warn(
+            logger.warning(
                 "Visdom python client failed to establish socket to get "
                 "messages from the server. This feature is optional and "
                 "can be disabled by initializing Visdom with "
@@ -531,115 +829,156 @@ class Visdom(object):
 
     @property
     def session(self):
-        if self._session:
-            return self._session
-        logger.warning("Setting up a new session...")
-        sess = requests.Session()
-        if self.proxies:
-            sess.proxies.update(self.proxies)
-        if self.username:
-            resp = sess.post(
-                "%s:%s%s" % (self.server, self.port, self.base_url),
-                json=dict(username=self.username, password=self.password),
-            )
-            if resp.status_code != requests.codes.ok:
-                raise RuntimeError("Authentication failed")
-            logger.info("Authentication succeeded")
-        self._session = sess
-        return sess
+        with self._session_lock:
+            current_pid = os.getpid()
+            if self._session and self._pid == current_pid:
+                return self._session
 
-    def register_event_handler(self, handler, target):
-        assert callable(handler), "Event handler must be a function"
-        assert self.use_socket, (
-            "Must be using the incoming socket to " "register events to web actions"
-        )
-        if target not in self.event_handlers:
-            self.event_handlers[target] = []
-        self.event_handlers[target].append(handler)
+            if self._session:
+                try:
+                    self._session.close()
+                except Exception:
+                    pass
+            self._pid = current_pid
+            logger.warning("Setting up a new session...")
+            sess = requests.Session()
+            if self.proxies:
+                sess.proxies.update(self.proxies)
+            if isinstance(self.ssl_verify, str):
+                sess.verify = self.ssl_verify
+            elif not self.ssl_verify:
+                sess.verify = False
+            if self.username:
+                resp = sess.post(
+                    "%s:%s%s" % (self.server, self.port, self.base_url),
+                    json=dict(username=self.username, password=self.password),
+                )
+                if resp.status_code != requests.codes.ok:
+                    raise RuntimeError("Authentication failed")
+                logger.info("Authentication succeeded")
+            self._session = sess
+            return sess
 
-    def clear_event_handlers(self, target):
-        self.event_handlers[target] = []
-
-    def setup_polling(self):
-        # TODO merge with setup_socket?
-        # Setup socket to server
-        def on_message(message):
-            message = json.loads(message)
-            if "command" in message:
-                # Handle server commands
-                if message["command"] == "alive":
-                    if "data" in message and message["data"] == "vis_alive":
-                        logger.info("Visdom successfully connected to server")
-                        self.socket_alive = True
-                        self.socket_connection_achieved = True
-                    else:
-                        logger.warn(
-                            "Visdom server failed handshake, may not "
-                            "be properly connected"
+    def _start_session_reaper(self):
+        def run_reaper():
+            while True:
+                time.sleep(self.session_idle_check_interval)
+                idle_for = time.time() - self._last_post_time
+                if idle_for <= self.session_idle_timeout:
+                    continue
+                with self._session_lock:
+                    if (
+                        self._session is not None
+                        and time.time() - self._last_post_time
+                        > self.session_idle_timeout
+                    ):
+                        logger.info(
+                            "Closing idle visdom HTTP session after %ds of "
+                            "inactivity; it will be recreated on the next send.",
+                            int(idle_for),
                         )
-            if "target" in message:
-                for handler in list(self.event_handlers.get(message["target"], [])):
-                    handler(message)
+                        try:
+                            self._session.close()
+                        except Exception:
+                            pass
+                        self._session = None
 
-        def on_close(ws):
-            self.socket_alive = False
+        self.session_reaper_thread = threading.Thread(
+            target=run_reaper, name="Visdom-Session-Reaper", daemon=True
+        )
+        self.session_reaper_thread.start()
 
-        def run_socket(*args):
-            # open a socket
-            resp_json = self._handle_post(
-                "{0}:{1}{2}/vis_socket_wrap".format(
-                    self.server, self.port, self.base_url
-                ),
-                data=json.dumps({"message_type": "init"}),
+    def register_event_handler(self, handler, target, env=None):
+        assert callable(handler), "Event handler must be a function"
+        assert (
+            self.use_socket
+        ), "Must be using the incoming socket to register events to web actions"
+
+        key = (env, target)
+        if key not in self.event_handlers:
+            self.event_handlers[key] = []
+        self.event_handlers[key].append(handler)
+
+    def clear_event_handlers(self, target, env=None):
+        self.event_handlers.pop((env, target), None)
+
+    def _handle_incoming_message(self, raw_message):
+        try:
+            message = json.loads(raw_message)
+        except (TypeError, ValueError) as e:
+            logger.warning("Visdom failed to decode incoming message: %s", e)
+            return
+
+        if not isinstance(message, dict):
+            logger.warning(
+                "Visdom ignored incoming message with unexpected type %s",
+                type(message).__name__,
             )
-            resp = json.loads(resp_json)
-            self.vis_sid = resp["sid"]
-            while self.use_socket:
+            return
+
+        if "command" in message:
+            # Handle server commands
+            if message["command"] == "alive":
+                if "data" in message and message["data"] == "vis_alive":
+                    logger.info("Visdom successfully connected to server")
+                    self.socket_alive = True
+                    self.socket_connection_achieved = True
+                else:
+                    logger.warning(
+                        "Visdom server failed handshake, may not "
+                        "be properly connected"
+                    )
+        if "target" in message:
+            env = message.get("eid")
+            key = (env, message["target"])
+
+            handlers = list(self.event_handlers.get(key, []))
+            if env is not None:
+                global_key = (None, message["target"])
+                handlers.extend(list(self.event_handlers.get(global_key, [])))
+
+            for handler in handlers:
+                try:
+                    handler(message)
+                except Exception as e:
+                    logger.warning(
+                        "Visdom failed to handle a handler for {}: {}"
+                        "".format(message, e)
+                    )
+                    traceback.print_exc()
+
+    def _run_polling(self):
+        while self.use_socket:
+            try:
                 resp_json = self._handle_post(
                     "{0}:{1}{2}/vis_socket_wrap".format(
                         self.server, self.port, self.base_url
                     ),
-                    data=json.dumps({"message_type": "query", "sid": self.vis_sid}),
+                    data=json.dumps({"message_type": "init"}),
                 )
                 resp = json.loads(resp_json)
-                for msg in resp["messages"]:
-                    on_message(msg)
-                time.sleep(0.1)
+                self.vis_sid = resp["sid"]
+                while self.use_socket:
+                    resp_json = self._handle_post(
+                        "{0}:{1}{2}/vis_socket_wrap".format(
+                            self.server, self.port, self.base_url
+                        ),
+                        data=json.dumps({"message_type": "query", "sid": self.vis_sid}),
+                    )
+                    resp = json.loads(resp_json)
+                    for msg in resp["messages"]:
+                        self._handle_incoming_message(msg)
+                    time.sleep(0.1)
+            except Exception as e:
+                logger.error("Polling had error {}, attempting restart".format(e))
+            finally:
+                self.socket_alive = False
+            if self.use_socket:
+                time.sleep(3)
 
-        # Start listening thread
-        self.socket_thread = threading.Thread(
-            target=run_socket, name="Visdom-Socket-Thread"
-        )
-        self.socket_thread.start()
-
-    def setup_socket(self, polling=False):
-        # Setup socket to server
+    def _run_websocket(self):
         def on_message(ws, message):
-            message = json.loads(message)
-            if "command" in message:
-                # Handle server commands
-                if message["command"] == "alive":
-                    if "data" in message and message["data"] == "vis_alive":
-                        logger.info("Visdom successfully connected to server")
-                        self.socket_alive = True
-                        self.socket_connection_achieved = True
-                    else:
-                        logger.warn(
-                            "Visdom server failed handshake, may not "
-                            "be properly connected"
-                        )
-            if "target" in message:
-                for handler in list(self.event_handlers.get(message["target"], [])):
-                    try:
-                        handler(message)
-                    except Exception as e:
-                        logger.warn(
-                            "Visdom failed to handle a handler for {}: {}"
-                            "".format(message, e)
-                        )
-                        import traceback
-
-                        traceback.print_exc()
+            self._handle_incoming_message(message)
 
         def on_error(ws, error):
             if hasattr(error, "errno") and error.errno == errno.ECONNREFUSED:
@@ -653,45 +992,69 @@ class Visdom(object):
             logger.error(error)
             ws.close()
 
-        def on_close(ws):
+        def on_close(ws, close_status_code=None, close_msg=None):
             self.socket_alive = False
+            if not self.socket_connection_achieved:
+                logger.warning(
+                    "WebSocket closed before connection achieved "
+                    "(close_status_code=%s). If login is enabled, "
+                    "pass username/password to Visdom().",
+                    close_status_code,
+                )
+                self.use_socket = False
 
-        def run_socket(*args):
-            host_scheme = urlparse(self.server).scheme
-            if host_scheme == "https":
-                ws_scheme = "wss"
-            else:
-                ws_scheme = "ws"
-            while self.use_socket:
-                try:
-                    sock_addr = "{}://{}:{}{}/vis_socket".format(
-                        ws_scheme, self.server_base_name, self.port, self.base_url
-                    )
-                    ws = websocket.WebSocketApp(
-                        sock_addr,
-                        on_message=on_message,
-                        on_error=on_error,
-                        on_close=on_close,
-                        header={
-                            "Cookie: user_password="
-                            + self.session.cookies.get("user_password", "")
-                        },
-                    )
-                    ws.run_forever(
-                        http_proxy_host=self.http_proxy_host,
-                        http_proxy_port=self.http_proxy_port,
-                        ping_timeout=100.0,
-                    )
-                    ws.close()
-                except Exception as e:
-                    logger.error("Socket had error {}, attempting restart".format(e))
+        host_scheme = urlparse(self.server).scheme
+        if host_scheme == "https":
+            ws_scheme = "wss"
+        else:
+            ws_scheme = "ws"
+        while self.use_socket:
+            try:
+                sock_addr = "{}://{}:{}{}/vis_socket".format(
+                    ws_scheme, self.server_base_name, self.port, self.base_url
+                )
+                ws = websocket.WebSocketApp(
+                    sock_addr,
+                    on_message=on_message,
+                    on_error=on_error,
+                    on_close=on_close,
+                    header={
+                        "Cookie": "user_password="
+                        + self.session.cookies.get("user_password", "")
+                    },
+                )
+                run_forever_kwargs = {
+                    "http_proxy_host": self.http_proxy_host,
+                    "http_proxy_port": self.http_proxy_port,
+                    "ping_timeout": 100.0,
+                }
+                if ws_scheme == "wss":
+                    if isinstance(self.ssl_verify, str):
+                        run_forever_kwargs["sslopt"] = {
+                            "cert_reqs": ssl.CERT_REQUIRED,
+                            "ca_certs": self.ssl_verify,
+                        }
+                    elif not self.ssl_verify:
+                        run_forever_kwargs["sslopt"] = {
+                            "cert_reqs": ssl.CERT_NONE,
+                        }
+                ws.run_forever(**run_forever_kwargs)
+                ws.close()
+            except Exception as e:
+                logger.error("Socket had error {}, attempting restart".format(e))
+            if self.use_socket:
                 time.sleep(3)
 
-        # Start listening thread
+    def setup_polling(self):
+        self.setup_socket(polling=True)
+
+    def setup_socket(self, polling=False):
+        run_socket = self._run_polling if polling else self._run_websocket
         self.socket_thread = threading.Thread(
-            target=run_socket, name="Visdom-Socket-Thread"
+            target=run_socket,
+            name="Visdom-Socket-Thread",
+            daemon=True,
         )
-        self.socket_thread.daemon = True
         self.socket_thread.start()
 
     # Utils
@@ -704,7 +1067,8 @@ class Visdom(object):
                             [
                                 endpoint,
                                 msg,
-                            ]
+                            ],
+                            cls=NanSafeEncoder,
                         )
                         + "\n"
                     )
@@ -717,8 +1081,26 @@ class Visdom(object):
         """
         if data is None:
             data = {}
-        r = self.session.post(url, data=data)
-        return r.text
+        self._last_post_time = time.time()
+        had_session = self._session is not None
+        try:
+            r = self.session.post(url, data=data, timeout=(20, None))
+            return r.text
+        except requests.exceptions.SSLError:
+            raise
+        except (requests.ConnectionError, requests.Timeout):
+            if not had_session:
+                raise
+            logger.warning("Connection failed, resetting session and retrying...")
+            with self._session_lock:
+                try:
+                    if self._session is not None:
+                        self._session.close()
+                except Exception:
+                    pass
+                self._session = None
+            r = self.session.post(url, data=data, timeout=(20, None))
+            return r.text
 
     def _send(self, msg, endpoint="events", quiet=False, from_log=False, create=True):
         """
@@ -738,10 +1120,6 @@ class Visdom(object):
         if msg.get("eid", None) is not None:
             self.env_list.add(msg["eid"])
 
-        # TODO investigate send use cases, then deprecate
-        if not self.send:
-            return msg, endpoint
-
         if "win" in msg and msg["win"] is None and create:
             msg["win"] = "window_" + get_rand_id()
 
@@ -757,8 +1135,25 @@ class Visdom(object):
                 "{0}:{1}{2}/{3}".format(
                     self.server, self.port, self.base_url, endpoint
                 ),
-                data=json.dumps(msg),
+                data=json.dumps(msg, cls=NanSafeEncoder),
             )
+        except requests.exceptions.SSLError as e:
+            ssl_msg = (
+                "SSL certificate verification failed for {}:{}. "
+                "If using a self-signed certificate, pass ssl_verify=False. "
+                "If using mkcert, run: "
+                "export REQUESTS_CA_BUNDLE=$(mkcert -CAROOT)/rootCA.pem".format(
+                    self.server, self.port
+                )
+            )
+            if self.raise_exceptions:
+                raise ConnectionError(ssl_msg) from e
+            else:
+                if not quiet:
+                    print("SSL Error:")
+                    print("-" * 60)
+                    print(ssl_msg)
+                return False
         except (requests.RequestException, requests.ConnectionError, requests.Timeout):
             if self.raise_exceptions:
                 raise ConnectionError("Error connecting to Visdom server")
@@ -802,6 +1197,246 @@ class Visdom(object):
 
         return self._send(msg={"prev_eid": prev_eid, "eid": eid}, endpoint="fork_env")
 
+    def _experiment_request(self, msg, endpoint):
+        """POST to an experiment `endpoint` and decode the JSON reply.
+
+        Returns the decoded reply when the server replies with JSON, otherwise
+        the raw response (e.g. an error string).
+        """
+        response = self._send(msg, endpoint=endpoint, quiet=True)
+        if not isstr(response):
+            return response
+        try:
+            return json.loads(response)
+        except ValueError:
+            return response
+
+    def _experiment_query(self, msg, endpoint):
+        """Ask an experiment `endpoint` a question and decode the JSON reply.
+
+        Unlike the endpoints reached through :meth:`_experiment_send`, which
+        record something, these ones ask a question that only a server can
+        answer. An offline client never reaches one, and would otherwise fall
+        through to the generic `_send` short circuit and hand back `True` — a
+        value a caller expecting a reply dict cannot use and cannot tell apart
+        from a real answer.
+
+        Returns None when offline, as the other read methods do.
+        """
+        if self.offline:
+            return None
+        return self._experiment_request(msg, endpoint)
+
+    def _experiment_send(self, msg, env):
+        """POST an experiment action for `env` and decode the JSON reply.
+
+        Shared plumbing for :meth:`experiment`, :meth:`log_metrics` and
+        :meth:`finish_experiment`, each of which acts on a single environment.
+        Returns the stored experiment as a dict.
+        """
+        msg["eid"] = env if env is not None else self.env
+        return self._experiment_request(msg, "experiments/log")
+
+    def experiment(self, name=None, params=None, tags=None, description=None, env=None):
+        """Create or update the experiment metadata for an environment.
+
+        Records the hyper-parameters (`params`), free-form `tags` (both dicts of
+        `{name: value}`), a display `name`, and a `description` against `env`
+        (defaults to this client's env). Calling it again for the same env merges
+        in new params/tags and overwrites name/description, so it is safe to call
+        at the start of and again during a run. Returns the stored experiment as
+        a dict.
+        """
+        if params is not None and not isinstance(params, dict):
+            raise TypeError("params must be a dict of {name: value}")
+        if tags is not None and not isinstance(tags, dict):
+            raise TypeError("tags must be a dict of {name: value}")
+        return self._experiment_send(
+            {
+                "action": "log",
+                "name": name,
+                "params": params,
+                "tags": tags,
+                "description": description,
+            },
+            env,
+        )
+
+    def log_metrics(self, metrics, step=None, env=None):
+        """Append one or more metric observations to an env's experiment.
+
+        `metrics` is a dict of `{name: value}` recorded at an optional training
+        `step`; the experiment is created automatically if it does not exist yet.
+        Returns the updated experiment as a dict.
+        """
+        if not isinstance(metrics, dict) or not metrics:
+            raise TypeError("metrics must be a non-empty dict of {name: value}")
+        return self._experiment_send(
+            {"action": "metrics", "metrics": metrics, "step": step}, env
+        )
+
+    def finish_experiment(self, status="finished", env=None):
+        """Mark an env's experiment terminal (`"finished"` or `"failed"`).
+
+        An experiment that is already terminal cannot be finished again; the
+        server rejects the attempt rather than restamping the existing record.
+
+        Returns the stored experiment as a dict.
+        """
+        return self._experiment_send({"action": "finish", "status": status}, env)
+
+    def search_experiments(
+        self, query=None, limit=100, offset=0, sort_by=None, descending=True
+    ):
+        """Search the experiments logged on the server, across all environments.
+
+        `query` filters the results using a small readable syntax — comparisons
+        (`<`, `<=`, `>`, `>=`, `=`, `!=`, `contains`) over param, metric and tag
+        names, combined with `AND`/`OR` and parentheses:
+
+            vis.search_experiments("lr < 0.01 AND acc > 0.9")
+            vis.search_experiments("status = finished AND (dataset contains mnist)")
+
+        A name is matched bare (`acc`) or namespaced (`metric.acc`, `param.lr`,
+        `tag.owner`) when it is ambiguous; metrics compare on their latest value.
+        `query=None` returns everything. Results are sorted by `sort_by` (any of
+        those same names, newest-created first by default) and paged with
+        `limit`/`offset`; pass `limit=None` for all of them.
+
+        Returns the server's reply as a dict of `experiments` (a list of
+        experiment dicts, one page worth), the unpaged `total` matching the
+        query, and the `limit`/`offset`/`query` used. Returns None on an offline
+        client, which has no server to search.
+        """
+        if query is not None and not isstr(query):
+            raise TypeError("query must be a string")
+        if sort_by is not None and not isstr(sort_by):
+            raise TypeError("sort_by must be a string")
+        return self._experiment_query(
+            {
+                "query": query,
+                "limit": limit,
+                "offset": offset,
+                "sort_by": sort_by,
+                "descending": descending,
+            },
+            "experiments/search",
+        )
+
+    def compare_experiments(self, env_ids):
+        """Compare the named experiments field by field, to see what differs.
+
+        `env_ids` names the runs to compare, in the order given, and each must
+        exist:
+
+            vis.compare_experiments(["run-a", "run-b"])
+
+        Finding the runs is :meth:`search_experiments`' job — it answers "which
+        runs match?", this answers "how do these runs differ?". To compare a
+        query's matches, search first and pass the ids on:
+
+            found = vis.search_experiments("lr < 0.01")
+            vis.compare_experiments([e["env_id"] for e in found["experiments"]])
+
+        Returns the server's reply as a dict: the compared runs (`env_ids` and
+        the full `experiments`), plus a `params`, `metrics` and `tags` section.
+        Each section holds the union of `fields`, the `shared` ones every run
+        agrees on, the `differing` rest, the per-run `values`, and `groups`.
+
+        `shared`/`differing` answer "what changed?"; `groups` answers "which runs
+        agree?", clustering the runs by value per field. Comparing three runs on
+        two learning rates gives a `params` section whose `differing` is `['lr']`,
+        whose `values['lr']` is `{'run-a': 0.1, 'run-b': 0.001, 'run-c': 0.1}`,
+        and whose `groups['lr']` is
+        `[{'value': 0.1, 'env_ids': ['run-a', 'run-c']},
+          {'value': 0.001, 'env_ids': ['run-b']}]`.
+
+        Returns None on an offline client, which has no server to compare on.
+        """
+        if isstr(env_ids) or not isinstance(env_ids, (list, tuple)):
+            raise TypeError("env_ids must be a list of environment ids")
+        if not all(isstr(env_id) for env_id in env_ids):
+            raise TypeError("env_ids must contain strings")
+        return self._experiment_query(
+            {"env_ids": list(env_ids)},
+            "experiments/compare",
+        )
+
+    def suggest_experiment(self, params=None, env=None):
+        """Ask the server to suggest parameters for the next run.
+
+        Reserved: the suggestion strategy (Optuna-backed) is not implemented
+        yet, so this returns the server's stub reply — a dict of
+        `{"status": "not_implemented", "suggestion": None, ...}` — rather than a
+        real suggestion. The method, its `params` search space (a dict of
+        `{name: spec}`) and the endpoint are in place so callers and the docs
+        are ready for when the strategy is wired in.
+
+        Returns the server's reply as a dict, or None on an offline client,
+        which has no server to ask.
+        """
+        if params is not None and not isinstance(params, dict):
+            raise TypeError("params must be a dict of {name: spec}")
+        msg = {"params": params}
+        if env is not None:
+            msg["eid"] = env
+        return self._experiment_query(msg, "experiments/suggest")
+
+    def hparams(
+        self, query=None, env_ids=None, mode=None, win=None, env=None, opts=None
+    ):
+        """Open a hyper-parameter pane over the experiments logged on the server.
+
+        Posts the selection to the ``experiments/hparams`` endpoint, which picks
+        the runs, flattens them into a table of hyper-parameters against their
+        latest metric values (and tags), and registers a dedicated ``hparams``
+        window with that content. The window persists/reloads like any pane.
+
+        `mode` chooses how the runs to show are selected; when it is left as
+        `None` the server infers it from which of `query`/`env_ids` were given:
+
+        * ``"query"`` — the runs matching `query` (the readable syntax of
+          :meth:`search_experiments`). The query must be non-empty and `env_ids`
+          must not be given.
+        * ``"env_ids"`` — the runs named in `env_ids`, in that order. `env_ids`
+          must be non-empty and `query` must not be given; only those
+          environments are read rather than every experiment.
+        * ``"both"`` — the intersection: runs that match `query` *and* are named
+          in `env_ids`, ordered by `env_ids`. Both must be given and non-empty.
+
+        There is no "show everything" call: with neither `query` nor `env_ids`
+        the server has nothing to select and rejects the request. A blank or
+        whitespace-only `query` counts as no query. Every id in `env_ids` must
+        name an environment that has an experiment: one that does not — a typo,
+        a deleted run — is answered with a ``404`` naming it rather than left
+        out of the pane unremarked.
+
+        ::
+
+            vis.hparams("lr < 0.01 AND acc > 0.9")          # query
+            vis.hparams(env_ids=["run-a", "run-b"])         # env_ids
+            vis.hparams("acc > 0.9", ["run-a", "run-b"])    # both
+            vis.hparams("acc > 0.9", ["run-a"], mode="query")   # forced, errors
+
+        `win`/`env`/`opts` behave as they do for the other plotting methods.
+        Returns the created window id.
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        return self._send(
+            {
+                "query": query,
+                "env_ids": env_ids,
+                "mode": mode,
+                "win": win,
+                "eid": env,
+                "opts": opts,
+            },
+            endpoint="experiments/hparams",
+        )
+
     def get_window_data(self, win=None, env=None):
         """
         This function returns all the window data for a specified window in
@@ -840,6 +1475,17 @@ class Visdom(object):
             create=False,
         )
 
+    def delete_envs(self, env_list):
+        """This function deletes a list of environments."""
+        if not isinstance(env_list, list):
+            raise TypeError("env_list must be a list of strings")
+        responses = []
+        for env in env_list:
+            if not isinstance(env, str):
+                raise TypeError(f"Environment ID must be a string, got {type(env)}")
+            responses.append(self.delete_env(env))
+        return responses
+
     def delete_env(self, env):
         """This function deletes a specific environment."""
         return self._send(msg={"eid": env}, endpoint="delete_env")
@@ -870,6 +1516,24 @@ class Visdom(object):
             return list(self.env_list)
         else:
             return json.loads(self._send({}, endpoint="env_state", quiet=True))
+
+    def get_env_state(self, env):
+        """
+        This function returns the state of a specific environment,
+        containing all window data as a dict of {window_id: window_json}.
+
+        Returns None if the environment does not exist.
+        """
+        assert isinstance(env, str), "env should be a string"
+        if self.offline:
+            return None
+        response = self._send({"eid": env}, endpoint="env_state", quiet=True)
+        if response is False:
+            return None
+        parsed = json.loads(response)
+        if isinstance(parsed, dict) and "error" in parsed:
+            return None
+        return parsed
 
     def win_exists(self, win, env=None):
         """
@@ -1038,9 +1702,7 @@ class Visdom(object):
                 try:
                     soup = bs4.BeautifulSoup(svg, "xml")
                 except bs4.FeatureNotFound as e:
-                    import six
-
-                    six.raise_from(ImportError("No module named 'lxml'"), e)
+                    raise ImportError("No module named 'lxml'") from e
                 height = soup.svg.attrs.pop("height", None)
                 width = soup.svg.attrs.pop("width", None)
                 svg = str(soup)
@@ -1065,25 +1727,80 @@ class Visdom(object):
                 opts["width"] = 1.35 * int(math.ceil(float(width)))
         return self.svg(svgstr=svg, opts=opts, env=env, win=win)
 
-    def plotlyplot(self, figure, win=None, env=None):
+    def save_plotly_figure(self, figure, filepath, **kwargs):
+        """
+        Save a Plotly figure to an image file from Python (no browser click required).
+
+        This allows programmatic saving of plots that would otherwise require
+        using the "Download plot as a png" button in the Visdom UI. You can
+        build the same figure, save it to file with this method, and optionally
+        display it in Visdom with plotlyplot().
+
+        Args:
+            figure: A Plotly Figure object (e.g. from plotly.graph_objects or
+                make_subplots).
+            filepath: Path for the output file (e.g. "plot.png", "figure.svg").
+                The format is inferred from the extension (png, svg, pdf, etc.).
+            **kwargs: Optional arguments passed to Plotly's write_image (e.g.
+                width, height, scale).
+
+        Raises:
+            RuntimeError: If plotly or kaleido is not installed.
+
+        Note: Requires the 'kaleido' package for image export. Install with
+        `pip install kaleido`.
+        """
+        try:
+            import plotly
+        except ImportError:
+            raise RuntimeError(
+                "Plotly must be installed to save Plotly figures. "
+                "Install with: pip install plotly"
+            )
+        try:
+            figure.write_image(filepath, **kwargs)
+        except ValueError as e:
+            if "kaleido" in str(e).lower() or "orca" in str(e).lower():
+                raise RuntimeError(
+                    "Saving Plotly figures to image requires the 'kaleido' package. "
+                    "Install with: pip install kaleido"
+                ) from e
+            raise
+
+    def plotlyplot(self, figure, win=None, env=None, save_path=None, save_kwargs=None):
         """
         This function draws a Plotly 'Figure' object. It does not explicitly
         take options as it assumes you have already explicitly configured the
         figure's layout.
 
+        To save the figure as an image from code (without using the browser
+        download button), pass save_path (e.g. save_path="plot.png"). Optional
+        arguments for Plotly's write_image should be passed via save_kwargs,
+        e.g. save_kwargs={"width": 800, "height": 600}. This requires the
+        optional 'kaleido' package (pip install kaleido).
+
         Note: You must have the 'plotly' Python package installed to use
         this function.
         """
+        if save_kwargs is None:
+            save_kwargs = {}
         try:
             import plotly
+
+            if save_path is not None:
+                self.save_plotly_figure(figure, save_path, **save_kwargs)
 
             # We do a round-trip of JSON encoding and decoding to make use of
             # the Plotly JSON Encoder. The JSON encoder deals with converting
             # numpy arrays to Python lists and several other edge cases.
-            figure_dict = json.loads(
-                json.dumps(figure, cls=plotly.utils.PlotlyJSONEncoder)
-            )
+            figure_json = json.dumps(figure, cls=plotly.utils.PlotlyJSONEncoder)
+            figure_dict = json.loads(figure_json)
+            # Plotly 6+ encodes large arrays as binary dicts {"dtype":..., "bdata":...}.
+            # Decode them back to plain Python lists so the frontend can render them.
+            if '"bdata"' in figure_json:
+                figure_dict = _decode_binary_arrays(figure_dict)
 
+            figure_dict["layout"] = _normalize_title_strings(figure_dict["layout"])
             # If opts title is not added, the title is not added to the top right of the window.
             # We add the paramater to opts manually if it exists.
             opts = dict()
@@ -1097,6 +1814,10 @@ class Visdom(object):
                 opts["title"] = (
                     title_prop["text"] if "text" in title_prop else title_prop
                 )
+            if "width" in figure_dict["layout"]:
+                opts["width"] = figure_dict["layout"]["width"]
+            if "height" in figure_dict["layout"]:
+                opts["height"] = figure_dict["layout"]["height"]
 
             return self._send(
                 {
@@ -1130,9 +1851,8 @@ class Visdom(object):
                 # them via an append event
                 entity_id = event["entityId"]
                 id = event["idx"]
-                if data_getter is not None:
-                    if data_type == "html":
-                        selected = {"html": data_getter(int(id))}
+                if data_getter is not None and data_type == "html":
+                    selected = {"html": data_getter(int(id))}
                 else:
                     selected = {"html": "<div>No preview available</div>"}
 
@@ -1147,6 +1867,8 @@ class Visdom(object):
                     },
                     endpoint="update",
                 )
+                return
+
             elif event["event_type"] == "RegionSelected":
                 # lasso events give us a subset of the data to re-run tsne on
                 # so we generate
@@ -1180,7 +1902,7 @@ class Visdom(object):
                 endpoint="update",
             )
 
-        self.register_event_handler(embedding_event_handler, win)
+        self.register_event_handler(embedding_event_handler, win, env=env)
 
     def embeddings(
         self,
@@ -1226,10 +1948,10 @@ class Visdom(object):
 
         Y = do_tsne(features)
 
-        label_set = list(set(labels))
+        labels_normalized, _, _ = _normalize_labels(labels)
         points = [
             {
-                "group": int(label_set.index(labels[i])),
+                "group": int(labels_normalized[i] - 1),
                 "name": "Entity {}".format(i),
                 "label": labels[i],
                 "position": xy,
@@ -1254,45 +1976,89 @@ class Visdom(object):
             endpoint="events",
         )
 
-        # Register the handlers for managing this embeddings pane
-        # TODO allow disabling this in a way that pushes onus for calculating
-        # to the server or frontend client
-        self._register_embeddings(
-            features, labels, points, data_getter, data_type, win, env, opts
-        )
+        if opts.get("register_embedding_events", True):
+            self._register_embeddings(
+                features, labels, points, data_getter, data_type, win, env, opts
+            )
         return win
 
     @pytorch_wrap
     def image(self, img, win=None, env=None, opts=None):
         """
-        This function draws an img. It takes as input an `CxHxW` or `HxW` tensor
-        `img` that contains the image. The array values can be float in [0,1] or
-        uint8 in [0, 255].
+        This function draws an img. It takes as input a `CxHxW` (where C is 1, 3, or 4)
+        or `HxW` tensor `img` that contains the image. The array values can be uint8 in
+        [0, 255] or float. Float arrays are converted as follows: images whose
+        full range is within [0, 1] are scaled to [0, 255]; images whose full
+        range is within [-1, 1] but includes negative values are mapped from
+        [-1, 1] to [0, 255]; all other float values are clipped to [0, 255].
+        Pass `opts.normalize=True` to min-max scale the image to fill [0, 255]
+        instead.
+
+        The following `opts` are supported:
+
+        - `opts.normalize`: min-max scale float image to [0, 255] (`boolean`; default = `False`)
+        - `opts.jpgquality`: quality of the JPEG image (`number` in (0, 100]; default = `None` for PNG)
+        - `opts.caption`: caption below the image (`string`; optional)
+        - `opts.store_history`: append to image history pane (`boolean`)
         """
         opts = {} if opts is None else opts
         _title2str(opts)
         _assert_opts(opts)
-        opts["width"] = opts.get("width", img.shape[img.ndim - 1])
-        opts["height"] = opts.get("height", img.shape[img.ndim - 2])
-
-        nchannels = img.shape[0] if img.ndim == 3 else 1
-        if nchannels == 1:
-            img = np.squeeze(img)
-            img = img[np.newaxis, :, :].repeat(3, axis=0)
-
-        if "float" in str(img.dtype):
-            if img.max() <= 1:
+        if np.issubdtype(img.dtype, np.floating):
+            finite = img[np.isfinite(img)]
+            if finite.size > 0:
+                img_min, img_max = float(finite.min()), float(finite.max())
+            else:
+                img_min, img_max = 0.0, 0.0
+            if opts.get("normalize", False):
+                if img_max > img_min:
+                    img = (img - img_min) / (img_max - img_min) * 255.0
+                else:
+                    img = np.zeros_like(img)
+            elif img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
                 img = img * 255.0
-            img = np.uint8(img)
+            elif img_min >= -1.0 - 1e-5 and img_max <= 1.0 + 1e-5:
+                img = (img + 1.0) / 2.0 * 255.0
+            img = np.nan_to_num(img, nan=0.0, posinf=255.0, neginf=0.0)
+            img = np.uint8(np.clip(img, 0, 255))
 
-        img = np.transpose(img, (1, 2, 0))
-        im = Image.fromarray(img)
+        # extract dimensions and process formats
+        if img.ndim == 2:
+            # grayscale - shape(H,W)
+            nchannels = 1
+            opts["width"] = opts.get("width", img.shape[1])
+            opts["height"] = opts.get("height", img.shape[0])
+            im = Image.fromarray(img, mode="L")
+        elif img.ndim == 3:
+            nchannels = img.shape[0]
+            opts["width"] = opts.get("width", img.shape[2])
+            opts["height"] = opts.get("height", img.shape[1])
+
+            if nchannels == 1:
+                im = Image.fromarray(img[0, :, :], mode="L")
+            elif nchannels == 3:
+                img = np.transpose(img, (1, 2, 0))
+                im = Image.fromarray(img, mode="RGB")
+            elif nchannels == 4:  # RGBA (4,H,W)
+                img = np.transpose(img, (1, 2, 0))
+                im = Image.fromarray(img, mode="RGBA")
+            else:
+                raise ValueError(
+                    f"Unsupported number of image channels: {nchannels}. "
+                    "Only 1 (grayscale), 3 (RGB), or 4 (RGBA) channels are supported."
+                )
+        else:
+            raise ValueError(
+                f"Unsupported image dimensions: {img.ndim}. "
+                "Image tensor must be 2D (HxW) or 3D (CxHxW)."
+            )
         buf = BytesIO()
         image_type = "png"
         imsave_args = {}
-        if "jpgquality" in opts:
+        jpgquality = opts.get("jpgquality")
+        if jpgquality is not None and nchannels != 4:
             image_type = "jpeg"
-            imsave_args["quality"] = opts["jpgquality"]
+            imsave_args["quality"] = jpgquality
 
         im.save(buf, format=image_type.upper(), **imsave_args)
 
@@ -1321,6 +2087,187 @@ class Visdom(object):
                 "opts": opts,
             },
             endpoint=endpoint,
+        )
+
+    def image_select(self, win, selected, env=None):
+        """
+        Set the selected frame index in an image_history window.
+
+        This function updates which frame is currently displayed in a window
+        that was created with ``opts=dict(store_history=True)`` via the
+        `image` function.
+        """
+        assert win is not None, "Must specify a window"
+        assert isinstance(selected, int), "selected must be an integer"
+
+        data = [{"type": "image_update_selected", "selected": selected}]
+        return self._send(
+            {
+                "data": data,
+                "win": win,
+                "eid": env,
+            },
+            endpoint="update",
+        )
+
+    @pytorch_wrap
+    def image_heatmap(self, img, heatmap, win=None, env=None, opts=None):
+        """
+        Overlay a heatmap on an image.
+
+        `img` is a `CxHxW` or `HxW` tensor (uint8 or float, same rules as
+        `image()`). `heatmap` is an `HxW` float array. Values are expected in
+        [0, 1] but any finite range is accepted — values outside [0, 1] are
+        rescaled via min-max normalization before blending. NaN maps to 0;
+        infinite values are clamped to the [0, 1] boundary. The two are
+        blended in Python and sent as a single image, so no frontend changes
+        are required.
+
+        The following `opts` are supported:
+
+        - `opts.alpha`:    heatmap blend strength (`float` in [0, 1]; default = 0.5)
+        - `opts.colormap`: matplotlib colormap name (`string`; default = `'jet'`)
+        - `opts.caption`:  caption below the image (`string`; optional)
+        - `opts.jpgquality`: JPEG quality (`number` in (0, 100]; default = PNG)
+        - `opts.normalize`: min-max scale the base image (`boolean`; default = `False`)
+        """
+        opts = {} if opts is None else dict(opts)
+        _title2str(opts)
+        _assert_opts(opts)
+
+        img = np.asarray(img)
+        if not np.issubdtype(img.dtype, np.floating) and img.dtype != np.uint8:
+            img = img.astype(np.float64)
+        if np.issubdtype(img.dtype, np.floating):
+            finite = img[np.isfinite(img)]
+            if finite.size > 0:
+                img_min, img_max = float(finite.min()), float(finite.max())
+            else:
+                img_min, img_max = 0.0, 0.0
+            if opts.get("normalize", False):
+                if img_max > img_min:
+                    img = (img - img_min) / (img_max - img_min) * 255.0
+                else:
+                    img = np.zeros_like(img)
+            elif img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
+                img = img * 255.0
+            elif img_min >= -1.0 - 1e-5 and img_max <= 1.0 + 1e-5:
+                img = (img + 1.0) / 2.0 * 255.0
+            img = np.nan_to_num(img, nan=0.0, posinf=255.0, neginf=0.0)
+            img = np.uint8(np.clip(img, 0, 255))
+
+        if img.ndim == 2:
+            H, W = img.shape
+            img_rgb = np.stack([img, img, img], axis=-1)
+        elif img.ndim == 3:
+            nchannels = img.shape[0]
+            H, W = img.shape[1], img.shape[2]
+            if nchannels == 1:
+                img_rgb = np.stack([img[0], img[0], img[0]], axis=-1)
+            elif nchannels == 3:
+                img_rgb = np.transpose(img, (1, 2, 0))
+            elif nchannels == 4:
+                img_rgb = np.transpose(img, (1, 2, 0))[:, :, :3]
+            else:
+                raise ValueError(
+                    "img must have 1, 3, or 4 channels; got {}".format(nchannels)
+                )
+        else:
+            raise ValueError(
+                "img must be 2D (H,W) or 3D (C,H,W); got {}D".format(img.ndim)
+            )
+
+        heatmap = np.asarray(heatmap, dtype=np.float32)
+        if heatmap.shape != (H, W):
+            raise ValueError(
+                "heatmap shape {} does not match image ({},{})".format(
+                    heatmap.shape, H, W
+                )
+            )
+        heatmap = np.nan_to_num(heatmap, nan=0.0, posinf=1.0, neginf=0.0)
+        h_min, h_max = float(heatmap.min()), float(heatmap.max())
+        if h_min < 0.0 or h_max > 1.0:
+            if h_max > h_min:
+                heatmap = (heatmap - h_min) / (h_max - h_min)
+            else:
+                heatmap = np.zeros_like(heatmap)
+
+        colormap = opts.get("colormap", "jet")
+        try:
+            import matplotlib.cm as _cm
+
+            cmap = getattr(_cm, colormap, _cm.jet)
+            heatmap_rgb = (cmap(heatmap)[:, :, :3] * 255).astype(np.uint8)
+        except ImportError:
+            # fallback: blue -> red gradient
+            heatmap_rgb = np.stack(
+                [heatmap, np.zeros_like(heatmap), 1.0 - heatmap], axis=-1
+            )
+            heatmap_rgb = (heatmap_rgb * 255).astype(np.uint8)
+
+        alpha = float(opts.get("alpha", 0.5))
+        if not 0.0 <= alpha <= 1.0:
+            raise ValueError("alpha must be in [0, 1]; got {}".format(alpha))
+        w = (heatmap * alpha)[:, :, np.newaxis].astype(np.float32)
+        blended = (
+            (
+                (1.0 - w) * img_rgb.astype(np.float32)
+                + w * heatmap_rgb.astype(np.float32)
+            )
+            .clip(0, 255)
+            .astype(np.uint8)
+        )
+
+        im = Image.fromarray(blended, mode="RGB")
+        buf = BytesIO()
+        image_type = "png"
+        imsave_args = {}
+        jpgquality = opts.get("jpgquality")
+        if jpgquality is not None:
+            image_type = "jpeg"
+            imsave_args["quality"] = jpgquality
+        im.save(buf, format=image_type.upper(), **imsave_args)
+        b64encoded = b64.b64encode(buf.getvalue()).decode("utf-8")
+
+        opts["width"] = opts.get("width", W)
+        opts["height"] = opts.get("height", H)
+
+        data = [
+            {
+                "content": {
+                    "src": "data:image/" + image_type + ";base64," + b64encoded,
+                    "caption": opts.get("caption"),
+                },
+                "type": "image",
+            }
+        ]
+        return self._send(
+            {"data": data, "win": win, "eid": env, "opts": opts},
+            endpoint="events",
+        )
+
+    @pytorch_wrap
+    def update_image_slider(self, win, index, env=None):
+        """
+        Set the displayed frame of an ``image_history`` window.
+
+        Args:
+            win (str): Window ID of an existing image_history pane.
+            index: Frame index to display (0-based). Accepts Python integers,
+                integral floats, and NumPy integer scalars or 0-d arrays.
+                Fractional or non-finite values raise an error. Clamped to
+                the valid range by the server.
+            env (str, optional): Environment ID. Defaults to ``self.env``.
+        """
+        assert win is not None, "update_image_slider requires a window id"
+        index = _coerce_image_slider_index(index)
+        return self._send(
+            {
+                "data": [{"type": "image_update_selected", "selected": index}],
+                "win": win,
+                "eid": env,
+            },
+            endpoint="update",
         )
 
     @pytorch_wrap
@@ -1380,6 +2327,7 @@ class Visdom(object):
         The following `opts` are supported:
 
         - `opts.sample_frequency`: sample frequency (`integer` > 0; default = 44100)
+        - `opts.caption`: caption to display below the player (`string`; optional)
         """
         opts = {} if opts is None else opts
         opts["sample_frequency"] = opts.get("sample_frequency", 44100)
@@ -1400,7 +2348,12 @@ class Visdom(object):
             audiofile = os.path.join(
                 tempfile.gettempdir(), "%s.wav" % next(tempfile._get_candidate_names())
             )
-            tensor = np.int16(tensor / np.max(np.abs(tensor)) * 32767)
+            max_val = np.max(np.abs(tensor))
+            if max_val == 0:
+                # When all zero tensor, skip normalisation to avoid division by zero
+                tensor = np.zeros_like(tensor, dtype=np.int16)
+            else:
+                tensor = np.int16(tensor / max_val * 32767)
             scipy.io.wavfile.write(audiofile, opts.get("sample_frequency"), tensor)
 
         extension = audiofile.split(".")[-1].lower()
@@ -1421,6 +2374,8 @@ class Visdom(object):
         )
         opts["height"] = 80
         opts["width"] = 330
+        if opts.get("caption"):
+            audiodata += "<p>%s</p>" % html.escape(str(opts["caption"]))
         return self.text(text=audiodata, win=win, env=env, opts=opts)
 
     def _encode(self, tensor, fps):
@@ -1481,6 +2436,7 @@ class Visdom(object):
         - `opts.fps`: FPS for the video (`integer` > 0; default = 25)
         - `opts.autoplay`: whether to autoplay the video when ready (`boolean`; default = `false`)
         - `opts.loop`: whether to loop the video (`boolean`; default = `false`)
+        - `opts.caption`: caption to display below the player (`string`; optional)
         """
         opts = {} if opts is None else opts
         opts["fps"] = opts.get("fps", 25)
@@ -1505,6 +2461,10 @@ class Visdom(object):
             ), "dimension argument should be LxHxWxC or LxCxHxW"
             if dim == "LxCxHxW":
                 tensor = tensor.transpose([0, 2, 3, 1])
+            if tensor.shape[-1] not in (1, 3):
+                raise ValueError(
+                    "video tensor's channel dim should be 1 (grayscale) or 3 (bgr)"
+                )
             bytestr, mimetype = self._encode(tensor, opts["fps"])
 
         flags = " ".join([k for k in ("autoplay", "loop") if opts[k]])
@@ -1520,6 +2480,8 @@ class Visdom(object):
             mimetype,
             base64.b64encode(bytestr).decode("utf-8"),
         )
+        if opts.get("caption"):
+            videodata += "<p>%s</p>" % html.escape(str(opts["caption"]))
         return self.text(text=videodata, win=win, env=env, opts=opts)
 
     def update_window_opts(self, win, opts, env=None):
@@ -1534,6 +2496,113 @@ class Visdom(object):
             "opts": opts,
         }
         return self._send(data_to_send, endpoint="update")
+
+    @pytorch_wrap
+    def learning_curve(
+        self,
+        metrics,
+        step=None,
+        win=None,
+        env=None,
+        opts=None,
+        update=None,
+    ):
+        """
+        This function draws machine-learning learning curves using named metrics.
+        It is a convenience wrapper around `line`, accepting a mapping from metric
+        names to scalar values or equal-length 1D series.
+
+        `metrics` should be a non-empty mapping, for example:
+
+            {"train_loss": [1.0, 0.8], "val_loss": [1.1, 0.9]}
+
+        `step` can be a scalar or a 1D series matching the metric length. When
+        `update='append'`, `step` must be specified to avoid repeatedly appending
+        points at the same x-coordinate.
+        """
+        assert hasattr(metrics, "items"), "metrics should be a mapping"
+        metric_items = list(metrics.items())
+        assert len(metric_items) > 0, "must provide at least one metric"
+
+        names = []
+        series = []
+        for metric_name, metric_values in metric_items:
+            name = str(metric_name)
+            values = np.asarray(_to_numpy(metric_values))
+            values = np.squeeze(values)
+            if values.ndim == 0:
+                values = values.reshape(1)
+            assert (
+                values.ndim == 1
+            ), "metric '{}' should be a scalar or one-dimensional".format(name)
+            assert values.shape[0] > 0, "metric '{}' should not be empty".format(name)
+            names.append(name)
+            series.append(values)
+
+        num_steps = series[0].shape[0]
+        for name, values in zip(names, series):
+            assert (
+                values.shape[0] == num_steps
+            ), "metric '{}' has length {}, expected {}".format(
+                name, values.shape[0], num_steps
+            )
+
+        if step is None:
+            assert update != "append", "must specify step when update='append'"
+            X = np.arange(num_steps)
+        else:
+            X = np.asarray(_to_numpy(step))
+            X = np.squeeze(X)
+            if X.ndim == 0:
+                X = X.reshape(1)
+            assert X.ndim == 1, "step should be a scalar or one-dimensional"
+            assert X.shape[0] == num_steps, "step has length {}, expected {}".format(
+                X.shape[0], num_steps
+            )
+
+        opts = {} if opts is None else dict(opts)
+        opts.setdefault("title", "Learning Curve")
+        opts.setdefault("xlabel", "step")
+        opts.setdefault("ylabel", "metric")
+        if opts.get("legend") is None:
+            legend = names
+            opts["legend"] = legend
+        else:
+            legend = opts["legend"]
+            assert isinstance(legend, (tuple, list)), "legend should be a list or tuple"
+            assert len(legend) >= len(
+                names
+            ), "legend should have at least as many entries as metrics"
+
+        if update is not None:
+            result = None
+            # Send one named update per metric so mapping order cannot swap traces.
+            for name, values in zip(names, series):
+                metric_opts = None
+                if update != "remove":
+                    metric_opts = dict(opts)
+                    metric_opts["legend"] = [name]
+                result = self.line(
+                    X=X,
+                    Y=values,
+                    win=win,
+                    env=env,
+                    opts=metric_opts,
+                    update=update,
+                    name=name,
+                )
+            return result
+
+        Y = np.column_stack(series)
+
+        return self.line(
+            X=X,
+            Y=Y,
+            win=win,
+            env=env,
+            opts=opts,
+            update=update,
+        )
 
     @pytorch_wrap
     def scatter(self, X, Y=None, win=None, env=None, opts=None, update=None, name=None):
@@ -1555,13 +2624,18 @@ class Visdom(object):
         The following `opts` are supported:
 
         - `opts.markersymbol`     : marker symbol (`string`; default = `'dot'`)
-        - `opts.markersize`       : marker size (`number`; default = `'10'`)
+        - `opts.markersize`       : marker size (`number` or `np.array`; default = `'10'`)
         - `opts.markercolor`      : marker color (`np.array`; default = `None`)
         - `opts.markerborderwidth`: marker border line width (`float`; default = 0.5)
         - `opts.dash`             : dash type (`np.array`; default = 'solid'`)
         - `opts.textlabels`       : text label for each point (`list`: default = `None`)
         - `opts.legend`           : `list` or `tuple` containing legend names
         """
+        if opts and opts.get("store_history") and update is not None:
+            raise ValueError(
+                "Cannot use store_history=True together with the update parameter"
+            )
+
         if update == "remove":
             assert win is not None
             assert name is not None, "A trace must be specified for deletion"
@@ -1577,19 +2651,18 @@ class Visdom(object):
             return self._send(data_to_send, endpoint="update")
 
         elif update is not None:
-            assert win is not None, "Must define a window to update"
+            if win is None:
+                raise ValueError("Must define a window to update")
 
             if update == "append":
-                if win is None:
-                    update = None
-                elif not self.offline:
+                if not self.offline:
                     exists = self.win_exists(win, env)
                     if exists is False:
                         update = None
             # case when X is 1 dimensional and corresponding values on y-axis
             # are passed in parameter Y
             if name:
-                assert len(name) >= 0, "name of trace should be non-empty string"
+                assert len(name) > 0, "name of trace should be non-empty string"
                 assert X.ndim == 1 or X.ndim == 2, (
                     "updating by name should" "have 1-dim or 2-dim X."
                 )
@@ -1603,21 +2676,21 @@ class Visdom(object):
 
         assert X.ndim == 2, "X should have two dims"
         assert X.shape[1] == 2 or X.shape[1] == 3, "X should have 2 or 3 cols"
+        assert X.shape[0] > 0, "X should have at least one point"
 
         if Y is not None:
             Y = np.ravel(Y)
             assert X.shape[0] == Y.shape[0], "sizes of X and Y should match"
-            assert np.equal(np.mod(Y, 1), 0).all(), "labels should be integers"
-            assert Y.min() >= 1, "labels are assumed to be at least 1"
-            labels = np.unique(Y.astype(int, copy=False))
+            Y, label_values, K = _normalize_labels(Y)
+            labels = np.unique(Y)
             assert (
                 len(labels) == 1 or name is None
             ), "name should not be specified with multiple labels or lines"
-            K = int(Y.max())  # largest label
         else:
             Y = np.ones(X.shape[0], dtype=int)
             labels = np.ones(1, dtype=int)
             K = 1  # largest label
+            label_values = None  # single unlabelled trace
 
         is3d = X.shape[1] == 3
 
@@ -1632,6 +2705,11 @@ class Visdom(object):
 
         if opts.get("markercolor") is not None:
             opts["markercolor"] = _markerColorCheck(opts["markercolor"], X, Y, K)
+
+        if opts.get("markersize") is not None and isinstance(
+            opts["markersize"], (list, tuple, np.ndarray)
+        ):
+            opts["markersize"] = _markerSizeCheck(opts["markersize"], X, Y)
 
         if opts.get("linecolor") is not None:
             opts["linecolor"] = _lineColorCheck(opts["linecolor"], K)
@@ -1656,6 +2734,11 @@ class Visdom(object):
         trace_opts = opts.get("traceopts", {"plotly": {}})["plotly"]
         dash = opts.get("dash")
         mc = opts.get("markercolor")
+        ms = (
+            opts.get("markersize")
+            if isinstance(opts.get("markersize"), np.ndarray)
+            else None
+        )
         lc = opts.get("linecolor")
 
         for k in labels:
@@ -1666,15 +2749,20 @@ class Visdom(object):
                 elif len(labels) == 1 and name is not None:
                     trace_name = name
                 else:
-                    trace_name = str(k)
+                    # For float-remapped labels show the original value;
+                    # for integer labels keep existing str(k) behaviour.
+                    if label_values is not None:
+                        trace_name = str(label_values[k - 1])
+                    else:
+                        trace_name = str(k)
                 use_gl = opts.get("webgl", False)
                 _data = {
-                    "x": nan2none(X.take(0, 1)[ind].tolist()),
-                    "y": nan2none(X.take(1, 1)[ind].tolist()),
+                    "x": X.take(0, 1)[ind].tolist(),
+                    "y": X.take(1, 1)[ind].tolist(),
                     "name": trace_name,
-                    "type": "scatter3d"
-                    if is3d
-                    else ("scattergl" if use_gl else "scatter"),
+                    "type": (
+                        "scatter3d" if is3d else ("scattergl" if use_gl else "scatter")
+                    ),
                     "mode": opts.get("mode"),
                     "text": L[ind].tolist() if L is not None else None,
                     "textposition": "right",
@@ -1683,7 +2771,11 @@ class Visdom(object):
                         "color": lc[k - 1] if lc is not None else None,
                     },
                     "marker": {
-                        "size": opts.get("markersize"),
+                        "size": (
+                            ms[ind].tolist()
+                            if ms is not None
+                            else opts.get("markersize")
+                        ),
                         "symbol": opts.get("markersymbol"),
                         "color": mc[k] if mc is not None else None,
                         "line": {
@@ -1701,18 +2793,42 @@ class Visdom(object):
                 if trace_name in trace_opts:
                     _data.update(trace_opts[trace_name])
 
-                data.append(_scrub_dict(_data))
+                data.append(_scrub_dict(_normalize_title_strings(_data)))
 
         if opts:
             for marker_prop in ["markercolor"]:
                 if marker_prop in opts:
                     del opts[marker_prop]
+            if ms is not None and "markersize" in opts:
+                del opts["markersize"]
             for line_prop in ["linecolor"]:
                 if line_prop in opts:
                     del opts[line_prop]
             for dash in ["dash"]:
                 if dash in opts:
                     del opts[dash]
+
+        if opts.get("store_history"):
+            layout = _opts2layout(opts, is3d)
+            data_to_send = {
+                "data": [
+                    {
+                        "type": "plot_history",
+                        "content": {
+                            "data": data,
+                            "layout": layout,
+                            "caption": opts.get("caption"),
+                        },
+                    }
+                ],
+                "win": win,
+                "eid": env,
+                "opts": opts,
+            }
+            endpoint = "events"
+            if win is not None and self.win_exists(win, env):
+                endpoint = "update"
+            return self._send(data_to_send, endpoint=endpoint)
 
         # Only send updates to the layout on the first plot, future updates
         # need to use `update_window_opts`
@@ -1732,13 +2848,28 @@ class Visdom(object):
         return self._send(data_to_send, endpoint=endpoint)
 
     @pytorch_wrap
-    def line(self, Y, X=None, win=None, env=None, opts=None, update=None, name=None):
+    def line(
+        self,
+        Y,
+        X=None,
+        win=None,
+        env=None,
+        opts=None,
+        update=None,
+        name=None,
+        Z=None,
+        is3d=False,
+    ):
         """
         This function draws a line plot. It takes in an `N` or `NxM` tensor
         `Y` that specifies the values of the `M` lines (that connect `N` points)
         to plot. It also takes an optional `X` tensor that specifies the
         corresponding x-axis values; `X` can be an `N` tensor (in which case all
         lines will share the same x-axis values) or have the same size as `Y`.
+
+        For 3D line plots, an optional `Z` tensor can be provided with the same
+        size as `Y` (or as an `N` tensor shared across lines). When `Z` is
+        provided, the plot is rendered as a 3D line plot.
 
         `update` can be used to efficiently update the data of an existing line.
         Use 'append' to append data, 'replace' to use new data, and 'remove' to
@@ -1750,10 +2881,10 @@ class Visdom(object):
 
         The following `opts` are supported:
 
-        - `opts.fillarea`    : fill area below line (`boolean`)
+        - `opts.fillarea`    : fill area below line (`boolean`; not supported for 3D)
         - `opts.markers`     : show markers (`boolean`; default = `false`)
         - `opts.markersymbol`: marker symbol (`string`; default = `'dot'`)
-        - `opts.markersize`  : marker size (`number`; default = `'10'`)
+        - `opts.markersize`  : marker size (`number` or `np.array`; default = `'10'`)
         - `opts.linecolor`   : line colors (`np.array`; default = None)
         - `opts.dash`        : line dash type (`np.array`; default = None)
         - `opts.legend`      : `list` or `tuple` containing legend names
@@ -1774,8 +2905,23 @@ class Visdom(object):
                 )
             else:
                 assert X is not None, "must specify x-values for line update"
+        if is3d:
+            assert Z is not None, (
+                "Z values are required for 3D line plots. "
+                "Pass Z when creating or updating a 3D line plot."
+            )
         assert Y.ndim == 1 or Y.ndim == 2, "Y should have 1 or 2 dim"
         assert Y.shape[-1] > 0, "must plot one line at least"
+
+        if Z is not None:
+            assert Z.ndim == 1 or Z.ndim == 2, "Z should have 1 or 2 dim"
+
+        if Y.ndim == 2 and Y.shape[1] == 1:
+            Y = Y.ravel()
+            if X is not None and X.ndim == 2 and X.shape[1] == 1:
+                X = X.ravel()
+            if Z is not None and Z.ndim == 2 and Z.shape[1] == 1:
+                Z = Z.ravel()
 
         if X is not None:
             assert X.ndim == 1 or X.ndim == 2, "X should have 1 or 2 dim"
@@ -1785,20 +2931,38 @@ class Visdom(object):
         if Y.ndim == 2 and X.ndim == 1:
             X = np.tile(X, (Y.shape[1], 1)).transpose()
 
+        if Z is not None and Y.ndim == 2 and Z.ndim == 1:
+            Z = np.tile(Z, (Y.shape[1], 1)).transpose()
+
         assert X.shape == Y.shape, "X and Y should be the same shape"
+        if Z is not None:
+            assert Z.shape == Y.shape, "Z and Y should be the same shape"
 
         opts = {} if opts is None else opts
         opts["markers"] = opts.get("markers", False)
         opts["fillarea"] = opts.get("fillarea", False)
+        if Z is not None and opts["fillarea"]:
+            warnings.warn(
+                "fillarea is not supported for 3D line plots",
+                UserWarning,
+                stacklevel=2,
+            )
+            opts["fillarea"] = False
         opts["mode"] = "lines+markers" if opts.get("markers") else "lines"
 
         _title2str(opts)
         _assert_opts(opts)
 
         if Y.ndim == 1:
-            linedata = np.column_stack((X, Y))
+            if Z is not None:
+                linedata = np.column_stack((X, Y, Z))
+            else:
+                linedata = np.column_stack((X, Y))
         else:
-            linedata = np.column_stack((X.ravel(order="F"), Y.ravel(order="F")))
+            cols = [X.ravel(order="F"), Y.ravel(order="F")]
+            if Z is not None:
+                cols.append(Z.ravel(order="F"))
+            linedata = np.column_stack(cols)
 
         labels = None
         if Y.ndim == 2:
@@ -1810,6 +2974,198 @@ class Visdom(object):
         )
 
     @pytorch_wrap
+    def roc_curve(
+        self,
+        y_true=None,
+        y_score=None,
+        fpr=None,
+        tpr=None,
+        pos_label=1,
+        win=None,
+        env=None,
+        opts=None,
+    ):
+        """
+        Draw a ROC curve for binary classification.
+
+        You can either provide raw labels/scores (`y_true`, `y_score`) or
+        precomputed points (`fpr`, `tpr`).
+
+        The following `opts` are supported:
+
+        - `opts.title`      : plot title (`string`; default includes ROC-AUC)
+        - `opts.legend`     : two legend labels for curve and baseline (`list`)
+        - `opts.xlabel`     : x-axis label (`string`; default = `False Positive Rate`)
+        - `opts.ylabel`     : y-axis label (`string`; default = `True Positive Rate`)
+        - `opts.layoutopts` : additional backend layout options (`dict`)
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        has_raw = y_true is not None or y_score is not None
+        has_points = fpr is not None or tpr is not None
+        if has_raw == has_points:
+            raise ValueError(
+                "provide exactly one input mode: (y_true, y_score) or (fpr, tpr)"
+            )
+
+        if has_raw:
+            if y_true is None or y_score is None:
+                raise ValueError("both y_true and y_score are required")
+            fpr, tpr = _compute_roc_curve(
+                y_true=np.ravel(y_true),
+                y_score=np.ravel(y_score),
+                pos_label=pos_label,
+            )
+        else:
+            if fpr is None or tpr is None:
+                raise ValueError("both fpr and tpr are required")
+            fpr, tpr = _coerce_curve_xy(fpr, tpr, "fpr", "tpr")
+
+        _validate_curve_range(fpr, "fpr")
+        _validate_curve_range(tpr, "tpr")
+
+        auc = _trapz_area(tpr, fpr)
+
+        opts = dict(opts)
+        opts["xlabel"] = opts.get("xlabel", "False Positive Rate")
+        opts["ylabel"] = opts.get("ylabel", "True Positive Rate")
+        opts["legend"] = _curve_legend(opts.get("legend"), ["ROC", "Chance"])
+        opts["title"] = opts.get("title", "ROC Curve (AUC={:.4f})".format(auc))
+
+        data = [
+            {
+                "x": fpr.tolist(),
+                "y": tpr.tolist(),
+                "name": opts["legend"][0],
+                "type": "scatter",
+                "mode": "lines",
+            },
+            {
+                "x": [0.0, 1.0],
+                "y": [0.0, 1.0],
+                "name": opts["legend"][1],
+                "type": "scatter",
+                "mode": "lines",
+                "line": {"dash": "dash"},
+            },
+        ]
+
+        return self._send(
+            {
+                "data": data,
+                "win": win,
+                "eid": env,
+                "layout": _opts2layout(opts),
+                "opts": opts,
+            }
+        )
+
+    @pytorch_wrap
+    def pr_curve(
+        self,
+        y_true=None,
+        y_score=None,
+        precision=None,
+        recall=None,
+        pos_label=1,
+        win=None,
+        env=None,
+        opts=None,
+    ):
+        """
+        Draw a precision-recall curve for binary classification.
+
+        You can either provide raw labels/scores (`y_true`, `y_score`) or
+        precomputed points (`precision`, `recall`).
+
+        The following `opts` are supported:
+
+        - `opts.title`      : plot title (`string`; default includes PR-AUC)
+        - `opts.legend`     : two legend labels for curve and baseline (`list`)
+        - `opts.xlabel`     : x-axis label (`string`; default = `Recall`)
+        - `opts.ylabel`     : y-axis label (`string`; default = `Precision`)
+        - `opts.layoutopts` : additional backend layout options (`dict`)
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        has_raw = y_true is not None or y_score is not None
+        has_points = precision is not None or recall is not None
+        if has_raw == has_points:
+            raise ValueError(
+                "provide exactly one input mode:"
+                " (y_true, y_score) or (precision, recall)"
+            )
+
+        if has_raw:
+            if y_true is None or y_score is None:
+                raise ValueError("both y_true and y_score are required")
+            precision, recall = _compute_pr_curve(
+                y_true=np.ravel(y_true),
+                y_score=np.ravel(y_score),
+                pos_label=pos_label,
+            )
+        else:
+            if precision is None or recall is None:
+                raise ValueError("both precision and recall are required")
+            recall, precision = _coerce_curve_xy(
+                recall, precision, "recall", "precision"
+            )
+
+        _validate_curve_range(recall, "recall")
+        _validate_curve_range(precision, "precision")
+
+        auc = _average_precision(precision, recall)
+
+        opts = dict(opts)
+        opts["xlabel"] = opts.get("xlabel", "Recall")
+        opts["ylabel"] = opts.get("ylabel", "Precision")
+        opts["legend"] = _curve_legend(opts.get("legend"), ["PR", "Baseline"])
+        opts["title"] = opts.get("title", "PR Curve (AUC={:.4f})".format(auc))
+
+        if has_raw:
+            y_true_arr = np.ravel(np.asarray(y_true))
+            positive_rate = float(np.mean(y_true_arr == pos_label))
+        else:
+            positive_rate = float(precision[0]) if float(recall[0]) == 0.0 else None
+
+        baseline = [positive_rate, positive_rate] if positive_rate is not None else None
+
+        data = [
+            {
+                "x": recall.tolist(),
+                "y": precision.tolist(),
+                "name": opts["legend"][0],
+                "type": "scatter",
+                "mode": "lines",
+            },
+        ]
+        if baseline is not None:
+            data.append(
+                {
+                    "x": [0.0, 1.0],
+                    "y": baseline,
+                    "name": opts["legend"][1],
+                    "type": "scatter",
+                    "mode": "lines",
+                    "line": {"dash": "dash"},
+                }
+            )
+
+        return self._send(
+            {
+                "data": data,
+                "win": win,
+                "eid": env,
+                "layout": _opts2layout(opts),
+                "opts": opts,
+            }
+        )
+
+    @pytorch_wrap
     def heatmap(self, X, win=None, env=None, update=None, opts=None):
         """
         This function draws a heatmap. It takes as input an `NxM` tensor `X`
@@ -1817,9 +3173,9 @@ class Visdom(object):
 
         `update` can be used to efficiently update the data of an existing plot
         saved to a window given by `win`. Use the value 'appendRow' to append
-        data row-wise, 'appendRow' to append data row-wise, 'appendColumn' to
-        append data column-wise, 'prependRow' to prepend data row-wise,
-        'prependColumn' to append data column-wise, 'replace' to use new data,
+        data row-wise, 'appendColumn' to append data column-wise,
+        'prependRow' to prepend data row-wise,
+        'prependColumn' to prepend data column-wise, 'replace' to use new data,
         and 'remove' to delete the plot. Using `update=appendRow` or
         `update='appendColumn'` will create a plot if it doesn't exist and
         append to the existing plot otherwise.
@@ -1878,7 +3234,7 @@ class Visdom(object):
 
         data = [
             {
-                "z": nan2none(X.tolist()),
+                "z": X.tolist(),
                 "x": opts.get("columnnames"),
                 "y": opts.get("rownames"),
                 "zmin": opts.get("xmin"),
@@ -1918,6 +3274,186 @@ class Visdom(object):
             data_to_send["updateDir"] = update
             endpoint = "update"
 
+        return self._send(data_to_send, endpoint=endpoint)
+
+    @pytorch_wrap
+    def confusion_matrix(
+        self,
+        y_true=None,
+        y_pred=None,
+        cm=None,
+        labels=None,
+        normalize=None,
+        update=None,
+        win=None,
+        env=None,
+        opts=None,
+    ):
+        """
+        Draw a confusion matrix for classification evaluation.
+
+        You can either provide raw label vectors (`y_true`, `y_pred`) or a
+        precomputed confusion matrix (`cm`).
+
+        The following `opts` are supported:
+
+        - `opts.title`       : plot title (`string`; default = `Confusion Matrix`)
+        - `opts.xlabel`      : x-axis label (`string`; default = `Predicted`)
+        - `opts.ylabel`      : y-axis label (`string`; default = `Actual`)
+        - `opts.colormap`    : Plotly colorscale (`string`; default = `Blues`)
+        - `opts.showCounts`  : show raw counts in cells (`bool`; default = `True`)
+        - `opts.showPercent` : show percentages in cells (`bool`; default = `True`
+                               when normalized, `False` otherwise)
+        - `opts.layoutopts`  : additional backend layout options (`dict`)
+
+        `update` may be used to modify an existing confusion matrix window
+        instead of creating a new one; it takes one of `None`, `'replace'`
+        (redraw the whole matrix in `win`) or `'remove'` (delete `win`).
+        """
+        opts = {} if opts is None else dict(opts)
+        _title2str(opts)
+        _assert_opts(opts)
+
+        valid_update = (None, "replace", "remove")
+        assert update in valid_update, "update must be one of: {}".format(valid_update)
+
+        if update == "remove":
+            assert win is not None, "win must be provided to remove a window"
+            return self._send(
+                {"data": [], "delete": True, "win": win, "eid": env},
+                endpoint="update",
+            )
+
+        has_raw = y_true is not None or y_pred is not None
+        has_matrix = cm is not None
+        if has_raw == has_matrix:
+            raise ValueError("provide exactly one input mode: (y_true, y_pred) or (cm)")
+
+        if has_raw:
+            if y_true is None or y_pred is None:
+                raise ValueError("both y_true and y_pred are required")
+            y_true = np.asarray(y_true).ravel()
+            y_pred = np.asarray(y_pred).ravel()
+            if labels is None:
+                labels = np.unique(np.concatenate([y_true, y_pred])).tolist()
+        else:
+            cm = np.asarray(cm)
+            if cm.ndim != 2 or cm.shape[0] != cm.shape[1]:
+                raise ValueError("cm must be a square 2D array")
+            if labels is None:
+                labels = list(range(cm.shape[0]))
+            if len(labels) != cm.shape[0]:
+                raise ValueError(
+                    "number of labels must match confusion matrix dimensions"
+                )
+
+        if len(set(labels)) != len(labels):
+            raise ValueError("labels must be unique")
+
+        if has_raw:
+            cm = _compute_confusion_matrix(y_true, y_pred, labels)
+
+        valid_normalize = (None, "true", "pred", "all")
+        if normalize not in valid_normalize:
+            raise ValueError("normalize must be one of: {}".format(valid_normalize))
+
+        raw_cm = cm.copy()
+        if normalize == "true":
+            row_sums = cm.sum(axis=1, keepdims=True).astype(float)
+            row_sums[row_sums == 0] = 1
+            cm = cm.astype(float) / row_sums
+        elif normalize == "pred":
+            col_sums = cm.sum(axis=0, keepdims=True).astype(float)
+            col_sums[col_sums == 0] = 1
+            cm = cm.astype(float) / col_sums
+        elif normalize == "all":
+            total = float(cm.sum())
+            if total == 0:
+                warnings.warn(
+                    "confusion matrix sum is zero; normalized values will be zero",
+                    UserWarning,
+                )
+                cm = cm.astype(float)
+            else:
+                cm = cm.astype(float) / total
+
+        str_labels = [str(lbl) for lbl in labels]
+
+        opts["xlabel"] = opts.get("xlabel", "Predicted")
+        opts["ylabel"] = opts.get("ylabel", "Actual")
+        opts["title"] = opts.get("title", "Confusion Matrix")
+        colormap = opts.get("colormap", "Blues")
+
+        show_counts = opts.get("showCounts", True)
+        show_percent = opts.get("showPercent", normalize is not None)
+
+        data = [
+            {
+                "z": cm.tolist(),
+                "x": str_labels,
+                "y": str_labels,
+                "type": "heatmap",
+                "colorscale": colormap,
+                "showscale": True,
+            }
+        ]
+
+        annotations = []
+        max_val = float(cm.max()) if cm.size > 0 else 1.0
+        threshold = max_val / 2.0
+        raw_total = float(raw_cm.sum())
+        raw_is_integer = np.issubdtype(raw_cm.dtype, np.integer)
+
+        for i in range(cm.shape[0]):
+            for j in range(cm.shape[1]):
+                cell_val = cm[i, j]
+                parts = []
+                if show_counts:
+                    raw_val = raw_cm[i, j]
+                    if raw_is_integer:
+                        parts.append(str(int(raw_val)))
+                    else:
+                        parts.append("{:.3g}".format(float(raw_val)))
+                if show_percent:
+                    if normalize is not None:
+                        parts.append("{:.1%}".format(cell_val))
+                    else:
+                        pct = raw_cm[i, j] / raw_total if raw_total > 0 else 0
+                        parts.append("{:.1%}".format(pct))
+                text = "<br>".join(parts) if parts else ""
+
+                font_color = "white" if cell_val > threshold else "black"
+
+                annotations.append(
+                    {
+                        "x": str_labels[j],
+                        "y": str_labels[i],
+                        "text": text,
+                        "showarrow": False,
+                        "font": {"color": font_color},
+                    }
+                )
+
+        layout = _opts2layout(opts)
+        layout["annotations"] = annotations
+        layout["xaxis"] = layout.get("xaxis", {})
+        layout["xaxis"]["title"] = {"text": opts["xlabel"]}
+        layout["xaxis"]["side"] = "bottom"
+        layout["yaxis"] = layout.get("yaxis", {})
+        layout["yaxis"]["title"] = {"text": opts["ylabel"]}
+        layout["yaxis"]["autorange"] = "reversed"
+
+        data_to_send = {
+            "data": data,
+            "win": win,
+            "eid": env,
+            "layout": layout,
+            "opts": opts,
+        }
+        endpoint = "events"
+        if update:
+            data_to_send["updateDir"] = update
+            endpoint = "update"
         return self._send(data_to_send, endpoint=endpoint)
 
     @pytorch_wrap
@@ -2011,11 +3547,65 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
-        minx, maxx = X.min(), X.max()
+        minx, maxx = np.nanmin(X), np.nanmax(X)
         bins = np.histogram(X, bins=opts["numbins"], range=(minx, maxx))[0]
         linrange = np.linspace(minx, maxx, opts["numbins"])
 
         return self.bar(X=bins, Y=linrange, opts=opts, win=win, env=env)
+
+    @pytorch_wrap
+    def histogram2d(self, X, Y, win=None, env=None, opts=None):
+        """
+        This function draws a 2D histogram (density map) of paired data. It
+        takes two `N` tensors `X` and `Y` of equal length that hold the
+        coordinates of `N` points; the points are binned into a 2D grid and
+        each cell is colored by the number of points that fall in it.
+
+        The following plot-specific `opts` are supported:
+
+        - `opts.xnumbins`: number of bins along the x-axis
+                           (`number`; default lets Plotly choose)
+        - `opts.ynumbins`: number of bins along the y-axis
+                           (`number`; default lets Plotly choose)
+        - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
+        - `opts.histnorm`: normalization of the bin counts, one of `''`,
+                           `'percent'`, `'probability'`, `'density'`, or
+                           `'probability density'`
+        """
+
+        X = np.squeeze(np.asarray(X))
+        Y = np.squeeze(np.asarray(Y))
+        assert X.ndim == 1 and Y.ndim == 1, "X and Y should be one-dimensional"
+        assert len(X) == len(Y), "X and Y should have the same length"
+
+        opts = {} if opts is None else opts
+        opts["colormap"] = opts.get("colormap", "Viridis")
+        _title2str(opts)
+        _assert_opts(opts)
+
+        trace = {
+            "x": X.tolist(),
+            "y": Y.tolist(),
+            "type": "histogram2d",
+            "colorscale": opts.get("colormap"),
+        }
+        if opts.get("xnumbins") is not None:
+            trace["nbinsx"] = opts["xnumbins"]
+        if opts.get("ynumbins") is not None:
+            trace["nbinsy"] = opts["ynumbins"]
+        if opts.get("histnorm") is not None:
+            trace["histnorm"] = opts["histnorm"]
+
+        return self._send(
+            {
+                "data": [trace],
+                "win": win,
+                "eid": env,
+                "layout": _opts2layout(opts),
+                "opts": opts,
+            },
+            endpoint="events",
+        )
 
     @pytorch_wrap
     def boxplot(self, X, win=None, env=None, opts=None):
@@ -2040,7 +3630,7 @@ class Visdom(object):
         if opts.get("legend") is not None:
             assert (
                 len(opts["legend"]) == X.shape[1]
-            ), "number of legened labels must match number of columns"
+            ), "number of legend labels must match number of columns"
 
         data = []
         for k in range(X.shape[1]):
@@ -2083,8 +3673,8 @@ class Visdom(object):
         assert X.ndim == 2, "X should be two-dimensional"
 
         opts = {} if opts is None else opts
-        opts["xmin"] = float(opts.get("xmin", X.min()))
-        opts["xmax"] = float(opts.get("xmax", X.max()))
+        opts["xmin"] = float(opts.get("xmin", np.nanmin(X)))
+        opts["xmax"] = float(opts.get("xmax", np.nanmax(X)))
         opts["colormap"] = opts.get("colormap", "Viridis")
         _title2str(opts)
         _assert_opts(opts)
@@ -2179,11 +3769,39 @@ class Visdom(object):
         # normalize vectors to unit length:
         if opts.get("normalize", False):
             assert (
-                isinstance(opts["normalize"], numbers.Number) and opts["normalize"] > 0
-            ), "opts.normalize should be positive number"
-            magnitude = np.sqrt(np.add(np.multiply(X, X), np.multiply(Y, Y))).max()
-            X = X / (magnitude / opts["normalize"])
-            Y = Y / (magnitude / opts["normalize"])
+                isinstance(opts["normalize"], numbers.Number)
+                and opts["normalize"] > 0
+                and np.isfinite(opts["normalize"])
+            ), "opts.normalize should be a finite positive number"
+            magnitude = np.sqrt(np.add(np.multiply(X, X), np.multiply(Y, Y)))
+            finite_mask = np.isfinite(magnitude)
+
+            if not np.any(finite_mask):
+                warnings.warn(
+                    "Skipping quiver normalization: all magnitudes are non-finite (NaN or Inf)",
+                    RuntimeWarning,
+                )
+            else:
+                max_mag = magnitude[finite_mask].max()
+
+                if max_mag <= 0:
+                    warnings.warn(
+                        "Skipping quiver normalization: max magnitude is zero",
+                        RuntimeWarning,
+                    )
+                else:
+                    scale = max_mag / opts["normalize"]
+
+                    if scale <= 0 or not np.isfinite(scale):
+                        warnings.warn(
+                            "Skipping quiver normalization: invalid scale computed",
+                            RuntimeWarning,
+                        )
+                    else:
+                        X = np.where(np.isfinite(X), X, np.nan)
+                        Y = np.where(np.isfinite(Y), Y, np.nan)
+                        X = X / scale
+                        Y = Y / scale
 
         # interleave X and Y with copies / NaNs to get lines:
         nans = np.full((X.shape[0], X.shape[1]), np.nan).flatten()
@@ -2300,7 +3918,7 @@ class Visdom(object):
             assert values.ndim == 1, "values should be one-dimensional"
             assert len(parents.tolist()) == len(
                 values.tolist()
-            ), "length of values should be equal to lenght of labels and parents"
+            ), "length of values should be equal to length of labels and parents"
 
             data_dict[0]["values"] = values.tolist()
 
@@ -2401,6 +4019,109 @@ class Visdom(object):
         )
 
     @pytorch_wrap
+    def sankey(self, source, target, value, labels=None, win=None, env=None, opts=None):
+        """
+        This function draws a Sankey (flow) diagram. Flows are defined by three
+        equal-length arrays:
+
+        - `source`: source node index of each link (`N` array of ints)
+        - `target`: target node index of each link (`N` array of ints)
+        - `value` : magnitude of each link (`N` array of non-negative numbers)
+
+        `labels` is an optional list of node names. If omitted, nodes are
+        referenced by their index alone.
+
+        The following `opts` are supported:
+
+        - `opts.labels`     : list of node labels (alternative to the `labels` arg)
+        - `opts.pad`        : node padding in px (`number`; default = 15)
+        - `opts.thickness`  : node thickness in px (`number`; default = 20)
+        - `opts.orientation`: `'h'` (default) or `'v'`
+        - `opts.nodecolor`  : node color(s) (`string` or list of strings)
+        - `opts.linkcolor`  : link color(s) (`string` or list of strings)
+        - `opts.layoutopts` : `dict` of additional backend layout options, e.g.
+          `layoutopts = {'plotly': {'font': {'size': 10}}}`.
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        source = np.asarray(source)
+        target = np.asarray(target)
+        value = np.asarray(value)
+        for name, arr in (("source", source), ("target", target), ("value", value)):
+            assert arr.ndim <= 1, "sankey {} must be 1-D, got shape {}".format(
+                name, arr.shape
+            )
+        source = source.ravel()
+        target = target.ravel()
+        value = value.ravel()
+        assert (
+            len(source) == len(target) == len(value)
+        ), "source, target and value must have the same length"
+        assert (source >= 0).all(), "sankey source indices must be non-negative"
+        assert (target >= 0).all(), "sankey target indices must be non-negative"
+        assert (
+            source == source.astype(int)
+        ).all(), "sankey source indices must be integers"
+        assert (
+            target == target.astype(int)
+        ).all(), "sankey target indices must be integers"
+        assert (value >= 0).all(), "sankey link values must be non-negative"
+
+        labels = labels if labels is not None else opts.get("labels")
+        if labels is not None and len(source) > 0:
+            num_nodes = max(int(source.max()), int(target.max())) + 1
+            assert len(labels) >= num_nodes, (
+                "labels must cover every referenced node "
+                "({} labels for {} nodes)".format(len(labels), num_nodes)
+            )
+
+        pad = opts.get("pad", 15)
+        thickness = opts.get("thickness", 20)
+        orientation = opts.get("orientation", "h")
+        assert (
+            isinstance(pad, numbers.Number) and pad >= 0
+        ), "opts.pad must be a non-negative number"
+        assert (
+            isinstance(thickness, numbers.Number) and thickness > 0
+        ), "opts.thickness must be a positive number"
+        assert orientation in ("h", "v"), "opts.orientation must be 'h' or 'v'"
+
+        node = {"pad": pad, "thickness": thickness}
+        if labels is not None:
+            node["label"] = list(labels)
+        if opts.get("nodecolor") is not None:
+            node["color"] = opts.get("nodecolor")
+
+        link = {
+            "source": source.astype(int).tolist(),
+            "target": target.astype(int).tolist(),
+            "value": value.tolist(),
+        }
+        if opts.get("linkcolor") is not None:
+            link["color"] = opts.get("linkcolor")
+
+        data = [
+            {
+                "type": "sankey",
+                "orientation": orientation,
+                "node": node,
+                "link": link,
+            }
+        ]
+
+        return self._send(
+            {
+                "data": data,
+                "win": win,
+                "eid": env,
+                "layout": _opts2layout(opts),
+                "opts": opts,
+            }
+        )
+
+    @pytorch_wrap
     def dual_axis_lines(self, X=None, Y1=None, Y2=None, opts=None, win=None, env=None):
         """
         This function will create a line plot using plotly with different Y-Axis.
@@ -2429,12 +4150,12 @@ class Visdom(object):
         - `opts.right` :  Set the right margin of the plot
         - `opts.left` :  Set the left margin of the plot
         """
-        X = np.asarray(X)
-        Y1 = np.asarray(Y1)
-        Y2 = np.asarray(Y2)
         assert X is not None, "X Cannot be None"
         assert Y1 is not None, "Y1 Cannot be None"
         assert Y2 is not None, "Y2 Cannot be None"
+        X = np.asarray(X)
+        Y1 = np.asarray(Y1)
+        Y2 = np.asarray(Y2)
         assert X.shape == Y1.shape, "values of X and Y1 are not in proper shape"
         assert X.shape == Y2.shape, "values of X and Y2 are not in proper shape"
         if opts is None:
@@ -2462,16 +4183,18 @@ class Visdom(object):
         data = [trace1, trace2]
 
         layout = {
-            "title": opts.get("title", "Example Double Y axis"),
+            "title": {"text": opts.get("title", "Example Double Y axis")},
             "yaxis": {
-                "title": trace1["name"],
-                "titlefont": {"color": opts.get("color_title_y1", "black")},
+                "title": {
+                    "text": trace1["name"],
+                    "font": {"color": opts.get("color_title_y1", "black")},
+                },
                 "tickfont": {"color": opts.get("color_tick_y1", "black")},
             },
             "yaxis2": {
-                "title": trace2["name"],
-                "titlefont": {
-                    "color": opts.get("color_title_y2", "rgb(148, 103, 0189)")
+                "title": {
+                    "text": trace2["name"],
+                    "font": {"color": opts.get("color_title_y2", "rgb(148, 103, 189)")},
                 },
                 "tickfont": {"color": opts.get("color_tick_y2", "rgb(148, 103, 189)")},
                 "overlaying": "y",
@@ -2502,7 +4225,7 @@ class Visdom(object):
 
     @pytorch_wrap
     def graph(
-        self, edges, edgeLabels=None, nodeLabels=None, opts=dict(), env=None, win=None
+        self, edges, edgeLabels=None, nodeLabels=None, opts=None, env=None, win=None
     ):
         """
         This function draws interactive network graphs. It takes list of edges as one of the arguments.
@@ -2520,13 +4243,14 @@ class Visdom(object):
                 * `directed` : directed (True) or undirected (False) graph; False by default
                 * `showVertexLabels` : boolean , if True displays vertex labels else hides the label; "True" by default
                 * `showEdgeLabels` :  boolean , if True displays edge labels else hides the label; "False" by default
-                * `scheme` : {"same", "different"} nodes with "same" or "diffent" colors; "same" by default
+                * `scheme` : {"same", "different"} nodes with "same" or "different" colors; "same" by default
                 * `height` : height of the Pane
                 * `width` : width of the Pane
         """
+        opts = {} if opts is None else opts
         try:
             import networkx as nx
-        except:
+        except ImportError:
             raise RuntimeError("networkx must be installed to plot Graph figures")
 
         G = nx.Graph()
@@ -2591,4 +4315,373 @@ class Visdom(object):
 
         return self._send(
             {"data": data, "win": win, "eid": env, "opts": opts}, endpoint="events"
+        )
+
+    @pytorch_wrap
+    def parallel_coordinates(self, X, Y=None, win=None, env=None, opts=None):
+        """
+        This function draws a parallel coordinates plot for comparing multiple
+        experiments across different parameters. Each row in the `NxM` matrix
+        `X` represents one experiment and each column represents a dimension
+        (e.g., a hyperparameter or metric).
+
+        An optional `N`-length vector `Y` supplies per-experiment color values
+        (e.g., accuracy or loss) so that the lines are shaded according to
+        a continuous colorscale.
+
+        The following `opts` are supported:
+
+        - `opts.dimensions`:       `list` of dimension label strings (length M)
+        - `opts.colormap`:         colorscale name (default `'Electric'`)
+        - `opts.reversescale`:     reverse the colorscale direction (`bool`)
+        - `opts.ranges`:           `dict` mapping dimension index to `[min, max]`
+        - `opts.constraintranges`: `dict` mapping dimension index to `[min, max]`
+                                   preset filter ranges
+        - `opts.tickvals`:         `dict` mapping dimension index to a `list` of
+                                   tick positions
+        - `opts.ticktext`:         `dict` mapping dimension index to a `list` of
+                                   tick labels (requires matching `tickvals`)
+        - `opts.max_experiments`:  `int`, cap to top N experiments sorted by `Y`
+                                   descending (requires `Y`)
+        - `opts.title`:            plot title
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        X = np.asarray(X, dtype=float)
+        assert X.ndim == 2, "X must be a 2D matrix (N experiments x M dimensions)"
+        N, M = X.shape
+        assert N >= 1, "X must have at least 1 experiment (row)"
+        assert M >= 2, "X must have at least 2 dimensions (columns)"
+
+        if Y is not None:
+            Y = np.squeeze(np.asarray(Y, dtype=float))
+            assert Y.ndim == 1, "Y must be a 1D vector"
+            assert (
+                len(Y) == N
+            ), "Length of Y (%d) must match number of rows in X (%d)" % (len(Y), N)
+
+        max_exp = opts.get("max_experiments")
+        if max_exp is not None:
+            assert Y is not None, "opts.max_experiments requires Y to be provided"
+            if N > max_exp:
+                top_idx = np.argsort(Y)[::-1][:max_exp]
+                X = X[top_idx]
+                Y = Y[top_idx]
+                N = len(Y)
+
+        dim_labels = opts.get("dimensions")
+        if dim_labels is None:
+            dim_labels = ["Dim %d" % (i + 1) for i in range(M)]
+        assert isinstance(dim_labels, (list, tuple)), (
+            "opts.dimensions should be a list/tuple of length %d" % M
+        )
+        assert (
+            len(dim_labels) == M
+        ), "Length of opts.dimensions (%d) must match number of columns in X (%d)" % (
+            len(dim_labels),
+            M,
+        )
+
+        opt_ranges = opts.get("ranges") or {}
+        opt_constraints = opts.get("constraintranges") or {}
+        opt_tickvals = opts.get("tickvals") or {}
+        opt_ticktext = opts.get("ticktext") or {}
+
+        dimensions = []
+        for i in range(M):
+            col = X[:, i]
+            col_min, col_max = float(np.nanmin(col)), float(np.nanmax(col))
+            pad = (col_max - col_min) * 0.05 if col_max > col_min else 0.5
+            dim = {
+                "values": col.tolist(),
+                "label": str(dim_labels[i]),
+                "range": opt_ranges.get(i, [col_min - pad, col_max + pad]),
+            }
+            if i in opt_constraints:
+                dim["constraintrange"] = opt_constraints[i]
+            if i in opt_tickvals:
+                dim["tickvals"] = opt_tickvals[i]
+            if i in opt_ticktext:
+                assert (
+                    i in opt_tickvals
+                ), "opts.ticktext[%d] requires matching opts.tickvals[%d]" % (i, i)
+                assert len(opt_ticktext[i]) == len(opt_tickvals[i]), (
+                    "opts.ticktext[%d] and opts.tickvals[%d] must have the same length"
+                    % (i, i)
+                )
+                dim["ticktext"] = opt_ticktext[i]
+            dimensions.append(dim)
+
+        line_config = {}
+        if Y is not None:
+            line_config = {
+                "color": Y.tolist(),
+                "colorscale": opts.get("colormap", "Electric"),
+                "showscale": True,
+                "cmin": float(np.nanmin(Y)),
+                "cmax": float(np.nanmax(Y)),
+            }
+            if opts.get("reversescale"):
+                line_config["reversescale"] = True
+
+        title = opts.get("title")
+        trace = {
+            "type": "parcoords",
+            "dimensions": dimensions,
+            "line": line_config if line_config else None,
+            "labelfont": {"size": 13},
+            "tickfont": {"size": 11},
+            "rangefont": {"size": 11},
+        }
+        if title:
+            trace["domain"] = {"y": [0, 0.85]}
+
+        data = [_scrub_dict(trace)]
+
+        layout = _opts2layout(opts)
+        layout.setdefault("paper_bgcolor", "white")
+        layout.setdefault("plot_bgcolor", "white")
+        if title:
+            layout["title"] = {
+                "text": str(title),
+                "x": 0.5,
+                "xanchor": "center",
+            }
+
+        has_colorbar = bool(line_config)
+        if "width" not in opts:
+            colorbar_room = 100 if has_colorbar else 0
+            opts["width"] = max(600, M * 140 + colorbar_room)
+        if "height" not in opts:
+            opts["height"] = 450
+
+        return self._send(
+            {
+                "data": data,
+                "win": win,
+                "eid": env,
+                "layout": _scrub_dict(layout),
+                "opts": opts,
+            }
+        )
+
+    @pytorch_wrap
+    def violin(self, X, win=None, env=None, opts=None):
+        """
+        This function draws violin plots of the specified data. It takes
+        input `N` or `NxM` tensor `X` that specifies the `N` data values
+        of which to construct the `M` violin plots.
+
+        The following plot-specific `opts` are currently supported:
+
+        - `opts.legend` : labels for each of the columns in `X`
+        - `opts.showbox` : overlay a mini box plot inside the violin
+                                  (`bool` and default = `True`)
+        - `opts.showmeanline` : overlay the mean line (`bool` and default = `True`)
+        - `opts.points` : which raw points to show alongside the violin
+                                  One of `all`, `outliers`,
+                                  `suspectedoutliers`, or `False`
+                                  (default = `False`)
+        - `opts.jitter` : amount of jitter applied to displayed points
+                                  (`float` in `[0, 1]`, default = `0.3`)
+        - `opts.orientation` : `v` for vertical and `h` for horizontal
+                                  violins
+        - `opts.bandwidth` : bandwidth of the kernel density estimate
+                                  `None` lets Plotly choose automatically
+        - `opts.side` : which side of the centre line to draw.
+                                  One of `both` , `positive`,
+                                  or `negative`
+        """
+
+        X = np.asarray(X)
+        if X.ndim > 2:
+            X = np.squeeze(X)
+        assert X.ndim == 1 or X.ndim == 2, "X should be one or two-dimensional"
+        if X.ndim == 1:
+            X = X[:, None]
+
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        if opts.get("legend") is not None:
+            assert (
+                len(opts["legend"]) == X.shape[1]
+            ), "number of legend labels must match number of columns in X"
+
+        showbox = opts.get("showbox", True)
+        showmeanline = opts.get("showmeanline", True)
+        points = opts.get("points", False)
+        jitter = opts.get("jitter", 0.3)
+        orientation = opts.get("orientation", "v")
+        bandwidth = opts.get("bandwidth", None)
+        side = opts.get("side", "both")
+
+        assert orientation in (
+            "v",
+            "h",
+        ), "opts.orientation must be 'v' (vertical) or 'h' (horizontal)"
+        assert side in (
+            "both",
+            "positive",
+            "negative",
+        ), "opts.side must be one of 'both', 'positive', or 'negative'"
+        assert points in ("all", "outliers", "suspectedoutliers", False), (
+            "opts.points must be one of 'all', 'outliers', "
+            "'suspectedoutliers', or False"
+        )
+        if jitter is not None:
+            assert (
+                isnum(jitter) and 0 <= jitter <= 1
+            ), "opts.jitter must be a float between 0 and 1"
+        if bandwidth is not None:
+            assert (
+                isnum(bandwidth) and bandwidth > 0
+            ), "opts.bandwidth must be a positive number"
+
+        data = []
+        for k in range(X.shape[1]):
+            col_data = X.take(k, 1).tolist()
+            label = opts["legend"][k] if opts.get("legend") else "column " + str(k)
+
+            trace = {
+                "type": "violin",
+                "name": label,
+                "box": {"visible": showbox},
+                "meanline": {"visible": showmeanline},
+                "points": points,
+                "side": side,
+            }
+            if jitter is not None:
+                trace["jitter"] = jitter
+
+            if orientation == "v":
+                trace["y"] = col_data
+            else:
+                trace["x"] = col_data
+                trace["orientation"] = "h"
+
+            if bandwidth is not None:
+                trace["bandwidth"] = bandwidth
+
+            if opts.get("opacity") is not None:
+                trace["opacity"] = opts["opacity"]
+
+            data.append(trace)
+
+        return self._send(
+            {
+                "data": data,
+                "win": win,
+                "eid": env,
+                "layout": _opts2layout(opts),
+                "opts": opts,
+            }
+        )
+
+    def html_table(self, data, headers=None, win=None, env=None, opts=None):
+        """
+        This function renders structured data as a styled HTML table.
+
+        - `data`: a 2D `list`/`tuple` of row data, a 2D numpy array, or
+           a list of `dict`s (in which case `headers` is derived from
+           the first dict's keys unless explicitly given). In case of
+           an empty list, a table with only headers will be rendered.
+        - `headers`: a `list`/`tuple`/1D numpy array of column header
+           names (`string` or any type convertible to `string`).
+           Required unless `data` is a list of dicts.
+
+        The following `opts` are supported:
+
+        - `opts.title`: title for the window (`string`; optional)
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        headers, data = _normalize_table_data(data, headers)
+
+        style = """
+            <style>
+            .visdom-table {
+                font-family: monospace;
+                border-collapse: collapse;
+                width: 100%;
+            }
+            .visdom-table th {
+                background-color: #2196F3;
+                color: white;
+                padding: 8px 12px;
+                text-align: left;
+            }
+            .visdom-table td {
+                padding: 6px 12px;
+                border-bottom: 1px solid #ddd;
+            }
+            .visdom-table tr:nth-child(even) td {
+                background-color: #f2f2f2;
+            }
+            .visdom-table tr:nth-child(odd) td {
+                background-color: #ffffff;
+            }
+            .visdom-table tr:hover td {
+                background-color: #ddeeff;
+            }
+            </style>
+        """
+
+        header_html = "".join("<th>%s</th>" % html.escape(str(h)) for h in headers)
+        rows_html = "".join(
+            "<tr>%s</tr>"
+            % "".join("<td>%s</td>" % html.escape(str(cell)) for cell in row)
+            for row in data
+        )
+
+        table_html = (
+            "%s<table class='visdom-table'>"
+            "<thead><tr>%s</tr></thead>"
+            "<tbody>%s</tbody>"
+            "</table>"
+        ) % (style, header_html, rows_html)
+
+        return self.text(text=table_html, win=win, env=env, opts=opts)
+
+    def table(self, data, headers=None, win=None, env=None, opts=None):
+        """
+        Renders a native, structured, editable table pane.
+
+        - `data`: a 2D list of rows (list of lists/tuples), OR a list of
+           dicts (in which case `headers` is derived from the first
+           dict's keys unless explicitly given).
+        - `headers`: list of column names. Required if `data` rows are
+           plain lists/tuples; optional (and used to reorder/filter
+           columns) if `data` is a list of dicts.
+
+        The following `opts` are supported:
+
+        - `opts.title`: title for the window (`string`; optional)
+        - `opts.editable`: whether cells/rows/columns can be edited by
+           anyone viewing the pane (`bool`; default `True`). Set to
+           `False` for a read-only display table (e.g. a live
+           leaderboard).
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+        opts.setdefault("editable", True)
+
+        headers, rows = _normalize_table_data(data, headers)
+
+        content = {"headers": headers, "rows": rows}
+
+        return self._send(
+            {
+                "data": [{"content": content, "type": "table"}],
+                "win": win,
+                "eid": env,
+                "opts": opts,
+            },
+            endpoint="events",
         )
