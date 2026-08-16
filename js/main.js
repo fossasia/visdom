@@ -7,7 +7,7 @@
  *
  */
 
-/* global ACTIVE_ENV $ Bin */
+/* global ACTIVE_ENV Bin */
 
 'use strict';
 
@@ -869,9 +869,6 @@ const App = () => {
         sendEnvQuery(['main'], showAllEnvWindows);
       }
     }
-
-    // Bootstrap tooltips need some encouragement
-    $('#clear-button').attr('data-original-title', 'Clear Current Environment');
   }, [mounted.current]);
 
   // define what mounted means for this app:
@@ -1184,14 +1181,3 @@ function load() {
 }
 
 document.addEventListener('DOMContentLoaded', load);
-
-$(document).ready(function () {
-  $('[data-toggle="tooltip"]').tooltip({
-    container: 'body',
-    delay: {
-      show: 600,
-      hide: 100,
-    },
-    trigger: 'hover',
-  });
-});
