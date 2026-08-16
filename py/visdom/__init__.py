@@ -3928,7 +3928,7 @@ class Visdom(object):
         sector's label or name. Values from the `parents` array define the
         hierarchical structure, indicating which parent sector a sector
         belongs to -- note that at least one entry in `parents` must be an
-        empty string `""`, marking the root of the hierarchy. The labels`
+        empty string `""`, marking the root of the hierarchy. The `labels`
         and `parents` arrays must be of equal length. There is an optional
         third array called `values`, which is used to display a numerical
         value when hovering over a sector. If provided, the `values` array
