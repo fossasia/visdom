@@ -10,6 +10,7 @@
 const { spawn, spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const { expect } = require('@playwright/test');
 
 function getPythonExecutable() {
   const isWin = process.platform === 'win32';
@@ -104,8 +105,11 @@ async function expandAllEnvGroups(page) {
   let count = await closedGroups.count();
   let attempts = 0;
   while (count > 0 && attempts < 50) {
-    await closedGroups.first().click({ force: true });
-    await page.waitForTimeout(150);
+    const countBeforeClick = count;
+    await expect
+      .poll(() => closedGroups.count(), { timeout: 1000 })
+      .not.toBe(countBeforeClick)
+      .catch(() => {});
     count = await closedGroups.count();
     attempts++;
   }
@@ -124,7 +128,9 @@ async function closeEnvDropdown(page) {
       await dropdown.waitFor({ state: 'hidden', timeout: 1000 });
     } catch (e) {
       await page.keyboard.press('Escape');
-      await dropdown.waitFor({ state: 'hidden', timeout: 2000 }).catch(() => {});
+      await dropdown
+        .waitFor({ state: 'hidden', timeout: 2000 })
+        .catch(() => {});
     }
   }
 }

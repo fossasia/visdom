@@ -1,4 +1,4 @@
-/**
+=/**
  * Copyright 2017-present, The Visdom Authors
  * All rights reserved.
  *
@@ -61,7 +61,6 @@ test.describe('Test Setup', () => {
       .getByText('main')
       .first();
     await mainSelection.hover();
-    await page.waitForTimeout(100);
 
     const removeBtn = page
       .locator('.rc-tree-select .rc-tree-select-selection-item-remove')
