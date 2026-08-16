@@ -469,8 +469,8 @@ def _assert_opts(opts):
 
 def _assert_sunburst_opts(opts):
     """
-    Validation for opts that are specific for sunburst charts. 
-    Kept separate from `_assert_opts` on purpose --`_assert_opts` 
+    Validation for opts that are specific for sunburst charts.
+    Kept separate from `_assert_opts` on purpose --`_assert_opts`
     is called by every plot type, and these keys (especially the
     generic-sounding `size`) are not reserved names elsewhere, so
     validating them globally would risk breaking unrelated plot calls that
@@ -480,18 +480,18 @@ def _assert_sunburst_opts(opts):
         fs = opts.get("font_size")
         fs = fs if fs is not None else opts.get("size")
         assert isnum(fs) and fs > 0, "font_size should be a positive number"
- 
+
     if opts.get("line_width") is not None or opts.get("marker_width") is not None:
         lw = opts.get("line_width")
         lw = lw if lw is not None else opts.get("marker_width")
         assert isnum(lw) and lw >= 0, "line_width should be a nonnegative number"
- 
+
     if opts.get("font_color") is not None:
         assert isstr(opts.get("font_color")), "font_color should be a string"
- 
+
     if opts.get("maxdepth") is not None:
         assert isnum(opts.get("maxdepth")), "maxdepth should be a number"
- 
+
     if opts.get("branchvalues") is not None:
         assert opts.get("branchvalues") in (
             "total",
@@ -3928,17 +3928,17 @@ class Visdom(object):
         sector's label or name. Values from the `parents` array define the
         hierarchical structure, indicating which parent sector a sector
         belongs to -- note that at least one entry in `parents` must be an
-        empty string `""`, marking the root of the hierarchy. The labels` 
-        and `parents` arrays must be of equal length. There is an optional 
-        third array called `values`, which is used to display a numerical 
-        value when hovering over a sector. If provided, the `values` array 
+        empty string `""`, marking the root of the hierarchy. The labels`
+        and `parents` arrays must be of equal length. There is an optional
+        third array called `values`, which is used to display a numerical
+        value when hovering over a sector. If provided, the `values` array
         must be the same length as `labels` and `parents`.
- 
+
         Examples: `vis.sunburst(labels, parents, opts)` or
         `vis.sunburst(labels, parents, values, opts)`
- 
+
         The following `opts` are supported:
- 
+
         - `opts.font_size`    : define font size of label (`int`)
         - `opts.font_color`    : define font color of label (`string`)
         - `opts.opacity`    : define opacity of chart (`float`, between 0 and 1)
@@ -3954,7 +3954,7 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
         _assert_sunburst_opts(opts)
- 
+
         labels = np.squeeze(np.asarray(labels))
         parents = np.squeeze(np.asarray(parents))
         assert labels.ndim <= 1, "labels should be one-dimensional"
@@ -3968,19 +3968,17 @@ class Visdom(object):
         assert np.any(
             parents == ""
         ), "at least one node must have an empty parent ('') marking the root"
- 
+
         font_size = opts.get("font_size")
         font_size = font_size if font_size is not None else opts.get("size")
         font_color = opts.get("font_color")
         opacity = opts.get("opacity")
         line_width = opts.get("line_width")
-        line_width = (
-            line_width if line_width is not None else opts.get("marker_width")
-        )
- 
+        line_width = line_width if line_width is not None else opts.get("marker_width")
+
         branchvalues = opts.get("branchvalues")
         branchvalues = branchvalues if branchvalues is not None else "remainder"
- 
+
         data_dict = [
             {
                 "labels": labels.tolist(),
@@ -3992,10 +3990,10 @@ class Visdom(object):
                 "branchvalues": branchvalues,
             }
         ]
- 
+
         if opts.get("maxdepth") is not None:
             data_dict[0]["maxdepth"] = opts.get("maxdepth")
- 
+
         if values is not None:
             try:
                 values = np.asarray(values, dtype=np.float64)
@@ -4006,15 +4004,11 @@ class Visdom(object):
             assert len(values) == len(
                 labels
             ), "length of values should be equal to length of labels and parents"
-            assert not np.any(
-                np.isnan(values)
-            ), "values cannot contain NaN"
-            assert np.all(
-                values >= 0
-            ), "values cannot contain negative numbers"
- 
+            assert not np.any(np.isnan(values)), "values cannot contain NaN"
+            assert np.all(values >= 0), "values cannot contain negative numbers"
+
             data_dict[0]["values"] = values.tolist()
- 
+
         data = data_dict
         return self._send(
             {
@@ -4025,7 +4019,6 @@ class Visdom(object):
                 "opts": opts,
             }
         )
-
 
     @pytorch_wrap
     def pie(self, X, win=None, env=None, opts=None):
