@@ -35,8 +35,8 @@ Use this skill when adding a new visualization type (e.g., a new chart, widget, 
    - Create a demo script exercising the new pane type
    - Import it in `example/demo.py`
 
-7. **Tests** (`cypress/integration/`):
-   - Add a Cypress test file for the new pane type
+7. **Tests** (`playwright/tests/`):
+   - Add a Playwright spec for the new pane type, following existing patterns
 
 ## Guardrails
 

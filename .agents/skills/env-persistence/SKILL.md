@@ -28,6 +28,8 @@ Use this skill for persistence format changes and env reload/view layout behavio
 ## Documentation
 
 - [Skill reference](references/REFERENCE.md)
+- `py/visdom/data_model/README.md` — the storage abstraction layer (`DataStore`/`JSONStore`); persistence now funnels through it
+- `py/visdom/data_model/base.py`, `py/visdom/data_model/json_store.py`
 - `py/visdom/utils/server_utils.py`
 - `py/visdom/server/handlers/web_handlers.py`
 - `py/visdom/server/app.py`

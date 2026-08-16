@@ -7,6 +7,7 @@
  *
  */
 
+import { Eraser } from 'lucide-react';
 import React from 'react';
 
 function FilterControls(props) {
@@ -24,14 +25,12 @@ function FilterControls(props) {
       />
       <span className="input-group-btn">
         <button
-          data-toggle="tooltip"
           title="Clear filter"
-          data-placement="bottom"
           type="button"
           className="btn btn-default"
           onClick={onFilterClear}
         >
-          <span className="glyphicon glyphicon-erase" />
+          <Eraser size={14} />
         </button>
       </span>
     </div>
