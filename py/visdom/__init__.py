@@ -490,7 +490,13 @@ def _assert_sunburst_opts(opts):
         assert isstr(opts.get("font_color")), "font_color should be a string"
 
     if opts.get("maxdepth") is not None:
-        assert isnum(opts.get("maxdepth")), "maxdepth should be a number"
+        md = opts.get("maxdepth")
+        assert isinstance(md, (int, np.integer)) and not isinstance(
+            md, bool
+        ), "maxdepth should be an integer"
+        assert (
+            md == -1 or md >= 1
+        ), "maxdepth should be -1 (show all levels) or a positive integer"
 
     if opts.get("branchvalues") is not None:
         assert opts.get("branchvalues") in (
