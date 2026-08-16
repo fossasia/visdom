@@ -6,7 +6,11 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from visdom.utils.shared_utils import get_new_window_id, _coerce_image_slider_index
+from visdom.utils.shared_utils import (
+    get_new_window_id,
+    _coerce_image_slider_index,
+    _normalize_table_data,
+)
 from visdom import server
 import os
 import os.path
@@ -167,18 +171,6 @@ def _title2str(opts):
             return opts
         else:
             return opts
-
-
-def _table_cell_to_native(cell):
-    """Coerce a single table cell/header to a JSON-serializable native
-    type. Handles numpy scalars that json.dumps and NanSafeEncoder cannot
-    serialize on their own.
-    """
-    if isinstance(cell, np.generic):
-        cell = cell.item()
-    if cell is None or isinstance(cell, (str, int, float, bool)):
-        return cell
-    return str(cell)
 
 
 def _scrub_dict(d):
@@ -1389,6 +1381,61 @@ class Visdom(object):
         if env is not None:
             msg["eid"] = env
         return self._experiment_query(msg, "experiments/suggest")
+
+    def hparams(
+        self, query=None, env_ids=None, mode=None, win=None, env=None, opts=None
+    ):
+        """Open a hyper-parameter pane over the experiments logged on the server.
+
+        Posts the selection to the ``experiments/hparams`` endpoint, which picks
+        the runs, flattens them into a table of hyper-parameters against their
+        latest metric values (and tags), and registers a dedicated ``hparams``
+        window with that content. The window persists/reloads like any pane.
+
+        `mode` chooses how the runs to show are selected; when it is left as
+        `None` the server infers it from which of `query`/`env_ids` were given:
+
+        * ``"query"`` — the runs matching `query` (the readable syntax of
+          :meth:`search_experiments`). The query must be non-empty and `env_ids`
+          must not be given.
+        * ``"env_ids"`` — the runs named in `env_ids`, in that order. `env_ids`
+          must be non-empty and `query` must not be given; only those
+          environments are read rather than every experiment.
+        * ``"both"`` — the intersection: runs that match `query` *and* are named
+          in `env_ids`, ordered by `env_ids`. Both must be given and non-empty.
+
+        There is no "show everything" call: with neither `query` nor `env_ids`
+        the server has nothing to select and rejects the request. A blank or
+        whitespace-only `query` counts as no query. Every id in `env_ids` must
+        name an environment that has an experiment: one that does not — a typo,
+        a deleted run — is answered with a ``404`` naming it rather than left
+        out of the pane unremarked.
+
+        ::
+
+            vis.hparams("lr < 0.01 AND acc > 0.9")          # query
+            vis.hparams(env_ids=["run-a", "run-b"])         # env_ids
+            vis.hparams("acc > 0.9", ["run-a", "run-b"])    # both
+            vis.hparams("acc > 0.9", ["run-a"], mode="query")   # forced, errors
+
+        `win`/`env`/`opts` behave as they do for the other plotting methods.
+        Returns the created window id.
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+
+        return self._send(
+            {
+                "query": query,
+                "env_ids": env_ids,
+                "mode": mode,
+                "win": win,
+                "eid": env,
+                "opts": opts,
+            },
+            endpoint="experiments/hparams",
+        )
 
     def get_window_data(self, win=None, env=None):
         """
@@ -4534,15 +4581,17 @@ class Visdom(object):
             }
         )
 
-    def html_table(self, headers, data, win=None, env=None, opts=None):
+    def html_table(self, data, headers=None, win=None, env=None, opts=None):
         """
         This function renders structured data as a styled HTML table.
 
-        - `headers`: a `list` of column header names (`string` or any
-           type convertible to `string`).
-        - `data`: a 2D `list` of row data, where each row is list or
-          `tuple` with same number of elements as `headers`. In case
-           of empty list, a table with only header will be rendered.
+        - `data`: a 2D `list`/`tuple` of row data, a 2D numpy array, or
+           a list of `dict`s (in which case `headers` is derived from
+           the first dict's keys unless explicitly given). In case of
+           an empty list, a table with only headers will be rendered.
+        - `headers`: a `list`/`tuple`/1D numpy array of column header
+           names (`string` or any type convertible to `string`).
+           Required unless `data` is a list of dicts.
 
         The following `opts` are supported:
 
@@ -4552,14 +4601,7 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
-        assert isinstance(headers, list), "headers should be a list"
-        assert isinstance(data, list), "data should be a list of rows"
-        assert all(
-            isinstance(row, (list, tuple)) for row in data
-        ), "each row in data should be a list or tuple"
-        assert all(
-            len(row) == len(headers) for row in data
-        ), "each data row must have the same number of columns as headers"
+        headers, data = _normalize_table_data(data, headers)
 
         style = """
             <style>
@@ -4630,58 +4672,7 @@ class Visdom(object):
         _assert_opts(opts)
         opts.setdefault("editable", True)
 
-        if isinstance(data, np.ndarray):
-            assert (
-                data.ndim == 2
-            ), "`data` as a numpy array must be 2-dimensional (rows x columns)"
-            data = data.tolist()
-        elif data is not None and not isinstance(data, (list, tuple)):
-            raise AssertionError(
-                "`data` must be a list, tuple, or numpy array (got %s)"
-                % type(data).__name__
-            )
-
-        if isinstance(headers, np.ndarray):
-            assert headers.ndim == 1, "`headers` as a numpy array must be 1-dimensional"
-            headers = headers.tolist()
-        elif headers is not None and not isinstance(headers, (list, tuple)):
-            raise AssertionError(
-                "`headers` must be a list, tuple, or numpy array (got %s)"
-                % type(headers).__name__
-            )
-
-        has_data = data is not None and len(data) > 0
-        has_headers = headers is not None and len(headers) > 0
-
-        if not has_data and not has_headers:
-            raise AssertionError("either `data` or `headers` must be provided")
-
-        if has_headers:
-            assert isinstance(headers, (list, tuple)), (
-                "headers should be a list (got %s)" % type(headers).__name__
-            )
-
-        if has_data and isinstance(data[0], dict):
-            assert all(
-                isinstance(row, dict) for row in data
-            ), "all rows in `data` must be dicts if the first row is a dict"
-            headers = list(headers) if has_headers else list(data[0].keys())
-            rows = [[row.get(h, "") for h in headers] for row in data]
-        else:
-            assert has_headers, "headers required when data rows are lists/tuples"
-            if has_data:
-                assert all(
-                    isinstance(row, (list, tuple)) for row in data
-                ), "each row in `data` should be a list or tuple"
-            headers = list(headers)
-            rows = [list(r) for r in data] if has_data else []
-
-        assert all(
-            len(r) == len(headers) for r in rows
-        ), "each row must have the same number of columns as headers"
-
-        rows = [[_table_cell_to_native(cell) for cell in row] for row in rows]
-        headers = [_table_cell_to_native(h) for h in headers]
+        headers, rows = _normalize_table_data(data, headers)
 
         content = {"headers": headers, "rows": rows}
 

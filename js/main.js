@@ -48,7 +48,6 @@ import ConnectionIndicator from './topbar/ConnectionIndicator';
 import EnvControls from './topbar/EnvControls';
 import FilterControls from './topbar/FilterControls';
 import ViewControls from './topbar/ViewControls';
-import { destroyTooltips, useTooltips } from './util';
 import WidthProvider from './Width';
 
 const jsonpatch = require('fast-json-patch');
@@ -891,12 +890,6 @@ const App = () => {
     });
     localStorage.setItem('filter', filterString);
   }, [filterString]);
-
-  useTooltips();
-
-  useEffect(() => {
-    return destroyTooltips;
-  }, []);
 
   const onWidthChange = (width, cols) => {
     windowSize.current.cols = cols;

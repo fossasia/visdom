@@ -30,6 +30,18 @@ function writeUint32BE(bytes, offset, value) {
   bytes[offset + 3] = value & 0xff;
 }
 
+function writeUint16LE(bytes, offset, value) {
+  bytes[offset] = value & 0xff;
+  bytes[offset + 1] = (value >>> 8) & 0xff;
+}
+
+function writeUint32LE(bytes, offset, value) {
+  bytes[offset] = value & 0xff;
+  bytes[offset + 1] = (value >>> 8) & 0xff;
+  bytes[offset + 2] = (value >>> 16) & 0xff;
+  bytes[offset + 3] = (value >>> 24) & 0xff;
+}
+
 function triggerBlobDownload(bytes, mimeType, filename) {
   const blob = new Blob([bytes], { type: mimeType });
   const url = window.URL.createObjectURL(blob);
@@ -54,11 +66,78 @@ function isJfifApp0At(bytes, pos) {
   );
 }
 
+function buildExifApp1(dpi) {
+  const TIFF_HEADER_SIZE = 8;
+  const NUM_ENTRIES = 4;
+  const ENTRY_SIZE = 12;
+  const ifdOffset = TIFF_HEADER_SIZE;
+  const ifdSize = 2 + NUM_ENTRIES * ENTRY_SIZE + 4;
+  const valuesOffset = ifdOffset + ifdSize;
+  const tiffLength = valuesOffset + 8 + 8;
+
+  const tiff = new Uint8Array(tiffLength);
+
+  tiff[0] = 0x49;
+  tiff[1] = 0x49;
+  writeUint16LE(tiff, 2, 42);
+  writeUint32LE(tiff, 4, ifdOffset);
+
+  let p = ifdOffset;
+  writeUint16LE(tiff, p, NUM_ENTRIES);
+  p += 2;
+
+  writeUint16LE(tiff, p, 0x011a);
+  writeUint16LE(tiff, p + 2, 5);
+  writeUint32LE(tiff, p + 4, 1);
+  writeUint32LE(tiff, p + 8, valuesOffset);
+  p += ENTRY_SIZE;
+
+  writeUint16LE(tiff, p, 0x011b);
+  writeUint16LE(tiff, p + 2, 5);
+  writeUint32LE(tiff, p + 4, 1);
+  writeUint32LE(tiff, p + 8, valuesOffset + 8);
+  p += ENTRY_SIZE;
+
+  writeUint16LE(tiff, p, 0x0128);
+  writeUint16LE(tiff, p + 2, 3);
+  writeUint32LE(tiff, p + 4, 1);
+  writeUint32LE(tiff, p + 8, 2);
+  p += ENTRY_SIZE;
+
+  writeUint16LE(tiff, p, 0x0213);
+  writeUint16LE(tiff, p + 2, 3);
+  writeUint32LE(tiff, p + 4, 1);
+  writeUint32LE(tiff, p + 8, 1);
+  p += ENTRY_SIZE;
+
+  writeUint32LE(tiff, p, 0);
+
+  writeUint32LE(tiff, valuesOffset, dpi);
+  writeUint32LE(tiff, valuesOffset + 4, 1);
+  writeUint32LE(tiff, valuesOffset + 8, dpi);
+  writeUint32LE(tiff, valuesOffset + 12, 1);
+
+  const exifId = [0x45, 0x78, 0x69, 0x66, 0x00, 0x00];
+  const payloadLength = 2 + exifId.length + tiff.length;
+  const segment = new Uint8Array(2 + payloadLength);
+  segment[0] = 0xff;
+  segment[1] = 0xe1;
+  segment[2] = (payloadLength >> 8) & 0xff;
+  segment[3] = payloadLength & 0xff;
+  segment.set(exifId, 4);
+  segment.set(tiff, 4 + exifId.length);
+  return segment;
+}
+
 function setJpegDpi(jpegBytes, dpi) {
   if (jpegBytes[0] !== 0xff || jpegBytes[1] !== 0xd8) {
     throw new Error('Not a valid JPEG (missing SOI marker)');
   }
   const safeDpi = normalizeDpi(dpi);
+  const exifSegment = buildExifApp1(safeDpi);
+
+  let workingBytes;
+  let insertExifAt;
 
   if (isJfifApp0At(jpegBytes, 2)) {
     const out = jpegBytes.slice();
@@ -67,35 +146,48 @@ function setJpegDpi(jpegBytes, dpi) {
     out[2 + 13] = safeDpi & 0xff;
     out[2 + 14] = (safeDpi >> 8) & 0xff;
     out[2 + 15] = safeDpi & 0xff;
-    return out;
+    workingBytes = out;
+
+    const app0LengthValue = (out[4] << 8) | out[5];
+    insertExifAt = 2 + 2 + app0LengthValue;
+  } else {
+    const app0 = new Uint8Array(18);
+    app0[0] = 0xff;
+    app0[1] = 0xe0;
+    app0[2] = 0x00;
+    app0[3] = 0x10;
+    app0[4] = 0x4a;
+    app0[5] = 0x46;
+    app0[6] = 0x49;
+    app0[7] = 0x46;
+    app0[8] = 0x00;
+    app0[9] = 0x01;
+    app0[10] = 0x02;
+    app0[11] = 0x01;
+    app0[12] = (safeDpi >> 8) & 0xff;
+    app0[13] = safeDpi & 0xff;
+    app0[14] = (safeDpi >> 8) & 0xff;
+    app0[15] = safeDpi & 0xff;
+    app0[16] = 0x00;
+    app0[17] = 0x00;
+
+    const out = new Uint8Array(2 + app0.length + (jpegBytes.length - 2));
+    out[0] = 0xff;
+    out[1] = 0xd8; // SOI
+    out.set(app0, 2);
+    out.set(jpegBytes.subarray(2), 2 + app0.length);
+    workingBytes = out;
+    insertExifAt = 2 + app0.length;
   }
 
-  const app0 = new Uint8Array(18);
-  app0[0] = 0xff;
-  app0[1] = 0xe0;
-  app0[2] = 0x00;
-  app0[3] = 0x10;
-  app0[4] = 0x4a;
-  app0[5] = 0x46;
-  app0[6] = 0x49;
-  app0[7] = 0x46;
-  app0[8] = 0x00;
-  app0[9] = 0x01;
-  app0[10] = 0x02;
-  app0[11] = 0x01;
-  app0[12] = (safeDpi >> 8) & 0xff;
-  app0[13] = safeDpi & 0xff;
-  app0[14] = (safeDpi >> 8) & 0xff;
-  app0[15] = safeDpi & 0xff;
-  app0[16] = 0x00;
-  app0[17] = 0x00;
-
-  const out = new Uint8Array(2 + app0.length + (jpegBytes.length - 2));
-  out[0] = 0xff;
-  out[1] = 0xd8;
-  out.set(app0, 2);
-  out.set(jpegBytes.subarray(2), 2 + app0.length);
-  return out;
+  const withExif = new Uint8Array(workingBytes.length + exifSegment.length);
+  withExif.set(workingBytes.subarray(0, insertExifAt), 0);
+  withExif.set(exifSegment, insertExifAt);
+  withExif.set(
+    workingBytes.subarray(insertExifAt),
+    insertExifAt + exifSegment.length
+  );
+  return withExif;
 }
 
 const CRC_TABLE = (() => {

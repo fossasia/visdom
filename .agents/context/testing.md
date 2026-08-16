@@ -59,14 +59,22 @@ py/tests/
 so a package there would ship a top-level `tests` distribution to users. `testutils/` is a
 package and is reachable because `py/tests` is on `pythonpath`.
 
-- Name a file after what it covers — `unit/window_builder.py`, not `unit/test_window_builder.py`.
-  The `unit/` and `integration/` directories already say these are tests, so the filename does not
-  repeat it; `python_files = ["*.py"]` in `pyproject.toml` collects them. Test *functions* still
-  need the `test_` prefix. **Write plain `def test_*()` functions, not `unittest.TestCase`
-  subclasses.** pytest still runs `TestCase` (much of the suite predates this rule), but
-  **pytest cannot inject fixtures into `TestCase` methods** — `def test_x(self, app)` fails.
-  Only autouse fixtures reach them. A `TestCase` therefore cannot use anything in the table
-  below, and cannot use `@pytest.mark.parametrize` either.
+- Name a file after what it covers — `integration/window_types.py`, not
+  `integration/test_window_types.py`. The `unit/` and `integration/` directories already say these
+  are tests, so the filename does not repeat it; `python_files = ["*.py"]` in `pyproject.toml`
+  collects them, and `norecursedirs` keeps `testutils/` importable but uncollected. Test
+  *functions* and `Test*` classes still need their usual prefixes.
+- **Which style you use depends on whether the test needs HTTP.**
+
+  | Test needs | Write | Why |
+  |---|---|---|
+  | no `Application`, or a handler object | plain `def test_*()` functions | fixtures and `parametrize` both work |
+  | a real HTTP round trip | a `VisdomHTTPTestCase` subclass | `tornado.testing.AsyncHTTPTestCase` is a `unittest.TestCase`, and that is what starts the app |
+
+  **pytest cannot inject fixtures into `TestCase` methods** — `def test_x(self, app)` fails, and
+  only autouse fixtures reach them. `@pytest.mark.parametrize` does not work on them either; use
+  a small `_assert_*` helper called from several one-line test methods instead. A module-level
+  `pytestmark = pytest.mark.integration` **does** apply to `TestCase` classes, so always set one.
 - Keep them hermetic. A test that needs an **externally launched** server must be marked
   `@pytest.mark.server` so CI can deselect it; nothing in the tracked suite needs one today.
 
@@ -85,20 +93,36 @@ package and is reachable because `py/tests` is on `pythonpath`.
 `reset_warn_once` is autouse: `shared_utils.warn_once` dedupes against a module-level set, so
 without it a warning raised by one test silently suppresses the same warning in another.
 
-HTTP tests are the one exception to the plain-function rule today: subclass
-`testutils.VisdomHTTPTestCase`, which starts the app in-process on an ephemeral port, gives every
-test a fresh `env_path` that is cleaned up, and provides `post_json`, `create_window`,
-`create_text_window`, `get_envs`, `get_win_data`, `win_exists` and `panes`. Override the
-`app_kwargs` class attribute to vary server configuration.
+### HTTP tests
 
-It is a `TestCase` only because `tornado.testing.AsyncHTTPTestCase` is one, so the fixtures above
-are unavailable inside it. It is scheduled to be replaced by an equivalent `visdom_server` fixture
-that runs the app on a background event loop and talks to it with `requests`, which removes the
-last reason for any `TestCase` in this suite.
+Subclass `testutils.VisdomHTTPTestCase`. It starts the app in-process on an ephemeral port, gives
+every test a fresh `env_path` that is cleaned up in `tearDown`, and provides `post_json`,
+`create_window`, `create_text_window`, `update`, `close_window`, `win_exists`, `get_win_data`,
+`get_envs`, `save` and `panes`, on top of `AsyncHTTPTestCase`'s own `fetch`. Override the
+`app_kwargs` class attribute to vary server configuration:
+
+```python
+class TestReadonlyRoutes(VisdomHTTPTestCase):
+    app_kwargs = {"readonly": True}
+```
+
+`AsyncHTTPTestCase` already runs the `Application` in-process on its own `IOLoop`, driving each
+request through `io_loop.run_sync`. **Do not replace it with a background thread, a hand-rolled
+`asyncio` loop, or an out-of-process server** — none of that buys anything, and it was tried and
+reverted. The `TestCase` style is the accepted cost of using it.
+
+Because fixtures cannot reach these tests, anything shared goes on the class: `self.env_path` for
+the temp directory, and a small base class between `VisdomHTTPTestCase` and your test classes for
+helpers several of them need (see `WindowTypeTestCase` in `integration/window_types.py`).
+Need a second `Application` over the same directory, for a reload assertion? Construct it directly
+with `Application(port=8097, env_path=self.env_path)` — `app_factory` is not available here.
 
 ### Markers
 
-`unit`, `integration`, `slow`, and `server` are registered in `pyproject.toml`.
+`unit`, `integration`, `slow`, and `server` are registered in `pyproject.toml`. Set
+`pytestmark = pytest.mark.unit` or `pytest.mark.integration` at the top of every new file; it
+works for both plain functions and `TestCase` classes. Many older files predate this and carry no
+marker, so `-m integration` currently under-selects.
 
 ## CI
 

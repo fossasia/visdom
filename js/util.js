@@ -7,19 +7,7 @@
  *
  */
 
-/* global $ */
-
 import { useEffect, useRef } from 'react';
-
-const TOOLTIP_SELECTOR = '[data-toggle="tooltip"]';
-const TOOLTIP_OPTIONS = {
-  container: 'body',
-  delay: {
-    show: 600,
-    hide: 100,
-  },
-  trigger: 'hover',
-};
 
 // custom hook to get previous value of a variable
 function usePrevious(value) {
@@ -30,24 +18,4 @@ function usePrevious(value) {
   return ref.current;
 }
 
-// custom hook to keep bootstrap tooltips in sync with the rendered markup
-function useTooltips() {
-  useEffect(() => {
-    $(TOOLTIP_SELECTOR).each((_, el) => {
-      const $tip = $(el);
-      const title = $tip.attr('title');
-      if (title) {
-        $tip.attr('data-original-title', title).attr('title', '');
-      }
-      if (!$tip.data('bs.tooltip')) {
-        $tip.tooltip(TOOLTIP_OPTIONS);
-      }
-    });
-  });
-}
-
-function destroyTooltips() {
-  $(TOOLTIP_SELECTOR).tooltip('destroy');
-}
-
-export { destroyTooltips, usePrevious, useTooltips };
+export { usePrevious };

@@ -210,7 +210,7 @@ def window(args):
                 "show_slider": opts.get("show_slider", True),
             }
         )
-    elif ptype in ["image", "text", "properties"] and is_visdom_type:
+    elif ptype in ["image", "text", "properties", "hparams"] and is_visdom_type:
         p.update({"content": args["data"][0]["content"], "type": ptype})
     elif ptype == "table" and is_visdom_type:
         p.update(
@@ -593,7 +593,9 @@ def register_window(self, p, eid):
         p["i"] = env[p["id"]]["i"]
         p["comment"] = env[p["id"]].get("comment", p.get("comment", ""))
     else:
-        p["i"] = len(env)
+        # not len(env): closing any window but the last would hand the next
+        # one an index that is still in use. Same rule as the undo path.
+        p["i"] = max((w.get("i", -1) for w in env.values()), default=-1) + 1
 
     env[p["id"]] = p
     self.mark_dirty(eid)

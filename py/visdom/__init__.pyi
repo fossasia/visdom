@@ -87,6 +87,15 @@ class Visdom:
     def suggest_experiment(
         self, params: _OptOps = ..., env: _OptStr = ...
     ) -> _ExperimentQueryReply: ...
+    def hparams(
+        self,
+        query: _OptStr = ...,
+        env_ids: Optional[_EnvIds] = ...,
+        mode: _OptStr = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
     def get_window_data(
         self, win: _OptStr = ..., env: _OptStr = ...
     ) -> _SendReturn: ...
@@ -362,8 +371,8 @@ class Visdom:
     ) -> _SendReturn: ...
     def html_table(
         self,
-        headers: List[Any],
-        data: List[List[Any]],
+        data: List[Any],
+        headers: Optional[List[Any]] = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
