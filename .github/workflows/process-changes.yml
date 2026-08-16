@@ -7,47 +7,47 @@ on: pull_request
 
 jobs:
   lint-js:
-    name: "Javascript Linter Check"
+    name: 'Javascript Linter Check'
     runs-on: ubuntu-latest
     steps:
-    - name: "Checkout Repository"
-      uses: actions/checkout@v3
-    - name: "Install Node"
-      uses: actions/setup-node@v3
-      with:
-          node-version: 16
-    - name: "Install Dependencies"
-      run: ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm install
-    - name: "Linter Check (ESLint)"
-      run: npm run lint
+      - name: 'Checkout Repository'
+        uses: actions/checkout@v7.0.1
+      - name: 'Install Node'
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '24'
+      - name: 'Install Dependencies'
+        run: CYPRESS_INSTALL_BINARY=0 ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm install
+      - name: 'Linter Check (ESLint)'
+        run: npm run lint
 
   lint-py:
-    name: "Python Linter Check"
+    name: 'Python Linter Check'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: psf/black@26.3.0
+      - uses: actions/checkout@v7.0.1
+      - uses: psf/black@26.5.1
         with:
-          src: "./py"
+          src: './py'
           version: 23.1.0
       - name: Check for Linting Errors
         if: failure()
         run: echo "::warning title='Python Linter Check failed'::Please run \"pip install black; black py\" before committing code changes to python files."
 
   install-and-build:
-    name: "Install and Build"
+    name: 'Install and Build'
     runs-on: ubuntu-latest
     outputs:
       jsfileschanged: ${{ steps.checkout.outputs.jsfileschanged }}
     steps:
-      - name: "Checkout Repository"
-        uses: actions/checkout@v3
+      - name: 'Checkout Repository'
+        uses: actions/checkout@v7.0.1
       - uses: ./.github/actions/prepare
         with:
           loadprbuild: false
 
       # count changed js files (diff to base branch)
-      - name: "Count changed JS-Files"
+      - name: 'Count changed JS-Files'
         id: checkout
         run: |
           git fetch origin $GITHUB_BASE_REF
@@ -56,13 +56,13 @@ jobs:
           echo 'jsfileschanged='$(git diff --name-only origin/$GITHUB_BASE_REF -- | grep '^js/*' | wc -l) >> $GITHUB_OUTPUT
           echo 'Num js files changed='$(git diff --name-only origin/$GITHUB_BASE_REF -- | grep '^js/*' | wc -l)
 
-      - name: "Build Project (PR version)"
+      - name: 'Build Project (PR version)'
         run: |
           npm run build
         if: steps.checkout.outputs.jsfileschanged > 0
 
-      - name: "Save built js-files"
-        uses: actions/upload-artifact@v4
+      - name: 'Save built js-files'
+        uses: actions/upload-artifact@v7
         with:
           name: pr-build
           if-no-files-found: error
@@ -70,119 +70,121 @@ jobs:
             ./py/visdom/static/js/main.js
             ./py/visdom/static/js/main.js.map
 
-
-  visual-regression-test-init:
-    name: "Initialize Visual Regression Test"
+  playwright-visual-regression-test-init:
+    name: 'Initialize Playwright Visual Regression Test'
     runs-on: ubuntu-latest
     needs: install-and-build
     steps:
+      - name: 'Checkout Repository'
+        uses: actions/checkout@v7.0.1
 
-      - name: "Checkout Repository"
-        uses: actions/checkout@v3
-
-      - name: "Save current Head-Ref as PR-branch"
+      - name: 'Save current Head-Ref as PR-branch'
         shell: bash
-        run: |
-          git checkout -B PR-HEAD
+        run: git checkout -B PR-HEAD
 
       - uses: ./.github/actions/prepare
         with:
           usebasebranch: true
           loadprbuild: false
 
-      - name: "Checkout Tests from Head-Ref"
+      - name: 'Checkout Playwright tests from Head-Ref'
         shell: bash
         run: |
-          git checkout PR-HEAD -- ./cypress
+          git checkout PR-HEAD -- ./playwright
           git checkout PR-HEAD -- ./example
+          git checkout PR-HEAD -- ./package.json
+          git checkout PR-HEAD -- ./playwright.config.js
+          git checkout PR-HEAD -- ./playwright.init.config.js
+          git checkout PR-HEAD -- ./playwright.visual.config.js
 
-      - name: Cypress test:init
-        uses: cypress-io/github-action@v4
+      - name: 'Install PR npm dependencies'
+        run: CYPRESS_INSTALL_BINARY=0 ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm install
+
+      - name: 'Install Playwright Chromium'
+        run: npx playwright install --with-deps chromium
+
+      - name: 'Generate Playwright baseline screenshots'
+        run: npm run test:init
+
+      - uses: actions/upload-artifact@v7
         with:
-          install: false
-          start: visdom -port 8098 -env_path /tmp
-          wait-on: 'http://localhost:8098'
-          spec: cypress/integration/*.init.js
+          name: playwright-init-screenshots
+          path: playwright/screenshots_init
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: cypress-init-screenshots
-          path: cypress/screenshots_init
-
-
-  visual-regression-test:
-    name: "Visual Regression Test"
+  playwright-visual-regression-test:
+    name: 'Playwright Visual Regression Test'
     runs-on: ubuntu-latest
-    needs: visual-regression-test-init
+    needs: playwright-visual-regression-test-init
     steps:
-      - name: "Checkout Repository"
-        uses: actions/checkout@v3
+      - name: 'Checkout Repository'
+        uses: actions/checkout@v7.0.1
+
       - uses: ./.github/actions/prepare
 
-      - uses: actions/download-artifact@v7
-        with:
-          name: cypress-init-screenshots
-          path: cypress/screenshots_init
+      - name: 'Install Playwright Chromium'
+        run: npx playwright install --with-deps chromium
 
-      - name: Cypress test:visual
-        uses: cypress-io/github-action@v4
+      - uses: actions/download-artifact@v8
         with:
-          install: false
-          start: visdom -port 8098 -env_path /tmp
-          wait-on: 'http://localhost:8098'
-          spec: cypress/integration/screenshots.js
+          name: playwright-init-screenshots
+          path: playwright/screenshots_init
 
-      - uses: actions/upload-artifact@v4
+      - name: 'Run Playwright visual regression tests'
+        run: npm run test:visual
+
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
-          name: cypress-screenshots-visual
-          path: cypress/screenshots
+          name: playwright-screenshots-visual
+          path: |
+            playwright/test-results/
+            playwright/playwright-report/
 
-  funcitonal-test:
-    name: "Functional Test (Websocket)"
+  playwright-test:
+    name: 'Playwright Functional Test'
     runs-on: ubuntu-latest
     needs: install-and-build
     strategy:
       matrix:
-        python: ['3.8', '3.9', '3.10']
+        python: ['3.12', '3.13']
     steps:
-      - name: "Checkout Repository"
-        uses: actions/checkout@v3
+      - name: 'Checkout Repository'
+        uses: actions/checkout@v7.0.1
       - uses: ./.github/actions/prepare
-
-      - name: Cypress test
-        uses: cypress-io/github-action@v4
         with:
-          install: false
-          start: visdom -port 8098 -env_path /tmp
-          wait-on: 'http://localhost:8098'
-          config: ignoreTestFiles=screenshots.*
+          python-version: ${{ matrix.python }}
 
-      - uses: actions/upload-artifact@v4
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright tests
+        run: npm test
+
+      - name: Upload Playwright Report
+        uses: actions/upload-artifact@v7
         if: failure()
         with:
-          name: cypress-screenshots-functional-${{ matrix.python }}
-          path: cypress/screenshots
+          name: playwright-report-${{ matrix.python }}
+          path: playwright/playwright-report/
 
-  funcitonal-test-polling:
-    name: 'Functional Test (Polling)'
+  playwright-test-polling:
+    name: 'Playwright Functional Test (Polling)'
     runs-on: ubuntu-latest
     needs: install-and-build
     steps:
       - name: 'Checkout Repository'
-        uses: actions/checkout@v3
+        uses: actions/checkout@v7.0.1
       - uses: ./.github/actions/prepare
 
-      - name: Cypress test
-        uses: cypress-io/github-action@v4
-        with:
-          install: false
-          start: visdom -port 8098 -env_path /tmp -use_frontend_client_polling
-          wait-on: 'http://localhost:8098'
-          config: ignoreTestFiles=screenshots.*
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
 
-      - uses: actions/upload-artifact@v4
+      - name: Run Playwright tests with polling
+        run: npm run test:polling
+
+      - name: Upload Playwright Polling Report
+        uses: actions/upload-artifact@v7
         if: failure()
         with:
-          name: cypress-screenshots-functional-polling
-          path: cypress/screenshots
+          name: playwright-report-polling
+          path: playwright/playwright-report-polling/

@@ -2,63 +2,60 @@ version: 2
 
 updates:
   # 1. JavaScript / npm
-  - package-ecosystem: "npm"
-    directory: "/"
-    target-branch: "master"
+  - package-ecosystem: 'npm'
+    directory: '/'
+    target-branch: 'dev'
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "06:00"
-    open-pull-requests-limit: 5
+      interval: 'daily'
+      time: '06:00'
+    open-pull-requests-limit: 25
     labels:
-      - "dependencies"
-      - "javascript"
+      - 'dependencies'
+      - 'javascript'
     commit-message:
-      prefix: "chore(deps)"
-      include: "scope"
+      prefix: 'chore(deps)'
+      include: 'scope'
     groups:
       npm-all-minor-patch:
         patterns:
-          - "*"
+          - '*'
         update-types:
-          - "minor"
-          - "patch"
+          - 'minor'
+          - 'patch'
 
   # 2. Python / pip
-  - package-ecosystem: "pip"
-    directory: "/"
-    target-branch: "master"
+  - package-ecosystem: 'pip'
+    directory: '/'
+    target-branch: 'dev'
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "06:00"
-    open-pull-requests-limit: 5
+      interval: 'daily'
+      time: '06:00'
+    open-pull-requests-limit: 25
     labels:
-      - "dependencies"
-      - "python"
+      - 'dependencies'
+      - 'python'
     commit-message:
-      prefix: "chore(deps)"
-      include: "scope"
+      prefix: 'chore(deps)'
+      include: 'scope'
     groups:
       pip-all-minor-patch:
         patterns:
-          - "*"
+          - '*'
         update-types:
-          - "minor"
-          - "patch"
+          - 'minor'
+          - 'patch'
 
   # 3. GitHub Actions
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    target-branch: "master"
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    target-branch: 'dev'
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "06:00"
-    open-pull-requests-limit: 3
+      interval: 'daily'
+      time: '06:00'
+    open-pull-requests-limit: 25
     labels:
-      - "dependencies"
-      - "github-actions"
+      - 'dependencies'
+      - 'github-actions'
     commit-message:
-      prefix: "chore(ci)"
-      include: "scope"
+      prefix: 'chore(ci)'
+      include: 'scope'
