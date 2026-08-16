@@ -3950,8 +3950,9 @@ class Visdom(object):
         - `opts.opacity`    : define opacity of chart (`float`, between 0 and 1)
         - `opts.line_width`    : define distance between two sectors and
                                   sector to its parents (`int`)
-        - `opts.maxdepth`    : maximum number of hierarchy levels visible
-                                at once (`int`)
+        - `opts.maxdepth`    :  maximum number of hierarchy levels visible
+                                at once -- a positive integer, or `-1` to
+                                show all levels (`int`)
         - `opts.branchvalues`    : `'total'` or `'remainder'` -- how
                                     `values` are interpreted relative to
                                     children (`string`; default = `'remainder'`)
