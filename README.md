@@ -813,13 +813,6 @@ Following `opts` are currently supported:
 - `opts.maxdepth`    : maximum number of hierarchy levels visible at once (`int`)
 - `opts.branchvalues`    : `'total'` or `'remainder'` -- how `values` are interpreted relative to children (`string`; default = `'remainder'`)
 
-Following `opts` are currently supported:
-- `opts.font_size`    : define font size of label (`int`)
-- `opts.font_color`    : define font color of label (`string`)
-- `opts.opacity`    : define opacity of chart (`float`)
-- `opts.line_width`    : define distance between two sectors and sector to its parents (`int`)
-
-
 #### vis.line
 This function draws a line plot. It takes as input an `N` or `NxM` tensor
 `Y` that specifies the values of the `M` lines (that connect `N` points)
