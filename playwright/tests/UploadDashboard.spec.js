@@ -72,6 +72,6 @@ test.describe('Visdom - Upload Dashboard JSON Feature', () => {
 
     const toast = page.locator('.visdom-toast-message');
     await expect(toast).toBeVisible();
-    await expect(toast).toContainText(/valid Visdom JSON|Error/i);
+    await expect(toast).toContainText('Error: This is not a valid Visdom JSON');
   });
 });
