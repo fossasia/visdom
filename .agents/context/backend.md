@@ -8,13 +8,13 @@
 - `py/visdom/server/app.py` — Application class, routes, state management.
 - `py/visdom/server/handlers/web_handlers.py` — HTTP handlers. Copy app attributes in `initialize()`, use `@check_auth`.
 - `py/visdom/server/handlers/socket_handlers.py` — WebSocket handlers (read-only + write-enabled).
-- `py/visdom/utils/server_utils.py` — `check_auth`, `broadcast`, `LazyEnvData`, `serialize_env`.
+- `py/visdom/utils/server_utils.py` — `check_auth`, `broadcast`, `LazyEnvData`. Environment persistence lives in `py/visdom/data_model/json_store.py` (`JSONStore`).
 - `py/visdom/server/build.py` — `download_scripts()`: fetches CDN dependencies.
 
 ## Coding Rules
 
 - Follow PEP 8, format with `black py` (v23.1.0), 80-char lines
-- Python >= 3.8 compatibility
+- Python >= 3.12 compatibility
 - Use `@pytorch_wrap` on all `Visdom` methods
 - Use `warn_once()` for deprecation warnings
 

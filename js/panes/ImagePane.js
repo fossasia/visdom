@@ -11,20 +11,25 @@ import React, { useContext, useEffect, useRef, useState } from 'react';
 
 import ApiContext from '../api/ApiContext';
 import EventSystem from '../EventSystem';
+import { showToast } from '../toasts/toastEvents';
 import Pane from './Pane';
+import { copyLatexToClipboard } from './utils/LatexExport';
+import { typesetMathJax } from './utils/mathjaxHelpers';
 
 const DEFAULT_HEIGHT = 400;
 const DEFAULT_WIDTH = 300;
 
 function ImagePane(props) {
   const { sendPaneMessage } = useContext(ApiContext);
-  const { envID, id, title, type, selected, width, height } = props;
+  const { envID, id, contentID, title, type, selected, width, height } = props;
   var { isFocused, content } = props;
 
-  // state varibles
+  // state variables
   // --------------
   const paneRef = useRef();
   const imgRef = useRef();
+  const captionRef = useRef();
+  const mouseLocationRef = useRef({ x: null, y: null });
   const [view, setView] = useState({ scale: 1, tx: 0, ty: 0 });
   const [imgDim, setImgDim] = useState({ width: null, height: 0 });
   const [actualSelected, setActualSelected] = useState(props.selected);
@@ -45,6 +50,29 @@ function ImagePane(props) {
     link.download = `${title || 'visdom_image'}.jpg`;
     link.href = content.src;
     link.click();
+  };
+
+  const handleLatexExport = (style) => {
+    copyLatexToClipboard(style, {
+      contentID,
+      id,
+      caption: content.caption || title,
+    })
+      .then(() =>
+        showToast('Copied!', 'success', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        })
+      )
+      .catch((err) => {
+        console.error('ImagePane LaTeX export failed:', err);
+        showToast('Failed to Copy', 'error', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        });
+      });
   };
 
   const handleZoom = (ev) => {
@@ -110,19 +138,23 @@ function ImagePane(props) {
   };
 
   const handleMouseOver = (ev) => {
-    // get the x and y offset of the pane
     var rect = paneRef.current.children[1].getBoundingClientRect();
-    // Compute the coords of the mouse relative to the top left of the pane
     var xscreen = ev.clientX - rect.x;
     var yscreen = ev.clientY - rect.y;
-    // Compute the coords of the pixel under the mouse wrt the image top left
     var ximage = Math.round((xscreen - view['tx']) / view['scale']);
     var yimage = Math.round((yscreen - view['ty']) / view['scale']);
-    setMouseLocation({
-      x: ximage,
-      y: yimage,
-      visibility: ev.altKey ? 'visible' : 'hidden',
-    });
+    mouseLocationRef.current = { x: ximage, y: yimage };
+    if (!ev.altKey) {
+      if (mouseLocation.visibility !== 'hidden') {
+        setMouseLocation({ x: 0, y: 0, visibility: 'hidden' });
+      }
+      return;
+    }
+    setMouseLocation((prev) =>
+      prev.x === ximage && prev.y === yimage
+        ? prev
+        : { x: ximage, y: yimage, visibility: 'visible' }
+    );
   };
 
   const handleReset = () => {
@@ -134,9 +166,24 @@ function ImagePane(props) {
   };
 
   const updateSlider = (evt) => {
-    // TODO add history update events here! need to send these to the client
-    // with sendPaneMessage
-    setActualSelected(parseInt(evt.target.value));
+    const idx = parseInt(evt.target.value, 10);
+    if (Number.isNaN(idx)) return;
+    setActualSelected(idx);
+  };
+
+  const commitSliderSelection = (value) => {
+    const idx = parseInt(value, 10);
+    if (Number.isNaN(idx)) return;
+    sendPaneMessage(
+      { event_type: 'SliderMoved', index: idx, pane_data: false },
+      id,
+      envID
+    );
+  };
+
+  const finalizeSlider = (evt) => {
+    if (!evt || !evt.target) return;
+    commitSliderSelection(evt.target.value);
   };
 
   // effects
@@ -158,9 +205,16 @@ function ImagePane(props) {
     const onEvent = (event) => {
       switch (event.type) {
         case 'keydown':
-        case 'keypress':
-          event.preventDefault();
+        case 'keypress': {
+          if (!isFocused) {
+            break;
+          }
+          const tag = event.target.tagName;
+          if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
+            event.preventDefault();
+          }
           break;
+        }
         case 'keyup':
           if (isFocused)
             sendPaneMessage(
@@ -178,7 +232,7 @@ function ImagePane(props) {
             sendPaneMessage(
               {
                 event_type: 'Click',
-                image_coord: mouseLocation,
+                image_coord: mouseLocationRef.current,
               },
               id,
               envID
@@ -191,16 +245,18 @@ function ImagePane(props) {
     return function cleanup() {
       EventSystem.unsubscribe('global.event', onEvent);
     };
-  }, [mouseLocation, isFocused]);
+  }, [isFocused]);
 
   // image size/pos computation
   // --------------------------
 
   // Find the width/height that preserves the aspect ratio 'scaledWidth/height'
   const computeHFromW = (scaledWidth) => {
+    if (!imgDim.width) return 0;
     return Math.ceil((imgDim.height / imgDim.width) * scaledWidth);
   };
   const computeWFromH = (scaledHeight) => {
+    if (!imgDim.height) return 0;
     return Math.ceil((imgDim.width / imgDim.height) * scaledHeight);
   };
 
@@ -208,7 +264,6 @@ function ImagePane(props) {
   let candidateWidth = Math.ceil(1 + width * view['scale']);
   let candidateHeight = Math.ceil(1 + height * view['scale']);
   let imageContainerStyle = {
-    alignItems: 'row',
     display: 'flex',
     height: isNaN(candidateHeight) ? DEFAULT_HEIGHT : candidateHeight,
     justifyContent: 'center',
@@ -225,7 +280,6 @@ function ImagePane(props) {
     // instead use the window width as the limiting factor
     if (newWidth > candidateWidth) {
       candidateHeight = computeHFromW(candidateWidth);
-      imageContainerStyle.alignItems = 'column';
     } else {
       candidateWidth = newWidth;
     }
@@ -238,7 +292,6 @@ function ImagePane(props) {
     if (newHeight > candidateHeight) {
       candidateWidth = computeWFromH(candidateHeight);
     } else {
-      imageContainerStyle.alignItems = 'column';
       candidateHeight = newHeight;
     }
   }
@@ -274,6 +327,8 @@ function ImagePane(props) {
               max={content.length - 1}
               value={actualSelected}
               onChange={updateSlider}
+              onPointerUp={finalizeSlider}
+              onKeyUp={finalizeSlider}
             />
             <span>&nbsp;&nbsp;{actualSelected}&nbsp;&nbsp;</span>
           </div>
@@ -283,12 +338,20 @@ function ImagePane(props) {
     content = content[actualSelected];
   }
 
+  useEffect(() => {
+    let cancelled = false;
+    typesetMathJax(captionRef.current, () => cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [content.caption]);
+
   // add caption as widget
   if (content.caption) {
     widgets.splice(
       0,
       0,
-      <span className="widget" key="img_caption">
+      <span className="widget" key="img_caption" ref={captionRef}>
         {content.caption}
       </span>
     );
@@ -301,6 +364,7 @@ function ImagePane(props) {
       handleReset={handleReset}
       handleZoom={handleZoom}
       handleMouseMove={handleMouseOver}
+      handleLatexExport={handleLatexExport}
       ref={paneRef}
       widgets={widgets}
     >
@@ -325,7 +389,6 @@ function ImagePane(props) {
           />
         </div>
       </div>
-      <p className="caption">{content.caption}</p>
       <span
         className="mouse_image_location"
         style={{ visibility: mouseLocation.visibility }}

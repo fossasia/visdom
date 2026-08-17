@@ -16,31 +16,33 @@ the data_model itself.
 import copy
 import json
 import logging
-import os
 import time
 import types
 from collections import deque
+from enum import Enum
 
 import tornado.ioloop
 import tornado.escape
 from visdom.server.handlers.base_handlers import BaseWebSocketHandler, BaseHandler
-from visdom.utils.shared_utils import get_rand_id
+from visdom.utils.shared_utils import get_rand_id, NanSafeEncoder
 from visdom.utils.server_utils import (
     check_auth,
     broadcast_envs,
-    serialize_env,
-    serialize_all,
     send_to_sources,
     broadcast,
     escape_eid,
+    push_deleted,
+    pop_deleted,
+    clear_deleted,
+    broadcast_undo_state,
+    notify,
 )
+from visdom.experiments import retarget_experiment
 from visdom.server.defaults import MAX_SOCKET_WAIT
 
 
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
-# TODO move generalized initialization logic from these handlers into the
-# basehandler
 # TODO abstract out any direct references to the app where possible from
 # all handlers. Can instead provide accessor functions on the state?
 # TODO Try to standardize the code between the client-server and
@@ -68,18 +70,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
         self.polling = False
         super().__init__(*args, **kwargs)
 
-    def initialize(self, app):
-        self.state = app.state
-        self.subs = app.subs
-        self.sources = app.sources
-        self.port = app.port
-        self.env_path = app.env_path
-        self.login_enabled = app.login_enabled
-        self.app = app
-        self.readonly = app.readonly
-
     def open(self, register_to="sources"):
-        # self.sid = str(hex(int(time.time() * 10000000))[2:]) # TODO: was previously used for websockets+vis only
         self.sid = get_rand_id()
         register_list = self.sources if register_to == "sources" else self.subs
         if self not in list(register_list.values()):
@@ -100,27 +91,68 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
         elif cmd == "close":
             if "data" in msg and "eid" in msg:
                 logging.info(f"closing window {msg['data']}")
-                p_data = self.state[msg["eid"]]["jsons"].pop(msg["data"], None)
+                eid = escape_eid(msg["eid"])
+                if eid not in self.state:
+                    return
+                p_data = self.state[eid]["jsons"].pop(msg["data"], None)
+                if p_data is not None:
+                    push_deleted(self.storage, eid, msg["data"], p_data)
+                env = self.state.get(msg["eid"])
+                if env is None:
+                    return
+                p_data = env["jsons"].pop(msg["data"], None)
                 event = {
                     "event_type": "close",
                     "target": msg["data"],
-                    "eid": msg["eid"],
+                    "eid": eid,
                     "pane_data": p_data,
                 }
                 send_to_sources(self, event)
+                self.mark_dirty(eid)
+                broadcast_undo_state(self, eid, self.storage)
+
+        elif cmd == "undo":
+            if "eid" in msg:
+                eid = escape_eid(msg["eid"])
+                if eid not in self.state:
+                    return
+                popped = pop_deleted(self.storage, eid)
+                if popped:
+                    win_id, p_data = popped
+                    env = self.state[eid]["jsons"]
+                    max_i = max((p.get("i", -1) for p in env.values()), default=-1)
+                    p_data["i"] = max_i + 1
+                    env[win_id] = p_data
+                    broadcast_msg = dict(p_data)
+                    broadcast_msg["eid"] = eid
+                    broadcast(
+                        self,
+                        json.dumps(broadcast_msg, cls=NanSafeEncoder),
+                        eid,
+                    )
+                    self.mark_dirty(eid)
+                broadcast_undo_state(self, eid, self.storage)
 
         elif cmd == "save":
             # save localStorage window metadata
             if "data" in msg and "eid" in msg:
                 msg["eid"] = escape_eid(msg["eid"])
-                self.state[msg["eid"]] = copy.deepcopy(self.state[msg["prev_eid"]])
+                prev_eid = escape_eid(msg["prev_eid"]) if msg.get("prev_eid") else None
+                if prev_eid not in self.state:
+                    return
+                # Saving under a new eid clones the env, metadata blob and all,
+                # so retarget the copy rather than leave it recording the env
+                # it was cloned from.
+                self.state[msg["eid"]] = retarget_experiment(
+                    copy.deepcopy(self.state[prev_eid]), msg["eid"]
+                )
                 self.state[msg["eid"]]["reload"] = msg["data"]
                 self.eid = msg["eid"]
-                serialize_env(self.state, [self.eid], env_path=self.env_path)
+                self.storage.save_env(self.eid, self.state[self.eid])
 
         elif cmd == "save_all":
             tornado.ioloop.IOLoop.current().run_in_executor(
-                None, serialize_all, self.state, self.env_path
+                None, self.storage.save_all, self.state
             )
 
         elif cmd == "delete_env":
@@ -130,14 +162,8 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     return
                 logging.info(f"closing environment {eid}")
                 self.state.pop(eid, None)
-                if self.env_path is not None:
-                    p = os.path.join(self.env_path, "{0}.json".format(eid))
-                    try:
-                        os.remove(p)
-                    except FileNotFoundError:
-                        pass
-                    except OSError as e:
-                        logging.error(f"Failed to delete {p}: {e}")
+                clear_deleted(self.storage, eid)
+                self.storage.delete_env(eid)
                 broadcast_envs(self)
 
         elif cmd == "save_layouts":
@@ -148,27 +174,410 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
 
         elif cmd == "forward_to_vis":
             packet = msg.get("data")
-            environment = self.state[packet["eid"]]
+            if not isinstance(packet, dict):
+                logging.warning(
+                    f"forward_to_vis: expected dict payload, got {type(packet).__name__!r}, dropping event"
+                )
+                return
+            eid = packet.get("eid")
+            target = packet.get("target")
+            if eid is None or target is None:
+                logging.warning(
+                    f"forward_to_vis: malformed packet (eid={eid!r},"
+                    f" target={target!r}), dropping event"
+                )
+                return
+            environment = self.state.get(eid)
+            if environment is None:
+                logging.warning(
+                    f"forward_to_vis: env {eid!r} not found, dropping event"
+                )
+                notify(
+                    self,
+                    f"Environment '{eid}' not found.",
+                    type="warning",
+                    target_subs=[self],
+                )
+                return
             if packet.get("pane_data") is not False:
-                packet["pane_data"] = environment["jsons"][packet["target"]]
+                pane = environment["jsons"].get(target)
+                if pane is None:
+                    logging.warning(
+                        f"forward_to_vis: pane {target!r} not found"
+                        f" in env {eid!r}, dropping event"
+                    )
+                    notify(
+                        self,
+                        f"Pane '{target}' not found in environment '{eid}'.",
+                        type="warning",
+                        target_subs=[self],
+                    )
+                    return
+                packet["pane_data"] = pane
             send_to_sources(self, msg.get("data"))
 
         elif cmd == "layout_item_update":
             eid = msg.get("eid")
             win = msg.get("win")
+            if eid is None or win is None or eid not in self.state:
+                logging.warning(
+                    f"layout_item_update: env {eid!r} or win {win!r}"
+                    f" not found, dropping event"
+                )
+                return
             self.state[eid]["reload"][win] = msg.get("data")
+            self.mark_dirty(eid)
+
+        elif cmd == "update_plot_layout":
+            eid = msg.get("eid")
+            win = msg.get("win")
+            frame = msg.get("frame")
+            patch = msg.get("data")
+            if eid is None or win is None or eid not in self.state:
+                logging.warning(
+                    f"update_plot_layout: env {eid!r} or win {win!r}"
+                    f" not found, dropping event"
+                )
+                return
+            if not isinstance(patch, dict):
+                logging.warning(
+                    f"update_plot_layout: expected dict patch, got"
+                    f" {type(patch).__name__!r}, dropping event"
+                )
+                return
+
+            env = self.state[eid]["jsons"]
+            if win not in env:
+                logging.warning(
+                    f"update_plot_layout: pane {win!r} not found"
+                    f" in env {eid!r}, dropping event"
+                )
+                return
+
+            p = env[win]
+
+            if p.get("type") == "plot_history":
+                content_list = p.get("content")
+                if (
+                    not isinstance(content_list, list)
+                    or frame is None
+                    or not (0 <= frame < len(content_list))
+                ):
+                    logging.warning(
+                        f"update_plot_layout: invalid frame {frame!r}"
+                        f" for plot_history pane {win!r}, dropping event"
+                    )
+                    return
+                layout = content_list[frame].setdefault("layout", {})
+            else:
+                content = p.get("content")
+                if not isinstance(content, dict):
+                    logging.warning(
+                        f"update_plot_layout: pane {win!r} has no plot"
+                        f" content, dropping event"
+                    )
+                    return
+                layout = content.setdefault("layout", {})
+
+            layout.update(patch)
+            p["version"] = p.get("version", 1) + 1
+            p["contentID"] = get_rand_id()
+
+            if p.get("type") == "plot_history":
+                layout_path = f"/content/{frame}/layout"
+            else:
+                layout_path = "/content/layout"
+
+            diff_packet = [
+                {"op": "add", "path": layout_path, "value": layout},
+                {"op": "replace", "path": "/version", "value": p["version"]},
+                {"op": "replace", "path": "/contentID", "value": p["contentID"]},
+            ]
+            broadcast_packet = {
+                "command": "window_update",
+                "win": win,
+                "eid": eid,
+                "content": diff_packet,
+                "version": p["version"],
+            }
+            broadcast(self, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
+            self.mark_dirty(eid)
+
+        elif cmd == "update_comment":
+            if self.readonly:
+                logging.warning("update_comment: rejected, server is in readonly mode")
+                return
+
+            eid = msg.get("eid")
+            win = msg.get("win")
+            comment = msg.get("data")
+            if eid is None or win is None or eid not in self.state:
+                logging.warning(
+                    f"update_comment: env {eid!r} or win {win!r}"
+                    f" not found, dropping event"
+                )
+                return
+            if not isinstance(comment, str):
+                logging.warning(
+                    f"update_comment: expected str data, got"
+                    f" {type(comment).__name__!r}, dropping event"
+                )
+                return
+
+            env = self.state[eid]["jsons"]
+            if win not in env:
+                logging.warning(
+                    f"update_comment: pane {win!r} not found"
+                    f" in env {eid!r}, dropping event"
+                )
+                return
+
+            p = env[win]
+            p["comment"] = comment
+            p["version"] = p.get("version", 1) + 1
+
+            diff_packet = [
+                {"op": "add", "path": "/comment", "value": comment},
+                {"op": "replace", "path": "/version", "value": p["version"]},
+            ]
+            broadcast_packet = {
+                "command": "window_update",
+                "win": win,
+                "eid": eid,
+                "content": diff_packet,
+                "version": p["version"],
+            }
+            broadcast(self, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
+            self.mark_dirty(eid)
+
+        elif cmd == "table_edit":
+            if self.readonly:
+                logging.warning("table_edit: rejected, server is in readonly mode")
+                return
+
+            eid = msg.get("eid")
+            win = msg.get("win")
+            op = msg.get("op")
+            payload = msg.get("data")
+            if eid is None or win is None or eid not in self.state:
+                logging.warning(
+                    f"table_edit: env {eid!r} or win {win!r}"
+                    f" not found, dropping event"
+                )
+                return
+            if not isinstance(payload, dict):
+                logging.warning(
+                    f"table_edit: expected dict data, got"
+                    f" {type(payload).__name__!r}, dropping event"
+                )
+                return
+
+            env = self.state[eid]["jsons"]
+            p = env.get(win)
+            if p is None or p.get("type") != "table":
+                logging.warning(
+                    f"table_edit: pane {win!r} not found or not a table"
+                    f" pane in env {eid!r}, dropping event"
+                )
+                return
+            if p.get("editable") is False:
+                logging.warning(
+                    f"table_edit: pane {win!r} is read-only, dropping event"
+                )
+                return
+
+            content = p.get("content")
+            if (
+                not isinstance(content, dict)
+                or not isinstance(content.get("headers"), list)
+                or not isinstance(content.get("rows"), list)
+            ):
+                logging.warning(
+                    f"table_edit: pane {win!r} has malformed table content,"
+                    f" dropping event"
+                )
+                return
+            headers, rows = content["headers"], content["rows"]
+
+            if (
+                not isinstance(headers, list)
+                or not isinstance(rows, list)
+                or not all(isinstance(r, list) for r in rows)
+            ):
+                logging.warning(
+                    f"table_edit: pane {win!r} has non-list headers/rows, dropping event"
+                )
+                return
+
+            def _as_int(v):
+                try:
+                    return int(v)
+                except (TypeError, ValueError):
+                    return None
+
+            patch = []
+
+            if op == "edit_cell":
+                r, c = _as_int(payload.get("row")), _as_int(payload.get("col"))
+                value = payload.get("value")
+                if (
+                    r is None
+                    or c is None
+                    or not (0 <= r < len(rows))
+                    or not isinstance(rows[r], list)
+                    or not (0 <= c < len(headers))
+                    or not (0 <= c < len(rows[r]))
+                ):
+                    logging.warning(
+                        f"table_edit: edit_cell out of range (row={r}, "
+                        f"col={c}, row_len={len(rows[r]) if r is not None and 0 <= r < len(rows) else 'n/a'}), "
+                        f"dropping event"
+                    )
+                    return
+                rows[r][c] = value
+                patch = [
+                    {"op": "replace", "path": f"/content/rows/{r}/{c}", "value": value}
+                ]
+
+            elif op == "edit_header":
+                c = _as_int(payload.get("col"))
+                value = payload.get("value")
+                if c is None or not (0 <= c < len(headers)):
+                    logging.warning(
+                        f"table_edit: edit_header out of range (col={c}),"
+                        f" dropping event"
+                    )
+                    return
+                headers[c] = value
+                patch = [
+                    {"op": "replace", "path": f"/content/headers/{c}", "value": value}
+                ]
+
+            elif op == "add_row":
+                new_row = payload.get("values") or [""] * len(headers)
+                if not isinstance(new_row, list) or len(new_row) != len(headers):
+                    logging.warning(
+                        "table_edit: add_row values must be a list matching"
+                        " headers length, dropping event"
+                    )
+                    return
+                rows.append(new_row)
+                patch = [{"op": "add", "path": "/content/rows/-", "value": new_row}]
+
+            elif op == "delete_row":
+                r = _as_int(payload.get("row"))
+                if r is None or not (0 <= r < len(rows)):
+                    logging.warning(
+                        f"table_edit: delete_row out of range (row={r}),"
+                        f" dropping event"
+                    )
+                    return
+                rows.pop(r)
+                patch = [{"op": "remove", "path": f"/content/rows/{r}"}]
+
+            elif op == "add_col":
+                name = str(payload.get("name") or f"Column {len(headers) + 1}")
+                default = payload.get("default")
+                if default is None:
+                    default = ""
+                headers.append(name)
+                patch = [{"op": "add", "path": "/content/headers/-", "value": name}]
+                for i, row in enumerate(rows):
+                    if not isinstance(row, list):
+                        continue
+                    row.append(default)
+                    patch.append(
+                        {"op": "add", "path": f"/content/rows/{i}/-", "value": default}
+                    )
+
+            elif op == "delete_col":
+                c = _as_int(payload.get("col"))
+                if c is None or not (0 <= c < len(headers)):
+                    logging.warning(
+                        f"table_edit: delete_col out of range (col={c}),"
+                        f" dropping event"
+                    )
+                    return
+                if len(headers) <= 1:
+                    logging.warning(
+                        "table_edit: refusing to delete the last remaining"
+                        " column, dropping event"
+                    )
+                    return
+                headers.pop(c)
+                patch = [{"op": "remove", "path": f"/content/headers/{c}"}]
+                for i, row in enumerate(rows):
+                    if isinstance(row, list) and c < len(row):
+                        row.pop(c)
+                        patch.append({"op": "remove", "path": f"/content/rows/{i}/{c}"})
+
+            else:
+                logging.warning(f"table_edit: unknown op {op!r}, dropping event")
+                return
+
+            p["version"] = p.get("version", 1) + 1
+            patch.append({"op": "replace", "path": "/version", "value": p["version"]})
+
+            broadcast_packet = {
+                "command": "window_update",
+                "win": win,
+                "eid": eid,
+                "content": patch,
+                "version": p["version"],
+            }
+            broadcast(self, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
+
+            send_to_sources(
+                self,
+                {
+                    "event_type": "TableEdit",
+                    "target": win,
+                    "eid": eid,
+                    "op": op,
+                    "data": payload,
+                },
+            )
+            self.mark_dirty(eid)
 
         elif cmd == "pop_embeddings_pane":
             packet = msg.get("data")
-            eid = packet["eid"]
-            win = packet["target"]
-            p = self.state[eid]["jsons"][win]
+            if not isinstance(packet, dict):
+                logging.warning(
+                    f"pop_embeddings_pane: expected dict payload,"
+                    f" got {type(packet).__name__!r}, dropping event"
+                )
+                return
+            eid = packet.get("eid")
+            win = packet.get("target")
+            if eid is None or win is None:
+                logging.warning(
+                    f"pop_embeddings_pane: malformed packet"
+                    f" (eid={eid!r}, target={win!r}), dropping event"
+                )
+                return
+            env = self.state.get(eid)
+            if env is None:
+                logging.warning(
+                    f"pop_embeddings_pane: env {eid!r} not found, dropping event"
+                )
+                return
+            if win not in env["jsons"]:
+                logging.warning(
+                    f"pop_embeddings_pane: pane {win!r} not found"
+                    f" in env {eid!r}, dropping event"
+                )
+                return
+            p = env["jsons"][win]
             p["content"]["selected"] = None
             p["content"]["data"] = p["old_content"].pop()
             if len(p["old_content"]) == 0:
                 p["content"]["has_previous"] = False
             p["contentID"] = get_rand_id()
-            broadcast(self, p, eid)
+            # Attach eid so the frontend can filter stale messages after env switch.
+            broadcast_msg = dict(p)
+            broadcast_msg["eid"] = eid
+            broadcast(self, json.dumps(broadcast_msg, cls=NanSafeEncoder), eid)
+            self.mark_dirty(eid)
 
 
 class AnySocketWrapper(AnySocketHandlerOrWrapper):
@@ -216,13 +625,8 @@ class AnySocketWrapper(AnySocketHandlerOrWrapper):
 
     def get_messages(self):
         to_send = []
-        messages = self.messages
-        self.messages = []
-        for message in messages:
-            if isinstance(message, dict):
-                # Not all messages are being formatted the same way (JSON)
-                # TODO investigate
-                message = json.dumps(message)
+        while len(self.messages) > 0:
+            message = self.messages.popleft()
             to_send.append(message)
         self.last_read_time = time.time()
         return to_send
@@ -240,7 +644,9 @@ class VisSocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
             self.close()
             return
         super().open("sources")
-        self.write_message(json.dumps({"command": "alive", "data": "vis_alive"}))
+        self.write_message(
+            json.dumps({"command": "alive", "data": "vis_alive"}, cls=NanSafeEncoder)
+        )
 
     def on_close(self):
         if self in list(self.sources.values()):
@@ -253,7 +659,7 @@ class VisSocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
         if cmd == "echo":
             logging.info(f"from visdom client: {message}")
             for sub in self.sources.values():
-                sub.write_message(json.dumps(msg))
+                sub.write_message(json.dumps(msg, cls=NanSafeEncoder))
             return
 
         super().on_message(message)
@@ -288,7 +694,13 @@ class SocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
 
         self.write_message(
             json.dumps(
-                {"command": "register", "data": self.sid, "readonly": self.readonly}
+                {
+                    "command": "register",
+                    "data": self.sid,
+                    "readonly": self.readonly,
+                    "envList": sorted(list(self.state.keys())),
+                },
+                cls=NanSafeEncoder,
             )
         )
         self.broadcast_layouts([self])
@@ -299,7 +711,10 @@ class SocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
             target_subs = self.subs.values()
         for sub in target_subs:
             sub.write_message(
-                json.dumps({"command": "layout_update", "data": self.app.layouts})
+                json.dumps(
+                    {"command": "layout_update", "data": self.app.layouts},
+                    cls=NanSafeEncoder,
+                )
             )
 
     def initialize(self, app):
@@ -322,20 +737,49 @@ class SocketWrapper(SocketHandlerOrWrapper, AnySocketWrapper):
         pass
 
 
+class SocketFailureReason(Enum):
+    """Failure reason codes for the HTTP polling socket protocol."""
+
+    CONNECTION_CLOSED = (
+        "closed",
+        "No active socket found for the given sid; "
+        "it may have been closed or never existed",
+    )
+    MISSING_MESSAGE = (
+        "no msg",
+        "POST body must include a 'message' field when message_type is 'send'",
+    )
+    INVALID_MESSAGE_TYPE = (
+        "invalid",
+        "Unrecognized message_type; expected 'query' or 'send'",
+    )
+
+    def __new__(cls, value, detail=""):
+        obj = object.__new__(cls)
+        obj._value_ = value
+        obj._detail = detail
+        return obj
+
+    @property
+    def detail(self):
+        return self._detail
+
+    def to_failure_response(self, message=""):
+        resp = {"success": False, "reason": self.value, "detail": self.detail}
+        if message:
+            resp["message"] = message
+        return resp
+
+
 def WrapSocketWrapper(BaseWrapper):
     class WrappedSocketWrap(BaseHandler):
         def initialize(self, app):
-            self.state = app.state
-            self.subs = app.subs
-            self.sources = app.sources
-            self.port = app.port
-            self.env_path = app.env_path
-            self.login_enabled = app.login_enabled
+            super().initialize(app)
             self.app = app
 
+        @check_auth
         def post(self):
             """Either write a message to the socket, or query what's there"""
-            # TODO formalize failure reasons
             args = tornado.escape.json_decode(
                 tornado.escape.to_basestring(self.request.body)
             )
@@ -352,24 +796,38 @@ def WrapSocketWrapper(BaseWrapper):
                 self.subs if BaseWrapper == SocketWrapper else self.sources
             ).get(sid)
 
-            # ensure a wrapper still exists for this connection
             if socket_wrap is None:
-                self.write(json.dumps({"success": False, "reason": "closed"}))
+                self.write(
+                    json.dumps(
+                        SocketFailureReason.CONNECTION_CLOSED.to_failure_response(
+                            f"sid={sid!r}"
+                        )
+                    )
+                )
                 return
 
-            # handle the requests
             if msg_type == "query":
                 messages = socket_wrap.get_messages()
                 self.write(json.dumps({"success": True, "messages": messages}))
             elif msg_type == "send":
                 msg = args.get("message")
                 if msg is None:
-                    self.write(json.dumps({"success": False, "reason": "no msg"}))
+                    self.write(
+                        json.dumps(
+                            SocketFailureReason.MISSING_MESSAGE.to_failure_response()
+                        )
+                    )
                 else:
                     socket_wrap.on_message(msg)
                     self.write(json.dumps({"success": True}))
             else:
-                self.write(json.dumps({"success": False, "reason": "invalid"}))
+                self.write(
+                    json.dumps(
+                        SocketFailureReason.INVALID_MESSAGE_TYPE.to_failure_response(
+                            f"message_type={msg_type!r}"
+                        )
+                    )
+                )
 
     if BaseWrapper == SocketWrapper:
 

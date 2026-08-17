@@ -4,7 +4,7 @@
 # AGENTS instructions
 
 Visdom: Python client + Tornado server + React frontend for live data visualization.
-Version `0.2.4` · Python >= 3.8 · Apache 2.0
+Version `0.2.4` · Python >= 3.12 · Apache 2.0
 
 ## Setup
 
@@ -38,14 +38,15 @@ Version `0.2.4` · Python >= 3.8 · Apache 2.0
 
 ## Testing
 
-- Start server: `visdom -port 8098 -env_path /tmp`
-- Baseline: `npm run test:init`
-- Run tests: `npm run test`
+- Python unit tests: `pytest -m "not server"` (config in `pyproject.toml`, suite in `py/tests/`)
+- Install browser once: `npx playwright install chromium`
+- Run E2E tests: `npm test` and `npm run test:polling`
+- Visual tests: `npm run test:init` then `npm run test:visual`
 - Pre-commit: `pre-commit run --all-files`
 
 ## PR Checklist
 
-- Branch from `master`, add Cypress tests for new code
+- Branch from `master`; add `pytest` tests in `py/tests/` for Python code and Playwright tests for frontend behavior
 - Update `README` for API changes, `__init__.pyi` for interface changes
 - Run linters, do not commit `py/visdom/static/`
 
@@ -58,4 +59,4 @@ Version `0.2.4` · Python >= 3.8 · Apache 2.0
 ## Context & Skills
 
 - `context/` — architecture, backend, frontend, testing
-- `skills/` — adding-pane, websocket-flow, cypress-testing, release-process
+- `skills/` — adding-pane, websocket-flow, playwright-testing, release-process

@@ -17,7 +17,7 @@ Use this skill when preparing a new release or updating the version.
    - `npm run lint` (JavaScript)
    - `black py` (Python)
    - `pre-commit run --all-files`
-   - Cypress tests pass
+   - Playwright WebSocket and polling tests pass
 
 3. Submit PR to `master` with version change.
 
@@ -38,3 +38,21 @@ Use this skill when preparing a new release or updating the version.
 - Never manually commit compiled JS files — let the CI workflow handle it
 - Ensure `demo.py` runs cleanly before releasing
 - Do not push directly to `master`
+
+## Documentation
+
+- [Skill reference](references/REFERENCE.md)
+- `py/visdom/VERSION`
+- `setup.py`
+- `.github/workflows/pypi.yml`
+- `.github/workflows/update-js-build-files.yml`
+- `AGENTS.md`
+- `CONTRIBUTING.md`
+
+## Assets
+
+- See `assets/README.md` and store templates/resources in `assets/`.
+
+## Tests
+
+- Follow the default flow in `references/TESTS.md`.

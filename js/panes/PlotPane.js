@@ -7,21 +7,71 @@
  *
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useContext, useEffect, useRef, useState } from 'react';
 const { usePrevious } = require('../util');
+import ApiContext from '../api/ApiContext';
+import { showToast } from '../toasts/toastEvents';
 import Pane from './Pane';
+import {
+  draggedIndexes,
+  pinDragged,
+  useAnnotations,
+} from './utils/annotations';
+import {
+  downloadJpegWithDpi,
+  downloadPngWithDpi,
+} from './utils/Embeddpimetadata';
+import { copyLatexToClipboard } from './utils/LatexExport';
+import { typesetMathJax } from './utils/mathjaxHelpers';
+import { downloadImageAsPdf } from './utils/pdfExport';
 const { sgg } = require('ml-savitzky-golay-generalized');
 
 var PlotPane = (props) => {
-  const { contentID, content } = props;
+  const { contentID, type, selected } = props;
+  const isHistory = type === 'plot_history';
 
-  // state varibles
+  // state variables
   // --------------
   const plotlyRef = useRef();
-  const previousContent = usePrevious(content);
+  const captionRef = useRef();
   const maxsmoothvalue = 100;
   const [smoothWidgetActive, setSmoothWidgetActive] = useState(false);
   const [smoothvalue, setSmoothValue] = useState(1);
+  const [actualSelected, setActualSelected] = useState(
+    isHistory ? selected || 0 : 0
+  );
+  const { sendPlotLayoutUpdate, sessionInfo } = useContext(ApiContext);
+  const layoutUpdateTimeout = useRef(null);
+
+  const content = isHistory
+    ? props.content[Math.min(actualSelected, props.content.length - 1)]
+    : props.content;
+
+  const previousContent = usePrevious(content);
+
+  useEffect(() => {
+    if (isHistory && selected !== undefined) {
+      setActualSelected(selected);
+    }
+  }, [selected]);
+
+  const annotations = useAnnotations({
+    plotlyRef,
+    content,
+    envID: props.envID,
+    paneID: props.id,
+    frame: isHistory ? actualSelected : undefined,
+    sendPlotLayoutUpdate,
+    readonly: !!sessionInfo?.readonly,
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    typesetMathJax(captionRef.current, () => cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [content && content.caption]);
 
   // private events
   // -------------
@@ -31,17 +81,124 @@ var PlotPane = (props) => {
   const updateSmoothSlider = (value) => {
     setSmoothValue(value);
   };
-  const handleDownload = () => {
-    Plotly.downloadImage(plotlyRef.current, {
-      format: 'svg',
-      filename: contentID,
-    });
+
+  const dpiToScale = (dpi) => (dpi ? dpi / 96 : 1);
+  const PDF_CAPTURE_DPI = 300;
+
+  const handleExport = (format, dpi) => {
+    if (format === 'pdf') {
+      Plotly.toImage(plotlyRef.current, {
+        format: 'jpeg',
+        scale: dpiToScale(PDF_CAPTURE_DPI),
+      })
+        .then((dataUrl) => {
+          downloadImageAsPdf(
+            dataUrl,
+            `${contentID || 'plot'}.pdf`,
+            PDF_CAPTURE_DPI
+          );
+        })
+        .catch((err) => {
+          showToast('Failed to Export PDF', 'error', { duration: 4000 });
+          // eslint-disable-next-line no-console
+          console.error('PlotPane PDF export failed:', err);
+        });
+      return;
+    }
+
+    if (format === 'svg') {
+      Plotly.downloadImage(plotlyRef.current, {
+        format: 'svg',
+        filename: contentID || 'plot',
+      });
+      return;
+    }
+
+    const dpiToEmbed = dpi || 96;
+    Plotly.toImage(plotlyRef.current, {
+      format: format === 'jpg' ? 'jpeg' : 'png',
+      scale: dpiToScale(dpiToEmbed),
+    })
+      .then((dataUrl) => {
+        const filename = `${contentID || 'plot'}.${format}`;
+        if (format === 'jpg') {
+          downloadJpegWithDpi(dataUrl, filename, dpiToEmbed);
+        } else {
+          downloadPngWithDpi(dataUrl, filename, dpiToEmbed);
+        }
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error(`PlotPane ${format.toUpperCase()} export failed:`, err);
+      });
+  };
+
+  const handleMetadataExport = () => {
+    const graph = plotlyRef.current;
+    const metadata = {
+      data: graph?.data ?? content?.data ?? [],
+      layout: graph?.layout ?? content?.layout ?? {},
+    };
+    const json = JSON.stringify(metadata, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${contentID || 'plot'}_metadata.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+  };
+
+  const handleLatexExport = (style) => {
+    const rawTitle = content?.layout?.title;
+    const plotTitle = typeof rawTitle === 'string' ? rawTitle : rawTitle?.text;
+    copyLatexToClipboard(style, {
+      contentID,
+      id: props.id,
+      caption: content?.caption || plotTitle,
+    })
+      .then(() =>
+        showToast('Copied!', 'success', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        })
+      )
+      .catch((err) => {
+        console.error('PlotPane LaTeX export failed:', err);
+        showToast('Failed to Copy', 'error', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        });
+      });
+  };
+
+  const updateHistorySlider = (ev) => {
+    setActualSelected(parseInt(ev.target.value));
   };
 
   // events
   // ------
+  const isDisplayed = (el) =>
+    !!(el && el.offsetWidth > 0 && el.offsetHeight > 0);
   useEffect(() => {
-    if (previousContent) {
+    const plotElement = plotlyRef.current;
+    if (!plotElement) return;
+
+    const resizeObserver = new ResizeObserver(() => {
+      if (plotElement._fullLayout && isDisplayed(plotElement)) {
+        Plotly.Plots.resize(plotElement);
+      }
+    });
+
+    resizeObserver.observe(plotElement);
+    return () => resizeObserver.disconnect();
+  }, []);
+  useEffect(() => {
+    if (previousContent && content) {
       // Retain trace visibility between old and new plots
       let trace_visibility_by_name = {};
       let trace_idx = null;
@@ -75,15 +232,56 @@ var PlotPane = (props) => {
   });
 
   useEffect(() => {
-    if (plotlyRef.current) {
-      Plotly.Plots.resize(plotlyRef.current);
-    }
-  }, [props.width, props.height]);
-  
+    const plotElement = plotlyRef.current;
+    if (!plotElement) return;
+
+    const handleRelayout = (eventdata) => {
+      const touchedShapes = Object.keys(eventdata).some((k) =>
+        k.includes('shapes')
+      );
+      const dragged = draggedIndexes(eventdata);
+      if (!touchedShapes && !dragged.length) return;
+
+      clearTimeout(layoutUpdateTimeout.current);
+      layoutUpdateTimeout.current = setTimeout(() => {
+        const shapes = plotElement.layout?.shapes || [];
+        const patch = { shapes };
+
+        if (dragged.length) {
+          patch.annotations = pinDragged(
+            plotElement.layout?.annotations,
+            dragged
+          );
+        }
+
+        if (content && content.layout) {
+          content.layout.shapes = shapes;
+          if (patch.annotations) {
+            content.layout.annotations = patch.annotations;
+          }
+        }
+
+        sendPlotLayoutUpdate(
+          props.envID,
+          props.id,
+          patch,
+          isHistory ? actualSelected : undefined
+        );
+      }, 300);
+    };
+
+    plotElement.on('plotly_relayout', handleRelayout);
+    return () => {
+      plotElement.removeListener('plotly_relayout', handleRelayout);
+      clearTimeout(layoutUpdateTimeout.current);
+    };
+  }, [props.envID, props.id, actualSelected, content]);
+
   // rendering
   // ---------
 
   const newPlot = () => {
+    if (!content || !content.data) return;
     var data = content.data;
 
     // add smoothed line plots for existing line plots
@@ -99,7 +297,7 @@ var PlotPane = (props) => {
           smooth_d.showlegend = false;
 
           // turn off smoothing for smoothvalue of 3 or too small arrays
-          if (windowSize < 5 || smooth_d.x.length <= 5) {
+          if (windowSize < 5 || !smooth_d.x || smooth_d.x.length <= 5) {
             d.opacity = 1.0;
 
             return smooth_d;
@@ -119,7 +317,7 @@ var PlotPane = (props) => {
           // adapt color & transparency
           d.opacity = 0.35;
           smooth_d.opacity = 1.0;
-          smooth_d.marker.line.color = 0;
+          if (smooth_d.marker?.line) smooth_d.marker.line.color = 0;
 
           return smooth_d;
         });
@@ -139,19 +337,55 @@ var PlotPane = (props) => {
         });
 
     // required for Plotly.react to register the update
-    content.layout.datarevision = props.version;
+    const layout = content.layout || (content.layout = {});
+    content.layout.datarevision = props.version + '_' + actualSelected;
+
+    // Adjust top margin and title position
+    layout.margin = layout.margin || {};
+
+    if (layout.title) {
+      if (typeof layout.title === 'string') {
+        layout.title = { text: layout.title };
+      }
+      if (layout.title.text) {
+        layout.margin.t = 85;
+      } else {
+        layout.margin.t = 30;
+      }
+    } else {
+      layout.margin.t = 30;
+    }
+
+    if (content.caption) {
+      layout.margin.b = Math.max(layout.margin.b || 60, 100);
+    }
 
     // draw / redraw plot with layout-options
     Plotly.react(contentID, data.concat(smooth_data), content.layout, {
-      showLink: true,
-      linkText: 'Edit',
+      displaylogo: false,
+      doubleClick: 'reset',
+      doubleClickDelay: 500,
+      modeBarButtonsToAdd: ['drawopenpath', 'eraseshape'].concat(
+        annotations.modebarButton ? [annotations.modebarButton] : []
+      ),
+      modeBarButtonsToRemove: ['toImage', 'sendDataToCloud'],
+      // dragging a note box leaves its arrow on the data point
+      edits: { annotationTail: !sessionInfo?.readonly },
+    }).then(() => {
+      const plotElement = plotlyRef.current;
+      if (plotElement && plotElement._fullLayout && isDisplayed(plotElement)) {
+        Plotly.Plots.resize(plotElement);
+      }
     });
   };
 
   // check if data can be smoothed
-  var contains_line_plots = content.data.some((data) => {
-    return data['type'] == 'scatter' && data['mode'] == 'lines';
-  });
+  var contains_line_plots =
+    content &&
+    content.data &&
+    content.data.some((data) => {
+      return data['type'] == 'scatter' && data['mode'] == 'lines';
+    });
 
   var smooth_widget_button = '';
   var smooth_widget = '';
@@ -176,7 +410,7 @@ var PlotPane = (props) => {
               min="1"
               max={maxsmoothvalue}
               value={smoothvalue}
-              onInput={(ev) => updateSmoothSlider(ev.target.value)}
+              onChange={(ev) => updateSmoothSlider(ev.target.value)}
             />
             <span>&nbsp;&nbsp;&nbsp;&nbsp;</span>
           </div>
@@ -185,20 +419,68 @@ var PlotPane = (props) => {
     }
   }
 
+  var history_widget = '';
+  if (isHistory && props.show_slider && props.content.length > 1) {
+    history_widget = (
+      <div className="widget" key="history_slider">
+        <div style={{ display: 'flex' }}>
+          <span>Frame:&nbsp;&nbsp;</span>
+          <input
+            type="range"
+            min="0"
+            max={props.content.length - 1}
+            value={actualSelected}
+            onChange={updateHistorySlider}
+          />
+          <span>
+            &nbsp;&nbsp;
+            {actualSelected}/{props.content.length - 1}
+            &nbsp;&nbsp;
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  var caption_widget = '';
+  if (content && content.caption) {
+    caption_widget = (
+      <div className="widget plot-caption" key="plot_caption" ref={captionRef}>
+        {content.caption}
+      </div>
+    );
+  }
+
   return (
     <Pane
       {...props}
-      handleDownload={handleDownload}
+      handleExport={handleExport}
+      handleMetadataExport={handleMetadataExport}
+      handleLatexExport={handleLatexExport}
       barwidgets={[smooth_widget_button]}
-      widgets={[smooth_widget]}
+      widgets={[
+        history_widget,
+        caption_widget,
+        smooth_widget,
+        annotations.hint,
+      ]}
       enablePropertyList
     >
       <div
         id={contentID}
         style={{ height: '100%', width: '100%' }}
-        className="plotly-graph-div"
+        className={`plotly-graph-div${
+          content.data?.[0]?.type === 'heatmap'
+            ? ' plotly-heatmap'
+            : content.data?.[0]?.type === 'contour'
+              ? ' plotly-contour'
+              : content.data?.[0]?.type === 'surface'
+                ? ' plotly-surface'
+                : ''
+        }`}
         ref={plotlyRef}
       />
+      {annotations.editor}
     </Pane>
   );
 };

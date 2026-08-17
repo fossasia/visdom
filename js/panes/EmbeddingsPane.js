@@ -8,8 +8,8 @@
  */
 
 import { polygonContains } from 'd3-polygon';
-import { event as currentEvent, mouse, select } from 'd3-selection';
-import * as d3 from 'd3-zoom';
+import { pointer, select } from 'd3-selection';
+import { zoom as d3zoom, zoomIdentity } from 'd3-zoom';
 import debounce from 'debounce';
 import React from 'react';
 import * as THREE from 'three';
@@ -17,11 +17,36 @@ import * as THREE from 'three';
 import ApiContext from '../api/ApiContext';
 import EventSystem from '../EventSystem';
 import lasso from '../lasso';
+import { showToast } from '../toasts/toastEvents';
 import Pane from './Pane';
+import {
+  downloadJpegWithDpi,
+  downloadPngWithDpi,
+} from './utils/Embeddpimetadata';
+import { copyLatexToClipboard } from './utils/LatexExport';
+import { downloadImageAsPdf } from './utils/pdfExport';
 
 const SCALE_RADIUS = 2000;
+const MIN_SELECTION = 22;
+
+const EXPORT_FORMATS = ['png', 'jpg', 'pdf'];
 
 class EmbeddingsPane extends React.Component {
+  state = { exportError: null };
+  sceneRef = React.createRef();
+
+  shouldComponentUpdate(nextProps, nextState) {
+    if (this.props.contentID !== nextProps.contentID) return true;
+    if (
+      Math.round(this.props.height) !== Math.round(nextProps.height) ||
+      Math.round(this.props.width) !== Math.round(nextProps.width)
+    )
+      return true;
+    if (this.props.isFocused !== nextProps.isFocused) return true;
+    if (this.state.exportError !== nextState.exportError) return true;
+    return false;
+  }
+
   onEvent = (e) => {
     if (!this.props.isFocused) {
       return;
@@ -29,16 +54,20 @@ class EmbeddingsPane extends React.Component {
 
     switch (e.type) {
       case 'keydown':
-      case 'keypress':
-        e.preventDefault();
+      case 'keypress': {
+        const tag = e.target.tagName;
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
+          e.preventDefault();
+        }
         break;
+      }
       case 'keyup':
         if (this.props.isFocused)
           this.context.sendPaneMessage(
             {
               event_type: 'KeyPress',
-              key: event.key,
-              key_code: event.keyCode,
+              key: e.key,
+              key_code: e.keyCode,
               pane_data: false, // No need to send the full data for this
             },
             this.props.id,
@@ -63,16 +92,16 @@ class EmbeddingsPane extends React.Component {
   };
 
   onRegionSelection = (pointIdxs) => {
-    if (this.props.isFocused)
-      this.context.sendPaneMessage(
-        {
-          event_type: 'RegionSelected',
-          selectedIdxs: pointIdxs,
-          pane_data: false, // No need to send the full data for this
-        },
-        this.props.id,
-        this.props.envID
-      );
+    this.props.onFocus(this.props.id);
+    this.context.sendPaneMessage(
+      {
+        event_type: 'RegionSelected',
+        selectedIdxs: pointIdxs,
+        pane_data: false, // No need to send the full data for this
+      },
+      this.props.id,
+      this.props.envID
+    );
   };
 
   // Used to pop an embeddings drilldown off of the stack
@@ -82,7 +111,7 @@ class EmbeddingsPane extends React.Component {
         pane_data: false, // No need to send the full data for this
       },
       this.props.id,
-      this.props.env
+      this.props.envID
     );
   };
 
@@ -93,20 +122,143 @@ class EmbeddingsPane extends React.Component {
     EventSystem.unsubscribe('global.event', this.onEvent);
   }
 
-  handleDownload = () => {
+  handleMetadataExport = () => {
     var blob = new Blob([JSON.stringify(this.props.content.data)], {
       type: 'text/plain',
     });
     var url = window.URL.createObjectURL(blob);
     var link = document.createElement('a');
-    link.download = 'visdom_tsne_data.txt';
+    link.download = this.props.contentID
+      ? `${this.props.contentID}_tsne_data.txt`
+      : 'plot_tsne_data.txt';
     link.href = url;
     link.click();
   };
 
+  handleLatexExport = (style) => {
+    copyLatexToClipboard(style, {
+      contentID: this.props.contentID,
+      id: this.props.id,
+      caption: this.props.title,
+    })
+      .then(() =>
+        showToast('Copied!', 'success', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        })
+      )
+      .catch((err) => {
+        console.error('EmbeddingsPane LaTeX export failed:', err);
+        showToast('Failed to Copy', 'error', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        });
+      });
+  };
+
+  handleExport = (format, dpi) => {
+    this.setState({ exportError: null });
+
+    const sceneInstance = this.sceneRef.current;
+    if (!sceneInstance) {
+      this.setState({
+        exportError: 'Visualization is not ready yet. Please try again.',
+      });
+      return;
+    }
+
+    const { renderer, scene, camera } = sceneInstance;
+    if (!renderer || !scene || !camera) {
+      this.setState({
+        exportError: 'Visualization is not ready yet. Please try again.',
+      });
+      return;
+    }
+
+    const width = Math.max(1, this.props.width);
+    const height = Math.max(1, this.props.height);
+    const PDF_CAPTURE_DPI = 300;
+    const scale = format === 'pdf' ? PDF_CAPTURE_DPI / 96 : dpi ? dpi / 96 : 1;
+    const originalPixelRatio = renderer.getPixelRatio();
+    const effectiveDpi = Math.round(scale * 96 * originalPixelRatio);
+
+    try {
+      // `updateStyle=false` keeps the on-screen CSS size unchanged while
+      // only the internal render resolution increases
+      renderer.setPixelRatio(originalPixelRatio * scale);
+      renderer.setSize(width, height, false);
+      renderer.render(scene, camera);
+
+      const mime =
+        format === 'jpg' || format === 'pdf' ? 'image/jpeg' : 'image/png';
+      const dataUrl = renderer.domElement.toDataURL(
+        mime,
+        format === 'jpg' || format === 'pdf' ? 0.95 : undefined
+      );
+
+      if (format === 'pdf') {
+        downloadImageAsPdf(
+          dataUrl,
+          `${this.props.contentID || 'plot'}.pdf`,
+          effectiveDpi
+        );
+      } else {
+        const filename = `${this.props.contentID || 'plot'}.${format}`;
+        if (format === 'jpg') {
+          downloadJpegWithDpi(dataUrl, filename, effectiveDpi);
+        } else {
+          downloadPngWithDpi(dataUrl, filename, effectiveDpi);
+        }
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('EmbeddingsPane export failed:', err);
+      this.setState({
+        exportError: 'Export failed: ' + (err.message || 'unknown error'),
+      });
+    } finally {
+      // restore the on-screen resolution and schedule a normal repaint,
+      // regardless of whether the export above succeeded
+      renderer.setPixelRatio(originalPixelRatio);
+      renderer.setSize(width, height, false);
+      sceneInstance.scheduleRender();
+    }
+  };
+
   render() {
     return (
-      <Pane {...this.props} handleDownload={this.handleDownload}>
+      <Pane
+        {...this.props}
+        handleExport={this.handleExport}
+        handleMetadataExport={this.handleMetadataExport}
+        handleLatexExport={this.handleLatexExport}
+        exportFormats={EXPORT_FORMATS}
+      >
+        {this.state.exportError ? (
+          <div
+            style={{
+              position: 'absolute',
+              top: 16,
+              left: 0,
+              right: 0,
+              textAlign: 'center',
+              zIndex: 5,
+            }}
+          >
+            <span
+              style={{
+                backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                color: '#c00',
+                padding: 2,
+                userSelect: 'none',
+              }}
+            >
+              {this.state.exportError}
+            </span>
+          </div>
+        ) : null}
         {this.props.content.isLoading ? (
           <div
             style={{
@@ -123,6 +275,7 @@ class EmbeddingsPane extends React.Component {
           </div>
         ) : (
           <Scene
+            ref={this.sceneRef}
             key={
               this.props.height +
               '===' +
@@ -150,9 +303,21 @@ class Scene extends React.Component {
   constructor(props) {
     super(props);
 
-    this.start = this.start.bind(this);
-    this.stop = this.stop.bind(this);
-    this.animate = this.animate.bind(this);
+    this.scheduleRender = this.scheduleRender.bind(this);
+    this.renderFrame = this.renderFrame.bind(this);
+  }
+
+  shouldComponentUpdate(nextProps, nextState) {
+    return (
+      nextProps.content.data !== this.props.content.data ||
+      nextProps.content.data.length !== this.props.content.data.length ||
+      Math.round(nextProps.height) !== Math.round(this.props.height) ||
+      Math.round(nextProps.width) !== Math.round(this.props.width) ||
+      nextProps.interactive !== this.props.interactive ||
+      nextState.detailsLoading !== this.state.detailsLoading ||
+      nextState.selectMode !== this.state.selectMode ||
+      nextState.selectionError !== this.state.selectionError
+    );
   }
 
   componentDidUpdate(prevProps) {
@@ -198,9 +363,9 @@ class Scene extends React.Component {
     let hoverContainer = new THREE.Object3D();
     scene.add(hoverContainer);
 
-    view.on('mousemove', () => {
+    view.on('mousemove', (event) => {
       if (!this.props.interactive) return;
-      let [mouseX, mouseY] = mouse(view.node());
+      let [mouseX, mouseY] = pointer(event, view.node());
       let mouse_position = [mouseX, mouseY];
       this.checkIntersects(
         mouse_position,
@@ -212,20 +377,23 @@ class Scene extends React.Component {
 
     view.on('mouseleave', () => {
       this.removeHighlights(hoverContainer);
+      this.scheduleRender();
     });
 
     this.raycaster = raycaster;
 
     /* ----------------------------------------------------------- */
 
-    let zoom = d3
-      .zoom()
-      .scaleExtent([this.getScaleFromZ(far), this.getScaleFromZ(near) - 1]);
-    zoom.on('zoom', () => {
+    let zoom = d3zoom().scaleExtent([
+      this.getScaleFromZ(far),
+      this.getScaleFromZ(near) - 1,
+    ]);
+    zoom.on('zoom', (event) => {
       if (!this.props.interactive) return;
-      let d3_transform = currentEvent.transform;
-      this.lastTransform = currentEvent.transform;
+      let d3_transform = event.transform;
+      this.lastTransform = event.transform;
       this.zoomHandler(d3_transform);
+      this.scheduleRender();
     });
     this.zoom = zoom;
 
@@ -235,7 +403,7 @@ class Scene extends React.Component {
 
       if (!this.lastTransform) {
         let initial_scale = this.getScaleFromZ(far);
-        initial_transform = d3.zoomIdentity
+        initial_transform = zoomIdentity
           .translate(this.props.width / 2, this.props.height / 2)
           .scale(initial_scale);
 
@@ -263,8 +431,8 @@ class Scene extends React.Component {
     // https://blog.fastforwardlabs.com/2017/10/04/using-three-js-for-2d-data-visualization.html
     // https://codepen.io/WebSeed/pen/MEBoRq
 
-    const width = this.props.width;
-    const height = this.props.height;
+    const width = Math.max(1, this.props.width);
+    const height = Math.max(1, this.props.height);
     let radius = SCALE_RADIUS;
     let color_array = [
       '#1f78b4',
@@ -278,8 +446,11 @@ class Scene extends React.Component {
       '#cab2d6',
       '#cccc00',
     ];
-    let circle_sprite = new THREE.TextureLoader().load(
-      'https://fastforwardlabs.github.io/visualization_assets/circle-sprite.png'
+    const textureLoader = new THREE.TextureLoader();
+    textureLoader.setCrossOrigin('anonymous');
+    let circle_sprite = textureLoader.load(
+      'https://fastforwardlabs.github.io/visualization_assets/circle-sprite.png',
+      () => this.scheduleRender()
     );
 
     let fov = 40;
@@ -296,28 +467,36 @@ class Scene extends React.Component {
       })
     );
 
-    let pointsGeometry = new THREE.Geometry();
+    let pointsGeometry = new THREE.BufferGeometry();
 
-    let colors = [];
-    for (let datum of generated_points) {
-      // Set vector coordinates from data
-      let vertex = new THREE.Vector3(datum.position[0], datum.position[1], 0);
-      pointsGeometry.vertices.push(vertex);
-      let color = new THREE.Color(color_array[datum.group]);
-      colors.push(color);
-    }
-    pointsGeometry.colors = colors;
+    const count = generated_points.length;
+    const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+    generated_points.forEach((datum, i) => {
+      positions[i * 3] = datum.position[0];
+      positions[i * 3 + 1] = datum.position[1];
+      positions[i * 3 + 2] = 0;
+      const c = new THREE.Color(color_array[datum.group]);
+      colors[i * 3] = c.r;
+      colors[i * 3 + 1] = c.g;
+      colors[i * 3 + 2] = c.b;
+    });
+    pointsGeometry.setAttribute(
+      'position',
+      new THREE.BufferAttribute(positions, 3)
+    );
+    pointsGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
     let pointsMaterial = new THREE.PointsMaterial({
       size: 6,
       sizeAttenuation: false,
-      vertexColors: THREE.VertexColors,
+      vertexColors: true,
       map: circle_sprite,
       transparent: true,
     });
 
     let points = new THREE.Points(pointsGeometry, pointsMaterial);
-    let renderer = new THREE.WebGLRenderer();
+    let renderer = new THREE.WebGLRenderer({ preserveDrawingBuffer: true });
 
     let scene = new THREE.Scene();
     scene.add(points);
@@ -343,15 +522,18 @@ class Scene extends React.Component {
     this.setUpMouseInteractions();
 
     this.mount.appendChild(this.renderer.domElement);
-    this.start();
+    this.scheduleRender();
   }
 
   componentWillUnmount() {
     this.stop();
+    clearTimeout(this._errTimer);
     let view = select(this.renderer.domElement);
     view.on('mousemove', null);
     view.on('mouseleave', null);
     this.mount.removeChild(this.renderer.domElement);
+    this.renderer.forceContextLoss();
+    this.renderer.dispose();
   }
 
   /* utility methods */
@@ -406,9 +588,11 @@ class Scene extends React.Component {
       let datum = this.generated_points[index];
       this.highlightPoint(datum, hoverContainer, circle_sprite);
       this.showTooltip(mouse_position, datum);
-    } else {
+      this.scheduleRender();
+    } else if (hoverContainer.children.length > 0) {
       this.removeHighlights(hoverContainer);
       this.hideTooltip();
+      this.scheduleRender();
     }
   }
 
@@ -426,6 +610,19 @@ class Scene extends React.Component {
     this.setState({ hovered: null });
   }
 
+  handleTooFew = (count) => {
+    this.setState({
+      selectionError: `Only ${count} point${
+        count === 1 ? '' : 's'
+      } selected; at least ${MIN_SELECTION} are needed to drill down.`,
+    });
+    clearTimeout(this._errTimer);
+    this._errTimer = setTimeout(
+      () => this.setState({ selectionError: null }),
+      3000
+    );
+  };
+
   sortIntersectsByDistanceToRay(intersects) {
     return [...intersects].sort((a, b) => a.distanceToRay - b.distanceToRay);
   }
@@ -433,16 +630,17 @@ class Scene extends React.Component {
   highlightPoint(datum, hoverContainer, circle_sprite) {
     this.removeHighlights(hoverContainer);
 
-    let geometry = new THREE.Geometry();
-    geometry.vertices.push(
-      new THREE.Vector3(datum.position[0], datum.position[1], 0)
-    );
-    geometry.colors = [new THREE.Color(this.color_array[datum.group])];
+    let geometry = new THREE.BufferGeometry();
+    const pos = new Float32Array([datum.position[0], datum.position[1], 0]);
+    const c = new THREE.Color(this.color_array[datum.group]);
+    const col = new Float32Array([c.r, c.g, c.b]);
+    geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(col, 3));
 
     let material = new THREE.PointsMaterial({
       size: 16,
       sizeAttenuation: false,
-      vertexColors: THREE.VertexColors,
+      vertexColors: true,
       map: circle_sprite,
       transparent: true,
     });
@@ -455,23 +653,25 @@ class Scene extends React.Component {
     hoverContainer.remove(...hoverContainer.children);
   }
 
-  start() {
-    if (!this.frameId) {
-      this.frameId = requestAnimationFrame(this.animate);
+  scheduleRender() {
+    if (this.frameId) {
+      return;
+    }
+    this.frameId = requestAnimationFrame(this.renderFrame);
+  }
+
+  renderFrame() {
+    this.frameId = null;
+    if (this.renderer && this.scene && this.camera) {
+      this.renderer.render(this.scene, this.camera);
     }
   }
 
   stop() {
-    cancelAnimationFrame(this.frameId);
-  }
-
-  animate() {
-    this.renderScene();
-    this.frameId = window.requestAnimationFrame(this.animate);
-  }
-
-  renderScene() {
-    this.renderer.render(this.scene, this.camera);
+    if (this.frameId) {
+      cancelAnimationFrame(this.frameId);
+      this.frameId = null;
+    }
   }
 
   render() {
@@ -578,6 +778,19 @@ class Scene extends React.Component {
               embeddings on
             </span>
           ) : null}
+          {this.state.selectionError ? (
+            <span
+              style={{
+                backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                color: '#c00',
+                padding: 2,
+                marginLeft: 6,
+                userSelect: 'none',
+              }}
+            >
+              {this.state.selectionError}
+            </span>
+          ) : null}
         </span>
         {this.state.hovered && (
           <div
@@ -612,6 +825,7 @@ class Scene extends React.Component {
             points={this.props.content.data}
             camera={this.camera}
             onRegionSelection={this.props.onRegionSelection}
+            onTooFew={this.handleTooFew}
           />
         )}
         <div
@@ -658,7 +872,8 @@ class LassoSelection extends React.Component {
         const selected = points.filter((point) =>
           polygonContains(polygon, point.test)
         );
-        if (selected.length <= 21) {
+        if (selected.length < MIN_SELECTION) {
+          this.props.onTooFew(selected.length);
           lassoInstance.reset();
           return;
         }
