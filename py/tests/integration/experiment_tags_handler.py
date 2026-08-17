@@ -24,7 +24,7 @@ class TestTagsEndpoint(VisdomHTTPTestCase):
 
     def test_set_and_get_preserve_tag_values(self):
         response = self.post_json(
-            "/tags",
+            "/experiments/tags",
             {
                 "eid": "main",
                 "tags": {"dataset": "cifar10", "stable": ""},
@@ -37,7 +37,7 @@ class TestTagsEndpoint(VisdomHTTPTestCase):
         )
         self.assertEqual(self.read_tags(), {"dataset": "cifar10", "stable": ""})
 
-        response = self.fetch("/tags?eid=main")
+        response = self.fetch("/experiments/tags?eid=main")
         self.assertEqual(response.code, 200)
         self.assertEqual(
             json.loads(response.body), {"dataset": "cifar10", "stable": ""}
@@ -45,10 +45,11 @@ class TestTagsEndpoint(VisdomHTTPTestCase):
 
     def test_append_and_replace_tags(self):
         self.post_json(
-            "/tags", {"eid": "main", "tags": {"dataset": "mnist", "old": "1"}}
+            "/experiments/tags",
+            {"eid": "main", "tags": {"dataset": "mnist", "old": "1"}},
         )
         response = self.post_json(
-            "/tags",
+            "/experiments/tags",
             {
                 "eid": "main",
                 "tags": {"dataset": "cifar10", "stage": "production"},
@@ -60,15 +61,17 @@ class TestTagsEndpoint(VisdomHTTPTestCase):
             {"dataset": "cifar10", "old": "1", "stage": "production"},
         )
 
-        response = self.post_json("/tags", {"eid": "main", "tags": {}})
+        response = self.post_json("/experiments/tags", {"eid": "main", "tags": {}})
         self.assertEqual(json.loads(response.body), {})
         self.assertEqual(self.read_tags(), {})
 
     def test_get_action_returns_all_tagged_environments(self):
-        self.post_json("/tags", {"eid": "run-a", "tags": {"owner": "alice"}})
-        self.post_json("/tags", {"eid": "run-b", "tags": {"owner": "bob"}})
+        self.post_json(
+            "/experiments/tags", {"eid": "run-a", "tags": {"owner": "alice"}}
+        )
+        self.post_json("/experiments/tags", {"eid": "run-b", "tags": {"owner": "bob"}})
 
-        response = self.post_json("/tags", {"action": "get"})
+        response = self.post_json("/experiments/tags", {"action": "get"})
         self.assertEqual(
             json.loads(response.body),
             {"run-a": {"owner": "alice"}, "run-b": {"owner": "bob"}},
@@ -80,7 +83,8 @@ class TestTagsEndpoint(VisdomHTTPTestCase):
         self._app.subs.update({"websocket": websocket, "polling": polling})
 
         response = self.post_json(
-            "/tags", {"eid": "main", "tags": {"stage": "production"}}
+            "/experiments/tags",
+            {"eid": "main", "tags": {"stage": "production"}},
         )
 
         self.assertEqual(response.code, 200)
@@ -92,13 +96,26 @@ class TestTagsEndpoint(VisdomHTTPTestCase):
         self.assertEqual(polling.last("tags_update"), expected)
 
     def test_invalid_tag_mapping_and_append_flag_return_400(self):
-        response = self.post_json("/tags", {"eid": "main", "tags": ["stable"]})
+        response = self.post_json(
+            "/experiments/tags", {"eid": "main", "tags": ["stable"]}
+        )
         self.assertEqual(response.code, 400)
 
         response = self.post_json(
-            "/tags", {"eid": "main", "tags": {}, "append": "false"}
+            "/experiments/tags",
+            {"eid": "main", "tags": {}, "append": "false"},
         )
         self.assertEqual(response.code, 400)
+
+    def test_missing_tags_is_400_and_preserves_existing_tags(self):
+        """Omitting tags is invalid rather than an implicit request to clear."""
+        self.post_json("/experiments/tags", {"eid": "main", "tags": {"owner": "alice"}})
+
+        response = self.post_json("/experiments/tags", {"eid": "main"})
+
+        self.assertEqual(response.code, 400)
+        self.assertIn("tags", response.reason)
+        self.assertEqual(self.read_tags(), {"owner": "alice"})
 
 
 class TestTagsEndpointReadonly(VisdomHTTPTestCase):
@@ -107,12 +124,13 @@ class TestTagsEndpointReadonly(VisdomHTTPTestCase):
     def test_reads_are_allowed_but_writes_are_rejected(self):
         ExperimentStore(self._app.storage).update_tags("main", {"dataset": "cifar10"})
 
-        response = self.fetch("/tags?eid=main")
+        response = self.fetch("/experiments/tags?eid=main")
         self.assertEqual(response.code, 200)
         self.assertEqual(json.loads(response.body), {"dataset": "cifar10"})
 
         response = self.post_json(
-            "/tags", {"eid": "main", "tags": {"dataset": "mnist"}}
+            "/experiments/tags",
+            {"eid": "main", "tags": {"dataset": "mnist"}},
         )
         self.assertEqual(response.code, 403)
         self.assertEqual(

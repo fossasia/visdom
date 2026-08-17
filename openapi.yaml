@@ -709,7 +709,7 @@ paths:
             not a JSON object. Also returned when authentication is required
             but not provided.
 
-  /tags:
+  /experiments/tags:
     get:
       operationId: getEnvironmentTags
       tags: [Experiments]
