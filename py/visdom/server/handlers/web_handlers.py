@@ -1286,6 +1286,9 @@ class TagsHandler(BaseHandler):
             )
             return
 
+        if "tags" not in args:
+            raise tornado.web.HTTPError(400, reason="'tags' is required for set action")
+
         eid = extract_eid(args)
         append = args.get("append", False)
         store = ExperimentStore(handler.storage)
@@ -1293,7 +1296,7 @@ class TagsHandler(BaseHandler):
         if eid in handler.state:
             handler.storage.save_env(eid, handler.state[eid])
         try:
-            experiment = store.update_tags(eid, args.get("tags", {}), append=append)
+            experiment = store.update_tags(eid, args["tags"], append=append)
         except (TypeError, ValueError) as error:
             raise tornado.web.HTTPError(400, reason=str(error))
 

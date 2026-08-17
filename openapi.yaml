@@ -738,6 +738,8 @@ paths:
         With `action: set` (the default), replaces an environment's tags or
         appends them when `append` is true. `action: get` reads the same data as
         GET while allowing later clients to use the shared POST transport.
+        The `tags` field is required for `set`; an explicit empty object clears
+        the environment's tags.
         Tag changes are allowed for completed experiments because they are
         organizational metadata. Successful writes broadcast `tags_update` to
         both WebSocket and polling browser clients.
@@ -759,8 +761,9 @@ paths:
                   type: object
                   maxProperties: 20
                   description: >
-                    String tag names mapped to string values. Names are limited
-                    to 50 characters by the domain layer.
+                    Required for `action: set`. String tag names mapped to string
+                    values. Names are limited to 50 characters by the domain
+                    layer. An empty object explicitly clears all tags.
                   additionalProperties:
                     type: string
                 append:
@@ -770,7 +773,9 @@ paths:
         "200":
           description: The resulting tags, or the requested tag mapping.
         "400":
-          description: Invalid action, tag mapping, tag limit, or append flag.
+          description: >
+            Invalid action, missing or invalid tag mapping, tag limit, or append
+            flag.
         "401":
           description: Authentication required but not provided.
         "403":
