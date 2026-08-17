@@ -342,8 +342,7 @@ def test_assets_are_filed_by_extension(offline_downloads, tmp_path):
     static = tmp_path / "static"
     assert (static / "js" / "jquery.min.js").exists()
     assert (static / "js" / "layout-bin-packer.js.map").exists()
-    assert (static / "css" / "bootstrap.min.css").exists()
-    assert (static / "fonts" / "glyphicons-halflings-regular.woff2").exists()
+    assert (static / "css" / "react-resizable-styles.css").exists()
     assert (static / "fonts" / "classnames").exists()
 
 
@@ -357,9 +356,17 @@ def test_the_mathjax_bundle_is_fetched_into_its_versioned_path(
 
 
 def test_the_build_stamp_records_the_installed_version(offline_downloads, tmp_path):
+    """The stamp is the version plus a fingerprint of the asset list.
+
+    Editing the list of files to fetch changes the fingerprint, so a checkout
+    that gained an asset refetches instead of trusting the version alone.
+    """
     _run_download(offline_downloads, tmp_path)
-    stamp = tmp_path / "static" / "version.built"
-    assert stamp.read_text().strip() == "9.9.9"
+    stamp = (tmp_path / "static" / "version.built").read_text().strip()
+    version, _, assets_hash = stamp.partition(":")
+
+    assert version == "9.9.9"
+    assert len(assets_hash) == 64
 
 
 def test_a_second_run_downloads_nothing(offline_downloads, tmp_path):
@@ -374,7 +381,9 @@ def test_a_stale_stamp_forces_a_refetch(offline_downloads, tmp_path):
     (tmp_path / "static" / "version.built").write_text("0.0.1")
     opener, _ = _run_download(offline_downloads, tmp_path)
     assert opener.requested
-    assert (tmp_path / "static" / "version.built").read_text().strip() == "9.9.9"
+    assert (
+        (tmp_path / "static" / "version.built").read_text().strip().startswith("9.9.9:")
+    )
 
 
 @pytest.mark.parametrize(

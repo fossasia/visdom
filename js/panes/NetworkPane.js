@@ -12,7 +12,13 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 
+import { showToast } from '../toasts/toastEvents';
 import Pane from './Pane';
+import {
+  downloadJpegWithDpi,
+  downloadPngWithDpi,
+} from './utils/Embeddpimetadata';
+import { copyLatexToClipboard } from './utils/LatexExport';
 import { downloadImageAsPdf } from './utils/pdfExport';
 
 function NetworkPane(props) {
@@ -33,6 +39,15 @@ function NetworkPane(props) {
   // private events
   // --------------
 
+  // NetworkPane always capture at 2x resolution by default (a
+  // legacy behavior predating the DPI dropdown), unlike PlotPane/
+  // EmbeddingsPane whose no-dpi-given default is a true native 1x. This
+  // constant is the single source of truth for that: both the capture
+  // scale AND the embedded DPI tag are derived from it, so they can't
+  // silently drift apart from each other.
+
+  const NETWORKPANE_LEGACY_SCALE = 2;
+
   const handleExport = (format, dpi) => {
     const svg = containerRef.current?.querySelector('svg');
 
@@ -49,7 +64,7 @@ function NetworkPane(props) {
 
     const filename = `${props.contentID || 'plot'}.${format}`;
 
-    const scale = dpi ? dpi / 96 : 2;
+    const scale = dpi ? dpi / 96 : NETWORKPANE_LEGACY_SCALE;
 
     requestAnimationFrame(() => {
       if (format === 'svg') {
@@ -88,13 +103,48 @@ function NetworkPane(props) {
         return;
       }
 
-      saveSvgAsPng(svg, filename, {
-        scale,
-        backgroundColor: '#FFFFFF',
-        encoderType: format === 'jpg' ? 'image/jpeg' : 'image/png',
-        encoderOptions: format === 'jpg' ? 0.92 : undefined,
-      });
+      const dpiToEmbed = dpi || 96 * NETWORKPANE_LEGACY_SCALE;
+      svgAsPngUri(
+        svg,
+        {
+          scale,
+          backgroundColor: '#FFFFFF',
+          encoderType: format === 'jpg' ? 'image/jpeg' : 'image/png',
+          encoderOptions: format === 'jpg' ? 0.92 : undefined,
+        },
+        (uri) => {
+          if (format === 'jpg') {
+            downloadJpegWithDpi(uri, filename, dpiToEmbed);
+          } else {
+            downloadPngWithDpi(uri, filename, dpiToEmbed);
+          }
+        }
+      );
     });
+  };
+
+  const handleLatexExport = (style) => {
+    copyLatexToClipboard(style, {
+      contentID: props.contentID,
+      id: props.id,
+      caption: props.title,
+      ext: 'pdf',
+    })
+      .then(() =>
+        showToast('Copied!', 'success', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        })
+      )
+      .catch((err) => {
+        console.error('NetworkPane LaTeX export failed:', err);
+        showToast('Failed to Copy', 'error', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        });
+      });
   };
 
   const SVG_STYLE_PROPS = [
@@ -318,7 +368,11 @@ function NetworkPane(props) {
   // ---------
 
   return (
-    <Pane {...props} handleExport={handleExport}>
+    <Pane
+      {...props}
+      handleExport={handleExport}
+      handleLatexExport={handleLatexExport}
+    >
       {downloadError && <div className="error-message">{downloadError}</div>}
       <div
         ref={containerRef}

@@ -7,6 +7,7 @@
  *
  */
 
+import { Eraser, Eye, FolderOpen, Save } from 'lucide-react';
 import TreeSelect, { SHOW_CHILD } from 'rc-tree-select';
 import React, { useContext, useState } from 'react';
 
@@ -152,10 +153,10 @@ function EnvControls(props) {
         </div>
         <button
           id="clear-button"
-          data-toggle="tooltip"
           title={confirmClear ? 'Are you sure?' : 'Clear Current Environment'}
-          data-placement="bottom"
-          className={confirmClear ? 'btn btn-warning btn-sm' : 'btn btn-default btn-sm'}
+          className={
+            confirmClear ? 'btn btn-warning btn-sm' : 'btn btn-default btn-sm'
+          }
           disabled={!(connected && envIDs.length > 0 && !readonly)}
           onClick={() => {
             if (confirmClear) {
@@ -165,39 +166,35 @@ function EnvControls(props) {
           }}
           onBlur={() => setConfirmClear(false)}
         >
-          <span className="glyphicon glyphicon-erase" />
+          <Eraser size={14} />
         </button>
         <button
-          data-toggle="tooltip"
           title="Save All Environments"
-          data-placement="bottom"
           className="btn btn-default btn-sm"
           disabled={!(connected && !readonly)}
           onClick={sendSaveAll}
         >
-          <span className="glyphicon glyphicon-floppy-disk" />
+          <Save size={14} />
         </button>
         <button
-          data-toggle="tooltip"
           title="Manage Environments"
-          data-placement="bottom"
           className="btn btn-default btn-sm"
           disabled={!(connected && envIDs.length > 0 && !readonly)}
           onClick={onEnvManageButton}
         >
-          <span className="glyphicon glyphicon-folder-open" />
+          <FolderOpen size={14} />
         </button>
         {envIDs.length > 1 && (
           <button
-            data-toggle="tooltip"
             title="Show All Windows from All Environments"
-            data-placement="bottom"
             className={
-              showAllEnvWindows ? 'btn btn-primary btn-sm' : 'btn btn-default btn-sm'
+              showAllEnvWindows
+                ? 'btn btn-primary btn-sm'
+                : 'btn btn-default btn-sm'
             }
             onClick={onToggleShowAll}
           >
-            <span className="glyphicon glyphicon-eye-open" />
+            <Eye size={14} />
           </button>
         )}
       </div>

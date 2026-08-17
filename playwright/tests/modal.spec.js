@@ -17,9 +17,9 @@ const {
 } = require('../support/helpers');
 
 const envmodal = 'div[aria-label="Environment Management Modal"] ';
-const envbutton = 'button[data-original-title="Manage Environments"] ';
+const envbutton = 'button[title="Manage Environments"] ';
 const viewmodal = 'div[aria-label="Layout Views Management Modal"] ';
-const viewbutton = 'button[data-original-title="Manage Views"] ';
+const viewbutton = 'button[title="Manage Views"] ';
 const viewselect = 'div[aria-label="View:"] ';
 
 async function dragMouse(page, locator, clientX, clientY) {

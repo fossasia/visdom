@@ -557,10 +557,20 @@ def test_update_comment_broadcasts_a_json_patch(env, inline_executor):
     ]
 
 
+def test_update_comment_marks_the_environment_dirty(env, inline_executor):
+    """Comments are saved on the autosave timer, not written on the spot."""
+    sub = open_sub(env)
+
+    send(sub, cmd="update_comment", eid="expt", win="win_0", data="looks good")
+
+    assert env.dirty_envs["expt"] == 1
+
+
 def test_update_comment_persists_the_environment(env, inline_executor):
     sub = open_sub(env)
 
     send(sub, cmd="update_comment", eid="expt", win="win_0", data="looks good")
+    env.flush_envs(["expt"])
 
     saved = env.storage.load_env("expt")
     assert saved["jsons"]["win_0"]["comment"] == "looks good"

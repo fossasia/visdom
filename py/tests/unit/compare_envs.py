@@ -451,7 +451,7 @@ def test_show_all_relabels_the_nested_plot_layout_too(fake_socket, store):
     state = {"a": _env(_plot_pane("w1", "loss"))}
     compare_envs(state, ["a"], fake_socket, store, show_all=True)
     duplicated = _by_title(fake_socket, "[a] loss")
-    assert duplicated["content"]["layout"]["title"] == "[a] loss"
+    assert duplicated["content"]["layout"]["title"] == {"text": "[a] loss"}
 
 
 def test_show_all_ids_are_namespaced_by_env(fake_socket, store):

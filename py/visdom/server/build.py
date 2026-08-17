@@ -7,6 +7,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import logging
+import hashlib
 import os
 import visdom
 from urllib import request
@@ -27,11 +28,9 @@ def download_scripts(proxies=None, install_dir=None):
 
     # all files that need to be downloaded:
     b = "https://unpkg.com/"
-    bb = "%sbootstrap@3.3.7/dist/" % b
     ext_files = {
         # - js
         "%sjquery@3.1.1/dist/jquery.min.js" % b: "jquery.min.js",
-        "%sbootstrap@3.3.7/dist/js/bootstrap.min.js" % b: "bootstrap.min.js",
         "%sreact@16.2.0/umd/react.production.min.js" % b: "react-react.min.js",
         "%sreact-dom@16.2.0/umd/react-dom.production.min.js" % b: "react-dom.min.js",
         "%sreact-modal@3.1.10/dist/react-modal.min.js" % b: "react-modal.min.js",
@@ -39,7 +38,7 @@ def download_scripts(proxies=None, install_dir=None):
         # https://raw.githubusercontent.com/plotly/plotly.js/master/dist/plotly.min.js
         ## [shouldsee/visdom/package_version]:latest.min.js not pointing to latest.
         ## see https://github.com/plotly/plotly.py/issues/3651
-        "https://cdn.plot.ly/plotly-2.11.1.min.js": "plotly-plotly.min.js",
+        "https://cdn.plot.ly/plotly-3.7.0.min.js": "plotly-plotly.min.js",
         # Stanford Javascript Crypto Library for Password Hashing
         "%ssjcl@1.0.7/sjcl.js" % b: "sjcl.js",
         "%slayout-bin-packer@1.4.0/dist/layout-bin-packer.js.map"
@@ -52,21 +51,10 @@ def download_scripts(proxies=None, install_dir=None):
         # - css
         "%sreact-resizable@3.1.3/css/styles.css" % b: "react-resizable-styles.css",
         "%sreact-grid-layout@2.2.3/css/styles.css" % b: "react-grid-layout-styles.css",
-        "%scss/bootstrap.min.css" % bb: "bootstrap.min.css",
         # - fonts
         "%sclassnames@2.2.5" % b: "classnames",
         "%slayout-bin-packer@1.4.0/dist/layout-bin-packer.js"
         % b: "layout_bin_packer.js",
-        "%sfonts/glyphicons-halflings-regular.eot"
-        % bb: "glyphicons-halflings-regular.eot",
-        "%sfonts/glyphicons-halflings-regular.woff2"
-        % bb: "glyphicons-halflings-regular.woff2",
-        "%sfonts/glyphicons-halflings-regular.woff"
-        % bb: "glyphicons-halflings-regular.woff",
-        "%sfonts/glyphicons-halflings-regular.ttf"
-        % bb: "glyphicons-halflings-regular.ttf",
-        "%sfonts/glyphicons-halflings-regular.svg#glyphicons_halflingsregular"
-        % bb: "glyphicons-halflings-regular.svg#glyphicons_halflingsregular",  # noqa
     }
 
     # make sure all relevant folders exist:
@@ -89,11 +77,15 @@ def download_scripts(proxies=None, install_dir=None):
     request.install_opener(opener)
 
     built_path = os.path.join(install_dir, "static/version.built")
+    assets_hash = hashlib.sha256(
+        repr(sorted(ext_files.items())).encode("utf-8")
+    ).hexdigest()
+    build_marker = "{0}:{1}".format(visdom.__version__, assets_hash)
     is_built = visdom.__version__ == "no_version_file"
     if os.path.exists(built_path):
         with open(built_path, "r") as build_file:
             build_version = build_file.read().strip()
-        if build_version == visdom.__version__:
+        if build_version == build_marker:
             is_built = True
         else:
             os.remove(built_path)
@@ -146,4 +138,4 @@ def download_scripts(proxies=None, install_dir=None):
 
     if not is_built:
         with open(built_path, "w+") as build_file:
-            build_file.write(visdom.__version__)
+            build_file.write(build_marker)

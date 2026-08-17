@@ -9,7 +9,6 @@
     "react",
     "jsx-a11y",
     "ignore-generated-and-nolint",
-    "cypress",
     "simple-import-sort"
   ],
   "parser": "@babel/eslint-parser",

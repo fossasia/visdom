@@ -10,9 +10,20 @@ testpaths = ["py/tests"]
 pythonpath = ["py", "py/tests"]
 # Test modules live under py/tests/{unit,integration}, so the directory already
 # says "test" and the files do not repeat it. Shared helpers are importable, not
-# collectable, so testutils is kept out of discovery.
+# collectable, so testutils is kept out of discovery. `visdom` is excluded too:
+# testpaths only applies when pytest is given no arguments, so `pytest .` from
+# py/ would otherwise import every module of the package as a test file and die
+# on the optional deps in visdom/loggers.
 python_files = ["*.py"]
-norecursedirs = ["testutils", "__pycache__", ".*", "build", "dist", "*.egg"]
+norecursedirs = [
+    "visdom",
+    "testutils",
+    "__pycache__",
+    ".*",
+    "build",
+    "dist",
+    "*.egg",
+]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-ra -q"
