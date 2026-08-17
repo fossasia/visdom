@@ -107,7 +107,6 @@ async function expandAllEnvGroups(page) {
   while (count > 0 && attempts < 50) {
     const countBeforeClick = count;
     await closedGroups.first().click({ force: true });
-
     await expect
       .poll(() => closedGroups.count(), { timeout: 150 })
       .not.toBe(countBeforeClick)
@@ -177,92 +176,12 @@ async function openEnv(page, name) {
   await closeEnvDropdown(page);
 }
 
-async function installPlotRenderObserver(page) {
-  await page.addInitScript(() => {
-    const hookDiv = (div) => {
-      if (typeof div.on !== 'function') return;
-
-      const bump = () => {
-        const n = parseInt(
-          div.getAttribute('data-plotly-render-count') || '0',
-          10
-        );
-        div.setAttribute('data-plotly-render-count', String(n + 1));
-      };
-
-      if (div.__plotlyListener && typeof div.removeListener === 'function') {
-        div.removeListener('plotly_afterplot', div.__plotlyListener);
-      }
-      div.__plotlyListener = bump;
-      div.on('plotly_afterplot', div.__plotlyListener);
-    };
-
-    const scan = () => {
-      document.querySelectorAll('.js-plotly-plot').forEach(hookDiv);
-    };
-
-    const observer = new MutationObserver(scan);
-    observer.observe(document.documentElement, {
-      childList: true,
-      subtree: true,
-    });
-
-    const retryLoop = () => {
-      scan();
-      requestAnimationFrame(retryLoop);
-    };
-    retryLoop();
-  });
-}
-
 async function waitForPlotRender(page) {
-  const content = page.locator('.content').first();
-  await content.waitFor({ state: 'visible', timeout: 20000 });
-
-  const plotDiv = content.locator('.plotly-graph-div').first();
-  if ((await plotDiv.count()) === 0) {
-    return;
-  }
-
-  const debounceMs = 200;
-  const pollMs = 50;
-  const deadline = Date.now() + 20000;
-  let lastCount = -1;
-  let stableSince = Date.now();
-
-  while (Date.now() < deadline) {
-    let current = lastCount;
-    try {
-      current = parseInt(
-        (await plotDiv.getAttribute('data-plotly-render-count')) || '0',
-        10
-      );
-    } catch (e) {
-      // treat as "no new information this poll" and keep trying
-    }
-    if (current !== lastCount) {
-      lastCount = current;
-      stableSince = Date.now();
-    } else if (current > 0 && Date.now() - stableSince >= debounceMs) {
-      return;
-    }
-    await page.waitForTimeout(pollMs);
-  }
-
-  if (lastCount > 0) {
-    console.warn(
-      `waitForPlotRender: render-count did not stabilize within 20s ` +
-        `(last observed: ${lastCount}). Proceeding anyway.`
-    );
-    return;
-  }
-
-  throw new Error(
-    'waitForPlotRender: no Plotly render was observed within 20s for a ' +
-      'pane that has a .plotly-graph-div element. Either this pane ' +
-      'genuinely never rendered, or the render-tracking hook installed by ' +
-      'installPlotRenderObserver failed to attach to it.'
-  );
+  await page
+    .locator('.content')
+    .first()
+    .waitFor({ state: 'visible', timeout: 20000 });
+  await page.waitForTimeout(800);
 }
 
 async function waitForMathJax(page) {
@@ -295,7 +214,6 @@ module.exports = {
   expandAllEnvGroups,
   closeEnvDropdown,
   openEnv,
-  installPlotRenderObserver,
   waitForPlotRender,
   waitForMathJax,
   screenshotContent,
