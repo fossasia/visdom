@@ -37,6 +37,7 @@ from visdom.utils.server_utils import (
     broadcast_undo_state,
     notify,
 )
+from visdom.experiments import retarget_experiment
 from visdom.server.defaults import MAX_SOCKET_WAIT
 
 
@@ -124,6 +125,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     "pane_data": p_data,
                 }
                 send_to_sources(self, event)
+                self.mark_dirty(eid)
                 broadcast_undo_state(self, eid, self.storage)
 
         elif cmd == "undo":
@@ -145,6 +147,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                         json.dumps(broadcast_msg, cls=NanSafeEncoder),
                         eid,
                     )
+                    self.mark_dirty(eid)
                 broadcast_undo_state(self, eid, self.storage)
 
         elif cmd == "save":
@@ -154,7 +157,12 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 prev_eid = escape_eid(msg["prev_eid"]) if msg.get("prev_eid") else None
                 if prev_eid not in self.state:
                     return
-                self.state[msg["eid"]] = copy.deepcopy(self.state[prev_eid])
+                # Saving under a new eid clones the env, metadata blob and all,
+                # so retarget the copy rather than leave it recording the env
+                # it was cloned from.
+                self.state[msg["eid"]] = retarget_experiment(
+                    copy.deepcopy(self.state[prev_eid]), msg["eid"]
+                )
                 self.state[msg["eid"]]["reload"] = msg["data"]
                 self.eid = msg["eid"]
                 self.storage.save_env(self.eid, self.state[self.eid])
@@ -235,6 +243,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 )
                 return
             self.state[eid]["reload"][win] = msg.get("data")
+            self.mark_dirty(eid)
 
         elif cmd == "update_plot_layout":
             eid = msg.get("eid")
@@ -292,6 +301,28 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 layout = content.setdefault("layout", {})
 
             layout.update(patch)
+            p["version"] = p.get("version", 1) + 1
+            p["contentID"] = get_rand_id()
+
+            if p.get("type") == "plot_history":
+                layout_path = f"/content/{frame}/layout"
+            else:
+                layout_path = "/content/layout"
+
+            diff_packet = [
+                {"op": "add", "path": layout_path, "value": layout},
+                {"op": "replace", "path": "/version", "value": p["version"]},
+                {"op": "replace", "path": "/contentID", "value": p["contentID"]},
+            ]
+            broadcast_packet = {
+                "command": "window_update",
+                "win": win,
+                "eid": eid,
+                "content": diff_packet,
+                "version": p["version"],
+            }
+            broadcast(self, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
+            self.mark_dirty(eid)
 
         elif cmd == "update_comment":
             if self.readonly:
@@ -338,10 +369,196 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 "version": p["version"],
             }
             broadcast(self, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
+            self.mark_dirty(eid)
 
-            tornado.ioloop.IOLoop.current().run_in_executor(
-                None, self.storage.save_env, eid, self.state[eid]
+        elif cmd == "table_edit":
+            if self.readonly:
+                logging.warning("table_edit: rejected, server is in readonly mode")
+                return
+
+            eid = msg.get("eid")
+            win = msg.get("win")
+            op = msg.get("op")
+            payload = msg.get("data")
+            if eid is None or win is None or eid not in self.state:
+                logging.warning(
+                    f"table_edit: env {eid!r} or win {win!r}"
+                    f" not found, dropping event"
+                )
+                return
+            if not isinstance(payload, dict):
+                logging.warning(
+                    f"table_edit: expected dict data, got"
+                    f" {type(payload).__name__!r}, dropping event"
+                )
+                return
+
+            env = self.state[eid]["jsons"]
+            p = env.get(win)
+            if p is None or p.get("type") != "table":
+                logging.warning(
+                    f"table_edit: pane {win!r} not found or not a table"
+                    f" pane in env {eid!r}, dropping event"
+                )
+                return
+            if p.get("editable") is False:
+                logging.warning(
+                    f"table_edit: pane {win!r} is read-only, dropping event"
+                )
+                return
+
+            content = p.get("content")
+            if (
+                not isinstance(content, dict)
+                or not isinstance(content.get("headers"), list)
+                or not isinstance(content.get("rows"), list)
+            ):
+                logging.warning(
+                    f"table_edit: pane {win!r} has malformed table content,"
+                    f" dropping event"
+                )
+                return
+            headers, rows = content["headers"], content["rows"]
+
+            if (
+                not isinstance(headers, list)
+                or not isinstance(rows, list)
+                or not all(isinstance(r, list) for r in rows)
+            ):
+                logging.warning(
+                    f"table_edit: pane {win!r} has non-list headers/rows, dropping event"
+                )
+                return
+
+            def _as_int(v):
+                try:
+                    return int(v)
+                except (TypeError, ValueError):
+                    return None
+
+            patch = []
+
+            if op == "edit_cell":
+                r, c = _as_int(payload.get("row")), _as_int(payload.get("col"))
+                value = payload.get("value")
+                if (
+                    r is None
+                    or c is None
+                    or not (0 <= r < len(rows))
+                    or not isinstance(rows[r], list)
+                    or not (0 <= c < len(headers))
+                    or not (0 <= c < len(rows[r]))
+                ):
+                    logging.warning(
+                        f"table_edit: edit_cell out of range (row={r}, "
+                        f"col={c}, row_len={len(rows[r]) if r is not None and 0 <= r < len(rows) else 'n/a'}), "
+                        f"dropping event"
+                    )
+                    return
+                rows[r][c] = value
+                patch = [
+                    {"op": "replace", "path": f"/content/rows/{r}/{c}", "value": value}
+                ]
+
+            elif op == "edit_header":
+                c = _as_int(payload.get("col"))
+                value = payload.get("value")
+                if c is None or not (0 <= c < len(headers)):
+                    logging.warning(
+                        f"table_edit: edit_header out of range (col={c}),"
+                        f" dropping event"
+                    )
+                    return
+                headers[c] = value
+                patch = [
+                    {"op": "replace", "path": f"/content/headers/{c}", "value": value}
+                ]
+
+            elif op == "add_row":
+                new_row = payload.get("values") or [""] * len(headers)
+                if not isinstance(new_row, list) or len(new_row) != len(headers):
+                    logging.warning(
+                        "table_edit: add_row values must be a list matching"
+                        " headers length, dropping event"
+                    )
+                    return
+                rows.append(new_row)
+                patch = [{"op": "add", "path": "/content/rows/-", "value": new_row}]
+
+            elif op == "delete_row":
+                r = _as_int(payload.get("row"))
+                if r is None or not (0 <= r < len(rows)):
+                    logging.warning(
+                        f"table_edit: delete_row out of range (row={r}),"
+                        f" dropping event"
+                    )
+                    return
+                rows.pop(r)
+                patch = [{"op": "remove", "path": f"/content/rows/{r}"}]
+
+            elif op == "add_col":
+                name = str(payload.get("name") or f"Column {len(headers) + 1}")
+                default = payload.get("default")
+                if default is None:
+                    default = ""
+                headers.append(name)
+                patch = [{"op": "add", "path": "/content/headers/-", "value": name}]
+                for i, row in enumerate(rows):
+                    if not isinstance(row, list):
+                        continue
+                    row.append(default)
+                    patch.append(
+                        {"op": "add", "path": f"/content/rows/{i}/-", "value": default}
+                    )
+
+            elif op == "delete_col":
+                c = _as_int(payload.get("col"))
+                if c is None or not (0 <= c < len(headers)):
+                    logging.warning(
+                        f"table_edit: delete_col out of range (col={c}),"
+                        f" dropping event"
+                    )
+                    return
+                if len(headers) <= 1:
+                    logging.warning(
+                        "table_edit: refusing to delete the last remaining"
+                        " column, dropping event"
+                    )
+                    return
+                headers.pop(c)
+                patch = [{"op": "remove", "path": f"/content/headers/{c}"}]
+                for i, row in enumerate(rows):
+                    if isinstance(row, list) and c < len(row):
+                        row.pop(c)
+                        patch.append({"op": "remove", "path": f"/content/rows/{i}/{c}"})
+
+            else:
+                logging.warning(f"table_edit: unknown op {op!r}, dropping event")
+                return
+
+            p["version"] = p.get("version", 1) + 1
+            patch.append({"op": "replace", "path": "/version", "value": p["version"]})
+
+            broadcast_packet = {
+                "command": "window_update",
+                "win": win,
+                "eid": eid,
+                "content": patch,
+                "version": p["version"],
+            }
+            broadcast(self, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
+
+            send_to_sources(
+                self,
+                {
+                    "event_type": "TableEdit",
+                    "target": win,
+                    "eid": eid,
+                    "op": op,
+                    "data": payload,
+                },
             )
+            self.mark_dirty(eid)
 
         elif cmd == "pop_embeddings_pane":
             packet = msg.get("data")
@@ -391,6 +608,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
             broadcast_msg = dict(p)
             broadcast_msg["eid"] = eid
             broadcast(self, json.dumps(broadcast_msg, cls=NanSafeEncoder), eid)
+            self.mark_dirty(eid)
 
 
 class AnySocketWrapper(AnySocketHandlerOrWrapper):

@@ -2,7 +2,7 @@
 name: frontend-pane-lifecycle
 description: Build and debug pane lifecycle behavior in the React frontend. Use when adding pane actions, layout behavior, rendering updates, or pane-level interactions.
 license: Apache-2.0
-compatibility: Requires React/webpack frontend context and Cypress UI test execution.
+compatibility: Requires React/webpack frontend context and Playwright UI test execution.
 ---
 
 # Skill: Frontend Pane Lifecycle

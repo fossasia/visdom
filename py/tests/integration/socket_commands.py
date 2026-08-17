@@ -557,13 +557,24 @@ def test_update_comment_broadcasts_a_json_patch(env, inline_executor):
     ]
 
 
-def test_update_comment_persists_the_environment(env, inline_executor):
+def test_update_comment_marks_the_environment_dirty(env):
+    """Persistence is debounced: the comment reaches disk on the next flush.
+
+    The command used to hand ``save_env`` straight to the executor. It now only
+    marks the env, and the autosave timer (or ``save_threshold`` being reached)
+    does the write, so a comment on a busy env costs one save per interval
+    rather than one per keystroke.
+    """
     sub = open_sub(env)
 
     send(sub, cmd="update_comment", eid="expt", win="win_0", data="looks good")
 
+    assert env.dirty_envs["expt"] == 1
+
+    env.flush_dirty()
     saved = env.storage.load_env("expt")
     assert saved["jsons"]["win_0"]["comment"] == "looks good"
+    assert "expt" not in env.dirty_envs
 
 
 @pytest.mark.parametrize("comment", [42, None, ["a"], {"text": "a"}])

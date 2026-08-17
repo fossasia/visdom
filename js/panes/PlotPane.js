@@ -12,6 +12,16 @@ const { usePrevious } = require('../util');
 import ApiContext from '../api/ApiContext';
 import { showToast } from '../toasts/toastEvents';
 import Pane from './Pane';
+import {
+  draggedIndexes,
+  pinDragged,
+  useAnnotations,
+} from './utils/annotations';
+import {
+  downloadJpegWithDpi,
+  downloadPngWithDpi,
+} from './utils/Embeddpimetadata';
+import { copyLatexToClipboard } from './utils/LatexExport';
 import { typesetMathJax } from './utils/mathjaxHelpers';
 import { downloadImageAsPdf } from './utils/pdfExport';
 const { sgg } = require('ml-savitzky-golay-generalized');
@@ -30,7 +40,7 @@ var PlotPane = (props) => {
   const [actualSelected, setActualSelected] = useState(
     isHistory ? selected || 0 : 0
   );
-  const { sendPlotLayoutUpdate } = useContext(ApiContext);
+  const { sendPlotLayoutUpdate, sessionInfo } = useContext(ApiContext);
   const layoutUpdateTimeout = useRef(null);
 
   const content = isHistory
@@ -44,6 +54,16 @@ var PlotPane = (props) => {
       setActualSelected(selected);
     }
   }, [selected]);
+
+  const annotations = useAnnotations({
+    plotlyRef,
+    content,
+    envID: props.envID,
+    paneID: props.id,
+    frame: isHistory ? actualSelected : undefined,
+    sendPlotLayoutUpdate,
+    readonly: !!sessionInfo?.readonly,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -70,14 +90,15 @@ var PlotPane = (props) => {
       Plotly.toImage(plotlyRef.current, {
         format: 'jpeg',
         scale: dpiToScale(PDF_CAPTURE_DPI),
-      }).then((dataUrl) => {
-        downloadImageAsPdf(
-          dataUrl,
-          `${contentID || 'plot'}.pdf`,
-          PDF_CAPTURE_DPI
-        );
       })
-      .catch((err) => {
+        .then((dataUrl) => {
+          downloadImageAsPdf(
+            dataUrl,
+            `${contentID || 'plot'}.pdf`,
+            PDF_CAPTURE_DPI
+          );
+        })
+        .catch((err) => {
           showToast('Failed to Export PDF', 'error', { duration: 4000 });
           // eslint-disable-next-line no-console
           console.error('PlotPane PDF export failed:', err);
@@ -85,11 +106,31 @@ var PlotPane = (props) => {
       return;
     }
 
-    Plotly.downloadImage(plotlyRef.current, {
-      format: format === 'jpg' ? 'jpeg' : format,
-      scale: dpiToScale(dpi),
-      filename: contentID || 'plot',
-    });
+    if (format === 'svg') {
+      Plotly.downloadImage(plotlyRef.current, {
+        format: 'svg',
+        filename: contentID || 'plot',
+      });
+      return;
+    }
+
+    const dpiToEmbed = dpi || 96;
+    Plotly.toImage(plotlyRef.current, {
+      format: format === 'jpg' ? 'jpeg' : 'png',
+      scale: dpiToScale(dpiToEmbed),
+    })
+      .then((dataUrl) => {
+        const filename = `${contentID || 'plot'}.${format}`;
+        if (format === 'jpg') {
+          downloadJpegWithDpi(dataUrl, filename, dpiToEmbed);
+        } else {
+          downloadPngWithDpi(dataUrl, filename, dpiToEmbed);
+        }
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error(`PlotPane ${format.toUpperCase()} export failed:`, err);
+      });
   };
 
   const handleMetadataExport = () => {
@@ -108,6 +149,31 @@ var PlotPane = (props) => {
     link.click();
     document.body.removeChild(link);
     setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+  };
+
+  const handleLatexExport = (style) => {
+    const rawTitle = content?.layout?.title;
+    const plotTitle = typeof rawTitle === 'string' ? rawTitle : rawTitle?.text;
+    copyLatexToClipboard(style, {
+      contentID,
+      id: props.id,
+      caption: content?.caption || plotTitle,
+    })
+      .then(() =>
+        showToast('Copied!', 'success', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        })
+      )
+      .catch((err) => {
+        console.error('PlotPane LaTeX export failed:', err);
+        showToast('Failed to Copy', 'error', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        });
+      });
   };
 
   const updateHistorySlider = (ev) => {
@@ -173,20 +239,32 @@ var PlotPane = (props) => {
       const touchedShapes = Object.keys(eventdata).some((k) =>
         k.includes('shapes')
       );
-      if (!touchedShapes) return;
+      const dragged = draggedIndexes(eventdata);
+      if (!touchedShapes && !dragged.length) return;
 
       clearTimeout(layoutUpdateTimeout.current);
       layoutUpdateTimeout.current = setTimeout(() => {
         const shapes = plotElement.layout?.shapes || [];
+        const patch = { shapes };
+
+        if (dragged.length) {
+          patch.annotations = pinDragged(
+            plotElement.layout?.annotations,
+            dragged
+          );
+        }
 
         if (content && content.layout) {
           content.layout.shapes = shapes;
+          if (patch.annotations) {
+            content.layout.annotations = patch.annotations;
+          }
         }
 
         sendPlotLayoutUpdate(
           props.envID,
           props.id,
-          { shapes },
+          patch,
           isHistory ? actualSelected : undefined
         );
       }, 300);
@@ -284,12 +362,15 @@ var PlotPane = (props) => {
 
     // draw / redraw plot with layout-options
     Plotly.react(contentID, data.concat(smooth_data), content.layout, {
-      showLink: false,
       displaylogo: false,
       doubleClick: 'reset',
       doubleClickDelay: 500,
-      modeBarButtonsToAdd: ['drawopenpath', 'eraseshape'],
-      modeBarButtonsToRemove: ['toImage'],
+      modeBarButtonsToAdd: ['drawopenpath', 'eraseshape'].concat(
+        annotations.modebarButton ? [annotations.modebarButton] : []
+      ),
+      modeBarButtonsToRemove: ['toImage', 'sendDataToCloud'],
+      // dragging a note box leaves its arrow on the data point
+      edits: { annotationTail: !sessionInfo?.readonly },
     }).then(() => {
       const plotElement = plotlyRef.current;
       if (plotElement && plotElement._fullLayout && isDisplayed(plotElement)) {
@@ -375,8 +456,14 @@ var PlotPane = (props) => {
       {...props}
       handleExport={handleExport}
       handleMetadataExport={handleMetadataExport}
+      handleLatexExport={handleLatexExport}
       barwidgets={[smooth_widget_button]}
-      widgets={[history_widget, caption_widget, smooth_widget]}
+      widgets={[
+        history_widget,
+        caption_widget,
+        smooth_widget,
+        annotations.hint,
+      ]}
       enablePropertyList
     >
       <div
@@ -393,6 +480,7 @@ var PlotPane = (props) => {
         }`}
         ref={plotlyRef}
       />
+      {annotations.editor}
     </Pane>
   );
 };
