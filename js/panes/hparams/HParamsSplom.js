@@ -96,9 +96,11 @@ const HParamsSplom = ({
   );
 
   const effectiveDims = useMemo(() => {
+    const defaults = () => numericCols.slice(0, MAX_DIMS).map((c) => c.id);
+    if (!Array.isArray(selectedDims)) return defaults();
     const validIds = new Set(numericCols.map((c) => c.id));
-    let ids = (selectedDims || []).filter((id) => validIds.has(id));
-    if (ids.length === 0) ids = numericCols.slice(0, MAX_DIMS).map((c) => c.id);
+    const ids = selectedDims.filter((id) => validIds.has(id));
+    if (ids.length === 0 && selectedDims.length > 0) return defaults();
     return ids.slice(0, MAX_DIMS);
   }, [selectedDims, numericCols]);
 
