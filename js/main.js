@@ -21,7 +21,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import ReactDOM from 'react-dom';
+import { createRoot } from 'react-dom/client';
 import ReactGridLayout, {
   getLayoutItem,
   sortLayoutItemsByRowCol as sortLayout,
@@ -404,17 +404,19 @@ const App = () => {
   };
 
   const onEnvUpdate = (data) => {
-    var layoutLists = storeMeta.layoutLists;
-    for (var envIdx in data) {
-      if (!layoutLists.has(data[envIdx])) {
-        layoutLists.set(data[envIdx], new Map([[DEFAULT_LAYOUT, new Map()]]));
+    setStoreMeta((prev) => {
+      const layoutLists = new Map(prev.layoutLists);
+      for (var envIdx in data) {
+        if (!layoutLists.has(data[envIdx])) {
+          layoutLists.set(data[envIdx], new Map([[DEFAULT_LAYOUT, new Map()]]));
+        }
       }
-    }
-    setStoreMeta((prev) => ({
-      ...prev,
-      envList: data,
-      layoutLists: layoutLists,
-    }));
+      return {
+        ...prev,
+        envList: data,
+        layoutLists: layoutLists,
+      };
+    });
   };
 
   // remove paneID from pane list
@@ -1176,7 +1178,8 @@ function AppWithApi() {
 }
 
 function load() {
-  ReactDOM.render(<AppWithApi />, document.getElementById('app'));
+  const root = createRoot(document.getElementById('app'));
+  root.render(<AppWithApi />);
   document.removeEventListener('DOMContentLoaded', load);
 }
 
