@@ -557,10 +557,25 @@ def test_update_comment_broadcasts_a_json_patch(env, inline_executor):
     ]
 
 
-def test_update_comment_persists_the_environment(env, inline_executor):
+def test_update_comment_does_not_write_to_disk(env, inline_executor):
+    """A comment is held in memory; only an explicit save writes it out.
+
+    ``update_comment`` used to schedule a ``save_env`` of its own. That was
+    removed upstream, so editing a comment leaves the stored environment
+    untouched until something else saves it.
+    """
     sub = open_sub(env)
 
     send(sub, cmd="update_comment", eid="expt", win="win_0", data="looks good")
+
+    assert env.storage.load_env("expt") == {}
+
+
+def test_an_explicit_save_persists_the_comment(env, inline_executor):
+    sub = open_sub(env)
+
+    send(sub, cmd="update_comment", eid="expt", win="win_0", data="looks good")
+    send(sub, cmd="save", eid="expt", prev_eid="expt", data={})
 
     saved = env.storage.load_env("expt")
     assert saved["jsons"]["win_0"]["comment"] == "looks good"
