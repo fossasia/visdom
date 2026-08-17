@@ -67,7 +67,7 @@ test.describe('Visdom - Upload Dashboard JSON Feature', () => {
     await page.setInputFiles('input[type="file"]', {
       name: 'bad.json',
       mimeType: 'application/json',
-      buffer: Buffer.from(JSON.stringify({ foo: 'bar' })),
+      buffer: Buffer.from(JSON.stringify({ test: 'bar' })),
     });
 
     const toast = page.locator('.visdom-toast-message');
