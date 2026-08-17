@@ -99,31 +99,6 @@
   color: #b94a48;
 }
 
-/* ---- Title bar (centered, like a proper pane heading) ---- */
-
-.bar-hparams {
-  height: 22px;
-}
-
-.bar-hparams button {
-  line-height: 22px;
-}
-
-.bar-hparams .pull-right {
-  float: none !important;
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  line-height: 22px;
-  text-align: center;
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: #3b5998;
-  pointer-events: none;
-}
-
 /* ---- HParamsTable (B2) ---- */
 
 .hparams-views {
