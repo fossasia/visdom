@@ -21,7 +21,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import ReactDOM from 'react-dom';
+import { createRoot } from 'react-dom/client';
 import ReactGridLayout, {
   getLayoutItem,
   sortLayoutItemsByRowCol as sortLayout,
@@ -1221,7 +1221,8 @@ function AppWithApi() {
 }
 
 function load() {
-  ReactDOM.render(<AppWithApi />, document.getElementById('app'));
+  const root = createRoot(document.getElementById('app'));
+  root.render(<AppWithApi />);
   document.removeEventListener('DOMContentLoaded', load);
 }
 
