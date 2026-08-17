@@ -299,6 +299,7 @@ Visdom offers the following basic visualization functions:
 - [`vis.text`](#vistext)     : arbitrary HTML
 - [`vis.properties`](#visproperties)     : properties grid
 - [`vis.table`](#vistable)     : editable, resizable table pane
+- [`vis.html_table`](#vishtml_table)     : static styled HTML table
 - [`vis.audio`](#visaudio)    : audio
 - [`vis.video`](#visvideo)    : videos
 - [`vis.svg`](#vissvg)      : SVG object
@@ -358,6 +359,16 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 - [`vis.save_plotly_figure`](#visplotlyplot): save a Plotly figure to an image file from code (no browser click)
 - [`vis.check_connection`](#vischeck_connection): check if the server is connected
 - [`vis.replay_log`](#visreplay_log): replay the actions from the provided log file
+
+### Experiments
+Track experiment metadata (hyper-parameters, metrics, tags) alongside your plots, then search and compare runs across your server:
+- [`vis.experiment`](#visexperiment)  : create or update experiment metadata for an env
+- [`vis.log_metrics`](#vislog_metrics)  : append metric observations to an env's experiment
+- [`vis.finish_experiment`](#visfinish_experiment)  : mark an experiment terminal (finished/failed)
+- [`vis.search_experiments`](#vissearch_experiments)  : search experiments across envs with a query
+- [`vis.compare_experiments`](#viscompare_experiments)  : diff experiments field by field
+- [`vis.suggest_experiment`](#vissuggest_experiment)  : suggest parameters for the next run (reserved)
+- [`vis.hparams`](#vishparams)  : open a hyper-parameter pane over the selected runs
 
 
 ## Loggers
@@ -599,6 +610,34 @@ Callback are called on property value update:
  - `value`: new value
 
 No specific `opts` are currently supported.
+
+#### vis.html_table
+This function renders structured data as a styled, static HTML
+table (read-only — use `vis.table` if you need an editable pane).
+
+Arguments:
+- `data`: a 2D `list`/`tuple` of rows, a 2D numpy array, or a
+  `list` of `dict`s (in which case `headers` is derived from the
+  first dict's keys unless explicitly given). In case of an empty
+  list, a table with only the header row is rendered.
+- `headers`: a `list`/`tuple`/1D numpy array of column names.
+  Required unless `data` is a list of dicts.
+
+`vis.html_table` accepts the exact same `data`/`headers` input
+shapes as `vis.table` (including numpy arrays and lists of dicts),
+so the two functions are interchangeable in how you call them —
+only the rendered pane differs (editable native table vs. static
+HTML).
+
+The following `opts` are supported:
+- `opts.title`: title for the window (`string`; optional)
+
+```python
+vis.html_table(
+    data=[["Alice", 92], ["Bob", 87]],
+    headers=["Name", "Score"],
+)
+```
 
 #### vis.table
 This function renders a native, structured, editable table pane. Cells
@@ -1190,6 +1229,105 @@ This function takes the contents of a visdom log and replays them to the current
 
 Arguments:
 - `log_filename`: log file to replay the contents of.
+
+### Experiments
+
+Attach experiment metadata — hyper-parameters, metric observations and tags — to an environment, then search and compare runs across your server. Metadata is stored under the environment's `experiment` key and persisted through the server's data store, so a server started without a persistence path (`env_path=None`) has nothing to store, search or compare. Each function returns the server's reply decoded as a dict.
+
+#### vis.experiment
+
+This function creates or updates the experiment metadata for an environment. Calling it again for the same env merges in new params/tags and overwrites the name/description, so it is safe to call at the start of and again during a run.
+
+Arguments:
+- `name`: Display name for the experiment. Defaults to the env id.
+- `params`: Hyper-parameters as a dict of `{name: value}`.
+- `tags`: Free-form tags as a dict of `{name: value}`.
+- `description`: Free-form description.
+- `env`: Environment to attach the experiment to. Defaults to the client's env.
+
+#### vis.log_metrics
+
+This function appends one or more metric observations to an env's experiment, creating the experiment automatically if it does not exist yet.
+
+Arguments:
+- `metrics`: A non-empty dict of `{name: value}` observations.
+- `step`: Optional training step the observations were recorded at.
+- `env`: Environment whose experiment to log to. Defaults to the client's env.
+
+> **Note**: once an experiment is finished (see `finish_experiment`), further `experiment`/`log_metrics` writes are rejected so a completed run's recorded data cannot change after the fact.
+
+#### vis.finish_experiment
+
+This function marks an env's experiment terminal so its recorded data is frozen.
+
+Arguments:
+- `status`: Terminal status, either `finished` (default) or `failed`.
+- `env`: Environment whose experiment to finish. Defaults to the client's env.
+
+#### vis.search_experiments
+
+This function searches the experiments logged on the server, across all environments. The `query` uses a small readable syntax — comparisons (`<`, `<=`, `>`, `>=`, `=`, `!=`, `contains`) over param, metric and tag names, combined with `AND`/`OR` and parentheses. A name is matched bare (`acc`) or namespaced (`metric.acc`, `param.lr`, `tag.owner`) when ambiguous; metrics compare on their latest value. Queries are evaluated in Python, never `eval`'d, so a hostile query is a parse error rather than code execution.
+
+```python
+vis.search_experiments("lr < 0.01 AND acc > 0.9")
+vis.search_experiments("status = finished AND (dataset contains mnist)")
+```
+
+Arguments:
+- `query`: The filter string. `None` (default) returns everything.
+- `limit`: Maximum results to return (default `100`). `None` returns all matches.
+- `offset`: Number of results to skip, for paging (default `0`).
+- `sort_by`: Field to sort by (any of the same names). Defaults to newest-created first.
+- `descending`: Sort direction (default `True`).
+
+Returns a dict of `experiments` (one page's worth), the unpaged `total` matching the query, and the `limit`/`offset`/`query` used.
+
+`search_experiments`, `compare_experiments` and `suggest_experiment` ask the server a question rather than record something, so an offline client (`Visdom(offline=True)`) has nothing to answer with and each returns `None`.
+
+#### vis.compare_experiments
+
+This function compares the named experiments field by field to see what differs. Finding the runs is `search_experiments`' job — it answers "which runs match?"; this answers "how do these runs differ?". To compare a query's matches, search first and pass the resulting ids on.
+
+Arguments:
+- `env_ids`: A list (or tuple) of environment ids to compare, in the order given. Each must have an experiment.
+
+Returns a dict with the compared runs (`env_ids`, full `experiments`) and a `params`, `metrics` and `tags` section. Each section lists the union of `fields`, the `shared` ones every run agrees on, the `differing` rest, the per-run `values`, and `groups` clustering the runs that agree per field.
+
+#### vis.suggest_experiment
+
+> **Reserved**: this endpoint is a stub. Choosing the next set of hyper-parameters to try (an Optuna-backed search strategy) is planned for a later release, so the server currently replies `501 Not Implemented` and this function returns a stub dict `{"status": "not_implemented", "suggestion": None, ...}` rather than a real suggestion. The method, its arguments and the endpoint are in place so callers and docs are ready for when the strategy is wired in.
+
+Arguments:
+- `params`: The search space to suggest over, as a dict of `{name: spec}`. Currently ignored by the stub.
+- `env`: Environment (study) to suggest against. Defaults to the client's env.
+
+#### vis.hparams
+
+This function opens a hyper-parameter pane over the experiments logged on the server. The selection is resolved server-side: the matching runs are flattened into one record each — the run's hyper-parameters, the latest value of each of its metrics, and its tags — and registered as an `hparams` window, so the pane appears in the browser like any other visualization and reloads with its environment. The pane heads the window with how many runs, params, metrics and tags the selection holds and lists the runs by name with their status; its download button saves the records as JSON.
+
+```python
+vis.hparams("lr < 0.01 AND acc > 0.9")          # by query
+vis.hparams(env_ids=["run-a", "run-b"])         # by env id
+vis.hparams("acc > 0.9", ["run-a", "run-b"])    # both
+```
+
+Arguments:
+- `query`: Filter string selecting the runs to show, in the same readable syntax as [`vis.search_experiments`](#vissearch_experiments). Defaults to `None`.
+- `env_ids`: Explicit list of environment ids to show, kept in the order given. Defaults to `None`.
+- `mode`: One of `query`, `env_ids` or `both`. Defaults to `None`, which infers the mode from the arguments given; passing it explicitly rejects the argument that mode does not accept.
+- `win`: Window id to draw into, as for the plotting functions.
+- `env`: Environment to open the pane in. Defaults to the client's env.
+- `opts`: Window options (`title`, `width`, `height`, ...), as for the plotting functions.
+
+Returns the id of the created window.
+
+The modes select as follows:
+
+- `query`: the runs matching `query`. The query must be non-empty and `env_ids` must not be given.
+- `env_ids`: the runs named in `env_ids`, in that order; only those environments are read rather than every experiment. `env_ids` must be non-empty and `query` must not be given.
+- `both`: the intersection — runs that match `query` *and* are named in `env_ids`, ordered by `env_ids`. Both must be given and non-empty.
+
+There is no "show everything" call: with neither `query` nor `env_ids` the server has nothing to select and rejects the request. A blank or whitespace-only `query` counts as no query. Every id in `env_ids` must name an environment that has an experiment: a mistyped or deleted one is a `404` naming it rather than a run quietly missing from the pane. Under `both`, an id that does have an experiment but does not match the query is filtered out as the query asked.
 
 ## Customizing Visdom
 The user config directory for visdom is

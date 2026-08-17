@@ -18,9 +18,11 @@ test.describe('Misc Tests', () => {
   test('plot_special_graph', async ({ page }) => {
     await runDemo(page, 'plot_special_graph');
 
-    await expect(page.locator('svg line')).toHaveCount(6);
-    await expect(page.locator('svg path')).toHaveCount(6);
-    await expect(page.locator('svg text')).toHaveCount(12);
-    await expect(page.locator('svg g')).toHaveCount(6);
+    const chart = page.locator('.content').first();
+
+    await expect(chart.locator('svg line')).toHaveCount(6);
+    await expect(chart.locator('svg path')).toHaveCount(6);
+    await expect(chart.locator('svg text')).toHaveCount(12);
+    await expect(chart.locator('svg g')).toHaveCount(6);
   });
 });
