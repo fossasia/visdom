@@ -13,7 +13,8 @@ Covers the four pieces the compare layer is built from: the pure
 over the named runs against a real ``JSONStore`` over a temporary
 directory; the ``/experiments/compare`` endpoint end-to-end through a real
 :class:`~visdom.server.app.Application` with Tornado's ``AsyncHTTPTestCase``; and
-the ``Visdom.compare_experiments`` message shape with a mocked transport (no server).
+the ``Visdom.compare_experiments`` message shape with a mocked transport (no
+server).
 """
 
 import json
@@ -405,6 +406,15 @@ class TestCompareEndpoint(tornado.testing.AsyncHTTPTestCase):
             "/experiments/compare",
             method="POST",
             body=json.dumps(body),
+            headers={"Content-Type": "application/json"},
+        )
+
+    def post_raw(self, body):
+        """POST a body verbatim, so malformed JSON reaches the handler."""
+        return self.fetch(
+            "/experiments/compare",
+            method="POST",
+            body=body,
             headers={"Content-Type": "application/json"},
         )
 

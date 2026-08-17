@@ -9,11 +9,13 @@
 
 import React, { useEffect, useRef } from 'react';
 
+import { showToast } from '../toasts/toastEvents';
 import Pane from './Pane';
+import { copyLatexToClipboard } from './utils/LatexExport';
 import { typesetMathJax } from './utils/mathjaxHelpers';
 
 function ImageComparePane(props) {
-  const { content, title, id } = props;
+  const { content, title, id, contentID } = props;
   const containerRef = useRef();
 
   useEffect(() => {
@@ -45,8 +47,40 @@ function ImageComparePane(props) {
     });
   };
 
+  const handleLatexExport = (style) => {
+    const isSingleImage = content.length <= 1;
+    copyLatexToClipboard(style, {
+      contentID,
+      id,
+      caption: title || (isSingleImage ? content[0]?.caption : undefined),
+      images: isSingleImage
+        ? undefined
+        : content.map((imgItem) => ({ caption: imgItem.caption })),
+    })
+      .then(() =>
+        showToast('Copied!', 'success', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        })
+      )
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error('ImageComparePane LaTeX export failed:', err);
+        showToast('Failed to Copy', 'error', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        });
+      });
+  };
+
   return (
-    <Pane {...props} handleDownload={handleDownload}>
+    <Pane
+      {...props}
+      handleDownload={handleDownload}
+      handleLatexExport={handleLatexExport}
+    >
       <div
         ref={containerRef}
         style={{

@@ -35,6 +35,7 @@ from visdom.experiments.query import (
     build_record,
     parse_query,
 )
+from visdom.experiments.records import flatten_experiments
 from visdom.experiments.store import (
     DEFAULT_SORT_FIELD,
     ExperimentStore,
@@ -64,6 +65,7 @@ __all__ = [
     "Tag",
     "build_comparison",
     "build_record",
+    "flatten_experiments",
     "parse_query",
     "retarget_experiment",
     "STATUS_FAILED",

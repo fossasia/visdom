@@ -27,6 +27,7 @@ _COMMON_APP_ATTRIBUTES = (
     "env_path",
     "storage",
     "login_enabled",
+    "mark_dirty",
 )
 
 _WEB_APP_ATTRIBUTES = _COMMON_APP_ATTRIBUTES + (

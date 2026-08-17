@@ -28,11 +28,9 @@ def download_scripts(proxies=None, install_dir=None):
 
     # all files that need to be downloaded:
     b = "https://unpkg.com/"
-    bb = "%sbootstrap@3.3.7/dist/" % b
     ext_files = {
         # - js
         "%sjquery@3.1.1/dist/jquery.min.js" % b: "jquery.min.js",
-        "%sbootstrap@3.3.7/dist/js/bootstrap.min.js" % b: "bootstrap.min.js",
         "%sreact@16.2.0/umd/react.production.min.js" % b: "react-react.min.js",
         "%sreact-dom@16.2.0/umd/react-dom.production.min.js" % b: "react-dom.min.js",
         "%sreact-modal@3.1.10/dist/react-modal.min.js" % b: "react-modal.min.js",
@@ -53,21 +51,10 @@ def download_scripts(proxies=None, install_dir=None):
         # - css
         "%sreact-resizable@3.1.3/css/styles.css" % b: "react-resizable-styles.css",
         "%sreact-grid-layout@2.2.3/css/styles.css" % b: "react-grid-layout-styles.css",
-        "%scss/bootstrap.min.css" % bb: "bootstrap.min.css",
         # - fonts
         "%sclassnames@2.2.5" % b: "classnames",
         "%slayout-bin-packer@1.4.0/dist/layout-bin-packer.js"
         % b: "layout_bin_packer.js",
-        "%sfonts/glyphicons-halflings-regular.eot"
-        % bb: "glyphicons-halflings-regular.eot",
-        "%sfonts/glyphicons-halflings-regular.woff2"
-        % bb: "glyphicons-halflings-regular.woff2",
-        "%sfonts/glyphicons-halflings-regular.woff"
-        % bb: "glyphicons-halflings-regular.woff",
-        "%sfonts/glyphicons-halflings-regular.ttf"
-        % bb: "glyphicons-halflings-regular.ttf",
-        "%sfonts/glyphicons-halflings-regular.svg#glyphicons_halflingsregular"
-        % bb: "glyphicons-halflings-regular.svg#glyphicons_halflingsregular",  # noqa
     }
 
     # make sure all relevant folders exist:
