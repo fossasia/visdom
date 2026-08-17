@@ -557,28 +557,30 @@ def test_update_comment_broadcasts_a_json_patch(env, inline_executor):
     ]
 
 
-def test_update_comment_does_not_write_to_disk(env, inline_executor):
-    """A comment is held in memory; only an explicit save writes it out.
+def test_update_comment_marks_the_environment_dirty(env):
+    """A comment is not written inline; it marks the env for the next save.
 
-    ``update_comment`` used to schedule a ``save_env`` of its own. That was
-    removed upstream, so editing a comment leaves the stored environment
-    untouched until something else saves it.
+    ``update_comment`` used to schedule a ``save_env`` of its own. It now calls
+    ``mark_dirty``, so with the default ``save_threshold`` the comment sits in
+    memory and nothing reaches disk until the autosave or a flush runs.
     """
     sub = open_sub(env)
 
     send(sub, cmd="update_comment", eid="expt", win="win_0", data="looks good")
 
+    assert env.dirty_envs["expt"] == 1
     assert env.storage.load_env("expt") == {}
 
 
-def test_an_explicit_save_persists_the_comment(env, inline_executor):
+def test_flushing_persists_the_comment(env):
     sub = open_sub(env)
 
     send(sub, cmd="update_comment", eid="expt", win="win_0", data="looks good")
-    send(sub, cmd="save", eid="expt", prev_eid="expt", data={})
+    env.flush_dirty()
 
     saved = env.storage.load_env("expt")
     assert saved["jsons"]["win_0"]["comment"] == "looks good"
+    assert "expt" not in env.dirty_envs
 
 
 @pytest.mark.parametrize("comment", [42, None, ["a"], {"text": "a"}])

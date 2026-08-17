@@ -17,11 +17,13 @@ import * as THREE from 'three';
 import ApiContext from '../api/ApiContext';
 import EventSystem from '../EventSystem';
 import lasso from '../lasso';
+import { showToast } from '../toasts/toastEvents';
 import Pane from './Pane';
 import {
   downloadJpegWithDpi,
   downloadPngWithDpi,
 } from './utils/Embeddpimetadata';
+import { copyLatexToClipboard } from './utils/LatexExport';
 import { downloadImageAsPdf } from './utils/pdfExport';
 
 const SCALE_RADIUS = 2000;
@@ -133,6 +135,29 @@ class EmbeddingsPane extends React.Component {
     link.click();
   };
 
+  handleLatexExport = (style) => {
+    copyLatexToClipboard(style, {
+      contentID: this.props.contentID,
+      id: this.props.id,
+      caption: this.props.title,
+    })
+      .then(() =>
+        showToast('Copied!', 'success', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        })
+      )
+      .catch((err) => {
+        console.error('EmbeddingsPane LaTeX export failed:', err);
+        showToast('Failed to Copy', 'error', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        });
+      });
+  };
+
   handleExport = (format, dpi) => {
     this.setState({ exportError: null });
 
@@ -208,6 +233,7 @@ class EmbeddingsPane extends React.Component {
         {...this.props}
         handleExport={this.handleExport}
         handleMetadataExport={this.handleMetadataExport}
+        handleLatexExport={this.handleLatexExport}
         exportFormats={EXPORT_FORMATS}
       >
         {this.state.exportError ? (
