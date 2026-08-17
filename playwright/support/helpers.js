@@ -104,13 +104,33 @@ async function expandAllEnvGroups(page) {
   );
   let count = await closedGroups.count();
   let attempts = 0;
+  let consecutiveNoProgress = 0;
+
+  const maxConsecutiveNoProgress = 6;
+
   while (count > 0 && attempts < 50) {
     const countBeforeClick = count;
     await closedGroups.first().click({ force: true });
-    await expect
-      .poll(() => closedGroups.count(), { timeout: 150 })
+    const madeProgress = await expect
+      .poll(() => closedGroups.count(), { timeout: 500 })
       .not.toBe(countBeforeClick)
-      .catch(() => {});
+      .then(() => true)
+      .catch(() => false);
+
+    if (madeProgress) {
+      consecutiveNoProgress = 0;
+    } else {
+      consecutiveNoProgress++;
+      if (consecutiveNoProgress >= maxConsecutiveNoProgress) {
+        throw new Error(
+          `expandAllEnvGroups: no progress after ${consecutiveNoProgress} ` +
+            `consecutive clicks (stuck at ${count} closed group(s)). A ` +
+            'click may not be registering, or the tree structure changed ' +
+            'unexpectedly mid-loop.'
+        );
+      }
+    }
+
     count = await closedGroups.count();
     attempts++;
   }
