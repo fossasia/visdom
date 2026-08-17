@@ -107,6 +107,7 @@ async function expandAllEnvGroups(page) {
   while (count > 0 && attempts < 50) {
     const countBeforeClick = count;
     await closedGroups.first().click({ force: true });
+
     await expect
       .poll(() => closedGroups.count(), { timeout: 150 })
       .not.toBe(countBeforeClick)
@@ -179,7 +180,7 @@ async function openEnv(page, name) {
 async function installPlotRenderObserver(page) {
   await page.addInitScript(() => {
     const hookDiv = (div) => {
-      if (typeof div.on !== 'function') return; // Plotly hasn't initialized this div yet
+      if (typeof div.on !== 'function') return;
 
       const bump = () => {
         const n = parseInt(
@@ -230,10 +231,15 @@ async function waitForPlotRender(page) {
   let stableSince = Date.now();
 
   while (Date.now() < deadline) {
-    const current = parseInt(
-      (await plotDiv.getAttribute('data-plotly-render-count')) || '0',
-      10
-    );
+    let current = lastCount;
+    try {
+      current = parseInt(
+        (await plotDiv.getAttribute('data-plotly-render-count')) || '0',
+        10
+      );
+    } catch (e) {
+      // treat as "no new information this poll" and keep trying
+    }
     if (current !== lastCount) {
       lastCount = current;
       stableSince = Date.now();
@@ -243,9 +249,19 @@ async function waitForPlotRender(page) {
     await page.waitForTimeout(pollMs);
   }
 
-  console.warn(
-    `waitForPlotRender: gave up after 20s without a stable render-count ` +
-      `(last observed: ${lastCount}). Proceeding anyway.`
+  if (lastCount > 0) {
+    console.warn(
+      `waitForPlotRender: render-count did not stabilize within 20s ` +
+        `(last observed: ${lastCount}). Proceeding anyway.`
+    );
+    return;
+  }
+
+  throw new Error(
+    'waitForPlotRender: no Plotly render was observed within 20s for a ' +
+      'pane that has a .plotly-graph-div element. Either this pane ' +
+      'genuinely never rendered, or the render-tracking hook installed by ' +
+      'installPlotRenderObserver failed to attach to it.'
   );
 }
 
