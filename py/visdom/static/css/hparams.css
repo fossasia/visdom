@@ -1,0 +1,100 @@
+/*
+ * Copyright 2017-present, The Visdom Authors
+ * All rights reserved.
+ *
+ * This source code is licensed under the license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+.content-hparams {
+  height: 100%;
+  overflow: auto;
+  background-color: #fff;
+  font-family: "Open Sans", sans-serif;
+  font-size: 12px;
+  color: #333;
+}
+
+.hparams-body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.hparams-summary {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 6px 10px;
+  background-color: #f0f0f0;
+  border-bottom: 1px solid #dedede;
+}
+
+.hparams-stat {
+  color: #3b5998;
+  white-space: nowrap;
+}
+
+.hparams-stat b {
+  font-weight: 600;
+}
+
+.hparams-runs {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+}
+
+.hparams-run {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 10px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.hparams-run-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hparams-run-status {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  text-transform: capitalize;
+  background-color: #dedede;
+  color: #333;
+}
+
+.hparams-status-running {
+  background-color: #6389d8;
+  color: #fff;
+}
+
+.hparams-status-finished {
+  background-color: #3b5998;
+  color: #fff;
+}
+
+.hparams-status-failed {
+  background-color: #d85f5f;
+  color: #fff;
+}
+
+.hparams-message {
+  padding: 16px;
+  text-align: center;
+  color: grey;
+}
+
+.hparams-error {
+  color: #b94a48;
+}

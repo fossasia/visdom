@@ -11,15 +11,23 @@ import React, { useContext, useEffect, useRef, useState } from 'react';
 
 import ApiContext from '../api/ApiContext';
 import EventSystem from '../EventSystem';
+import { showToast } from '../toasts/toastEvents';
 import Pane from './Pane';
+import {
+  downloadJpegWithDpi,
+  downloadPngWithDpi,
+} from './utils/Embeddpimetadata';
+import { copyLatexToClipboard } from './utils/LatexExport';
 import { typesetMathJax } from './utils/mathjaxHelpers';
+import { downloadImageAsPdf } from './utils/pdfExport';
 
 const DEFAULT_HEIGHT = 400;
 const DEFAULT_WIDTH = 300;
+const IMAGE_EXPORT_FORMATS = ['png', 'jpg', 'pdf'];
 
 function ImagePane(props) {
   const { sendPaneMessage } = useContext(ApiContext);
-  const { envID, id, title, type, selected, width, height } = props;
+  const { envID, id, contentID, title, type, selected, width, height } = props;
   var { isFocused, content } = props;
 
   // state variables
@@ -40,14 +48,81 @@ function ImagePane(props) {
     x: 0,
     y: 0,
   });
+  const [exportError, setExportError] = useState(null);
+  const exportErrorTimeoutRef = useRef(null);
 
   // private events
   // -------------
-  const handleDownload = () => {
-    var link = document.createElement('a');
-    link.download = `${title || 'visdom_image'}.jpg`;
-    link.href = content.src;
-    link.click();
+  const handleExport = (format, dpi) => {
+    try {
+      const filename = `${title || 'visdom_image'}.${format}`;
+      const dpiToEmbed = dpi || 96;
+      const isSourceJpeg = /^data:image\/jpe?g/i.test(content.src || '');
+
+      if (isSourceJpeg && format === 'jpg') {
+        downloadJpegWithDpi(content.src, filename, dpiToEmbed);
+        return;
+      }
+      if (isSourceJpeg && format === 'pdf') {
+        downloadImageAsPdf(content.src, filename, dpiToEmbed);
+        return;
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = imgRef.current.naturalWidth;
+      canvas.height = imgRef.current.naturalHeight;
+      const ctx = canvas.getContext('2d');
+
+      if (format === 'jpg' || format === 'pdf') {
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+      ctx.drawImage(imgRef.current, 0, 0);
+
+      if (format === 'pdf') {
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+        downloadImageAsPdf(dataUrl, filename, dpiToEmbed);
+      } else if (format === 'jpg') {
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+        downloadJpegWithDpi(dataUrl, filename, dpiToEmbed);
+      } else {
+        const dataUrl = canvas.toDataURL('image/png');
+        downloadPngWithDpi(dataUrl, filename, dpiToEmbed);
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('ImagePane export failed:', err);
+      setExportError('Export failed. Please try again.');
+      if (exportErrorTimeoutRef.current) {
+        clearTimeout(exportErrorTimeoutRef.current);
+      }
+      exportErrorTimeoutRef.current = setTimeout(() => {
+        setExportError(null);
+      }, 3000);
+    }
+  };
+
+  const handleLatexExport = (style) => {
+    copyLatexToClipboard(style, {
+      contentID,
+      id,
+      caption: content.caption || title,
+    })
+      .then(() =>
+        showToast('Copied!', 'success', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        })
+      )
+      .catch((err) => {
+        console.error('ImagePane LaTeX export failed:', err);
+        showToast('Failed to Copy', 'error', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        });
+      });
   };
 
   const handleZoom = (ev) => {
@@ -168,6 +243,14 @@ function ImagePane(props) {
   useEffect(() => {
     setActualSelected(selected);
   }, [selected]);
+
+  useEffect(() => {
+    return () => {
+      if (exportErrorTimeoutRef.current) {
+        clearTimeout(exportErrorTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Reset the image settings when the user resizes the window. Avoid
   // constantly resetting the zoom level when user has not zoomed.
@@ -335,13 +418,16 @@ function ImagePane(props) {
   return (
     <Pane
       {...props}
-      handleDownload={handleDownload}
+      handleExport={handleExport}
+      exportFormats={IMAGE_EXPORT_FORMATS}
       handleReset={handleReset}
       handleZoom={handleZoom}
       handleMouseMove={handleMouseOver}
+      handleLatexExport={handleLatexExport}
       ref={paneRef}
       widgets={widgets}
     >
+      {exportError && <div className="error-message">{exportError}</div>}
       <div style={divstyle}>
         <div style={imageContainerStyle}>
           <img
