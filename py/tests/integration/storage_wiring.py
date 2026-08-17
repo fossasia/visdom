@@ -11,7 +11,7 @@ Tests that the server routes persistence through ``Application.storage``
 (the DataStore backend) rather than writing environment files directly.
 
 As end-to-end save/fork/reload behavior is already
-covered in ``test_environment_lifecycle``; here we assert the abstraction itself
+covered in ``environment_lifecycle``; here we assert the abstraction itself
 is in place so a future refactor cannot silently bypass the backend.
 """
 
