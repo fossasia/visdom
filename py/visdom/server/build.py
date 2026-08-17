@@ -30,7 +30,6 @@ def download_scripts(proxies=None, install_dir=None):
     b = "https://unpkg.com/"
     ext_files = {
         # - js
-        "%sjquery@3.1.1/dist/jquery.min.js" % b: "jquery.min.js",
         "%sreact@16.2.0/umd/react.production.min.js" % b: "react-react.min.js",
         "%sreact-dom@16.2.0/umd/react-dom.production.min.js" % b: "react-dom.min.js",
         "%sreact-modal@3.1.10/dist/react-modal.min.js" % b: "react-modal.min.js",
