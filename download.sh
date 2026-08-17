@@ -1,7 +1,6 @@
 #!/bin/sh
 
 mkdir -p py/static/js
-wget https://unpkg.com/jquery@3.1.1/dist/jquery.min.js -O py/static/js/jquery.min.js
 wget "https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-mml-svg.js" -O py/static/js/mathjax-tex-mml-svg.js
 wget https://cdn.rawgit.com/plotly/plotly.js/master/dist/plotly.min.js -O py/static/js/plotly-plotly.min.js
 wget https://unpkg.com/sjcl@1.0.7/sjcl.js -O py/static/js/sjcl.js

@@ -30,7 +30,6 @@ def download_scripts(proxies=None, install_dir=None):
     b = "https://unpkg.com/"
     ext_files = {
         # - js
-        "%sjquery@3.1.1/dist/jquery.min.js" % b: "jquery.min.js",
         # here is another url in case the cdn breaks down again.
         # https://raw.githubusercontent.com/plotly/plotly.js/master/dist/plotly.min.js
         ## [shouldsee/visdom/package_version]:latest.min.js not pointing to latest.
