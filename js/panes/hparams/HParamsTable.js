@@ -8,13 +8,13 @@
  */
 
 import TreeSelect from 'rc-tree-select';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
   buildColumns,
   filterRecords,
   formatValue,
-  isNumeric,
+  isNumberLike,
   makeComparator,
   numericExtent,
   spineStyle,
@@ -40,6 +40,12 @@ function accessorFor(sortBy, columns) {
   }
   const col = columns.find((c) => c.id === sortBy);
   return col ? col.accessor : null;
+}
+
+function directionLabel(sort) {
+  if (!sort.by) return 'Sort direction';
+  if (sort.dir === 'asc') return 'Sorted ascending — click for descending';
+  return 'Sorted descending — click to clear';
 }
 
 const SortCaret = ({ sort, columnId }) => {
@@ -83,6 +89,7 @@ const SortHeader = ({ sort, columnId, label, scopeClass, onSort }) => {
 
 const HParamsRow = React.memo(function HParamsRow({
   record,
+  rowId,
   columns,
   colorBy,
   extent,
@@ -101,7 +108,7 @@ const HParamsRow = React.memo(function HParamsRow({
         <input
           type="checkbox"
           checked={isSelected}
-          onChange={() => onToggle(record.env_id)}
+          onChange={() => onToggle(rowId)}
           aria-label={'Select ' + runLabel}
         />
       </td>
@@ -123,7 +130,7 @@ const HParamsRow = React.memo(function HParamsRow({
           colorBy && col.id === colorBy ? spineStyle(value, extent) : null;
         const cls =
           'hparams-cell' +
-          (isNumeric(value) ? ' hparams-cell-num' : '') +
+          (isNumberLike(value) ? ' hparams-cell-num' : '') +
           (style ? ' hparams-cell-spine' : '') +
           (groupStartIds.has(col.id) ? ' hparams-col-sep' : '');
         return (
@@ -155,8 +162,49 @@ const HParamsTable = ({ records, paramKeys, metricKeys, tagKeys }) => {
       ),
     [columns, records]
   );
-  const colorParamCols = colorCols.filter((c) => c.group === 'param');
-  const colorMetricCols = colorCols.filter((c) => c.group === 'metric');
+  const colorParamCols = useMemo(
+    () => colorCols.filter((c) => c.group === 'param'),
+    [colorCols]
+  );
+  const colorMetricCols = useMemo(
+    () => colorCols.filter((c) => c.group === 'metric'),
+    [colorCols]
+  );
+
+  const rowIds = useMemo(() => {
+    const ids = new Map();
+    records.forEach((record, index) => {
+      ids.set(record, record.env_id || 'row:' + index);
+    });
+    return ids;
+  }, [records]);
+
+  useEffect(() => {
+    setSort((prev) => {
+      if (!prev.by || prev.by === RUN_COLUMN_ID) return prev;
+      return columns.some((c) => c.id === prev.by)
+        ? prev
+        : { by: null, dir: null };
+    });
+  }, [columns]);
+
+  useEffect(() => {
+    setColorBy((prev) =>
+      prev && !colorCols.some((c) => c.id === prev) ? null : prev
+    );
+  }, [colorCols]);
+
+  useEffect(() => {
+    setSelected((prev) => {
+      if (prev.size === 0) return prev;
+      const live = new Set(rowIds.values());
+      const next = new Set();
+      prev.forEach((id) => {
+        if (live.has(id)) next.add(id);
+      });
+      return next.size === prev.size ? prev : next;
+    });
+  }, [rowIds]);
 
   const groupStartIds = useMemo(() => {
     const ids = new Set();
@@ -192,9 +240,11 @@ const HParamsTable = ({ records, paramKeys, metricKeys, tagKeys }) => {
   }, []);
 
   const handleSortSelect = useCallback((value) => {
-    setSort((prev) =>
-      value ? { by: value, dir: prev.dir || 'asc' } : { by: null, dir: null }
-    );
+    setSort((prev) => {
+      if (!value) return { by: null, dir: null };
+      if (prev.by === value) return { by: value, dir: prev.dir || 'asc' };
+      return { by: value, dir: 'asc' };
+    });
   }, []);
 
   const cycleDir = useCallback(() => {
@@ -205,80 +255,102 @@ const HParamsTable = ({ records, paramKeys, metricKeys, tagKeys }) => {
     });
   }, []);
 
-  const toggle = useCallback((envId) => {
+  const toggle = useCallback((rowId) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(envId)) next.delete(envId);
-      else next.add(envId);
+      if (next.has(rowId)) next.delete(rowId);
+      else next.add(rowId);
       return next;
     });
   }, []);
 
   const allSelected =
-    rows.length > 0 && rows.every((r) => selected.has(r.env_id));
+    rows.length > 0 && rows.every((r) => selected.has(rowIds.get(r)));
+
+  const visibleSelected = useMemo(
+    () =>
+      rows.reduce(
+        (total, r) => (selected.has(rowIds.get(r)) ? total + 1 : total),
+        0
+      ),
+    [rows, rowIds, selected]
+  );
 
   const handleSelectAll = useCallback(() => {
     setSelected((prev) => {
       const next = new Set(prev);
-      const everyOn = rows.length > 0 && rows.every((r) => next.has(r.env_id));
+      const everyOn =
+        rows.length > 0 && rows.every((r) => next.has(rowIds.get(r)));
       rows.forEach((r) =>
-        everyOn ? next.delete(r.env_id) : next.add(r.env_id)
+        everyOn ? next.delete(rowIds.get(r)) : next.add(rowIds.get(r))
       );
       return next;
     });
-  }, [rows]);
+  }, [rows, rowIds]);
 
-  const bands = [
-    { key: 'param', label: 'params' },
-    { key: 'metric', label: 'metrics' },
-    { key: 'tag', label: 'tags' },
-  ]
-    .map((b) => ({
-      ...b,
-      span: columns.filter((c) => c.group === b.key).length,
-    }))
-    .filter((b) => b.span > 0);
+  const bands = useMemo(
+    () =>
+      [
+        { key: 'param', label: 'params' },
+        { key: 'metric', label: 'metrics' },
+        { key: 'tag', label: 'tags' },
+      ]
+        .map((b) => ({
+          ...b,
+          span: columns.filter((c) => c.group === b.key).length,
+        }))
+        .filter((b) => b.span > 0),
+    [columns]
+  );
 
-  const sortTreeData = [
-    { key: RUN_COLUMN_ID, value: RUN_COLUMN_ID, title: 'run' },
-    ...bands.map((b) => ({
-      key: '__g_' + b.key,
-      value: '__g_' + b.key,
-      title: b.label,
-      selectable: false,
-      children: columns
-        .filter((c) => c.group === b.key)
-        .map((c) => ({ key: c.id, value: c.id, title: c.label })),
-    })),
-  ];
-
-  const colorTreeData = [];
-  if (colorParamCols.length) {
-    colorTreeData.push({
-      key: '__cg_param',
-      value: '__cg_param',
-      title: 'params',
-      selectable: false,
-      children: colorParamCols.map((c) => ({
-        key: c.id,
-        value: c.id,
-        title: c.label,
+  const sortTreeData = useMemo(
+    () => [
+      { key: RUN_COLUMN_ID, value: RUN_COLUMN_ID, title: 'run' },
+      ...bands.map((b) => ({
+        key: '__g_' + b.key,
+        value: '__g_' + b.key,
+        title: b.label,
+        selectable: false,
+        children: columns
+          .filter((c) => c.group === b.key)
+          .map((c) => ({ key: c.id, value: c.id, title: c.label })),
       })),
-    });
-  }
-  if (colorMetricCols.length) {
-    colorTreeData.push({
-      key: '__cg_metric',
-      value: '__cg_metric',
-      title: 'metrics',
-      selectable: false,
-      children: colorMetricCols.map((c) => ({
-        key: c.id,
-        value: c.id,
-        title: c.label,
-      })),
-    });
-  }
+    ],
+    [bands, columns]
+  );
+
+  const colorTreeData = useMemo(() => {
+    const data = [];
+    if (colorParamCols.length) {
+      data.push({
+        key: '__cg_param',
+        value: '__cg_param',
+        title: 'params',
+        selectable: false,
+        children: colorParamCols.map((c) => ({
+          key: c.id,
+          value: c.id,
+          title: c.label,
+        })),
+      });
+    }
+    if (colorMetricCols.length) {
+      data.push({
+        key: '__cg_metric',
+        value: '__cg_metric',
+        title: 'metrics',
+        selectable: false,
+        children: colorMetricCols.map((c) => ({
+          key: c.id,
+          value: c.id,
+          title: c.label,
+        })),
+      });
+    }
+    return data;
+  }, [colorParamCols, colorMetricCols]);
+
+  const dirLabel = directionLabel(sort);
 
   return (
     <div className="hparams-table-wrap">
@@ -310,14 +382,8 @@ const HParamsTable = ({ records, paramKeys, metricKeys, tagKeys }) => {
             className="hparams-dir-btn"
             onClick={cycleDir}
             disabled={!sort.by}
-            title={
-              sort.dir === 'asc'
-                ? 'Ascending — click for descending'
-                : 'Descending — click to clear'
-            }
-            aria-label={
-              sort.dir === 'desc' ? 'Sort descending' : 'Sort ascending'
-            }
+            title={dirLabel}
+            aria-label={dirLabel}
           >
             {!sort.by ? '⇅' : sort.dir === 'asc' ? '▲' : '▼'}
           </button>
@@ -341,7 +407,9 @@ const HParamsTable = ({ records, paramKeys, metricKeys, tagKeys }) => {
         ) : null}
         {selected.size ? (
           <span className="hparams-selected-count">
-            {selected.size} selected
+            {visibleSelected === selected.size
+              ? selected.size + ' selected'
+              : visibleSelected + ' of ' + selected.size + ' selected'}
           </span>
         ) : null}
       </div>
@@ -408,18 +476,22 @@ const HParamsTable = ({ records, paramKeys, metricKeys, tagKeys }) => {
                 </td>
               </tr>
             ) : (
-              rows.map((record, index) => (
-                <HParamsRow
-                  key={record.env_id || index}
-                  record={record}
-                  columns={columns}
-                  colorBy={colorBy}
-                  extent={extent}
-                  isSelected={selected.has(record.env_id)}
-                  onToggle={toggle}
-                  groupStartIds={groupStartIds}
-                />
-              ))
+              rows.map((record) => {
+                const rowId = rowIds.get(record);
+                return (
+                  <HParamsRow
+                    key={rowId}
+                    record={record}
+                    rowId={rowId}
+                    columns={columns}
+                    colorBy={colorBy}
+                    extent={extent}
+                    isSelected={selected.has(rowId)}
+                    onToggle={toggle}
+                    groupStartIds={groupStartIds}
+                  />
+                );
+              })
             )}
           </tbody>
         </table>

@@ -10,13 +10,29 @@
 /*
  * Pure helpers for the hyper-parameter table. Kept free of React so the
  * ordering and formatting rules live in one place and can mirror the Python
- * backend exactly. The comparator below intentionally matches
- * visdom.experiments.store._order_key / _sort_pairs so the table and the
- * server-side search agree on which run ranks first.
+ * backend exactly. The comparator matches
+ * visdom.experiments.store._order_key for every value the backend can order --
+ * including booleans, which Python orders by str(value), i.e. "True"/"False"
+ * -- and visdom.experiments.store._sort_pairs for absent values, which sort
+ * last in both directions. NaN is the one deliberate divergence: the backend
+ * leaves it in the ordered bucket, where Python's sort gives it no defined
+ * position, so the table treats it as missing instead.
  */
 
 const SPINE_LIGHT = [235, 240, 249];
 const SPINE_DARK = [59, 89, 152];
+
+const SPINE_TEXT_CANDIDATES = [
+  { color: '#333', rgb: [51, 51, 51] },
+  { color: '#fff', rgb: [255, 255, 255] },
+  { color: '#000', rgb: [0, 0, 0] },
+];
+
+const MIN_CONTRAST = 4.5;
+
+const PRECISION = 4;
+const EXPONENTIAL_ABOVE = 1e6;
+const EXPONENTIAL_BELOW = 1e-4;
 
 export function isMissing(value) {
   return (
@@ -30,11 +46,15 @@ export function isNumeric(value) {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+export function isNumberLike(value) {
+  return typeof value === 'number' && !Number.isNaN(value);
+}
+
 export function orderKey(value) {
   if (typeof value === 'boolean') {
-    return [1, 0, String(value)];
+    return [1, 0, value ? 'True' : 'False'];
   }
-  if (isNumeric(value)) {
+  if (isNumberLike(value)) {
     return [0, value, ''];
   }
   return [1, 0, String(value)];
@@ -42,7 +62,7 @@ export function orderKey(value) {
 
 export function compareOrderKeys(a, b) {
   if (a[0] !== b[0]) return a[0] - b[0];
-  if (a[1] !== b[1]) return a[1] - b[1];
+  if (a[1] !== b[1]) return a[1] < b[1] ? -1 : 1;
   if (a[2] < b[2]) return -1;
   if (a[2] > b[2]) return 1;
   return 0;
@@ -96,9 +116,18 @@ export function buildColumns(paramKeys, metricKeys, tagKeys) {
 export function formatValue(value) {
   if (isMissing(value)) return '—';
   if (typeof value === 'number') {
-    if (!Number.isFinite(value)) return '—';
+    if (value === Infinity) return '∞';
+    if (value === -Infinity) return '-∞';
     if (Number.isInteger(value)) return String(value);
-    return String(parseFloat(value.toPrecision(4)));
+    const rounded = parseFloat(value.toPrecision(PRECISION));
+    const magnitude = Math.abs(rounded);
+    if (
+      magnitude >= EXPONENTIAL_ABOVE ||
+      (magnitude > 0 && magnitude < EXPONENTIAL_BELOW)
+    ) {
+      return rounded.toExponential(PRECISION - 1).replace('e+', 'e');
+    }
+    return String(rounded);
   }
   return String(value);
 }
@@ -133,20 +162,56 @@ export function numericExtent(records, accessor) {
   return { min, max };
 }
 
-export function spineStyle(value, extent) {
+function channelLuminance(channel) {
+  const c = channel / 255;
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+export function relativeLuminance(rgb) {
+  return (
+    0.2126 * channelLuminance(rgb[0]) +
+    0.7152 * channelLuminance(rgb[1]) +
+    0.0722 * channelLuminance(rgb[2])
+  );
+}
+
+export function contrastRatio(rgbA, rgbB) {
+  const a = relativeLuminance(rgbA);
+  const b = relativeLuminance(rgbB);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+
+export function textColorFor(rgb) {
+  let fallback = SPINE_TEXT_CANDIDATES[0];
+  let fallbackRatio = 0;
+  for (let i = 0; i < SPINE_TEXT_CANDIDATES.length; i++) {
+    const candidate = SPINE_TEXT_CANDIDATES[i];
+    const ratio = contrastRatio(rgb, candidate.rgb);
+    if (ratio >= MIN_CONTRAST) return candidate.color;
+    if (ratio > fallbackRatio) {
+      fallbackRatio = ratio;
+      fallback = candidate;
+    }
+  }
+  return fallback.color;
+}
+
+export function spineColor(value, extent) {
   if (!extent || !isNumeric(value)) return null;
   const { min, max } = extent;
   let t = max > min ? (value - min) / (max - min) : 1;
   if (t < 0) t = 0;
   else if (t > 1) t = 1;
-  const mix = (a, b) => Math.round(a + (b - a) * t);
-  const bg =
-    'rgb(' +
-    mix(SPINE_LIGHT[0], SPINE_DARK[0]) +
-    ', ' +
-    mix(SPINE_LIGHT[1], SPINE_DARK[1]) +
-    ', ' +
-    mix(SPINE_LIGHT[2], SPINE_DARK[2]) +
-    ')';
-  return { backgroundColor: bg, color: t > 0.62 ? '#fff' : '#333' };
+  return SPINE_LIGHT.map((from, i) =>
+    Math.round(from + (SPINE_DARK[i] - from) * t)
+  );
+}
+
+export function spineStyle(value, extent) {
+  const rgb = spineColor(value, extent);
+  if (!rgb) return null;
+  return {
+    backgroundColor: 'rgb(' + rgb.join(', ') + ')',
+    color: textColorFor(rgb),
+  };
 }
