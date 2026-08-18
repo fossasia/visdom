@@ -13,7 +13,7 @@ import ApiContext from '../api/ApiContext';
 import Pane from './Pane';
 import PropertyItem from './PropertyItem';
 
-function PropertiesPane(props) {
+var PropertiesPane = function (props) {
   const { sendPaneMessage } = useContext(ApiContext);
   const { envID, id, content, onFocus } = props;
 
@@ -73,6 +73,13 @@ function PropertiesPane(props) {
       </div>
     </Pane>
   );
-}
+};
+
+PropertiesPane = React.memo(PropertiesPane, (props, nextProps) => {
+  if (props.contentID !== nextProps.contentID) return false;
+  else if (props.h !== nextProps.h || props.w !== nextProps.w) return false;
+  else if (props.isFocused !== nextProps.isFocused) return false;
+  return true;
+});
 
 export default PropertiesPane;

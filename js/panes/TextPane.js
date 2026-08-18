@@ -15,7 +15,7 @@ import EventSystem from '../EventSystem';
 import Pane from './Pane';
 import { typesetMathJax } from './utils/mathjaxHelpers';
 
-function TextPane(props) {
+var TextPane = function (props) {
   const { sendPaneMessage } = useContext(ApiContext);
   const { envID, id, content, isFocused } = props;
   const contentRef = useRef();
@@ -102,6 +102,13 @@ function TextPane(props) {
       </ScrollToBottom>
     </Pane>
   );
-}
+};
+
+TextPane = React.memo(TextPane, (props, nextProps) => {
+  if (props.contentID !== nextProps.contentID) return false;
+  else if (props.h !== nextProps.h || props.w !== nextProps.w) return false;
+  else if (props.isFocused !== nextProps.isFocused) return false;
+  return true;
+});
 
 export default TextPane;

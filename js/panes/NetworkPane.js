@@ -21,7 +21,7 @@ import {
 import { copyLatexToClipboard } from './utils/LatexExport';
 import { downloadImageAsPdf } from './utils/pdfExport';
 
-function NetworkPane(props) {
+var NetworkPane = function (props) {
   const {
     content,
     directed,
@@ -381,6 +381,16 @@ function NetworkPane(props) {
       />
     </Pane>
   );
-}
+};
+
+NetworkPane = React.memo(NetworkPane, (props, nextProps) => {
+  if (props.contentID !== nextProps.contentID) return false;
+  else if (props.h !== nextProps.h || props.w !== nextProps.w) return false;
+  else if (props.directed !== nextProps.directed) return false;
+  else if (props.showEdgeLabels !== nextProps.showEdgeLabels) return false;
+  else if (props.showVertexLabels !== nextProps.showVertexLabels) return false;
+  else if (props.isFocused !== nextProps.isFocused) return false;
+  return true;
+});
 
 export default NetworkPane;

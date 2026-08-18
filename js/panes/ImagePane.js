@@ -25,7 +25,7 @@ const DEFAULT_HEIGHT = 400;
 const DEFAULT_WIDTH = 300;
 const IMAGE_EXPORT_FORMATS = ['png', 'jpg', 'pdf'];
 
-function ImagePane(props) {
+var ImagePane = function (props) {
   const { sendPaneMessage } = useContext(ApiContext);
   const { envID, id, contentID, title, type, selected, width, height } = props;
   var { isFocused, content } = props;
@@ -457,6 +457,18 @@ function ImagePane(props) {
       </span>
     </Pane>
   );
-}
+};
+
+ImagePane = React.memo(ImagePane, (props, nextProps) => {
+  if (props.contentID !== nextProps.contentID) return false;
+  else if (props.h !== nextProps.h || props.w !== nextProps.w) return false;
+  else if (
+    Math.round(props.width) !== Math.round(nextProps.width) ||
+    Math.round(props.height) !== Math.round(nextProps.height)
+  )
+    return false;
+  else if (props.isFocused !== nextProps.isFocused) return false;
+  return true;
+});
 
 export default ImagePane;

@@ -14,7 +14,7 @@ import Pane from './Pane';
 import { copyLatexToClipboard } from './utils/LatexExport';
 import { typesetMathJax } from './utils/mathjaxHelpers';
 
-function ImageComparePane(props) {
+var ImageComparePane = function (props) {
   const { content, title, id, contentID } = props;
   const containerRef = useRef();
 
@@ -147,6 +147,13 @@ function ImageComparePane(props) {
       </div>
     </Pane>
   );
-}
+};
+
+ImageComparePane = React.memo(ImageComparePane, (props, nextProps) => {
+  if (props.contentID !== nextProps.contentID) return false;
+  else if (props.h !== nextProps.h || props.w !== nextProps.w) return false;
+  else if (props.isFocused !== nextProps.isFocused) return false;
+  return true;
+});
 
 export default ImageComparePane;
