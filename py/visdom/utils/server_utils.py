@@ -39,7 +39,6 @@ from visdom.utils.shared_utils import (
     NanSafeEncoder,
 )
 
-
 # ---- Vaguely server-security related functions ---- #
 
 
@@ -126,13 +125,13 @@ def escape_eid(eid):
     with underscores and backslashes with hyphen, to avoid recognizing them as
     directories or breaking URLs and filenames.
 
-    Also strips surrounding whitespace. As ``JSONStore`` independently 
-    strips whitespace before deriving an on-disk filename from an eid, 
-    so two in-memory eids that differ only by leading/trailing whitespace 
-    (e.g. ``"main"`` and ``"main "``) would otherwise stay distinct in ``self.state`` 
-    while silently colliding on disk - whichever one is saved last clobbers the other. 
-    Stripping here, at the single choke point every eid passes through (HTTP handlers, 
-    websocket handlers, and the storage layer all call this), keeps the in-memory key 
+    Also strips surrounding whitespace. As ``JSONStore`` independently
+    strips whitespace before deriving an on-disk filename from an eid,
+    so two in-memory eids that differ only by leading/trailing whitespace
+    (e.g. ``"main"`` and ``"main "``) would otherwise stay distinct in ``self.state``
+    while silently colliding on disk - whichever one is saved last clobbers the other.
+    Stripping here, at the single choke point every eid passes through (HTTP handlers,
+    websocket handlers, and the storage layer all call this), keeps the in-memory key
     and the on-disk filename in agreement.
     """
     return (
@@ -359,9 +358,9 @@ def compare_envs(state, eids, socket, store, show_all=False):
                     for dataIdx, data in enumerate(destWidJson["content"]["data"]):
                         if "name" not in data:
                             break  # stop working with this plot, not right format
-                        destWidJson["content"]["data"][dataIdx][
-                            "name"
-                        ] = "{}_{}".format(eidNums[eid], data["name"])
+                        destWidJson["content"]["data"][dataIdx]["name"] = (
+                            "{}_{}".format(eidNums[eid], data["name"])
+                        )
                 else:
                     if "name" not in destWidJson["content"]["data"][0]:
                         continue  # Skip windows with unnamed data
@@ -423,9 +422,7 @@ def compare_envs(state, eids, socket, store, show_all=False):
         border: 1px solid black;
     }}
     </style>
-    <table> {} </table>""".format(
-        " ".join(tableRows)
-    )
+    <table> {} </table>""".format(" ".join(tableRows))
 
     res["jsons"]["window_compare_legend"] = {
         "command": "window",
