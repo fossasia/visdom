@@ -18,7 +18,7 @@ import tempfile
 import unittest
 
 from visdom.data_model import JSONStore, DataStore
-from visdom.utils.server_utils import LazyEnvData
+from visdom.utils.server_utils import LazyEnvData, extract_eid
 
 
 def _env(win_id="win_0"):
