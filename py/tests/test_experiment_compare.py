@@ -13,7 +13,8 @@ Covers the four pieces the compare layer is built from: the pure
 over the named runs against a real ``JSONStore`` over a temporary
 directory; the ``/experiments/compare`` endpoint end-to-end through a real
 :class:`~visdom.server.app.Application` with Tornado's ``AsyncHTTPTestCase``; and
-the ``Visdom.compare_experiments`` message shape with a mocked transport (no server).
+the ``Visdom.compare_experiments`` message shape with a mocked transport (no
+server).
 """
 
 import json
