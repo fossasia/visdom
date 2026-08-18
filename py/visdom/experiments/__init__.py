@@ -26,6 +26,8 @@ from visdom.experiments.query import (
     And,
     Comparison,
     ExperimentLike,
+    MAX_QUERY_DEPTH,
+    MAX_QUERY_LENGTH,
     Node,
     Or,
     Query,
@@ -34,7 +36,12 @@ from visdom.experiments.query import (
     parse_query,
 )
 from visdom.experiments.records import flatten_experiments
-from visdom.experiments.store import DEFAULT_SORT_FIELD, ExperimentStore
+from visdom.experiments.store import (
+    DEFAULT_SORT_FIELD,
+    ExperimentStore,
+    METADATA_KEY,
+    retarget_experiment,
+)
 
 __all__ = [
     "And",
@@ -45,6 +52,9 @@ __all__ = [
     "ExperimentFinishedError",
     "ExperimentLike",
     "ExperimentStore",
+    "MAX_QUERY_DEPTH",
+    "MAX_QUERY_LENGTH",
+    "METADATA_KEY",
     "Metric",
     "Node",
     "Or",
@@ -57,6 +67,7 @@ __all__ = [
     "build_record",
     "flatten_experiments",
     "parse_query",
+    "retarget_experiment",
     "STATUS_FAILED",
     "STATUS_FINISHED",
     "STATUS_RUNNING",

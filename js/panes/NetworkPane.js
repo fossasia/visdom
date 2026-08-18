@@ -12,7 +12,14 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 
+import { showToast } from '../toasts/toastEvents';
 import Pane from './Pane';
+import {
+  downloadJpegWithDpi,
+  downloadPngWithDpi,
+} from './utils/Embeddpimetadata';
+import { copyLatexToClipboard } from './utils/LatexExport';
+import { downloadImageAsPdf } from './utils/pdfExport';
 
 function NetworkPane(props) {
   const {
@@ -31,7 +38,17 @@ function NetworkPane(props) {
 
   // private events
   // --------------
-  const handleDownload = () => {
+
+  // NetworkPane always capture at 2x resolution by default (a
+  // legacy behavior predating the DPI dropdown), unlike PlotPane/
+  // EmbeddingsPane whose no-dpi-given default is a true native 1x. This
+  // constant is the single source of truth for that: both the capture
+  // scale AND the embedded DPI tag are derived from it, so they can't
+  // silently drift apart from each other.
+
+  const NETWORKPANE_LEGACY_SCALE = 2;
+
+  const handleExport = (format, dpi) => {
     const svg = containerRef.current?.querySelector('svg');
 
     if (!svg) {
@@ -45,13 +62,111 @@ function NetworkPane(props) {
       return;
     }
 
+    const filename = `${props.contentID || 'plot'}.${format}`;
+
+    const scale = dpi ? dpi / 96 : NETWORKPANE_LEGACY_SCALE;
+
     requestAnimationFrame(() => {
-      const filename = props.contentID ? `${props.contentID}.png` : 'plot.png';
-      saveSvgAsPng(svg, filename, {
-        scale: 2,
-        backgroundColor: '#FFFFFF',
-      });
+      if (format === 'svg') {
+        const clone = svg.cloneNode(true);
+        inlineComputedStyles(svg, clone);
+        const source = new XMLSerializer().serializeToString(clone);
+        const blob = new Blob([source], {
+          type: 'image/svg+xml;charset=utf-8',
+        });
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+        return;
+      }
+
+      if (format === 'pdf') {
+        const PDF_CAPTURE_DPI = 300;
+        const pdfScale = PDF_CAPTURE_DPI / 96;
+        svgAsPngUri(
+          svg,
+          {
+            scale: pdfScale,
+            backgroundColor: '#FFFFFF',
+            encoderType: 'image/jpeg',
+            encoderOptions: 0.92,
+          },
+          (uri) => {
+            downloadImageAsPdf(uri, filename, PDF_CAPTURE_DPI);
+          }
+        );
+        return;
+      }
+
+      const dpiToEmbed = dpi || 96 * NETWORKPANE_LEGACY_SCALE;
+      svgAsPngUri(
+        svg,
+        {
+          scale,
+          backgroundColor: '#FFFFFF',
+          encoderType: format === 'jpg' ? 'image/jpeg' : 'image/png',
+          encoderOptions: format === 'jpg' ? 0.92 : undefined,
+        },
+        (uri) => {
+          if (format === 'jpg') {
+            downloadJpegWithDpi(uri, filename, dpiToEmbed);
+          } else {
+            downloadPngWithDpi(uri, filename, dpiToEmbed);
+          }
+        }
+      );
     });
+  };
+
+  const handleLatexExport = (style) => {
+    copyLatexToClipboard(style, {
+      contentID: props.contentID,
+      id: props.id,
+      caption: props.title,
+      ext: 'pdf',
+    })
+      .then(() =>
+        showToast('Copied!', 'success', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        })
+      )
+      .catch((err) => {
+        console.error('NetworkPane LaTeX export failed:', err);
+        showToast('Failed to Copy', 'error', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        });
+      });
+  };
+
+  const SVG_STYLE_PROPS = [
+    'fill',
+    'stroke',
+    'stroke-width',
+    'stroke-opacity',
+    'fill-opacity',
+    'opacity',
+    'font-family',
+    'font-size',
+  ];
+  const inlineComputedStyles = (liveEl, cloneEl) => {
+    const computed = window.getComputedStyle(liveEl);
+    const styleStr = SVG_STYLE_PROPS.map(
+      (prop) => `${prop}:${computed.getPropertyValue(prop)}`
+    ).join(';');
+    cloneEl.setAttribute('style', styleStr);
+
+    for (let i = 0; i < liveEl.children.length; i++) {
+      inlineComputedStyles(liveEl.children[i], cloneEl.children[i]);
+    }
   };
 
   // effects
@@ -253,7 +368,11 @@ function NetworkPane(props) {
   // ---------
 
   return (
-    <Pane {...props} handleDownload={handleDownload}>
+    <Pane
+      {...props}
+      handleExport={handleExport}
+      handleLatexExport={handleLatexExport}
+    >
       {downloadError && <div className="error-message">{downloadError}</div>}
       <div
         ref={containerRef}

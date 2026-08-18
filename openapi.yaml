@@ -404,11 +404,15 @@ paths:
         optional `step`, creating the experiment if it does not exist yet.
 
 
-        - `finish`: mark the experiment terminal (`finished` or `failed`).
+        - `finish`: mark the experiment terminal (`finished` or `failed`). An
+        experiment that is already terminal cannot be finished again.
 
 
-        Once an experiment is terminal, `log` and `metrics` are rejected with
-        `409` so a finished run's recorded data cannot change after the fact.
+        Once an experiment is terminal, every action is rejected with `409`, so
+        neither a finished run's recorded data nor its final status can change
+        after the fact.
+        Every action writes, so the endpoint is rejected when the server is
+        running in readonly mode.
       requestBody:
         required: true
         content:
@@ -465,10 +469,16 @@ paths:
             Invalid request — unknown `action`, non-object `params`/`tags`/`metrics`,
             empty `metrics`, or a non-terminal `finish` status. Also returned when
             authentication is required but not provided.
+        "403":
+          description: >
+            Experiment logging is disabled because the server is in readonly
+            mode.
         "404":
           description: A `finish` was requested for an env that has no experiment.
         "409":
-          description: A `log`/`metrics` write was attempted on a terminal (finished/failed) experiment.
+          description: >
+            A write was attempted on a terminal (finished/failed) experiment —
+            a `log`/`metrics` call, or a second `finish`.
 
   /experiments/search:
     post:
@@ -564,10 +574,10 @@ paths:
                     description: The query used, `""` if none was given.
         "400":
           description: >
-            Invalid request — malformed `query` syntax, a non-string
-            `query`/`sort_by`, or a `limit`/`offset` that is not a non-negative
-            integer. Also returned when authentication is required but not
-            provided.
+            Invalid request — a body that is not a JSON object, malformed
+            `query` syntax, a non-string `query`/`sort_by`, or a `limit`/`offset`
+            that is not a non-negative integer. Also returned when
+            authentication is required but not provided.
 
   /experiments/compare:
     post:
@@ -638,9 +648,9 @@ paths:
                     $ref: "#/components/schemas/ExperimentComparisonSection"
         "400":
           description: >
-            Invalid request — `env_ids` missing, empty, not a list, or holding
-            something other than strings. Also returned when authentication is
-            required but not provided.
+            Invalid request — the body is not a JSON object, or `env_ids` is
+            missing, empty, not a list, or holds something other than strings.
+            Also returned when authentication is required but not provided.
         "404":
           description: One or more of the given `env_ids` has no experiment.
 
@@ -652,7 +662,7 @@ paths:
       description: >
         Reserved endpoint for hyper-parameter suggestion. Choosing the next set
         of parameters to try is a search-strategy problem (Optuna-backed) that
-        lands in a later layer, so this is currently a stub: it accepts the
+        lands in a later release, so this is currently a stub: it accepts the
         request and replies `501 Not Implemented` with a JSON body carrying a
         `suggestion: null` placeholder, rather than a made-up suggestion. The
         route, the `suggest_experiment` client method and this documentation are
@@ -678,7 +688,7 @@ paths:
         "501":
           description: >
             Not implemented — the suggestion strategy is reserved for a later
-            layer. The body is a JSON stub.
+            release. The body is a JSON stub.
           content:
             application/json:
               schema:
@@ -693,6 +703,11 @@ paths:
                   suggestion:
                     nullable: true
                     description: Always `null` while the endpoint is a stub.
+        "400":
+          description: >
+            Invalid request — the body is present but is not valid JSON, or is
+            not a JSON object. Also returned when authentication is required
+            but not provided.
 
   /upload_env:
     post:
