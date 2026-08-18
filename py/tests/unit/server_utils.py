@@ -14,6 +14,7 @@ No server needed — these test pure functions directly.
 import unittest
 
 from visdom.utils.server_utils import (
+    compare_envs,
     escape_eid,
     extract_eid,
     hash_password,
@@ -164,6 +165,73 @@ class TestRecursiveOrder(unittest.TestCase):
 
     def test_bytes_unchanged(self):
         self.assertEqual(recursive_order(b"hello"), b"hello")
+
+
+def _plot_window(title, data):
+    """Build a minimal 'plot' window dict, as stored per environment."""
+    return {
+        "id": "w1",
+        "title": title,
+        "content": {
+            "data": data,
+            "layout": {"title": {"text": title}},
+        },
+        "type": "plot",
+    }
+
+
+class _FakeStore:
+    def list_envs(self):
+        return []
+
+    def load_env(self, eid):
+        return {}
+
+
+class _FakeSocket:
+    def __init__(self):
+        self.messages = []
+
+    def write_message(self, msg):
+        self.messages.append(msg)
+
+
+class TestCompareEnvs(unittest.TestCase):
+    """compare_envs must skip a shared-title plot window with no data,
+    on both the first env (ix == 0) and any later env (ix > 0), instead
+    of crashing on content["data"][0] of an empty list."""
+
+    def test_first_env_empty_data_is_skipped(self):
+        state = {
+            "env_a": {"jsons": {"w1": _plot_window("Empty Curve", [])}},
+            "env_b": {"jsons": {"w1": _plot_window("Empty Curve", [])}},
+        }
+        # Should not raise.
+        compare_envs(state, ["env_a", "env_b"], _FakeSocket(), _FakeStore())
+
+    def test_second_env_empty_data_is_skipped(self):
+        named_trace = [{"x": [1], "y": [1], "name": "run", "type": "scatter"}]
+        state = {
+            "env_a": {"jsons": {"w1": _plot_window("Empty Curve", named_trace)}},
+            "env_b": {"jsons": {"w1": _plot_window("Empty Curve", [])}},
+        }
+        # Should not raise, even though env_a (ix == 0) has real data and
+        # env_b (ix > 0) does not.
+        compare_envs(state, ["env_a", "env_b"], _FakeSocket(), _FakeStore())
+
+    def test_shared_named_data_still_merges(self):
+        named_trace = [{"x": [1], "y": [1], "name": "run", "type": "scatter"}]
+        state = {
+            "env_a": {"jsons": {"w1": _plot_window("Real Curve", named_trace)}},
+            "env_b": {"jsons": {"w1": _plot_window("Real Curve", named_trace)}},
+        }
+        socket = _FakeSocket()
+        compare_envs(state, ["env_a", "env_b"], socket, _FakeStore())
+
+        plot_messages = [m for m in socket.messages if '"id": "w1"' in m]
+        self.assertEqual(len(plot_messages), 1)
+        self.assertIn("env_a_run", plot_messages[0])
+        self.assertIn("env_b_run", plot_messages[0])
 
 
 if __name__ == "__main__":

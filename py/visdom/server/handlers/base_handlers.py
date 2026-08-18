@@ -115,12 +115,12 @@ class BaseHandler(tornado.web.RequestHandler):
 
     def write_error(self, status_code, **kwargs):
         logging.error("ERROR: %s: %s" % (status_code, kwargs))
-        debug = self.settings.get("debug")
-        title = http.client.responses.get(status_code, "Unknown Error")
         if "exc_info" in kwargs:
             logging.info(
                 "Traceback: {}".format(traceback.format_exception(*kwargs["exc_info"]))
             )
+            debug = self.settings.get("debug")
+            title = http.client.responses.get(status_code, "Unknown Error")
             logging.error("rendering error page")
             exc_info = kwargs["exc_info"]
             # exc_info is a tuple consisting of:
@@ -142,9 +142,9 @@ class BaseHandler(tornado.web.RequestHandler):
                 return
             except Exception as e:
                 logging.error(e)
-        self.set_status(status_code)
-        self.write(
-            f"""
-            <h1>{status_code} - {title}</h1>
-            """
-        )
+            self.set_status(status_code)
+            self.write(
+                f"""
+                <h1>{status_code} - {title}</h1>
+                """
+            )
