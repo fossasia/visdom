@@ -368,6 +368,7 @@ Track experiment metadata (hyper-parameters, metrics, tags) alongside your plots
 - [`vis.search_experiments`](#vissearch_experiments)  : search experiments across envs with a query
 - [`vis.compare_experiments`](#viscompare_experiments)  : diff experiments field by field
 - [`vis.suggest_experiment`](#vissuggest_experiment)  : suggest parameters for the next run (reserved)
+- [`vis.hparams`](#vishparams)  : open a hyper-parameter pane over the selected runs
 
 
 ## Loggers
@@ -499,6 +500,54 @@ booster = xgb.train(params, dtrain, evals=[(dtrain, "train"), (dval, "eval")], c
 Each eval metric gets its own window with one trace per data name (`train`/`eval`), and `best_iteration`/`best_score` are logged as a text pane once training finishes. See `example/train_xgboost_example.py` for a full working example.
 
 **Note:** one logger is active at a time. Calling `autolog()` again for a different env moves logging there and warns; the previous env keeps the windows it already has. Import `cross_validate` after `autolog()` — importing it first binds the original function, and every fold then opens its own window instead of sharing one per metric.
+
+### TensorFlow / Keras
+
+`visdom.loggers.VisdomKerasLogger` implements Keras's `Callback` protocol, plotting train/val metrics to Visdom after every epoch.
+
+```python
+from tensorflow import keras
+from tensorflow.keras import layers
+import visdom
+from visdom.loggers import VisdomKerasLogger
+
+viz = visdom.Visdom()
+logger = VisdomKerasLogger(viz, env="keras_run")
+
+model = keras.Sequential([
+    layers.Input(shape=(20,)),
+    layers.Dense(32, activation="relu"),
+    layers.Dense(1, activation="sigmoid"),
+])
+model.compile(optimizer="adam", loss="binary_crossentropy", metrics=["accuracy"])
+
+model.fit(
+    x_train, y_train,
+    validation_data=(x_val, y_val),
+    epochs=20,
+    callbacks=[logger],
+)
+```
+
+A metric named `val_<name>` is plotted as a `val` trace on the same window its train counterpart `<name>` plots as a `train` trace, matching how Keras already splits train/val by key prefix. One instance can be reused across multiple `fit()` calls — a new run's epoch 0 replaces the previous run's curve on the same windows in place, rather than opening a duplicate set of windows.
+
+**Per-batch logging with `log_every`** — use when you also want step-level detail on large datasets. Off by default, since `on_train_batch_end` otherwise fires every batch regardless of whether step-level detail is wanted:
+
+```python
+logger = VisdomKerasLogger(viz, env="keras_run", log_every=50)
+model.fit(x_train, y_train, epochs=20, callbacks=[logger])
+```
+
+Each metric gets its own window titled `"<name> (step)"`, throttled to one send every `log_every` batches. The optimizer's current learning rate is read (not computed) and plotted alongside as `lr`.
+
+**Parameters:**
+- `viz`: a connected `visdom.Visdom()` instance
+- `env`: environment name (default: `viz.env` if set, otherwise auto-generated from timestamp)
+- `log_every`: also plot metrics at batch granularity, one send every N batches (default: `None`, disabled)
+
+**Note:** each call to `viz.line()` is a synchronous network request made on the training thread. Pick a `log_every` large enough that it doesn't stall training waiting on the server — 50+ is a reasonable default on GPU.
+
+See `example/train_keras_example.py` for a full working example.
 
 ## Details
 <img src="https://user-images.githubusercontent.com/19650074/198747904-7a8a580f-851a-45fb-8f45-94e54a910ee2.png"/>
@@ -1294,11 +1343,39 @@ Returns a dict with the compared runs (`env_ids`, full `experiments`) and a `par
 
 #### vis.suggest_experiment
 
-> **Reserved**: this endpoint is a stub. Choosing the next set of hyper-parameters to try (an Optuna-backed search strategy) is planned for a later layer, so the server currently replies `501 Not Implemented` and this function returns a stub dict `{"status": "not_implemented", "suggestion": None, ...}` rather than a real suggestion. The method, its arguments and the endpoint are in place so callers and docs are ready for when the strategy is wired in.
+> **Reserved**: this endpoint is a stub. Choosing the next set of hyper-parameters to try (an Optuna-backed search strategy) is planned for a later release, so the server currently replies `501 Not Implemented` and this function returns a stub dict `{"status": "not_implemented", "suggestion": None, ...}` rather than a real suggestion. The method, its arguments and the endpoint are in place so callers and docs are ready for when the strategy is wired in.
 
 Arguments:
 - `params`: The search space to suggest over, as a dict of `{name: spec}`. Currently ignored by the stub.
 - `env`: Environment (study) to suggest against. Defaults to the client's env.
+
+#### vis.hparams
+
+This function opens a hyper-parameter pane over the experiments logged on the server. The selection is resolved server-side: the matching runs are flattened into one record each — the run's hyper-parameters, the latest value of each of its metrics, and its tags — and registered as an `hparams` window, so the pane appears in the browser like any other visualization and reloads with its environment. The pane heads the window with how many runs, params, metrics and tags the selection holds and lists the runs by name with their status; its download button saves the records as JSON.
+
+```python
+vis.hparams("lr < 0.01 AND acc > 0.9")          # by query
+vis.hparams(env_ids=["run-a", "run-b"])         # by env id
+vis.hparams("acc > 0.9", ["run-a", "run-b"])    # both
+```
+
+Arguments:
+- `query`: Filter string selecting the runs to show, in the same readable syntax as [`vis.search_experiments`](#vissearch_experiments). Defaults to `None`.
+- `env_ids`: Explicit list of environment ids to show, kept in the order given. Defaults to `None`.
+- `mode`: One of `query`, `env_ids` or `both`. Defaults to `None`, which infers the mode from the arguments given; passing it explicitly rejects the argument that mode does not accept.
+- `win`: Window id to draw into, as for the plotting functions.
+- `env`: Environment to open the pane in. Defaults to the client's env.
+- `opts`: Window options (`title`, `width`, `height`, ...), as for the plotting functions.
+
+Returns the id of the created window.
+
+The modes select as follows:
+
+- `query`: the runs matching `query`. The query must be non-empty and `env_ids` must not be given.
+- `env_ids`: the runs named in `env_ids`, in that order; only those environments are read rather than every experiment. `env_ids` must be non-empty and `query` must not be given.
+- `both`: the intersection — runs that match `query` *and* are named in `env_ids`, ordered by `env_ids`. Both must be given and non-empty.
+
+There is no "show everything" call: with neither `query` nor `env_ids` the server has nothing to select and rejects the request. A blank or whitespace-only `query` counts as no query. Every id in `env_ids` must name an environment that has an experiment: a mistyped or deleted one is a `404` naming it rather than a run quietly missing from the pane. Under `both`, an id that does have an experiment but does not match the query is filtered out as the query asked.
 
 ## Customizing Visdom
 The user config directory for visdom is
