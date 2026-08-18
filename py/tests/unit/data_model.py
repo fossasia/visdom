@@ -257,6 +257,20 @@ class TestJSONStore(unittest.TestCase):
         self.backend.save_env("main", _env())
         self.assertEqual(self.backend.list_envs(), sorted(["main", stem]))
 
+    def test_list_recovers_hash_file_unusable_name_field(self):
+        """A hash_<64>.json with a non-string "name" field falls back to stem.
+
+        Even if a "name" key exists in the JSON, it must be a string; otherwise
+        we treat it like a missing name and use the filename stem so the
+        environment still appears in list_envs().
+        """
+        hex64 = "c" * 64
+        stem = "hash_{0}".format(hex64)
+        with open(os.path.join(self.env_path, stem + ".json"), "w") as fn:
+            fn.write(json.dumps({"name": 123, "jsons": {}, "reload": {}}))
+        self.backend.save_env("main", _env())
+        self.assertEqual(self.backend.list_envs(), sorted(["main", stem]))
+
 
 class TestJSONStoreNoPath(unittest.TestCase):
     """JSONStore(None): persistence disabled (in-memory-only mode)."""
