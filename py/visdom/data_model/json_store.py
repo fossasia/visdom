@@ -176,14 +176,19 @@ class JSONStore(DataStore):
             path = os.path.join(self.env_path, name)
             if not os.path.isfile(path):
                 continue
+            stem = name[: -len(".json")]
             if HASHED_ENV_RE.match(name):
+                real_name = None
                 try:
                     with open(path, "r", encoding="utf-8") as fn:
-                        envs.append(json.load(fn)["name"])
-                except (OSError, UnicodeError, ValueError, KeyError):
+                        data = json.load(fn)
+                    if isinstance(data, dict) and isinstance(data.get("name"), str):
+                        real_name = data["name"]
+                except (OSError, UnicodeError, ValueError):
                     continue
+                envs.append(real_name if real_name is not None else stem)
             else:
-                envs.append(name[: -len(".json")])
+                envs.append(stem)
         return sorted(envs)
 
     def delete_env(self, eid):
