@@ -214,19 +214,50 @@ class TestJSONStore(unittest.TestCase):
         self.assertEqual(self.backend.list_envs(), [".._evil"])
         self.assertEqual(self.backend.load_env("../evil"), _env())
 
+    def test_env_literally_named_like_hash_pattern_is_still_listed(self):
+        """A primary env whose (escaped) id exactly matches hash_<64hex>.
+
+        This is the actual collision that used to make list_envs() drop the
+        environment entirely: the filename looks exactly like a hash-fallback
+        file (there is nothing else to distinguish it by), but it is really
+        an ordinary primary file with no "name" bookkeeping field inside. It
+        must still be listed, using its own filename stem, which -- for this
+        specific collision -- *is* the real, already-escaped id.
+        """
+        hex64 = "c" * 64
+        eid = "hash_" + hex64
+        self.backend.save_env(eid, _env())
+        self.assertEqual(self.backend.list_envs(), [eid])
+        self.assertTrue(self.backend.env_exists(eid))
+        self.assertEqual(self.backend.load_env(eid)["jsons"], _env()["jsons"])
+
+
     def test_list_skips_unreadable_hash_files(self):
-        """Malformed hash_<64>.json files are ignored, not raised, by list_envs."""
+        """Invalid-JSON hash_<64>.json files are ignored, not raised, by list_envs."""
         hex64 = "a" * 64
         with open(
             os.path.join(self.env_path, "hash_{0}.json".format(hex64)), "w"
         ) as fn:
             fn.write("{not valid json")
-        with open(
-            os.path.join(self.env_path, "hash_{0}.json".format("b" * 64)), "w"
-        ) as fn:
-            fn.write(json.dumps({"jsons": {}, "reload": {}}))
         self.backend.save_env("main", _env())
         self.assertEqual(self.backend.list_envs(), ["main"])
+
+    def test_list_recovers_hash_file_missing_name_field(self):
+        """A well-formed hash_<64>.json missing its "name" field is recovered.
+
+        This can happen if a genuine hash-fallback file's "name" field is
+        lost (e.g. hand-edited, or written by an older/different DataStore
+        implementation). Rather than silently vanishing, the environment is
+        surfaced under its filename stem  worse than having the real name,
+        but strictly better than losing access to the data entirely.
+        """
+        hex64 = "b" * 64
+        stem = "hash_{0}".format(hex64)
+        with open(os.path.join(self.env_path, stem + ".json"), "w") as fn:
+            fn.write(json.dumps({"jsons": {}, "reload": {}}))
+        self.backend.save_env("main", _env())
+        self.assertEqual(self.backend.list_envs(), sorted(["main", stem]))
+
 
 
 class TestJSONStoreNoPath(unittest.TestCase):

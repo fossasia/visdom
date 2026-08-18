@@ -166,6 +166,20 @@ class JSONStore(DataStore):
         Hash-fallback files are recognised by their exact ``hash_<64 hex>.json``
         shape and resolved to the real id kept inside; every other ``.json`` file
         yields its filename stem. Sub-directories (e.g. ``view/``) are skipped.
+
+        The ``hash_<64 hex>.json`` shape is only a naming convention, not a
+        guarantee: a user-chosen eid that happens to equal that exact pattern
+        (e.g. an environment literally named ``hash_<64 hex chars>``) is short
+        enough to be written as an ordinary primary file, with none of the
+        hash-fallback bookkeeping -- there is no ``name`` field inside it. Such
+        a file is indistinguishable from a genuine hash-fallback file by name
+        alone, so it is resolved the same way an unreadable ``name`` field
+        would be: fall back to the filename stem. That stem is the correct id
+        either way -- for a colliding primary file it *is* the real,
+        already-escaped id, and for a hash-fallback file with unusable
+        metadata it is still the best identifier available. Surfacing it beats
+        silently hiding the environment.
+
         """
         if self.env_path is None or not os.path.isdir(self.env_path):
             return []
