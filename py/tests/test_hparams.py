@@ -1,4 +1,12 @@
-"""Tests for the hyper-parameter pane client method (Layer 3, PR A1).
+#!/usr/bin/env python3
+
+# Copyright 2017-present, The Visdom Authors
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
+"""Tests for the hyper-parameter pane client method.
 
 ``Visdom.hparams`` is a thin wrapper: it validates ``opts`` like the other
 plotting methods and posts the selection (``query``/``env_ids``/``mode``) to the
@@ -16,7 +24,11 @@ from visdom import Visdom
 
 
 class TestHparamsClientMessage(unittest.TestCase):
-    """Visdom.hparams posts the selection to the experiments/hparams endpoint."""
+    """Visdom.hparams posts the selection to the experiments/hparams endpoint.
+
+    The transport is mocked to return the ``(msg, endpoint)`` it would have
+    posted, so we can assert on it directly.
+    """
 
     def setUp(self):
         with (

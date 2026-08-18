@@ -216,7 +216,10 @@ class UpdateHandler(BaseHandler):
         idxs = list(range(len(pdata)))
 
         if name is not None:
-            assert len(new_data) == 1 or args.get("delete")
+            if not args.get("delete") and len(new_data) != 1:
+                raise tornado.web.HTTPError(
+                    400, reason="a named trace update takes exactly one data entry"
+                )
             idxs = [i for i in idxs if pdata[i]["name"] == name]
 
         # Delete a trace
@@ -549,7 +552,10 @@ class ForkEnvHandler(BaseHandler):
         prev_eid = escape_eid(args.get("prev_eid"))
         eid = escape_eid(args.get("eid"))
 
-        assert prev_eid in handler.state, "env to be forked doesn't exist"
+        if prev_eid not in handler.state:
+            # the eid stays out of the reason: it is echoed on the status line,
+            # which is latin-1 only, and eids are free-form unicode.
+            raise tornado.web.HTTPError(400, reason="env to be forked doesn't exist")
 
         # The copy carries the source env's experiment metadata, whose env_id
         # still names the env it was forked from; retarget it so the fork does
@@ -702,9 +708,10 @@ class DataHandler(BaseHandler):
                     json.dumps(handler.state[eid]["jsons"], cls=NanSafeEncoder)
                 )
             else:
-                assert (
-                    args["win"] in handler.state[eid]["jsons"]
-                ), "Window {} doesn't exist in env {}".format(args["win"], eid)
+                if args["win"] not in handler.state[eid]["jsons"]:
+                    raise tornado.web.HTTPError(
+                        400, reason="window doesn't exist in this env"
+                    )
                 handler.write(
                     json.dumps(
                         handler.state[eid]["jsons"][args["win"]], cls=NanSafeEncoder
@@ -1180,7 +1187,7 @@ class ExperimentSuggestHandler(BaseHandler):
     """POST ``/experiments/suggest`` — suggest parameters for the next run.
 
     Reserved endpoint. Choosing the next set of hyper-parameters to try is a
-    search-strategy problem (Optuna-backed) that belongs to a later layer, so
+    search-strategy problem (Optuna-backed) that belongs to a later release, so
     this is a stub: it accepts the request and replies ``501 Not Implemented``
     with a JSON body rather than a made-up suggestion. Wiring the route, the
     :meth:`Visdom.suggest_experiment` client method and the API docs now means
@@ -1202,7 +1209,7 @@ class ExperimentSuggestHandler(BaseHandler):
         "status": "not_implemented",
         "detail": (
             "experiment suggestion is not implemented yet; the endpoint is "
-            "reserved for a later layer"
+            "reserved for a later release"
         ),
         "suggestion": None,
     }

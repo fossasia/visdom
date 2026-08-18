@@ -7,7 +7,7 @@
  *
  */
 
-/* global ACTIVE_ENV $ Bin */
+/* global ACTIVE_ENV Bin */
 
 'use strict';
 
@@ -22,7 +22,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import ReactDOM from 'react-dom';
+import { createRoot } from 'react-dom/client';
 import ReactGridLayout, {
   getLayoutItem,
   sortLayoutItemsByRowCol as sortLayout,
@@ -405,17 +405,19 @@ const App = () => {
   };
 
   const onEnvUpdate = (data) => {
-    var layoutLists = storeMeta.layoutLists;
-    for (var envIdx in data) {
-      if (!layoutLists.has(data[envIdx])) {
-        layoutLists.set(data[envIdx], new Map([[DEFAULT_LAYOUT, new Map()]]));
+    setStoreMeta((prev) => {
+      const layoutLists = new Map(prev.layoutLists);
+      for (var envIdx in data) {
+        if (!layoutLists.has(data[envIdx])) {
+          layoutLists.set(data[envIdx], new Map([[DEFAULT_LAYOUT, new Map()]]));
+        }
       }
-    }
-    setStoreMeta((prev) => ({
-      ...prev,
-      envList: data,
-      layoutLists: layoutLists,
-    }));
+      return {
+        ...prev,
+        envList: data,
+        layoutLists: layoutLists,
+      };
+    });
   };
 
   // remove paneID from pane list
@@ -870,9 +872,6 @@ const App = () => {
         sendEnvQuery(['main'], showAllEnvWindows);
       }
     }
-
-    // Bootstrap tooltips need some encouragement
-    $('#clear-button').attr('data-original-title', 'Clear Current Environment');
   }, [mounted.current]);
 
   // define what mounted means for this app:
@@ -1180,19 +1179,9 @@ function AppWithApi() {
 }
 
 function load() {
-  ReactDOM.render(<AppWithApi />, document.getElementById('app'));
+  const root = createRoot(document.getElementById('app'));
+  root.render(<AppWithApi />);
   document.removeEventListener('DOMContentLoaded', load);
 }
 
 document.addEventListener('DOMContentLoaded', load);
-
-$(document).ready(function () {
-  $('[data-toggle="tooltip"]').tooltip({
-    container: 'body',
-    delay: {
-      show: 600,
-      hide: 100,
-    },
-    trigger: 'hover',
-  });
-});
