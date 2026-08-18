@@ -231,7 +231,6 @@ class TestJSONStore(unittest.TestCase):
         self.assertTrue(self.backend.env_exists(eid))
         self.assertEqual(self.backend.load_env(eid)["jsons"], _env()["jsons"])
 
-
     def test_list_skips_unreadable_hash_files(self):
         """Invalid-JSON hash_<64>.json files are ignored, not raised, by list_envs."""
         hex64 = "a" * 64
@@ -248,7 +247,7 @@ class TestJSONStore(unittest.TestCase):
         This can happen if a genuine hash-fallback file's "name" field is
         lost (e.g. hand-edited, or written by an older/different DataStore
         implementation). Rather than silently vanishing, the environment is
-        surfaced under its filename stem  worse than having the real name,
+        surfaced under its filename stem -- worse than having the real name,
         but strictly better than losing access to the data entirely.
         """
         hex64 = "b" * 64
@@ -257,7 +256,6 @@ class TestJSONStore(unittest.TestCase):
             fn.write(json.dumps({"jsons": {}, "reload": {}}))
         self.backend.save_env("main", _env())
         self.assertEqual(self.backend.list_envs(), sorted(["main", stem]))
-
 
 
 class TestJSONStoreNoPath(unittest.TestCase):
