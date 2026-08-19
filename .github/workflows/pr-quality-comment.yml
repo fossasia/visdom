@@ -41,6 +41,9 @@ jobs:
             let result;
             try {
               result = JSON.parse(fs.readFileSync('./artifact/pr-quality-result.json', 'utf8'));
+              if (!result || typeof result !== 'object') {
+                throw new Error('artifact did not contain a JSON object');
+              }
             } catch (e) {
               core.warning(`Could not read result artifact: ${e.message}`);
               return;
@@ -95,7 +98,6 @@ jobs:
             });
 
             // Match on BOTH the marker text and the comment author
-            // the marker string into it.
             const prev = comments.find(
               c => c.body && c.body.includes(BOT_MARKER) && c.user && c.user.login === BOT_LOGIN
             );
