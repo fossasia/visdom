@@ -24,7 +24,7 @@ import pytest
 
 from visdom.data_model import JSONStore, DataStore
 from visdom.data_model import json_store as json_store_module
-from visdom.utils.server_utils import LazyEnvData
+from visdom.utils.server_utils import LazyEnvData, extract_eid
 
 pytestmark = pytest.mark.unit
 
@@ -130,6 +130,28 @@ class TestJSONStore(unittest.TestCase):
         ret = self.backend.save_envs({"lazy": lazy}, ["lazy"])
         self.assertEqual(ret, [])
         self.assertFalse(self.backend.env_exists("lazy"))
+
+    def test_whitespace_differing_eids_no_longer_collide(self):
+        """'main' and 'main ' must not silently overwrite each other on disk.
+
+        Regression test: the in-memory state dict is keyed by
+        ``extract_eid(args)``, while JSONStore derives filenames via its own
+        whitespace-stripping ``_safe_eid``. Before ``escape_eid`` also
+        stripped whitespace, two distinct in-memory envs differing only by
+        surrounding whitespace would collide on disk (whichever saved last
+        would clobber the other). Now both normalise to the same id, so this
+        is expected, intentional behaviour rather than an accidental clobber.
+        """
+        eid_a = extract_eid({"eid": "main"})
+        eid_b = extract_eid({"eid": "main "})
+        self.assertEqual(eid_a, eid_b)  # they are now (correctly) one env
+
+        self.backend.save_env(eid_a, _env("winA"))
+        self.backend.save_env(eid_b, _env("winB"))
+        # Only one file exists on disk, holding the last write - not two
+        # environments silently fighting over the same filename.
+        self.assertEqual(self.backend.list_envs(), ["main"])
+        self.assertEqual(self.backend.load_env("main")["jsons"], _env("winB")["jsons"])
 
     def test_save_writes_materialised_lazy_env(self):
         """A LazyEnvData that has been loaded is persisted by save."""
