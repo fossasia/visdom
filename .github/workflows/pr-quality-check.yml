@@ -73,7 +73,7 @@ jobs:
               const name = heading.replace(/^#+\s*/, '');
               if (!content) {
                 errors.push(`- **${name}** is empty.`);
-              } else if (!/[-*]\s*\[x\]/i.test(content)) {
+              } else if (!/[-*]\s+\[x\]/i.test(content)) {
                 errors.push(`- **${name}** — please tick at least one checkbox.`);
               }
             }
