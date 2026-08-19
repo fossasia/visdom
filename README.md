@@ -501,6 +501,54 @@ Each eval metric gets its own window with one trace per data name (`train`/`eval
 
 **Note:** one logger is active at a time. Calling `autolog()` again for a different env moves logging there and warns; the previous env keeps the windows it already has. Import `cross_validate` after `autolog()` — importing it first binds the original function, and every fold then opens its own window instead of sharing one per metric.
 
+### TensorFlow / Keras
+
+`visdom.loggers.VisdomKerasLogger` implements Keras's `Callback` protocol, plotting train/val metrics to Visdom after every epoch.
+
+```python
+from tensorflow import keras
+from tensorflow.keras import layers
+import visdom
+from visdom.loggers import VisdomKerasLogger
+
+viz = visdom.Visdom()
+logger = VisdomKerasLogger(viz, env="keras_run")
+
+model = keras.Sequential([
+    layers.Input(shape=(20,)),
+    layers.Dense(32, activation="relu"),
+    layers.Dense(1, activation="sigmoid"),
+])
+model.compile(optimizer="adam", loss="binary_crossentropy", metrics=["accuracy"])
+
+model.fit(
+    x_train, y_train,
+    validation_data=(x_val, y_val),
+    epochs=20,
+    callbacks=[logger],
+)
+```
+
+A metric named `val_<name>` is plotted as a `val` trace on the same window its train counterpart `<name>` plots as a `train` trace, matching how Keras already splits train/val by key prefix. One instance can be reused across multiple `fit()` calls — a new run's epoch 0 replaces the previous run's curve on the same windows in place, rather than opening a duplicate set of windows.
+
+**Per-batch logging with `log_every`** — use when you also want step-level detail on large datasets. Off by default, since `on_train_batch_end` otherwise fires every batch regardless of whether step-level detail is wanted:
+
+```python
+logger = VisdomKerasLogger(viz, env="keras_run", log_every=50)
+model.fit(x_train, y_train, epochs=20, callbacks=[logger])
+```
+
+Each metric gets its own window titled `"<name> (step)"`, throttled to one send every `log_every` batches. The optimizer's current learning rate is read (not computed) and plotted alongside as `lr`.
+
+**Parameters:**
+- `viz`: a connected `visdom.Visdom()` instance
+- `env`: environment name (default: `viz.env` if set, otherwise auto-generated from timestamp)
+- `log_every`: also plot metrics at batch granularity, one send every N batches (default: `None`, disabled)
+
+**Note:** each call to `viz.line()` is a synchronous network request made on the training thread. Pick a `log_every` large enough that it doesn't stall training waiting on the server — 50+ is a reasonable default on GPU.
+
+See `example/train_keras_example.py` for a full working example.
+
 ## Details
 <img src="https://user-images.githubusercontent.com/19650074/198747904-7a8a580f-851a-45fb-8f45-94e54a910ee2.png"/>
 
