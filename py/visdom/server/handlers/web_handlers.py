@@ -18,7 +18,6 @@ import getpass
 import json
 import jsonpatch
 import logging
-import math
 import os
 import uuid
 from collections import OrderedDict
@@ -29,6 +28,7 @@ import tornado.escape
 from visdom.utils.shared_utils import (
     get_rand_id,
     _coerce_image_slider_index,
+    _is_missing_value,
     NanSafeEncoder,
 )
 from visdom.utils.server_utils import (
@@ -110,7 +110,9 @@ class ExistsHandler(BaseHandler):
 
 class UpdateHandler(BaseHandler):
     @staticmethod
-    def update_packet(p, args, max_text_lines, max_old_content, max_image_history):
+    def update_packet(
+        p, args, max_text_lines, max_old_content, max_image_history, max_plot_history
+    ):
         # Shallow copy the packet to dynamically capture changes to top-level keys.
         old_p = p.copy()
 
@@ -121,7 +123,12 @@ class UpdateHandler(BaseHandler):
             old_p["old_content"] = copy.deepcopy(p["old_content"])
 
         p = UpdateHandler.update(
-            p, args, max_text_lines, max_old_content, max_image_history
+            p,
+            args,
+            max_text_lines,
+            max_old_content,
+            max_image_history,
+            max_plot_history,
         )
         p["contentID"] = get_rand_id()
 
@@ -162,7 +169,9 @@ class UpdateHandler(BaseHandler):
         return []
 
     @staticmethod
-    def update(p, args, max_text_lines, max_old_content, max_image_history):
+    def update(
+        p, args, max_text_lines, max_old_content, max_image_history, max_plot_history
+    ):
         # Update text in window, separated by a line break
         if p["type"] == "text":
             p["content"] += "<br>" + args["data"][0]["content"]
@@ -188,6 +197,11 @@ class UpdateHandler(BaseHandler):
             utype = args["data"][0]["type"]
             if utype == "plot_history":
                 p["content"].append(args["data"][0]["content"])
+                # A plot frame is a whole figure, so an unbounded history grows
+                # the env until the process runs out of memory. Keep the newest
+                # ``max_plot_history`` frames, as image history already does.
+                if len(p["content"]) > max_plot_history:
+                    p["content"] = p["content"][-max_plot_history:]
                 p["selected"] = len(p["content"]) - 1
             elif utype == "plot_update_selected":
                 selected = args["data"][0]["selected"]
@@ -209,21 +223,26 @@ class UpdateHandler(BaseHandler):
         new_data = args.get("data")
         p = update_window(p, args)
         name = args.get("name")
-        if name is None and new_data is None:
+        delete = args.get("delete")
+        # An unnamed delete carries no name and no data, which this shortcut used
+        # to read as "opts-only update" and return early, silently dropping the
+        # deletion. Ask about the delete flag first. ``not new_data`` also covers
+        # an empty list, which a layout-only update sends in place of None.
+        if not delete and name is None and not new_data:
             return p  # we only updated the opts or layout
         append = args.get("append")
 
         idxs = list(range(len(pdata)))
 
         if name is not None:
-            if not args.get("delete") and len(new_data) != 1:
+            if not delete and len(new_data) != 1:
                 raise tornado.web.HTTPError(
                     400, reason="a named trace update takes exactly one data entry"
                 )
             idxs = [i for i in idxs if pdata[i]["name"] == name]
 
         # Delete a trace
-        if args.get("delete"):
+        if delete:
             idxs_set = set(idxs)
             p["content"]["data"] = [e for i, e in enumerate(pdata) if i not in idxs_set]
             return p
@@ -317,23 +336,21 @@ class UpdateHandler(BaseHandler):
 
             return p
 
-        # inject new trace
+        # Inject a new trace. This used to clone ``pdata[0]`` before overwriting
+        # every key of the clone, which raised IndexError once a plot had all of
+        # its traces deleted. The clone was dead work anyway, so build the trace
+        # from the update alone.
         if len(idxs) == 0:
-            idx = len(pdata)
-            pdata.append(dict(pdata[0]))  # plot is not empty, clone an entry
-            idxs = [idx]
-            append = False
-            pdata[idx] = new_data[0]
-            for k, v in new_data[0].items():
-                pdata[idx][k] = v
-            pdata[idx]["name"] = name
+            trace = dict(new_data[0])
+            trace["name"] = name
+            pdata.append(trace)
             return p
 
-        # Update traces
-        for n, idx in enumerate(idxs):
-            if all(
-                i is None or math.isnan(i) or math.isinf(i) for i in new_data[n]["x"]
-            ):
+        # Update traces. An unnamed update may carry fewer entries than the plot
+        # has traces, so walk only as far as the data reaches instead of
+        # indexing past the end of it.
+        for n, idx in enumerate(idxs[: len(new_data)]):
+            if all(_is_missing_value(i) for i in new_data[n]["x"]):
                 continue
             # handle data for plotting
             axes = ["x", "y"]
@@ -452,6 +469,7 @@ class UpdateHandler(BaseHandler):
                 handler.max_text_lines,
                 handler.max_old_content,
                 handler.max_image_history,
+                handler.max_plot_history,
             )
         except (TypeError, ValueError) as exc:
             if is_image_slider_update:
