@@ -462,6 +462,7 @@ var ImagePane = function (props) {
 ImagePane = React.memo(ImagePane, (props, nextProps) => {
   if (props.contentID !== nextProps.contentID) return false;
   else if (props.content !== nextProps.content) return false;
+  else if (props.title !== nextProps.title) return false;
   else if (props.h !== nextProps.h || props.w !== nextProps.w) return false;
   else if (
     Math.round(props.width) !== Math.round(nextProps.width) ||
