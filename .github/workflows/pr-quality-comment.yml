@@ -11,7 +11,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: pr-quality-comment-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+  group: pr-quality-comment-${{ github.event.workflow_run.head_sha }}
   cancel-in-progress: true
 
 jobs:
@@ -95,6 +95,7 @@ jobs:
             });
 
             // Match on BOTH the marker text and the comment author
+            // the marker string into it.
             const prev = comments.find(
               c => c.body && c.body.includes(BOT_MARKER) && c.user && c.user.login === BOT_LOGIN
             );
