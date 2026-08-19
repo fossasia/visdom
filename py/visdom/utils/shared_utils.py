@@ -182,6 +182,21 @@ def _sanitize_nans(obj):
     return obj
 
 
+def _is_missing_value(value):
+    """Whether a plotted coordinate carries no value.
+
+    Clients mark gaps in a series with None, NaN or Inf. Only numbers can be
+    NaN or Inf: a categorical axis carries strings, and passing one to
+    ``math.isnan`` raises ``TypeError``, so anything non-numeric is present by
+    definition.
+    """
+    if value is None:
+        return True
+    if isinstance(value, numbers.Real):
+        return math.isnan(value) or math.isinf(value)
+    return False
+
+
 class NanSafeEncoder(json.JSONEncoder):
     """JSON encoder that converts NaN and Inf float values to None.
 
