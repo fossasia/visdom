@@ -201,6 +201,9 @@ class UpdateHandler(BaseHandler):
             utype = args["data"][0]["type"]
             if utype == "plot_history":
                 p["content"].append(args["data"][0]["content"])
+                # A plot frame is a whole figure, so an unbounded history grows
+                # the env until the process runs out of memory. Keep the newest
+                # ``max_plot_history`` frames, as image history already does.
                 if len(p["content"]) > max_plot_history:
                     p["content"] = p["content"][-max_plot_history:]
                 p["selected"] = len(p["content"]) - 1
@@ -225,8 +228,10 @@ class UpdateHandler(BaseHandler):
         p = update_window(p, args)
         name = args.get("name")
         delete = args.get("delete")
-        # a heatmap removal names no trace and carries no data, so ask about the
-        # deletion before reading either as "nothing to do"
+        # An unnamed delete carries no name and no data, which this shortcut used
+        # to read as "opts-only update" and return early, silently dropping the
+        # deletion. Ask about the delete flag first. ``not new_data`` also covers
+        # an empty list, which a layout-only update sends in place of None.
         if not delete and name is None and not new_data:
             return p  # we only updated the opts or layout
         append = args.get("append")
@@ -335,17 +340,21 @@ class UpdateHandler(BaseHandler):
 
             return p
 
-        # inject new trace; the plot may hold none at all if every trace of it
-        # has been deleted
+        # Inject a new trace. This used to clone ``pdata[0]`` before overwriting
+        # every key of the clone, which raised IndexError once a plot had all of
+        # its traces deleted. The clone was dead work anyway, so build the trace
+        # from the update alone.
         if len(idxs) == 0:
             trace = dict(new_data[0])
             trace["name"] = name
             pdata.append(trace)
             return p
 
-        # Update traces, as far as the update supplies them
-        for idx, new_trace in zip(idxs, new_data):
-            if all(_is_missing_value(i) for i in new_trace["x"]):
+        # Update traces. An unnamed update may carry fewer entries than the plot
+        # has traces, so walk only as far as the data reaches instead of
+        # indexing past the end of it.
+        for n, idx in enumerate(idxs[: len(new_data)]):
+            if all(_is_missing_value(i) for i in new_data[n]["x"]):
                 continue
             # handle data for plotting
             axes = ["x", "y"]
@@ -353,24 +362,26 @@ class UpdateHandler(BaseHandler):
                 axes.append("z")
             for axis in axes:
                 pdata[idx][axis] = (
-                    (pdata[idx][axis] + new_trace[axis]) if append else new_trace[axis]
+                    (pdata[idx][axis] + new_data[n][axis])
+                    if append
+                    else new_data[n][axis]
                 )
 
             # handle marker properties
-            if "marker" not in new_trace:
+            if "marker" not in new_data[n]:
                 continue
             if "marker" not in pdata[idx]:
                 pdata[idx]["marker"] = {}
             pdata_marker = pdata[idx]["marker"]
             for marker_prop in ["color"]:
-                if marker_prop not in new_trace["marker"]:
+                if marker_prop not in new_data[n]["marker"]:
                     continue
                 if marker_prop not in pdata[idx]["marker"]:
                     pdata[idx]["marker"][marker_prop] = []
                 pdata_marker[marker_prop] = (
-                    (pdata_marker[marker_prop] + new_trace["marker"][marker_prop])
+                    (pdata_marker[marker_prop] + new_data[n]["marker"][marker_prop])
                     if append
-                    else new_trace["marker"][marker_prop]
+                    else new_data[n]["marker"][marker_prop]
                 )
 
         return p

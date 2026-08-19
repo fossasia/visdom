@@ -12,11 +12,12 @@ Two kinds of asset live under ``py/visdom/static``:
 
 * **tracked** — ``js/main.js`` and its source map, the three HTML pages, and the
   stylesheets under ``css/``. They are committed, so they are asserted outright.
-* **downloaded** — jQuery, bootstrap and d3, fetched by ``build.py`` and ignored
-  by git (``.gitignore:17,19``). CI installs the package and runs pytest without
-  ever building the frontend, so these are absent there. Asserting them would
-  make the job red for a reason that has nothing to do with the code under test,
-  so each is skipped when it is not on disk and checked when it is.
+* **downloaded** — plotly, d3 and the resizer stylesheet, fetched by ``build.py``
+  and ignored by git (``.gitignore:17,19``). CI installs the package and runs
+  pytest without ever building the frontend, so these are absent there.
+  Asserting them would make the job red for a reason that has nothing to do
+  with the code under test, so each is skipped when it is not on disk and
+  checked when it is.
 """
 
 import os
@@ -44,9 +45,9 @@ TRACKED_ASSETS = [
 
 # Written by build.py at install time; absent in a plain checkout.
 DOWNLOADED_ASSETS = [
-    "js/jquery.min.js",
+    "js/plotly-plotly.min.js",
     "js/d3.v3.min.js",
-    "css/bootstrap.min.css",
+    "css/react-resizable-styles.css",
 ]
 
 # webpack emits well over a megabyte; anything near zero means a broken build

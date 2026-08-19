@@ -192,7 +192,7 @@ def _is_missing_value(value):
     """
     if value is None:
         return True
-    if isinstance(value, (float, int, np.floating, np.integer)):
+    if isinstance(value, numbers.Real):
         return math.isnan(value) or math.isinf(value)
     return False
 
