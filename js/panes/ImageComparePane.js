@@ -151,6 +151,7 @@ var ImageComparePane = function (props) {
 
 ImageComparePane = React.memo(ImageComparePane, (props, nextProps) => {
   if (props.contentID !== nextProps.contentID) return false;
+  else if (props.content !== nextProps.content) return false;
   else if (props.h !== nextProps.h || props.w !== nextProps.w) return false;
   else if (props.isFocused !== nextProps.isFocused) return false;
   return true;
