@@ -340,13 +340,14 @@ def test_every_asset_is_fetched_over_https_from_a_known_host(
 def test_assets_are_filed_by_extension(offline_downloads, tmp_path):
     _run_download(offline_downloads, tmp_path)
     static = tmp_path / "static"
-    assert (static / "js" / "jquery.min.js").exists()
+    assert (static / "js" / "sjcl.js").exists()
     assert (static / "js" / "layout-bin-packer.js.map").exists()
     assert (static / "css" / "react-resizable-styles.css").exists()
     assert (static / "css" / "react-grid-layout-styles.css").exists()
-    # Anything without a js/css/map extension lands in fonts/, which is why the
-    # extensionless classnames package ends up there.
-    assert (static / "fonts" / "classnames").exists()
+    # Anything without a js/css/map extension would land in fonts/. Every
+    # remaining asset carries one, so the directory is made and left empty.
+    assert (static / "fonts").is_dir()
+    assert list((static / "fonts").iterdir()) == []
 
 
 def test_the_mathjax_bundle_is_fetched_into_its_versioned_path(
