@@ -39,7 +39,6 @@ from visdom.utils.shared_utils import (
     NanSafeEncoder,
 )
 
-
 # ---- Vaguely server-security related functions ---- #
 
 
@@ -125,9 +124,22 @@ def escape_eid(eid):
     """Replace forward slashes and other problematic characters
     with underscores and backslashes with hyphen, to avoid recognizing them as
     directories or breaking URLs and filenames.
+
+    Also strips surrounding whitespace. As ``JSONStore`` independently
+    strips whitespace before deriving an on-disk filename from an eid,
+    so two in-memory eids that differ only by leading/trailing whitespace
+    (e.g. ``"main"`` and ``"main "``) would otherwise stay distinct in ``self.state``
+    while silently colliding on disk - whichever one is saved last clobbers the other.
+    Stripping here, at the single choke point every eid passes through (HTTP handlers,
+    websocket handlers, and the storage layer all call this), keeps the in-memory key
+    and the on-disk filename in agreement.
     """
     return (
-        eid.replace("/", "_").replace("\\", "_").replace("\n", "-").replace("\r", "-")
+        eid.strip()
+        .replace("/", "_")
+        .replace("\\", "_")
+        .replace("\n", "-")
+        .replace("\r", "-")
     )
 
 

@@ -9,6 +9,7 @@
 
 import React from 'react';
 
+import HParamsTable from './hparams/HParamsTable';
 import Pane from './Pane';
 
 function readContent(content) {
@@ -72,25 +73,14 @@ var HParamsPane = (props) => {
             <b>{data.tagKeys.length}</b> tags
           </span>
         </div>
-        <ul className="hparams-runs">
-          {data.records.map((record, index) => (
-            <li className="hparams-run" key={record.env_id || index}>
-              <span className="hparams-run-name">
-                {record.name || record.env_id || 'run ' + index}
-              </span>
-              {record.status ? (
-                <span
-                  className={
-                    'hparams-run-status hparams-status-' + record.status
-                  }
-                >
-                  {record.status}
-                </span>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-        <div className="hparams-views" />
+        <div className="hparams-views">
+          <HParamsTable
+            records={data.records}
+            paramKeys={data.paramKeys}
+            metricKeys={data.metricKeys}
+            tagKeys={data.tagKeys}
+          />
+        </div>
       </div>
     );
   }
