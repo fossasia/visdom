@@ -24,6 +24,7 @@ from visdom.experiments.models import (
     STATUS_FINISHED,
 )
 from visdom.experiments.query import Query, build_record
+from visdom.experiments.tags import MAX_TAGS_PER_ENV, normalize_tags
 
 METADATA_KEY = "experiment"
 
@@ -181,6 +182,34 @@ class ExperimentStore:
         else:
             self._reject_if_terminal(env_id, experiment)
         experiment.add_metric(key, value, step)
+        return self._write(env_id, env, experiment)
+
+    def update_tags(self, env_id, tags, append=False):
+        """Replace or append organizational tags for ``env_id``.
+
+        ``tags`` is the model's ``{key: value}`` representation.  Unlike run
+        logging, tag management is allowed after an experiment reaches a
+        terminal state: tags organize completed runs and do not alter their
+        parameters, metrics, result status, or completion timestamp.
+        """
+        if not isinstance(append, bool):
+            raise TypeError("append must be a boolean")
+        tags = normalize_tags(tags)
+
+        env, experiment = self._read(env_id)
+        if experiment is None:
+            experiment = Experiment(env_id=env_id, name=env_id)
+        if append:
+            final_tag_names = {tag.key for tag in experiment.tags}
+            final_tag_names.update(tags)
+            if len(final_tag_names) > MAX_TAGS_PER_ENV:
+                raise ValueError(
+                    "environments may have at most {0} tags".format(MAX_TAGS_PER_ENV)
+                )
+        if not append:
+            experiment.tags = []
+        for key, value in tags.items():
+            experiment.set_tag(key, value)
         return self._write(env_id, env, experiment)
 
     def finish_experiment(self, env_id, status=STATUS_FINISHED):
