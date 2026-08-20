@@ -153,6 +153,7 @@ const App = () => {
   // data stores
   const [storeMeta, setStoreMeta] = useState({
     envList: [],
+    tagsByEnv: {},
     layoutLists: new Map([['main', new Map([[DEFAULT_LAYOUT, new Map()]])]]),
   });
   const [storeData, setStoreData] = useState({
@@ -406,17 +407,32 @@ const App = () => {
   const onEnvUpdate = (data) => {
     setStoreMeta((prev) => {
       const layoutLists = new Map(prev.layoutLists);
+      const tagsByEnv = {};
       for (var envIdx in data) {
         if (!layoutLists.has(data[envIdx])) {
           layoutLists.set(data[envIdx], new Map([[DEFAULT_LAYOUT, new Map()]]));
+        }
+        if (prev.tagsByEnv[data[envIdx]]) {
+          tagsByEnv[data[envIdx]] = prev.tagsByEnv[data[envIdx]];
         }
       }
       return {
         ...prev,
         envList: data,
+        tagsByEnv: tagsByEnv,
         layoutLists: layoutLists,
       };
     });
+  };
+
+  const onTagsUpdate = ({ eid, tags }) => {
+    setStoreMeta((prev) => ({
+      ...prev,
+      tagsByEnv: {
+        ...prev.tagsByEnv,
+        [eid]: tags,
+      },
+    }));
   };
 
   // remove paneID from pane list
@@ -1112,6 +1128,7 @@ const App = () => {
     onLayoutMessage,
     onReloadMessage,
     onEnvUpdate,
+    onTagsUpdate,
     onCloseMessage,
     onUndoState,
     onDisconnect,

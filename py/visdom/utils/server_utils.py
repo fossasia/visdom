@@ -85,6 +85,11 @@ class LazyEnvData(Mapping):
         self._eid = eid
         self._raw_dict = None
 
+    @property
+    def is_loaded(self):
+        """Whether this environment has been materialized in memory."""
+        return self._raw_dict is not None
+
     def lazy_load_data(self):
         if self._raw_dict is not None:
             return
