@@ -495,14 +495,15 @@ def _hashed_name(eid):
     return "hash_{0}.json".format(digest)
 
 
-def test_env_named_like_a_hash_file_is_dropped_from_the_listing(store):
-    """An env whose own name matches hash_<64 hex> disappears from list_envs.
+def test_env_named_like_a_hash_file_is_still_listed(store):
+    """An env whose own name matches hash_<64 hex> no longer disappears.
 
-    HASHED_ENV_RE matches on the filename alone, so the file is read as a hash
-    fallback and skipped when the ``name`` field it expects is absent. The
-    environment is still saved, and still loads by id — only the listing loses
-    it. Documented here rather than fixed: changing the rule would break the
-    long-name files already on users' disks.
+    HASHED_ENV_RE matches on the filename alone, so this file is read as a
+    hash fallback first. It has none of the fallback bookkeeping though --
+    there's no ``name`` field, because it was written as an ordinary primary
+    file. list_envs() used to drop such environments from the listing
+    entirely on a bare KeyError; it now falls back to the filename stem,
+    which for this exact collision *is* the real, already-escaped id.
     """
     colliding_eid = "hash_" + "a" * 64
     store.save_env(colliding_eid, _env())
@@ -510,7 +511,7 @@ def test_env_named_like_a_hash_file_is_dropped_from_the_listing(store):
 
     assert store.env_exists(colliding_eid)
     assert store.load_env(colliding_eid) == _env()
-    assert store.list_envs() == ["main"]
+    assert store.list_envs() == sorted(["main", colliding_eid])
 
 
 def test_hash_fallback_file_reports_the_real_id(store, env_path):
@@ -521,6 +522,21 @@ def test_hash_fallback_file_reports_the_real_id(store, env_path):
     assert _hashed_name(long_eid) in os.listdir(env_path)
     assert store.list_envs() == [long_eid]
 
+
+def test_hash_shaped_file_missing_name_field_falls_back_to_its_stem(store, env_path):
+    """A well-formed hash_<64>.json without a ``name`` field isn't dropped.
+
+    This can happen if a genuine hash-fallback file's ``name`` field is lost
+    (hand-edited, or written by a different DataStore implementation).
+    Surfacing it under its filename stem is worse than having the real name,
+    but strictly better than losing access to the environment entirely.
+    """
+    stem = "hash_" + "b" * 64
+    with open(os.path.join(env_path, stem + ".json"), "w") as fn:
+        fn.write(json.dumps({"jsons": {}, "reload": {}}))
+    store.save_env("main", _env())
+
+    assert store.list_envs() == sorted(["main", stem])
 
 # -- LazyEnvData -------------------------------------------------------------
 
