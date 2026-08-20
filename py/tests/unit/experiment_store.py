@@ -27,9 +27,11 @@ from visdom.experiments import (
     Metric,
     Param,
     Tag,
+    normalize_tags,
     STATUS_FAILED,
     STATUS_FINISHED,
     STATUS_RUNNING,
+    tags_to_mapping,
 )
 
 
@@ -111,6 +113,38 @@ class TestModels(unittest.TestCase):
         self.assertIsInstance(rebuilt.tags[0], Tag)
 
 
+class TestTagHelpers(unittest.TestCase):
+    """Tag helpers preserve model values and validate the public mapping."""
+
+    def test_tags_to_mapping_preserves_values(self):
+        """Converting model tags never drops their key/value data."""
+        tags = [Tag("dataset", "cifar10"), Tag("stable", "")]
+        self.assertEqual(tags_to_mapping(tags), {"dataset": "cifar10", "stable": ""})
+
+    def test_normalize_tags_trims_names_and_preserves_values(self):
+        """Normalization changes tag names only, leaving values untouched."""
+        self.assertEqual(
+            normalize_tags({" dataset ": " cifar10 ", "": "ignored"}),
+            {"dataset": " cifar10 "},
+        )
+
+    def test_normalize_tags_rejects_invalid_types(self):
+        """The domain accepts only string-to-string mappings."""
+        with self.assertRaises(TypeError):
+            normalize_tags(["stable"])
+        with self.assertRaises(TypeError):
+            normalize_tags({1: "stable"})
+        with self.assertRaises(TypeError):
+            normalize_tags({"priority": 1})
+
+    def test_normalize_tags_enforces_limits(self):
+        """Tag names and per-environment tag counts stay bounded."""
+        with self.assertRaises(ValueError):
+            normalize_tags({"x" * 51: "value"})
+        with self.assertRaises(ValueError):
+            normalize_tags({"tag-{0}".format(i): "" for i in range(21)})
+
+
 class TestExperimentStore(unittest.TestCase):
     """ExperimentStore CRUD/list operations over a real JSONStore backend."""
 
@@ -161,6 +195,43 @@ class TestExperimentStore(unittest.TestCase):
         exp = self.store.get_experiment("main")
         self.assertIsNotNone(exp)
         self.assertEqual(exp.latest_metric("loss").value, 1.5)
+
+    def test_update_tags_replaces_and_preserves_values(self):
+        """Replacing tags persists the complete key/value mapping."""
+        self.store.log_experiment("main", tags={"old": "value"})
+        updated = self.store.update_tags("main", {" dataset ": "cifar10", "stable": ""})
+        self.assertEqual(
+            tags_to_mapping(updated.tags), {"dataset": "cifar10", "stable": ""}
+        )
+        reopened = ExperimentStore(JSONStore(self.env_path))
+        self.assertEqual(
+            tags_to_mapping(reopened.get_experiment("main").tags),
+            {"dataset": "cifar10", "stable": ""},
+        )
+
+    def test_update_tags_appends_and_updates_by_key(self):
+        """Append mode keeps unrelated values and updates matching keys."""
+        self.store.log_experiment("main", tags={"dataset": "mnist", "owner": "alice"})
+        updated = self.store.update_tags(
+            "main", {"dataset": "cifar10", "stable": ""}, append=True
+        )
+        self.assertEqual(
+            tags_to_mapping(updated.tags),
+            {"dataset": "cifar10", "owner": "alice", "stable": ""},
+        )
+
+    def test_update_tags_creates_and_can_update_terminal_experiment(self):
+        """Tag management creates missing records and remains organizational."""
+        created = self.store.update_tags("main", {"owner": "alice"})
+        self.assertEqual(tags_to_mapping(created.tags), {"owner": "alice"})
+
+        self.store.finish_experiment("main")
+        updated = self.store.update_tags("main", {"stage": "production"}, append=True)
+        self.assertEqual(updated.status, STATUS_FINISHED)
+        self.assertEqual(
+            tags_to_mapping(updated.tags),
+            {"owner": "alice", "stage": "production"},
+        )
 
     def test_finish_experiment(self):
         """finish_experiment persists a terminal status."""

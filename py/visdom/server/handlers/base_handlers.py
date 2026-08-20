@@ -27,12 +27,14 @@ _COMMON_APP_ATTRIBUTES = (
     "env_path",
     "storage",
     "login_enabled",
+    "mark_dirty",
 )
 
 _WEB_APP_ATTRIBUTES = _COMMON_APP_ATTRIBUTES + (
     "max_text_lines",
     "max_old_content",
     "max_image_history",
+    "max_plot_history",
 )
 
 _SOCKET_APP_ATTRIBUTES = _COMMON_APP_ATTRIBUTES + ("readonly",)

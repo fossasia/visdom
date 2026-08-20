@@ -82,6 +82,7 @@ class FakeHandler:
         max_text_lines=500,
         max_old_content=50,
         max_image_history=4,
+        max_plot_history=4,
     ):
         self.state = {} if state is None else state
         self.storage = JSONStore(env_path) if storage is None else storage
@@ -94,12 +95,18 @@ class FakeHandler:
         self.max_text_lines = max_text_lines
         self.max_old_content = max_old_content
         self.max_image_history = max_image_history
+        self.max_plot_history = max_plot_history
 
         self.written = []
         self.status = None
         self.eid = "main"
         self.sid = "sid_handler"
         self.broadcasted = []
+        self.dirtied = []
+
+    def mark_dirty(self, eid):
+        """Record an environment the server flagged as needing a save."""
+        self.dirtied.append(eid)
 
     def write(self, chunk):
         self.written.append(chunk)
