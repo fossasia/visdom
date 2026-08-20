@@ -644,5 +644,116 @@ class TestContour(unittest.TestCase):
         self.assertNotIn("scene", sent["payload"]["layout"])
 
 
+class TestPrCurve(unittest.TestCase):
+    """Precomputed (precision, recall) points must match the AUC that
+    sklearn.metrics.average_precision_score computes for the same
+    underlying labels/scores, including when several points share the
+    same recall value (a normal outcome of precision_recall_curve on
+    real, imperfectly-separated data)."""
+
+    def setUp(self):
+        self.viz = _unconnected_visdom()
+
+    def _pr_curve(self, precision, recall, **kwargs):
+        sent = {}
+
+        def capture(msg, endpoint="events", **_):
+            sent["payload"] = msg
+            sent["endpoint"] = endpoint
+            return "win1"
+
+        with patch.object(self.viz, "_send", side_effect=capture):
+            self.viz.pr_curve(precision=precision, recall=recall, **kwargs)
+        return sent
+
+    def _auc_from_title(self, sent):
+        title = sent["payload"]["layout"]["title"]["text"]
+        return float(title.split("AUC=")[1].rstrip(")"))
+
+    def test_auc_matches_sklearn_with_tied_recall(self):
+        """Points sharing a recall value must not skew the computed AUC.
+
+        The tied-recall pair (recall=0.75) is given here with the LOWER
+        precision (0.6) first and the higher (0.7) second in input order.
+        A plain stable sort on recall alone (the pre-fix behavior) would
+        keep that input order within the tie and compute AUC=0.475;
+        breaking the tie by descending precision (matching how precision
+        actually evolves as more points are accepted at fixed recall)
+        gives the correct AUC=0.5.
+        """
+        precision = np.array([0.5, 0.6, 0.7, 0.8, 1.0])
+        recall = np.array([1.0, 0.75, 0.75, 0.5, 0.25])
+        expected_auc = 0.5
+
+        sent = self._pr_curve(precision, recall)
+        self.assertAlmostEqual(self._auc_from_title(sent), expected_auc, places=4)
+
+    def test_auc_matches_sklearn_random_trials(self):
+        """AP for a set of realistic, ties-heavy trials must match sklearn."""
+        from sklearn.metrics import average_precision_score, precision_recall_curve
+
+        for seed in range(10):
+            rng = np.random.RandomState(seed)
+            n = rng.randint(15, 60)
+            y_true = rng.randint(0, 2, size=n)
+            if y_true.sum() == 0 or y_true.sum() == n:
+                continue
+            y_score = y_true * rng.uniform(0.3, 0.7, size=n) + rng.uniform(0, 1, size=n)
+            y_score = np.round(y_score, 1)  # force duplicate scores -> ties
+
+            true_ap = average_precision_score(y_true, y_score)
+            precision, recall, _ = precision_recall_curve(y_true, y_score)
+
+            sent = self._pr_curve(precision, recall)
+            with self.subTest(seed=seed):
+                self.assertAlmostEqual(self._auc_from_title(sent), true_ap, places=4)
+
+
+class TestRocCurve(unittest.TestCase):
+    """ROC's AUC uses trapezoidal integration rather than a
+    precision-weighted sum, so it must stay correct independent of the
+    pr_curve fix above; this guards against a future change to the
+    shared point-sorting helper regressing ROC while fixing PR (or
+    vice versa)."""
+
+    def setUp(self):
+        self.viz = _unconnected_visdom()
+
+    def _roc_curve(self, fpr, tpr, **kwargs):
+        sent = {}
+
+        def capture(msg, endpoint="events", **_):
+            sent["payload"] = msg
+            sent["endpoint"] = endpoint
+            return "win1"
+
+        with patch.object(self.viz, "_send", side_effect=capture):
+            self.viz.roc_curve(fpr=fpr, tpr=tpr, **kwargs)
+        return sent
+
+    def _auc_from_title(self, sent):
+        title = sent["payload"]["layout"]["title"]["text"]
+        return float(title.split("AUC=")[1].rstrip(")"))
+
+    def test_auc_matches_sklearn_random_trials(self):
+        from sklearn.metrics import roc_auc_score, roc_curve
+
+        for seed in range(10):
+            rng = np.random.RandomState(seed)
+            n = rng.randint(15, 60)
+            y_true = rng.randint(0, 2, size=n)
+            if y_true.sum() == 0 or y_true.sum() == n:
+                continue
+            y_score = y_true * rng.uniform(0.3, 0.7, size=n) + rng.uniform(0, 1, size=n)
+            y_score = np.round(y_score, 1)
+
+            true_auc = roc_auc_score(y_true, y_score)
+            fpr, tpr, _ = roc_curve(y_true, y_score)
+
+            sent = self._roc_curve(fpr, tpr)
+            with self.subTest(seed=seed):
+                self.assertAlmostEqual(self._auc_from_title(sent), true_auc, places=4)
+
+
 if __name__ == "__main__":
     unittest.main()
