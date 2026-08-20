@@ -42,6 +42,10 @@ from visdom.experiments.store import (
     METADATA_KEY,
     retarget_experiment,
 )
+from visdom.experiments.tags import (
+    normalize_tags,
+    tags_to_mapping,
+)
 
 __all__ = [
     "And",
@@ -63,6 +67,8 @@ __all__ = [
     "QueryParseError",
     "SECTIONS",
     "Tag",
+    "normalize_tags",
+    "tags_to_mapping",
     "build_comparison",
     "build_record",
     "flatten_experiments",
