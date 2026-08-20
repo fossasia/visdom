@@ -35,7 +35,7 @@ const PANE_SIZE = {
   properties: [20, 20],
   table: [30, 20],
   network: [20, 20],
-  hparams: [40, 24],
+  hparams: [98, 46],
 };
 const MODAL_STYLE = {
   content: {

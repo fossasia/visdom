@@ -34,6 +34,18 @@ const PRECISION = 4;
 const EXPONENTIAL_ABOVE = 1e6;
 const EXPONENTIAL_BELOW = 1e-4;
 
+export const COLUMN_GROUPS = [
+  { key: 'param', label: 'params' },
+  { key: 'metric', label: 'metrics' },
+  { key: 'tag', label: 'tags' },
+];
+
+export const NUMERIC_GROUPS = COLUMN_GROUPS.slice(0, 2);
+
+export function runLabel(record) {
+  return (record && (record.name || record.env_id)) || 'run';
+}
+
 export function isMissing(value) {
   return (
     value === undefined ||
@@ -113,6 +125,28 @@ export function buildColumns(paramKeys, metricKeys, tagKeys) {
   return columns;
 }
 
+export function groupColumnTree(columns, groups) {
+  const cols = columns || [];
+  return (groups || [])
+    .map(({ key, label }) => {
+      const children = cols.filter((col) => col.group === key);
+      if (children.length === 0) return null;
+      return {
+        key: '__g_' + key,
+        value: '__g_' + key,
+        title: label,
+        selectable: false,
+        checkable: false,
+        children: children.map((col) => ({
+          key: col.id,
+          value: col.id,
+          title: col.label,
+        })),
+      };
+    })
+    .filter(Boolean);
+}
+
 export function formatValue(value) {
   if (isMissing(value)) return '—';
   if (typeof value === 'number') {
@@ -145,6 +179,13 @@ export function filterRecords(records, query, columns) {
       }
     }
     return false;
+  });
+}
+
+export function toNumericColumn(records, accessor) {
+  return (records || []).map((record) => {
+    const value = accessor(record);
+    return isNumeric(value) ? value : null;
   });
 }
 
@@ -214,4 +255,35 @@ export function spineStyle(value, extent) {
     backgroundColor: 'rgb(' + rgb.join(', ') + ')',
     color: textColorFor(rgb),
   };
+}
+
+/*
+ * Numeric param/metric columns only — the axes a scatter matrix (SPLOM) or a
+ * "color by" ramp can actually plot. Tags are excluded (categorical) and any
+ * column whose values are all missing/non-numeric is dropped.
+ */
+export function selectNumericColumns(records, columns) {
+  return (columns || []).filter(
+    (col) =>
+      (col.group === 'param' || col.group === 'metric') &&
+      numericExtent(records, col.accessor) !== null
+  );
+}
+
+/*
+ * Build Plotly `splom` dimensions from the chosen column ids. Order follows
+ * selectedIds; unknown ids are skipped; missing/non-numeric cells become null
+ * so Plotly leaves a gap instead of plotting a bogus 0.
+ */
+export function buildSplomDimensions(records, columns, selectedIds) {
+  const byId = new Map((columns || []).map((col) => [col.id, col]));
+  const dimensions = [];
+  (selectedIds || []).forEach((id) => {
+    const col = byId.get(id);
+    if (!col) return;
+    const values = toNumericColumn(records, col.accessor);
+    if (values.every((v) => v === null)) return;
+    dimensions.push({ label: col.label, values });
+  });
+  return dimensions;
 }
