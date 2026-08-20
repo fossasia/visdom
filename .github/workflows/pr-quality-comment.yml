@@ -1,0 +1,133 @@
+name: PR Quality Comment
+
+on:
+  workflow_run:
+    workflows: ['PR Quality Check']
+    types: [completed]
+
+permissions:
+  issues: write
+  pull-requests: read
+  actions: read
+
+concurrency:
+  group: pr-quality-comment-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: true
+
+jobs:
+  comment:
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.event == 'pull_request'
+    steps:
+      - name: Download result artifact
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: pr-quality-result
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: ./artifact
+
+      - name: Post comment / manage label
+        if: steps.download.outcome == 'success'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const BOT_MARKER = '<!-- pr-quality-check -->';
+            const BOT_LOGIN = 'github-actions[bot]';
+
+            let result;
+            try {
+              result = JSON.parse(fs.readFileSync('./artifact/pr-quality-result.json', 'utf8'));
+              if (!result || typeof result !== 'object') {
+                throw new Error('artifact did not contain a JSON object');
+              }
+            } catch (e) {
+              core.warning(`Could not read result artifact: ${e.message}`);
+              return;
+            }
+
+            const { pr_number: pr, errors } = result;
+            if (!pr) {
+              core.warning('No PR number found in artifact, skipping.');
+              return;
+            }
+
+            // Re-fetch the PR from the API rather than trusting artifact
+            let prData;
+            try {
+              const { data } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pr,
+              });
+              prData = data;
+            } catch (e) {
+              core.warning(`Could not fetch PR #${pr}: ${e.message}`);
+              return;
+            }
+            if (prData.state !== 'open') {
+              core.info(`PR #${pr} is not open, skipping.`);
+              return;
+            }
+
+            if (!errors || errors.length === 0) {
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr,
+                  name: 'blocked',
+                });
+              } catch (e) {
+                if (e.status !== 404) throw e;
+              }
+              core.info('All sections look good!');
+              return;
+            }
+
+            // Paginate so an old marker comment is found even on PRs
+            // with more than one page (30) of comments.
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr,
+              per_page: 100,
+            });
+
+            // Match on BOTH the marker text and the comment author
+            const prev = comments.find(
+              c => c.body && c.body.includes(BOT_MARKER) && c.user && c.user.login === BOT_LOGIN
+            );
+            if (prev) {
+              try {
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: prev.id,
+                });
+              } catch (e) {
+                // Comment may already be gone (concurrent run/manual delete).
+                if (e.status !== 404) throw e;
+              }
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr,
+              body: `${BOT_MARKER}\n**Please fix these sections before this PR can be reviewed:**\n\n${errors.join('\n')}\n\n`,
+            });
+
+            try {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr,
+                labels: ['blocked'],
+              });
+            } catch (e) {
+              core.warning(`Could not add blocked label: ${e.message}`);
+            }

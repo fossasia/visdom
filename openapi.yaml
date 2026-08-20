@@ -781,6 +781,78 @@ paths:
             not a JSON object. Also returned when authentication is required
             but not provided.
 
+  /experiments/tags:
+    get:
+      operationId: getEnvironmentTags
+      tags: [Experiments]
+      summary: Read experiment tags for environments
+      description: >
+        Returns one environment's key/value tag mapping when `eid` is supplied,
+        or an `{eid: {name: value}}` mapping for all tagged environments.
+        Tags are stored in the existing `Experiment.tags` metadata; no separate
+        tag index or persistence format is maintained.
+      parameters:
+        - in: query
+          name: eid
+          schema:
+            type: string
+          description: Optional environment ID.
+      responses:
+        "200":
+          description: One tag mapping or all environment tag mappings.
+        "401":
+          description: Authentication required but not provided.
+    post:
+      operationId: updateEnvironmentTags
+      tags: [Experiments]
+      summary: Read, replace, or append environment tags
+      description: >
+        With `action: set` (the default), replaces an environment's tags or
+        appends them when `append` is true. `action: get` reads the same data as
+        GET while allowing later clients to use the shared POST transport.
+        The `tags` field is required for `set`; an explicit empty object clears
+        the environment's tags.
+        Tag changes are allowed for completed experiments because they are
+        organizational metadata. Successful writes broadcast `tags_update` to
+        both WebSocket and polling browser clients.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action:
+                  type: string
+                  enum: [get, set]
+                  default: set
+                eid:
+                  type: string
+                  description: Target environment. Defaults to `main` for set.
+                tags:
+                  type: object
+                  maxProperties: 20
+                  description: >
+                    Required for `action: set`. String tag names mapped to string
+                    values. Names are limited to 50 characters by the domain
+                    layer. An empty object explicitly clears all tags.
+                  additionalProperties:
+                    type: string
+                append:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          description: The resulting tags, or the requested tag mapping.
+        "400":
+          description: >
+            Invalid action, missing or invalid tag mapping, tag limit, or append
+            flag.
+        "401":
+          description: Authentication required but not provided.
+        "403":
+          description: Tag writes are disabled in readonly mode.
+
   /upload_env:
     post:
       operationId: uploadEnvironment
