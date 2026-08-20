@@ -291,7 +291,9 @@ const App = () => {
     if (newPane.command == 'window_update') {
       newPane = jsonpatch.applyPatch(
         newPanes[newPane.win],
-        newPane.content
+        newPane.content,
+        false,
+        false
       ).newDocument;
     }
 
