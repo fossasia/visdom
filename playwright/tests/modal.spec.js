@@ -105,16 +105,18 @@ test.describe.serial('Test Env Modal', () => {
     await page.locator('button', { hasText: 'Delete Selected' }).click();
     await expect(page.locator(envmodal)).toHaveCount(0);
 
-    // wait for polling cycle to deliver env_update (polling interval is 500ms)
-    await page.waitForTimeout(1500);
-
-    // check that both forks do not exist anymore, but original env still exists
     await page.locator('.rc-tree-select').click();
     await expandAllEnvGroups(page);
     const tree = page.locator('.rc-tree-select-tree');
-    await expect(tree.locator(`span[title="${env}"]`)).toBeVisible();
-    await expect(tree.locator(`span[title="${env}_fork"]`)).toHaveCount(0);
-    await expect(tree.locator(`span[title="${env}_fork2"]`)).toHaveCount(0);
+    await expect(tree.locator(`span[title="${env}"]`)).toBeVisible({
+      timeout: 5000,
+    });
+    await expect(tree.locator(`span[title="${env}_fork"]`)).toHaveCount(0, {
+      timeout: 5000,
+    });
+    await expect(tree.locator(`span[title="${env}_fork2"]`)).toHaveCount(0, {
+      timeout: 5000,
+    });
     await closeEnvDropdown(page);
   });
 });
@@ -138,23 +140,25 @@ test.describe.serial('Test View Modal', () => {
   test('View Modal save view', async ({ page }) => {
     env = 'view_modal_' + Math.floor(Math.random() * 1e6);
 
+    const paneCount = page.locator('.layout .react-grid-item');
+
     // initialize any env
     await runDemo(page, 'text_basic', { env: env, args: ['"Text Pane"'] });
-    await page.waitForTimeout(500);
+    await expect(paneCount).toHaveCount(1);
     await runDemo(page, 'image_basic', { env: env, open: false });
-    await page.waitForTimeout(500);
+    await expect(paneCount).toHaveCount(2);
     await runDemo(page, 'plot_line_basic', {
       env: env,
       open: false,
       args: ['"Line Plot"'],
     });
-    await page.waitForTimeout(500);
+    await expect(paneCount).toHaveCount(3);
     await runDemo(page, 'plot_bar_basic', {
       env: env,
       open: false,
       args: ['"Bar Plot"'],
     });
-    await page.waitForTimeout(500);
+    await expect(paneCount).toHaveCount(4);
 
     // save the view at this point
     await page.locator(viewbutton).click();
@@ -162,14 +166,18 @@ test.describe.serial('Test View Modal', () => {
     await page.locator('button', { hasText: 'fork' }).click();
     await page.locator(viewmodal).press('Escape');
 
-    // apply a change to the same view
-    await dragMouse(
-      page,
-      paneByTitle(page, 'Text Pane').locator('.bar'),
-      1000,
-      300
+    // capture the pane's position before dragging, so the post-drag check
+    // doesn't depend on knowing/hardcoding its exact starting coordinates
+    const textPane = paneByTitle(page, 'Text Pane');
+    const initialTransform = await textPane.evaluate(
+      (el) => getComputedStyle(el).transform
     );
-    await page.waitForTimeout(300);
+
+    // apply a change to the same view
+    await dragMouse(page, textPane.locator('.bar'), 1000, 300);
+    // wait for the drag to actually reposition the pane before saving the
+    // view, instead of guessing a fixed delay
+    await expect(textPane).not.toHaveCSS('transform', initialTransform);
 
     // save the view at this point
     await page.locator(viewbutton).click();
@@ -248,7 +256,11 @@ test.describe.serial('Test View Modal', () => {
     await page.locator(viewbutton).click();
     await page.locator(viewmodal + 'select').selectOption('first');
     await page.locator('button', { hasText: 'Delete' }).click();
-    await page.waitForTimeout(300);
+    // wait for the 'first' view to actually disappear from the dropdown
+    // before selecting 'second', instead of guessing a fixed delay
+    await expect(
+      page.locator(viewmodal + 'select option', { hasText: 'first' })
+    ).toHaveCount(0);
     await page.locator(viewmodal + 'select').selectOption('second');
     await page.locator('button', { hasText: 'Delete' }).click();
     await page.locator(viewmodal).press('Escape');
