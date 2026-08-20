@@ -365,7 +365,9 @@ var PlotPane = (props) => {
       displaylogo: false,
       doubleClick: 'reset',
       doubleClickDelay: 500,
-      modeBarButtonsToAdd: ['drawopenpath', 'eraseshape'],
+      modeBarButtonsToAdd: ['drawopenpath', 'eraseshape'].concat(
+        annotations.modebarButton ? [annotations.modebarButton] : []
+      ),
       modeBarButtonsToRemove: ['toImage', 'sendDataToCloud'],
       // dragging a note box leaves its arrow on the data point
       edits: { annotationTail: !sessionInfo?.readonly },
@@ -408,7 +410,7 @@ var PlotPane = (props) => {
               min="1"
               max={maxsmoothvalue}
               value={smoothvalue}
-              onInput={(ev) => updateSmoothSlider(ev.target.value)}
+              onChange={(ev) => updateSmoothSlider(ev.target.value)}
             />
             <span>&nbsp;&nbsp;&nbsp;&nbsp;</span>
           </div>
@@ -455,7 +457,7 @@ var PlotPane = (props) => {
       handleExport={handleExport}
       handleMetadataExport={handleMetadataExport}
       handleLatexExport={handleLatexExport}
-      barwidgets={[smooth_widget_button, annotations.button]}
+      barwidgets={[smooth_widget_button]}
       widgets={[
         history_widget,
         caption_widget,
