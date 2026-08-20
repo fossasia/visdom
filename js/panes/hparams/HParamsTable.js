@@ -26,6 +26,7 @@ import {
 import StatusBadge from './StatusBadge';
 
 const RUN_COLUMN_ID = 'run:name';
+const NO_SORT = { by: null, dir: null };
 
 function nextSort(current, columnId) {
   if (current.by !== columnId) return { by: columnId, dir: 'asc' };
@@ -44,6 +45,12 @@ function accessorFor(sortBy, columns) {
   }
   const col = columns.find((c) => c.id === sortBy);
   return col ? col.accessor : null;
+}
+
+function directionLabel(sort) {
+  if (!sort.by) return 'Sort direction';
+  if (sort.dir === 'asc') return 'Sorted ascending — click for descending';
+  return 'Sorted descending — click to clear';
 }
 
 const SortCaret = ({ sort, columnId }) => {
@@ -87,6 +94,7 @@ const SortHeader = ({ sort, columnId, label, scopeClass, onSort }) => {
 
 const HParamsRow = React.memo(function HParamsRow({
   record,
+  rowId,
   columns,
   colorBy,
   extent,
@@ -105,7 +113,7 @@ const HParamsRow = React.memo(function HParamsRow({
         <input
           type="checkbox"
           checked={isSelected}
-          onChange={() => onToggle(record.env_id)}
+          onChange={() => onToggle(rowId)}
           aria-label={'Select ' + label}
         />
       </td>
@@ -135,6 +143,8 @@ const HParamsRow = React.memo(function HParamsRow({
 
 const HParamsTable = ({
   records,
+  columnRecords,
+  rowIds,
   paramKeys,
   metricKeys,
   tagKeys,
@@ -149,9 +159,20 @@ const HParamsTable = ({
     () => buildColumns(paramKeys, metricKeys, tagKeys),
     [paramKeys, metricKeys, tagKeys]
   );
+  const pickerRecords = columnRecords || records;
   const colorCols = useMemo(
-    () => selectNumericColumns(records, columns),
-    [records, columns]
+    () => selectNumericColumns(pickerRecords, columns),
+    [pickerRecords, columns]
+  );
+
+  const activeSort = useMemo(() => {
+    if (!sort.by || sort.by === RUN_COLUMN_ID) return sort;
+    return columns.some((c) => c.id === sort.by) ? sort : NO_SORT;
+  }, [sort, columns]);
+
+  const activeColorBy = useMemo(
+    () => (colorBy && colorCols.some((c) => c.id === colorBy) ? colorBy : null),
+    [colorBy, colorCols]
   );
 
   const groupStartIds = useMemo(() => {
@@ -165,18 +186,18 @@ const HParamsTable = ({
   }, [columns]);
 
   const rows = useMemo(() => {
-    if (!sort.by) return records;
-    const accessor = accessorFor(sort.by, columns);
+    if (!activeSort.by) return records;
+    const accessor = accessorFor(activeSort.by, columns);
     if (!accessor) return records;
-    return records.slice().sort(makeComparator(accessor, sort.dir));
-  }, [records, sort, columns]);
+    return records.slice().sort(makeComparator(accessor, activeSort.dir));
+  }, [records, activeSort, columns]);
 
   const extent = useMemo(() => {
-    if (!colorBy) return null;
-    const col = columns.find((c) => c.id === colorBy);
+    if (!activeColorBy) return null;
+    const col = columns.find((c) => c.id === activeColorBy);
     if (!col) return null;
     return numericExtent(records, col.accessor);
-  }, [records, colorBy, columns]);
+  }, [records, activeColorBy, columns]);
 
   const handleSort = useCallback((columnId) => {
     setSort((prev) => nextSort(prev, columnId));
@@ -196,28 +217,38 @@ const HParamsTable = ({
     });
   }, []);
 
-  const toggle = useCallback((envId) => {
+  const toggle = useCallback((rowId) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(envId)) next.delete(envId);
-      else next.add(envId);
+      if (next.has(rowId)) next.delete(rowId);
+      else next.add(rowId);
       return next;
     });
   }, []);
 
   const allSelected =
-    rows.length > 0 && rows.every((r) => selected.has(r.env_id));
+    rows.length > 0 && rows.every((r) => selected.has(rowIds.get(r)));
+
+  const visibleSelected = useMemo(
+    () =>
+      rows.reduce(
+        (total, r) => (selected.has(rowIds.get(r)) ? total + 1 : total),
+        0
+      ),
+    [rows, rowIds, selected]
+  );
 
   const handleSelectAll = useCallback(() => {
     setSelected((prev) => {
       const next = new Set(prev);
-      const everyOn = rows.length > 0 && rows.every((r) => next.has(r.env_id));
+      const everyOn =
+        rows.length > 0 && rows.every((r) => next.has(rowIds.get(r)));
       rows.forEach((r) =>
-        everyOn ? next.delete(r.env_id) : next.add(r.env_id)
+        everyOn ? next.delete(rowIds.get(r)) : next.add(rowIds.get(r))
       );
       return next;
     });
-  }, [rows]);
+  }, [rows, rowIds]);
 
   const bands = COLUMN_GROUPS.map((b) => ({
     ...b,
@@ -231,6 +262,8 @@ const HParamsTable = ({
 
   const colorTreeData = groupColumnTree(colorCols, NUMERIC_GROUPS);
 
+  const dirLabel = directionLabel(activeSort);
+
   return (
     <div className="hparams-table-wrap">
       <div className="hparams-toolbar">
@@ -238,7 +271,7 @@ const HParamsTable = ({
           sort by:
           <TreeSelect
             className="hparams-treeselect hparams-select-narrow"
-            value={sort.by || undefined}
+            value={activeSort.by || undefined}
             placeholder="none"
             allowClear
             treeLine
@@ -251,17 +284,11 @@ const HParamsTable = ({
             type="button"
             className="hparams-dir-btn"
             onClick={cycleDir}
-            disabled={!sort.by}
-            title={
-              sort.dir === 'asc'
-                ? 'Ascending — click for descending'
-                : 'Descending — click to clear'
-            }
-            aria-label={
-              sort.dir === 'desc' ? 'Sort descending' : 'Sort ascending'
-            }
+            disabled={!activeSort.by}
+            title={dirLabel}
+            aria-label={dirLabel}
           >
-            {!sort.by ? '⇅' : sort.dir === 'asc' ? '▲' : '▼'}
+            {!activeSort.by ? '⇅' : activeSort.dir === 'asc' ? '▲' : '▼'}
           </button>
         </span>
         {colorCols.length ? (
@@ -269,7 +296,7 @@ const HParamsTable = ({
             color by:
             <TreeSelect
               className="hparams-treeselect hparams-select-narrow"
-              value={colorBy || undefined}
+              value={activeColorBy || undefined}
               placeholder="none"
               allowClear
               treeLine
@@ -282,7 +309,9 @@ const HParamsTable = ({
         ) : null}
         {selected.size ? (
           <span className="hparams-selected-count">
-            {selected.size} selected
+            {visibleSelected === selected.size
+              ? selected.size + ' selected'
+              : visibleSelected + ' of ' + selected.size + ' selected'}
           </span>
         ) : null}
       </div>
@@ -319,7 +348,7 @@ const HParamsTable = ({
                 />
               </th>
               <SortHeader
-                sort={sort}
+                sort={activeSort}
                 columnId={RUN_COLUMN_ID}
                 label="run"
                 scopeClass="hparams-th-run"
@@ -328,7 +357,7 @@ const HParamsTable = ({
               {columns.map((col) => (
                 <SortHeader
                   key={col.id}
-                  sort={sort}
+                  sort={activeSort}
                   columnId={col.id}
                   label={col.label}
                   scopeClass={
@@ -349,18 +378,22 @@ const HParamsTable = ({
                 </td>
               </tr>
             ) : (
-              rows.map((record, index) => (
-                <HParamsRow
-                  key={record.env_id || index}
-                  record={record}
-                  columns={columns}
-                  colorBy={colorBy}
-                  extent={extent}
-                  isSelected={selected.has(record.env_id)}
-                  onToggle={toggle}
-                  groupStartIds={groupStartIds}
-                />
-              ))
+              rows.map((record) => {
+                const rowId = rowIds.get(record);
+                return (
+                  <HParamsRow
+                    key={rowId}
+                    record={record}
+                    rowId={rowId}
+                    columns={columns}
+                    colorBy={activeColorBy}
+                    extent={extent}
+                    isSelected={selected.has(rowId)}
+                    onToggle={toggle}
+                    groupStartIds={groupStartIds}
+                  />
+                );
+              })
             )}
           </tbody>
         </table>

@@ -18,6 +18,7 @@ import {
   applyFilters,
   buildColumns,
   buildFilterSpecs,
+  buildRowIds,
   collectStatuses,
   countActiveFilters,
   filterRecords,
@@ -87,13 +88,15 @@ var HParamsPane = (props) => {
   const activeFilters =
     countActiveFilters(filters, specs) + (tableFilter.trim() ? 1 : 0);
 
+  const rowIds = useMemo(() => buildRowIds(records), [records]);
+
   const selectionActive = tableSelected.size > 0;
   const selectedVisible = useMemo(
     () =>
       selectionActive
-        ? visibleRecords.filter((r) => tableSelected.has(r.env_id))
+        ? visibleRecords.filter((r) => tableSelected.has(rowIds.get(r)))
         : visibleRecords,
-    [selectionActive, visibleRecords, tableSelected]
+    [selectionActive, visibleRecords, tableSelected, rowIds]
   );
   const clearSelection = useCallback(() => setTableSelected(new Set()), []);
   const closeFilters = useCallback(() => setFiltersOpen(false), []);
@@ -226,6 +229,7 @@ var HParamsPane = (props) => {
                 isPlot && selectionActive ? selectedVisible : visibleRecords;
               const viewProps = {
                 columnRecords: records,
+                rowIds,
                 paramKeys: data.paramKeys,
                 metricKeys: data.metricKeys,
                 tagKeys: data.tagKeys,
