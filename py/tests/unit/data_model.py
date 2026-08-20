@@ -538,6 +538,7 @@ def test_hash_shaped_file_missing_name_field_falls_back_to_its_stem(store, env_p
 
     assert store.list_envs() == sorted(["main", stem])
 
+
 # -- LazyEnvData -------------------------------------------------------------
 
 
