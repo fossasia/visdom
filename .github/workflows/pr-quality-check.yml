@@ -1,0 +1,96 @@
+name: PR Quality Check
+
+on:
+  pull_request:
+    types: [opened, edited, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-quality-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR body
+        id: validate
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const rawBody = context.payload.pull_request.body || '';
+            const pr = context.payload.pull_request.number;
+            const headSha = context.payload.pull_request.head.sha;
+
+            // Strip fenced code blocks first so headings quoted/pasted
+            const body = rawBody.replace(/```[\s\S]*?```/g, '');
+
+            const sections = [
+              { heading: '## Description', min: 20 },
+              { heading: '## Motivation and Context', min: 5 },
+              { heading: '## How Has This Been Tested?', min: 10 },
+            ];
+
+            function escapeRegExp(s) {
+              return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            }
+
+            function getSectionContent(text, heading) {
+              const re = new RegExp('^' + escapeRegExp(heading) + '\\s*$', 'im');
+              const match = re.exec(text);
+              if (!match) return null;
+              const after = text.slice(match.index + match[0].length);
+              const nextSection = after.match(/\n##\s/);
+              return after
+                .slice(0, nextSection ? nextSection.index : undefined)
+                .replace(/<!--[\s\S]*?-->/g, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+            }
+
+            const errors = [];
+
+            for (const { heading, min } of sections) {
+              const content = getSectionContent(body, heading);
+              const name = heading.replace(/^#+\s*/, '');
+
+              if (!content) {
+                errors.push(`- **${name}** is empty.`);
+              } else if (content.length < min) {
+                errors.push(`- **${name}** is too short (${content.length}/${min} chars minimum).`);
+              }
+            }
+
+            const checkboxSections = [
+              '## Types of changes',
+              '## Checklist:',
+            ];
+            for (const heading of checkboxSections) {
+              const content = getSectionContent(body, heading);
+              const name = heading.replace(/^#+\s*/, '');
+              if (!content) {
+                errors.push(`- **${name}** is empty.`);
+              } else if (!/[-*]\s+\[x\]/i.test(content)) {
+                errors.push(`- **${name}** — please tick at least one checkbox.`);
+              }
+            }
+
+            const result = { pr_number: pr, head_sha: headSha, errors };
+            fs.writeFileSync('pr-quality-result.json', JSON.stringify(result));
+            core.setOutput('has_errors', errors.length > 0 ? 'true' : 'false');
+
+      - name: Upload result
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-quality-result
+          path: pr-quality-result.json
+          retention-days: 1
+
+      - name: Fail if incomplete
+        if: steps.validate.outputs.has_errors == 'true'
+        run: |
+          echo "PR description sections are incomplete. See the automated comment on the PR for details." >&2
+          exit 1
