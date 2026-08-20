@@ -59,6 +59,11 @@ py/tests/
 so a package there would ship a top-level `tests` distribution to users. `testutils/` is a
 package and is reachable because `py/tests` is on `pythonpath`.
 
+Everything under `py/tests/` must be **hermetic and collectable**: no externally launched
+server, no browser, no assertion a human has to make. A script that needs a live server and is
+judged by looking at the UI goes in `example/manual/` instead — see
+`example/manual/visual_check.py`. Pixel correctness is Playwright's job, not pytest's.
+
 - Name a file after what it covers — `integration/window_types.py`, not
   `integration/test_window_types.py`. The `unit/` and `integration/` directories already say these
   are tests, so the filename does not repeat it; `python_files = ["*.py"]` in `pyproject.toml`
