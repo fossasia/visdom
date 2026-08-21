@@ -91,12 +91,14 @@ def app_handler(app):
 def offline_client():
     """Visdom client that never opens a connection.
 
-    With ``send=False`` the client's ``_send`` returns the payload instead of
-    performing I/O, so plot methods can be asserted as pure functions.
+    ``_handle_post`` is the client's only outbound I/O, so stubbing it lets the
+    constructor's env handshake succeed offline and leaves plot methods
+    assertable as pure functions.
     """
     import visdom
 
-    return visdom.Visdom(send=False, use_incoming_socket=False)
+    with patch.object(visdom.Visdom, "_handle_post", return_value=""):
+        yield visdom.Visdom(use_incoming_socket=False)
 
 
 @pytest.fixture

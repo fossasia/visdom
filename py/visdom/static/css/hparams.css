@@ -1,0 +1,482 @@
+/*
+ * Copyright 2017-present, The Visdom Authors
+ * All rights reserved.
+ *
+ * This source code is licensed under the license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+.content-hparams {
+  height: 100%;
+  overflow: hidden;
+  background-color: #fff;
+  font-family: "Open Sans", sans-serif;
+  font-size: 12px;
+  color: #333;
+}
+
+.hparams-body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.hparams-summary {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 6px 10px;
+  background-color: #f0f0f0;
+  border-bottom: 1px solid #dedede;
+}
+
+.hparams-stat {
+  color: #3b5998;
+  white-space: nowrap;
+}
+
+.hparams-stat b {
+  font-weight: 600;
+}
+
+.hparams-runs {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+}
+
+.hparams-run {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 10px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.hparams-run-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hparams-run-status {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  text-transform: capitalize;
+  background-color: #dedede;
+  color: #333;
+}
+
+.hparams-status-running {
+  background-color: #6389d8;
+  color: #fff;
+}
+
+.hparams-status-finished {
+  background-color: #3b5998;
+  color: #fff;
+}
+
+.hparams-status-failed {
+  background-color: #d85f5f;
+  color: #fff;
+}
+
+.hparams-message {
+  padding: 16px;
+  text-align: center;
+  color: grey;
+}
+
+.hparams-error {
+  color: #b94a48;
+}
+
+/* ---- HParamsTable (B2) ---- */
+
+.hparams-views {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.hparams-table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.hparams-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  background-color: #fff;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.hparams-filter {
+  flex: 0 1 200px;
+  padding: 3px 8px;
+  font-family: "Open Sans", sans-serif;
+  font-size: 12px;
+  color: #333;
+  border: 1px solid #dedede;
+  border-radius: 3px;
+}
+
+.hparams-filter:focus {
+  outline: none;
+  border-color: #3b5998;
+}
+
+.hparams-colorby,
+.hparams-sortby {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #666;
+}
+
+.hparams-treeselect {
+  font-family: "Open Sans", sans-serif;
+  font-size: 13px;
+  color: #333;
+}
+
+.hparams-select-narrow {
+  width: 150px;
+}
+
+.hparams-select-wide {
+  width: 220px;
+}
+
+.hparams-treeselect .rc-tree-select-selector {
+  border-radius: 4px !important;
+  border-color: #dedede !important;
+}
+
+.hparams-dir-btn {
+  padding: 1px 6px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: #3b5998;
+  background-color: #fff;
+  border: 1px solid #dedede;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.hparams-dir-btn:hover:not(:disabled) {
+  border-color: #3b5998;
+}
+
+.hparams-dir-btn:disabled {
+  color: #b8b8b8;
+  cursor: default;
+}
+
+.hparams-dir-btn:focus-visible {
+  outline: 2px solid #3b5998;
+  outline-offset: -2px;
+}
+
+.hparams-selected-count {
+  margin-left: auto;
+  color: #3b5998;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.hparams-table-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.hparams-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  font-size: 12px;
+  color: #333;
+}
+
+.hparams-table th,
+.hparams-table td {
+  border-bottom: 1px solid #f0f0f0;
+  border-right: 1px solid #f0f0f0;
+  padding: 3px 8px;
+  text-align: left;
+  white-space: nowrap;
+  font-weight: normal;
+}
+
+/* Column group bands (params | metrics | tags) */
+.hparams-col-group {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #444;
+  text-align: center;
+  background-color: #f7f7f7;
+  border-bottom: 1px solid #dedede !important;
+}
+
+.hparams-group-param,
+.hparams-group-metric,
+.hparams-group-tag {
+  border-left: 1px solid #ccc;
+}
+
+.hparams-col-sep {
+  border-left: 1px solid #ccc;
+}
+
+.hparams-col-blank {
+  background-color: #fff;
+  border-right-color: transparent !important;
+}
+
+/* Sticky column headers */
+.hparams-head-row th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background-color: #f0f0f0;
+  border-bottom: 1px solid #dedede;
+}
+
+.hparams-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  width: 100%;
+  max-width: 140px;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: #222;
+  cursor: pointer;
+  text-align: left;
+}
+
+.hparams-sort-btn:focus-visible {
+  outline: 2px solid #3b5998;
+  outline-offset: -2px;
+}
+
+.hparams-th-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hparams-caret {
+  flex: 0 0 auto;
+  width: 11px;
+  font-size: 9px;
+  line-height: 1;
+  text-align: center;
+}
+
+.hparams-caret-idle {
+  color: #6b7280;
+}
+
+.hparams-caret-active {
+  color: #3b5998;
+}
+
+.hparams-head-row th:hover .hparams-sort-btn,
+.hparams-head-row th:hover .hparams-caret-idle {
+  color: #3b5998;
+}
+
+.hparams-head-row th.hparams-th-active {
+  background-color: #e6ecfa;
+}
+
+.hparams-head-row th.hparams-th-active .hparams-sort-btn {
+  color: #3b5998;
+  font-weight: 700;
+}
+
+/* Sticky first columns: selection checkbox + run name */
+.hparams-cell-select,
+.hparams-th-select {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  width: 28px;
+  min-width: 28px;
+  text-align: center;
+  background-color: #fff;
+}
+
+.hparams-cell-run,
+.hparams-th-run {
+  position: sticky;
+  left: 28px;
+  z-index: 1;
+  background-color: #fff;
+  max-width: 180px;
+}
+
+.hparams-head-row .hparams-th-select,
+.hparams-head-row .hparams-th-run {
+  z-index: 3;
+  background-color: #f0f0f0;
+}
+
+.hparams-run-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.hparams-run-cell .hparams-run-name {
+  max-width: 120px;
+}
+
+/* Numeric cells: right aligned, aligned digits */
+.hparams-cell-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The color spine transition (disabled when the user prefers reduced motion) */
+.hparams-cell-spine {
+  transition: background-color 0.2s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hparams-cell-spine,
+  .hparams-caret-idle {
+    transition: none;
+  }
+}
+
+/* Row states */
+.hparams-row:hover td,
+.hparams-row:hover th {
+  background-color: #f7f9fd;
+}
+
+.hparams-row-selected td,
+.hparams-row-selected th {
+  background-color: #eaf0fb;
+}
+
+.hparams-nomatch {
+  padding: 16px;
+  text-align: center;
+  color: grey;
+}
+
+/* ---- View switcher (Table | Parallel coordinates | Scatter matrix) ---- */
+
+.hparams-viewtabs {
+  display: flex;
+  gap: 2px;
+  padding: 4px 10px 0;
+  background-color: #fff;
+  border-bottom: 1px solid #dedede;
+}
+
+.hparams-viewtab {
+  padding: 3px 12px;
+  font-family: "Open Sans", sans-serif;
+  font-size: 12px;
+  color: #666;
+  background: none;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  cursor: pointer;
+}
+
+.hparams-viewtab:hover {
+  color: #3b5998;
+}
+
+.hparams-viewtab-active {
+  color: #3b5998;
+  font-weight: 600;
+  background-color: #f0f0f0;
+  border-color: #dedede;
+}
+
+.hparams-viewtab:focus-visible {
+  outline: 2px solid #3b5998;
+  outline-offset: -2px;
+}
+
+/* ---- HParamsSplom (B4) ---- */
+
+.hparams-splom-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.hparams-splom-plot {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+.hparams-splom-overlay {
+  position: absolute;
+  top: 40px;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: grey;
+  pointer-events: none;
+}
+
+.hparams-splom-note {
+  margin-left: auto;
+  color: #888;
+  font-style: italic;
+  white-space: nowrap;
+}
+
+/* ---- HParamsParallelCoords (B3) ---- */
+
+.hparams-parcoords-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.hparams-parcoords-plot {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}

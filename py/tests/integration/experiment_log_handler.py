@@ -12,12 +12,13 @@ Drives a real :class:`~visdom.server.app.Application` over a temp env dir with
 Tornado's ``AsyncHTTPTestCase``, so the full route -> handler -> ``ExperimentStore``
 -> ``JSONStore`` path is exercised. Also unit-tests the client-side
 ``Visdom.experiment``/``log_metrics``/``finish_experiment`` message shapes with
-``send=False`` (no server needed).
+a mocked transport (no server needed).
 """
 
 import json
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
 
 import tornado.testing
 
@@ -224,12 +225,21 @@ class TestExperimentLogReadonly(tornado.testing.AsyncHTTPTestCase):
 class TestClientMessageShapes(unittest.TestCase):
     """Client methods build the right request without needing a server.
 
-    A ``send=False`` client short-circuits ``_send`` to return the
-    ``(msg, endpoint)`` it would have posted, so we can assert on it directly.
+    The transport is mocked to return the ``(msg, endpoint)`` it would have
+    posted, so we can assert on it directly.
     """
 
     def _client(self):
-        return Visdom(send=False, env="expenv")
+        with (
+            patch.object(Visdom, "_handle_post", return_value=True),
+            patch.object(Visdom, "_start_session_reaper"),
+        ):
+            client = Visdom(env="expenv", use_incoming_socket=False)
+
+        client._send = Mock(
+            side_effect=lambda msg, endpoint="events", **_: (msg, endpoint)
+        )
+        return client
 
     def test_experiment_message(self):
         msg, endpoint = self._client().experiment(

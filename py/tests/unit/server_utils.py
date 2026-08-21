@@ -1,3 +1,11 @@
+#!/usr/bin/env python3
+
+# Copyright 2017-present, The Visdom Authors
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
 """
 Unit tests for server utility functions.
 No server needed — these test pure functions directly.
@@ -41,6 +49,29 @@ class TestEscapeEid(unittest.TestCase):
     def test_empty_string(self):
         self.assertEqual(escape_eid(""), "")
 
+    def test_leading_whitespace_stripped(self):
+        self.assertEqual(escape_eid("  main"), "main")
+
+    def test_trailing_whitespace_stripped(self):
+        self.assertEqual(escape_eid("main  "), "main")
+
+    def test_surrounding_whitespace_stripped(self):
+        self.assertEqual(escape_eid("  main  "), "main")
+
+    def test_whitespace_only_differing_ids_collapse_to_same_value(self):
+        """'main' and 'main ' must normalise identically.
+
+        JSONStore strips whitespace before deriving an on-disk filename, so
+        if escape_eid did not also strip, these two eids would stay distinct
+        in the in-memory state dict while silently colliding on disk.
+        """
+        self.assertEqual(escape_eid("main"), escape_eid("main "))
+        self.assertEqual(escape_eid("main"), escape_eid(" main"))
+
+    def test_internal_whitespace_preserved(self):
+        """Only leading/trailing whitespace is stripped, not internal."""
+        self.assertEqual(escape_eid("my env"), "my env")
+
 
 class TestExtractEid(unittest.TestCase):
     """Tests for extract_eid() — extracts and escapes eid from args dict."""
@@ -56,6 +87,9 @@ class TestExtractEid(unittest.TestCase):
 
     def test_escapes_value(self):
         self.assertEqual(extract_eid({"eid": "a/b"}), "a_b")
+
+    def test_whitespace_stripped(self):
+        self.assertEqual(extract_eid({"eid": "main "}), "main")
 
 
 class TestHashPassword(unittest.TestCase):

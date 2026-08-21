@@ -47,23 +47,25 @@ npm run build     # build js
 
 ## Testing Your Changes
 
-This project has Cypress tests (end-to-end tests and visual regression tests) so you can check for side effects of your changes.
+This project uses Playwright for end-to-end and visual regression tests so you
+can check for side effects of your changes.
 
-### Using Cypress GUI
+### Using the Playwright UI
 
-1. Start a fresh visdom server instance on port `8098`: `visdom -port 8098`
-2. Run `npm run test:init` to generate screenshots for visual regression testing
-3. Adapt the code to your needs
-4. Run `npm run build` or `npm run dev` (enables automatic building)
-5. Run `npm run test:gui`
+1. Run `npx playwright install chromium` on first setup
+2. Run `npm run build` or `npm run dev` to compile the frontend
+3. Make sure port `8098` is available; Playwright starts an isolated Visdom
+   server automatically
+4. Run `npm run test:gui`
 
 ### As CLI Tests
 
-1. Start a fresh visdom server instance on port `8098`: `visdom -port 8098`
-2. Run `npm run test:init`
-3. Adapt the code to your needs
-4. Run `npm run build` or `npm run dev`
-5. Run `npm run test`
+1. Run `npx playwright install chromium` on first setup
+2. Run `npm run build` or `npm run dev`
+3. Run the WebSocket suite with `npm test`
+4. Run the polling suite with `npm run test:polling`
+5. For visual changes, generate baselines before editing with
+   `npm run test:init`, then compare with `npm run test:visual`
 
 ## Local Development
 
