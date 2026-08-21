@@ -269,12 +269,17 @@ export function cellClass(value, options) {
   const opts = options || {};
   return (
     'hparams-cell' +
-    (isNumeric(value) ? ' hparams-cell-num' : '') +
+    (isNumberLike(value) ? ' hparams-cell-num' : '') +
     (opts.spine ? ' hparams-cell-spine' : '') +
     (opts.separator ? ' hparams-col-sep' : '')
   );
 }
 
+/*
+ * Numeric param/metric columns only — the axes a scatter matrix (SPLOM) or a
+ * "color by" ramp can actually plot. Tags are excluded (categorical) and any
+ * column whose values are all missing/non-numeric is dropped.
+ */
 export function selectNumericColumns(records, columns) {
   return (columns || []).filter(
     (col) =>
@@ -335,6 +340,13 @@ export function completeRecords(records, cols) {
   );
 }
 
+/*
+ * Build Plotly `parcoords` dimensions. Plotly cannot render null/NaN cells —
+ * one sparse axis corrupts every line -- so callers pass records that already
+ * hold a numeric value on every axis (see completeRecords). Each axis spans its
+ * exact data range; an axis whose values are all equal gets a small symmetric
+ * range so it does not collapse to zero height.
+ */
 export function buildParcoordsDimensions(records, columns, selectedIds) {
   const byId = new Map((columns || []).map((col) => [col.id, col]));
   const dimensions = [];

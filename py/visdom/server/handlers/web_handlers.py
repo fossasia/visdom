@@ -38,6 +38,7 @@ from visdom.utils.server_utils import (
     register_window,
     gather_envs,
     broadcast_envs,
+    broadcast_tags,
     escape_eid,
     compare_envs,
     load_env,
@@ -52,11 +53,13 @@ from visdom.utils.server_utils import (
 from visdom.server.handlers.base_handlers import BaseHandler
 from visdom.experiments import (
     DEFAULT_SORT_FIELD,
+    Experiment,
     ExperimentStore,
     ExperimentFinishedError,
     QueryParseError,
     retarget_experiment,
     STATUS_FINISHED,
+    tags_to_mapping,
 )
 
 logger = logging.getLogger(__name__)
@@ -349,8 +352,8 @@ class UpdateHandler(BaseHandler):
         # Update traces. An unnamed update may carry fewer entries than the plot
         # has traces, so walk only as far as the data reaches instead of
         # indexing past the end of it.
-        for n, idx in enumerate(idxs[: len(new_data)]):
-            if all(_is_missing_value(i) for i in new_data[n]["x"]):
+        for idx, new_trace in zip(idxs, new_data):
+            if all(_is_missing_value(i) for i in new_trace["x"]):
                 continue
             # handle data for plotting
             axes = ["x", "y"]
@@ -358,26 +361,24 @@ class UpdateHandler(BaseHandler):
                 axes.append("z")
             for axis in axes:
                 pdata[idx][axis] = (
-                    (pdata[idx][axis] + new_data[n][axis])
-                    if append
-                    else new_data[n][axis]
+                    (pdata[idx][axis] + new_trace[axis]) if append else new_trace[axis]
                 )
 
             # handle marker properties
-            if "marker" not in new_data[n]:
+            if "marker" not in new_trace:
                 continue
             if "marker" not in pdata[idx]:
                 pdata[idx]["marker"] = {}
             pdata_marker = pdata[idx]["marker"]
             for marker_prop in ["color"]:
-                if marker_prop not in new_data[n]["marker"]:
+                if marker_prop not in new_trace["marker"]:
                     continue
                 if marker_prop not in pdata[idx]["marker"]:
                     pdata[idx]["marker"][marker_prop] = []
                 pdata_marker[marker_prop] = (
-                    (pdata_marker[marker_prop] + new_data[n]["marker"][marker_prop])
+                    (pdata_marker[marker_prop] + new_trace["marker"][marker_prop])
                     if append
-                    else new_data[n]["marker"][marker_prop]
+                    else new_trace["marker"][marker_prop]
                 )
 
         return p
@@ -1236,6 +1237,100 @@ class ExperimentSuggestHandler(BaseHandler):
     def wrap_func(handler, args):
         handler.set_status(501)
         handler.write(json.dumps(ExperimentSuggestHandler.NOT_IMPLEMENTED))
+
+    @check_auth
+    def post(self):
+        self.wrap_func(self, _decode_json_body(self.request.body))
+
+
+class TagsHandler(BaseHandler):
+    """Read and update environment tags backed by experiment metadata."""
+
+    VALID_ACTIONS = ("get", "set")
+
+    def initialize(self, app):
+        super().initialize(app)
+        self.readonly = app.readonly
+
+    @staticmethod
+    def _experiment_map(handler):
+        """Return stored experiments overlaid with current in-memory state."""
+        store = ExperimentStore(handler.storage)
+        experiments = {exp.env_id: exp for exp in store.list_experiments()}
+        for eid, env in handler.state.items():
+            blob = env.get("experiment")
+            if isinstance(blob, Mapping):
+                experiments[eid] = Experiment.from_dict(blob)
+        return experiments
+
+    @staticmethod
+    def _write_tags(handler, eid=None):
+        experiments = TagsHandler._experiment_map(handler)
+        if eid is not None:
+            experiment = experiments.get(eid)
+            tags = tags_to_mapping(experiment.tags) if experiment else {}
+            handler.write(json.dumps(tags, cls=NanSafeEncoder))
+            return
+        tag_map = {
+            env_id: tags_to_mapping(experiment.tags)
+            for env_id, experiment in experiments.items()
+            if experiment.tags
+        }
+        handler.write(json.dumps(tag_map, cls=NanSafeEncoder))
+
+    @staticmethod
+    def wrap_func(handler, args):
+        action = args.get("action", "set")
+        if action not in TagsHandler.VALID_ACTIONS:
+            raise tornado.web.HTTPError(
+                400, reason="unknown action {0!r}".format(action)
+            )
+
+        if action == "get":
+            eid = extract_eid(args) if args.get("eid") is not None else None
+            TagsHandler._write_tags(handler, eid)
+            return
+
+        if handler.readonly:
+            handler.set_status(403)
+            handler.write(
+                {
+                    "success": False,
+                    "error": "Tag updates are disabled while the server is "
+                    "in readonly mode",
+                }
+            )
+            return
+
+        if "tags" not in args:
+            raise tornado.web.HTTPError(400, reason="'tags' is required for set action")
+
+        eid = extract_eid(args)
+        append = args.get("append", False)
+        store = ExperimentStore(handler.storage)
+
+        if eid in handler.state:
+            handler.storage.save_env(eid, handler.state[eid])
+        try:
+            experiment = store.update_tags(eid, args["tags"], append=append)
+        except (TypeError, ValueError) as error:
+            raise tornado.web.HTTPError(400, reason=str(error))
+
+        is_new_env = eid not in handler.state
+        if is_new_env:
+            handler.state[eid] = {"jsons": {}, "reload": {}}
+        handler.state[eid]["experiment"] = experiment.to_dict()
+
+        tags = tags_to_mapping(experiment.tags)
+        if is_new_env:
+            broadcast_envs(handler)
+        broadcast_tags(handler, eid, tags)
+        handler.write(json.dumps(tags, cls=NanSafeEncoder))
+
+    @check_auth
+    def get(self):
+        eid = self.get_query_argument("eid", default=None)
+        self.wrap_func(self, {"action": "get", "eid": eid})
 
     @check_auth
     def post(self):

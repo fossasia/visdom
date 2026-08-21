@@ -7,6 +7,12 @@
  *
  */
 
+/*
+ * Plotly-facing helpers shared by the hyper-parameter plot views (scatter
+ * matrix and parallel coordinates). Unlike hparamsUtils these touch the global
+ * Plotly instance and the DOM, so they live apart from the pure helpers.
+ */
+
 import { useEffect } from 'react';
 
 const SNAPSHOT_NOTICE_DELAY = 700;
