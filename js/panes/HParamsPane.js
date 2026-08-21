@@ -7,9 +7,18 @@
  *
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 
+import HParamsParallelCoords from './hparams/HParamsParallelCoords';
+import HParamsSplom from './hparams/HParamsSplom';
+import HParamsTable from './hparams/HParamsTable';
 import Pane from './Pane';
+
+const VIEWS = [
+  { key: 'table', label: 'Table' },
+  { key: 'parcoords', label: 'Parallel coordinates' },
+  { key: 'splom', label: 'Scatter matrix' },
+];
 
 function readContent(content) {
   if (!content || typeof content !== 'object' || Array.isArray(content)) {
@@ -30,6 +39,15 @@ function readContent(content) {
 var HParamsPane = (props) => {
   const { content } = props;
   const data = readContent(content);
+  const [view, setView] = useState('table');
+  const [tableSort, setTableSort] = useState({ by: null, dir: null });
+  const [tableFilter, setTableFilter] = useState('');
+  const [tableColorBy, setTableColorBy] = useState(null);
+  const [tableSelected, setTableSelected] = useState(() => new Set());
+  const [splomDims, setSplomDims] = useState(null);
+  const [splomColorBy, setSplomColorBy] = useState(null);
+  const [parcoordsDims, setParcoordsDims] = useState(null);
+  const [parcoordsColorBy, setParcoordsColorBy] = useState(null);
 
   const handleDownload = () => {
     let blob = new Blob([JSON.stringify(content)], {
@@ -72,25 +90,66 @@ var HParamsPane = (props) => {
             <b>{data.tagKeys.length}</b> tags
           </span>
         </div>
-        <ul className="hparams-runs">
-          {data.records.map((record, index) => (
-            <li className="hparams-run" key={record.env_id || index}>
-              <span className="hparams-run-name">
-                {record.name || record.env_id || 'run ' + index}
-              </span>
-              {record.status ? (
-                <span
-                  className={
-                    'hparams-run-status hparams-status-' + record.status
-                  }
-                >
-                  {record.status}
-                </span>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-        <div className="hparams-views" />
+        <div className="hparams-views">
+          <div className="hparams-viewtabs" role="tablist">
+            {VIEWS.map((v) => (
+              <button
+                key={v.key}
+                type="button"
+                role="tab"
+                aria-selected={view === v.key}
+                className={
+                  'hparams-viewtab' +
+                  (view === v.key ? ' hparams-viewtab-active' : '')
+                }
+                onClick={() => setView(v.key)}
+              >
+                {v.label}
+              </button>
+            ))}
+          </div>
+          {(() => {
+            const viewProps = {
+              records: data.records,
+              paramKeys: data.paramKeys,
+              metricKeys: data.metricKeys,
+              tagKeys: data.tagKeys,
+            };
+            if (view === 'splom')
+              return (
+                <HParamsSplom
+                  {...viewProps}
+                  selectedDims={splomDims}
+                  onSelectedDims={setSplomDims}
+                  colorBy={splomColorBy}
+                  onColorBy={setSplomColorBy}
+                />
+              );
+            if (view === 'parcoords')
+              return (
+                <HParamsParallelCoords
+                  {...viewProps}
+                  selectedDims={parcoordsDims}
+                  onSelectedDims={setParcoordsDims}
+                  colorBy={parcoordsColorBy}
+                  onColorBy={setParcoordsColorBy}
+                />
+              );
+            return (
+              <HParamsTable
+                {...viewProps}
+                sort={tableSort}
+                setSort={setTableSort}
+                filter={tableFilter}
+                setFilter={setTableFilter}
+                colorBy={tableColorBy}
+                setColorBy={setTableColorBy}
+                selected={tableSelected}
+                setSelected={setTableSelected}
+              />
+            );
+          })()}
+        </div>
       </div>
     );
   }
