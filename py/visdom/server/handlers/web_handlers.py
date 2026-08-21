@@ -352,8 +352,8 @@ class UpdateHandler(BaseHandler):
         # Update traces. An unnamed update may carry fewer entries than the plot
         # has traces, so walk only as far as the data reaches instead of
         # indexing past the end of it.
-        for n, idx in enumerate(idxs[: len(new_data)]):
-            if all(_is_missing_value(i) for i in new_data[n]["x"]):
+        for idx, new_trace in zip(idxs, new_data):
+            if all(_is_missing_value(i) for i in new_trace["x"]):
                 continue
             # handle data for plotting
             axes = ["x", "y"]
@@ -361,26 +361,24 @@ class UpdateHandler(BaseHandler):
                 axes.append("z")
             for axis in axes:
                 pdata[idx][axis] = (
-                    (pdata[idx][axis] + new_data[n][axis])
-                    if append
-                    else new_data[n][axis]
+                    (pdata[idx][axis] + new_trace[axis]) if append else new_trace[axis]
                 )
 
             # handle marker properties
-            if "marker" not in new_data[n]:
+            if "marker" not in new_trace:
                 continue
             if "marker" not in pdata[idx]:
                 pdata[idx]["marker"] = {}
             pdata_marker = pdata[idx]["marker"]
             for marker_prop in ["color"]:
-                if marker_prop not in new_data[n]["marker"]:
+                if marker_prop not in new_trace["marker"]:
                     continue
                 if marker_prop not in pdata[idx]["marker"]:
                     pdata[idx]["marker"][marker_prop] = []
                 pdata_marker[marker_prop] = (
-                    (pdata_marker[marker_prop] + new_data[n]["marker"][marker_prop])
+                    (pdata_marker[marker_prop] + new_trace["marker"][marker_prop])
                     if append
-                    else new_data[n]["marker"][marker_prop]
+                    else new_trace["marker"][marker_prop]
                 )
 
         return p
@@ -1304,6 +1302,9 @@ class TagsHandler(BaseHandler):
             )
             return
 
+        if "tags" not in args:
+            raise tornado.web.HTTPError(400, reason="'tags' is required for set action")
+
         eid = extract_eid(args)
         append = args.get("append", False)
         store = ExperimentStore(handler.storage)
@@ -1311,7 +1312,7 @@ class TagsHandler(BaseHandler):
         if eid in handler.state:
             handler.storage.save_env(eid, handler.state[eid])
         try:
-            experiment = store.update_tags(eid, args.get("tags", {}), append=append)
+            experiment = store.update_tags(eid, args["tags"], append=append)
         except (TypeError, ValueError) as error:
             raise tornado.web.HTTPError(400, reason=str(error))
 
