@@ -235,9 +235,11 @@ const HParamsTable = ({
 
   const handleSortSelect = useCallback(
     (value) => {
-      setSort((prev) =>
-        value ? { by: value, dir: prev.dir || 'asc' } : { by: null, dir: null }
-      );
+      setSort((prev) => {
+        if (!value) return { by: null, dir: null };
+        if (prev.by === value) return { by: value, dir: prev.dir || 'asc' };
+        return { by: value, dir: 'asc' };
+      });
     },
     [setSort]
   );
@@ -286,17 +288,27 @@ const HParamsTable = ({
     });
   }, [rows, rowIds, setSelected]);
 
-  const bands = COLUMN_GROUPS.map((b) => ({
-    ...b,
-    span: columns.filter((c) => c.group === b.key).length,
-  })).filter((b) => b.span > 0);
+  const bands = useMemo(
+    () =>
+      COLUMN_GROUPS.map((b) => ({
+        ...b,
+        span: columns.filter((c) => c.group === b.key).length,
+      })).filter((b) => b.span > 0),
+    [columns]
+  );
 
-  const sortTreeData = [
-    { key: RUN_COLUMN_ID, value: RUN_COLUMN_ID, title: 'run' },
-    ...groupColumnTree(columns, COLUMN_GROUPS),
-  ];
+  const sortTreeData = useMemo(
+    () => [
+      { key: RUN_COLUMN_ID, value: RUN_COLUMN_ID, title: 'run' },
+      ...groupColumnTree(columns, COLUMN_GROUPS),
+    ],
+    [columns]
+  );
 
-  const colorTreeData = groupColumnTree(colorCols, NUMERIC_GROUPS);
+  const colorTreeData = useMemo(
+    () => groupColumnTree(colorCols, NUMERIC_GROUPS),
+    [colorCols]
+  );
 
   const dirLabel = directionLabel(activeSort);
 

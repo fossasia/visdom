@@ -315,7 +315,7 @@ export function completeRecords(records, cols) {
 
 /*
  * Build Plotly `parcoords` dimensions. Plotly cannot render null/NaN cells —
- * one sparse axis corrupts every line — so callers pass records that already
+ * one sparse axis corrupts every line -- so callers pass records that already
  * hold a numeric value on every axis (see completeRecords). Each axis spans its
  * exact data range; an axis whose values are all equal gets a small symmetric
  * range so it does not collapse to zero height.

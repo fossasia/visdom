@@ -11,14 +11,14 @@
 ``Visdom.hparams`` is a thin wrapper: it validates ``opts`` like the other
 plotting methods and posts the selection (``query``/``env_ids``/``mode``) to the
 ``experiments/hparams`` endpoint, which does the selecting, flattening and
-window creation. These tests pin the request it builds by mocking the transport
-under ``_send``; the selection rules and flattening are tested against the
-endpoint in ``test_experiment_hparams``.
+window creation. These tests pin the request it builds against a captured
+transport (no server); the selection rules and flattening are tested against
+the endpoint in ``test_experiment_hparams``.
 """
 
 import json
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from visdom import Visdom
 
@@ -26,8 +26,8 @@ from visdom import Visdom
 class TestHparamsClientMessage(unittest.TestCase):
     """Visdom.hparams posts the selection to the experiments/hparams endpoint.
 
-    The transport is mocked to return the ``(msg, endpoint)`` it would have
-    posted, so we can assert on it directly.
+    The transport is captured at ``_handle_post``, so what is asserted on is
+    the message the client would have put on the wire.
     """
 
     def setUp(self):
@@ -37,23 +37,24 @@ class TestHparamsClientMessage(unittest.TestCase):
         ):
             self.vis = Visdom(raise_exceptions=True, use_incoming_socket=False)
 
-    def hparams(self, *args, **kwargs):
-        """Return the (msg, endpoint) hparams would have posted."""
-        posted = {}
-        prefix = "{0}:{1}{2}/".format(self.vis.server, self.vis.port, self.vis.base_url)
+        self.posted = []
+        self.vis._handle_post = Mock(side_effect=self._capture)
 
-        def capture(url, data=None):
-            posted["msg"] = json.loads(data)
-            posted["endpoint"] = url[len(prefix) :]
-            return True
+    def _capture(self, url, data=None):
+        self.posted.append((url, json.loads(data)))
+        return "{}"
 
-        with patch.object(self.vis, "_handle_post", side_effect=capture):
-            self.vis.hparams(*args, **kwargs)
-        return posted["msg"], posted["endpoint"]
+    def sent(self):
+        """The last message posted, as ``(msg, endpoint)``."""
+        url, msg = self.posted[-1]
+        prefix = "{}:{}{}/".format(self.vis.server, self.vis.port, self.vis.base_url)
+        return msg, url[len(prefix) :]
 
     def test_posts_to_hparams_endpoint(self):
         """The selection goes to the experiments/hparams endpoint."""
-        msg, endpoint = self.hparams("acc > 0.9")
+        self.vis.hparams("acc > 0.9")
+
+        msg, endpoint = self.sent()
         self.assertEqual(endpoint, "experiments/hparams")
         self.assertEqual(msg["query"], "acc > 0.9")
         self.assertIsNone(msg["mode"])
@@ -61,20 +62,24 @@ class TestHparamsClientMessage(unittest.TestCase):
 
     def test_env_ids_and_mode_pass_through(self):
         """env_ids and an explicit mode ride along untouched for the server."""
-        msg, _ = self.hparams(env_ids=["run-a", "run-b"], mode="env_ids")
+        self.vis.hparams(env_ids=["run-a", "run-b"], mode="env_ids")
+
+        msg, _ = self.sent()
         self.assertEqual(msg["env_ids"], ["run-a", "run-b"])
         self.assertEqual(msg["mode"], "env_ids")
 
     def test_win_and_env_pass_through(self):
         """win/env target a specific pane like the other plotting methods."""
-        msg, _ = self.hparams("acc > 0.9", win="hp1", env="run-x")
+        self.vis.hparams("acc > 0.9", win="hp1", env="run-x")
+
+        msg, _ = self.sent()
         self.assertEqual(msg["win"], "hp1")
         self.assertEqual(msg["eid"], "run-x")
 
     def test_opts_are_validated_client_side(self):
         """opts are asserted before the request, like the other methods."""
         with self.assertRaises(AssertionError):
-            self.hparams("acc > 0.9", opts={"opacity": 5})
+            self.vis.hparams("acc > 0.9", opts={"opacity": 5})
 
 
 if __name__ == "__main__":
