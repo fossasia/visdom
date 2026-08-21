@@ -84,6 +84,7 @@ jobs:
           name: notify-payload
           path: notify-payload.json
           retention-days: 1
+          overwrite: true
 
   notify:
     needs: prepare
@@ -118,6 +119,23 @@ jobs:
               return;
             }
             const { pr_number: pr, errors } = payload;
+
+            let prData;
+            try {
+              const { data } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pr,
+              });
+              prData = data;
+            } catch (e) {
+              core.warning(`Could not re-fetch PR #${pr}: ${e.message}`);
+              return;
+            }
+            if (prData.state !== 'open') {
+              core.info(`PR #${pr} is no longer open, skipping.`);
+              return;
+            }
 
             if (!errors || errors.length === 0) {
               try {
