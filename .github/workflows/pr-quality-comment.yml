@@ -79,7 +79,7 @@ jobs:
 
       - name: Upload notify payload
         if: steps.parse.outputs.should_notify == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: notify-payload
           path: notify-payload.json
