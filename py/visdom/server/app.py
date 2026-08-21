@@ -48,6 +48,7 @@ from visdom.server.handlers.web_handlers import (
     IndexHandler,
     PostHandler,
     SaveHandler,
+    TagsHandler,
     UpdateHandler,
     UploadEnvHandler,
     UserSettingsHandler,
@@ -58,6 +59,7 @@ from visdom.server.defaults import (
     DEFAULT_HOSTNAME,
     DEFAULT_MAX_IMAGE_HISTORY,
     DEFAULT_MAX_OLD_CONTENT,
+    DEFAULT_MAX_PLOT_HISTORY,
     DEFAULT_MAX_TEXT_LINES,
     DEFAULT_PORT,
     DEFAULT_SAVE_INTERVAL,
@@ -90,6 +92,7 @@ class Application(tornado.web.Application):
         self.eager_data_loading = eager_data_loading
         self.max_image_history = DEFAULT_MAX_IMAGE_HISTORY
         self.max_old_content = DEFAULT_MAX_OLD_CONTENT
+        self.max_plot_history = DEFAULT_MAX_PLOT_HISTORY
         self.max_text_lines = DEFAULT_MAX_TEXT_LINES
         self.env_path = env_path
         self.storage = JSONStore(env_path)
@@ -141,6 +144,7 @@ class Application(tornado.web.Application):
             (r"%s/compare" % experiments_url, ExperimentCompareHandler, {"app": self}),
             (r"%s/suggest" % experiments_url, ExperimentSuggestHandler, {"app": self}),
             (r"%s/hparams" % experiments_url, ExperimentHparamsHandler, {"app": self}),
+            (r"%s/tags" % experiments_url, TagsHandler, {"app": self}),
             (r"%s/user/(.*)" % self.base_url, UserSettingsHandler, {"app": self}),
             (r"%s/health" % self.base_url, HealthHandler),
             (r"%s(.*)" % self.base_url, IndexHandler, {"app": self}),
