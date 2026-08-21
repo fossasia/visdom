@@ -16,3 +16,10 @@ try:
     __all__.append("VisdomXGBLogger")
 except ImportError:
     pass
+
+try:
+    from visdom.loggers.keras import VisdomKerasLogger
+
+    __all__.append("VisdomKerasLogger")
+except ImportError:
+    pass

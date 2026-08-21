@@ -172,7 +172,15 @@ def _normalize_table_data(data, headers):
 
 
 def _sanitize_nans(obj):
-    """Recursively replace NaN/Inf floats with None in nested structures."""
+    """Recursively replace NaN/Inf floats with None in nested structures.
+
+    Also coerces numpy scalars (e.g. np.int64, np.bool_) to native Python
+    types first: unlike np.floating, they aren't json-serializable on
+    their own, so a value like X.min() on an integer array would
+    otherwise reach json.dumps() unconverted and raise.
+    """
+    if isinstance(obj, np.generic):
+        obj = obj.item()
     if isinstance(obj, (float, np.floating)) and (math.isnan(obj) or math.isinf(obj)):
         return None
     if isinstance(obj, dict):
@@ -180,6 +188,21 @@ def _sanitize_nans(obj):
     if isinstance(obj, (list, tuple)):
         return [_sanitize_nans(v) for v in obj]
     return obj
+
+
+def _is_missing_value(value):
+    """Whether a plotted coordinate carries no value.
+
+    Clients mark gaps in a series with None, NaN or Inf. Only numbers can be
+    NaN or Inf: a categorical axis carries strings, and passing one to
+    ``math.isnan`` raises ``TypeError``, so anything non-numeric is present by
+    definition.
+    """
+    if value is None:
+        return True
+    if isinstance(value, numbers.Real):
+        return math.isnan(value) or math.isinf(value)
+    return False
 
 
 class NanSafeEncoder(json.JSONEncoder):
