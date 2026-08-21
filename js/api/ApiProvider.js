@@ -144,7 +144,7 @@ const ApiProvider = ({ children }) => {
   // different types of server-commands
   const syncTags = () => {
     $.ajax({
-      url: correctPathname() + 'tags',
+      url: correctPathname() + 'experiments/tags',
       method: 'GET',
       dataType: 'json',
       global: false,
@@ -329,7 +329,7 @@ const ApiProvider = ({ children }) => {
   // Replace or append key/value tags for one environment.
   const sendTagsUpdate = (envID, tags, append = false) => {
     return $.ajax({
-      url: correctPathname() + 'tags',
+      url: correctPathname() + 'experiments/tags',
       method: 'POST',
       contentType: 'application/json; charset=utf-8',
       dataType: 'json',
