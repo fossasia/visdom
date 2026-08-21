@@ -343,6 +343,7 @@ TablePane = React.memo(TablePane, (props, nextProps) => {
   if (props.contentID !== nextProps.contentID) return false;
   else if (props.content !== nextProps.content) return false;
   else if (props.title !== nextProps.title) return false;
+  else if (props.comment !== nextProps.comment) return false;
   else if (props.h !== nextProps.h || props.w !== nextProps.w) return false;
   else if (props.editable !== nextProps.editable) return false;
   else if (props.isFocused !== nextProps.isFocused) return false;

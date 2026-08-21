@@ -387,6 +387,7 @@ NetworkPane = React.memo(NetworkPane, (props, nextProps) => {
   if (props.contentID !== nextProps.contentID) return false;
   else if (props.content !== nextProps.content) return false;
   else if (props.title !== nextProps.title) return false;
+  else if (props.comment !== nextProps.comment) return false;
   else if (props.h !== nextProps.h || props.w !== nextProps.w) return false;
   else if (props.directed !== nextProps.directed) return false;
   else if (props.showEdgeLabels !== nextProps.showEdgeLabels) return false;
