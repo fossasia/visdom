@@ -204,6 +204,8 @@ const App = () => {
   const localStorageTimer = useRef(null);
   const savedStateRecoveryToastShown = useRef(false);
   const serverLayoutErrorToastShown = useRef(false);
+  const latestRef = useRef({});
+  latestRef.current = { selection, sessionInfo, filterString, focusedPaneID };
 
   // --------------------- //
   // grid helper functions //
@@ -448,12 +450,12 @@ const App = () => {
   // remove paneID from pane list
   // (also tell server)
   const closePane = (paneID, keepPosition = false, setState = true) => {
-    if (sessionInfo.readonly) {
+    if (latestRef.current.sessionInfo.readonly) {
       return;
     }
     if (!keepPosition) {
       localStorage.removeItem(keyLS(paneID));
-      sendPaneClose(paneID, selection.envIDs[0]);
+      sendPaneClose(paneID, latestRef.current.selection.envIDs[0]);
     }
 
     if (setState) {
@@ -465,7 +467,9 @@ const App = () => {
         );
         return { ...prev, panes: newPanes, layout: newLayout };
       });
-      setFocusedPaneID(focusedPaneID === paneID ? null : focusedPaneID);
+      setFocusedPaneID((currentFocusedPaneID) =>
+        currentFocusedPaneID === paneID ? null : currentFocusedPaneID
+      );
       relayout();
     }
   };
@@ -596,14 +600,14 @@ const App = () => {
   };
 
   const focusPane = (paneID, callback) => {
-    if (focusedPaneID != paneID) {
+    if (latestRef.current.focusedPaneID != paneID) {
       setFocusedPaneID(paneID);
       if (callback) callbacks.current.push(callback);
     } else if (callback) callback();
   };
 
   const blurPane = () => {
-    if (focusedPaneID != null) setFocusedPaneID(null);
+    if (latestRef.current.focusedPaneID != null) setFocusedPaneID(null);
   };
 
   const resizePane = (layout, oldLayoutItem, layoutItem) => {
@@ -690,8 +694,8 @@ const App = () => {
   };
 
   const relayout = ({
-    layoutID = selection.layoutID,
-    filterString: nextFilterString = filterString,
+    layoutID = latestRef.current.selection.layoutID,
+    filterString: nextFilterString = latestRef.current.filterString,
   } = {}) => {
     let envLayoutList = getCurrLayoutList();
     let filter = getValidFilter(nextFilterString);
