@@ -350,8 +350,11 @@ def compare_envs(state, eids, socket, store, show_all=False):
                     destWidJson["content"].append(next_img)
             elif ptype == "plot":
                 if ix == 0:
-                    if "name" not in destWidJson["content"]["data"][0]:
-                        continue  # Skip windows with unnamed data
+                    if (
+                        not destWidJson["content"]["data"]
+                        or "name" not in destWidJson["content"]["data"][0]
+                    ):
+                        continue  # Skip windows with empty or unnamed data
                     destWidJson["has_compare"] = False
                     destWidJson["content"]["layout"]["showlegend"] = True
                     destWidJson["contentID"] = get_rand_id()
@@ -362,8 +365,11 @@ def compare_envs(state, eids, socket, store, show_all=False):
                             "name"
                         ] = "{}_{}".format(eidNums[eid], data["name"])
                 else:
-                    if "name" not in destWidJson["content"]["data"][0]:
-                        continue  # Skip windows with unnamed data
+                    if (
+                        not destWidJson["content"]["data"]
+                        or "name" not in destWidJson["content"]["data"][0]
+                    ):
+                        continue  # Skip windows with empty or unnamed data
                     # has_compare will be set to True only if the window title is
                     # shared by at least 2 envs.
                     destWidJson["has_compare"] = True
