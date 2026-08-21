@@ -7,7 +7,7 @@ on:
 
 permissions:
   issues: write
-  pull-requests: read
+  pull-requests: write
   actions: read
 
 concurrency:
