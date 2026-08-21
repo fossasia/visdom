@@ -389,7 +389,7 @@
   color: grey;
 }
 
-/* ---- View switcher (Table | Scatter matrix) ---- */
+/* ---- View switcher (Table | Parallel coordinates | Scatter matrix) ---- */
 
 .hparams-viewtabs {
   display: flex;
@@ -462,4 +462,21 @@
   color: #888;
   font-style: italic;
   white-space: nowrap;
+}
+
+/* ---- HParamsParallelCoords (B3) ---- */
+
+.hparams-parcoords-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.hparams-parcoords-plot {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
 }

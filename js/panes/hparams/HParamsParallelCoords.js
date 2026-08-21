@@ -13,8 +13,10 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import { applySnapshotButton, observePlotResize } from './hparamsPlot';
 import {
   buildColumns,
-  buildSplomDimensions,
+  buildParcoordsDimensions,
+  completeRecords,
   groupColumnTree,
+  isNumeric,
   NUMERIC_GROUPS,
   numericExtent,
   runLabel,
@@ -22,23 +24,13 @@ import {
   toNumericColumn,
 } from './hparamsUtils';
 
-const MAX_DIMS = 6;
+const RUN_LABEL_MAX = 18;
 
-const SPLOM_COLORSCALE = 'Viridis';
+const MAX_DIMS = 10;
 
-const AXIS_STYLE = {
-  showline: true,
-  linecolor: '#aab8d8',
-  linewidth: 1,
-  mirror: 'all',
-  gridcolor: '#f0f2f8',
-  zeroline: false,
-  ticklen: 3,
-  tickfont: { size: 9, color: '#666' },
-  automargin: true,
-};
+const PARCOORDS_COLORSCALE = 'Viridis';
 
-const HParamsSplom = ({
+const HParamsParallelCoords = ({
   records,
   paramKeys,
   metricKeys,
@@ -49,7 +41,6 @@ const HParamsSplom = ({
   onColorBy,
 }) => {
   const plotRef = useRef(null);
-  const prevDimCount = useRef(0);
 
   const columns = useMemo(
     () => buildColumns(paramKeys, metricKeys, tagKeys),
@@ -61,13 +52,17 @@ const HParamsSplom = ({
   );
 
   const effectiveDims = useMemo(() => {
-    const defaults = () => numericCols.slice(0, MAX_DIMS).map((c) => c.id);
-    if (!Array.isArray(selectedDims)) return defaults();
     const validIds = new Set(numericCols.map((c) => c.id));
-    const ids = selectedDims.filter((id) => validIds.has(id));
-    if (ids.length === 0 && selectedDims.length > 0) return defaults();
+    let ids = (selectedDims || []).filter((id) => validIds.has(id));
+    if (ids.length === 0) {
+      const dense = numericCols.filter((c) =>
+        records.every((r) => isNumeric(c.accessor(r)))
+      );
+      const pick = dense.length >= 2 ? dense : numericCols;
+      ids = pick.slice(0, MAX_DIMS).map((c) => c.id);
+    }
     return ids.slice(0, MAX_DIMS);
-  }, [selectedDims, numericCols]);
+  }, [selectedDims, numericCols, records]);
 
   const effectiveColorBy = useMemo(() => {
     if (!colorBy) return null;
@@ -83,6 +78,17 @@ const HParamsSplom = ({
     [numericCols]
   );
 
+  const rows = useMemo(() => {
+    const colorCol = effectiveColorBy
+      ? columns.find((c) => c.id === effectiveColorBy)
+      : null;
+    const axisCols = effectiveDims
+      .map((id) => columns.find((c) => c.id === id))
+      .filter(Boolean);
+    const requiredCols = colorCol ? axisCols.concat(colorCol) : axisCols;
+    return completeRecords(records, requiredCols);
+  }, [records, columns, effectiveDims, effectiveColorBy]);
+
   const hasPlot = numericCols.length >= 2;
 
   useEffect(() => {
@@ -95,70 +101,82 @@ const HParamsSplom = ({
     const el = plotRef.current;
     if (!el || !window.Plotly) return;
 
-    const dimensions = buildSplomDimensions(records, columns, effectiveDims);
-    if (dimensions.length < 2) {
-      window.Plotly.purge(el);
-      prevDimCount.current = 0;
-      return;
-    }
-
-    const names = records.map(runLabel);
-
     const colorCol = effectiveColorBy
       ? columns.find((c) => c.id === effectiveColorBy)
       : null;
-    let colorValues;
-    let colorLabel;
-    let cmin;
-    let cmax;
+
+    const numericDimensions = buildParcoordsDimensions(
+      rows,
+      columns,
+      effectiveDims
+    );
+    if (numericDimensions.length < 2 || rows.length === 0) {
+      window.Plotly.purge(el);
+      return;
+    }
+
+    const runName = (record) => {
+      const name = runLabel(record);
+      return name.length > RUN_LABEL_MAX
+        ? name.slice(0, RUN_LABEL_MAX - 1) + '…'
+        : name;
+    };
+    const runDimension = {
+      label: 'run',
+      values: rows.map((_, i) => i),
+      tickvals: rows.map((_, i) => i),
+      ticktext: rows.map(runName),
+      range: [-0.5, Math.max(rows.length - 1, 0.5)],
+    };
+    const dimensions = [runDimension, ...numericDimensions];
+
+    let line;
     if (colorCol) {
-      colorValues = toNumericColumn(records, colorCol.accessor);
-      colorLabel = colorCol.label;
-      const ext = numericExtent(records, colorCol.accessor);
-      if (ext) {
-        cmin = ext.min;
-        cmax = ext.max;
-      }
+      const ext = numericExtent(rows, colorCol.accessor);
+      line = {
+        color: toNumericColumn(rows, colorCol.accessor),
+        colorscale: PARCOORDS_COLORSCALE,
+        showscale: true,
+        cmin: ext ? ext.min : 0,
+        cmax: ext ? ext.max : 1,
+        colorbar: {
+          title: { text: colorCol.label, side: 'right', font: { size: 11 } },
+          thickness: 12,
+          len: 0.6,
+          outlinewidth: 0,
+        },
+      };
     } else {
-      colorValues = records.map((_, i) => i + 1);
-      colorLabel = 'run order';
-      cmin = 1;
-      cmax = Math.max(records.length, 1);
+      line = {
+        color: rows.map((_, i) => i + 1),
+        colorscale: PARCOORDS_COLORSCALE,
+        showscale: true,
+        cmin: 1,
+        cmax: Math.max(rows.length, 1),
+        colorbar: {
+          title: { text: 'run order', side: 'right', font: { size: 11 } },
+          thickness: 12,
+          len: 0.6,
+          outlinewidth: 0,
+        },
+      };
     }
 
     const data = [
       {
-        type: 'splom',
+        type: 'parcoords',
         dimensions,
-        text: names,
-        hovertemplate: '<b>%{text}</b><br>x: %{x}<br>y: %{y}<extra></extra>',
-        marker: {
-          size: 7,
-          line: { color: '#ffffff', width: 0.6 },
-          color: colorValues,
-          colorscale: SPLOM_COLORSCALE,
-          showscale: true,
-          cmin,
-          cmax,
-          colorbar: {
-            title: { text: colorLabel, side: 'right', font: { size: 11 } },
-            thickness: 12,
-            len: 0.6,
-            outlinewidth: 0,
-          },
-        },
-        diagonal: { visible: true },
-        showupperhalf: true,
-        showlowerhalf: true,
-        opacity: 1,
+        line,
+        labelangle: 0,
+        labelside: 'top',
+        labelfont: { size: 12, color: '#333' },
+        tickfont: { size: 10, color: '#666' },
+        rangefont: { size: 10, color: '#888' },
       },
     ];
 
     const layout = {
-      margin: { l: 60, r: 20, t: 34, b: 44 },
-      dragmode: 'select',
-      hovermode: 'closest',
-      showlegend: false,
+      margin: { l: 120, r: 80, t: 64, b: 76 },
       font: { family: '"Open Sans", sans-serif', size: 11, color: '#333' },
       paper_bgcolor: '#ffffff',
       plot_bgcolor: '#ffffff',
@@ -167,18 +185,8 @@ const HParamsSplom = ({
         '::' +
         (effectiveColorBy || 'order') +
         '::' +
-        records.length,
+        rows.length,
     };
-    for (let i = 1; i <= dimensions.length; i++) {
-      const suffix = i === 1 ? '' : String(i);
-      layout['xaxis' + suffix] = { ...AXIS_STYLE };
-      layout['yaxis' + suffix] = { ...AXIS_STYLE };
-    }
-
-    if (el._fullLayout && prevDimCount.current !== dimensions.length) {
-      window.Plotly.purge(el);
-    }
-    prevDimCount.current = dimensions.length;
 
     const config = applySnapshotButton(
       {
@@ -187,7 +195,7 @@ const HParamsSplom = ({
         responsive: true,
         doubleClick: 'reset',
       },
-      'hparams_scatter.png'
+      'hparams_parcoords.png'
     );
 
     try {
@@ -201,7 +209,7 @@ const HParamsSplom = ({
     } catch (e) {
       window.Plotly.purge(el);
     }
-  }, [records, columns, effectiveDims, effectiveColorBy]);
+  }, [rows, columns, effectiveDims, effectiveColorBy]);
 
   const handleDims = (value) => {
     onSelectedDims(Array.isArray(value) ? value.slice(0, MAX_DIMS) : []);
@@ -209,19 +217,19 @@ const HParamsSplom = ({
 
   if (!hasPlot) {
     return (
-      <div className="hparams-splom-wrap">
+      <div className="hparams-parcoords-wrap">
         <div className="hparams-message hparams-empty">
-          A scatter matrix needs at least two numeric params or metrics.
+          Parallel coordinates need at least two numeric params or metrics.
         </div>
       </div>
     );
   }
 
   return (
-    <div className="hparams-splom-wrap">
+    <div className="hparams-parcoords-wrap">
       <div className="hparams-toolbar">
         <span className="hparams-sortby">
-          dimensions:
+          axes:
           <TreeSelect
             className="hparams-treeselect hparams-select-wide"
             value={effectiveDims}
@@ -235,7 +243,7 @@ const HParamsSplom = ({
             dropdownMatchSelectWidth={false}
             treeData={treeData}
             onChange={handleDims}
-            aria-label="Scatter matrix dimensions"
+            aria-label="Parallel coordinates axes"
           />
         </span>
         <span className="hparams-colorby">
@@ -243,28 +251,37 @@ const HParamsSplom = ({
           <TreeSelect
             className="hparams-treeselect hparams-select-narrow"
             value={effectiveColorBy || undefined}
-            placeholder="none"
+            placeholder="run order"
             allowClear
             treeLine
             treeDefaultExpandAll
             dropdownMatchSelectWidth={false}
             treeData={treeData}
             onChange={(value) => onColorBy(value || null)}
-            aria-label="Color scatter matrix by"
+            aria-label="Color parallel coordinates by"
           />
         </span>
-        {truncated ? (
+        {rows.length < records.length ? (
+          <span className="hparams-splom-note">
+            {rows.length} of {records.length} runs have all selected axes
+          </span>
+        ) : truncated ? (
           <span className="hparams-splom-note">showing first {MAX_DIMS}</span>
         ) : null}
       </div>
-      <div className="hparams-splom-plot" ref={plotRef} />
+      <div className="hparams-parcoords-plot" ref={plotRef} />
       {effectiveDims.length < 2 ? (
         <div className="hparams-splom-overlay">
           Select at least two dimensions to plot.
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="hparams-splom-overlay">
+          No run has a value on every selected axis. Remove a sparse axis to see
+          lines.
         </div>
       ) : null}
     </div>
   );
 };
 
-export default HParamsSplom;
+export default HParamsParallelCoords;
