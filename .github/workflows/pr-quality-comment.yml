@@ -24,7 +24,7 @@ jobs:
       - name: Download check result (cross-run artifact)
         id: download
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: pr-quality-result
           run-id: ${{ github.event.workflow_run.id }}
@@ -96,7 +96,7 @@ jobs:
       - name: Download notify payload
         id: download_payload
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: notify-payload
           path: ./payload
