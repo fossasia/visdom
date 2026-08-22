@@ -19,7 +19,7 @@ __pycache__/
 .venv
 venv
 
-# Python static assets (built/vendored, not source)
+# Python static assets (built/vendored)
 py/visdom/static/fonts/
 py/visdom/static/js/
 py/visdom/static/css/react-resizable-styles.css
@@ -30,7 +30,7 @@ py/visdom/extra_deps/**/*
 # Website (Docusaurus)
 website/.docusaurus
 
-# Top-level build/dependency outputs (unanchored - matches at any depth)
+# Top-level build/dependency outputs (matches at any depth)
 node_modules
 build
 
