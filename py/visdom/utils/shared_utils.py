@@ -172,7 +172,15 @@ def _normalize_table_data(data, headers):
 
 
 def _sanitize_nans(obj):
-    """Recursively replace NaN/Inf floats with None in nested structures."""
+    """Recursively replace NaN/Inf floats with None in nested structures.
+
+    Also coerces numpy scalars (e.g. np.int64, np.bool_) to native Python
+    types first: unlike np.floating, they aren't json-serializable on
+    their own, so a value like X.min() on an integer array would
+    otherwise reach json.dumps() unconverted and raise.
+    """
+    if isinstance(obj, np.generic):
+        obj = obj.item()
     if isinstance(obj, (float, np.floating)) and (math.isnan(obj) or math.isinf(obj)):
         return None
     if isinstance(obj, dict):
