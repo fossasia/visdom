@@ -9,12 +9,14 @@
 
 import React, { useState } from 'react';
 
+import HParamsParallelCoords from './hparams/HParamsParallelCoords';
 import HParamsSplom from './hparams/HParamsSplom';
 import HParamsTable from './hparams/HParamsTable';
 import Pane from './Pane';
 
 const VIEWS = [
   { key: 'table', label: 'Table' },
+  { key: 'parcoords', label: 'Parallel coordinates' },
   { key: 'splom', label: 'Scatter matrix' },
 ];
 
@@ -44,6 +46,8 @@ var HParamsPane = (props) => {
   const [tableSelected, setTableSelected] = useState(() => new Set());
   const [splomDims, setSplomDims] = useState(null);
   const [splomColorBy, setSplomColorBy] = useState(null);
+  const [parcoordsDims, setParcoordsDims] = useState(null);
+  const [parcoordsColorBy, setParcoordsColorBy] = useState(null);
 
   const handleDownload = () => {
     let blob = new Blob([JSON.stringify(content)], {
@@ -104,33 +108,47 @@ var HParamsPane = (props) => {
               </button>
             ))}
           </div>
-          {view === 'splom' ? (
-            <HParamsSplom
-              records={data.records}
-              paramKeys={data.paramKeys}
-              metricKeys={data.metricKeys}
-              tagKeys={data.tagKeys}
-              selectedDims={splomDims}
-              onSelectedDims={setSplomDims}
-              colorBy={splomColorBy}
-              onColorBy={setSplomColorBy}
-            />
-          ) : (
-            <HParamsTable
-              records={data.records}
-              paramKeys={data.paramKeys}
-              metricKeys={data.metricKeys}
-              tagKeys={data.tagKeys}
-              sort={tableSort}
-              setSort={setTableSort}
-              filter={tableFilter}
-              setFilter={setTableFilter}
-              colorBy={tableColorBy}
-              setColorBy={setTableColorBy}
-              selected={tableSelected}
-              setSelected={setTableSelected}
-            />
-          )}
+          {(() => {
+            const viewProps = {
+              records: data.records,
+              paramKeys: data.paramKeys,
+              metricKeys: data.metricKeys,
+              tagKeys: data.tagKeys,
+            };
+            if (view === 'splom')
+              return (
+                <HParamsSplom
+                  {...viewProps}
+                  selectedDims={splomDims}
+                  onSelectedDims={setSplomDims}
+                  colorBy={splomColorBy}
+                  onColorBy={setSplomColorBy}
+                />
+              );
+            if (view === 'parcoords')
+              return (
+                <HParamsParallelCoords
+                  {...viewProps}
+                  selectedDims={parcoordsDims}
+                  onSelectedDims={setParcoordsDims}
+                  colorBy={parcoordsColorBy}
+                  onColorBy={setParcoordsColorBy}
+                />
+              );
+            return (
+              <HParamsTable
+                {...viewProps}
+                sort={tableSort}
+                setSort={setTableSort}
+                filter={tableFilter}
+                setFilter={setTableFilter}
+                colorBy={tableColorBy}
+                setColorBy={setTableColorBy}
+                selected={tableSelected}
+                setSelected={setTableSelected}
+              />
+            );
+          })()}
         </div>
       </div>
     );

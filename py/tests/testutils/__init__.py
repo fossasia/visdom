@@ -17,14 +17,28 @@ shipped to users as a top-level ``tests`` distribution.
 from testutils.fakes import FakeHandler, FakeSocket, SpyStore
 from testutils.http import VisdomHTTPTestCase
 from testutils.payloads import content_args, env_payload, plot_data, window_args
+from testutils.sockets import (
+    commands,
+    last,
+    open_source,
+    open_sub,
+    sent,
+    socket_double,
+)
 
 __all__ = [
     "FakeHandler",
     "FakeSocket",
     "SpyStore",
     "VisdomHTTPTestCase",
+    "commands",
     "content_args",
     "env_payload",
+    "last",
+    "open_source",
+    "open_sub",
     "plot_data",
+    "sent",
+    "socket_double",
     "window_args",
 ]
