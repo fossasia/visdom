@@ -7,16 +7,29 @@
  *
  */
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 
+import HParamsFilters from './hparams/HParamsFilters';
+import HParamsParallelCoords from './hparams/HParamsParallelCoords';
 import HParamsSplom from './hparams/HParamsSplom';
 import HParamsTable from './hparams/HParamsTable';
+import {
+  applyFilters,
+  buildColumns,
+  buildFilterSpecs,
+  collectStatuses,
+  countActiveFilters,
+  filterRecords,
+} from './hparams/hparamsUtils';
 import Pane from './Pane';
 
 const VIEWS = [
   { key: 'table', label: 'Table' },
+  { key: 'parcoords', label: 'Parallel coordinates' },
   { key: 'splom', label: 'Scatter matrix' },
 ];
+
+const NO_RECORDS = [];
 
 function readContent(content) {
   if (!content || typeof content !== 'object' || Array.isArray(content)) {
@@ -44,6 +57,33 @@ var HParamsPane = (props) => {
   const [tableSelected, setTableSelected] = useState(() => new Set());
   const [splomDims, setSplomDims] = useState(null);
   const [splomColorBy, setSplomColorBy] = useState(null);
+  const [parcoordsDims, setParcoordsDims] = useState(null);
+  const [parcoordsColorBy, setParcoordsColorBy] = useState(null);
+  const [filtersOpen, setFiltersOpen] = useState(true);
+  const [filters, setFilters] = useState({ statuses: [], columns: {} });
+
+  const records = data ? data.records : NO_RECORDS;
+  const columns = useMemo(
+    () =>
+      data ? buildColumns(data.paramKeys, data.metricKeys, data.tagKeys) : [],
+    [data]
+  );
+  const specs = useMemo(
+    () => buildFilterSpecs(records, columns),
+    [records, columns]
+  );
+  const statuses = useMemo(() => collectStatuses(records), [records]);
+  const visibleRecords = useMemo(
+    () =>
+      applyFilters(
+        filterRecords(records, tableFilter, columns),
+        specs,
+        filters
+      ),
+    [records, tableFilter, columns, specs, filters]
+  );
+  const activeFilters =
+    countActiveFilters(filters, specs) + (tableFilter.trim() ? 1 : 0);
 
   const handleDownload = () => {
     let blob = new Blob([JSON.stringify(content)], {
@@ -85,6 +125,11 @@ var HParamsPane = (props) => {
           <span className="hparams-stat">
             <b>{data.tagKeys.length}</b> tags
           </span>
+          {visibleRecords.length !== records.length ? (
+            <span className="hparams-stat hparams-stat-filtered">
+              showing <b>{visibleRecords.length}</b> of {records.length}
+            </span>
+          ) : null}
         </div>
         <div className="hparams-views">
           <div className="hparams-viewtabs" role="tablist">
@@ -103,34 +148,90 @@ var HParamsPane = (props) => {
                 {v.label}
               </button>
             ))}
+            <span className="hparams-viewtools">
+              <input
+                type="text"
+                className="hparams-filter"
+                placeholder="Search runs…"
+                value={tableFilter}
+                onChange={(e) => setTableFilter(e.target.value)}
+                aria-label="Search runs"
+              />
+              <button
+                type="button"
+                className={
+                  'hparams-filters-toggle' +
+                  (filtersOpen ? ' hparams-filters-toggle-active' : '')
+                }
+                onClick={() => setFiltersOpen((open) => !open)}
+                aria-expanded={filtersOpen}
+                title="Filter runs across every view"
+              >
+                Filters{activeFilters ? ' (' + activeFilters + ')' : ''}
+              </button>
+            </span>
           </div>
-          {view === 'splom' ? (
-            <HParamsSplom
-              records={data.records}
-              paramKeys={data.paramKeys}
-              metricKeys={data.metricKeys}
-              tagKeys={data.tagKeys}
-              selectedDims={splomDims}
-              onSelectedDims={setSplomDims}
-              colorBy={splomColorBy}
-              onColorBy={setSplomColorBy}
-            />
-          ) : (
-            <HParamsTable
-              records={data.records}
-              paramKeys={data.paramKeys}
-              metricKeys={data.metricKeys}
-              tagKeys={data.tagKeys}
-              sort={tableSort}
-              setSort={setTableSort}
-              filter={tableFilter}
-              setFilter={setTableFilter}
-              colorBy={tableColorBy}
-              setColorBy={setTableColorBy}
-              selected={tableSelected}
-              setSelected={setTableSelected}
-            />
-          )}
+          <div className="hparams-layout">
+            {filtersOpen ? (
+              <HParamsFilters
+                specs={specs}
+                statuses={statuses}
+                filters={filters}
+                setFilters={setFilters}
+                setSearch={setTableFilter}
+                onClose={() => setFiltersOpen(false)}
+                visibleCount={visibleRecords.length}
+                totalCount={records.length}
+              />
+            ) : null}
+            {(() => {
+              if (visibleRecords.length === 0) {
+                return (
+                  <div className="hparams-message hparams-empty">
+                    No runs match your filters.
+                  </div>
+                );
+              }
+              const viewProps = {
+                records: visibleRecords,
+                columnRecords: records,
+                paramKeys: data.paramKeys,
+                metricKeys: data.metricKeys,
+                tagKeys: data.tagKeys,
+              };
+              if (view === 'splom')
+                return (
+                  <HParamsSplom
+                    {...viewProps}
+                    selectedDims={splomDims}
+                    onSelectedDims={setSplomDims}
+                    colorBy={splomColorBy}
+                    onColorBy={setSplomColorBy}
+                  />
+                );
+              if (view === 'parcoords')
+                return (
+                  <HParamsParallelCoords
+                    {...viewProps}
+                    selectedDims={parcoordsDims}
+                    onSelectedDims={setParcoordsDims}
+                    colorBy={parcoordsColorBy}
+                    onColorBy={setParcoordsColorBy}
+                  />
+                );
+              return (
+                <HParamsTable
+                  {...viewProps}
+                  sort={tableSort}
+                  setSort={setTableSort}
+                  colorBy={tableColorBy}
+                  setColorBy={setTableColorBy}
+                  selected={tableSelected}
+                  setSelected={setTableSelected}
+                />
+              );
+            })()}
+          </div>
         </div>
       </div>
     );

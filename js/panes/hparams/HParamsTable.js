@@ -13,7 +13,6 @@ import React, { useCallback, useEffect, useMemo } from 'react';
 import {
   buildColumns,
   COLUMN_GROUPS,
-  filterRecords,
   formatValue,
   groupColumnTree,
   isNumberLike,
@@ -26,7 +25,6 @@ import {
 } from './hparamsUtils';
 
 const RUN_COLUMN_ID = 'run:name';
-const CONTROL_STYLE = { width: 150 };
 
 function nextSort(current, columnId) {
   if (current.by !== columnId) return { by: columnId, dir: 'asc' };
@@ -150,49 +148,47 @@ const HParamsRow = React.memo(function HParamsRow({
 
 const HParamsTable = ({
   records,
+  columnRecords,
   paramKeys,
   metricKeys,
   tagKeys,
   sort,
   setSort,
-  filter,
-  setFilter,
   colorBy,
   setColorBy,
   selected,
   setSelected,
 }) => {
+  const allRecords = columnRecords || records;
+
   const columns = useMemo(
     () => buildColumns(paramKeys, metricKeys, tagKeys),
     [paramKeys, metricKeys, tagKeys]
   );
   const colorCols = useMemo(
-    () => selectNumericColumns(records, columns),
-    [records, columns]
+    () => selectNumericColumns(allRecords, columns),
+    [allRecords, columns]
   );
 
   const rowIds = useMemo(() => {
     const ids = new Map();
-    records.forEach((record, index) => {
+    allRecords.forEach((record, index) => {
       ids.set(record, record.env_id || 'row:' + index);
     });
     return ids;
-  }, [records]);
+  }, [allRecords]);
 
-  useEffect(() => {
-    setSort((prev) => {
-      if (!prev.by || prev.by === RUN_COLUMN_ID) return prev;
-      return columns.some((c) => c.id === prev.by)
-        ? prev
-        : { by: null, dir: null };
-    });
-  }, [columns]);
+  const activeSort = useMemo(() => {
+    if (!sort.by || sort.by === RUN_COLUMN_ID) return sort;
+    return columns.some((c) => c.id === sort.by)
+      ? sort
+      : { by: null, dir: null };
+  }, [sort, columns]);
 
-  useEffect(() => {
-    setColorBy((prev) =>
-      prev && !colorCols.some((c) => c.id === prev) ? null : prev
-    );
-  }, [colorCols]);
+  const activeColorBy = useMemo(
+    () => (colorCols.some((c) => c.id === colorBy) ? colorBy : null),
+    [colorBy, colorCols]
+  );
 
   useEffect(() => {
     setSelected((prev) => {
@@ -204,7 +200,7 @@ const HParamsTable = ({
       });
       return next.size === prev.size ? prev : next;
     });
-  }, [rowIds]);
+  }, [rowIds, setSelected]);
 
   const groupStartIds = useMemo(() => {
     const ids = new Set();
@@ -216,36 +212,37 @@ const HParamsTable = ({
     return ids;
   }, [columns]);
 
-  const filtered = useMemo(
-    () => filterRecords(records, filter, columns),
-    [records, filter, columns]
-  );
-
   const rows = useMemo(() => {
-    if (!sort.by) return filtered;
-    const accessor = accessorFor(sort.by, columns);
-    if (!accessor) return filtered;
-    return filtered.slice().sort(makeComparator(accessor, sort.dir));
-  }, [filtered, sort, columns]);
+    if (!activeSort.by) return records;
+    const accessor = accessorFor(activeSort.by, columns);
+    if (!accessor) return records;
+    return records.slice().sort(makeComparator(accessor, activeSort.dir));
+  }, [records, activeSort, columns]);
 
   const extent = useMemo(() => {
-    if (!colorBy) return null;
-    const col = columns.find((c) => c.id === colorBy);
+    if (!activeColorBy) return null;
+    const col = columns.find((c) => c.id === activeColorBy);
     if (!col) return null;
     return numericExtent(records, col.accessor);
-  }, [records, colorBy, columns]);
+  }, [records, activeColorBy, columns]);
 
-  const handleSort = useCallback((columnId) => {
-    setSort((prev) => nextSort(prev, columnId));
-  }, []);
+  const handleSort = useCallback(
+    (columnId) => {
+      setSort((prev) => nextSort(prev, columnId));
+    },
+    [setSort]
+  );
 
-  const handleSortSelect = useCallback((value) => {
-    setSort((prev) => {
-      if (!value) return { by: null, dir: null };
-      if (prev.by === value) return { by: value, dir: prev.dir || 'asc' };
-      return { by: value, dir: 'asc' };
-    });
-  }, []);
+  const handleSortSelect = useCallback(
+    (value) => {
+      setSort((prev) => {
+        if (!value) return { by: null, dir: null };
+        if (prev.by === value) return { by: value, dir: prev.dir || 'asc' };
+        return { by: value, dir: 'asc' };
+      });
+    },
+    [setSort]
+  );
 
   const cycleDir = useCallback(() => {
     setSort((prev) => {
@@ -253,16 +250,19 @@ const HParamsTable = ({
       if (prev.dir === 'asc') return { by: prev.by, dir: 'desc' };
       return { by: null, dir: null };
     });
-  }, []);
+  }, [setSort]);
 
-  const toggle = useCallback((rowId) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(rowId)) next.delete(rowId);
-      else next.add(rowId);
-      return next;
-    });
-  }, []);
+  const toggle = useCallback(
+    (rowId) => {
+      setSelected((prev) => {
+        const next = new Set(prev);
+        if (next.has(rowId)) next.delete(rowId);
+        else next.add(rowId);
+        return next;
+      });
+    },
+    [setSelected]
+  );
 
   const allSelected =
     rows.length > 0 && rows.every((r) => selected.has(rowIds.get(r)));
@@ -286,7 +286,7 @@ const HParamsTable = ({
       );
       return next;
     });
-  }, [rows, rowIds]);
+  }, [rows, rowIds, setSelected]);
 
   const bands = useMemo(
     () =>
@@ -310,25 +310,16 @@ const HParamsTable = ({
     [colorCols]
   );
 
-  const dirLabel = directionLabel(sort);
+  const dirLabel = directionLabel(activeSort);
 
   return (
     <div className="hparams-table-wrap">
       <div className="hparams-toolbar">
-        <input
-          type="text"
-          className="hparams-filter"
-          placeholder="Filter runs…"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          aria-label="Filter runs"
-        />
         <span className="hparams-sortby">
           sort by:
           <TreeSelect
-            className="hparams-treeselect"
-            style={CONTROL_STYLE}
-            value={sort.by || undefined}
+            className="hparams-treeselect hparams-select-narrow"
+            value={activeSort.by || undefined}
             placeholder="none"
             allowClear
             treeLine
@@ -341,20 +332,19 @@ const HParamsTable = ({
             type="button"
             className="hparams-dir-btn"
             onClick={cycleDir}
-            disabled={!sort.by}
+            disabled={!activeSort.by}
             title={dirLabel}
             aria-label={dirLabel}
           >
-            {!sort.by ? '⇅' : sort.dir === 'asc' ? '▲' : '▼'}
+            {!activeSort.by ? '⇅' : activeSort.dir === 'asc' ? '▲' : '▼'}
           </button>
         </span>
         {colorCols.length ? (
           <span className="hparams-colorby">
             color by:
             <TreeSelect
-              className="hparams-treeselect"
-              style={CONTROL_STYLE}
-              value={colorBy || undefined}
+              className="hparams-treeselect hparams-select-narrow"
+              value={activeColorBy || undefined}
               placeholder="none"
               allowClear
               treeLine
@@ -406,7 +396,7 @@ const HParamsTable = ({
                 />
               </th>
               <SortHeader
-                sort={sort}
+                sort={activeSort}
                 columnId={RUN_COLUMN_ID}
                 label="run"
                 scopeClass="hparams-th-run"
@@ -415,7 +405,7 @@ const HParamsTable = ({
               {columns.map((col) => (
                 <SortHeader
                   key={col.id}
-                  sort={sort}
+                  sort={activeSort}
                   columnId={col.id}
                   label={col.label}
                   scopeClass={
@@ -432,7 +422,7 @@ const HParamsTable = ({
             {rows.length === 0 ? (
               <tr>
                 <td className="hparams-nomatch" colSpan={2 + columns.length}>
-                  No runs match “{filter}”.
+                  No runs to show.
                 </td>
               </tr>
             ) : (
@@ -444,7 +434,7 @@ const HParamsTable = ({
                     record={record}
                     rowId={rowId}
                     columns={columns}
-                    colorBy={colorBy}
+                    colorBy={activeColorBy}
                     extent={extent}
                     isSelected={selected.has(rowId)}
                     onToggle={toggle}
