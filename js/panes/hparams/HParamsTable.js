@@ -26,7 +26,6 @@ import {
 } from './hparamsUtils';
 
 const RUN_COLUMN_ID = 'run:name';
-const CONTROL_STYLE = { width: 150 };
 
 function nextSort(current, columnId) {
   if (current.by !== columnId) return { by: columnId, dir: 'asc' };
@@ -186,13 +185,13 @@ const HParamsTable = ({
         ? prev
         : { by: null, dir: null };
     });
-  }, [columns]);
+  }, [columns, setSort]);
 
   useEffect(() => {
     setColorBy((prev) =>
       prev && !colorCols.some((c) => c.id === prev) ? null : prev
     );
-  }, [colorCols]);
+  }, [colorCols, setColorBy]);
 
   useEffect(() => {
     setSelected((prev) => {
@@ -204,7 +203,7 @@ const HParamsTable = ({
       });
       return next.size === prev.size ? prev : next;
     });
-  }, [rowIds]);
+  }, [rowIds, setSelected]);
 
   const groupStartIds = useMemo(() => {
     const ids = new Set();
@@ -235,17 +234,23 @@ const HParamsTable = ({
     return numericExtent(records, col.accessor);
   }, [records, colorBy, columns]);
 
-  const handleSort = useCallback((columnId) => {
-    setSort((prev) => nextSort(prev, columnId));
-  }, []);
+  const handleSort = useCallback(
+    (columnId) => {
+      setSort((prev) => nextSort(prev, columnId));
+    },
+    [setSort]
+  );
 
-  const handleSortSelect = useCallback((value) => {
-    setSort((prev) => {
-      if (!value) return { by: null, dir: null };
-      if (prev.by === value) return { by: value, dir: prev.dir || 'asc' };
-      return { by: value, dir: 'asc' };
-    });
-  }, []);
+  const handleSortSelect = useCallback(
+    (value) => {
+      setSort((prev) => {
+        if (!value) return { by: null, dir: null };
+        if (prev.by === value) return { by: value, dir: prev.dir || 'asc' };
+        return { by: value, dir: 'asc' };
+      });
+    },
+    [setSort]
+  );
 
   const cycleDir = useCallback(() => {
     setSort((prev) => {
@@ -253,16 +258,19 @@ const HParamsTable = ({
       if (prev.dir === 'asc') return { by: prev.by, dir: 'desc' };
       return { by: null, dir: null };
     });
-  }, []);
+  }, [setSort]);
 
-  const toggle = useCallback((rowId) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(rowId)) next.delete(rowId);
-      else next.add(rowId);
-      return next;
-    });
-  }, []);
+  const toggle = useCallback(
+    (rowId) => {
+      setSelected((prev) => {
+        const next = new Set(prev);
+        if (next.has(rowId)) next.delete(rowId);
+        else next.add(rowId);
+        return next;
+      });
+    },
+    [setSelected]
+  );
 
   const allSelected =
     rows.length > 0 && rows.every((r) => selected.has(rowIds.get(r)));
@@ -286,7 +294,7 @@ const HParamsTable = ({
       );
       return next;
     });
-  }, [rows, rowIds]);
+  }, [rows, rowIds, setSelected]);
 
   const bands = useMemo(
     () =>
@@ -326,8 +334,7 @@ const HParamsTable = ({
         <span className="hparams-sortby">
           sort by:
           <TreeSelect
-            className="hparams-treeselect"
-            style={CONTROL_STYLE}
+            className="hparams-treeselect hparams-select-narrow"
             value={sort.by || undefined}
             placeholder="none"
             allowClear
@@ -352,8 +359,7 @@ const HParamsTable = ({
           <span className="hparams-colorby">
             color by:
             <TreeSelect
-              className="hparams-treeselect"
-              style={CONTROL_STYLE}
+              className="hparams-treeselect hparams-select-narrow"
               value={colorBy || undefined}
               placeholder="none"
               allowClear

@@ -287,3 +287,37 @@ export function buildSplomDimensions(records, columns, selectedIds) {
   });
   return dimensions;
 }
+
+export function completeRecords(records, cols) {
+  return (records || []).filter((record) =>
+    (cols || []).every((col) => isNumeric(col.accessor(record)))
+  );
+}
+
+/*
+ * Build Plotly `parcoords` dimensions. Plotly cannot render null/NaN cells —
+ * one sparse axis corrupts every line -- so callers pass records that already
+ * hold a numeric value on every axis (see completeRecords). Each axis spans its
+ * exact data range; an axis whose values are all equal gets a small symmetric
+ * range so it does not collapse to zero height.
+ */
+export function buildParcoordsDimensions(records, columns, selectedIds) {
+  const byId = new Map((columns || []).map((col) => [col.id, col]));
+  const dimensions = [];
+  (selectedIds || []).forEach((id) => {
+    const col = byId.get(id);
+    if (!col) return;
+    const extent = numericExtent(records, col.accessor);
+    if (extent === null) return;
+    const values = (records || []).map((record) => col.accessor(record));
+    const dimension = { label: col.label, values };
+    if (extent.min === extent.max) {
+      const delta = Math.abs(extent.max) * 0.05 || 1;
+      dimension.range = [extent.min - delta, extent.max + delta];
+    } else {
+      dimension.range = [extent.min, extent.max];
+    }
+    dimensions.push(dimension);
+  });
+  return dimensions;
+}
