@@ -3934,11 +3934,15 @@ class Visdom(object):
         sector's label or name. Values from the `parents` array define the
         hierarchical structure, indicating which parent sector a sector
         belongs to -- note that at least one entry in `parents` must be an
-        empty string `""`, marking the root of the hierarchy. The `labels`
+        empty string `""` (or `None`, which is treated the same way),
+        marking the root of the hierarchy. Keep in mind that the `labels`
         and `parents` arrays must be of equal length. There is an optional
         third array called `values`, which is used to display a numerical
         value when hovering over a sector. If provided, the `values` array
-        must be the same length as `labels` and `parents`.
+        must be the same length as `labels` and `parents`, and every entry
+        must be a non-negative, non-NaN number -- omit `values` entirely if
+        some sectors don't have a known value, rather than passing NaN.
+
 
         Examples: `vis.sunburst(labels, parents, opts)` or
         `vis.sunburst(labels, parents, values, opts)`
@@ -3966,8 +3970,15 @@ class Visdom(object):
         parents = np.squeeze(np.asarray(parents))
         assert labels.ndim <= 1, "labels should be one-dimensional"
         assert parents.ndim <= 1, "parents should be one-dimensional"
-        labels = np.atleast_1d(labels).astype(str)
-        parents = np.atleast_1d(parents).astype(str)
+        labels = np.atleast_1d(labels)
+        parents = np.atleast_1d(parents)
+        if parents.dtype == object:
+            parents = np.array(
+                ["" if p is None else p for p in parents], dtype=object
+            )
+
+        labels = labels.astype(str)
+        parents = parents.astype(str)
         assert len(labels) > 0, "labels cannot be empty"
         assert len(labels) == len(
             parents
