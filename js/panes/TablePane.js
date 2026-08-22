@@ -21,7 +21,7 @@ const DEFAULT_ROW_HEIGHT = 28;
 const MIN_COL_WIDTH = 40;
 const MIN_ROW_HEIGHT = 18;
 
-function TablePane(props) {
+var TablePane = function (props) {
   const { sendTableEdit, sessionInfo } = useContext(ApiContext);
   const { envID, id, contentID, content } = props;
   const { headers = [], rows = [] } = content || {};
@@ -337,6 +337,17 @@ function TablePane(props) {
       </div>
     </Pane>
   );
-}
+};
+
+TablePane = React.memo(TablePane, (props, nextProps) => {
+  if (props.contentID !== nextProps.contentID) return false;
+  else if (props.content !== nextProps.content) return false;
+  else if (props.title !== nextProps.title) return false;
+  else if (props.comment !== nextProps.comment) return false;
+  else if (props.h !== nextProps.h || props.w !== nextProps.w) return false;
+  else if (props.editable !== nextProps.editable) return false;
+  else if (props.isFocused !== nextProps.isFocused) return false;
+  return true;
+});
 
 export default TablePane;
