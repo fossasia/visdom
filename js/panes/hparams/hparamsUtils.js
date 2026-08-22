@@ -7,10 +7,12 @@
  *
  */
 
+import React from 'react';
+
 /*
- * Pure helpers for the hyper-parameter table. Kept free of React so the
- * ordering and formatting rules live in one place and can mirror the Python
- * backend exactly. The comparator matches
+ * Shared helpers for the hyper-parameter views, so the ordering and formatting
+ * rules live in one place and can mirror the Python backend exactly. The
+ * comparator matches
  * visdom.experiments.store._order_key for every value the backend can order --
  * including booleans, which Python orders by str(value), i.e. "True"/"False"
  * -- and visdom.experiments.store._sort_pairs for absent values, which sort
@@ -533,3 +535,10 @@ export function buildComparison(records, columns) {
   });
   return sections;
 }
+
+export const StatusBadge = ({ status }) =>
+  status ? (
+    <span className={'hparams-run-status hparams-status-' + status}>
+      {status}
+    </span>
+  ) : null;

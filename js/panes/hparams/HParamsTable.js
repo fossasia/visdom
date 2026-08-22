@@ -22,8 +22,8 @@ import {
   runLabel,
   selectNumericColumns,
   spineStyle,
+  StatusBadge,
 } from './hparamsUtils';
-import StatusBadge from './StatusBadge';
 
 const RUN_COLUMN_ID = 'run:name';
 const NO_SORT = { by: null, dir: null };

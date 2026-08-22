@@ -17,8 +17,8 @@ import {
   numericExtent,
   runLabel,
   spineStyle,
+  StatusBadge,
 } from './hparamsUtils';
-import StatusBadge from './StatusBadge';
 
 const HParamsCompare = ({ records, paramKeys, metricKeys, tagKeys }) => {
   const [showIdentical, setShowIdentical] = useState(true);
