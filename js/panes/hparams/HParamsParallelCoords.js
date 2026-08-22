@@ -7,22 +7,18 @@
  *
  */
 
-import TreeSelect from 'rc-tree-select';
 import React, { useEffect, useMemo, useRef } from 'react';
 
+import HParamsAxisToolbar from './HParamsAxisToolbar';
 import { applySnapshotButton, observePlotResize } from './hparamsPlot';
 import {
-  buildColumns,
   buildParcoordsDimensions,
   completeRecords,
-  groupColumnTree,
-  isNumeric,
-  NUMERIC_GROUPS,
   numericExtent,
   runLabel,
-  selectNumericColumns,
   toNumericColumn,
 } from './hparamsUtils';
+import useHParamsAxes from './useHParamsAxes';
 
 const RUN_LABEL_MAX = 18;
 
@@ -32,6 +28,7 @@ const PARCOORDS_COLORSCALE = 'Viridis';
 
 const HParamsParallelCoords = ({
   records,
+  columnRecords,
   paramKeys,
   metricKeys,
   tagKeys,
@@ -42,41 +39,24 @@ const HParamsParallelCoords = ({
 }) => {
   const plotRef = useRef(null);
 
-  const columns = useMemo(
-    () => buildColumns(paramKeys, metricKeys, tagKeys),
-    [paramKeys, metricKeys, tagKeys]
-  );
-  const numericCols = useMemo(
-    () => selectNumericColumns(records, columns),
-    [records, columns]
-  );
-
-  const effectiveDims = useMemo(() => {
-    const validIds = new Set(numericCols.map((c) => c.id));
-    let ids = (selectedDims || []).filter((id) => validIds.has(id));
-    if (ids.length === 0) {
-      const dense = numericCols.filter((c) =>
-        records.every((r) => isNumeric(c.accessor(r)))
-      );
-      const pick = dense.length >= 2 ? dense : numericCols;
-      ids = pick.slice(0, MAX_DIMS).map((c) => c.id);
-    }
-    return ids.slice(0, MAX_DIMS);
-  }, [selectedDims, numericCols, records]);
-
-  const effectiveColorBy = useMemo(() => {
-    if (!colorBy) return null;
-    return numericCols.some((c) => c.id === colorBy) ? colorBy : null;
-  }, [colorBy, numericCols]);
-
-  const truncated =
-    (selectedDims || []).filter((id) => numericCols.some((c) => c.id === id))
-      .length > MAX_DIMS;
-
-  const treeData = useMemo(
-    () => groupColumnTree(numericCols, NUMERIC_GROUPS),
-    [numericCols]
-  );
+  const {
+    columns,
+    dims: effectiveDims,
+    colorBy: effectiveColorBy,
+    treeData,
+    truncated,
+    hasPlot,
+  } = useHParamsAxes({
+    records,
+    columnRecords,
+    paramKeys,
+    metricKeys,
+    tagKeys,
+    selectedDims,
+    colorBy,
+    maxDims: MAX_DIMS,
+    preferDense: true,
+  });
 
   const rows = useMemo(() => {
     const colorCol = effectiveColorBy
@@ -88,8 +68,6 @@ const HParamsParallelCoords = ({
     const requiredCols = colorCol ? axisCols.concat(colorCol) : axisCols;
     return completeRecords(records, requiredCols);
   }, [records, columns, effectiveDims, effectiveColorBy]);
-
-  const hasPlot = numericCols.length >= 2;
 
   useEffect(() => {
     const el = plotRef.current;
@@ -211,10 +189,6 @@ const HParamsParallelCoords = ({
     }
   }, [rows, columns, effectiveDims, effectiveColorBy]);
 
-  const handleDims = (value) => {
-    onSelectedDims(Array.isArray(value) ? value.slice(0, MAX_DIMS) : []);
-  };
-
   if (!hasPlot) {
     return (
       <div className="hparams-parcoords-wrap">
@@ -225,57 +199,34 @@ const HParamsParallelCoords = ({
     );
   }
 
+  const note =
+    rows.length < records.length
+      ? rows.length + ' of ' + records.length + ' runs have all selected axes'
+      : truncated
+        ? 'showing first ' + MAX_DIMS
+        : null;
+
   return (
     <div className="hparams-parcoords-wrap">
-      <div className="hparams-toolbar">
-        <span className="hparams-sortby">
-          axes:
-          <TreeSelect
-            className="hparams-treeselect hparams-select-wide"
-            value={effectiveDims}
-            placeholder="pick axes"
-            treeCheckable
-            multiple
-            showCheckedStrategy="SHOW_CHILD"
-            treeLine
-            treeDefaultExpandAll
-            maxTagCount={3}
-            dropdownMatchSelectWidth={false}
-            treeData={treeData}
-            onChange={handleDims}
-            aria-label="Parallel coordinates axes"
-          />
-        </span>
-        <span className="hparams-colorby">
-          color by:
-          <TreeSelect
-            className="hparams-treeselect hparams-select-narrow"
-            value={effectiveColorBy || undefined}
-            placeholder="run order"
-            allowClear
-            treeLine
-            treeDefaultExpandAll
-            dropdownMatchSelectWidth={false}
-            treeData={treeData}
-            onChange={(value) => onColorBy(value || null)}
-            aria-label="Color parallel coordinates by"
-          />
-        </span>
-        {rows.length < records.length ? (
-          <span className="hparams-splom-note">
-            {rows.length} of {records.length} runs have all selected axes
-          </span>
-        ) : truncated ? (
-          <span className="hparams-splom-note">showing first {MAX_DIMS}</span>
-        ) : null}
-      </div>
+      <HParamsAxisToolbar
+        axesLabel="axes"
+        axesName="parallel coordinates"
+        colorFallback="run order"
+        treeData={treeData}
+        dims={effectiveDims}
+        onDims={onSelectedDims}
+        colorBy={effectiveColorBy}
+        onColorBy={onColorBy}
+        maxDims={MAX_DIMS}
+        note={note}
+      />
       <div className="hparams-parcoords-plot" ref={plotRef} />
       {effectiveDims.length < 2 ? (
-        <div className="hparams-splom-overlay">
+        <div className="hparams-plot-overlay">
           Select at least two dimensions to plot.
         </div>
       ) : rows.length === 0 ? (
-        <div className="hparams-splom-overlay">
+        <div className="hparams-plot-overlay">
           No run has a value on every selected axis. Remove a sparse axis to see
           lines.
         </div>

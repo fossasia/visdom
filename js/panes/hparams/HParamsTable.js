@@ -13,7 +13,6 @@ import React, { useCallback, useEffect, useMemo } from 'react';
 import {
   buildColumns,
   COLUMN_GROUPS,
-  filterRecords,
   formatValue,
   groupColumnTree,
   isNumberLike,
@@ -149,49 +148,47 @@ const HParamsRow = React.memo(function HParamsRow({
 
 const HParamsTable = ({
   records,
+  columnRecords,
   paramKeys,
   metricKeys,
   tagKeys,
   sort,
   setSort,
-  filter,
-  setFilter,
   colorBy,
   setColorBy,
   selected,
   setSelected,
 }) => {
+  const allRecords = columnRecords || records;
+
   const columns = useMemo(
     () => buildColumns(paramKeys, metricKeys, tagKeys),
     [paramKeys, metricKeys, tagKeys]
   );
   const colorCols = useMemo(
-    () => selectNumericColumns(records, columns),
-    [records, columns]
+    () => selectNumericColumns(allRecords, columns),
+    [allRecords, columns]
   );
 
   const rowIds = useMemo(() => {
     const ids = new Map();
-    records.forEach((record, index) => {
+    allRecords.forEach((record, index) => {
       ids.set(record, record.env_id || 'row:' + index);
     });
     return ids;
-  }, [records]);
+  }, [allRecords]);
 
-  useEffect(() => {
-    setSort((prev) => {
-      if (!prev.by || prev.by === RUN_COLUMN_ID) return prev;
-      return columns.some((c) => c.id === prev.by)
-        ? prev
-        : { by: null, dir: null };
-    });
-  }, [columns, setSort]);
+  const activeSort = useMemo(() => {
+    if (!sort.by || sort.by === RUN_COLUMN_ID) return sort;
+    return columns.some((c) => c.id === sort.by)
+      ? sort
+      : { by: null, dir: null };
+  }, [sort, columns]);
 
-  useEffect(() => {
-    setColorBy((prev) =>
-      prev && !colorCols.some((c) => c.id === prev) ? null : prev
-    );
-  }, [colorCols, setColorBy]);
+  const activeColorBy = useMemo(
+    () => (colorCols.some((c) => c.id === colorBy) ? colorBy : null),
+    [colorBy, colorCols]
+  );
 
   useEffect(() => {
     setSelected((prev) => {
@@ -215,24 +212,19 @@ const HParamsTable = ({
     return ids;
   }, [columns]);
 
-  const filtered = useMemo(
-    () => filterRecords(records, filter, columns),
-    [records, filter, columns]
-  );
-
   const rows = useMemo(() => {
-    if (!sort.by) return filtered;
-    const accessor = accessorFor(sort.by, columns);
-    if (!accessor) return filtered;
-    return filtered.slice().sort(makeComparator(accessor, sort.dir));
-  }, [filtered, sort, columns]);
+    if (!activeSort.by) return records;
+    const accessor = accessorFor(activeSort.by, columns);
+    if (!accessor) return records;
+    return records.slice().sort(makeComparator(accessor, activeSort.dir));
+  }, [records, activeSort, columns]);
 
   const extent = useMemo(() => {
-    if (!colorBy) return null;
-    const col = columns.find((c) => c.id === colorBy);
+    if (!activeColorBy) return null;
+    const col = columns.find((c) => c.id === activeColorBy);
     if (!col) return null;
     return numericExtent(records, col.accessor);
-  }, [records, colorBy, columns]);
+  }, [records, activeColorBy, columns]);
 
   const handleSort = useCallback(
     (columnId) => {
@@ -318,24 +310,16 @@ const HParamsTable = ({
     [colorCols]
   );
 
-  const dirLabel = directionLabel(sort);
+  const dirLabel = directionLabel(activeSort);
 
   return (
     <div className="hparams-table-wrap">
       <div className="hparams-toolbar">
-        <input
-          type="text"
-          className="hparams-filter"
-          placeholder="Filter runs…"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          aria-label="Filter runs"
-        />
         <span className="hparams-sortby">
           sort by:
           <TreeSelect
             className="hparams-treeselect hparams-select-narrow"
-            value={sort.by || undefined}
+            value={activeSort.by || undefined}
             placeholder="none"
             allowClear
             treeLine
@@ -348,11 +332,11 @@ const HParamsTable = ({
             type="button"
             className="hparams-dir-btn"
             onClick={cycleDir}
-            disabled={!sort.by}
+            disabled={!activeSort.by}
             title={dirLabel}
             aria-label={dirLabel}
           >
-            {!sort.by ? '⇅' : sort.dir === 'asc' ? '▲' : '▼'}
+            {!activeSort.by ? '⇅' : activeSort.dir === 'asc' ? '▲' : '▼'}
           </button>
         </span>
         {colorCols.length ? (
@@ -360,7 +344,7 @@ const HParamsTable = ({
             color by:
             <TreeSelect
               className="hparams-treeselect hparams-select-narrow"
-              value={colorBy || undefined}
+              value={activeColorBy || undefined}
               placeholder="none"
               allowClear
               treeLine
@@ -412,7 +396,7 @@ const HParamsTable = ({
                 />
               </th>
               <SortHeader
-                sort={sort}
+                sort={activeSort}
                 columnId={RUN_COLUMN_ID}
                 label="run"
                 scopeClass="hparams-th-run"
@@ -421,7 +405,7 @@ const HParamsTable = ({
               {columns.map((col) => (
                 <SortHeader
                   key={col.id}
-                  sort={sort}
+                  sort={activeSort}
                   columnId={col.id}
                   label={col.label}
                   scopeClass={
@@ -438,7 +422,7 @@ const HParamsTable = ({
             {rows.length === 0 ? (
               <tr>
                 <td className="hparams-nomatch" colSpan={2 + columns.length}>
-                  No runs match “{filter}”.
+                  No runs to show.
                 </td>
               </tr>
             ) : (
@@ -450,7 +434,7 @@ const HParamsTable = ({
                     record={record}
                     rowId={rowId}
                     columns={columns}
-                    colorBy={colorBy}
+                    colorBy={activeColorBy}
                     extent={extent}
                     isSelected={selected.has(rowId)}
                     onToggle={toggle}
