@@ -199,17 +199,23 @@ const HParamsTable = ({
     return numericExtent(records, col.accessor);
   }, [records, activeColorBy, columns]);
 
-  const handleSort = useCallback((columnId) => {
-    setSort((prev) => nextSort(prev, columnId));
-  }, []);
+  const handleSort = useCallback(
+    (columnId) => {
+      setSort((prev) => nextSort(prev, columnId));
+    },
+    [setSort]
+  );
 
-  const handleSortSelect = useCallback((value) => {
-    setSort((prev) => {
-      if (!value) return { by: null, dir: null };
-      if (prev.by === value) return { by: value, dir: prev.dir || 'asc' };
-      return { by: value, dir: 'asc' };
-    });
-  }, []);
+  const handleSortSelect = useCallback(
+    (value) => {
+      setSort((prev) => {
+        if (!value) return { by: null, dir: null };
+        if (prev.by === value) return { by: value, dir: prev.dir || 'asc' };
+        return { by: value, dir: 'asc' };
+      });
+    },
+    [setSort]
+  );
 
   const cycleDir = useCallback(() => {
     setSort((prev) => {
@@ -217,16 +223,19 @@ const HParamsTable = ({
       if (prev.dir === 'asc') return { by: prev.by, dir: 'desc' };
       return { by: null, dir: null };
     });
-  }, []);
+  }, [setSort]);
 
-  const toggle = useCallback((rowId) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(rowId)) next.delete(rowId);
-      else next.add(rowId);
-      return next;
-    });
-  }, []);
+  const toggle = useCallback(
+    (rowId) => {
+      setSelected((prev) => {
+        const next = new Set(prev);
+        if (next.has(rowId)) next.delete(rowId);
+        else next.add(rowId);
+        return next;
+      });
+    },
+    [setSelected]
+  );
 
   const allSelected =
     rows.length > 0 && rows.every((r) => selected.has(rowIds.get(r)));
@@ -250,7 +259,7 @@ const HParamsTable = ({
       );
       return next;
     });
-  }, [rows, rowIds]);
+  }, [rows, rowIds, setSelected]);
 
   const bands = useMemo(
     () =>
