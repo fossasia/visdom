@@ -83,7 +83,7 @@ jobs:
             core.setOutput('has_errors', errors.length > 0 ? 'true' : 'false');
 
       - name: Upload result
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pr-quality-result
           path: pr-quality-result.json
