@@ -126,7 +126,7 @@ jobs:
                 if (flaggedIgnored.length > 0) {
                   const list = flaggedIgnored.map(f => `  - \`${f}\``).join('\n');
                   errors.push(
-                    `- **Ignored files committed** — these match a pattern in \`.gitignore\` and should not be part of the PR, kindly remove them:\n${list}`
+                    `- **Committed files** matches in \`.gitignore\` and should not be part of the PR, kindly remove:\n${list}`
                   );
                 }
               }
