@@ -253,7 +253,6 @@ class RunTracker:
         self._add_event("created", {"params": self.params, "tags": self.tags})
         self._write()
 
-
         atexit.register(self._atexit_finalize)
 
     # recording
