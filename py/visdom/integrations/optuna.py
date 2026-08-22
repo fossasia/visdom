@@ -16,7 +16,10 @@ Visdom dependency just for this optional adapter.
 
 from __future__ import annotations
 
+import html
+import json
 import warnings
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -24,7 +27,7 @@ from visdom.experiments.tags import normalize_tags
 
 
 class OptunaCallback:
-    """Log each completed Optuna trial to a dedicated Visdom environment.
+    """Log completed Optuna trials and optionally maintain a study dashboard.
 
     Instances are passed to ``Study.optimize(callbacks=[...])``. Optuna calls
     the instance with a ``Study`` and ``FrozenTrial`` after a trial finishes;
@@ -32,9 +35,13 @@ class OptunaCallback:
     Visdom's experiment API.
 
     ``dashboard_env`` is the namespace for the study and its trial
-    environments. When omitted it is derived from the Optuna study name. The
-    callback itself does not create a dashboard pane; it only establishes the
-    stable environment layout that a dashboard can aggregate later.
+    environments. When omitted it is derived from the Optuna study name.
+    ``create_dashboard=True`` creates a summary, an HParams pane and Optuna's
+    Plotly study visualizations in that environment. The first completed trial
+    creates the dashboard; later trials refresh it every ``refresh_every``
+    successful writes. Call :meth:`update_dashboard` after ``Study.optimize``
+    to ensure the final trials are included when the total is not an exact
+    multiple of that interval.
 
     Optuna is intentionally not imported here. This keeps the integration
     optional and also means importing :mod:`visdom.integrations` never requires
@@ -52,6 +59,8 @@ class OptunaCallback:
         raise_on_error: Re-raise Visdom logging failures when true. By default a
             warning is emitted so an unavailable dashboard does not stop the
             optimization.
+        create_dashboard: Create and periodically refresh the study dashboard.
+        refresh_every: Number of newly logged trials between dashboard refreshes.
 
     Example::
 
@@ -59,8 +68,10 @@ class OptunaCallback:
             viz,
             dashboard_env="optuna_resnet",
             objective_names=["validation_accuracy"],
+            create_dashboard=True,
         )
         study.optimize(objective, callbacks=[callback])
+        callback.update_dashboard(study)
     """
 
     def __init__(
@@ -70,17 +81,26 @@ class OptunaCallback:
         objective_names: Sequence[str] | None = None,
         tags: Mapping[str, str] | None = None,
         raise_on_error: bool = False,
+        create_dashboard: bool = False,
+        refresh_every: int = 10,
     ) -> None:
         if dashboard_env is not None and not isinstance(dashboard_env, str):
             raise TypeError("dashboard_env must be a string or None")
         if dashboard_env == "":
             raise ValueError("dashboard_env must not be empty")
+        if refresh_every < 1:
+            raise ValueError("refresh_every must be at least 1")
 
         self.viz = viz
         self.dashboard_env = dashboard_env
         self.objective_names = self._validate_objective_names(objective_names)
         self.tags = self._validate_tags(tags)
         self.raise_on_error = raise_on_error
+        self.create_dashboard = create_dashboard
+        self.refresh_every = refresh_every
+        self._dashboard_created = False
+        self._trials_since_refresh = 0
+        self._trial_envs: list[str] = []
 
     @staticmethod
     def _validate_objective_names(
@@ -163,6 +183,156 @@ class OptunaCallback:
         )
         return normalize_tags(tags)
 
+    def _summary_html(self, study: Any) -> str:
+        trials = study.get_trials(deepcopy=False)
+        states = Counter(trial.state.name for trial in trials)
+        rows = [
+            ("Study", study.study_name),
+            (
+                "Direction",
+                ", ".join(direction.name.lower() for direction in study.directions),
+            ),
+            ("Trials", len(trials)),
+            ("Complete", states["COMPLETE"]),
+            ("Pruned", states["PRUNED"]),
+            ("Failed", states["FAIL"]),
+        ]
+        if len(study.directions) == 1 and states["COMPLETE"]:
+            rows.extend(
+                [
+                    ("Best value", study.best_value),
+                    (
+                        "Best parameters",
+                        json.dumps(
+                            study.best_params,
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
+                    ),
+                ]
+            )
+        elif states["COMPLETE"]:
+            rows.append(("Pareto trials", len(study.best_trials)))
+
+        body = "".join(
+            "<tr><th>{}</th><td>{}</td></tr>".format(
+                html.escape(str(label)), html.escape(str(value))
+            )
+            for label, value in rows
+        )
+        return "<h3>Optuna Study</h3><table>{}</table>".format(body)
+
+    def _dashboard_figures(self, study: Any) -> list[tuple[str, Any]]:
+        try:
+            from optuna.visualization import (
+                plot_optimization_history,
+                plot_param_importances,
+                plot_timeline,
+            )
+
+            objective_names = self._metric_names(study, len(study.directions))
+            figures = []
+            multi_objective = len(objective_names) > 1
+            complete_trials = sum(
+                trial.state.name == "COMPLETE"
+                for trial in study.get_trials(deepcopy=False)
+            )
+            for index, objective_name in enumerate(objective_names):
+                target = (
+                    (lambda trial, i=index: trial.values[i])
+                    if multi_objective
+                    else None
+                )
+                kwargs: dict[str, Any] = {"target_name": objective_name}
+                if target is not None:
+                    kwargs["target"] = target
+                history = plot_optimization_history(study, **kwargs)
+                history.update_layout(
+                    title="Optimization History — {}".format(objective_name)
+                )
+                suffix = "-{}".format(index) if multi_objective else ""
+                figures.append(("optuna-history{}".format(suffix), history))
+
+                if complete_trials >= 2:
+                    try:
+                        importance = plot_param_importances(study, **kwargs)
+                    except ValueError:
+                        pass
+                    else:
+                        importance.update_layout(
+                            title="Parameter Importance — {}".format(objective_name)
+                        )
+                        figures.append(
+                            ("optuna-importance{}".format(suffix), importance)
+                        )
+
+            timeline = plot_timeline(study)
+            timeline.update_layout(title="Optuna Trial Timeline")
+            figures.append(("optuna-timeline", timeline))
+            return figures
+        except ImportError as error:
+            warnings.warn(
+                "Optuna dashboard plots are unavailable: {}".format(error),
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            return []
+
+    def _build_dashboard_payload(self, study: Any) -> dict[str, Any]:
+        if not self._trial_envs:
+            raise ValueError("cannot create an Optuna dashboard before logging a trial")
+        return {
+            "env": self.study_env(study),
+            "env_ids": list(self._trial_envs),
+            "summary": self._summary_html(study),
+            "figures": self._dashboard_figures(study),
+        }
+
+    def update_dashboard(self, study: Any) -> bool:
+        """Create or refresh all dashboard panes for ``study``.
+
+        Returns whether the dashboard was written successfully. Only trials
+        logged by this callback instance are included in the HParams pane;
+        loading trials from a resumed study is handled by the later resume
+        integration.
+        """
+        payload = self._build_dashboard_payload(study)
+        try:
+            self.viz.text(
+                payload["summary"],
+                win="optuna-summary",
+                env=payload["env"],
+                opts={"title": "Optuna Study"},
+            )
+            self.viz.hparams(
+                env_ids=payload["env_ids"],
+                win="optuna-trials",
+                env=payload["env"],
+                opts={"title": "Optuna Trials"},
+            )
+            for win, figure in payload["figures"]:
+                self.viz.plotlyplot(figure, win=win, env=payload["env"])
+        except Exception as error:
+            if self.raise_on_error:
+                raise
+            warnings.warn(
+                "OptunaCallback failed to update the dashboard: {}".format(error),
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            return False
+        self._dashboard_created = True
+        self._trials_since_refresh = 0
+        return True
+
+    def _maybe_update_dashboard(self, study: Any) -> None:
+        self._trials_since_refresh += 1
+        if (
+            not self._dashboard_created
+            or self._trials_since_refresh >= self.refresh_every
+        ):
+            self.update_dashboard(study)
+
     def _build_payload(self, study: Any, trial: Any) -> dict[str, Any]:
         env = self.trial_env(trial, study)
         state = trial.state.name
@@ -211,3 +381,8 @@ class OptunaCallback:
                 RuntimeWarning,
                 stacklevel=2,
             )
+            return
+
+        self._trial_envs.append(payload["env"])
+        if self.create_dashboard:
+            self._maybe_update_dashboard(study)
