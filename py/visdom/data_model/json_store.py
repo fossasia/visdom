@@ -186,6 +186,20 @@ class JSONStore(DataStore):
         Hash-fallback files are recognised by their exact ``hash_<64 hex>.json``
         shape and resolved to the real id kept inside; every other ``.json`` file
         yields its filename stem. Sub-directories (e.g. ``view/``) are skipped.
+
+        The ``hash_<64 hex>.json`` shape is only a naming convention, not a
+        guarantee: a user-chosen eid that happens to equal that exact pattern
+        (e.g. an environment literally named ``hash_<64 hex chars>``) is short
+        enough to be written as an ordinary primary file, with none of the
+        hash-fallback bookkeeping -- there is no ``name`` field inside it. Such
+        a file is indistinguishable from a genuine hash-fallback file by name
+        alone, so it is resolved the same way an unreadable ``name`` field
+        would be: fall back to the filename stem. That stem is the correct id
+        either way -- for a colliding primary file it *is* the real,
+        already-escaped id, and for a hash-fallback file with unusable
+        metadata it is still the best identifier available. Surfacing it beats
+        silently hiding the environment.
+
         """
         if self.env_path is None or not os.path.isdir(self.env_path):
             return []
@@ -196,14 +210,19 @@ class JSONStore(DataStore):
             path = os.path.join(self.env_path, name)
             if not os.path.isfile(path):
                 continue
+            stem = name[: -len(".json")]
             if HASHED_ENV_RE.match(name):
+                real_name = None
                 try:
                     with open(path, "r", encoding="utf-8") as fn:
-                        envs.append(json.load(fn)["name"])
-                except (OSError, UnicodeError, ValueError, KeyError):
+                        data = json.load(fn)
+                    if isinstance(data, dict) and isinstance(data.get("name"), str):
+                        real_name = data["name"]
+                except (OSError, UnicodeError, ValueError):
                     continue
+                envs.append(real_name if real_name is not None else stem)
             else:
-                envs.append(name[: -len(".json")])
+                envs.append(stem)
         return sorted(envs)
 
     def delete_env(self, eid):
