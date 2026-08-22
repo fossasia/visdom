@@ -3973,9 +3973,7 @@ class Visdom(object):
         labels = np.atleast_1d(labels)
         parents = np.atleast_1d(parents)
         if parents.dtype == object:
-            parents = np.array(
-                ["" if p is None else p for p in parents], dtype=object
-            )
+            parents = np.array(["" if p is None else p for p in parents], dtype=object)
 
         labels = labels.astype(str)
         parents = parents.astype(str)
