@@ -490,6 +490,7 @@ var PlotPane = (props) => {
 PlotPane = React.memo(PlotPane, (props, nextProps) => {
   if (props.contentID !== nextProps.contentID) return false;
   else if (props.h !== nextProps.h || props.w !== nextProps.w) return false;
+  else if (props.comment !== nextProps.comment) return false;
   else if (props.isFocused !== nextProps.isFocused) return false;
   return true;
 });

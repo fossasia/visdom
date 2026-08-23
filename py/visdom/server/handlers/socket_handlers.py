@@ -538,6 +538,10 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
 
             p["version"] = p.get("version", 1) + 1
             patch.append({"op": "replace", "path": "/version", "value": p["version"]})
+            p["contentID"] = get_rand_id()
+            patch.append(
+                {"op": "replace", "path": "/contentID", "value": p["contentID"]}
+            )
 
             broadcast_packet = {
                 "command": "window_update",
