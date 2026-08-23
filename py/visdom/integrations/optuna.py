@@ -22,8 +22,10 @@ import warnings
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from typing import Any
+from urllib.parse import quote
 
 from visdom.experiments.tags import normalize_tags
+from visdom.utils.server_utils import escape_eid
 
 
 class OptunaCallback:
@@ -149,6 +151,15 @@ class OptunaCallback:
             raise ValueError("study is required when dashboard_env was not supplied")
         return "{}_trial_{:06d}".format(self.study_env(study), trial.number)
 
+    def _trial_url(self, trial: Any, study: Any) -> str:
+        root = "{}:{}{}".format(
+            self.viz.server,
+            self.viz.port,
+            self.viz.base_url,
+        ).rstrip("/")
+        env = quote(escape_eid(self.trial_env(trial, study)), safe="")
+        return "{}/env/{}".format(root, env)
+
     def _metric_names(self, study: Any, value_count: int) -> tuple[str, ...]:
         if self.objective_names is not None:
             names = self.objective_names
@@ -186,6 +197,7 @@ class OptunaCallback:
     def _summary_html(self, study: Any) -> str:
         trials = study.get_trials(deepcopy=False)
         states = Counter(trial.state.name for trial in trials)
+        links = []
         rows = [
             ("Study", study.study_name),
             (
@@ -198,6 +210,7 @@ class OptunaCallback:
             ("Failed", states["FAIL"]),
         ]
         if len(study.directions) == 1 and states["COMPLETE"]:
+            links.append(("Open best trial", self._trial_url(study.best_trial, study)))
             rows.extend(
                 [
                     ("Best value", study.best_value),
@@ -214,13 +227,32 @@ class OptunaCallback:
         elif states["COMPLETE"]:
             rows.append(("Pareto trials", len(study.best_trials)))
 
+        terminal_trials = [
+            trial
+            for trial in trials
+            if trial.state.name in ("COMPLETE", "PRUNED", "FAIL")
+        ]
+        if terminal_trials:
+            latest_trial = max(terminal_trials, key=lambda trial: trial.number)
+            links.append(("Open latest trial", self._trial_url(latest_trial, study)))
+
         body = "".join(
             "<tr><th>{}</th><td>{}</td></tr>".format(
                 html.escape(str(label)), html.escape(str(value))
             )
             for label, value in rows
         )
-        return "<h3>Optuna Study</h3><table>{}</table>".format(body)
+        navigation = ""
+        if links:
+            anchors = " | ".join(
+                '<a href="{}" target="_blank" rel="noopener noreferrer">{}</a>'.format(
+                    html.escape(url, quote=True),
+                    html.escape(label),
+                )
+                for label, url in links
+            )
+            navigation = "<p><strong>Open in Visdom:</strong> {}</p>".format(anchors)
+        return "<h3>Optuna Study</h3><table>{}</table>{}".format(body, navigation)
 
     def _dashboard_figures(self, study: Any) -> list[tuple[str, Any]]:
         try:
