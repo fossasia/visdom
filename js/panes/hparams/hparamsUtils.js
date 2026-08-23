@@ -7,6 +7,20 @@
  *
  */
 
+import React from 'react';
+
+/*
+ * Shared helpers for the hyper-parameter views, so the ordering and formatting
+ * rules live in one place and can mirror the Python backend exactly. The
+ * comparator matches
+ * visdom.experiments.store._order_key for every value the backend can order --
+ * including booleans, which Python orders by str(value), i.e. "True"/"False"
+ * -- and visdom.experiments.store._sort_pairs for absent values, which sort
+ * last in both directions. NaN is the one deliberate divergence: the backend
+ * leaves it in the ordered bucket, where Python's sort gives it no defined
+ * position, so the table treats it as missing instead.
+ */
+
 const SPINE_LIGHT = [235, 240, 249];
 const SPINE_DARK = [59, 89, 152];
 
@@ -263,6 +277,11 @@ export function cellClass(value, options) {
   );
 }
 
+/*
+ * Numeric param/metric columns only — the axes a scatter matrix (SPLOM) or a
+ * "color by" ramp can actually plot. Tags are excluded (categorical) and any
+ * column whose values are all missing/non-numeric is dropped.
+ */
 export function selectNumericColumns(records, columns) {
   return (columns || []).filter(
     (col) =>
@@ -323,6 +342,13 @@ export function completeRecords(records, cols) {
   );
 }
 
+/*
+ * Build Plotly `parcoords` dimensions. Plotly cannot render null/NaN cells —
+ * one sparse axis corrupts every line -- so callers pass records that already
+ * hold a numeric value on every axis (see completeRecords). Each axis spans its
+ * exact data range; an axis whose values are all equal gets a small symmetric
+ * range so it does not collapse to zero height.
+ */
 export function buildParcoordsDimensions(records, columns, selectedIds) {
   const byId = new Map((columns || []).map((col) => [col.id, col]));
   const dimensions = [];
@@ -577,3 +603,10 @@ export function selectMetricSeries(runs, metricKey, colorIndex) {
   });
   return { plotted, missing };
 }
+
+export const StatusBadge = ({ status }) =>
+  status ? (
+    <span className={'hparams-run-status hparams-status-' + status}>
+      {status}
+    </span>
+  ) : null;

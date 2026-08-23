@@ -812,6 +812,11 @@ def WrapSocketWrapper(BaseWrapper):
 
             if BaseWrapper == VisSocketWrapper and sid is None:
                 new_sub = VisSocketWrapper()
+                # open() logs the peer it is mocking a socket for, so the
+                # wrapper needs a request the same way the subscriber path
+                # below gives it one. Without it every polling client raised
+                # AttributeError here and never got a sid back.
+                new_sub.request = self.request
                 new_sub.initialize(self.app)
                 self.write(json.dumps({"success": True, "sid": new_sub.sid}))
                 return

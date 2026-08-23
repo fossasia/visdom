@@ -7,7 +7,13 @@
  *
  */
 
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 import HParamsCompare from './hparams/HParamsCompare';
 import { downloadJson, exportCsv, exportJson } from './hparams/hparamsExport';
@@ -112,6 +118,18 @@ var HParamsPane = (props) => {
     countActiveFilters(filters, specs) + (tableFilter.trim() ? 1 : 0);
 
   const rowIds = useMemo(() => buildRowIds(records), [records]);
+
+  useEffect(() => {
+    setTableSelected((prev) => {
+      if (prev.size === 0) return prev;
+      const live = new Set(rowIds.values());
+      const next = new Set();
+      prev.forEach((id) => {
+        if (live.has(id)) next.add(id);
+      });
+      return next.size === prev.size ? prev : next;
+    });
+  }, [rowIds]);
 
   const selectionActive = tableSelected.size > 0;
   const selectedVisible = useMemo(

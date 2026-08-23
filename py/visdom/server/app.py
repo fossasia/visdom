@@ -122,7 +122,14 @@ class Application(tornado.web.Application):
                 tornado_settings["cookie_secret"] = fn.read()
 
         tornado_settings["static_url_prefix"] = self.base_url + "/static/"
-        tornado_settings["debug"] = True
+        # A traceback and the raw request are debugging aids, not something to
+        # hand to whoever provoked the error. `debug` was forced on for every
+        # server, which put both on the 500 page -- and, being tornado's debug
+        # flag, also turned on autoreload. Follow the operator's logging level
+        # instead, and keep the two concerns separate.
+        tornado_settings["show_error_details"] = logging.getLogger().isEnabledFor(
+            logging.DEBUG
+        )
         experiments_url = "%s/experiments" % self.base_url
         handlers = [
             (r"%s/events" % self.base_url, PostHandler, {"app": self}),

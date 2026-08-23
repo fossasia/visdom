@@ -7,7 +7,7 @@
  *
  */
 
-import React, { useCallback, useEffect, useMemo } from 'react';
+import React, { useCallback, useMemo } from 'react';
 
 import { ColumnSelect } from './ColumnSelect';
 import {
@@ -21,12 +21,11 @@ import {
   runLabel,
   selectNumericColumns,
   spineStyle,
+  StatusBadge,
 } from './hparamsUtils';
-import StatusBadge from './StatusBadge';
 import useHParamsColumns from './useHParamsColumns';
 
 const RUN_COLUMN_ID = 'run:name';
-
 const NO_SORT = { by: null, dir: null };
 
 function sortGlyph(dir) {
@@ -178,18 +177,6 @@ const HParamsTable = ({
     [colorBy, colorCols]
   );
 
-  useEffect(() => {
-    setSelected((prev) => {
-      if (prev.size === 0) return prev;
-      const live = new Set(rowIds.values());
-      const next = new Set();
-      prev.forEach((id) => {
-        if (live.has(id)) next.add(id);
-      });
-      return next.size === prev.size ? prev : next;
-    });
-  }, [rowIds, setSelected]);
-
   const groupStartIds = useMemo(() => {
     const ids = new Set();
     let prev = null;
@@ -306,7 +293,7 @@ const HParamsTable = ({
         <span className="hparams-sortby">
           sort by:
           <ColumnSelect
-            value={sort.by}
+            value={activeSort.by}
             placeholder="none"
             treeData={sortTreeData}
             onChange={handleSortSelect}
@@ -320,14 +307,14 @@ const HParamsTable = ({
             title={dirLabel}
             aria-label={dirLabel}
           >
-            {sortGlyph(sort.by ? sort.dir : null)}
+            {sortGlyph(activeSort.by ? activeSort.dir : null)}
           </button>
         </span>
         {colorCols.length ? (
           <span className="hparams-colorby">
             color by:
             <ColumnSelect
-              value={colorBy}
+              value={activeColorBy}
               placeholder="none"
               treeData={colorTreeData}
               onChange={setColorBy}
