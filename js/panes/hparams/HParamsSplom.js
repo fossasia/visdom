@@ -7,23 +7,25 @@
  *
  */
 
-import TreeSelect from 'rc-tree-select';
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 
+import HParamsAxisToolbar from './HParamsAxisToolbar';
 import {
-  buildColumns,
-  buildSplomDimensions,
-  groupColumnTree,
-  NUMERIC_GROUPS,
-  numericExtent,
-  runLabel,
-  selectNumericColumns,
+  PLOT_COLORSCALE,
+  plotBaseLayout,
+  plotColorbar,
+  renderPlot,
+  usePlotResize,
+} from './hparamsPlot';
+import {
+  coincidentRuns,
+  formatValue,
+  resolveColor,
   toNumericColumn,
 } from './hparamsUtils';
+import useHParamsAxes from './useHParamsAxes';
 
 const MAX_DIMS = 6;
-
-const SPLOM_COLORSCALE = 'Viridis';
 
 const AXIS_STYLE = {
   showline: true,
@@ -37,44 +39,52 @@ const AXIS_STYLE = {
   automargin: true,
 };
 
-const SNAPSHOT_NOTICE_DELAY = 700;
-
-function notify(message, kind) {
-  const lib = window.Plotly && window.Plotly.Lib;
-  if (lib && typeof lib.notifier === 'function') lib.notifier(message, kind);
+function axisDimIndex(axis) {
+  const id = (axis && (axis._id || axis.id)) || '';
+  const n = parseInt(String(id).replace(/[^0-9]/g, ''), 10);
+  return Number.isNaN(n) ? 0 : n - 1;
 }
 
-function downloadSnapshot(gd) {
-  if (!window.Plotly || typeof window.Plotly.toImage !== 'function') return;
-  let done = false;
-  const timer = setTimeout(() => {
-    if (!done) notify('Taking snapshot - this may take a few seconds', 'long');
-  }, SNAPSHOT_NOTICE_DELAY);
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
 
-  window.Plotly.toImage(gd, {
-    format: 'png',
-    width: gd.offsetWidth || 900,
-    height: gd.offsetHeight || 600,
-  })
-    .then((url) => {
-      done = true;
-      clearTimeout(timer);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = 'hparams_scatter.png';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    })
-    .catch(() => {
-      done = true;
-      clearTimeout(timer);
-      notify('Snapshot failed', 'long');
-    });
+function tipHtml(names, colX, colY, x, y) {
+  const head =
+    names.length > 1 ? names.length + ' runs here' : escapeHtml(names[0]);
+  const list =
+    names.length > 1
+      ? '<ul class="hparams-splom-tip-list">' +
+        names.map((n) => '<li>' + escapeHtml(n) + '</li>').join('') +
+        '</ul>'
+      : '';
+  const coord =
+    colX.id === colY.id
+      ? escapeHtml(colX.label) + ': ' + formatValue(x)
+      : escapeHtml(colX.label) +
+        ': ' +
+        formatValue(x) +
+        '<br>' +
+        escapeHtml(colY.label) +
+        ': ' +
+        formatValue(y);
+  return (
+    '<div class="hparams-splom-tip-head">' +
+    head +
+    '</div>' +
+    list +
+    '<div class="hparams-splom-tip-coord">' +
+    coord +
+    '</div>'
+  );
 }
 
 const HParamsSplom = ({
   records,
+  columnRecords,
   paramKeys,
   metricKeys,
   tagKeys,
@@ -83,115 +93,67 @@ const HParamsSplom = ({
   colorBy,
   onColorBy,
 }) => {
+  const wrapRef = useRef(null);
   const plotRef = useRef(null);
+  const tipRef = useRef(null);
   const prevDimCount = useRef(0);
 
-  const columns = useMemo(
-    () => buildColumns(paramKeys, metricKeys, tagKeys),
-    [paramKeys, metricKeys, tagKeys]
-  );
-  const numericCols = useMemo(
-    () => selectNumericColumns(records, columns),
-    [records, columns]
-  );
+  const {
+    columns,
+    dims: effectiveDims,
+    colorBy: effectiveColorBy,
+    treeData,
+    truncated,
+    hasPlot,
+  } = useHParamsAxes({
+    records,
+    columnRecords,
+    paramKeys,
+    metricKeys,
+    tagKeys,
+    selectedDims,
+    colorBy,
+    maxDims: MAX_DIMS,
+  });
 
-  const effectiveDims = useMemo(() => {
-    const defaults = () => numericCols.slice(0, MAX_DIMS).map((c) => c.id);
-    if (!Array.isArray(selectedDims)) return defaults();
-    const validIds = new Set(numericCols.map((c) => c.id));
-    const ids = selectedDims.filter((id) => validIds.has(id));
-    if (ids.length === 0 && selectedDims.length > 0) return defaults();
-    return ids.slice(0, MAX_DIMS);
-  }, [selectedDims, numericCols]);
-
-  const effectiveColorBy = useMemo(() => {
-    if (!colorBy) return null;
-    return numericCols.some((c) => c.id === colorBy) ? colorBy : null;
-  }, [colorBy, numericCols]);
-
-  const truncated =
-    (selectedDims || []).filter((id) => numericCols.some((c) => c.id === id))
-      .length > MAX_DIMS;
-
-  const treeData = useMemo(
-    () => groupColumnTree(numericCols, NUMERIC_GROUPS),
-    [numericCols]
-  );
-
-  const hasPlot = numericCols.length >= 2;
+  usePlotResize(plotRef);
 
   useEffect(() => {
     const el = plotRef.current;
-    if (!el) return;
-    const isDisplayed = (node) =>
-      !!(node && node.offsetWidth > 0 && node.offsetHeight > 0);
-    const resizeObserver = new ResizeObserver(() => {
-      if (window.Plotly && el._fullLayout && isDisplayed(el)) {
-        window.Plotly.Plots.resize(el);
-      }
+    if (!el || !window.Plotly) return undefined;
+
+    const plotted = [];
+    const dimensions = [];
+    effectiveDims.forEach((id) => {
+      const col = columns.find((c) => c.id === id);
+      if (!col) return;
+      const values = toNumericColumn(records, col.accessor);
+      if (values.every((v) => v === null)) return;
+      plotted.push(col);
+      dimensions.push({ label: col.label, values });
     });
-    resizeObserver.observe(el);
-    return () => {
-      resizeObserver.disconnect();
-      if (window.Plotly && el._fullLayout) window.Plotly.purge(el);
-    };
-  }, []);
-
-  useEffect(() => {
-    const el = plotRef.current;
-    if (!el || !window.Plotly) return;
-
-    const dimensions = buildSplomDimensions(records, columns, effectiveDims);
     if (dimensions.length < 2) {
       window.Plotly.purge(el);
       prevDimCount.current = 0;
-      return;
+      return undefined;
     }
 
-    const names = records.map(runLabel);
-
-    const colorCol = effectiveColorBy
-      ? columns.find((c) => c.id === effectiveColorBy)
-      : null;
-    let colorValues;
-    let colorLabel;
-    let cmin;
-    let cmax;
-    if (colorCol) {
-      colorValues = toNumericColumn(records, colorCol.accessor);
-      colorLabel = colorCol.label;
-      const ext = numericExtent(records, colorCol.accessor);
-      if (ext) {
-        cmin = ext.min;
-        cmax = ext.max;
-      }
-    } else {
-      colorValues = records.map((_, i) => i + 1);
-      colorLabel = 'run order';
-      cmin = 1;
-      cmax = Math.max(records.length, 1);
-    }
+    const color = resolveColor(records, columns, effectiveColorBy);
 
     const data = [
       {
         type: 'splom',
         dimensions,
-        text: names,
-        hovertemplate: '<b>%{text}</b><br>x: %{x}<br>y: %{y}<extra></extra>',
+        hoverinfo: 'none',
         marker: {
           size: 7,
           line: { color: '#ffffff', width: 0.6 },
-          color: colorValues,
-          colorscale: SPLOM_COLORSCALE,
+          color: color.values,
+          colorscale: PLOT_COLORSCALE,
           showscale: true,
-          cmin,
-          cmax,
-          colorbar: {
-            title: { text: colorLabel, side: 'right', font: { size: 11 } },
-            thickness: 12,
-            len: 0.6,
-            outlinewidth: 0,
-          },
+          cmin: color.cmin,
+          cmax: color.cmax,
+          colorbar: plotColorbar(color.label),
         },
         diagonal: { visible: true },
         showupperhalf: true,
@@ -201,13 +163,11 @@ const HParamsSplom = ({
     ];
 
     const layout = {
+      ...plotBaseLayout(),
       margin: { l: 60, r: 20, t: 34, b: 44 },
       dragmode: 'select',
       hovermode: 'closest',
       showlegend: false,
-      font: { family: '"Open Sans", sans-serif', size: 11, color: '#333' },
-      paper_bgcolor: '#ffffff',
-      plot_bgcolor: '#ffffff',
       datarevision:
         effectiveDims.join('|') +
         '::' +
@@ -226,41 +186,55 @@ const HParamsSplom = ({
     }
     prevDimCount.current = dimensions.length;
 
-    const config = {
-      showLink: false,
-      displaylogo: false,
-      responsive: true,
-      doubleClick: 'reset',
+    const hideTip = () => {
+      if (tipRef.current) tipRef.current.style.display = 'none';
     };
-    const cameraIcon = window.Plotly.Icons && window.Plotly.Icons.camera;
-    if (cameraIcon) {
-      config.modeBarButtonsToRemove = ['toImage'];
-      config.modeBarButtonsToAdd = [
-        {
-          name: 'downloadPng',
-          title: 'Download plot as PNG',
-          icon: cameraIcon,
-          click: downloadSnapshot,
-        },
-      ];
-    }
+    const showTip = (ev) => {
+      const tip = tipRef.current;
+      const wrap = wrapRef.current;
+      if (!tip || !wrap || !ev || !ev.points || !ev.points.length) return;
+      const p = ev.points[0];
+      const colX = plotted[axisDimIndex(p.xaxis)];
+      const colY = plotted[axisDimIndex(p.yaxis)];
+      if (!colX || !colY) return;
+      const names = coincidentRuns(records, colX, colY, p.x, p.y);
+      if (names.length === 0) return;
 
-    try {
-      window.Plotly.react(el, data, layout, config)
-        .then(() => {
-          if (el._fullLayout && el.offsetWidth > 0) {
-            window.Plotly.Plots.resize(el);
-          }
-        })
-        .catch(() => window.Plotly.purge(el));
-    } catch (e) {
-      window.Plotly.purge(el);
-    }
+      tip.innerHTML = tipHtml(names, colX, colY, p.x, p.y);
+      tip.style.display = 'block';
+      const rect = wrap.getBoundingClientRect();
+      const me = ev.event;
+      let left = (me ? me.clientX - rect.left : 0) + 14;
+      let top = (me ? me.clientY - rect.top : 0) + 12;
+      if (left + tip.offsetWidth > wrap.clientWidth) {
+        left = wrap.clientWidth - tip.offsetWidth - 6;
+      }
+      if (top + tip.offsetHeight > wrap.clientHeight) {
+        top = wrap.clientHeight - tip.offsetHeight - 6;
+      }
+      tip.style.left = Math.max(0, left) + 'px';
+      tip.style.top = Math.max(0, top) + 'px';
+    };
+
+    renderPlot(el, data, layout, 'hparams_scatter.png', (gd) => {
+      if (!gd || typeof gd.on !== 'function') return;
+      if (gd.removeAllListeners) {
+        gd.removeAllListeners('plotly_hover');
+        gd.removeAllListeners('plotly_unhover');
+      }
+      gd.on('plotly_hover', showTip);
+      gd.on('plotly_unhover', hideTip);
+    });
+
+    return () => {
+      const gd = plotRef.current;
+      if (gd && gd.removeAllListeners) {
+        gd.removeAllListeners('plotly_hover');
+        gd.removeAllListeners('plotly_unhover');
+      }
+      hideTip();
+    };
   }, [records, columns, effectiveDims, effectiveColorBy]);
-
-  const handleDims = (value) => {
-    onSelectedDims(Array.isArray(value) ? value.slice(0, MAX_DIMS) : []);
-  };
 
   if (!hasPlot) {
     return (
@@ -273,48 +247,23 @@ const HParamsSplom = ({
   }
 
   return (
-    <div className="hparams-splom-wrap">
-      <div className="hparams-toolbar">
-        <span className="hparams-sortby">
-          dimensions:
-          <TreeSelect
-            className="hparams-treeselect hparams-select-wide"
-            value={effectiveDims}
-            placeholder="pick axes"
-            treeCheckable
-            multiple
-            showCheckedStrategy="SHOW_CHILD"
-            treeLine
-            treeDefaultExpandAll
-            maxTagCount={3}
-            dropdownMatchSelectWidth={false}
-            treeData={treeData}
-            onChange={handleDims}
-            aria-label="Scatter matrix dimensions"
-          />
-        </span>
-        <span className="hparams-colorby">
-          color by:
-          <TreeSelect
-            className="hparams-treeselect hparams-select-narrow"
-            value={effectiveColorBy || undefined}
-            placeholder="none"
-            allowClear
-            treeLine
-            treeDefaultExpandAll
-            dropdownMatchSelectWidth={false}
-            treeData={treeData}
-            onChange={(value) => onColorBy(value || null)}
-            aria-label="Color scatter matrix by"
-          />
-        </span>
-        {truncated ? (
-          <span className="hparams-splom-note">showing first {MAX_DIMS}</span>
-        ) : null}
-      </div>
+    <div className="hparams-splom-wrap" ref={wrapRef}>
+      <HParamsAxisToolbar
+        axesLabel="dimensions"
+        axesName="scatter matrix"
+        colorFallback="none"
+        treeData={treeData}
+        dims={effectiveDims}
+        onDims={onSelectedDims}
+        colorBy={effectiveColorBy}
+        onColorBy={onColorBy}
+        maxDims={MAX_DIMS}
+        note={truncated ? 'showing first ' + MAX_DIMS : null}
+      />
       <div className="hparams-splom-plot" ref={plotRef} />
+      <div className="hparams-splom-tip" ref={tipRef} />
       {effectiveDims.length < 2 ? (
-        <div className="hparams-splom-overlay">
+        <div className="hparams-plot-overlay">
           Select at least two dimensions to plot.
         </div>
       ) : null}
@@ -322,4 +271,4 @@ const HParamsSplom = ({
   );
 };
 
-export default HParamsSplom;
+export default React.memo(HParamsSplom);

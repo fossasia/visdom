@@ -7,16 +7,32 @@
  *
  */
 
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
+import HParamsCompare from './hparams/HParamsCompare';
+import HParamsFilters from './hparams/HParamsFilters';
+import HParamsParallelCoords from './hparams/HParamsParallelCoords';
 import HParamsSplom from './hparams/HParamsSplom';
 import HParamsTable from './hparams/HParamsTable';
+import {
+  applyFilters,
+  buildColumns,
+  buildFilterSpecs,
+  buildRowIds,
+  collectStatuses,
+  countActiveFilters,
+  filterRecords,
+} from './hparams/hparamsUtils';
 import Pane from './Pane';
 
 const VIEWS = [
   { key: 'table', label: 'Table' },
+  { key: 'parcoords', label: 'Parallel coordinates' },
   { key: 'splom', label: 'Scatter matrix' },
+  { key: 'compare', label: 'Compare' },
 ];
+
+const NO_RECORDS = [];
 
 function readContent(content) {
   if (!content || typeof content !== 'object' || Array.isArray(content)) {
@@ -36,7 +52,7 @@ function readContent(content) {
 
 var HParamsPane = (props) => {
   const { content } = props;
-  const data = readContent(content);
+  const data = useMemo(() => readContent(content), [content]);
   const [view, setView] = useState('table');
   const [tableSort, setTableSort] = useState({ by: null, dir: null });
   const [tableFilter, setTableFilter] = useState('');
@@ -44,8 +60,62 @@ var HParamsPane = (props) => {
   const [tableSelected, setTableSelected] = useState(() => new Set());
   const [splomDims, setSplomDims] = useState(null);
   const [splomColorBy, setSplomColorBy] = useState(null);
+  const [parcoordsDims, setParcoordsDims] = useState(null);
+  const [parcoordsColorBy, setParcoordsColorBy] = useState(null);
+  const [filtersOpen, setFiltersOpen] = useState(true);
+  const [filters, setFilters] = useState({ statuses: [], columns: {} });
 
-  const handleDownload = () => {
+  const records = data ? data.records : NO_RECORDS;
+  const columns = useMemo(
+    () =>
+      data ? buildColumns(data.paramKeys, data.metricKeys, data.tagKeys) : [],
+    [data]
+  );
+  const specs = useMemo(
+    () => buildFilterSpecs(records, columns),
+    [records, columns]
+  );
+  const statuses = useMemo(() => collectStatuses(records), [records]);
+  const visibleRecords = useMemo(
+    () =>
+      applyFilters(
+        filterRecords(records, tableFilter, columns),
+        specs,
+        filters
+      ),
+    [records, tableFilter, columns, specs, filters]
+  );
+  const activeFilters =
+    countActiveFilters(filters, specs) + (tableFilter.trim() ? 1 : 0);
+
+  const rowIds = useMemo(() => buildRowIds(records), [records]);
+
+  useEffect(() => {
+    setTableSelected((prev) => {
+      if (prev.size === 0) return prev;
+      const live = new Set(rowIds.values());
+      const next = new Set();
+      prev.forEach((id) => {
+        if (live.has(id)) next.add(id);
+      });
+      return next.size === prev.size ? prev : next;
+    });
+  }, [rowIds]);
+
+  const selectionActive = tableSelected.size > 0;
+  const selectedVisible = useMemo(
+    () =>
+      selectionActive
+        ? visibleRecords.filter((r) => tableSelected.has(rowIds.get(r)))
+        : visibleRecords,
+    [selectionActive, visibleRecords, tableSelected, rowIds]
+  );
+  const clearSelection = useCallback(() => setTableSelected(new Set()), []);
+  const closeFilters = useCallback(() => setFiltersOpen(false), []);
+
+  const comparisonRecords = selectionActive ? selectedVisible : NO_RECORDS;
+
+  const handleDownload = useCallback(() => {
     let blob = new Blob([JSON.stringify(content)], {
       type: 'application/json',
     });
@@ -54,7 +124,7 @@ var HParamsPane = (props) => {
     link.download = 'visdom_hparams.json';
     link.href = url;
     link.click();
-  };
+  }, [content]);
 
   let body;
   if (data === null) {
@@ -85,6 +155,25 @@ var HParamsPane = (props) => {
           <span className="hparams-stat">
             <b>{data.tagKeys.length}</b> tags
           </span>
+          {visibleRecords.length !== records.length ? (
+            <span className="hparams-stat hparams-stat-filtered">
+              showing <b>{visibleRecords.length}</b> of {records.length}
+            </span>
+          ) : null}
+          {selectionActive ? (
+            <span className="hparams-stat hparams-stat-selected">
+              <b>{tableSelected.size}</b> selected for plots
+              <button
+                type="button"
+                className="hparams-chip-clear"
+                onClick={clearSelection}
+                aria-label="Clear selection"
+                title="Clear selection"
+              >
+                ×
+              </button>
+            </span>
+          ) : null}
         </div>
         <div className="hparams-views">
           <div className="hparams-viewtabs" role="tablist">
@@ -103,34 +192,130 @@ var HParamsPane = (props) => {
                 {v.label}
               </button>
             ))}
+            <span className="hparams-viewtools">
+              <input
+                type="text"
+                className="hparams-filter"
+                placeholder="Search runs…"
+                value={tableFilter}
+                onChange={(e) => setTableFilter(e.target.value)}
+                aria-label="Search runs"
+              />
+              <button
+                type="button"
+                className={
+                  'hparams-filters-toggle' +
+                  (filtersOpen ? ' hparams-filters-toggle-active' : '')
+                }
+                onClick={() => setFiltersOpen((open) => !open)}
+                aria-expanded={filtersOpen}
+                title="Filter runs across every view"
+              >
+                Filters{activeFilters ? ' (' + activeFilters + ')' : ''}
+              </button>
+            </span>
           </div>
-          {view === 'splom' ? (
-            <HParamsSplom
-              records={data.records}
-              paramKeys={data.paramKeys}
-              metricKeys={data.metricKeys}
-              tagKeys={data.tagKeys}
-              selectedDims={splomDims}
-              onSelectedDims={setSplomDims}
-              colorBy={splomColorBy}
-              onColorBy={setSplomColorBy}
-            />
-          ) : (
-            <HParamsTable
-              records={data.records}
-              paramKeys={data.paramKeys}
-              metricKeys={data.metricKeys}
-              tagKeys={data.tagKeys}
-              sort={tableSort}
-              setSort={setTableSort}
-              filter={tableFilter}
-              setFilter={setTableFilter}
-              colorBy={tableColorBy}
-              setColorBy={setTableColorBy}
-              selected={tableSelected}
-              setSelected={setTableSelected}
-            />
-          )}
+          <div className="hparams-layout">
+            {filtersOpen ? (
+              <HParamsFilters
+                specs={specs}
+                statuses={statuses}
+                filters={filters}
+                setFilters={setFilters}
+                setSearch={setTableFilter}
+                onClose={closeFilters}
+                visibleCount={visibleRecords.length}
+                totalCount={records.length}
+              />
+            ) : null}
+            {(() => {
+              if (visibleRecords.length === 0) {
+                return (
+                  <div className="hparams-message hparams-empty">
+                    No runs match your filters.
+                  </div>
+                );
+              }
+              const isPlot = view === 'splom' || view === 'parcoords';
+              const plotRecords =
+                isPlot && selectionActive ? selectedVisible : visibleRecords;
+              const viewProps = {
+                columnRecords: records,
+                rowIds,
+                paramKeys: data.paramKeys,
+                metricKeys: data.metricKeys,
+                tagKeys: data.tagKeys,
+              };
+
+              if (view === 'compare')
+                return (
+                  <HParamsCompare {...viewProps} records={comparisonRecords} />
+                );
+
+              let viewEl;
+              if (view === 'splom')
+                viewEl = (
+                  <HParamsSplom
+                    {...viewProps}
+                    records={plotRecords}
+                    selectedDims={splomDims}
+                    onSelectedDims={setSplomDims}
+                    colorBy={splomColorBy}
+                    onColorBy={setSplomColorBy}
+                  />
+                );
+              else if (view === 'parcoords')
+                viewEl = (
+                  <HParamsParallelCoords
+                    {...viewProps}
+                    records={plotRecords}
+                    selectedDims={parcoordsDims}
+                    onSelectedDims={setParcoordsDims}
+                    colorBy={parcoordsColorBy}
+                    onColorBy={setParcoordsColorBy}
+                  />
+                );
+              else
+                viewEl = (
+                  <HParamsTable
+                    {...viewProps}
+                    records={visibleRecords}
+                    sort={tableSort}
+                    setSort={setTableSort}
+                    colorBy={tableColorBy}
+                    setColorBy={setTableColorBy}
+                    selected={tableSelected}
+                    setSelected={setTableSelected}
+                  />
+                );
+
+              if (!isPlot || !selectionActive) return viewEl;
+              return (
+                <div className="hparams-plot-area">
+                  <div className="hparams-selection-banner">
+                    <span>
+                      Plotting <b>{plotRecords.length}</b> selected{' '}
+                      {plotRecords.length === 1 ? 'run' : 'runs'}
+                    </span>
+                    <button
+                      type="button"
+                      className="hparams-link-btn"
+                      onClick={clearSelection}
+                    >
+                      Show all
+                    </button>
+                  </div>
+                  {plotRecords.length === 0 ? (
+                    <div className="hparams-message hparams-empty">
+                      Every selected run is hidden by the current filters.
+                    </div>
+                  ) : (
+                    viewEl
+                  )}
+                </div>
+              );
+            })()}
+          </div>
         </div>
       </div>
     );
