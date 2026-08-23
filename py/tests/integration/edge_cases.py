@@ -15,6 +15,7 @@ missing envs and windows, twenty creations in a row, empty and enormous and
 markup-bearing content, and the pages that render straight from state.
 """
 
+import logging
 import os
 import unittest
 
@@ -142,6 +143,59 @@ class TestDeleteMissingEnv(VisdomHTTPTestCase):
 
     def test_deleting_a_none_env_is_a_no_op(self):
         self.assertEqual(self.post_json("/delete_env", {"eid": None}).code, 200)
+
+
+class TestErrorPageDetails(VisdomHTTPTestCase):
+    """What a 500 tells the client on an ordinary server.
+
+    The error page renders the exception, its traceback and the request the
+    handler was serving whenever the app is built with error details on. That
+    used to be unconditional, so ``error.html``'s own "what happened" branch
+    for a production server was unreachable.
+    """
+
+    def test_the_status_is_still_reported(self):
+        body = self.fetch("/error/500").body.decode()
+
+        self.assertIn("500", body)
+        self.assertIn("Internal Server Error", body)
+
+    def test_the_production_message_is_shown_instead(self):
+        self.assertIn("What happened", self.fetch("/error/500").body.decode())
+
+    def test_the_traceback_is_not_rendered(self):
+        self.assertNotIn("Traceback", self.fetch("/error/500").body.decode())
+
+    def test_the_source_paths_are_not_rendered(self):
+        self.assertNotIn("web_handlers.py", self.fetch("/error/500").body.decode())
+
+    def test_the_request_is_not_rendered(self):
+        body = self.fetch("/error/500").body.decode()
+
+        self.assertNotIn("Remote IP", body)
+        self.assertNotIn("127.0.0.1", body)
+
+
+class TestErrorPageUnderDebugLogging(VisdomHTTPTestCase):
+    """``-logging_level DEBUG`` is the operator asking for the detail back."""
+
+    def get_app(self):
+        root = logging.getLogger()
+        previous = root.level
+        root.setLevel(logging.DEBUG)
+        try:
+            return super().get_app()
+        finally:
+            root.setLevel(previous)
+
+    def test_the_traceback_is_rendered(self):
+        self.assertIn("Traceback", self.fetch("/error/500").body.decode())
+
+    def test_the_request_is_rendered(self):
+        body = self.fetch("/error/500").body.decode()
+
+        self.assertIn("Remote IP", body)
+        self.assertIn("127.0.0.1", body)
 
 
 class TestRenderedPages(VisdomHTTPTestCase):
