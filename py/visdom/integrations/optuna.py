@@ -188,8 +188,8 @@ class OptunaCallback:
 
     def __call__(self, study: Any, trial: Any) -> None:
         """Record the completed ``trial`` without affecting optimization by default."""
-        payload = self._build_payload(study, trial)
         try:
+            payload = self._build_payload(study, trial)
             self.viz.experiment(
                 name=payload["name"],
                 params=payload["params"],
