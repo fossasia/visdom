@@ -48,6 +48,7 @@ TRACKED_ASSETS = [
     os.path.join("css", "network.css"),
     os.path.join("css", "hparams.css"),
     os.path.join("css", "rc-tree-select-overrides.css"),
+    os.path.join("css", "rc-slider-overrides.css"),
 ]
 
 # Fetched by download_scripts() at first run; absent in a plain checkout.
