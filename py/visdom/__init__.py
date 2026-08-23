@@ -1308,7 +1308,7 @@ class Visdom(object):
                 "tags": dict(tags),
                 "append": append,
             },
-            "tags",
+            "experiments/tags",
         )
 
     def get_tags(self, env=None):
@@ -1319,7 +1319,7 @@ class Visdom(object):
         """
         return self._experiment_request(
             {"action": "get", "eid": env if env is not None else self.env},
-            "tags",
+            "experiments/tags",
         )
 
     def search_experiments(

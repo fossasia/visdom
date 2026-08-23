@@ -142,7 +142,6 @@ class Application(tornado.web.Application):
             (r"%s/log" % experiments_url, ExperimentLogHandler, {"app": self}),
             (r"%s/search" % experiments_url, ExperimentSearchHandler, {"app": self}),
             (r"%s/compare" % experiments_url, ExperimentCompareHandler, {"app": self}),
-            (r"%s/tags" % self.base_url, TagsHandler, {"app": self}),
             (r"%s/suggest" % experiments_url, ExperimentSuggestHandler, {"app": self}),
             (r"%s/hparams" % experiments_url, ExperimentHparamsHandler, {"app": self}),
             (r"%s/tags" % experiments_url, TagsHandler, {"app": self}),
