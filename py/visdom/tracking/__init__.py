@@ -6,6 +6,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+
 from visdom.tracking.core import (
     DEFAULT_OUT_DIR,
     RunAlreadyFinishedError,
@@ -15,6 +16,7 @@ from visdom.tracking.core import (
     STATUS_RUNNING,
     STATUS_UNFINISHED,
 )
+from visdom.tracking.graphs import GRAPH_METHODS, NON_GRAPH_METHODS, TrackedVisdom
 
 __all__ = [
     "RunTracker",
@@ -24,4 +26,7 @@ __all__ = [
     "STATUS_FINISHED",
     "STATUS_FAILED",
     "STATUS_UNFINISHED",
+    "TrackedVisdom",
+    "GRAPH_METHODS",
+    "NON_GRAPH_METHODS",
 ]

@@ -220,9 +220,9 @@ class TestReviewRegressions(unittest.TestCase):
                 raise RuntimeError("boom, cannot even str() me")
 
         run = RunTracker("exp", out_dir=self.out_dir)
-        run.log_event("bad", obj=Unstringable())
-        run.log_event("good", epoch=1)
-        run.finish()
+        run.log_event("bad", obj=Unstringable())  # must not raise
+        run.log_event("good", epoch=1)  # must still succeed afterwards
+        run.finish()  # must still succeed afterwards
 
         data = json.load(open(run.path))
         self.assertEqual(data["status"], RunTracker.STATUS_FINISHED)
@@ -251,7 +251,7 @@ class TestReviewRegressions(unittest.TestCase):
         self.assertLess(size_at_300, size_at_30 * 2)
 
         data = json.load(open(run.path))
-        self.assertEqual(data["event_count"], 302)
+        self.assertEqual(data["event_count"], 302)  # created + 300 steps + finish
         self.assertLessEqual(len(data["recent_events"]), 10)
 
         events_path = os.path.join(self.out_dir, data["events_file"])
@@ -308,6 +308,153 @@ class TestReviewRegressions(unittest.TestCase):
         data = json.load(open(run.path))
         self.assertEqual(data["params"], {"layers": [1, 2, 3]})
         self.assertNotIn("new_key", data["params"])
+
+    def test_failed_finish_write_rolls_back_status_and_allows_retry(self):
+        """Previously: self.status flipped to a terminal value in memory
+        *before* the write that was supposed to persist it. If that write
+        failed, the object permanently lied about its own state: retrying
+        finish() raised RunAlreadyFinishedError (since status already
+        looked terminal), and the atexit safety net silently no-op'd for
+        the same reason -- the on-disk file was stuck at "running" forever
+        with no path to ever correct it."""
+        run = RunTracker("exp", out_dir=self.out_dir)
+
+        with patch("visdom.tracking.core.os.replace", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                run.finish()
+
+        # In-memory state must reflect what's actually durable on disk,
+        # not what we merely attempted.
+        self.assertEqual(run.status, RunTracker.STATUS_RUNNING)
+        on_disk = json.load(open(run.path))
+        self.assertEqual(on_disk["status"], RunTracker.STATUS_RUNNING)
+
+        # A retry (disk "fixed" now) must be allowed, not rejected as
+        # already-finished.
+        run.finish()
+        self.assertEqual(run.status, RunTracker.STATUS_FINISHED)
+        on_disk_after = json.load(open(run.path))
+        self.assertEqual(on_disk_after["status"], RunTracker.STATUS_FINISHED)
+
+    def test_atexit_still_recovers_after_a_failed_finish_attempt(self):
+        """Companion to the above: if a failed finish() is never retried,
+        the atexit safety net must still be able to mark the run
+        unfinished, rather than seeing an incorrectly-terminal in-memory
+        status and skipping it."""
+        run = RunTracker("exp", out_dir=self.out_dir)
+
+        with patch("visdom.tracking.core.os.replace", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                run.finish()
+
+        run._atexit_finalize()
+        data = json.load(open(run.path))
+        self.assertEqual(data["status"], RunTracker.STATUS_UNFINISHED)
+
+    def test_failed_set_param_write_rolls_back_the_param(self):
+        """Same class of bug as finish(): self.params must not claim a
+        value that was never actually persisted."""
+        run = RunTracker("exp", params={"lr": 0.01}, out_dir=self.out_dir)
+
+        with patch("visdom.tracking.core.os.replace", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                run.set_param("lr", 0.999)
+
+        self.assertEqual(run.params["lr"], 0.01)  # rolled back, not 0.999
+        run.finish()
+        data = json.load(open(run.path))
+        self.assertEqual(data["params"]["lr"], 0.01)
+
+    def test_failed_log_event_write_does_not_advance_event_count(self):
+        """The event-counter analogue: if the durable .jsonl append itself
+        fails, event_count/recent_events must not advance either -- they'd
+        otherwise claim an event exists that was never actually written
+        anywhere."""
+        run = RunTracker("exp", out_dir=self.out_dir)
+        count_before = run.event_count
+
+        with patch("visdom.tracking.core.open", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                run.log_event("will_not_persist")
+
+        self.assertEqual(run.event_count, count_before)
+        run.finish()
+
+    def test_failed_finish_write_leaves_no_phantom_event_in_jsonl(self):
+        """Follow-up to the two tests above: a failed finish() must not
+        leave a status_change line in the .jsonl log that doesn't match
+        the (correctly rolled-back-to-running) status. This used to
+        happen because the old _add_event() durably appended to .jsonl as
+        a side effect of just building the event, before the metadata
+        write was even attempted -- so a failed metadata write still left
+        that append committed. The write-then-commit design (build the
+        event, attempt the metadata write with it included, only append
+        to .jsonl after that succeeds) closes this gap: if the metadata
+        write fails, the event was never appended anywhere at all."""
+        run = RunTracker("exp", out_dir=self.out_dir)
+
+        with patch("visdom.tracking.core.os.replace", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                run.finish()
+
+        events_after_failure = [json.loads(l) for l in open(run.events_path)]
+        self.assertEqual([e["type"] for e in events_after_failure], ["created"])
+        self.assertEqual(run.event_count, 1)  # not 2 -- the attempt didn't count
+
+        run.finish()  # retry, disk "fixed"
+
+        events_after_retry = [json.loads(l) for l in open(run.events_path)]
+        self.assertEqual(
+            [e["type"] for e in events_after_retry], ["created", "status_change"]
+        )  # exactly one status_change, not two
+
+    def test_failed_init_write_leaves_no_orphaned_jsonl_file(self):
+        """Companion for __init__ specifically: if the very first metadata
+        write fails, the constructor raises and no RunTracker is ever
+        returned -- but the old design still durably appended the
+        "created" event to .jsonl as a side effect of _add_event() before
+        _write() was attempted, leaving an orphaned .events.jsonl file
+        with no matching .json and no object anyone holds a reference to.
+        The write-then-commit ordering means nothing is appended until
+        after the metadata write succeeds, so a failure here should leave
+        the output directory completely empty."""
+        with patch("visdom.tracking.core.os.replace", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                RunTracker("exp", out_dir=self.out_dir)
+
+        self.assertEqual(os.listdir(self.out_dir), [])
+
+    def test_jsonl_append_failure_after_committed_metadata_does_not_corrupt_state(
+        self,
+    ):
+        """The one gap the write-then-commit design does NOT close (and
+        documents rather than hides): if the metadata write succeeds but
+        the subsequent .jsonl append then fails, self.status/self.params
+        are already correctly committed (metadata -- the source of truth
+        -- says so too), so finish() still "worked" from a correctness
+        standpoint even though this call raises. Confirms that outcome is
+        self-consistent rather than silently wrong: status is genuinely
+        terminal, a further finish() call is correctly rejected (not
+        because of a bug, but because the run really did finish), and the
+        metadata file matches self.status exactly."""
+        run = RunTracker("exp", out_dir=self.out_dir)
+
+        with patch.object(
+            RunTracker, "_append_event_line", side_effect=OSError("disk full")
+        ):
+            with self.assertRaises(OSError):
+                run.finish()
+
+        # The metadata write (source of truth) already succeeded before
+        # the patched call, so status really is terminal now.
+        self.assertEqual(run.status, RunTracker.STATUS_FINISHED)
+        on_disk = json.load(open(run.path))
+        self.assertEqual(on_disk["status"], RunTracker.STATUS_FINISHED)
+
+        # A further finish() call is correctly rejected -- the run
+        # genuinely did finish, this isn't the bug from before.
+        with self.assertRaises(RunAlreadyFinishedError):
+            run.finish()
 
     def test_tmp_file_is_cleaned_up_if_write_fails(self):
         """Previously: if json.dump/os.replace failed partway through
