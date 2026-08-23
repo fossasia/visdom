@@ -260,19 +260,21 @@ class RunTracker:
     def _add_event(self, event_type: str, data: Optional[dict] = None) -> dict:
         now_wall = time.time()
         now_mono = time.monotonic()
-        self.event_count += 1
+        seq = self.event_count + 1
         event = {
-            "seq": self.event_count,
+            "seq": seq,
             "type": event_type,
             "time": now_wall,
             "delta_from_start": round(now_mono - self._start_monotonic, 6),
             "delta_from_prev": round(now_mono - self._last_event_monotonic, 6),
         }
-        self._last_event_monotonic = now_mono
         if data:
             event["data"] = _json_safe(data)
-        self._recent_events.append(event)
+
         self._append_event_line(event)
+        self.event_count = seq
+        self._last_event_monotonic = now_mono
+        self._recent_events.append(event)
         return event
 
     def _append_event_line(self, event: dict) -> None:
@@ -305,10 +307,22 @@ class RunTracker:
         """Record/replace a parameter value, timestamped as an event too."""
         with self._lock:
             self._reject_if_terminal("set a param on")
+            key = str(key)
+            had_key = key in self.params
+            prev_value = self.params.get(key)
             safe_value = _json_safe(value)
-            self.params[str(key)] = safe_value
-            self._add_event("param_set", {"key": key, "value": safe_value})
-            self._write()
+            self.params[key] = safe_value
+            try:
+                self._add_event("param_set", {"key": key, "value": safe_value})
+                self._write()
+            except Exception:
+                # Same reasoning as _finish_locked: don't let self.params
+                # claim a value that was never actually persisted.
+                if had_key:
+                    self.params[key] = prev_value
+                else:
+                    self.params.pop(key, None)
+                raise
 
     # lifecycle
 
@@ -341,12 +355,24 @@ class RunTracker:
             self._finish_locked(status, reason)
 
     def _finish_locked(self, status: str, reason: Optional[str]) -> None:
+        prev_status = self.status
+        prev_reason = self.stop_reason
+        prev_end_time = self.end_time
+        prev_end_monotonic = self._end_monotonic
+
         self.status = status
         self.stop_reason = reason
         self.end_time = time.time()
         self._end_monotonic = time.monotonic()
-        self._add_event("status_change", {"status": status, "reason": reason})
-        self._write()
+        try:
+            self._add_event("status_change", {"status": status, "reason": reason})
+            self._write()
+        except Exception:
+            self.status = prev_status
+            self.stop_reason = prev_reason
+            self.end_time = prev_end_time
+            self._end_monotonic = prev_end_monotonic
+            raise
         try:
             atexit.unregister(self._atexit_finalize)
         except Exception:
