@@ -40,16 +40,18 @@ STATUS_FINISHED = "finished"
 STATUS_FAILED = "failed"
 STATUS_UNFINISHED = "unfinished"
 
-
+# Terminal states: once set, a run's record is frozen.
 _TERMINAL_STATUSES = (STATUS_FINISHED, STATUS_FAILED, STATUS_UNFINISHED)
 
 DEFAULT_OUT_DIR = "visdom_runs"
-
 
 DEFAULT_RECENT_EVENTS_LIMIT = 50
 
 
 _MAX_SLUG_LEN = 100
+
+
+_UNSET = object()
 
 
 class RunAlreadyFinishedError(Exception):
@@ -249,20 +251,52 @@ class RunTracker:
         self.event_count = 0
         self._last_event_monotonic = self._start_monotonic
 
-        ensure_dir_exists(out_dir)
-        self._add_event("created", {"params": self.params, "tags": self.tags})
-        self._write()
+        # Per-window bookkeeping for log_plot_update (see tracking.graphs):
+        # lets us report "this is the Nth update to window 'loss', arriving
+        # M seconds after the (N-1)th" without the caller having to track
+        # any of that themselves.
+        self._window_update_count: dict = {}
+        self._window_last_update_monotonic: dict = {}
 
+        ensure_dir_exists(out_dir)
+        # Write-then-commit: build the "created" event but don't touch
+        # jsonl or any counters yet. Attempt the metadata write first; only
+        # if THAT succeeds do we commit anything, so a failure here leaves
+        # zero files behind instead of an orphaned .events.jsonl with no
+        # matching .json (see _build_event/_commit_event below).
+        event, now_mono = self._build_event(
+            "created", {"params": self.params, "tags": self.tags}
+        )
+        self._write(self.to_dict(pending_event=event))
+        self._commit_event(event, now_mono)
+        self._append_event_line(event)
+
+        # Belt-and-braces: if the process ends without finish() ever being
+        # called (crash, uncaught signal, forgotten call), leave the record
+        # as "unfinished" rather than a permanently-stale "running". This
+        # keeps a reference to self alive until finish()/atexit fires -- see
+        # the module docstring's note on always finishing runs explicitly.
         atexit.register(self._atexit_finalize)
 
     # recording
 
-    def _add_event(self, event_type: str, data: Optional[dict] = None) -> dict:
+    def _build_event(self, event_type: str, data: Optional[dict] = None):
+        """Build a candidate event, deliberately without touching any of
+        self's state yet.
+
+        Returns ``(event, now_monotonic)``. Callers persist ``event`` via
+        ``to_dict(pending_event=event)`` / ``_write()`` *first*; only once
+        that succeeds do they call :meth:`_commit_event` to make it count
+        in memory, then append it to the durable ``.jsonl`` log. This
+        write-then-commit ordering is what makes the rollback logic this
+        module used to need (snapshot fields, restore them in an
+        ``except``) unnecessary: if the write never happens, self was
+        never mutated in the first place, so there's nothing to undo.
+        """
         now_wall = time.time()
         now_mono = time.monotonic()
-        seq = self.event_count + 1
         event = {
-            "seq": seq,
+            "seq": self.event_count + 1,
             "type": event_type,
             "time": now_wall,
             "delta_from_start": round(now_mono - self._start_monotonic, 6),
@@ -270,20 +304,34 @@ class RunTracker:
         }
         if data:
             event["data"] = _json_safe(data)
+        return event, now_mono
 
-        self._append_event_line(event)
-        self.event_count = seq
+    def _commit_event(self, event: dict, now_mono: float) -> None:
+        """Record an event in memory. Only ever call this *after* the
+        metadata write that included it (via ``pending_event``) has
+        already succeeded -- see :meth:`_build_event`.
+        """
+        self.event_count = event["seq"]
         self._last_event_monotonic = now_mono
         self._recent_events.append(event)
-        return event
 
     def _append_event_line(self, event: dict) -> None:
         """Append one event as a JSON line to the full on-disk timeline.
 
         O(1) in the number of events logged so far -- this is what keeps
         ``log_event`` cheap across very long runs, unlike rewriting the
-        whole file (which the metadata file below intentionally avoids
-        doing with the full event history).
+        whole file (which the metadata file intentionally avoids doing
+        with the full event history -- see ``to_dict``).
+
+        Always called *after* the metadata write already succeeded (see
+        ``log_event``/``set_param``/``_finish_locked``), so the metadata
+        file -- the source of truth for ``status``/``params``/
+        ``event_count`` -- is never left inconsistent by a failure here.
+        The narrow remaining gap: if this specific call fails, the
+        ``.jsonl`` full history can be missing the line for an event the
+        metadata file already confirms happened. That's a real but minor
+        limitation (documented in the module docstring) rather than
+        something silently swept under the rug.
         """
         line = json.dumps(event, default=str) + "\n"
         with open(self.events_path, "a") as f:
@@ -296,33 +344,105 @@ class RunTracker:
         part won't catch on their own, e.g. ``run.log_event("epoch_end",
         epoch=3, loss=0.21)``. Every call records how long it's been since
         the run started and since the previous event.
+
+        Note: in the rare case where the metadata write succeeds but the
+        subsequent ``.jsonl`` append then fails, this can raise even
+        though the event was already durably recorded in the metadata
+        file's ``event_count``/``recent_events``. The full ``.jsonl``
+        history may be missing this one line in that specific case.
         """
         with self._lock:
             self._reject_if_terminal("log an event on")
-            event = self._add_event(event_type, data)
-            self._write()
+            event, now_mono = self._build_event(event_type, data)
+            # Attempt the durable write with this event included *before*
+            # touching self.event_count/_recent_events. If this raises,
+            # self is untouched -- no rollback needed, log_event can just
+            # be called again.
+            self._write(self.to_dict(pending_event=event))
+            self._commit_event(event, now_mono)
+            self._append_event_line(event)
         return event
 
     def set_param(self, key: str, value: Any) -> None:
-        """Record/replace a parameter value, timestamped as an event too."""
+        """Record/replace a parameter value, timestamped as an event too.
+
+        Note: as with :meth:`log_event`, this can raise in the rare case
+        where the metadata write succeeded but the trailing ``.jsonl``
+        append then failed -- ``self.params`` will already reflect the
+        new value.
+        """
         with self._lock:
             self._reject_if_terminal("set a param on")
             key = str(key)
-            had_key = key in self.params
-            prev_value = self.params.get(key)
             safe_value = _json_safe(value)
-            self.params[key] = safe_value
-            try:
-                self._add_event("param_set", {"key": key, "value": safe_value})
-                self._write()
-            except Exception:
-                # Same reasoning as _finish_locked: don't let self.params
-                # claim a value that was never actually persisted.
-                if had_key:
-                    self.params[key] = prev_value
-                else:
-                    self.params.pop(key, None)
-                raise
+            candidate_params = dict(self.params)
+            candidate_params[key] = safe_value
+            event, now_mono = self._build_event(
+                "param_set", {"key": key, "value": safe_value}
+            )
+            # Same write-then-commit ordering as log_event: attempt the
+            # write with the *candidate* params dict, without touching
+            # self.params yet.
+            self._write(self.to_dict(pending_event=event, params=candidate_params))
+            self.params = candidate_params
+            self._commit_event(event, now_mono)
+            self._append_event_line(event)
+
+    def log_plot_update(self, method: str, win: Optional[str], **extra) -> dict:
+        """Log one graph/plot update, with per-window sequence and timing.
+
+        Meant to be called by :mod:`visdom.tracking.graphs` (or anything
+        else wrapping a Visdom instance), not typically by hand: it answers
+        "is this the first update to this window, and if not, how long
+        since the last one" so a plotted metric's own cadence shows up in
+        the record, not just the run's global event timeline.
+
+        Note: as with :meth:`log_event`, this can raise in the rare case
+        where the metadata write succeeded but the trailing ``.jsonl``
+        append then failed -- the per-window counters will already
+        reflect this update.
+        """
+        with self._lock:
+            self._reject_if_terminal("log a plot update on")
+            now = time.monotonic()
+            prev = self._window_last_update_monotonic.get(win)
+            seq = self._window_update_count.get(win, 0) + 1
+            data = {
+                "method": method,
+                "win": win,
+                "window_update_seq": seq,
+                "seconds_since_prev_update_to_window": (
+                    None if prev is None else round(now - prev, 6)
+                ),
+            }
+            data.update(extra)
+            event, now_mono = self._build_event("plot_update", data)
+            self._write(self.to_dict(pending_event=event))
+            self._window_update_count[win] = seq
+            self._window_last_update_monotonic[win] = now
+            self._commit_event(event, now_mono)
+            self._append_event_line(event)
+        return event
+
+    def track(self, vis):
+        """Wrap a ``Visdom`` instance so its graph calls auto-log here.
+
+        Returns a thin proxy -- see :class:`visdom.tracking.graphs.TrackedVisdom`
+        -- that behaves exactly like ``vis`` except that calls to chart
+        methods (``line``, ``scatter``, ``bar``, ...) also call
+        :meth:`log_plot_update` for you. Everything else (``vis.image()``,
+        ``vis.close()``, attribute access, ...) passes straight through.
+
+            run = RunTracker("exp1", params={...})
+            tvis = run.track(vis)
+            tvis.line(X=..., Y=..., win="loss")  # auto-logged
+
+        Imported lazily to avoid a circular import (``graphs`` depends on
+        this module for type hints, not the other way around).
+        """
+        from visdom.tracking.graphs import TrackedVisdom
+
+        return TrackedVisdom(vis, self)
 
     # lifecycle
 
@@ -343,6 +463,15 @@ class RunTracker:
         doesn't need explaining -- it's ``unfinished`` runs (see
         :meth:`_atexit_finalize` / the context-manager path) where a reason
         actually earns its place in the record.
+
+        Note: in the rare case where the metadata write succeeds but the
+        subsequent (best-effort) full-history ``.jsonl`` append then
+        fails, this can raise even though ``self.status``/the metadata
+        file already correctly show the run as terminal. Check
+        ``self.status`` in an ``except`` block before assuming the run
+        didn't finish -- a second ``finish()`` call in that situation
+        correctly raises ``RunAlreadyFinishedError``, not because it
+        failed, but because it already succeeded.
         """
         if status not in (STATUS_FINISHED, STATUS_FAILED):
             raise ValueError(
@@ -355,28 +484,32 @@ class RunTracker:
             self._finish_locked(status, reason)
 
     def _finish_locked(self, status: str, reason: Optional[str]) -> None:
-        prev_status = self.status
-        prev_reason = self.stop_reason
-        prev_end_time = self.end_time
-        prev_end_monotonic = self._end_monotonic
-
+        end_time = time.time()
+        end_monotonic = time.monotonic()
+        event, now_mono = self._build_event(
+            "status_change", {"status": status, "reason": reason}
+        )
+        self._write(
+            self.to_dict(
+                pending_event=event,
+                status=status,
+                stop_reason=reason,
+                end_time=end_time,
+                end_monotonic=end_monotonic,
+            )
+        )
         self.status = status
         self.stop_reason = reason
-        self.end_time = time.time()
-        self._end_monotonic = time.monotonic()
+        self.end_time = end_time
+        self._end_monotonic = end_monotonic
+        self._commit_event(event, now_mono)
         try:
-            self._add_event("status_change", {"status": status, "reason": reason})
-            self._write()
-        except Exception:
-            self.status = prev_status
-            self.stop_reason = prev_reason
-            self.end_time = prev_end_time
-            self._end_monotonic = prev_end_monotonic
-            raise
-        try:
-            atexit.unregister(self._atexit_finalize)
-        except Exception:
-            pass
+            self._append_event_line(event)
+        finally:
+            try:
+                atexit.unregister(self._atexit_finalize)
+            except Exception:
+                pass
 
     def _atexit_finalize(self) -> None:
         """Catch the process ending without an explicit finish() call.
@@ -397,7 +530,7 @@ class RunTracker:
         """Seconds between start and end, or ``None`` while still running.
 
         Computed from a monotonic clock so it can't go negative from a
-        system clock adjustment mid-run (see ``_add_event``).
+        system clock adjustment mid-run (see ``_build_event``).
         """
         if self._end_monotonic is None:
             return None
@@ -417,29 +550,78 @@ class RunTracker:
             else:
                 reason = "{0}: {1}".format(exc_type.__name__, _safe_exc_str(exc))
                 self._finish_locked(STATUS_UNFINISHED, reason)
-        return False  # never swallow the exception
+        return False
 
     # persistence
 
-    def to_dict(self) -> dict:
+    def to_dict(
+        self,
+        *,
+        pending_event: Optional[dict] = None,
+        status: Any = _UNSET,
+        stop_reason: Any = _UNSET,
+        end_time: Any = _UNSET,
+        end_monotonic: Any = _UNSET,
+        params: Any = _UNSET,
+    ) -> dict:
+        """Build the metadata payload.
+
+        With no arguments, reflects the currently *committed* state --
+        this is what plain introspection and ``_write()``'s default use.
+
+        The keyword-only overrides exist for the write-then-commit pattern
+        used throughout this class (see ``log_event``/``set_param``/
+        ``_finish_locked``): a caller about to change ``status``,
+        ``stop_reason``, ``end_time``, ``params``, and/or add a new event
+        can render the *candidate* resulting payload here -- without
+        mutating ``self`` at all -- attempt to persist it, and only touch
+        ``self`` afterwards, once persisting has actually succeeded. That
+        ordering is what lets a failed write be handled by simply not
+        committing anything, rather than needing to mutate first and roll
+        back on failure.
+        """
+        resolved_status = self.status if status is _UNSET else status
+        resolved_stop_reason = (
+            self.stop_reason if stop_reason is _UNSET else stop_reason
+        )
+        resolved_end_time = self.end_time if end_time is _UNSET else end_time
+        resolved_end_monotonic = (
+            self._end_monotonic if end_monotonic is _UNSET else end_monotonic
+        )
+        resolved_params = self.params if params is _UNSET else params
+
+        resolved_total_duration = None
+        if resolved_end_monotonic is not None:
+            resolved_total_duration = resolved_end_monotonic - self._start_monotonic
+
+        recent_events = list(self._recent_events)
+        event_count = self.event_count
+        if pending_event is not None:
+            recent_events.append(pending_event)
+            limit = self._recent_events.maxlen
+            if limit is not None and len(recent_events) > limit:
+                recent_events = recent_events[-limit:]
+            event_count = pending_event["seq"]
+
         return {
             "run_id": self.run_id,
             "name": self.name,
-            "status": self.status,
-            "params": self.params,
+            "status": resolved_status,
+            "params": resolved_params,
             "tags": self.tags,
             "environment": self.environment,
             "start_time": self.start_time,
-            "end_time": self.end_time,
-            "total_duration": self.total_duration,
-            "stop_reason": self.stop_reason,
-            "event_count": self.event_count,
+            "end_time": resolved_end_time,
+            "total_duration": resolved_total_duration,
+            "stop_reason": resolved_stop_reason,
+            "event_count": event_count,
             "events_file": os.path.basename(self.events_path),
-            "recent_events": list(self._recent_events),
+            "recent_events": recent_events,
         }
 
-    def _write(self) -> None:
-        """Persist current metadata, atomically (write to tmp, then rename).
+    def _write(self, payload: Optional[dict] = None) -> None:
+        """Persist ``payload`` (or the current committed state if omitted),
+        atomically (write to tmp, then rename).
 
         Deliberately does *not* include the full event history -- see
         ``to_dict``/``_append_event_line`` -- so this file's write cost
@@ -447,10 +629,12 @@ class RunTracker:
         Every mutation calls this, so a crash between two events still
         leaves a readable, complete-up-to-that-point metadata file on disk.
         """
+        if payload is None:
+            payload = self.to_dict()
         tmp_path = self.path + ".tmp"
         try:
             with open(tmp_path, "w") as f:
-                json.dump(self.to_dict(), f, indent=2, default=str)
+                json.dump(payload, f, indent=2, default=str)
             os.replace(tmp_path, self.path)
         except Exception:
             if os.path.exists(tmp_path):
