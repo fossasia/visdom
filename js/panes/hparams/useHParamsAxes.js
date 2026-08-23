@@ -43,8 +43,12 @@ export default function useHParamsAxes({
 
   const dims = useMemo(() => {
     const valid = new Set(numericCols.map((col) => col.id));
-    const chosen = (selectedDims || []).filter((id) => valid.has(id));
-    if (chosen.length > 0) return chosen.slice(0, maxDims);
+    if (Array.isArray(selectedDims)) {
+      const chosen = selectedDims.filter((id) => valid.has(id));
+      if (chosen.length > 0 || selectedDims.length === 0) {
+        return chosen.slice(0, maxDims);
+      }
+    }
     const isDense = preferDense
       ? (col) => records.every((record) => isNumeric(col.accessor(record)))
       : null;

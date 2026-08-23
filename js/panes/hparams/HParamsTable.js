@@ -21,12 +21,11 @@ import {
   runLabel,
   selectNumericColumns,
   spineStyle,
+  StatusBadge,
 } from './hparamsUtils';
-import StatusBadge from './StatusBadge';
 import useHParamsColumns from './useHParamsColumns';
 
 const RUN_COLUMN_ID = 'run:name';
-
 const NO_SORT = { by: null, dir: null };
 
 function sortGlyph(dir) {
@@ -46,18 +45,18 @@ function ariaSort(sort, columnId) {
   return sort.dir === 'asc' ? 'ascending' : 'descending';
 }
 
-function directionLabel(sort) {
-  if (!sort.by) return 'Sort direction';
-  if (sort.dir === 'asc') return 'Sorted ascending — click for descending';
-  return 'Sorted descending — click to clear';
-}
-
 function accessorFor(sortBy, columns) {
   if (sortBy === RUN_COLUMN_ID) {
     return (record) => record.name || record.env_id;
   }
   const col = columns.find((c) => c.id === sortBy);
   return col ? col.accessor : null;
+}
+
+function directionLabel(sort) {
+  if (!sort.by) return 'Sort direction';
+  if (sort.dir === 'asc') return 'Sorted ascending — click for descending';
+  return 'Sorted descending — click to clear';
 }
 
 const SortCaret = ({ sort, columnId }) => {
@@ -149,6 +148,7 @@ const HParamsRow = React.memo(function HParamsRow({
 
 const HParamsTable = ({
   records,
+  columnRecords,
   rowIds,
   paramKeys,
   metricKeys,
@@ -161,9 +161,20 @@ const HParamsTable = ({
   setSelected,
 }) => {
   const columns = useHParamsColumns(paramKeys, metricKeys, tagKeys);
+  const pickerRecords = columnRecords || records;
   const colorCols = useMemo(
-    () => selectNumericColumns(records, columns),
-    [records, columns]
+    () => selectNumericColumns(pickerRecords, columns),
+    [pickerRecords, columns]
+  );
+
+  const activeSort = useMemo(() => {
+    if (!sort.by || sort.by === RUN_COLUMN_ID) return sort;
+    return columns.some((c) => c.id === sort.by) ? sort : NO_SORT;
+  }, [sort, columns]);
+
+  const activeColorBy = useMemo(
+    () => (colorBy && colorCols.some((c) => c.id === colorBy) ? colorBy : null),
+    [colorBy, colorCols]
   );
 
   const groupStartIds = useMemo(() => {
@@ -175,16 +186,6 @@ const HParamsTable = ({
     });
     return ids;
   }, [columns]);
-
-  const activeSort = useMemo(() => {
-    if (!sort.by || sort.by === RUN_COLUMN_ID) return sort;
-    return columns.some((c) => c.id === sort.by) ? sort : NO_SORT;
-  }, [sort, columns]);
-
-  const activeColorBy = useMemo(
-    () => (colorBy && colorCols.some((c) => c.id === colorBy) ? colorBy : null),
-    [colorBy, colorCols]
-  );
 
   const rows = useMemo(() => {
     if (!activeSort.by) return records;
@@ -200,15 +201,23 @@ const HParamsTable = ({
     return numericExtent(records, col.accessor);
   }, [records, activeColorBy, columns]);
 
-  const handleSort = useCallback((columnId) => {
-    setSort((prev) => nextSort(prev, columnId));
-  }, []);
+  const handleSort = useCallback(
+    (columnId) => {
+      setSort((prev) => nextSort(prev, columnId));
+    },
+    [setSort]
+  );
 
-  const handleSortSelect = useCallback((value) => {
-    setSort((prev) =>
-      value ? { by: value, dir: prev.dir || 'asc' } : { by: null, dir: null }
-    );
-  }, []);
+  const handleSortSelect = useCallback(
+    (value) => {
+      setSort((prev) => {
+        if (!value) return { by: null, dir: null };
+        if (prev.by === value) return { by: value, dir: prev.dir || 'asc' };
+        return { by: value, dir: 'asc' };
+      });
+    },
+    [setSort]
+  );
 
   const cycleDir = useCallback(() => {
     setSort((prev) => {
@@ -216,16 +225,19 @@ const HParamsTable = ({
       if (prev.dir === 'asc') return { by: prev.by, dir: 'desc' };
       return { by: null, dir: null };
     });
-  }, []);
+  }, [setSort]);
 
-  const toggle = useCallback((envId) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(envId)) next.delete(envId);
-      else next.add(envId);
-      return next;
-    });
-  }, []);
+  const toggle = useCallback(
+    (rowId) => {
+      setSelected((prev) => {
+        const next = new Set(prev);
+        if (next.has(rowId)) next.delete(rowId);
+        else next.add(rowId);
+        return next;
+      });
+    },
+    [setSelected]
+  );
 
   const allSelected =
     rows.length > 0 && rows.every((r) => selected.has(rowIds.get(r)));
@@ -249,19 +261,29 @@ const HParamsTable = ({
       );
       return next;
     });
-  }, [rows, rowIds]);
+  }, [rows, rowIds, setSelected]);
 
-  const bands = COLUMN_GROUPS.map((b) => ({
-    ...b,
-    span: columns.filter((c) => c.group === b.key).length,
-  })).filter((b) => b.span > 0);
+  const bands = useMemo(
+    () =>
+      COLUMN_GROUPS.map((b) => ({
+        ...b,
+        span: columns.filter((c) => c.group === b.key).length,
+      })).filter((b) => b.span > 0),
+    [columns]
+  );
 
-  const sortTreeData = [
-    { key: RUN_COLUMN_ID, value: RUN_COLUMN_ID, title: 'run' },
-    ...groupColumnTree(columns, COLUMN_GROUPS),
-  ];
+  const sortTreeData = useMemo(
+    () => [
+      { key: RUN_COLUMN_ID, value: RUN_COLUMN_ID, title: 'run' },
+      ...groupColumnTree(columns, COLUMN_GROUPS),
+    ],
+    [columns]
+  );
 
-  const colorTreeData = groupColumnTree(colorCols, NUMERIC_GROUPS);
+  const colorTreeData = useMemo(
+    () => groupColumnTree(colorCols, NUMERIC_GROUPS),
+    [colorCols]
+  );
 
   const dirLabel = directionLabel(activeSort);
 
