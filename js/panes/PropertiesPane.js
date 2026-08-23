@@ -81,6 +81,11 @@ PropertiesPane = React.memo(PropertiesPane, (props, nextProps) => {
   else if (props.title !== nextProps.title) return false;
   else if (props.comment !== nextProps.comment) return false;
   else if (props.h !== nextProps.h || props.w !== nextProps.w) return false;
+  else if (
+    Math.round(props.width) !== Math.round(nextProps.width) ||
+    Math.round(props.height) !== Math.round(nextProps.height)
+  )
+    return false;
   else if (props.isFocused !== nextProps.isFocused) return false;
   return true;
 });
