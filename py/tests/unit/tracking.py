@@ -329,8 +329,6 @@ class TestReviewRegressions(unittest.TestCase):
         on_disk = json.load(open(run.path))
         self.assertEqual(on_disk["status"], RunTracker.STATUS_RUNNING)
 
-        # A retry (disk "fixed" now) must be allowed, not rejected as
-        # already-finished.
         run.finish()
         self.assertEqual(run.status, RunTracker.STATUS_FINISHED)
         on_disk_after = json.load(open(run.path))
@@ -380,6 +378,26 @@ class TestReviewRegressions(unittest.TestCase):
         self.assertEqual(run.event_count, count_before)
         run.finish()
 
+    def test_failed_log_plot_update_write_does_not_advance_window_counters(self):
+        """Same write-then-commit contract as log_event/set_param, for the
+        per-window bookkeeping log_plot_update maintains: a failed write
+        must leave _window_update_count/_window_last_update_monotonic
+        exactly as they were, not claiming a window update happened that
+        was never actually persisted anywhere."""
+        run = RunTracker("exp", out_dir=self.out_dir)
+
+        with patch("visdom.tracking.core.os.replace", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                run.log_plot_update("line", "loss")
+
+        self.assertEqual(run._window_update_count, {})
+        self.assertEqual(run._window_last_update_monotonic, {})
+
+        event = run.log_plot_update("line", "loss")
+        self.assertEqual(event["data"]["window_update_seq"], 1)
+        self.assertIsNone(event["data"]["seconds_since_prev_update_to_window"])
+        run.finish()
+
     def test_failed_finish_write_leaves_no_phantom_event_in_jsonl(self):
         """Follow-up to the two tests above: a failed finish() must not
         leave a status_change line in the .jsonl log that doesn't match
@@ -401,7 +419,7 @@ class TestReviewRegressions(unittest.TestCase):
         self.assertEqual([e["type"] for e in events_after_failure], ["created"])
         self.assertEqual(run.event_count, 1)  # not 2 -- the attempt didn't count
 
-        run.finish()  # retry, disk "fixed"
+        run.finish()
 
         events_after_retry = [json.loads(l) for l in open(run.events_path)]
         self.assertEqual(

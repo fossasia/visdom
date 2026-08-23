@@ -45,6 +45,7 @@ _TERMINAL_STATUSES = (STATUS_FINISHED, STATUS_FAILED, STATUS_UNFINISHED)
 
 DEFAULT_OUT_DIR = "visdom_runs"
 
+
 DEFAULT_RECENT_EVENTS_LIMIT = 50
 
 
@@ -150,7 +151,7 @@ def _capture_packages() -> dict:
     """
     try:
         from importlib import metadata as importlib_metadata
-    except ImportError:  # pragma: no cover - py < 3.8, unsupported by visdom
+    except ImportError:
         return {}
     packages = {}
     try:
@@ -252,7 +253,7 @@ class RunTracker:
         self._last_event_monotonic = self._start_monotonic
 
         # Per-window bookkeeping for log_plot_update (see tracking.graphs):
-        # lets us report "this is the Nth update to window 'loss', arriving
+        # reports "this is the Nth update to window 'loss', arriving
         # M seconds after the (N-1)th" without the caller having to track
         # any of that themselves.
         self._window_update_count: dict = {}
@@ -299,6 +300,9 @@ class RunTracker:
             "seq": self.event_count + 1,
             "type": event_type,
             "time": now_wall,
+            # Deltas are computed from a monotonic clock, not wall time, so
+            # a system clock adjustment (NTP sync, DST, manual change)
+            # during a long run can't produce a negative duration here.
             "delta_from_start": round(now_mono - self._start_monotonic, 6),
             "delta_from_prev": round(now_mono - self._last_event_monotonic, 6),
         }
@@ -382,7 +386,8 @@ class RunTracker:
             )
             # Same write-then-commit ordering as log_event: attempt the
             # write with the *candidate* params dict, without touching
-            # self.params yet.
+            # self.params yet. A failure here leaves self.params exactly
+            # as it was
             self._write(self.to_dict(pending_event=event, params=candidate_params))
             self.params = candidate_params
             self._commit_event(event, now_mono)
@@ -417,6 +422,11 @@ class RunTracker:
             }
             data.update(extra)
             event, now_mono = self._build_event("plot_update", data)
+            # Same write-then-commit ordering as log_event/set_param: the
+            # per-window counters below are only committed after the
+            # metadata write (including this event) has actually
+            # succeeded, so a failure can't leave self._window_update_count
+            # claiming an update was recorded when it wasn't.
             self._write(self.to_dict(pending_event=event))
             self._window_update_count[win] = seq
             self._window_last_update_monotonic[win] = now
@@ -550,7 +560,7 @@ class RunTracker:
             else:
                 reason = "{0}: {1}".format(exc_type.__name__, _safe_exc_str(exc))
                 self._finish_locked(STATUS_UNFINISHED, reason)
-        return False
+        return False  # never swallow the exception
 
     # persistence
 

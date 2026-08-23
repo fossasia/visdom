@@ -6,7 +6,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""Auto-logging hook for Visdom's chart-drawing methods .
+"""Auto-logging hook for Visdom's chart-drawing methods (Part 2).
 
 As (``tracking.core``) needs an explicit ``run.log_event(...)`` call
 every time something worth recording happens. This module removes that for
@@ -38,7 +38,6 @@ from typing import Any
 
 from visdom.tracking.core import RunAlreadyFinishedError
 
-
 GRAPH_METHODS = frozenset(
     {
         "line",
@@ -68,6 +67,7 @@ GRAPH_METHODS = frozenset(
         "plotlyplot",
     }
 )
+
 
 NON_GRAPH_METHODS = frozenset(
     {
@@ -202,7 +202,7 @@ class TrackedVisdom:
                     method=method_name,
                     error="{0}: {1}".format(type(e).__name__, e),
                 )
-                raise  # the plot call's own failure is never swallowed
+                raise
 
             win = _resolve_win(result, kwargs)
             if win is not None:
@@ -212,7 +212,7 @@ class TrackedVisdom:
                     method=method_name,
                     update=kwargs.get("update"),
                 )
-            return result  # always the plotting call's real, untouched result
+            return result
 
         wrapper.__name__ = getattr(bound_method, "__name__", method_name)
         wrapper.__doc__ = getattr(bound_method, "__doc__", None)
