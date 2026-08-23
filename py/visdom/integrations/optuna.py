@@ -28,13 +28,16 @@ from visdom.experiments.tags import normalize_tags
 from visdom.utils.server_utils import escape_eid
 
 
+_INTERMEDIATE_METRIC_NAME = "intermediate_value"
+
+
 class OptunaCallback:
     """Log completed Optuna trials and optionally maintain a study dashboard.
 
     Instances are passed to ``Study.optimize(callbacks=[...])``. Optuna calls
     the instance with a ``Study`` and ``FrozenTrial`` after a trial finishes;
-    the callback stores the trial's parameters, objective values and state via
-    Visdom's experiment API.
+    the callback stores the trial's parameters, objective values, reported
+    intermediate values and state via Visdom's experiment API.
 
     ``dashboard_env`` is the namespace for the study and its trial
     environments. When omitted it is derived from the Optuna study name.
@@ -194,6 +197,12 @@ class OptunaCallback:
         )
         return normalize_tags(tags)
 
+    @staticmethod
+    def _intermediate_values(trial: Any) -> list[tuple[int, float]]:
+        """Return reported intermediate values ordered by training step."""
+        values = getattr(trial, "intermediate_values", None) or {}
+        return sorted(values.items())
+
     def _summary_html(self, study: Any) -> str:
         trials = study.get_trials(deepcopy=False)
         states = Counter(trial.state.name for trial in trials)
@@ -257,6 +266,7 @@ class OptunaCallback:
     def _dashboard_figures(self, study: Any) -> list[tuple[str, Any]]:
         try:
             from optuna.visualization import (
+                plot_intermediate_values,
                 plot_optimization_history,
                 plot_param_importances,
                 plot_timeline,
@@ -265,10 +275,8 @@ class OptunaCallback:
             objective_names = self._metric_names(study, len(study.directions))
             figures = []
             multi_objective = len(objective_names) > 1
-            complete_trials = sum(
-                trial.state.name == "COMPLETE"
-                for trial in study.get_trials(deepcopy=False)
-            )
+            trials = study.get_trials(deepcopy=False)
+            complete_trials = sum(trial.state.name == "COMPLETE" for trial in trials)
             for index, objective_name in enumerate(objective_names):
                 target = (
                     (lambda trial, i=index: trial.values[i])
@@ -297,6 +305,15 @@ class OptunaCallback:
                         figures.append(
                             ("optuna-importance{}".format(suffix), importance)
                         )
+
+            if any(self._intermediate_values(trial) for trial in trials):
+                try:
+                    intermediate = plot_intermediate_values(study)
+                except ValueError:
+                    pass
+                else:
+                    intermediate.update_layout(title="Optuna Intermediate Values")
+                    figures.append(("optuna-intermediate-values", intermediate))
 
             timeline = plot_timeline(study)
             timeline.update_layout(title="Optuna Trial Timeline")
@@ -399,6 +416,12 @@ class OptunaCallback:
                 description=payload["description"],
                 env=payload["env"],
             )
+            for step, value in self._intermediate_values(trial):
+                self.viz.log_metrics(
+                    {_INTERMEDIATE_METRIC_NAME: value},
+                    step=step,
+                    env=payload["env"],
+                )
             if payload["metrics"]:
                 self.viz.log_metrics(payload["metrics"], env=payload["env"])
             self.viz.finish_experiment(
