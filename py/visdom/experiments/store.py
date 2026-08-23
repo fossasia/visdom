@@ -24,12 +24,31 @@ from visdom.experiments.models import (
     STATUS_FINISHED,
 )
 from visdom.experiments.query import Query, build_record
+from visdom.experiments.tags import MAX_TAGS_PER_ENV, normalize_tags
 
 METADATA_KEY = "experiment"
 
 DEFAULT_SORT_FIELD = "created_at"
 
 _MISSING = object()
+
+
+def retarget_experiment(env, env_id):
+    """Point ``env``'s experiment metadata, if it has any, at ``env_id``.
+
+    Cloning an environment copies its persisted data wholesale, metadata blob
+    included, which leaves the copy recording the env it was cloned from. The
+    callers that clone an env re-point the copy through here so what lands on
+    disk names the env it actually lives in.
+
+    Returns ``env`` so a clone can be retargeted in the same expression that
+    copies it. ``env`` may be any mutable mapping — the server holds
+    environments as plain dicts or as ``LazyEnvData``.
+    """
+    blob = env.get(METADATA_KEY)
+    if isinstance(blob, dict):
+        blob["env_id"] = env_id
+    return env
 
 
 def _order_key(value):
@@ -99,6 +118,13 @@ class ExperimentStore:
         The env may be a ``LazyEnvData`` rather than a plain dict, so it is
         mutated through the mapping interface and never copied — a write must
         land in the same object the server is serving.
+
+        The env an experiment is stored under is the authoritative one, so the
+        loaded experiment is re-pointed at ``env_id`` rather than trusting the
+        ``env_id`` recorded in the blob. Forking an environment deep-copies the
+        whole env dict, metadata included, which leaves the copy's blob naming
+        the env it was forked from; a comparison keyed by experiment env_id
+        would then fold the fork and its parent into one column.
         """
         env = self.env_provider(env_id) if self.env_provider is not None else None
         if env is None:
@@ -111,6 +137,8 @@ class ExperimentStore:
             env["reload"] = {}
         blob = env.get(METADATA_KEY)
         experiment = Experiment.from_dict(blob) if isinstance(blob, dict) else None
+        if experiment is not None:
+            experiment.env_id = env_id
         return env, experiment
 
     def _write(self, env_id, env, experiment):
@@ -120,12 +148,17 @@ class ExperimentStore:
         return experiment
 
     @staticmethod
-    def _reject_if_terminal(env_id, experiment):
-        """Raise if ``experiment`` is finished/failed and so must not be logged to."""
+    def _reject_if_terminal(env_id, experiment, action="log to"):
+        """Raise if ``experiment`` is finished/failed and so must not be written to.
+
+        ``action`` names the attempted operation so the error reads sensibly for
+        every caller (``"log to"`` for the logging paths, ``"finish"`` for a
+        second attempt at finishing an already terminal experiment).
+        """
         if experiment.is_terminal():
             raise ExperimentFinishedError(
-                "experiment {0!r} is {1}; cannot log to a terminal experiment".format(
-                    env_id, experiment.status
+                "experiment {0!r} is {1}; cannot {2} a terminal experiment".format(
+                    env_id, experiment.status, action
                 )
             )
 
@@ -168,11 +201,45 @@ class ExperimentStore:
         experiment.add_metric(key, value, step)
         return self._write(env_id, env, experiment)
 
+    def update_tags(self, env_id, tags, append=False):
+        """Replace or append organizational tags for ``env_id``.
+
+        ``tags`` is the model's ``{key: value}`` representation.  Unlike run
+        logging, tag management is allowed after an experiment reaches a
+        terminal state: tags organize completed runs and do not alter their
+        parameters, metrics, result status, or completion timestamp.
+        """
+        if not isinstance(append, bool):
+            raise TypeError("append must be a boolean")
+        tags = normalize_tags(tags)
+
+        env, experiment = self._read(env_id)
+        if experiment is None:
+            experiment = Experiment(env_id=env_id, name=env_id)
+        if append:
+            final_tag_names = {tag.key for tag in experiment.tags}
+            final_tag_names.update(tags)
+            if len(final_tag_names) > MAX_TAGS_PER_ENV:
+                raise ValueError(
+                    "environments may have at most {0} tags".format(MAX_TAGS_PER_ENV)
+                )
+        if not append:
+            experiment.tags = []
+        for key, value in tags.items():
+            experiment.set_tag(key, value)
+        return self._write(env_id, env, experiment)
+
     def finish_experiment(self, env_id, status=STATUS_FINISHED):
-        """Mark ``env_id``'s experiment terminal; raise if none was logged."""
+        """Mark ``env_id``'s experiment terminal; raise if none was logged.
+
+        An experiment that is already terminal is rejected rather than
+        re-finished, matching ``log_experiment``/``log_metric``: once a run has
+        stopped, neither its status nor its ``finished_at`` stamp may change.
+        """
         env, experiment = self._read(env_id)
         if experiment is None:
             raise KeyError("no experiment logged for env {0!r}".format(env_id))
+        self._reject_if_terminal(env_id, experiment, "finish")
         experiment.finish(status)
         return self._write(env_id, env, experiment)
 

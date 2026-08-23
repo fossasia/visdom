@@ -7,7 +7,7 @@
  *
  */
 
-/* global ACTIVE_ENV $ Bin */
+/* global ACTIVE_ENV Bin */
 
 'use strict';
 
@@ -15,8 +15,15 @@ import 'fetch';
 import 'rc-slider/assets/index.css';
 import 'rc-tree-select/assets/index.less';
 
-import React, { useContext, useEffect, useRef, useState } from 'react';
-import ReactDOM from 'react-dom';
+import React, {
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { createRoot } from 'react-dom/client';
 import ReactGridLayout, {
   getLayoutItem,
   sortLayoutItemsByRowCol as sortLayout,
@@ -48,6 +55,19 @@ import WidthProvider from './Width';
 const jsonpatch = require('fast-json-patch');
 const GridLayout = WidthProvider(ReactGridLayout);
 
+let recoveredInvalidStateAtStartup = false;
+
+const safeJsonParse = (raw, fallback, onError) => {
+  if (raw == null || raw === '') return fallback;
+
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    if (onError) onError(e);
+    return fallback;
+  }
+};
+
 var use_envs = null;
 if (ACTIVE_ENV !== '') {
   if (ACTIVE_ENV.indexOf('+') > -1) {
@@ -58,48 +78,68 @@ if (ACTIVE_ENV !== '') {
     use_envs = [ACTIVE_ENV];
   }
 } else {
-  use_envs = JSON.parse(localStorage.getItem('envIDs')) || ['main'];
+  let storedEnvIDs = safeJsonParse(localStorage.getItem('envIDs'), null, () => {
+    localStorage.removeItem('envIDs');
+    recoveredInvalidStateAtStartup = true;
+  });
+  use_envs = Array.isArray(storedEnvIDs) ? storedEnvIDs : ['main'];
 }
 
-const PaneWrapper = ({
-  Comp,
-  pane,
-  panelayout,
-  envID,
-  onClose,
-  onFocus,
-  isFocused,
-  defaultWidth,
-  defaultHeight,
-}) => {
-  const { width, height, ref } = useResizeDetector();
-  const PANE_TITLE_BAR_HEIGHT = 14;
+const PaneWrapper = React.memo(
+  function PaneWrapper({
+    Comp,
+    pane,
+    panelayout,
+    envID,
+    onClose,
+    onFocus,
+    isFocused,
+    defaultWidth,
+    defaultHeight,
+  }) {
+    const { width, height, ref } = useResizeDetector();
+    const PANE_TITLE_BAR_HEIGHT = 14;
 
-  const finalWidth =
-    width !== undefined && width > 0 ? width - 2 : defaultWidth;
-  const finalHeight =
-    (height !== undefined && height > 0 ? height - 2 : defaultHeight) -
-    PANE_TITLE_BAR_HEIGHT;
+    const finalWidth =
+      width !== undefined && width > 0 ? width - 2 : defaultWidth;
+    const finalHeight =
+      (height !== undefined && height > 0 ? height - 2 : defaultHeight) -
+      PANE_TITLE_BAR_HEIGHT;
 
-  return (
-    <div ref={ref} style={{ width: '100%', height: '100%' }}>
-      <Comp
-        key={pane.id}
-        {...pane}
-        envID={envID}
-        onClose={onClose}
-        onFocus={onFocus}
-        isFocused={isFocused}
-        w={panelayout.w}
-        h={panelayout.h}
-        width={finalWidth}
-        height={finalHeight}
-        _width={finalWidth}
-        _height={finalHeight}
-      />
-    </div>
-  );
-};
+    return (
+      <div ref={ref} style={{ width: '100%', height: '100%' }}>
+        <Comp
+          key={pane.id}
+          {...pane}
+          envID={envID}
+          onClose={onClose}
+          onFocus={onFocus}
+          isFocused={isFocused}
+          w={panelayout.w}
+          h={panelayout.h}
+          width={finalWidth}
+          height={finalHeight}
+          _width={finalWidth}
+          _height={finalHeight}
+        />
+      </div>
+    );
+  },
+  (props, nextProps) => {
+    if (props.Comp !== nextProps.Comp) return false;
+    else if (props.pane !== nextProps.pane) return false;
+    else if (
+      props.panelayout.w !== nextProps.panelayout.w ||
+      props.panelayout.h !== nextProps.panelayout.h
+    )
+      return false;
+    else if (props.envID !== nextProps.envID) return false;
+    else if (props.isFocused !== nextProps.isFocused) return false;
+    else if (props.defaultWidth !== nextProps.defaultWidth) return false;
+    else if (props.defaultHeight !== nextProps.defaultHeight) return false;
+    return true;
+  }
+);
 
 const App = () => {
   // -------------- //
@@ -163,6 +203,10 @@ const App = () => {
   const _pendingPanesVersions = useRef({});
   const _envReloadInFlight = useRef(false);
   const localStorageTimer = useRef(null);
+  const savedStateRecoveryToastShown = useRef(false);
+  const serverLayoutErrorToastShown = useRef(false);
+  const latestRef = useRef({});
+  latestRef.current = { selection, sessionInfo, filterString, focusedPaneID };
 
   // --------------------- //
   // grid helper functions //
@@ -197,6 +241,28 @@ const App = () => {
     } catch (e) {
       return new RegExp('', 'i');
     }
+  };
+
+  const showSavedStateRecoveryToast = () => {
+    if (savedStateRecoveryToastShown.current) return;
+
+    savedStateRecoveryToastShown.current = true;
+    showToast(
+      'Invalid saved UI data was detected and reset to defaults.',
+      'warning',
+      { duration: 6000 }
+    );
+  };
+
+  const showServerLayoutErrorToast = () => {
+    if (serverLayoutErrorToastShown.current) return;
+
+    serverLayoutErrorToastShown.current = true;
+    showToast(
+      'Saved views could not be loaded because the server returned invalid layout data.',
+      'error',
+      { duration: 6000 }
+    );
   };
 
   // ------------------ //
@@ -241,21 +307,34 @@ const App = () => {
 
   // process single pane
   const processPane = (newPane, newPanes, newLayout) => {
-    // if newPane is actually window_update object, apply the to newPanes
     if (newPane.command == 'window_update') {
-      newPane = jsonpatch.applyPatch(
+      let mutated = jsonpatch.applyPatch(
         newPanes[newPane.win],
-        newPane.content
+        newPane.content,
+        false,
+        true
       ).newDocument;
+
+      let contentCopy = mutated.content;
+      if (contentCopy !== null && typeof contentCopy === 'object') {
+        contentCopy = Array.isArray(contentCopy)
+          ? contentCopy.slice()
+          : Object.assign({}, contentCopy);
+      }
+      newPane = Object.assign({}, mutated, { content: contentCopy });
     }
 
     let exists = newPane.id in newPanes;
     newPanes[newPane.id] = newPane;
 
     if (!exists) {
-      let stored = JSON.parse(localStorage.getItem(keyLS(newPane.id)));
+      let layoutKey = keyLS(newPane.id);
+      let stored = safeJsonParse(localStorage.getItem(layoutKey), null, () => {
+        localStorage.removeItem(layoutKey);
+        showSavedStateRecoveryToast();
+      });
       if (_bin.current == null) {
-        rebin();
+        _bin.current = createBin(newLayout, windowSize.current.cols);
       }
       let paneLayout;
       if (stored) {
@@ -354,28 +433,30 @@ const App = () => {
   };
 
   const onEnvUpdate = (data) => {
-    var layoutLists = storeMeta.layoutLists;
-    for (var envIdx in data) {
-      if (!layoutLists.has(data[envIdx])) {
-        layoutLists.set(data[envIdx], new Map([[DEFAULT_LAYOUT, new Map()]]));
+    setStoreMeta((prev) => {
+      const layoutLists = new Map(prev.layoutLists);
+      for (var envIdx in data) {
+        if (!layoutLists.has(data[envIdx])) {
+          layoutLists.set(data[envIdx], new Map([[DEFAULT_LAYOUT, new Map()]]));
+        }
       }
-    }
-    setStoreMeta((prev) => ({
-      ...prev,
-      envList: data,
-      layoutLists: layoutLists,
-    }));
+      return {
+        ...prev,
+        envList: data,
+        layoutLists: layoutLists,
+      };
+    });
   };
 
   // remove paneID from pane list
   // (also tell server)
   const closePane = (paneID, keepPosition = false, setState = true) => {
-    if (sessionInfo.readonly) {
+    if (latestRef.current.sessionInfo.readonly) {
       return;
     }
     if (!keepPosition) {
       localStorage.removeItem(keyLS(paneID));
-      sendPaneClose(paneID, selection.envIDs[0]);
+      sendPaneClose(paneID, latestRef.current.selection.envIDs[0]);
     }
 
     if (setState) {
@@ -387,8 +468,10 @@ const App = () => {
         );
         return { ...prev, panes: newPanes, layout: newLayout };
       });
-      setFocusedPaneID(focusedPaneID === paneID ? null : focusedPaneID);
-      callbacks.current.push('relayout');
+      setFocusedPaneID((currentFocusedPaneID) =>
+        currentFocusedPaneID === paneID ? null : currentFocusedPaneID
+      );
+      relayout();
     }
   };
 
@@ -399,7 +482,6 @@ const App = () => {
     Object.keys(storeData.panes).map((paneID) => {
       closePane(paneID, false, false);
     });
-    rebin();
     setStoreData((prev) => ({
       ...prev,
       layout: [],
@@ -478,7 +560,17 @@ const App = () => {
 
     let payload = {};
     Object.keys(storeData.panes).map((paneID) => {
-      payload[paneID] = JSON.parse(localStorage.getItem(keyLS(paneID)));
+      let layoutKey = keyLS(paneID);
+      let storedLayout = safeJsonParse(
+        localStorage.getItem(layoutKey),
+        null,
+        () => {
+          localStorage.removeItem(layoutKey);
+          showSavedStateRecoveryToast();
+        }
+      );
+      payload[paneID] =
+        storedLayout || getLayoutItem(storeData.layout, paneID) || null;
     });
 
     sendEnvSave(env, selection.envIDs[0], payload);
@@ -509,14 +601,14 @@ const App = () => {
   };
 
   const focusPane = (paneID, callback) => {
-    if (focusedPaneID != paneID) {
+    if (latestRef.current.focusedPaneID != paneID) {
       setFocusedPaneID(paneID);
       if (callback) callbacks.current.push(callback);
     } else if (callback) callback();
   };
 
   const blurPane = () => {
-    if (focusedPaneID != null) setFocusedPaneID(null);
+    if (latestRef.current.focusedPaneID != null) setFocusedPaneID(null);
   };
 
   const resizePane = (layout, oldLayoutItem, layoutItem) => {
@@ -563,23 +655,27 @@ const App = () => {
     updateLayout(layout);
   };
 
-  const rebin = (layout) => {
-    layout = layout ? layout : storeData.layout;
-    let layoutID = selection.layoutID;
+  const applySavedLayout = (layout, layoutID, layoutMap) => {
     if (layoutID !== DEFAULT_LAYOUT) {
-      let envLayoutList = getCurrLayoutList();
-      let layoutMap = envLayoutList.get(selection.layoutID);
-      layout = layout.map((paneLayout) => {
+      return layout.map((paneLayout) => {
         if (layoutMap.has(paneLayout.i)) {
           let storedVals = layoutMap.get(paneLayout.i);
-          paneLayout.h = storedVals[1];
-          paneLayout.height = storedVals[1];
-          paneLayout.w = storedVals[2];
-          paneLayout.width = storedVals[2];
+          return {
+            ...paneLayout,
+            h: storedVals[1],
+            height: storedVals[1],
+            w: storedVals[2],
+            width: storedVals[2],
+          };
         }
         return paneLayout;
       });
     }
+
+    return layout;
+  };
+
+  const createBin = (layout, cols) => {
     let contents = layout.map((paneLayout) => {
       return {
         width: paneLayout.w,
@@ -587,8 +683,7 @@ const App = () => {
       };
     });
 
-    _bin.current = new Bin.ShelfFirst(contents, windowSize.current.cols);
-    return layout;
+    return new Bin.ShelfFirst(contents, cols);
   };
 
   const getCurrLayoutList = () => {
@@ -599,59 +694,74 @@ const App = () => {
     }
   };
 
-  const relayout = () => {
-    let layout = rebin();
-
-    let sorted = sortLayout(layout);
-    let newPanes = Object.assign({}, storeData.panes);
-    let filter = getValidFilter(filterString);
-    let old_sorted = sorted.slice();
-    let layoutID = selection.layoutID;
+  const relayout = ({
+    layoutID = latestRef.current.selection.layoutID,
+    filterString: nextFilterString = latestRef.current.filterString,
+  } = {}) => {
     let envLayoutList = getCurrLayoutList();
-    let layoutMap = envLayoutList.get(selection.layoutID);
-    // Sort out things that were filtered away
-    sorted = sorted.sort(function (a, b) {
-      let diff =
-        (newPanes[a.i].title.match(filter) != null) -
-        (newPanes[b.i].title.match(filter) != null);
-      if (diff != 0) {
-        return -diff;
-      } else if (layoutID !== DEFAULT_LAYOUT) {
-        let aVal = layoutMap.has(a.i) ? -layoutMap.get(a.i)[0] : 1;
-        let bVal = layoutMap.has(b.i) ? -layoutMap.get(b.i)[0] : 1;
-        let diff = bVal - aVal;
+    let filter = getValidFilter(nextFilterString);
+    let cols = windowSize.current.cols;
+
+    setStoreData((prev) => {
+      let layoutMap = envLayoutList.get(layoutID);
+      let sorted = sortLayout(prev.layout);
+      let old_sorted = sorted.slice();
+      let newPanes = Object.assign({}, prev.panes);
+
+      // Sort out things that were filtered away
+      sorted = sorted.sort(function (a, b) {
+        let diff =
+          (newPanes[a.i].title.match(filter) != null) -
+          (newPanes[b.i].title.match(filter) != null);
         if (diff != 0) {
-          // At least one of the two was in the layout map.
-          return diff;
+          return -diff;
+        } else if (layoutID !== DEFAULT_LAYOUT) {
+          let aVal = layoutMap.has(a.i) ? -layoutMap.get(a.i)[0] : 1;
+          let bVal = layoutMap.has(b.i) ? -layoutMap.get(b.i)[0] : 1;
+          let diff = bVal - aVal;
+          if (diff != 0) {
+            // At least one of the two was in the layout map.
+            return diff;
+          }
         }
-      }
-      return old_sorted.indexOf(a) - old_sorted.indexOf(b); // stable sort
+        return old_sorted.indexOf(a) - old_sorted.indexOf(b); // stable sort
+      });
+
+      // The bin packer indexes its dimensions by pane order, so initialize it
+      // only after the final filtered/saved-view order has been determined.
+      sorted = applySavedLayout(sorted, layoutID, layoutMap);
+      let bin = createBin(sorted, cols);
+
+      let newLayout = sorted.map((paneLayout, idx) => {
+        let pos = bin.position(idx, cols);
+
+        if (!newPanes[paneLayout.i] || newPanes[paneLayout.i].i !== idx) {
+          newPanes[paneLayout.i] = {
+            ...newPanes[paneLayout.i],
+            i: idx,
+          };
+        }
+
+        return Object.assign({}, paneLayout, pos);
+      });
+
+      return {
+        ...prev,
+        panes: newPanes,
+        layout: newLayout,
+      };
     });
-
-    let newLayout = sorted.map((paneLayout, idx) => {
-      let pos = _bin.current.position(idx, windowSize.current.cols);
-
-      newPanes[paneLayout.i].i = idx;
-
-      return Object.assign({}, paneLayout, pos);
-    });
-
-    setStoreData((prev) => ({
-      ...prev,
-      panes: newPanes,
-    }));
-    updateLayout(newLayout);
   };
 
   const updateLayout = (layout) => {
     setStoreData((prev) => ({ ...prev, layout: layout }));
-    // TODO this is very non-conventional react, someday it shall be fixed but
-    // for now it's important to fix relayout grossness
-    storeData.layout = layout;
   };
   const resizePaneLive = (layout) => {
     updateLayout(layout);
   };
+  useLayoutEffect(() => {
+    _bin.current = createBin(storeData.layout, windowSize.current.cols);
+  }, [storeData.layout]);
   useEffect(() => {
     clearTimeout(localStorageTimer.current);
     localStorageTimer.current = setTimeout(() => {
@@ -670,13 +780,8 @@ const App = () => {
       ...prev,
       layoutID: newLayoutID,
     }));
-    // TODO this is very non-conventional react, someday it shall be fixed but
-    // for now it's important to fix relayout grossness
-    selection.layoutID = newLayoutID;
-    if (selection.layoutID !== DEFAULT_LAYOUT) {
-      callbacks.current.push('relayout');
-      callbacks.current.push('relayout');
-      callbacks.current.push('relayout');
+    if (newLayoutID !== DEFAULT_LAYOUT) {
+      relayout({ layoutID: newLayoutID });
     }
   };
 
@@ -685,7 +790,14 @@ const App = () => {
     if (layoutJSON.length == 0) {
       return; // Skip totally blank updates, these are empty inits
     }
-    let layoutsObj = JSON.parse(layoutJSON);
+    let layoutsObj = safeJsonParse(
+      layoutJSON,
+      null,
+      showServerLayoutErrorToast
+    );
+    if (!layoutsObj) {
+      return;
+    }
     let layoutLists = new Map();
     for (let envName of Object.keys(layoutsObj)) {
       let layoutList = new Map();
@@ -760,13 +872,19 @@ const App = () => {
   // effects
   // -------
 
-  // flush pre-render callbacks
+  useEffect(() => {
+    if (recoveredInvalidStateAtStartup) {
+      showSavedStateRecoveryToast();
+    }
+  }, []);
+
+  // Run callbacks after state updates have been committed.
   const callbacks = useRef([]);
-  callbacks.current.forEach((cb) => {
-    if (cb === 'relayout') relayout();
-    else if (cb) cb();
+  useEffect(() => {
+    let pendingCallbacks = callbacks.current;
+    callbacks.current = [];
+    pendingCallbacks.forEach((cb) => cb());
   });
-  callbacks.current = [];
 
   // ask server for envs after registration succeeded
   useEffect(() => {
@@ -786,9 +904,6 @@ const App = () => {
         sendEnvQuery(['main'], showAllEnvWindows);
       }
     }
-
-    // Bootstrap tooltips need some encouragement
-    $('#clear-button').attr('data-original-title', 'Clear Current Environment');
   }, [mounted.current]);
 
   // define what mounted means for this app:
@@ -813,62 +928,78 @@ const App = () => {
     windowSize.current.cols = cols;
     windowSize.current.width = width;
   };
-  let panes = Object.keys(storeData.panes).map((id) => {
-    let pane = storeData.panes[id];
 
-    try {
-      let Comp = PANES[pane.type];
-      if (!Comp) {
-        throw new Error('unrecognized pane type: ' + pane);
-      }
-      let panelayout = getLayoutItem(storeData.layout, id);
-      let filter = getValidFilter(filterString);
-      let isVisible = pane.title.match(filter);
-
-      var _height = Math.round(h2p(panelayout.h));
-      var _width = Math.round(w2p(panelayout.w));
-
-      return (
-        <div
-          key={pane.id}
-          className={isVisible ? '' : 'hidden-window'}
-          onDoubleClick={(e) => handlePaneDoubleClick(e, panelayout)}
-        >
-          <PaneWrapper
-            Comp={Comp}
-            pane={pane}
-            panelayout={panelayout}
-            envID={selection.envIDs[0]}
-            onClose={closePane}
-            onFocus={focusPane}
-            isFocused={pane.id === focusedPaneID}
-            defaultWidth={_width}
-            defaultHeight={_height}
-          />
-        </div>
-      );
-    } catch (err) {
-      return (
-        <div key={pane.id}>
-          <TextPane
-            content={
-              'Error: ' +
-              (err.message ||
-                JSON.stringify(err, Object.getOwnPropertyNames(err)))
-            }
-            envID={selection.envIDs[0]}
-            id={pane.id}
-            key={pane.id}
-            onClose={closePane}
-            onFocus={focusPane}
-            isFocused={pane.id === focusedPaneID}
-            w={300}
-            h={300}
-          />
-        </div>
-      );
+  let panes = useMemo(() => {
+    let layoutById = new Map();
+    for (let i = 0; i < storeData.layout.length; i++) {
+      let item = storeData.layout[i];
+      if (item !== undefined) layoutById.set(item.i, item);
     }
-  });
+
+    let filter = getValidFilter(filterString);
+
+    return Object.keys(storeData.panes).map((id) => {
+      let pane = storeData.panes[id];
+
+      try {
+        let Comp = PANES[pane.type];
+        if (!Comp) {
+          throw new Error('unrecognized pane type: ' + pane);
+        }
+        let panelayout = layoutById.get(id);
+        let isVisible = pane.title.match(filter);
+
+        var _height = Math.round(h2p(panelayout.h));
+        var _width = Math.round(w2p(panelayout.w));
+
+        return (
+          <div
+            key={pane.id}
+            className={isVisible ? '' : 'hidden-window'}
+            onDoubleClick={(e) => handlePaneDoubleClick(e, panelayout)}
+          >
+            <PaneWrapper
+              Comp={Comp}
+              pane={pane}
+              panelayout={panelayout}
+              envID={selection.envIDs[0]}
+              onClose={closePane}
+              onFocus={focusPane}
+              isFocused={pane.id === focusedPaneID}
+              defaultWidth={_width}
+              defaultHeight={_height}
+            />
+          </div>
+        );
+      } catch (err) {
+        return (
+          <div key={pane.id}>
+            <TextPane
+              content={
+                'Error: ' +
+                (err.message ||
+                  JSON.stringify(err, Object.getOwnPropertyNames(err)))
+              }
+              envID={selection.envIDs[0]}
+              id={pane.id}
+              key={pane.id}
+              onClose={closePane}
+              onFocus={focusPane}
+              isFocused={pane.id === focusedPaneID}
+              w={300}
+              h={300}
+            />
+          </div>
+        );
+      }
+    });
+  }, [
+    storeData.panes,
+    storeData.layout,
+    filterString,
+    focusedPaneID,
+    selection.envIDs,
+  ]);
   const escapeHtml = (str) => {
     return String(str)
       .replace(/&/g, '&amp;')
@@ -987,7 +1118,6 @@ const App = () => {
       layoutList={getCurrLayoutList()}
       onRepackButton={() => {
         relayout();
-        relayout();
       }}
       onViewChange={updateToLayout}
       onViewManageButton={() => setShowViewModal(!showViewModal)}
@@ -1004,12 +1134,13 @@ const App = () => {
     <FilterControls
       filter={filterString}
       onFilterChange={(ev) => {
-        setFilterString(ev.target.value);
-        callbacks.current.push('relayout');
+        let nextFilterString = ev.target.value;
+        setFilterString(nextFilterString);
+        relayout({ filterString: nextFilterString });
       }}
       onFilterClear={() => {
         setFilterString('');
-        callbacks.current.push('relayout');
+        relayout({ filterString: '' });
       }}
     />
   );
@@ -1096,19 +1227,9 @@ function AppWithApi() {
 }
 
 function load() {
-  ReactDOM.render(<AppWithApi />, document.getElementById('app'));
+  const root = createRoot(document.getElementById('app'));
+  root.render(<AppWithApi />);
   document.removeEventListener('DOMContentLoaded', load);
 }
 
 document.addEventListener('DOMContentLoaded', load);
-
-$(document).ready(function () {
-  $('[data-toggle="tooltip"]').tooltip({
-    container: 'body',
-    delay: {
-      show: 600,
-      hide: 100,
-    },
-    trigger: 'hover',
-  });
-});

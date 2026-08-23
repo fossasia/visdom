@@ -39,7 +39,6 @@ from visdom.utils.shared_utils import (
     NanSafeEncoder,
 )
 
-
 # ---- Vaguely server-security related functions ---- #
 
 
@@ -129,9 +128,22 @@ def escape_eid(eid):
     """Replace forward slashes and other problematic characters
     with underscores and backslashes with hyphen, to avoid recognizing them as
     directories or breaking URLs and filenames.
+
+    Also strips surrounding whitespace. As ``JSONStore`` independently
+    strips whitespace before deriving an on-disk filename from an eid,
+    so two in-memory eids that differ only by leading/trailing whitespace
+    (e.g. ``"main"`` and ``"main "``) would otherwise stay distinct in ``self.state``
+    while silently colliding on disk - whichever one is saved last clobbers the other.
+    Stripping here, at the single choke point every eid passes through (HTTP handlers,
+    websocket handlers, and the storage layer all call this), keeps the in-memory key
+    and the on-disk filename in agreement.
     """
     return (
-        eid.replace("/", "_").replace("\\", "_").replace("\n", "-").replace("\r", "-")
+        eid.strip()
+        .replace("/", "_")
+        .replace("\\", "_")
+        .replace("\n", "-")
+        .replace("\r", "-")
     )
 
 
@@ -216,6 +228,14 @@ def window(args):
         )
     elif ptype in ["image", "text", "properties", "hparams"] and is_visdom_type:
         p.update({"content": args["data"][0]["content"], "type": ptype})
+    elif ptype == "table" and is_visdom_type:
+        p.update(
+            {
+                "content": args["data"][0]["content"],
+                "type": ptype,
+                "editable": opts.get("editable", True),
+            }
+        )
     elif ptype == "network" and is_visdom_type:
         p.update(
             {
@@ -384,11 +404,11 @@ def compare_envs(state, eids, socket, store, show_all=False):
                 )
                 win_copy["title"] = label
                 if isinstance(win_copy.get("layout"), dict):
-                    win_copy["layout"]["title"] = label
+                    win_copy["layout"]["title"] = {"text": label}
                 if isinstance(win_copy.get("content"), dict) and isinstance(
                     win_copy["content"].get("layout"), dict
                 ):
-                    win_copy["content"]["layout"]["title"] = label
+                    win_copy["content"]["layout"]["title"] = {"text": label}
                 win_copy["has_compare"] = True
                 res["jsons"][new_wid] = win_copy
 
@@ -421,7 +441,7 @@ def compare_envs(state, eids, socket, store, show_all=False):
         "contentID": "compare_legend",
         "content": tbl,
         "type": "text",
-        "layout": {"title": "compare_legend"},
+        "layout": {"title": {"text": "compare_legend"}},
         "i": 1,
         "has_compare": True,
         "commentsDisabled": True,
@@ -453,6 +473,18 @@ def broadcast_envs(handler, target_subs=None):
                 cls=NanSafeEncoder,
             )
         )
+
+
+def broadcast_tags(handler, eid, tags, target_subs=None):
+    """Broadcast one environment's key/value tags to browser clients."""
+    if target_subs is None:
+        target_subs = handler.subs.values()
+    message = json.dumps(
+        {"command": "tags_update", "data": {"eid": eid, "tags": tags}},
+        cls=NanSafeEncoder,
+    )
+    for sub in target_subs:
+        sub.write_message(message)
 
 
 def send_to_sources(handler, msg):
@@ -589,9 +621,12 @@ def register_window(self, p, eid):
         p["i"] = env[p["id"]]["i"]
         p["comment"] = env[p["id"]].get("comment", p.get("comment", ""))
     else:
-        p["i"] = len(env)
+        # not len(env): closing any window but the last would hand the next
+        # one an index that is still in use. Same rule as the undo path.
+        p["i"] = max((w.get("i", -1) for w in env.values()), default=-1) + 1
 
     env[p["id"]] = p
+    self.mark_dirty(eid)
 
     broadcast_msg = dict(p)
     broadcast_msg["eid"] = eid

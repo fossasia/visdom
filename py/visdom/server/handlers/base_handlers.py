@@ -27,12 +27,14 @@ _COMMON_APP_ATTRIBUTES = (
     "env_path",
     "storage",
     "login_enabled",
+    "mark_dirty",
 )
 
 _WEB_APP_ATTRIBUTES = _COMMON_APP_ATTRIBUTES + (
     "max_text_lines",
     "max_old_content",
     "max_image_history",
+    "max_plot_history",
 )
 
 _SOCKET_APP_ATTRIBUTES = _COMMON_APP_ATTRIBUTES + ("readonly",)
@@ -126,7 +128,7 @@ class BaseHandler(tornado.web.RequestHandler):
             # exc_info is a tuple consisting of:
             # 1. The class of the Exception
             # 2. The actual Exception that was thrown
-            # 3. The traceback opbject
+            # 3. The traceback object
             try:
                 params = {
                     "error": exc_info[1] if debug else None,
