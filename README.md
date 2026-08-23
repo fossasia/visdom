@@ -569,10 +569,24 @@ model.fit(x_train, y_train, epochs=20, callbacks=[logger])
 
 Each metric gets its own window titled `"<name> (step)"`, throttled to one send every `log_every` batches. The optimizer's current learning rate is read (not computed) and plotted alongside as `lr`.
 
+**Experiment tracking with `params`** — records the run in the ExperimentStore alongside the charts, so it becomes queryable through [`vis.search_experiments`](#vissearch_experiments) / [`vis.compare_experiments`](#viscompare_experiments). Off by default. Without `params` the logger only ever calls `viz.line()`:
+
+```python
+logger = VisdomKerasLogger(viz, env="keras_run", params={"lr": 0.01})
+model.fit(x_train, y_train, epochs=20, callbacks=[logger])
+
+viz.search_experiments("status = finished")
+```
+
+Hyper-parameters are recorded when training begins, each epoch's metrics as they are plotted, and the run is marked `finished` when `fit()` returns. Only epoch metrics are recorded — per-batch values from `log_every` stay visualization-only so a run's metric history keeps the granularity the search and compare views read it at.
+
+**Note:** a finished experiment rejects further writes, so an env records one tracked run. Give every run its own env, including a repeat run of the same script. Keras reports no exception to `on_train_end`, so a tracked run is always recorded as `finished`. Call `viz.finish_experiment(status="failed", env=...)` directly to record a run that did not.
+
 **Parameters:**
 - `viz`: a connected `visdom.Visdom()` instance
 - `env`: environment name (default: `viz.env` if set, otherwise auto-generated from timestamp)
 - `log_every`: also plot metrics at batch granularity, one send every N batches (default: `None`, disabled)
+- `params`: hyper-parameters to record, opting the run into experiment tracking (default: `None`, disabled)
 
 **Note:** each call to `viz.line()` is a synchronous network request made on the training thread. Pick a `log_every` large enough that it doesn't stall training waiting on the server — 50+ is a reasonable default on GPU.
 
