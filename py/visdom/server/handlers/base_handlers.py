@@ -31,6 +31,7 @@ _COMMON_APP_ATTRIBUTES = (
 )
 
 _WEB_APP_ATTRIBUTES = _COMMON_APP_ATTRIBUTES + (
+    "readonly",
     "max_text_lines",
     "max_old_content",
     "max_image_history",
@@ -121,7 +122,7 @@ class BaseHandler(tornado.web.RequestHandler):
             logging.info(
                 "Traceback: {}".format(traceback.format_exception(*kwargs["exc_info"]))
             )
-            debug = self.settings.get("debug")
+            show_details = self.settings.get("show_error_details", False)
             title = http.client.responses.get(status_code, "Unknown Error")
             logging.error("rendering error page")
             exc_info = kwargs["exc_info"]
@@ -131,11 +132,11 @@ class BaseHandler(tornado.web.RequestHandler):
             # 3. The traceback object
             try:
                 params = {
-                    "error": exc_info[1] if debug else None,
+                    "error": exc_info[1] if show_details else None,
                     "trace_info": (
-                        traceback.format_exception(*exc_info) if debug else None
+                        traceback.format_exception(*exc_info) if show_details else None
                     ),
-                    "request": self.request.__dict__ if debug else None,
+                    "request": self.request.__dict__ if show_details else None,
                     "status_code": status_code,
                     "title": title,
                 }
