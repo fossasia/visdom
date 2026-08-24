@@ -172,7 +172,7 @@ const App = () => {
   // data stores
   const [storeMeta, setStoreMeta] = useState({
     envList: [],
-    tags: {},
+    tagsByEnv: {},
     layoutLists: new Map([['main', new Map([[DEFAULT_LAYOUT, new Map()]])]]),
   });
   const [storeData, setStoreData] = useState({
@@ -437,28 +437,28 @@ const App = () => {
   const onEnvUpdate = (data) => {
     setStoreMeta((prev) => {
       const layoutLists = new Map(prev.layoutLists);
-      const tags = {};
+      const tagsByEnv = {};
       data.forEach((env) => {
         if (!layoutLists.has(env)) {
           layoutLists.set(env, new Map([[DEFAULT_LAYOUT, new Map()]]));
         }
-        if (prev.tags[env]) {
-          tags[env] = prev.tags[env];
+        if (prev.tagsByEnv[env]) {
+          tagsByEnv[env] = prev.tagsByEnv[env];
         }
       });
       return {
         ...prev,
         envList: data,
+        tagsByEnv: tagsByEnv,
         layoutLists: layoutLists,
-        tags: tags,
       };
     });
   };
 
-  const onTagsSync = (tags) => {
+  const onTagsSync = (tagsByEnv) => {
     setStoreMeta((prev) => ({
       ...prev,
-      tags: tags && typeof tags === 'object' ? tags : {},
+      tagsByEnv: tagsByEnv && typeof tagsByEnv === 'object' ? tagsByEnv : {},
     }));
   };
 
@@ -467,13 +467,13 @@ const App = () => {
       return;
     }
     setStoreMeta((prev) => {
-      const nextTags = { ...prev.tags };
+      const nextTagsByEnv = { ...prev.tagsByEnv };
       if (Object.keys(tags).length === 0) {
-        delete nextTags[eid];
+        delete nextTagsByEnv[eid];
       } else {
-        nextTags[eid] = tags;
+        nextTagsByEnv[eid] = tags;
       }
-      return { ...prev, tags: nextTags };
+      return { ...prev, tagsByEnv: nextTagsByEnv };
     });
   };
 
@@ -558,14 +558,14 @@ const App = () => {
     setStoreMeta((prev) => {
       const layoutLists = new Map(prev.layoutLists);
       layoutLists.delete(env2delete);
-      const tags = { ...prev.tags };
-      delete tags[env2delete];
+      const tagsByEnv = { ...prev.tagsByEnv };
+      delete tagsByEnv[env2delete];
       let EnvIds = prev.envList.filter((env) => env !== env2delete);
       return {
         ...prev,
         envList: EnvIds,
         layoutLists: layoutLists,
-        tags: tags,
+        tagsByEnv: tagsByEnv,
       };
     });
 
@@ -1113,7 +1113,7 @@ const App = () => {
       onEnvDelete={onEnvDelete}
       onEnvSave={onEnvSave}
       onTagsSave={onTagsSave}
-      tags={storeMeta.tags}
+      tags={storeMeta.tagsByEnv}
       onModalClose={() => setShowEnvModal(false)}
       show={showEnvModal}
     />,
@@ -1132,7 +1132,7 @@ const App = () => {
     <EnvControls
       envIDs={selection.envIDs}
       envList={storeMeta.envList}
-      tags={storeMeta.tags}
+      tags={storeMeta.tagsByEnv}
       envSelectorStyle={{
         width: Math.max(window.innerWidth / 3, 50),
         wordBreak: 'break-all',
