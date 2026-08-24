@@ -9,17 +9,17 @@
 
 import React, { useMemo, useState } from 'react';
 
-import HParamsMessage from './HParamsMessage';
 import {
   buildComparison,
   cellClass,
   formatValue,
+  HParamsMessage,
   numericExtent,
   runLabel,
   spineStyle,
   StatusBadge,
+  useHParamsColumns,
 } from './hparamsUtils';
-import useHParamsColumns from './useHParamsColumns';
 
 const HParamsCompare = ({ records, paramKeys, metricKeys, tagKeys }) => {
   const [showIdentical, setShowIdentical] = useState(true);

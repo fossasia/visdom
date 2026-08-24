@@ -10,23 +10,21 @@
 import React, { useEffect, useRef } from 'react';
 
 import HParamsAxisToolbar from './HParamsAxisToolbar';
-import HParamsMessage from './HParamsMessage';
 import {
+  coincidentRuns,
+  formatValue,
+  HParamsMessage,
   PLOT_COLORSCALE,
   plotAxisStyle,
   plotBaseLayout,
   plotColorbar,
   plotRevision,
   renderPlot,
-  usePlotResize,
-} from './hparamsPlot';
-import {
-  coincidentRuns,
-  formatValue,
   resolveColor,
   toNumericColumn,
+  useHParamsAxes,
+  usePlotResize,
 } from './hparamsUtils';
-import useHParamsAxes from './useHParamsAxes';
 
 const MAX_DIMS = 6;
 

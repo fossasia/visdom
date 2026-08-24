@@ -9,17 +9,17 @@
 
 import React, { useEffect, useMemo, useRef } from 'react';
 
-import HParamsMessage from './HParamsMessage';
 import {
+  HParamsMessage,
   plotAxisStyle,
   plotBaseLayout,
   plotRevision,
   renderPlot,
   runColor,
+  selectMetricSeries,
+  useExperimentMetrics,
   usePlotResize,
-} from './hparamsPlot';
-import { selectMetricSeries } from './hparamsUtils';
-import useExperimentMetrics from './useExperimentMetrics';
+} from './hparamsUtils';
 
 const MAX_MISSING_NAMED = 3;
 
