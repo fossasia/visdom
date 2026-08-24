@@ -626,8 +626,16 @@ class TestSurf(unittest.TestCase):
         """surf accepts 1xN and Nx1 size-1 row and column matrices."""
         sent_row = self._surf(np.ones((1, 5)))
         self.assertEqual(sent_row["payload"]["data"][0]["type"], "surface")
+        self.assertEqual(
+            sent_row["payload"]["data"][0]["z"],
+            [[1.0, 1.0, 1.0, 1.0, 1.0]],
+        )
         sent_col = self._surf(np.ones((5, 1)))
         self.assertEqual(sent_col["payload"]["data"][0]["type"], "surface")
+        self.assertEqual(
+            sent_col["payload"]["data"][0]["z"],
+            [[1.0], [1.0], [1.0], [1.0], [1.0]],
+        )
 
 
 class TestContour(unittest.TestCase):
@@ -660,8 +668,16 @@ class TestContour(unittest.TestCase):
         """contour accepts 1xN and Nx1 size-1 row and column matrices."""
         sent_row = self._contour(np.ones((1, 5)))
         self.assertEqual(sent_row["payload"]["data"][0]["type"], "contour")
+        self.assertEqual(
+            sent_row["payload"]["data"][0]["z"],
+            [[1.0, 1.0, 1.0, 1.0, 1.0]],
+        )
         sent_col = self._contour(np.ones((5, 1)))
         self.assertEqual(sent_col["payload"]["data"][0]["type"], "contour")
+        self.assertEqual(
+            sent_col["payload"]["data"][0]["z"],
+            [[1.0], [1.0], [1.0], [1.0], [1.0]],
+        )
 
 
 class TestPie(unittest.TestCase):
@@ -704,9 +720,13 @@ class TestStem(unittest.TestCase):
         return sent
 
     def test_size_1_x(self):
-        """Single-point stem plot (size-1 X) succeeds."""
+        """Single-point stem plot (size-1 X) produces scatter trace with expected point data."""
         sent = self._stem(np.array([5.0]))
-        self.assertIn("data", sent["payload"])
+        trace = sent["payload"]["data"][0]
+        self.assertEqual(trace["type"], "scatter")
+        self.assertEqual(trace["mode"], "lines")
+        self.assertEqual(trace["x"][:2], [1.0, 1.0])
+        self.assertEqual(trace["y"][:2], [0.0, 5.0])
 
 
 if __name__ == "__main__":
