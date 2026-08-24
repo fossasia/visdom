@@ -547,6 +547,12 @@ class TestBoxplot(unittest.TestCase):
         with self.assertRaises(AssertionError):
             self.viz.boxplot(X, opts={"legend": ["only_one"]})
 
+    def test_size_1_x(self):
+        """Single-observation boxplot (size-1 X) produces one trace."""
+        sent = self._boxplot(np.array([10.5]))
+        self.assertEqual(len(sent["payload"]["data"]), 1)
+        self.assertEqual(sent["payload"]["data"][0]["y"], [10.5])
+
 
 class TestSurf(unittest.TestCase):
     def setUp(self):
@@ -616,6 +622,13 @@ class TestSurf(unittest.TestCase):
         sent = self._surf(np.ones((2, 2)))
         self.assertIn("scene", sent["payload"]["layout"])
 
+    def test_size_1_row_and_col(self):
+        """surf accepts 1xN and Nx1 size-1 row and column matrices."""
+        sent_row = self._surf(np.ones((1, 5)))
+        self.assertEqual(sent_row["payload"]["data"][0]["type"], "surface")
+        sent_col = self._surf(np.ones((5, 1)))
+        self.assertEqual(sent_col["payload"]["data"][0]["type"], "surface")
+
 
 class TestContour(unittest.TestCase):
     def setUp(self):
@@ -642,6 +655,58 @@ class TestContour(unittest.TestCase):
         """contour renders flat, without the 3D scene surf builds."""
         sent = self._contour(np.ones((2, 2)))
         self.assertNotIn("scene", sent["payload"]["layout"])
+
+    def test_size_1_row_and_col(self):
+        """contour accepts 1xN and Nx1 size-1 row and column matrices."""
+        sent_row = self._contour(np.ones((1, 5)))
+        self.assertEqual(sent_row["payload"]["data"][0]["type"], "contour")
+        sent_col = self._contour(np.ones((5, 1)))
+        self.assertEqual(sent_col["payload"]["data"][0]["type"], "contour")
+
+
+class TestPie(unittest.TestCase):
+    def setUp(self):
+        self.viz = _unconnected_visdom()
+
+    def _pie(self, X, **kwargs):
+        sent = {}
+
+        def capture(msg, endpoint="events", **_):
+            sent["payload"] = msg
+            sent["endpoint"] = endpoint
+            return "win1"
+
+        with patch.object(self.viz, "_send", side_effect=capture):
+            self.viz.pie(X, **kwargs)
+        return sent
+
+    def test_size_1_x(self):
+        """Single-slice pie chart (size-1 X) produces a pie trace."""
+        sent = self._pie(np.array([100]))
+        self.assertEqual(sent["payload"]["data"][0]["type"], "pie")
+        self.assertEqual(sent["payload"]["data"][0]["values"], [100])
+
+
+class TestStem(unittest.TestCase):
+    def setUp(self):
+        self.viz = _unconnected_visdom()
+
+    def _stem(self, X, **kwargs):
+        sent = {}
+
+        def capture(msg, endpoint="events", **_):
+            sent["payload"] = msg
+            sent["endpoint"] = endpoint
+            return "win1"
+
+        with patch.object(self.viz, "_send", side_effect=capture):
+            self.viz.stem(X, **kwargs)
+        return sent
+
+    def test_size_1_x(self):
+        """Single-point stem plot (size-1 X) succeeds."""
+        sent = self._stem(np.array([5.0]))
+        self.assertIn("data", sent["payload"])
 
 
 if __name__ == "__main__":
