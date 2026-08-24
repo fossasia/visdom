@@ -2,7 +2,7 @@
 
 A readonly server must refuse every request that changes stored state, and must
 still serve every request that only reads it. The guard is a decorator applied
-per handler (:func:`~visdom.utils.server_utils.reject_readonly`), so what needs
+per handler (:func:`~visdom.utils.server_utils.check_readonly_message`), so what needs
 testing is coverage rather than mechanism: each write endpoint refuses, each
 read endpoint does not, and nothing reaches disk on the way out.
 

@@ -6,7 +6,11 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from visdom.utils.shared_utils import get_new_window_id, _coerce_image_slider_index
+from visdom.utils.shared_utils import (
+    get_new_window_id,
+    _coerce_image_slider_index,
+    _normalize_table_data,
+)
 from visdom import server
 import os
 import os.path
@@ -180,25 +184,30 @@ def _scrub_dict(d):
         return d
 
 
+TICK_FIELD_SUFFIXES = (
+    "type",
+    "label",
+    "tickmin",
+    "tickmax",
+    "tickvals",
+    "ticklabels",
+    "tick",
+    "tickfont",
+    "tickstep",
+)
+
+
 def _axisformat(xy, opts):
-    fields = [
-        "type",
-        "label",
-        "tickmin",
-        "tickmax",
-        "tickvals",
-        "ticklabels",
-        "tick",
-        "tickfont",
-    ]
+    fields = TICK_FIELD_SUFFIXES
     if any(opts.get(xy + i) is not None for i in fields):
         has_ticks = (
             opts.get(xy + "tickmin") is not None
             and opts.get(xy + "tickmax") is not None
         )
+        label = opts.get(xy + "label")
         return {
             "type": opts.get(xy + "type"),
-            "title": opts.get(xy + "label"),
+            "title": {"text": label} if label is not None else None,
             "range": (
                 [opts.get(xy + "tickmin"), opts.get(xy + "tickmax")]
                 if has_ticks
@@ -214,25 +223,17 @@ def _axisformat(xy, opts):
 
 
 def _axisformat3d(xyz, opts):
-    fields = [
-        "type",
-        "label",
-        "tickmin",
-        "tickmax",
-        "tickvals",
-        "ticklabels",
-        "tick",
-        "tickfont",
-    ]
+    fields = TICK_FIELD_SUFFIXES
     if any(opts.get(xyz + i) is not None for i in fields):
         has_ticks = (
             opts.get(xyz + "tickmin") is not None
             and opts.get(xyz + "tickmax") is not None
         )
         has_step = has_ticks and opts.get(xyz + "tickstep") is not None
+        label = opts.get(xyz + "label")
         return {
             "type": opts.get(xyz + "type"),
-            "title": opts.get(xyz + "label"),
+            "title": {"text": label} if label is not None else None,
             "range": (
                 [opts.get(xyz + "tickmin"), opts.get(xyz + "tickmax")]
                 if has_ticks
@@ -248,6 +249,7 @@ def _axisformat3d(xyz, opts):
                 if has_step
                 else None
             ),
+            "dtick": opts.get(xyz + "tickstep"),
             "tickfont": opts.get(xyz + "tickfont"),
         }
 
@@ -256,7 +258,7 @@ def _opts2layout(opts, is3d=False):
     tight = opts.get("tight_layout", False)
     layout = {
         "showlegend": opts.get("showlegend", "legend" in opts),
-        "title": opts.get("title"),
+        "title": {"text": opts["title"]} if opts.get("title") is not None else None,
         "margin": {
             "l": opts.get("marginleft", 0 if (is3d or tight) else 60),
             "r": opts.get("marginright", 0 if tight else 60),
@@ -282,7 +284,7 @@ def _opts2layout(opts, is3d=False):
     if layout_opts is not None:
         if "plotly" in layout_opts:
             layout.update(layout_opts["plotly"])
-    return _scrub_dict(layout)
+    return _scrub_dict(_normalize_title_strings(layout))
 
 
 def _normalize_labels(Y):
@@ -638,6 +640,30 @@ def _compute_confusion_matrix(y_true, y_pred, labels):
     return cm
 
 
+def _normalize_title_strings(layout):
+    """Recursively wrap any plain-string 'title' value as {'text': ...}.
+
+    plotly.js v3.0+ no longer accepts a bare string for any 'title'
+    attribute (chart title, xaxis/yaxis title, scene axis title, legend
+    title, colorbar title, etc.). Visdom's own layout-building functions
+    already emit the object form, but plotlyplot() forwards a user-supplied
+    raw figure layout untouched, so a plain string can appear at any depth
+    (e.g. layout['scene']['xaxis']['title']). This walks the whole layout
+    and fixes every occurrence in place, returning a new structure.
+    """
+    if isinstance(layout, dict):
+        fixed = {}
+        for key, value in layout.items():
+            if key == "title" and isinstance(value, str):
+                fixed[key] = {"text": value}
+            else:
+                fixed[key] = _normalize_title_strings(value)
+        return fixed
+    if isinstance(layout, list):
+        return [_normalize_title_strings(v) for v in layout]
+    return layout
+
+
 def _decode_binary_arrays(obj):
     """Decode Plotly 6+ binary-encoded arrays back to plain Python lists."""
     if isinstance(obj, dict):
@@ -668,7 +694,7 @@ class Visdom(object):
         http_proxy_host=None,
         http_proxy_port=None,
         env="main",
-        send=True,
+        *,
         raise_exceptions=None,
         use_incoming_socket=True,
         log_to_filename=None,
@@ -716,7 +742,6 @@ class Visdom(object):
             .replace("\r", "-")
         )
         self.env_list = {self.env}  # default env
-        self.send = send
         self.event_handlers = {}  # Haven't registered any events
         self.socket_alive = False
         self.socket_connection_achieved = False
@@ -762,7 +787,7 @@ class Visdom(object):
 
         # Setup for online interactions
         result = self._send({"eid": env}, endpoint="env/" + env)
-        if self.send and result is False:
+        if result is False:
             if self.raise_exceptions:
                 raise ConnectionError(
                     "Could not connect to server at {}:{}.".format(
@@ -776,17 +801,16 @@ class Visdom(object):
                     )
                 )
         # when talking to a server, get a backchannel
-        if send and use_incoming_socket:
+        if use_incoming_socket:
             self.setup_socket()
-        elif send and use_polling:
+        elif use_polling:
             self.setup_polling()
-        elif send and not use_incoming_socket:
+        else:
             logger.warning(
                 "Without the incoming socket you cannot receive events from "
                 "the server or register event handlers to your Visdom client."
             )
-        if send:
-            self._start_session_reaper()
+        self._start_session_reaper()
         # Wait for initialization before starting
         time_spent = 0
         inc = 0.1
@@ -878,102 +902,83 @@ class Visdom(object):
     def clear_event_handlers(self, target, env=None):
         self.event_handlers.pop((env, target), None)
 
-    def setup_polling(self):
-        # TODO merge with setup_socket?
-        # Setup socket to server
-        def on_message(message):
-            message = json.loads(message)
-            if "command" in message:
-                # Handle server commands
-                if message["command"] == "alive":
-                    if "data" in message and message["data"] == "vis_alive":
-                        logger.info("Visdom successfully connected to server")
-                        self.socket_alive = True
-                        self.socket_connection_achieved = True
-                    else:
-                        logger.warning(
-                            "Visdom server failed handshake, may not "
-                            "be properly connected"
-                        )
-            if "target" in message:
-                env = message.get("eid")
-                key = (env, message["target"])
+    def _handle_incoming_message(self, raw_message):
+        try:
+            message = json.loads(raw_message)
+        except (TypeError, ValueError) as e:
+            logger.warning("Visdom failed to decode incoming message: %s", e)
+            return
 
-                for handler in list(self.event_handlers.get(key, [])):
-                    handler(message)
-
-                if env is not None:
-                    global_key = (None, message["target"])
-                    for handler in list(self.event_handlers.get(global_key, [])):
-                        handler(message)
-
-        def on_close(ws):
-            self.socket_alive = False
-
-        def run_socket(*args):
-            # open a socket
-            resp_json = self._handle_post(
-                "{0}:{1}{2}/vis_socket_wrap".format(
-                    self.server, self.port, self.base_url
-                ),
-                data=json.dumps({"message_type": "init"}),
+        if not isinstance(message, dict):
+            logger.warning(
+                "Visdom ignored incoming message with unexpected type %s",
+                type(message).__name__,
             )
-            resp = json.loads(resp_json)
-            self.vis_sid = resp["sid"]
-            while self.use_socket:
+            return
+
+        if "command" in message:
+            # Handle server commands
+            if message["command"] == "alive":
+                if "data" in message and message["data"] == "vis_alive":
+                    logger.info("Visdom successfully connected to server")
+                    self.socket_alive = True
+                    self.socket_connection_achieved = True
+                else:
+                    logger.warning(
+                        "Visdom server failed handshake, may not "
+                        "be properly connected"
+                    )
+        if "target" in message:
+            env = message.get("eid")
+            key = (env, message["target"])
+
+            handlers = list(self.event_handlers.get(key, []))
+            if env is not None:
+                global_key = (None, message["target"])
+                handlers.extend(list(self.event_handlers.get(global_key, [])))
+
+            for handler in handlers:
+                try:
+                    handler(message)
+                except Exception as e:
+                    logger.warning(
+                        "Visdom failed to handle a handler for {}: {}"
+                        "".format(message, e)
+                    )
+                    traceback.print_exc()
+
+    def _run_polling(self):
+        while self.use_socket:
+            try:
                 resp_json = self._handle_post(
                     "{0}:{1}{2}/vis_socket_wrap".format(
                         self.server, self.port, self.base_url
                     ),
-                    data=json.dumps({"message_type": "query", "sid": self.vis_sid}),
+                    data=json.dumps({"message_type": "init"}),
                 )
                 resp = json.loads(resp_json)
-                for msg in resp["messages"]:
-                    on_message(msg)
-                time.sleep(0.1)
+                self.vis_sid = resp["sid"]
+                while self.use_socket:
+                    resp_json = self._handle_post(
+                        "{0}:{1}{2}/vis_socket_wrap".format(
+                            self.server, self.port, self.base_url
+                        ),
+                        data=json.dumps({"message_type": "query", "sid": self.vis_sid}),
+                    )
+                    resp = json.loads(resp_json)
+                    for msg in resp["messages"]:
+                        self._handle_incoming_message(msg)
+                    time.sleep(0.1)
+            except Exception as e:
+                logger.error("Polling had error {}, attempting restart".format(e))
+            finally:
+                self.socket_alive = False
+            if self.use_socket:
+                time.sleep(3)
 
-        # Start listening thread
-        self.socket_thread = threading.Thread(
-            target=run_socket, name="Visdom-Socket-Thread"
-        )
-        self.socket_thread.start()
-
-    def setup_socket(self, polling=False):
-        # Setup socket to server
+    def _run_websocket(self):
         def on_message(ws, message):
-            message = json.loads(message)
-            if "command" in message:
-                # Handle server commands
-                if message["command"] == "alive":
-                    if "data" in message and message["data"] == "vis_alive":
-                        logger.info("Visdom successfully connected to server")
-                        self.socket_alive = True
-                        self.socket_connection_achieved = True
-                    else:
-                        logger.warning(
-                            "Visdom server failed handshake, may not "
-                            "be properly connected"
-                        )
-            if "target" in message:
-                env = message.get("eid")
-                key = (env, message["target"])
-
-                handlers = list(self.event_handlers.get(key, []))
-                if env is not None:
-                    global_key = (None, message["target"])
-                    handlers.extend(list(self.event_handlers.get(global_key, [])))
-
-                for handler in handlers:
-                    try:
-                        handler(message)
-                    except Exception as e:
-                        logger.warning(
-                            "Visdom failed to handle a handler for {}: {}"
-                            "".format(message, e)
-                        )
-                        import traceback
-
-                        traceback.print_exc()
+            self._handle_incoming_message(message)
 
         def on_error(ws, error):
             if hasattr(error, "errno") and error.errno == errno.ECONNREFUSED:
@@ -998,53 +1003,58 @@ class Visdom(object):
                 )
                 self.use_socket = False
 
-        def run_socket(*args):
-            host_scheme = urlparse(self.server).scheme
-            if host_scheme == "https":
-                ws_scheme = "wss"
-            else:
-                ws_scheme = "ws"
-            while self.use_socket:
-                try:
-                    sock_addr = "{}://{}:{}{}/vis_socket".format(
-                        ws_scheme, self.server_base_name, self.port, self.base_url
-                    )
-                    ws = websocket.WebSocketApp(
-                        sock_addr,
-                        on_message=on_message,
-                        on_error=on_error,
-                        on_close=on_close,
-                        header={
-                            "Cookie": "user_password="
-                            + self.session.cookies.get("user_password", "")
-                        },
-                    )
-                    run_forever_kwargs = {
-                        "http_proxy_host": self.http_proxy_host,
-                        "http_proxy_port": self.http_proxy_port,
-                        "ping_timeout": 100.0,
-                    }
-                    if ws_scheme == "wss":
-                        if isinstance(self.ssl_verify, str):
-                            run_forever_kwargs["sslopt"] = {
-                                "cert_reqs": ssl.CERT_REQUIRED,
-                                "ca_certs": self.ssl_verify,
-                            }
-                        elif not self.ssl_verify:
-                            run_forever_kwargs["sslopt"] = {
-                                "cert_reqs": ssl.CERT_NONE,
-                            }
-                    ws.run_forever(**run_forever_kwargs)
-                    ws.close()
-                except Exception as e:
-                    logger.error("Socket had error {}, attempting restart".format(e))
+        host_scheme = urlparse(self.server).scheme
+        if host_scheme == "https":
+            ws_scheme = "wss"
+        else:
+            ws_scheme = "ws"
+        while self.use_socket:
+            try:
+                sock_addr = "{}://{}:{}{}/vis_socket".format(
+                    ws_scheme, self.server_base_name, self.port, self.base_url
+                )
+                ws = websocket.WebSocketApp(
+                    sock_addr,
+                    on_message=on_message,
+                    on_error=on_error,
+                    on_close=on_close,
+                    header={
+                        "Cookie": "user_password="
+                        + self.session.cookies.get("user_password", "")
+                    },
+                )
+                run_forever_kwargs = {
+                    "http_proxy_host": self.http_proxy_host,
+                    "http_proxy_port": self.http_proxy_port,
+                    "ping_timeout": 100.0,
+                }
+                if ws_scheme == "wss":
+                    if isinstance(self.ssl_verify, str):
+                        run_forever_kwargs["sslopt"] = {
+                            "cert_reqs": ssl.CERT_REQUIRED,
+                            "ca_certs": self.ssl_verify,
+                        }
+                    elif not self.ssl_verify:
+                        run_forever_kwargs["sslopt"] = {
+                            "cert_reqs": ssl.CERT_NONE,
+                        }
+                ws.run_forever(**run_forever_kwargs)
+                ws.close()
+            except Exception as e:
+                logger.error("Socket had error {}, attempting restart".format(e))
+            if self.use_socket:
                 time.sleep(3)
 
-        # Start listening thread
+    def setup_polling(self):
+        self.setup_socket(polling=True)
+
+    def setup_socket(self, polling=False):
+        run_socket = self._run_polling if polling else self._run_websocket
         self.socket_thread = threading.Thread(
-            target=run_socket, name="Visdom-Socket-Thread"
+            target=run_socket,
+            name="Visdom-Socket-Thread",
+            daemon=True,
         )
-        self.socket_thread.daemon = True
         self.socket_thread.start()
 
     # Utils
@@ -1109,10 +1119,6 @@ class Visdom(object):
 
         if msg.get("eid", None) is not None:
             self.env_list.add(msg["eid"])
-
-        # TODO investigate send use cases, then deprecate
-        if not self.send:
-            return msg, endpoint
 
         if "win" in msg and msg["win"] is None and create:
             msg["win"] = "window_" + get_rand_id()
@@ -1195,8 +1201,7 @@ class Visdom(object):
         """POST to an experiment `endpoint` and decode the JSON reply.
 
         Returns the decoded reply when the server replies with JSON, otherwise
-        the raw response (e.g. an error string, or the `(msg, endpoint)` tuple
-        when this client has `send=False`).
+        the raw response (e.g. an error string).
         """
         response = self._send(msg, endpoint=endpoint, quiet=True)
         if not isstr(response):
@@ -1205,6 +1210,22 @@ class Visdom(object):
             return json.loads(response)
         except ValueError:
             return response
+
+    def _experiment_query(self, msg, endpoint):
+        """Ask an experiment `endpoint` a question and decode the JSON reply.
+
+        Unlike the endpoints reached through :meth:`_experiment_send`, which
+        record something, these ones ask a question that only a server can
+        answer. An offline client never reaches one, and would otherwise fall
+        through to the generic `_send` short circuit and hand back `True` — a
+        value a caller expecting a reply dict cannot use and cannot tell apart
+        from a real answer.
+
+        Returns None when offline, as the other read methods do.
+        """
+        if self.offline:
+            return None
+        return self._experiment_request(msg, endpoint)
 
     def _experiment_send(self, msg, env):
         """POST an experiment action for `env` and decode the JSON reply.
@@ -1257,6 +1278,9 @@ class Visdom(object):
     def finish_experiment(self, status="finished", env=None):
         """Mark an env's experiment terminal (`"finished"` or `"failed"`).
 
+        An experiment that is already terminal cannot be finished again; the
+        server rejects the attempt rather than restamping the existing record.
+
         Returns the stored experiment as a dict.
         """
         return self._experiment_send({"action": "finish", "status": status}, env)
@@ -1295,13 +1319,14 @@ class Visdom(object):
         Returns the server's reply as a dict of `experiments` (a list of
         experiment dicts, one page worth), the unpaged `total` matching the
         query, and the `limit` the server actually applied alongside the
-        `offset`/`query` used.
+        `offset`/`query` used. Returns None on an offline client, which has no
+        server to search.
         """
         if query is not None and not isstr(query):
             raise TypeError("query must be a string")
         if sort_by is not None and not isstr(sort_by):
             raise TypeError("sort_by must be a string")
-        return self._experiment_request(
+        return self._experiment_query(
             {
                 "query": query,
                 "limit": limit,
@@ -1344,12 +1369,14 @@ class Visdom(object):
         and whose `groups['lr']` is
         `[{'value': 0.1, 'env_ids': ['run-a', 'run-c']},
           {'value': 0.001, 'env_ids': ['run-b']}]`.
+
+        Returns None on an offline client, which has no server to compare on.
         """
         if isstr(env_ids) or not isinstance(env_ids, (list, tuple)):
             raise TypeError("env_ids must be a list of environment ids")
         if not all(isstr(env_id) for env_id in env_ids):
             raise TypeError("env_ids must contain strings")
-        return self._experiment_request(
+        return self._experiment_query(
             {"env_ids": list(env_ids)},
             "experiments/compare",
         )
@@ -1364,14 +1391,15 @@ class Visdom(object):
         `{name: spec}`) and the endpoint are in place so callers and the docs
         are ready for when the strategy is wired in.
 
-        Returns the server's reply as a dict.
+        Returns the server's reply as a dict, or None on an offline client,
+        which has no server to ask.
         """
         if params is not None and not isinstance(params, dict):
             raise TypeError("params must be a dict of {name: spec}")
         msg = {"params": params}
         if env is not None:
             msg["eid"] = env
-        return self._experiment_request(msg, "experiments/suggest")
+        return self._experiment_query(msg, "experiments/suggest")
 
     def hparams(
         self, query=None, env_ids=None, mode=None, win=None, env=None, opts=None
@@ -1397,7 +1425,10 @@ class Visdom(object):
 
         There is no "show everything" call: with neither `query` nor `env_ids`
         the server has nothing to select and rejects the request. A blank or
-        whitespace-only `query` counts as no query.
+        whitespace-only `query` counts as no query. Every id in `env_ids` must
+        name an environment that has an experiment: one that does not — a typo,
+        a deleted run — is answered with a ``404`` naming it rather than left
+        out of the pane unremarked.
 
         ::
 
@@ -1832,6 +1863,7 @@ class Visdom(object):
             if '"bdata"' in figure_json:
                 figure_dict = _decode_binary_arrays(figure_dict)
 
+            figure_dict["layout"] = _normalize_title_strings(figure_dict["layout"])
             # If opts title is not added, the title is not added to the top right of the window.
             # We add the paramater to opts manually if it exists.
             opts = dict()
@@ -2492,6 +2524,10 @@ class Visdom(object):
             ), "dimension argument should be LxHxWxC or LxCxHxW"
             if dim == "LxCxHxW":
                 tensor = tensor.transpose([0, 2, 3, 1])
+            if tensor.shape[-1] not in (1, 3):
+                raise ValueError(
+                    "video tensor's channel dim should be 1 (grayscale) or 3 (bgr)"
+                )
             bytestr, mimetype = self._encode(tensor, opts["fps"])
 
         flags = " ".join([k for k in ("autoplay", "loop") if opts[k]])
@@ -2820,7 +2856,7 @@ class Visdom(object):
                 if trace_name in trace_opts:
                     _data.update(trace_opts[trace_name])
 
-                data.append(_scrub_dict(_data))
+                data.append(_scrub_dict(_normalize_title_strings(_data)))
 
         if opts:
             for marker_prop in ["markercolor"]:
@@ -3464,10 +3500,10 @@ class Visdom(object):
         layout = _opts2layout(opts)
         layout["annotations"] = annotations
         layout["xaxis"] = layout.get("xaxis", {})
-        layout["xaxis"]["title"] = opts["xlabel"]
+        layout["xaxis"]["title"] = {"text": opts["xlabel"]}
         layout["xaxis"]["side"] = "bottom"
         layout["yaxis"] = layout.get("yaxis", {})
-        layout["yaxis"]["title"] = opts["ylabel"]
+        layout["yaxis"]["title"] = {"text": opts["ylabel"]}
         layout["yaxis"]["autorange"] = "reversed"
 
         data_to_send = {
@@ -4210,16 +4246,18 @@ class Visdom(object):
         data = [trace1, trace2]
 
         layout = {
-            "title": opts.get("title", "Example Double Y axis"),
+            "title": {"text": opts.get("title", "Example Double Y axis")},
             "yaxis": {
-                "title": trace1["name"],
-                "titlefont": {"color": opts.get("color_title_y1", "black")},
+                "title": {
+                    "text": trace1["name"],
+                    "font": {"color": opts.get("color_title_y1", "black")},
+                },
                 "tickfont": {"color": opts.get("color_tick_y1", "black")},
             },
             "yaxis2": {
-                "title": trace2["name"],
-                "titlefont": {
-                    "color": opts.get("color_title_y2", "rgb(148, 103, 189)")
+                "title": {
+                    "text": trace2["name"],
+                    "font": {"color": opts.get("color_title_y2", "rgb(148, 103, 189)")},
                 },
                 "tickfont": {"color": opts.get("color_tick_y2", "rgb(148, 103, 189)")},
                 "overlaying": "y",
@@ -4606,15 +4644,17 @@ class Visdom(object):
             }
         )
 
-    def table(self, headers, data, win=None, env=None, opts=None):
+    def html_table(self, data, headers=None, win=None, env=None, opts=None):
         """
         This function renders structured data as a styled HTML table.
 
-        - `headers`: a `list` of column header names (`string` or any
-           type convertible to `string`).
-        - `data`: a 2D `list` of row data, where each row is list or
-          `tuple` with same number of elements as `headers`. In case
-           of empty list, a table with only header will be rendered.
+        - `data`: a 2D `list`/`tuple` of row data, a 2D numpy array, or
+           a list of `dict`s (in which case `headers` is derived from
+           the first dict's keys unless explicitly given). In case of
+           an empty list, a table with only headers will be rendered.
+        - `headers`: a `list`/`tuple`/1D numpy array of column header
+           names (`string` or any type convertible to `string`).
+           Required unless `data` is a list of dicts.
 
         The following `opts` are supported:
 
@@ -4624,14 +4664,7 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
-        assert isinstance(headers, list), "headers should be a list"
-        assert isinstance(data, list), "data should be a list of rows"
-        assert all(
-            isinstance(row, (list, tuple)) for row in data
-        ), "each row in data should be a list or tuple"
-        assert all(
-            len(row) == len(headers) for row in data
-        ), "each data row must have the same number of columns as headers"
+        headers, data = _normalize_table_data(data, headers)
 
         style = """
             <style>
@@ -4677,3 +4710,41 @@ class Visdom(object):
         ) % (style, header_html, rows_html)
 
         return self.text(text=table_html, win=win, env=env, opts=opts)
+
+    def table(self, data, headers=None, win=None, env=None, opts=None):
+        """
+        Renders a native, structured, editable table pane.
+
+        - `data`: a 2D list of rows (list of lists/tuples), OR a list of
+           dicts (in which case `headers` is derived from the first
+           dict's keys unless explicitly given).
+        - `headers`: list of column names. Required if `data` rows are
+           plain lists/tuples; optional (and used to reorder/filter
+           columns) if `data` is a list of dicts.
+
+        The following `opts` are supported:
+
+        - `opts.title`: title for the window (`string`; optional)
+        - `opts.editable`: whether cells/rows/columns can be edited by
+           anyone viewing the pane (`bool`; default `True`). Set to
+           `False` for a read-only display table (e.g. a live
+           leaderboard).
+        """
+        opts = {} if opts is None else opts
+        _title2str(opts)
+        _assert_opts(opts)
+        opts.setdefault("editable", True)
+
+        headers, rows = _normalize_table_data(data, headers)
+
+        content = {"headers": headers, "rows": rows}
+
+        return self._send(
+            {
+                "data": [{"content": content, "type": "table"}],
+                "win": win,
+                "eid": env,
+                "opts": opts,
+            },
+            endpoint="events",
+        )

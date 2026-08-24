@@ -37,13 +37,37 @@ from visdom.utils.server_utils import (
     check_auth,
     extract_eid,
     register_window,
-    reject_readonly,
+    check_readonly_message,
     window,
 )
 
 READONLY_MESSAGE = "Experiment writes are disabled while the server is in readonly mode"
 
 VALID_MODES = ("query", "env_ids", "both")
+
+#: How many unknown ids a 404 names before it summarizes the rest.
+UNKNOWN_IDS_SHOWN = 5
+
+
+def _reason(text):
+    """Return ``text`` as a reason phrase that is safe to put on the status line.
+
+    Reason phrases are latin-1 encoded by Tornado and cannot span lines, so
+    anything built from the request body — an env id, a query — is escaped to
+    ASCII and flattened onto one line first. A run named with an emoji should
+    come back as the 404 it is rather than a 500 from the error path itself.
+    """
+    return " ".join(text.split()).encode("ascii", "backslashreplace").decode("ascii")
+
+
+def _unknown_env_ids(unknown):
+    """Return the 404 naming the ``env_ids`` that have no experiment."""
+    named = ", ".join("'{0}'".format(env_id) for env_id in unknown[:UNKNOWN_IDS_SHOWN])
+    if len(unknown) > UNKNOWN_IDS_SHOWN:
+        named += " (and {0} more)".format(len(unknown) - UNKNOWN_IDS_SHOWN)
+    return tornado.web.HTTPError(
+        404, reason=_reason("no experiment for env_ids: {0}".format(named))
+    )
 
 
 class ExperimentHparamsHandler(BaseHandler):
@@ -54,6 +78,9 @@ class ExperimentHparamsHandler(BaseHandler):
     * ``query`` — filter with the syntax of :mod:`~visdom.experiments.query`
       (``"lr < 0.01 AND acc > 90"``).
     * ``env_ids`` — an explicit list of environments, kept in the order given.
+      Every id must have an experiment; one that does not is a 404 naming it,
+      like ``/experiments/compare``, since a mistyped id dropped from the
+      selection would open a pane quietly missing a run that was asked for.
     * ``mode`` — ``"query"``, ``"env_ids"`` or ``"both"``; when omitted it is
       inferred from which of ``query``/``env_ids`` were supplied. Each mode
       rejects the argument it does not accept, and with neither supplied there is
@@ -157,18 +184,30 @@ class ExperimentHparamsHandler(BaseHandler):
 
         if spec.get("mode") == "env_ids":
             experiments = []
-            for env_id in wanted or []:
+            unknown = []
+            for env_id in wanted:
                 experiment = store.get_experiment(env_id)
-                if experiment is not None:
+                if experiment is None:
+                    unknown.append(env_id)
+                else:
                     experiments.append(experiment)
+            if unknown:
+                raise _unknown_env_ids(unknown)
             return experiments
 
         try:
             experiments = store.search(query=spec.get("query"))
         except QueryParseError as e:
-            raise tornado.web.HTTPError(400, reason=str(e))
+            raise tornado.web.HTTPError(400, reason=_reason(str(e)))
         if wanted is not None:
             by_id = {experiment.env_id: experiment for experiment in experiments}
+            unknown = [
+                env_id
+                for env_id in wanted
+                if env_id not in by_id and store.get_experiment(env_id) is None
+            ]
+            if unknown:
+                raise _unknown_env_ids(unknown)
             experiments = [by_id[eid] for eid in wanted if eid in by_id]
         return experiments
 
@@ -201,7 +240,7 @@ class ExperimentHparamsHandler(BaseHandler):
         handler.storage.save_env(eid, handler.state[eid])
 
     @check_auth
-    @reject_readonly(READONLY_MESSAGE)
+    @check_readonly_message(READONLY_MESSAGE)
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -292,7 +331,7 @@ class ExperimentHparamsUpdateHandler(BaseHandler):
         handler.storage.save_env(eid, handler.state[eid])
 
     @check_auth
-    @reject_readonly(READONLY_MESSAGE)
+    @check_readonly_message(READONLY_MESSAGE)
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)

@@ -98,6 +98,21 @@ class JSONStore(DataStore):
                 written.append(eid)
         return written
 
+    def _atomic_write(self, path, payload):
+        """Write ``payload`` to ``path`` via a temporary file and one rename.
+
+        Writing straight to ``path`` truncates the previous contents before the
+        new ones are complete, so an interrupted write leaves a half-file that
+        :meth:`load_env` cannot parse and silently reports as an empty
+        environment. Staging into ``<path>.tmp`` and calling :func:`os.replace`
+        keeps the old file readable until the new one is whole. This mirrors
+        :meth:`save_undo`.
+        """
+        tmp = path + ".tmp"
+        with open(tmp, "w") as fn:
+            fn.write(payload)
+        os.replace(tmp, path)
+
     def serialize_env(self, eid, env_data):
         """Write one environment to disk; return ``True`` if written.
 
@@ -108,6 +123,11 @@ class JSONStore(DataStore):
         :meth:`_hash_path` so it agrees with load/delete/exists on the file a
         given ``eid`` maps to; over-long ids fall back to ``hash_<sha256>.json``
         with the real id kept in a ``name`` field.
+
+        The write itself is atomic (see :meth:`_atomic_write`), so a crash
+        part-way through cannot destroy the environment already on disk. The
+        staging file carries a ``.tmp`` suffix rather than ``.json``, so a
+        stranded one is never mistaken for an environment by :meth:`list_envs`.
         """
         if isinstance(env_data, LazyEnvData):
             if env_data._raw_dict is None:
@@ -121,15 +141,15 @@ class JSONStore(DataStore):
         try:
             if primary is None:
                 raise OSError(errno.ENAMETOOLONG, "env id maps outside env_path")
-            with open(primary, "w") as fn:
-                fn.write(json.dumps(payload, cls=NanSafeEncoder))
+            self._atomic_write(primary, json.dumps(payload, cls=NanSafeEncoder))
         except OSError as e:
             if e.errno != errno.ENAMETOOLONG and getattr(e, "winerror", None) != 206:
                 raise
             data_to_save = copy.deepcopy(payload)
             data_to_save["name"] = self._safe_eid(eid)
-            with open(self._hash_path(eid), "w") as fn:
-                fn.write(json.dumps(data_to_save, cls=NanSafeEncoder))
+            self._atomic_write(
+                self._hash_path(eid), json.dumps(data_to_save, cls=NanSafeEncoder)
+            )
         return True
 
     def save_all(self, state):
@@ -195,6 +215,20 @@ class JSONStore(DataStore):
         Hash-fallback files are recognised by their exact ``hash_<64 hex>.json``
         shape and resolved to the real id kept inside; every other ``.json`` file
         yields its filename stem. Sub-directories (e.g. ``view/``) are skipped.
+
+        The ``hash_<64 hex>.json`` shape is only a naming convention, not a
+        guarantee: a user-chosen eid that happens to equal that exact pattern
+        (e.g. an environment literally named ``hash_<64 hex chars>``) is short
+        enough to be written as an ordinary primary file, with none of the
+        hash-fallback bookkeeping -- there is no ``name`` field inside it. Such
+        a file is indistinguishable from a genuine hash-fallback file by name
+        alone, so it is resolved the same way an unreadable ``name`` field
+        would be: fall back to the filename stem. That stem is the correct id
+        either way -- for a colliding primary file it *is* the real,
+        already-escaped id, and for a hash-fallback file with unusable
+        metadata it is still the best identifier available. Surfacing it beats
+        silently hiding the environment.
+
         """
         if self.env_path is None or not os.path.isdir(self.env_path):
             return []
@@ -205,14 +239,19 @@ class JSONStore(DataStore):
             path = os.path.join(self.env_path, name)
             if not os.path.isfile(path):
                 continue
+            stem = name[: -len(".json")]
             if HASHED_ENV_RE.match(name):
+                real_name = None
                 try:
                     with open(path, "r", encoding="utf-8") as fn:
-                        envs.append(json.load(fn)["name"])
-                except (OSError, UnicodeError, ValueError, KeyError):
+                        data = json.load(fn)
+                    if isinstance(data, dict) and isinstance(data.get("name"), str):
+                        real_name = data["name"]
+                except (OSError, UnicodeError, ValueError):
                     continue
+                envs.append(real_name if real_name is not None else stem)
             else:
-                envs.append(name[: -len(".json")])
+                envs.append(stem)
         return sorted(envs)
 
     def delete_env(self, eid):
@@ -298,18 +337,12 @@ class JSONStore(DataStore):
         payload = json.dumps(stack, cls=NanSafeEncoder)
         try:
             target = plain
-            tmp = plain + ".tmp"
-            with open(tmp, "w") as fn:
-                fn.write(payload)
-            os.replace(tmp, plain)
+            self._atomic_write(plain, payload)
         except OSError as e:
             if e.errno != errno.ENAMETOOLONG and getattr(e, "winerror", None) != 206:
                 raise
             target = hashed
-            tmp = hashed + ".tmp"
-            with open(tmp, "w") as fn:
-                fn.write(payload)
-            os.replace(tmp, hashed)
+            self._atomic_write(hashed, payload)
         return target
 
     def clear_undo(self, eid):

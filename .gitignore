@@ -1,7 +1,3 @@
-cypress/screenshots
-cypress/screenshots_init
-cypress/downloads
-cypress/fixtures
 playwright/screenshots
 playwright/screenshots_init
 playwright/screenshots_diff
@@ -35,7 +31,9 @@ test-bin
 bin
 
 playwright/playwright-report/
+playwright/playwright-report-polling/
 playwright/test-results/
+playwright/test-results-polling/
 playwright/tmp/
 playwright-report/
 test-results/

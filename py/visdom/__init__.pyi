@@ -21,6 +21,10 @@ _EnvIds = Union[List[Text], Tuple[Text, ...]]
 # The decoded JSON reply of the experiment endpoints.
 _ExperimentReply = Mapping[Text, Any]
 
+# The reply of the experiment endpoints that only answer questions. An offline
+# client has no server to ask, so those hand back None rather than a reply.
+_ExperimentQueryReply = Optional[_ExperimentReply]
+
 # No widely-deployed stubs exist at the moment for torch or numpy. When they are available, the correct type of the tensor-like inputs
 # to the plotting commands should be
 # Tensor = Union[torch.Tensor, numpy.ndarray, List]
@@ -44,7 +48,7 @@ class Visdom:
         http_proxy_host: _OptStr = ...,
         http_proxy_port: Optional[int] = ...,
         env: Text = ...,
-        send: bool = ...,
+        *,
         raise_exceptions: Optional[bool] = ...,
         use_incoming_socket: bool = ...,
         log_to_filename: _OptStr = ...,
@@ -78,11 +82,11 @@ class Visdom:
         offset: int = ...,
         sort_by: _OptStr = ...,
         descending: bool = ...,
-    ) -> _ExperimentReply: ...
-    def compare_experiments(self, env_ids: _EnvIds) -> _ExperimentReply: ...
+    ) -> _ExperimentQueryReply: ...
+    def compare_experiments(self, env_ids: _EnvIds) -> _ExperimentQueryReply: ...
     def suggest_experiment(
         self, params: _OptOps = ..., env: _OptStr = ...
-    ) -> _ExperimentReply: ...
+    ) -> _ExperimentQueryReply: ...
     def hparams(
         self,
         query: _OptStr = ...,
@@ -374,10 +378,10 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
-    def table(
+    def html_table(
         self,
-        headers: List[Any],
-        data: List[List[Any]],
+        data: List[Any],
+        headers: Optional[List[Any]] = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
@@ -409,4 +413,12 @@ class Visdom:
         opts: _OptOps = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
+    ) -> _SendReturn: ...
+    def table(
+        self,
+        data: List[Any],
+        headers: Optional[List[Any]] = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
     ) -> _SendReturn: ...

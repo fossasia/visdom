@@ -17,8 +17,8 @@ import {
   numericExtent,
   runLabel,
   spineStyle,
+  StatusBadge,
 } from './hparamsUtils';
-import StatusBadge from './StatusBadge';
 import useHParamsColumns from './useHParamsColumns';
 
 const HParamsCompare = ({ records, paramKeys, metricKeys, tagKeys }) => {
