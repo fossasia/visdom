@@ -10,7 +10,6 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 
 import HParamsAxisToolbar from './HParamsAxisToolbar';
-import HParamsMessage from './HParamsMessage';
 import {
   PLOT_COLORSCALE,
   plotBaseLayout,
@@ -22,6 +21,7 @@ import {
 import {
   buildParcoordsDimensions,
   completeRecords,
+  HParamsMessage,
   resolveColor,
   runLabel,
 } from './hparamsUtils';

@@ -9,10 +9,10 @@
 
 import React, { useCallback, useMemo } from 'react';
 
-import { ColumnSelect } from './ColumnSelect';
 import {
   cellClass,
   COLUMN_GROUPS,
+  ColumnSelect,
   formatValue,
   groupColumnTree,
   makeComparator,
@@ -22,8 +22,8 @@ import {
   selectNumericColumns,
   spineStyle,
   StatusBadge,
+  useHParamsColumns,
 } from './hparamsUtils';
-import useHParamsColumns from './useHParamsColumns';
 
 const RUN_COLUMN_ID = 'run:name';
 const NO_SORT = { by: null, dir: null };

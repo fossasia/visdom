@@ -7,7 +7,10 @@
  *
  */
 
-import React from 'react';
+import TreeSelect from 'rc-tree-select';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+
+import { serverPath } from '../../api/ApiProvider';
 
 /*
  * Shared helpers for the hyper-parameter views, so the ordering and formatting
@@ -610,3 +613,244 @@ export const StatusBadge = ({ status }) =>
       {status}
     </span>
   ) : null;
+
+const TREE_PROPS = {
+  treeLine: true,
+  treeDefaultExpandAll: true,
+  dropdownMatchSelectWidth: false,
+};
+
+export const HParamsMessage = ({ wrapClass, tone, children }) => {
+  const message = (
+    <div className={'hparams-message hparams-' + (tone || 'empty')}>
+      {children}
+    </div>
+  );
+  return wrapClass ? <div className={wrapClass}>{message}</div> : message;
+};
+
+export const ColumnSelect = ({
+  value,
+  placeholder,
+  treeData,
+  onChange,
+  label,
+}) => (
+  <TreeSelect
+    {...TREE_PROPS}
+    className="hparams-treeselect hparams-select-narrow"
+    value={value || undefined}
+    placeholder={placeholder}
+    allowClear
+    treeData={treeData}
+    onChange={(next) => onChange(next || null)}
+    aria-label={label}
+  />
+);
+
+export const ColumnMultiSelect = ({
+  value,
+  placeholder,
+  treeData,
+  maxCount,
+  onChange,
+  label,
+}) => (
+  <TreeSelect
+    {...TREE_PROPS}
+    className="hparams-treeselect hparams-select-wide"
+    value={value}
+    placeholder={placeholder}
+    treeCheckable
+    multiple
+    showCheckedStrategy="SHOW_CHILD"
+    maxTagCount={3}
+    treeData={treeData}
+    onChange={(next) =>
+      onChange(Array.isArray(next) ? next.slice(0, maxCount) : [])
+    }
+    aria-label={label}
+  />
+);
+
+const CSV_MIME = 'text/csv;charset=utf-8';
+const JSON_MIME = 'application/json';
+const NEEDS_QUOTING = /[",\r\n]/;
+
+function csvCell(value) {
+  if (isMissing(value)) return '';
+  const text =
+    value !== null && typeof value === 'object'
+      ? JSON.stringify(value)
+      : String(value);
+  if (NEEDS_QUOTING.test(text)) return '"' + text.replace(/"/g, '""') + '"';
+  return text;
+}
+
+export function buildCsv(records, columns) {
+  const cols = columns || [];
+  const header = ['run', 'env_id', 'status'].concat(
+    cols.map((col) => col.group + '.' + col.label)
+  );
+  const lines = [header.map(csvCell).join(',')];
+  (records || []).forEach((record) => {
+    const row = [runLabel(record), record.env_id, record.status].concat(
+      cols.map((col) => col.accessor(record))
+    );
+    lines.push(row.map(csvCell).join(','));
+  });
+  return lines.join('\r\n');
+}
+
+export function buildJson(records, paramKeys, metricKeys, tagKeys) {
+  return JSON.stringify(
+    {
+      records: records || [],
+      param_keys: paramKeys || [],
+      metric_keys: metricKeys || [],
+      tag_keys: tagKeys || [],
+    },
+    null,
+    2
+  );
+}
+
+export function downloadText(text, filename, mime) {
+  const blob = new Blob([text], { type: mime });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.download = filename;
+  link.href = url;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
+
+export function downloadJson(value, filename) {
+  downloadText(JSON.stringify(value), filename, JSON_MIME);
+}
+
+export function exportCsv(records, columns, filename) {
+  downloadText(buildCsv(records, columns), filename, CSV_MIME);
+}
+
+export function exportJson(records, keys, filename) {
+  const text = buildJson(
+    records,
+    keys.paramKeys,
+    keys.metricKeys,
+    keys.tagKeys
+  );
+  downloadText(text, filename, JSON_MIME);
+}
+
+export function fetchExperimentComparison(envIds, signal) {
+  const ids = (envIds || []).filter((id) => typeof id === 'string');
+  if (ids.length === 0) {
+    return Promise.reject(new Error('No runs to load.'));
+  }
+  return window
+    .fetch(serverPath() + 'experiments/compare', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ env_ids: ids }),
+      signal,
+    })
+    .catch((err) => {
+      if (err && err.name === 'AbortError') throw err;
+      throw new Error('Could not reach the server.');
+    })
+    .then((res) => {
+      if (!res.ok) {
+        const reason = res.statusText || 'request failed';
+        throw new Error('Could not load metric history (' + reason + ').');
+      }
+      return res.json();
+    });
+}
+
+export function useHParamsColumns(paramKeys, metricKeys, tagKeys) {
+  return useMemo(
+    () => buildColumns(paramKeys, metricKeys, tagKeys),
+    [paramKeys, metricKeys, tagKeys]
+  );
+}
+
+const NO_EXPERIMENTS = [];
+
+export function useExperimentMetrics(records, cacheRef) {
+  const [nonce, setNonce] = useState(0);
+  const [state, setState] = useState({
+    status: 'idle',
+    error: null,
+    experiments: NO_EXPERIMENTS,
+  });
+
+  const envIds = useMemo(
+    () => (records || []).map((r) => r.env_id).filter((id) => !!id),
+    [records]
+  );
+
+  const refresh = useCallback(() => {
+    const cache = cacheRef.current;
+    if (cache) envIds.forEach((id) => cache.delete(id));
+    setNonce((n) => n + 1);
+  }, [cacheRef, envIds]);
+
+  useEffect(() => {
+    const cache = cacheRef.current;
+    if (envIds.length === 0) {
+      setState({ status: 'idle', error: null, experiments: NO_EXPERIMENTS });
+      return undefined;
+    }
+
+    const readCache = () => envIds.map((id) => cache.get(id)).filter(Boolean);
+    const wanted = envIds.filter((id) => !cache.has(id));
+    if (wanted.length === 0) {
+      setState({ status: 'ready', error: null, experiments: readCache() });
+      return undefined;
+    }
+
+    let cancelled = false;
+    const controller = new AbortController();
+    setState((prev) => ({ ...prev, status: 'loading', error: null }));
+
+    fetchExperimentComparison(wanted, controller.signal)
+      .then((reply) => {
+        if (cancelled) return;
+        const loaded = (reply && reply.experiments) || [];
+        loaded.forEach((exp) => {
+          if (exp && typeof exp.env_id === 'string') cache.set(exp.env_id, exp);
+        });
+        setState({ status: 'ready', error: null, experiments: readCache() });
+      })
+      .catch((err) => {
+        if (cancelled || (err && err.name === 'AbortError')) return;
+        setState({
+          status: 'error',
+          error: (err && err.message) || 'Could not load metric history.',
+          experiments: NO_EXPERIMENTS,
+        });
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [envIds, nonce, cacheRef]);
+
+  const parsed = useMemo(
+    () => buildMetricSeries(state.experiments),
+    [state.experiments]
+  );
+
+  return {
+    status: state.status,
+    error: state.error,
+    runs: parsed.runs,
+    metricKeys: parsed.metricKeys,
+    refresh,
+  };
+}

@@ -10,7 +10,6 @@
 import React, { useEffect, useRef } from 'react';
 
 import HParamsAxisToolbar from './HParamsAxisToolbar';
-import HParamsMessage from './HParamsMessage';
 import {
   PLOT_COLORSCALE,
   plotAxisStyle,
@@ -23,6 +22,7 @@ import {
 import {
   coincidentRuns,
   formatValue,
+  HParamsMessage,
   resolveColor,
   toNumericColumn,
 } from './hparamsUtils';

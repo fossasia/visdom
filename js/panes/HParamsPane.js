@@ -16,9 +16,7 @@ import React, {
 } from 'react';
 
 import HParamsCompare from './hparams/HParamsCompare';
-import { downloadJson, exportCsv, exportJson } from './hparams/hparamsExport';
 import HParamsFilters from './hparams/HParamsFilters';
-import HParamsMessage from './hparams/HParamsMessage';
 import HParamsMetrics from './hparams/HParamsMetrics';
 import HParamsParallelCoords from './hparams/HParamsParallelCoords';
 import HParamsSplom from './hparams/HParamsSplom';
@@ -29,9 +27,13 @@ import {
   buildRowIds,
   collectStatuses,
   countActiveFilters,
+  downloadJson,
+  exportCsv,
+  exportJson,
   filterRecords,
+  HParamsMessage,
+  useHParamsColumns,
 } from './hparams/hparamsUtils';
-import useHParamsColumns from './hparams/useHParamsColumns';
 import Pane from './Pane';
 
 const VIEWS = [
