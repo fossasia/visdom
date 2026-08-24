@@ -12,15 +12,20 @@ import { isMissing, runLabel } from './hparamsUtils';
 const CSV_MIME = 'text/csv;charset=utf-8';
 const JSON_MIME = 'application/json';
 const NEEDS_QUOTING = /[",\r\n]/;
+const FORMULA_START = /^[=+\-@\t\r]/;
+const NUMERIC = /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/;
 
 function csvCell(value) {
   if (isMissing(value)) return '';
-  const text =
+  const raw =
     value !== null && typeof value === 'object'
       ? JSON.stringify(value)
       : String(value);
-  if (NEEDS_QUOTING.test(text)) return '"' + text.replace(/"/g, '""') + '"';
-  return text;
+  if (FORMULA_START.test(raw) && !NUMERIC.test(raw)) {
+    return '"\'' + raw.replace(/"/g, '""') + '"';
+  }
+  if (NEEDS_QUOTING.test(raw)) return '"' + raw.replace(/"/g, '""') + '"';
+  return raw;
 }
 
 export function buildCsv(records, columns) {
