@@ -1,40 +1,39 @@
+# Playwright
 playwright/screenshots
 playwright/screenshots_init
 playwright/screenshots_diff
-node_modules
-build
+playwright/playwright-report-polling/
+playwright/test-results-polling/
+playwright-report/
+test-results/
+tmp/
+
+# Python / Torch build artifacts
 th/CMakeLists.txt
 th/build.luarocks
 dist/
 visdom*.tgz
 visdom.egg-info/
 setup.cfg
-py/visdom/static/fonts/
-py/visdom/static/css/
-py/visdom/static/js/*.min.js
-py/visdom/static/js/*.js
-py/visdom/static/js/*.js.map
-py/visdom/static/js/*.LICENSE.txt
-py/visdom/static/js/mathjax/
-py/visdom/static/js/sjcl.js
-py/visdom/static/version.built
 __pycache__/
-py/visdom/static/js/layout_bin_packer.js
-py/visdom/extra_deps/**/*
-
-website/node_modules
-website/build
-website/.docusaurus
 .venv
 venv
+
+# Python static assets (built/vendored)
+py/visdom/static/fonts/
+py/visdom/static/js/
+py/visdom/static/css/react-resizable-styles.css
+py/visdom/static/css/react-grid-layout-styles.css
+py/visdom/static/version.built
+py/visdom/extra_deps/**/*
+
+# Website (Docusaurus)
+website/.docusaurus
+
+# Top-level build/dependency outputs (matches at any depth)
+node_modules
+build
+
+# Misc
 test-bin
 bin
-
-playwright/playwright-report/
-playwright/playwright-report-polling/
-playwright/test-results/
-playwright/test-results-polling/
-playwright/tmp/
-playwright-report/
-test-results/
-tmp/
