@@ -389,7 +389,7 @@
   color: grey;
 }
 
-/* ---- View switcher (Table | Scatter matrix) ---- */
+/* ---- View switcher (Table | Parallel coordinates | Scatter matrix) ---- */
 
 .hparams-viewtabs {
   display: flex;
@@ -444,7 +444,41 @@
   min-width: 0;
 }
 
-.hparams-splom-overlay {
+/* Live hover for the scatter matrix: names every run stacked on the marker
+   under the cursor, which a shared marker would otherwise hide. */
+.hparams-splom-tip {
+  position: absolute;
+  z-index: 4;
+  display: none;
+  max-width: 220px;
+  padding: 6px 9px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #f5f7fb;
+  background-color: rgba(30, 40, 62, 0.95);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+}
+
+.hparams-splom-tip-head {
+  font-weight: 600;
+}
+
+.hparams-splom-tip-list {
+  margin: 3px 0 0;
+  padding-left: 16px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.hparams-splom-tip-coord {
+  margin-top: 4px;
+  color: #b9c4de;
+  font-variant-numeric: tabular-nums;
+}
+
+.hparams-plot-overlay {
   position: absolute;
   top: 40px;
   right: 0;
@@ -457,9 +491,430 @@
   pointer-events: none;
 }
 
-.hparams-splom-note {
+.hparams-plot-note {
   margin-left: auto;
   color: #888;
   font-style: italic;
   white-space: nowrap;
+}
+
+/* ---- HParamsParallelCoords (B3) ---- */
+
+.hparams-parcoords-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.hparams-parcoords-plot {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* ---- HParamsCompare (C1) ---- */
+
+.hparams-compare-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.hparams-compare-lead {
+  padding: 8px 12px;
+  color: #666;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.hparams-compare-lead b {
+  color: #3b5998;
+  font-weight: 600;
+}
+
+.hparams-compare-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.hparams-compare-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+  color: #333;
+}
+
+.hparams-compare-table th,
+.hparams-compare-table td {
+  border-bottom: 1px solid #f0f0f0;
+  border-right: 1px solid #f0f0f0;
+  padding: 4px 12px;
+  text-align: left;
+  white-space: nowrap;
+  font-weight: normal;
+}
+
+/* Run columns are the comparison; their headers stay put on both scroll axes. */
+.hparams-compare-run {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  min-width: 96px;
+  background-color: #f0f0f0;
+  border-bottom: 1px solid #dedede !important;
+  vertical-align: bottom;
+}
+
+.hparams-compare-run-name {
+  display: block;
+  max-width: 160px;
+  overflow: hidden;
+  font-weight: 600;
+  color: #222;
+  text-overflow: ellipsis;
+}
+
+.hparams-compare-run .hparams-run-status {
+  margin-top: 3px;
+}
+
+.hparams-compare-corner {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  background-color: #f0f0f0;
+  border-bottom: 1px solid #dedede !important;
+}
+
+/* The field name is the row's identity — pin it left so a wide run set scrolls
+   under a label that stays readable. */
+.hparams-compare-field {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  max-width: 200px;
+  overflow: hidden;
+  color: #444;
+  background-color: #fff;
+  text-overflow: ellipsis;
+}
+
+.hparams-compare-row:hover td,
+.hparams-compare-row:hover .hparams-compare-field {
+  background-color: #f7f9fd;
+}
+
+/* Section eyebrow: what-differs / metrics / identical — the structure that tells
+   the reader where the signal is. */
+.hparams-compare-section th {
+  position: sticky;
+  left: 0;
+  padding: 8px 12px 3px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #9aa2b1;
+  background-color: #fff;
+  border-right-color: transparent !important;
+}
+
+.hparams-compare-toggle {
+  padding: 0;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #3b5998;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.hparams-compare-toggle:focus-visible {
+  outline: 2px solid #3b5998;
+  outline-offset: 2px;
+}
+
+.hparams-compare-note {
+  color: #888;
+  font-style: italic;
+}
+
+/* ---- HParamsFilters (B5) ---- */
+
+.hparams-layout {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: row;
+}
+
+.hparams-viewtools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding-bottom: 4px;
+}
+
+.hparams-viewtools .hparams-filter {
+  flex: 0 1 160px;
+  padding: 2px 8px;
+}
+
+.hparams-filters-toggle {
+  padding: 2px 10px;
+  font-family: "Open Sans", sans-serif;
+  font-size: 12px;
+  color: #3b5998;
+  background-color: #fff;
+  border: 1px solid #dedede;
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.hparams-filters-toggle:hover {
+  border-color: #3b5998;
+}
+
+.hparams-filters-toggle-active {
+  color: #fff;
+  background-color: #3b5998;
+  border-color: #3b5998;
+}
+
+.hparams-filters-toggle:focus-visible {
+  outline: 2px solid #3b5998;
+  outline-offset: -2px;
+}
+
+.hparams-filters {
+  flex: 0 0 190px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background-color: #fbfbfc;
+  border-right: 1px solid #e6e6e6;
+}
+
+.hparams-filters-head {
+  display: flex;
+  align-items: center;
+  padding: 6px 8px 6px 10px;
+  border-bottom: 1px solid #ececec;
+}
+
+.hparams-filters-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #666;
+}
+
+.hparams-filters-close {
+  margin-left: auto;
+  padding: 0 4px;
+  font-size: 11px;
+  line-height: 1;
+  color: #888;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.hparams-filters-close:hover {
+  color: #3b5998;
+}
+
+.hparams-filters-close:focus-visible {
+  outline: 2px solid #3b5998;
+  outline-offset: 1px;
+}
+
+.hparams-filters-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 10px;
+}
+
+.hparams-filter-group {
+  margin-bottom: 12px;
+}
+
+.hparams-filter-eyebrow {
+  margin-bottom: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #9aa2b1;
+  border-bottom: 1px solid #ececec;
+}
+
+.hparams-filter-row {
+  margin-bottom: 10px;
+}
+
+.hparams-filter-label {
+  overflow: hidden;
+  font-size: 12px;
+  color: #333;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hparams-filter-bounds {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #666;
+  font-variant-numeric: tabular-nums;
+}
+
+.hparams-filter-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+}
+
+.hparams-filter-check {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #444;
+  cursor: pointer;
+}
+
+.hparams-filter-check input {
+  margin: 0;
+}
+
+.hparams-filter-missing {
+  margin-top: 2px;
+  font-size: 11px;
+  color: #888;
+}
+
+.hparams-filter-none {
+  font-size: 12px;
+  font-style: italic;
+  color: #888;
+}
+
+.hparams-filters-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: #666;
+  background-color: #fff;
+  border-top: 1px solid #ececec;
+}
+
+.hparams-filters-count {
+  flex: 1 1 auto;
+}
+
+.hparams-stat-filtered {
+  color: #3b5998;
+}
+
+/* A removable chip: the count reads as a filter that is currently on, and the
+   × is the way to turn it off. */
+.hparams-stat-selected {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 1px 3px 1px 9px;
+  color: #3b5998;
+  background-color: #e6ecfa;
+  border: 1px solid #cddaf3;
+  border-radius: 11px;
+}
+
+.hparams-chip-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1;
+  color: #5c73a8;
+  background: none;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.hparams-chip-clear:hover {
+  color: #fff;
+  background-color: #3b5998;
+}
+
+.hparams-chip-clear:focus-visible {
+  outline: 2px solid #3b5998;
+  outline-offset: 1px;
+}
+
+/* A quiet inline action — reads as a link, not a button, so it sits inside the
+   plot banner's sentence without stealing weight from the text next to it. */
+.hparams-link-btn {
+  padding: 0;
+  font: inherit;
+  font-size: 11px;
+  color: #3b5998;
+  background: none;
+  border: none;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.hparams-link-btn:hover {
+  color: #24386b;
+}
+
+.hparams-link-btn:focus-visible {
+  outline: 2px solid #3b5998;
+  outline-offset: 1px;
+}
+
+/* Wraps a plot when a selection is active so the banner and the plot share the
+   column the plot alone usually fills. */
+.hparams-plot-area {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.hparams-selection-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 12px;
+  font-size: 12px;
+  color: #3b5998;
+  background-color: #eaf0fb;
+  border-bottom: 1px solid #d4e0f6;
+}
+
+.hparams-selection-banner b {
+  font-weight: 600;
 }
