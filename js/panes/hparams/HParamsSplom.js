@@ -42,41 +42,34 @@ function axisDimIndex(axis) {
   return Number.isNaN(n) ? 0 : n - 1;
 }
 
-function escapeHtml(text) {
-  return String(text)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+function tipNode(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
 }
 
-function tipHtml(names, colX, colY, x, y) {
-  const head =
-    names.length > 1 ? names.length + ' runs here' : escapeHtml(names[0]);
-  const list =
-    names.length > 1
-      ? '<ul class="hparams-splom-tip-list">' +
-        names.map((n) => '<li>' + escapeHtml(n) + '</li>').join('') +
-        '</ul>'
-      : '';
-  const coord =
-    colX.id === colY.id
-      ? escapeHtml(colX.label) + ': ' + formatValue(x)
-      : escapeHtml(colX.label) +
-        ': ' +
-        formatValue(x) +
-        '<br>' +
-        escapeHtml(colY.label) +
-        ': ' +
-        formatValue(y);
-  return (
-    '<div class="hparams-splom-tip-head">' +
-    head +
-    '</div>' +
-    list +
-    '<div class="hparams-splom-tip-coord">' +
-    coord +
-    '</div>'
+function renderTip(tip, names, colX, colY, x, y) {
+  while (tip.firstChild) tip.removeChild(tip.firstChild);
+  tip.appendChild(
+    tipNode(
+      'div',
+      'hparams-splom-tip-head',
+      names.length > 1 ? names.length + ' runs here' : names[0]
+    )
   );
+  if (names.length > 1) {
+    const list = tipNode('ul', 'hparams-splom-tip-list');
+    names.forEach((n) => list.appendChild(tipNode('li', '', n)));
+    tip.appendChild(list);
+  }
+  const coord = tipNode('div', 'hparams-splom-tip-coord');
+  coord.appendChild(tipNode('span', '', colX.label + ': ' + formatValue(x)));
+  if (colX.id !== colY.id) {
+    coord.appendChild(document.createElement('br'));
+    coord.appendChild(tipNode('span', '', colY.label + ': ' + formatValue(y)));
+  }
+  tip.appendChild(coord);
 }
 
 const HParamsSplom = ({
@@ -196,7 +189,7 @@ const HParamsSplom = ({
       const names = coincidentRuns(records, colX, colY, p.x, p.y);
       if (names.length === 0) return;
 
-      tip.innerHTML = tipHtml(names, colX, colY, p.x, p.y);
+      renderTip(tip, names, colX, colY, p.x, p.y);
       tip.style.display = 'block';
       const rect = wrap.getBoundingClientRect();
       const me = ev.event;
