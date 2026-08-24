@@ -105,6 +105,8 @@ class VisdomKerasLogger(Callback):
             if log_every < 1:
                 raise ValueError("log_every must be >= 1, got {}".format(log_every))
         self.log_every = log_every
+        if params is not None and not isinstance(params, dict):
+            raise TypeError("params must be a dict of {name: value}")
         self._params = params
         self._wins = {}
         self._step_wins = {}
