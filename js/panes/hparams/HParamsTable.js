@@ -8,23 +8,25 @@
  */
 
 import TreeSelect from 'rc-tree-select';
-import React, { useCallback, useEffect, useMemo } from 'react';
+import React, { useCallback, useMemo } from 'react';
 
 import {
   buildColumns,
+  cellClass,
   COLUMN_GROUPS,
   formatValue,
   groupColumnTree,
-  isNumberLike,
   makeComparator,
   NUMERIC_GROUPS,
   numericExtent,
   runLabel,
   selectNumericColumns,
   spineStyle,
+  StatusBadge,
 } from './hparamsUtils';
 
 const RUN_COLUMN_ID = 'run:name';
+const NO_SORT = { by: null, dir: null };
 
 function nextSort(current, columnId) {
   if (current.by !== columnId) return { by: columnId, dir: 'asc' };
@@ -118,24 +120,17 @@ const HParamsRow = React.memo(function HParamsRow({
       <th scope="row" className="hparams-cell hparams-cell-run">
         <div className="hparams-run-cell" title={label}>
           <span className="hparams-run-name">{label}</span>
-          {record.status ? (
-            <span
-              className={'hparams-run-status hparams-status-' + record.status}
-            >
-              {record.status}
-            </span>
-          ) : null}
+          <StatusBadge status={record.status} />
         </div>
       </th>
       {columns.map((col) => {
         const value = col.accessor(record);
         const style =
           colorBy && col.id === colorBy ? spineStyle(value, extent) : null;
-        const cls =
-          'hparams-cell' +
-          (isNumberLike(value) ? ' hparams-cell-num' : '') +
-          (style ? ' hparams-cell-spine' : '') +
-          (groupStartIds.has(col.id) ? ' hparams-col-sep' : '');
+        const cls = cellClass(value, {
+          spine: !!style,
+          separator: groupStartIds.has(col.id),
+        });
         return (
           <td key={col.id} className={cls} style={style || undefined}>
             {formatValue(value)}
@@ -149,6 +144,7 @@ const HParamsRow = React.memo(function HParamsRow({
 const HParamsTable = ({
   records,
   columnRecords,
+  rowIds,
   paramKeys,
   metricKeys,
   tagKeys,
@@ -159,48 +155,25 @@ const HParamsTable = ({
   selected,
   setSelected,
 }) => {
-  const allRecords = columnRecords || records;
-
   const columns = useMemo(
     () => buildColumns(paramKeys, metricKeys, tagKeys),
     [paramKeys, metricKeys, tagKeys]
   );
+  const pickerRecords = columnRecords || records;
   const colorCols = useMemo(
-    () => selectNumericColumns(allRecords, columns),
-    [allRecords, columns]
+    () => selectNumericColumns(pickerRecords, columns),
+    [pickerRecords, columns]
   );
-
-  const rowIds = useMemo(() => {
-    const ids = new Map();
-    allRecords.forEach((record, index) => {
-      ids.set(record, record.env_id || 'row:' + index);
-    });
-    return ids;
-  }, [allRecords]);
 
   const activeSort = useMemo(() => {
     if (!sort.by || sort.by === RUN_COLUMN_ID) return sort;
-    return columns.some((c) => c.id === sort.by)
-      ? sort
-      : { by: null, dir: null };
+    return columns.some((c) => c.id === sort.by) ? sort : NO_SORT;
   }, [sort, columns]);
 
   const activeColorBy = useMemo(
-    () => (colorCols.some((c) => c.id === colorBy) ? colorBy : null),
+    () => (colorBy && colorCols.some((c) => c.id === colorBy) ? colorBy : null),
     [colorBy, colorCols]
   );
-
-  useEffect(() => {
-    setSelected((prev) => {
-      if (prev.size === 0) return prev;
-      const live = new Set(rowIds.values());
-      const next = new Set();
-      prev.forEach((id) => {
-        if (live.has(id)) next.add(id);
-      });
-      return next.size === prev.size ? prev : next;
-    });
-  }, [rowIds, setSelected]);
 
   const groupStartIds = useMemo(() => {
     const ids = new Set();
