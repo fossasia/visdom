@@ -12,12 +12,14 @@
 'use strict';
 
 import 'fetch';
+import 'rc-slider/assets/index.css';
 import 'rc-tree-select/assets/index.less';
 
 import React, {
   useContext,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -83,45 +85,61 @@ if (ACTIVE_ENV !== '') {
   use_envs = Array.isArray(storedEnvIDs) ? storedEnvIDs : ['main'];
 }
 
-const PaneWrapper = ({
-  Comp,
-  pane,
-  panelayout,
-  envID,
-  onClose,
-  onFocus,
-  isFocused,
-  defaultWidth,
-  defaultHeight,
-}) => {
-  const { width, height, ref } = useResizeDetector();
-  const PANE_TITLE_BAR_HEIGHT = 14;
+const PaneWrapper = React.memo(
+  function PaneWrapper({
+    Comp,
+    pane,
+    panelayout,
+    envID,
+    onClose,
+    onFocus,
+    isFocused,
+    defaultWidth,
+    defaultHeight,
+  }) {
+    const { width, height, ref } = useResizeDetector();
+    const PANE_TITLE_BAR_HEIGHT = 14;
 
-  const finalWidth =
-    width !== undefined && width > 0 ? width - 2 : defaultWidth;
-  const finalHeight =
-    (height !== undefined && height > 0 ? height - 2 : defaultHeight) -
-    PANE_TITLE_BAR_HEIGHT;
+    const finalWidth =
+      width !== undefined && width > 0 ? width - 2 : defaultWidth;
+    const finalHeight =
+      (height !== undefined && height > 0 ? height - 2 : defaultHeight) -
+      PANE_TITLE_BAR_HEIGHT;
 
-  return (
-    <div ref={ref} style={{ width: '100%', height: '100%' }}>
-      <Comp
-        key={pane.id}
-        {...pane}
-        envID={envID}
-        onClose={onClose}
-        onFocus={onFocus}
-        isFocused={isFocused}
-        w={panelayout.w}
-        h={panelayout.h}
-        width={finalWidth}
-        height={finalHeight}
-        _width={finalWidth}
-        _height={finalHeight}
-      />
-    </div>
-  );
-};
+    return (
+      <div ref={ref} style={{ width: '100%', height: '100%' }}>
+        <Comp
+          key={pane.id}
+          {...pane}
+          envID={envID}
+          onClose={onClose}
+          onFocus={onFocus}
+          isFocused={isFocused}
+          w={panelayout.w}
+          h={panelayout.h}
+          width={finalWidth}
+          height={finalHeight}
+          _width={finalWidth}
+          _height={finalHeight}
+        />
+      </div>
+    );
+  },
+  (props, nextProps) => {
+    if (props.Comp !== nextProps.Comp) return false;
+    else if (props.pane !== nextProps.pane) return false;
+    else if (
+      props.panelayout.w !== nextProps.panelayout.w ||
+      props.panelayout.h !== nextProps.panelayout.h
+    )
+      return false;
+    else if (props.envID !== nextProps.envID) return false;
+    else if (props.isFocused !== nextProps.isFocused) return false;
+    else if (props.defaultWidth !== nextProps.defaultWidth) return false;
+    else if (props.defaultHeight !== nextProps.defaultHeight) return false;
+    return true;
+  }
+);
 
 const App = () => {
   // -------------- //
@@ -189,6 +207,8 @@ const App = () => {
   const localStorageTimer = useRef(null);
   const savedStateRecoveryToastShown = useRef(false);
   const serverLayoutErrorToastShown = useRef(false);
+  const latestRef = useRef({});
+  latestRef.current = { selection, sessionInfo, filterString, focusedPaneID };
 
   // --------------------- //
   // grid helper functions //
@@ -289,12 +309,21 @@ const App = () => {
 
   // process single pane
   const processPane = (newPane, newPanes, newLayout) => {
-    // if newPane is actually window_update object, apply the to newPanes
     if (newPane.command == 'window_update') {
-      newPane = jsonpatch.applyPatch(
+      let mutated = jsonpatch.applyPatch(
         newPanes[newPane.win],
-        newPane.content
+        newPane.content,
+        false,
+        true
       ).newDocument;
+
+      let contentCopy = mutated.content;
+      if (contentCopy !== null && typeof contentCopy === 'object') {
+        contentCopy = Array.isArray(contentCopy)
+          ? contentCopy.slice()
+          : Object.assign({}, contentCopy);
+      }
+      newPane = Object.assign({}, mutated, { content: contentCopy });
     }
 
     let exists = newPane.id in newPanes;
@@ -451,12 +480,12 @@ const App = () => {
   // remove paneID from pane list
   // (also tell server)
   const closePane = (paneID, keepPosition = false, setState = true) => {
-    if (sessionInfo.readonly) {
+    if (latestRef.current.sessionInfo.readonly) {
       return;
     }
     if (!keepPosition) {
       localStorage.removeItem(keyLS(paneID));
-      sendPaneClose(paneID, selection.envIDs[0]);
+      sendPaneClose(paneID, latestRef.current.selection.envIDs[0]);
     }
 
     if (setState) {
@@ -468,7 +497,9 @@ const App = () => {
         );
         return { ...prev, panes: newPanes, layout: newLayout };
       });
-      setFocusedPaneID(focusedPaneID === paneID ? null : focusedPaneID);
+      setFocusedPaneID((currentFocusedPaneID) =>
+        currentFocusedPaneID === paneID ? null : currentFocusedPaneID
+      );
       relayout();
     }
   };
@@ -608,14 +639,14 @@ const App = () => {
   };
 
   const focusPane = (paneID, callback) => {
-    if (focusedPaneID != paneID) {
+    if (latestRef.current.focusedPaneID != paneID) {
       setFocusedPaneID(paneID);
       if (callback) callbacks.current.push(callback);
     } else if (callback) callback();
   };
 
   const blurPane = () => {
-    if (focusedPaneID != null) setFocusedPaneID(null);
+    if (latestRef.current.focusedPaneID != null) setFocusedPaneID(null);
   };
 
   const resizePane = (layout, oldLayoutItem, layoutItem) => {
@@ -702,8 +733,8 @@ const App = () => {
   };
 
   const relayout = ({
-    layoutID = selection.layoutID,
-    filterString: nextFilterString = filterString,
+    layoutID = latestRef.current.selection.layoutID,
+    filterString: nextFilterString = latestRef.current.filterString,
   } = {}) => {
     let envLayoutList = getCurrLayoutList();
     let filter = getValidFilter(nextFilterString);
@@ -742,10 +773,12 @@ const App = () => {
       let newLayout = sorted.map((paneLayout, idx) => {
         let pos = bin.position(idx, cols);
 
-        newPanes[paneLayout.i] = {
-          ...newPanes[paneLayout.i],
-          i: idx,
-        };
+        if (!newPanes[paneLayout.i] || newPanes[paneLayout.i].i !== idx) {
+          newPanes[paneLayout.i] = {
+            ...newPanes[paneLayout.i],
+            i: idx,
+          };
+        }
 
         return Object.assign({}, paneLayout, pos);
       });
@@ -933,62 +966,78 @@ const App = () => {
     windowSize.current.cols = cols;
     windowSize.current.width = width;
   };
-  let panes = Object.keys(storeData.panes).map((id) => {
-    let pane = storeData.panes[id];
 
-    try {
-      let Comp = PANES[pane.type];
-      if (!Comp) {
-        throw new Error('unrecognized pane type: ' + pane);
-      }
-      let panelayout = getLayoutItem(storeData.layout, id);
-      let filter = getValidFilter(filterString);
-      let isVisible = pane.title.match(filter);
-
-      var _height = Math.round(h2p(panelayout.h));
-      var _width = Math.round(w2p(panelayout.w));
-
-      return (
-        <div
-          key={pane.id}
-          className={isVisible ? '' : 'hidden-window'}
-          onDoubleClick={(e) => handlePaneDoubleClick(e, panelayout)}
-        >
-          <PaneWrapper
-            Comp={Comp}
-            pane={pane}
-            panelayout={panelayout}
-            envID={selection.envIDs[0]}
-            onClose={closePane}
-            onFocus={focusPane}
-            isFocused={pane.id === focusedPaneID}
-            defaultWidth={_width}
-            defaultHeight={_height}
-          />
-        </div>
-      );
-    } catch (err) {
-      return (
-        <div key={pane.id}>
-          <TextPane
-            content={
-              'Error: ' +
-              (err.message ||
-                JSON.stringify(err, Object.getOwnPropertyNames(err)))
-            }
-            envID={selection.envIDs[0]}
-            id={pane.id}
-            key={pane.id}
-            onClose={closePane}
-            onFocus={focusPane}
-            isFocused={pane.id === focusedPaneID}
-            w={300}
-            h={300}
-          />
-        </div>
-      );
+  let panes = useMemo(() => {
+    let layoutById = new Map();
+    for (let i = 0; i < storeData.layout.length; i++) {
+      let item = storeData.layout[i];
+      if (item !== undefined) layoutById.set(item.i, item);
     }
-  });
+
+    let filter = getValidFilter(filterString);
+
+    return Object.keys(storeData.panes).map((id) => {
+      let pane = storeData.panes[id];
+
+      try {
+        let Comp = PANES[pane.type];
+        if (!Comp) {
+          throw new Error('unrecognized pane type: ' + pane);
+        }
+        let panelayout = layoutById.get(id);
+        let isVisible = pane.title.match(filter);
+
+        var _height = Math.round(h2p(panelayout.h));
+        var _width = Math.round(w2p(panelayout.w));
+
+        return (
+          <div
+            key={pane.id}
+            className={isVisible ? '' : 'hidden-window'}
+            onDoubleClick={(e) => handlePaneDoubleClick(e, panelayout)}
+          >
+            <PaneWrapper
+              Comp={Comp}
+              pane={pane}
+              panelayout={panelayout}
+              envID={selection.envIDs[0]}
+              onClose={closePane}
+              onFocus={focusPane}
+              isFocused={pane.id === focusedPaneID}
+              defaultWidth={_width}
+              defaultHeight={_height}
+            />
+          </div>
+        );
+      } catch (err) {
+        return (
+          <div key={pane.id}>
+            <TextPane
+              content={
+                'Error: ' +
+                (err.message ||
+                  JSON.stringify(err, Object.getOwnPropertyNames(err)))
+              }
+              envID={selection.envIDs[0]}
+              id={pane.id}
+              key={pane.id}
+              onClose={closePane}
+              onFocus={focusPane}
+              isFocused={pane.id === focusedPaneID}
+              w={300}
+              h={300}
+            />
+          </div>
+        );
+      }
+    });
+  }, [
+    storeData.panes,
+    storeData.layout,
+    filterString,
+    focusedPaneID,
+    selection.envIDs,
+  ]);
   const escapeHtml = (str) => {
     return String(str)
       .replace(/&/g, '&amp;')
