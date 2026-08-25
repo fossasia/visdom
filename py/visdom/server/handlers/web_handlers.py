@@ -977,7 +977,7 @@ class ExperimentLogHandler(BaseHandler):
             )
 
         eid = extract_eid(args)
-        store = ExperimentStore(handler.storage)
+        store = ExperimentStore(handler.storage, env_provider=handler.state.get)
 
         if action == "metrics":
             metrics = ExperimentLogHandler._require_mapping(args, "metrics")
@@ -1123,7 +1123,7 @@ class ExperimentSearchHandler(BaseHandler):
         offset = ExperimentSearchHandler._require_index(args, "offset", 0)
         descending = ExperimentSearchHandler._require_flag(args, "descending", True)
 
-        store = ExperimentStore(handler.storage)
+        store = ExperimentStore(handler.storage, env_provider=handler.state.get)
         try:
             experiments = store.search(
                 query=query,
@@ -1208,7 +1208,7 @@ class ExperimentCompareHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
         env_ids = ExperimentCompareHandler._require_env_ids(args)
-        store = ExperimentStore(handler.storage)
+        store = ExperimentStore(handler.storage, env_provider=handler.state.get)
         try:
             comparison = store.compare(env_ids)
         except KeyError as e:

@@ -300,11 +300,12 @@ def _normalize_labels(Y):
     Y = np.ravel(Y)
 
     try:
-        is_integer_labels = (
-            np.issubdtype(Y.dtype, np.number)
-            and np.equal(np.mod(Y, 1), 0).all()
-            and np.nanmin(Y) >= 1
-        )
+        with np.errstate(invalid="ignore"):
+            is_integer_labels = (
+                np.issubdtype(Y.dtype, np.number)
+                and np.equal(np.mod(Y, 1), 0).all()
+                and np.nanmin(Y) >= 1
+            )
     except TypeError:
         is_integer_labels = False
 
@@ -1510,6 +1511,50 @@ class Visdom(object):
                 "opts": opts,
             },
             endpoint="experiments/hparams",
+        )
+
+    def update_hparams(
+        self, win, query=None, env_ids=None, mode=None, env=None, opts=None
+    ):
+        """Change or refresh an existing hyper-parameter pane.
+
+        Posts to the ``experiments/hparams/update`` endpoint, the dedicated
+        write path for ``hparams`` windows (the generic update route only
+        understands plot windows). `win` must name a window created by
+        :meth:`hparams`; the server rejects an unknown window (404) or a window
+        of any other type (400). The pane keeps its id and position but is
+        rebuilt in place — table, latest metric values and status badges — and
+        the environment is saved, so the update reaches disk immediately.
+
+        Called with a `query`/`env_ids`/`mode` selection, the pane's selection
+        is **replaced**, under exactly the rules documented on :meth:`hparams`.
+        Called with only `win`, the selection stored on the window is re-run —
+        a manual refresh that picks up runs logged (or newly matching) since the
+        pane was last built::
+
+            win = vis.hparams("lr < 0.01")
+            vis.update_hparams(win, "lr < 0.1 AND acc > 0.9")  # new selection
+            vis.update_hparams(win)                            # refresh as-is
+
+        `opts` overrides the pane's title/size; when omitted the current ones
+        are kept. Returns the window id.
+        """
+        if not isstr(win) or not win:
+            raise ValueError("win must be the id of an existing hparams window")
+        if opts is not None:
+            _title2str(opts)
+            _assert_opts(opts)
+
+        return self._send(
+            {
+                "win": win,
+                "query": query,
+                "env_ids": env_ids,
+                "mode": mode,
+                "eid": env,
+                "opts": opts,
+            },
+            endpoint="experiments/hparams/update",
         )
 
     def get_window_data(self, win=None, env=None):
