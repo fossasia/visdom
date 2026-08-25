@@ -21,7 +21,7 @@ import {
 import { copyLatexToClipboard } from './utils/LatexExport';
 import { downloadImageAsPdf } from './utils/pdfExport';
 
-function NetworkPane(props) {
+var NetworkPane = function (props) {
   const {
     content,
     directed,
@@ -188,6 +188,17 @@ function NetworkPane(props) {
       }
     };
   }, [content, directed, showEdgeLabels, showVertexLabels]);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const svg = d3.select(containerRef.current).select('svg');
+    if (svg.empty()) return; // nothing drawn yet
+    svg.attr('viewBox', '0 0 ' + _width + ' ' + _height);
+    if (forceRef.current) {
+      forceRef.current.size([_width, _height]);
+      forceRef.current.resume();
+    }
+  }, [_width, _height]);
 
   useEffect(() => {
     return () => {
@@ -381,6 +392,24 @@ function NetworkPane(props) {
       />
     </Pane>
   );
-}
+};
+
+NetworkPane = React.memo(NetworkPane, (props, nextProps) => {
+  if (props.contentID !== nextProps.contentID) return false;
+  else if (props.content !== nextProps.content) return false;
+  else if (props.title !== nextProps.title) return false;
+  else if (props.comment !== nextProps.comment) return false;
+  else if (props.h !== nextProps.h || props.w !== nextProps.w) return false;
+  else if (
+    Math.round(props._width) !== Math.round(nextProps._width) ||
+    Math.round(props._height) !== Math.round(nextProps._height)
+  )
+    return false;
+  else if (props.directed !== nextProps.directed) return false;
+  else if (props.showEdgeLabels !== nextProps.showEdgeLabels) return false;
+  else if (props.showVertexLabels !== nextProps.showVertexLabels) return false;
+  else if (props.isFocused !== nextProps.isFocused) return false;
+  return true;
+});
 
 export default NetworkPane;

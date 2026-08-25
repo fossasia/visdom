@@ -356,6 +356,8 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 - [`vis.win_exists`](#viswin_exists) : check if a window already exists by id
 - [`vis.get_env_list`](#visget_env_list) : get a list of all of the environments on your server
 - [`vis.get_window_data`](#visget_window_data): get current data for a window
+- [`vis.set_tags`](#visset_tags): replace or append environment tags
+- [`vis.get_tags`](#visget_tags): read environment tags
 - [`vis.save_plotly_figure`](#visplotlyplot): save a Plotly figure to an image file from code (no browser click)
 - [`vis.check_connection`](#vischeck_connection): check if the server is connected
 - [`vis.replay_log`](#visreplay_log): replay the actions from the provided log file
@@ -373,9 +375,11 @@ Track experiment metadata (hyper-parameters, metrics, tags) alongside your plots
 
 ## Loggers
 
-Framework-specific logging bridges that wrap the Visdom API so training loops stay focused on training. Each logger lives in its own submodule and handles window creation, step tracking, and throttling internally.
+Framework-specific logging bridges that wrap the Visdom API so training loops stay focused on training. Each logger lives in its own submodule and handles window creation, step tracking, and throttling internally. None of the framework packages below are part of Visdom's own install — each logger imports its framework lazily and raises a clear `ImportError` with the `pip install` command if it's missing.
 
 ### PyTorch
+
+**Requirements:** `pip install visdom torch`
 
 `visdom.pytorch.VisdomLogger` is a context manager for raw PyTorch training loops. Call `tracker.log(name, value)` for any scalar — no `viz.line()` arguments needed.
 
@@ -422,6 +426,8 @@ Each unique name passed to `tracker.log()` gets its own window. The first call c
 
 ### scikit-learn
 
+**Requirements:** `pip install visdom scikit-learn`
+
 `visdom.loggers.VisdomSklearnLogger` patches all sklearn `fit()` calls so every estimator trained after `autolog()` logs to Visdom automatically — no per-estimator code needed.
 
 **Plain estimators** (classifiers, regressors, clusterers) produce a text pane with the estimator name, dataset shape, training score, fit time, and all hyperparameters.
@@ -435,6 +441,8 @@ Each unique name passed to `tracker.log()` gets its own window. The first call c
 **Note:** `train_score`, `train_rmse`, `train_mae` and the residual scatter are all measured on the data passed to `fit()`. They describe fit quality on the training set and are not held-out estimates — score your own test set for that.
 
 **Note:** panes are keyed on the estimator instance, so refitting the same estimator updates the panes it already owns instead of opening new ones. Two different estimator objects always get their own panes, even of the same class.
+
+**Note:** one logger is active at a time. Calling `autolog()` again switches the active env **silently** — no warning is raised, and the previous env stops receiving updates.
 
 ```python
 import visdom
@@ -473,6 +481,8 @@ See `example/train_sklearn_example.py` for a full working example covering plain
 
 ### XGBoost
 
+**Requirements:** `pip install visdom xgboost`
+
 `visdom.loggers.VisdomXGBLogger` implements XGBoost's `TrainingCallback` protocol, plotting train/eval metrics to Visdom after every boosting round.
 
 There was no way to visualize XGBoost training runs in Visdom without manually attaching a `TrainingCallback` and wiring up `viz.line()` calls yourself. This adds opt-in auto-logging behind a single `autolog()` call, with no changes required to model, `train()`, or `fit()` code.
@@ -502,6 +512,8 @@ Each eval metric gets its own window with one trace per data name (`train`/`eval
 **Note:** one logger is active at a time. Calling `autolog()` again for a different env moves logging there and warns; the previous env keeps the windows it already has. Import `cross_validate` after `autolog()` — importing it first binds the original function, and every fold then opens its own window instead of sharing one per metric.
 
 ### TensorFlow / Keras
+
+**Requirements:** `pip install visdom tensorflow` (or `pip install visdom keras`)
 
 `visdom.loggers.VisdomKerasLogger` implements Keras's `Callback` protocol, plotting train/val metrics to Visdom after every epoch.
 
@@ -546,6 +558,8 @@ Each metric gets its own window titled `"<name> (step)"`, throttled to one send 
 - `log_every`: also plot metrics at batch granularity, one send every N batches (default: `None`, disabled)
 
 **Note:** each call to `viz.line()` is a synchronous network request made on the training thread. Pick a `log_every` large enough that it doesn't stall training waiting on the server — 50+ is a reasonable default on GPU.
+
+**Note:** not thread-safe — internal state has no locking, so calling `fit()` on the same logger instance from multiple threads can race.
 
 See `example/train_keras_example.py` for a full working example.
 
@@ -1267,6 +1281,35 @@ This function returns the window data for the given window. Returns data for all
 Arguments:
 - `env`: Environment to search for the window in.
 - `win`: Window to return data for. Set to `None` to retrieve all the windows in an environment.
+
+#### vis.set_tags
+
+This function replaces an environment's key/value tags. Pass `append=True` to
+keep its existing tags and add or update the supplied keys instead. `env`
+defaults to the client's current environment. An empty mapping clears all tags
+in replace mode.
+
+```python
+vis.set_tags({"dataset": "cifar10", "stage": "training"})
+vis.set_tags({"stable": ""}, append=True)
+```
+
+Arguments:
+- `tags`: mapping of string tag names to string values (maximum 20 names, 50 characters each)
+- `env`: target environment; defaults to the client's current environment
+- `append`: append/update instead of replace; defaults to `False`
+
+The complete stored tag mapping is returned.
+
+#### vis.get_tags
+
+This function returns an environment's key/value tag mapping. `env` defaults to
+the client's current environment; an environment without tags returns `{}`.
+
+```python
+tags = vis.get_tags()
+# {"dataset": "cifar10", "stage": "training", "stable": ""}
+```
 
 #### vis.check_connection
 

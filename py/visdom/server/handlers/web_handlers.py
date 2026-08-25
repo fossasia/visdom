@@ -15,10 +15,10 @@ the data_model itself.
 
 import copy
 import getpass
+import hmac
 import json
 import jsonpatch
 import logging
-import math
 import os
 import uuid
 from collections import OrderedDict
@@ -29,15 +29,19 @@ import tornado.escape
 from visdom.utils.shared_utils import (
     get_rand_id,
     _coerce_image_slider_index,
+    _is_missing_value,
     NanSafeEncoder,
 )
 from visdom.utils.server_utils import (
     check_auth,
+    check_readonly,
+    reject_readonly,
     extract_eid,
     window,
     register_window,
     gather_envs,
     broadcast_envs,
+    broadcast_tags,
     escape_eid,
     compare_envs,
     load_env,
@@ -48,15 +52,18 @@ from visdom.utils.server_utils import (
     push_deleted,
     clear_deleted,
     notify,
+    LazyEnvData,
 )
 from visdom.server.handlers.base_handlers import BaseHandler
 from visdom.experiments import (
     DEFAULT_SORT_FIELD,
+    Experiment,
     ExperimentStore,
     ExperimentFinishedError,
     QueryParseError,
     retarget_experiment,
     STATUS_FINISHED,
+    tags_to_mapping,
 )
 
 logger = logging.getLogger(__name__)
@@ -70,6 +77,7 @@ logger = logging.getLogger(__name__)
 
 class PostHandler(BaseHandler):
     @check_auth
+    @check_readonly
     def post(self):
         req = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -110,7 +118,9 @@ class ExistsHandler(BaseHandler):
 
 class UpdateHandler(BaseHandler):
     @staticmethod
-    def update_packet(p, args, max_text_lines, max_old_content, max_image_history):
+    def update_packet(
+        p, args, max_text_lines, max_old_content, max_image_history, max_plot_history
+    ):
         # Shallow copy the packet to dynamically capture changes to top-level keys.
         old_p = p.copy()
 
@@ -121,7 +131,12 @@ class UpdateHandler(BaseHandler):
             old_p["old_content"] = copy.deepcopy(p["old_content"])
 
         p = UpdateHandler.update(
-            p, args, max_text_lines, max_old_content, max_image_history
+            p,
+            args,
+            max_text_lines,
+            max_old_content,
+            max_image_history,
+            max_plot_history,
         )
         p["contentID"] = get_rand_id()
 
@@ -162,7 +177,9 @@ class UpdateHandler(BaseHandler):
         return []
 
     @staticmethod
-    def update(p, args, max_text_lines, max_old_content, max_image_history):
+    def update(
+        p, args, max_text_lines, max_old_content, max_image_history, max_plot_history
+    ):
         # Update text in window, separated by a line break
         if p["type"] == "text":
             p["content"] += "<br>" + args["data"][0]["content"]
@@ -188,6 +205,11 @@ class UpdateHandler(BaseHandler):
             utype = args["data"][0]["type"]
             if utype == "plot_history":
                 p["content"].append(args["data"][0]["content"])
+                # A plot frame is a whole figure, so an unbounded history grows
+                # the env until the process runs out of memory. Keep the newest
+                # ``max_plot_history`` frames, as image history already does.
+                if len(p["content"]) > max_plot_history:
+                    p["content"] = p["content"][-max_plot_history:]
                 p["selected"] = len(p["content"]) - 1
             elif utype == "plot_update_selected":
                 selected = args["data"][0]["selected"]
@@ -209,21 +231,26 @@ class UpdateHandler(BaseHandler):
         new_data = args.get("data")
         p = update_window(p, args)
         name = args.get("name")
-        if name is None and new_data is None:
+        delete = args.get("delete")
+        # An unnamed delete carries no name and no data, which this shortcut used
+        # to read as "opts-only update" and return early, silently dropping the
+        # deletion. Ask about the delete flag first. ``not new_data`` also covers
+        # an empty list, which a layout-only update sends in place of None.
+        if not delete and name is None and not new_data:
             return p  # we only updated the opts or layout
         append = args.get("append")
 
         idxs = list(range(len(pdata)))
 
         if name is not None:
-            if not args.get("delete") and len(new_data) != 1:
+            if not delete and len(new_data) != 1:
                 raise tornado.web.HTTPError(
                     400, reason="a named trace update takes exactly one data entry"
                 )
             idxs = [i for i in idxs if pdata[i]["name"] == name]
 
         # Delete a trace
-        if args.get("delete"):
+        if delete:
             idxs_set = set(idxs)
             p["content"]["data"] = [e for i, e in enumerate(pdata) if i not in idxs_set]
             return p
@@ -317,23 +344,21 @@ class UpdateHandler(BaseHandler):
 
             return p
 
-        # inject new trace
+        # Inject a new trace. This used to clone ``pdata[0]`` before overwriting
+        # every key of the clone, which raised IndexError once a plot had all of
+        # its traces deleted. The clone was dead work anyway, so build the trace
+        # from the update alone.
         if len(idxs) == 0:
-            idx = len(pdata)
-            pdata.append(dict(pdata[0]))  # plot is not empty, clone an entry
-            idxs = [idx]
-            append = False
-            pdata[idx] = new_data[0]
-            for k, v in new_data[0].items():
-                pdata[idx][k] = v
-            pdata[idx]["name"] = name
+            trace = dict(new_data[0])
+            trace["name"] = name
+            pdata.append(trace)
             return p
 
-        # Update traces
-        for n, idx in enumerate(idxs):
-            if all(
-                i is None or math.isnan(i) or math.isinf(i) for i in new_data[n]["x"]
-            ):
+        # Update traces. An unnamed update may carry fewer entries than the plot
+        # has traces, so walk only as far as the data reaches instead of
+        # indexing past the end of it.
+        for idx, new_trace in zip(idxs, new_data):
+            if all(_is_missing_value(i) for i in new_trace["x"]):
                 continue
             # handle data for plotting
             axes = ["x", "y"]
@@ -341,26 +366,24 @@ class UpdateHandler(BaseHandler):
                 axes.append("z")
             for axis in axes:
                 pdata[idx][axis] = (
-                    (pdata[idx][axis] + new_data[n][axis])
-                    if append
-                    else new_data[n][axis]
+                    (pdata[idx][axis] + new_trace[axis]) if append else new_trace[axis]
                 )
 
             # handle marker properties
-            if "marker" not in new_data[n]:
+            if "marker" not in new_trace:
                 continue
             if "marker" not in pdata[idx]:
                 pdata[idx]["marker"] = {}
             pdata_marker = pdata[idx]["marker"]
             for marker_prop in ["color"]:
-                if marker_prop not in new_data[n]["marker"]:
+                if marker_prop not in new_trace["marker"]:
                     continue
                 if marker_prop not in pdata[idx]["marker"]:
                     pdata[idx]["marker"][marker_prop] = []
                 pdata_marker[marker_prop] = (
-                    (pdata_marker[marker_prop] + new_data[n]["marker"][marker_prop])
+                    (pdata_marker[marker_prop] + new_trace["marker"][marker_prop])
                     if append
-                    else new_data[n]["marker"][marker_prop]
+                    else new_trace["marker"][marker_prop]
                 )
 
         return p
@@ -452,6 +475,7 @@ class UpdateHandler(BaseHandler):
                 handler.max_text_lines,
                 handler.max_old_content,
                 handler.max_image_history,
+                handler.max_plot_history,
             )
         except (TypeError, ValueError) as exc:
             if is_image_slider_update:
@@ -470,6 +494,7 @@ class UpdateHandler(BaseHandler):
         handler.write(p["id"])
 
     @check_auth
+    @check_readonly
     def post(self):
         if self.login_enabled and not self.current_user:
             self.set_status(400)
@@ -495,6 +520,7 @@ class CloseHandler(BaseHandler):
             broadcast(handler, json.dumps({"command": "close", "data": win}), eid)
 
     @check_auth
+    @check_readonly
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -516,6 +542,7 @@ class DeleteEnvHandler(BaseHandler):
             broadcast_envs(handler)
 
     @check_auth
+    @check_readonly
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -571,6 +598,7 @@ class ForkEnvHandler(BaseHandler):
         handler.write(eid)
 
     @check_auth
+    @check_readonly
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -675,6 +703,7 @@ class SaveHandler(BaseHandler):
         handler.write(json.dumps(ret))
 
     @check_auth
+    @check_readonly
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -688,7 +717,12 @@ class DataHandler(BaseHandler):
         eid = extract_eid(args)
 
         if "data" in args:
-            # Load data from client
+            # Load data from client. This is the one write behind an endpoint
+            # that also reads, so it cannot be refused by the decorator.
+            if handler.readonly:
+                reject_readonly(handler)
+                return
+
             data = json.loads(args["data"])
 
             if eid not in handler.state:
@@ -764,7 +798,19 @@ class IndexHandler(BaseHandler):
         salt = stored.split("$")[0]
         password = hash_password(json_obj["password"], salt=salt)
 
-        if (username == self.user_credential["username"]) and (password == stored):
+        # Constant-time comparison: `==` on the derived key returns as soon as
+        # two characters differ, so response timing tells an attacker how much
+        # of a guess was right. Both halves are always compared, which keeps a
+        # wrong username costing the same as a wrong password.
+        username_ok = hmac.compare_digest(
+            str(username).encode("utf-8"),
+            self.user_credential["username"].encode("utf-8"),
+        )
+        password_ok = hmac.compare_digest(
+            password.encode("utf-8"), stored.encode("utf-8")
+        )
+
+        if username_ok and password_ok:
             self.set_secure_cookie("user_password", username + password)
         else:
             self.set_status(400)
@@ -796,10 +842,6 @@ class ErrorHandler(BaseHandler):
 
 
 class UploadEnvHandler(BaseHandler):
-    def initialize(self, app):
-        super().initialize(app)
-        self.readonly = app.readonly
-
     @check_auth
     def post(self):
         # 100mb file size limit
@@ -915,10 +957,6 @@ class ExperimentLogHandler(BaseHandler):
     """
 
     VALID_ACTIONS = ("log", "metrics", "finish")
-
-    def initialize(self, app):
-        super().initialize(app)
-        self.readonly = app.readonly
 
     @staticmethod
     def _require_mapping(args, field):
@@ -1218,6 +1256,124 @@ class ExperimentSuggestHandler(BaseHandler):
     def wrap_func(handler, args):
         handler.set_status(501)
         handler.write(json.dumps(ExperimentSuggestHandler.NOT_IMPLEMENTED))
+
+    @check_auth
+    def post(self):
+        self.wrap_func(self, _decode_json_body(self.request.body))
+
+
+class TagsHandler(BaseHandler):
+    """Read and update environment tags backed by experiment metadata."""
+
+    VALID_ACTIONS = ("get", "set")
+
+    def initialize(self, app):
+        super().initialize(app)
+        self.readonly = app.readonly
+
+    @staticmethod
+    def _experiment_from_env(eid, env):
+        """Return an experiment from one materialized in-memory environment."""
+        blob = env.get("experiment")
+        if not isinstance(blob, Mapping):
+            return None
+        experiment = Experiment.from_dict(blob)
+        experiment.env_id = eid
+        return experiment
+
+    @staticmethod
+    def _read_experiment(handler, eid):
+        """Read one experiment without materializing unrelated environments."""
+        env = handler.state.get(eid)
+        if env is None or (isinstance(env, LazyEnvData) and not env.is_loaded):
+            return ExperimentStore(handler.storage).get_experiment(eid)
+        experiment = TagsHandler._experiment_from_env(eid, env)
+        if experiment is not None:
+            return experiment
+        return ExperimentStore(handler.storage).get_experiment(eid)
+
+    @staticmethod
+    def _experiment_map(handler):
+        """Return stored experiments overlaid with materialized state only."""
+        store = ExperimentStore(handler.storage)
+        experiments = {exp.env_id: exp for exp in store.list_experiments()}
+        for eid, env in handler.state.items():
+            if isinstance(env, LazyEnvData) and not env.is_loaded:
+                continue
+            experiment = TagsHandler._experiment_from_env(eid, env)
+            if experiment is not None:
+                experiments[eid] = experiment
+        return experiments
+
+    @staticmethod
+    def _write_tags(handler, eid=None):
+        if eid is not None:
+            experiment = TagsHandler._read_experiment(handler, eid)
+            tags = tags_to_mapping(experiment.tags) if experiment else {}
+            handler.write(json.dumps(tags, cls=NanSafeEncoder))
+            return
+        experiments = TagsHandler._experiment_map(handler)
+        tag_map = {
+            env_id: tags_to_mapping(experiment.tags)
+            for env_id, experiment in experiments.items()
+            if experiment.tags
+        }
+        handler.write(json.dumps(tag_map, cls=NanSafeEncoder))
+
+    @staticmethod
+    def wrap_func(handler, args):
+        action = args.get("action", "set")
+        if action not in TagsHandler.VALID_ACTIONS:
+            raise tornado.web.HTTPError(
+                400, reason="unknown action {0!r}".format(action)
+            )
+
+        if action == "get":
+            eid = extract_eid(args) if args.get("eid") is not None else None
+            TagsHandler._write_tags(handler, eid)
+            return
+
+        if handler.readonly:
+            handler.set_status(403)
+            handler.write(
+                {
+                    "success": False,
+                    "error": "Tag updates are disabled while the server is "
+                    "in readonly mode",
+                }
+            )
+            return
+
+        if "tags" not in args:
+            raise tornado.web.HTTPError(400, reason="'tags' is required for set action")
+
+        eid = extract_eid(args)
+        append = args.get("append", False)
+        store = ExperimentStore(handler.storage)
+        env = handler.state.get(eid)
+        is_new_env = env is None
+        if is_new_env:
+            env = {"jsons": {}, "reload": {}}
+        try:
+            experiment = store.update_tags(
+                eid, args["tags"], append=append, env_data=env
+            )
+        except (TypeError, ValueError) as error:
+            raise tornado.web.HTTPError(400, reason=str(error))
+
+        if is_new_env:
+            handler.state[eid] = env
+
+        tags = tags_to_mapping(experiment.tags)
+        if is_new_env:
+            broadcast_envs(handler)
+        broadcast_tags(handler, eid, tags)
+        handler.write(json.dumps(tags, cls=NanSafeEncoder))
+
+    @check_auth
+    def get(self):
+        eid = self.get_query_argument("eid", default=None)
+        self.wrap_func(self, {"action": "get", "eid": eid})
 
     @check_auth
     def post(self):
