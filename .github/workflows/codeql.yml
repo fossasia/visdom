@@ -4,7 +4,6 @@ on:
   pull_request:
   push:
     branches:
-      - master
       - dev
   schedule:
     - cron: "30 3 * * 0"
