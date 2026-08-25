@@ -341,13 +341,17 @@ def test_assets_are_filed_by_extension(offline_downloads, tmp_path):
     """Each asset lands in the directory its extension implies.
 
     Nothing in the current list is extensionless, so the ``fonts/`` fallback in
-    ``build.download_scripts`` is unreachable and is not asserted here.
+    ``build.download_scripts`` only ever makes the directory and leaves it empty.
     """
     _run_download(offline_downloads, tmp_path)
     static = tmp_path / "static"
     assert (static / "js" / "plotly-plotly.min.js").exists()
+    assert (static / "js" / "sjcl.js").exists()
     assert (static / "js" / "layout-bin-packer.js.map").exists()
     assert (static / "css" / "react-resizable-styles.css").exists()
+    assert (static / "css" / "react-grid-layout-styles.css").exists()
+    assert (static / "fonts").is_dir()
+    assert list((static / "fonts").iterdir()) == []
 
 
 def test_the_mathjax_bundle_is_fetched_into_its_versioned_path(
