@@ -371,6 +371,7 @@ Track experiment metadata (hyper-parameters, metrics, tags) alongside your plots
 - [`vis.compare_experiments`](#viscompare_experiments)  : diff experiments field by field
 - [`vis.suggest_experiment`](#vissuggest_experiment)  : suggest parameters for the next run (reserved)
 - [`vis.hparams`](#vishparams)  : open a hyper-parameter pane over the selected runs
+- [`vis.update_hparams`](#visupdate_hparams)  : change or refresh an existing hyper-parameter pane
 
 
 ## Loggers
@@ -1395,7 +1396,7 @@ Arguments:
 
 #### vis.hparams
 
-This function opens a hyper-parameter pane over the experiments logged on the server. The selection is resolved server-side: the matching runs are flattened into one record each — the run's hyper-parameters, the latest value of each of its metrics, and its tags — and registered as an `hparams` window, so the pane appears in the browser like any other visualization and reloads with its environment. The pane heads the window with how many runs, params, metrics and tags the selection holds and lists the runs by name with their status; its download button saves the records as JSON.
+This function opens a hyper-parameter pane over the experiments logged on the server. The selection is resolved server-side: the matching runs are flattened into one record each — the run's hyper-parameters, the latest value of each of its metrics, and its tags — and registered as an `hparams` window, so the pane appears in the browser like any other visualization and reloads with its environment. The environment is saved as soon as the pane exists, so it survives a server restart without an explicit save. The pane heads the window with how many runs, params, metrics and tags the selection holds and lists the runs by name with their status; its download button saves the records as JSON.
 
 ```python
 vis.hparams("lr < 0.01 AND acc > 0.9")          # by query
@@ -1411,7 +1412,7 @@ Arguments:
 - `env`: Environment to open the pane in. Defaults to the client's env.
 - `opts`: Window options (`title`, `width`, `height`, ...), as for the plotting functions.
 
-Returns the id of the created window.
+Returns the id of the created window. The resolved selection is stored on the window, so [`vis.update_hparams`](#visupdate_hparams) can re-run it later.
 
 The modes select as follows:
 
@@ -1420,6 +1421,24 @@ The modes select as follows:
 - `both`: the intersection — runs that match `query` *and* are named in `env_ids`, ordered by `env_ids`. Both must be given and non-empty.
 
 There is no "show everything" call: with neither `query` nor `env_ids` the server has nothing to select and rejects the request. A blank or whitespace-only `query` counts as no query. Every id in `env_ids` must name an environment that has an experiment: a mistyped or deleted one is a `404` naming it rather than a run quietly missing from the pane. Under `both`, an id that does have an experiment but does not match the query is filtered out as the query asked.
+
+#### vis.update_hparams
+
+This function changes or refreshes an existing hyper-parameter pane — the dedicated write path for `hparams` windows, since the generic update route only understands plot windows. Called with a `query`/`env_ids`/`mode` selection the pane's selection is replaced, under the rules of [`vis.hparams`](#vishparams); called with only `win` the selection stored on the window is re-run, a manual refresh that picks up runs logged (or newly matching) since the pane was built. The pane keeps its id and position, is rebuilt in place, and the environment is saved so the update reaches disk immediately.
+
+```python
+win = vis.hparams("lr < 0.01")
+vis.update_hparams(win, "lr < 0.1 AND acc > 0.9")  # replace the selection
+vis.update_hparams(win)                            # refresh as-is
+```
+
+Arguments:
+- `win`: Id of the pane to update (required). Unknown windows are a 404; non-hparams windows a 400.
+- `query` / `env_ids` / `mode`: The replacement selection, validated exactly as on [`vis.hparams`](#vishparams).
+- `env`: Environment holding the window. Defaults to the client's env.
+- `opts`: Overrides the pane's title/size; when omitted the current ones are kept.
+
+Returns the window id.
 
 ## Customizing Visdom
 The user config directory for visdom is

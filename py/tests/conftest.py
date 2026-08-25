@@ -91,12 +91,15 @@ def app_handler(app):
 def offline_client():
     """Visdom client that never opens a connection.
 
-    With ``send=False`` the client's ``_send`` returns the payload instead of
-    performing I/O, so plot methods can be asserted as pure functions.
+    ``_handle_post`` is the client's only I/O point, so stubbing it leaves
+    ``_send`` and everything above it running their real code -- including the
+    env handshake ``__init__`` performs -- while no socket is ever opened. The
+    ``send`` constructor flag this used to rely on no longer exists.
     """
     import visdom
 
-    return visdom.Visdom(send=False, use_incoming_socket=False)
+    with patch.object(visdom.Visdom, "_handle_post", return_value="win_offline"):
+        yield visdom.Visdom(use_incoming_socket=False)
 
 
 @pytest.fixture
