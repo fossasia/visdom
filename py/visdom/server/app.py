@@ -66,7 +66,6 @@ from visdom.server.defaults import (
     DEFAULT_SAVE_THRESHOLD,
 )
 
-
 tornado_settings = {
     "autoescape": None,
     "debug": "/dbg/" in __file__,
