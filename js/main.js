@@ -154,6 +154,7 @@ const App = () => {
     sendEnvQuery,
     sendEnvSave,
     sendLayoutsSave,
+    sendTagsUpdate,
     sendPaneClose,
     sendUndo,
     sendPaneLayoutUpdate,
@@ -171,6 +172,7 @@ const App = () => {
   // data stores
   const [storeMeta, setStoreMeta] = useState({
     envList: [],
+    tagsByEnv: {},
     layoutLists: new Map([['main', new Map([[DEFAULT_LAYOUT, new Map()]])]]),
   });
   const [storeData, setStoreData] = useState({
@@ -435,16 +437,43 @@ const App = () => {
   const onEnvUpdate = (data) => {
     setStoreMeta((prev) => {
       const layoutLists = new Map(prev.layoutLists);
-      for (var envIdx in data) {
-        if (!layoutLists.has(data[envIdx])) {
-          layoutLists.set(data[envIdx], new Map([[DEFAULT_LAYOUT, new Map()]]));
+      const tagsByEnv = {};
+      data.forEach((env) => {
+        if (!layoutLists.has(env)) {
+          layoutLists.set(env, new Map([[DEFAULT_LAYOUT, new Map()]]));
         }
-      }
+        if (prev.tagsByEnv[env]) {
+          tagsByEnv[env] = prev.tagsByEnv[env];
+        }
+      });
       return {
         ...prev,
         envList: data,
+        tagsByEnv: tagsByEnv,
         layoutLists: layoutLists,
       };
+    });
+  };
+
+  const onTagsSync = (tagsByEnv) => {
+    setStoreMeta((prev) => ({
+      ...prev,
+      tagsByEnv: tagsByEnv && typeof tagsByEnv === 'object' ? tagsByEnv : {},
+    }));
+  };
+
+  const onTagsUpdate = ({ eid, tags }) => {
+    if (!eid || !tags || typeof tags !== 'object') {
+      return;
+    }
+    setStoreMeta((prev) => {
+      const nextTagsByEnv = { ...prev.tagsByEnv };
+      if (Object.keys(tags).length === 0) {
+        delete nextTagsByEnv[eid];
+      } else {
+        nextTagsByEnv[eid] = tags;
+      }
+      return { ...prev, tagsByEnv: nextTagsByEnv };
     });
   };
 
@@ -529,11 +558,14 @@ const App = () => {
     setStoreMeta((prev) => {
       const layoutLists = new Map(prev.layoutLists);
       layoutLists.delete(env2delete);
+      const tagsByEnv = { ...prev.tagsByEnv };
+      delete tagsByEnv[env2delete];
       let EnvIds = prev.envList.filter((env) => env !== env2delete);
       return {
         ...prev,
         envList: EnvIds,
         layoutLists: layoutLists,
+        tagsByEnv: tagsByEnv,
       };
     });
 
@@ -549,6 +581,12 @@ const App = () => {
     });
 
     sendEnvDelete(env2delete, previousEnv);
+  };
+
+  const onTagsSave = (env, tags) => {
+    return sendTagsUpdate(env, tags).done((savedTags) => {
+      onTagsUpdate({ eid: env, tags: savedTags });
+    });
   };
 
   const onEnvSave = (env) => {
@@ -1074,6 +1112,8 @@ const App = () => {
       envList={storeMeta.envList}
       onEnvDelete={onEnvDelete}
       onEnvSave={onEnvSave}
+      onTagsSave={onTagsSave}
+      tags={storeMeta.tagsByEnv}
       onModalClose={() => setShowEnvModal(false)}
       show={showEnvModal}
     />,
@@ -1092,6 +1132,7 @@ const App = () => {
     <EnvControls
       envIDs={selection.envIDs}
       envList={storeMeta.envList}
+      tags={storeMeta.tagsByEnv}
       envSelectorStyle={{
         width: Math.max(window.innerWidth / 3, 50),
         wordBreak: 'break-all',
@@ -1161,6 +1202,8 @@ const App = () => {
     onLayoutMessage,
     onReloadMessage,
     onEnvUpdate,
+    onTagsUpdate,
+    onTagsSync,
     onCloseMessage,
     onUndoState,
     onDisconnect,

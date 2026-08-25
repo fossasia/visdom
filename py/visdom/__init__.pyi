@@ -20,6 +20,7 @@ _EnvIds = Union[List[Text], Tuple[Text, ...]]
 
 # The decoded JSON reply of the experiment endpoints.
 _ExperimentReply = Mapping[Text, Any]
+_TagMap = Mapping[Text, Text]
 
 # The reply of the experiment endpoints that only answer questions. An offline
 # client has no server to ask, so those hand back None rather than a reply.
@@ -75,6 +76,13 @@ class Visdom:
     def finish_experiment(
         self, status: Text = ..., env: _OptStr = ...
     ) -> Mapping[Text, Any]: ...
+    def set_tags(
+        self,
+        tags: _TagMap,
+        env: _OptStr = ...,
+        append: bool = ...,
+    ) -> _TagMap: ...
+    def get_tags(self, env: _OptStr = ...) -> _TagMap: ...
     def search_experiments(
         self,
         query: _OptStr = ...,
@@ -93,6 +101,15 @@ class Visdom:
         env_ids: Optional[_EnvIds] = ...,
         mode: _OptStr = ...,
         win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
+    def update_hparams(
+        self,
+        win: Text,
+        query: _OptStr = ...,
+        env_ids: Optional[_EnvIds] = ...,
+        mode: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...

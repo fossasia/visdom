@@ -328,6 +328,76 @@ class TestExperimentStore(unittest.TestCase):
         self.assertEqual(exp.get_param("lr").value, 0.01)
 
 
+class TestExperimentStoreEnvProvider(unittest.TestCase):
+    """With an env_provider the store writes the live env, not a disk snapshot.
+
+    The server passes ``state.get`` so that persisting experiment metadata can
+    never rewrite an env file from a copy that is missing windows created — or
+    reviving windows closed — since the file was last written.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.env_path = self._tmp.name
+        self.backend = JSONStore(self.env_path)
+        self.state = {}
+        self.store = ExperimentStore(self.backend, env_provider=self.state.get)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_write_persists_live_windows(self):
+        """A window living only in memory reaches disk on the next log."""
+        self.state["main"] = {"jsons": {"hp": {"id": "hp"}}, "reload": {}}
+        self.store.log_metric("main", "acc", 0.9)
+        env = self.backend.load_env("main")
+        self.assertIn("hp", env["jsons"])
+        self.assertEqual(env["experiment"]["metrics"][0]["value"], 0.9)
+
+    def test_write_lands_in_the_live_env(self):
+        """The experiment blob is set on the state env itself, not a copy."""
+        self.state["main"] = {"jsons": {}, "reload": {}}
+        self.store.log_experiment("main", params={"lr": 0.01})
+        self.assertEqual(self.state["main"]["experiment"]["params"][0]["value"], 0.01)
+
+    def test_closed_window_stays_gone(self):
+        """A window closed in memory is not resurrected from the stale file."""
+        self.backend.save_env(
+            "main", {"jsons": {"doomed": {"id": "doomed"}}, "reload": {}}
+        )
+        self.state["main"] = {"jsons": {}, "reload": {}}
+        self.store.log_metric("main", "acc", 0.9)
+        self.assertNotIn("doomed", self.backend.load_env("main")["jsons"])
+
+    def test_env_not_in_state_falls_back_to_disk(self):
+        """An env the provider does not serve is read from (and keeps) its file."""
+        self.backend.save_env("other", {"jsons": {"w": {"id": "w"}}, "reload": {}})
+        self.store.log_experiment("other", params={"lr": 0.1})
+        env = self.backend.load_env("other")
+        self.assertIn("w", env["jsons"])
+        self.assertEqual(env["experiment"]["params"][0]["value"], 0.1)
+
+    def test_lazy_env_data_round_trips(self):
+        """A LazyEnvData env is written through and persisted with its windows."""
+        self.backend.save_env("main", {"jsons": {"w": {"id": "w"}}, "reload": {}})
+        self.state["main"] = LazyEnvData(self.backend, "main")
+        self.store.log_metric("main", "acc", 0.5)
+        env = self.backend.load_env("main")
+        self.assertIn("w", env["jsons"])
+        self.assertEqual(env["experiment"]["metrics"][0]["value"], 0.5)
+
+    def test_delete_experiment_through_lazy_env(self):
+        """delete_experiment removes the blob from a LazyEnvData live env."""
+        self.backend.save_env("main", {"jsons": {"w": {"id": "w"}}, "reload": {}})
+        self.state["main"] = LazyEnvData(self.backend, "main")
+        self.store.log_experiment("main", params={"lr": 0.01})
+        self.assertTrue(self.store.delete_experiment("main"))
+        self.assertNotIn("experiment", self.state["main"])
+        env = self.backend.load_env("main")
+        self.assertNotIn("experiment", env)
+        self.assertIn("w", env["jsons"])
+
+
 class TestExperimentStoreNoPersistence(unittest.TestCase):
     """With persistence disabled the store degrades gracefully (no crashes)."""
 
