@@ -468,6 +468,44 @@ def _assert_opts(opts):
         assert isstr(opts.get("title")), "title should be a string"
 
 
+def _assert_sunburst_opts(opts):
+    """
+    Validation for opts that are specific for sunburst charts.
+    Kept separate from `_assert_opts` on purpose --`_assert_opts`
+    is called by every plot type, and these keys (especially the
+    generic-sounding `size`) are not reserved names elsewhere, so
+    validating them globally would risk breaking unrelated plot calls that
+    happen to carry an opts key of the same name for unrelated reasons.
+    """
+    if opts.get("font_size") is not None or opts.get("size") is not None:
+        fs = opts.get("font_size")
+        fs = fs if fs is not None else opts.get("size")
+        assert isnum(fs) and fs > 0, "font_size should be a positive number"
+
+    if opts.get("line_width") is not None or opts.get("marker_width") is not None:
+        lw = opts.get("line_width")
+        lw = lw if lw is not None else opts.get("marker_width")
+        assert isnum(lw) and lw >= 0, "line_width should be a nonnegative number"
+
+    if opts.get("font_color") is not None:
+        assert isstr(opts.get("font_color")), "font_color should be a string"
+
+    if opts.get("maxdepth") is not None:
+        md = opts.get("maxdepth")
+        assert isinstance(md, (int, np.integer)) and not isinstance(
+            md, bool
+        ), "maxdepth should be an integer"
+        assert (
+            md == -1 or md >= 1
+        ), "maxdepth should be -1 (show all levels) or a positive integer"
+
+    if opts.get("branchvalues") is not None:
+        assert opts.get("branchvalues") in (
+            "total",
+            "remainder",
+        ), "branchvalues must be 'total' or 'remainder'"
+
+
 torch_types = []
 try:
     import torch
@@ -3975,18 +4013,72 @@ class Visdom(object):
 
     @pytorch_wrap
     def sunburst(self, labels, parents, values=None, win=None, env=None, opts=None):
+        """
+        This function draws a sunburst chart. It takes two input arrays:
+        `labels` and `parents`. Values from the `labels` array define the
+        sector's label or name. Values from the `parents` array define the
+        hierarchical structure, indicating which parent sector a sector
+        belongs to -- note that at least one entry in `parents` must be an
+        empty string `""` (or `None`, which is treated the same way),
+        marking the root of the hierarchy. Keep in mind that the `labels`
+        and `parents` arrays must be of equal length. There is an optional
+        third array called `values`, which is used to display a numerical
+        value when hovering over a sector. If provided, the `values` array
+        must be the same length as `labels` and `parents`, and every entry
+        must be a non-negative, non-NaN number -- omit `values` entirely if
+        some sectors don't have a known value, rather than passing NaN.
+
+
+        Examples: `vis.sunburst(labels, parents, opts)` or
+        `vis.sunburst(labels, parents, values, opts)`
+
+        The following `opts` are supported:
+
+        - `opts.font_size`    : define font size of label (`int`)
+        - `opts.font_color`    : define font color of label (`string`)
+        - `opts.opacity`    : define opacity of chart (`float`, between 0 and 1)
+        - `opts.line_width`    : define distance between two sectors and
+                                  sector to its parents (`int`)
+        - `opts.maxdepth`    :  maximum number of hierarchy levels visible
+                                at once -- a positive integer, or `-1` to
+                                show all levels (`int`)
+        - `opts.branchvalues`    : `'total'` or `'remainder'` -- how
+                                    `values` are interpreted relative to
+                                    children (`string`; default = `'remainder'`)
+        """
         opts = {} if opts is None else opts
         _title2str(opts)
         _assert_opts(opts)
+        _assert_sunburst_opts(opts)
 
-        font_size = opts.get("size")
+        labels = np.squeeze(np.asarray(labels))
+        parents = np.squeeze(np.asarray(parents))
+        assert labels.ndim <= 1, "labels should be one-dimensional"
+        assert parents.ndim <= 1, "parents should be one-dimensional"
+        labels = np.atleast_1d(labels)
+        parents = np.atleast_1d(parents)
+        if parents.dtype == object:
+            parents = np.array(["" if p is None else p for p in parents], dtype=object)
+
+        labels = labels.astype(str)
+        parents = parents.astype(str)
+        assert len(labels) > 0, "labels cannot be empty"
+        assert len(labels) == len(
+            parents
+        ), "length of parents and labels should be equal"
+        assert np.any(
+            parents == ""
+        ), "at least one node must have an empty parent ('') marking the root"
+
+        font_size = opts.get("font_size")
+        font_size = font_size if font_size is not None else opts.get("size")
         font_color = opts.get("font_color")
         opacity = opts.get("opacity")
-        line_width = opts.get("marker_width")
+        line_width = opts.get("line_width")
+        line_width = line_width if line_width is not None else opts.get("marker_width")
 
-        assert len(parents.tolist()) == len(
-            labels.tolist()
-        ), "length of parents and labels should be equal"
+        branchvalues = opts.get("branchvalues")
+        branchvalues = branchvalues if branchvalues is not None else "remainder"
 
         data_dict = [
             {
@@ -3996,14 +4088,25 @@ class Visdom(object):
                 "leaf": {"opacity": opacity},
                 "marker": {"line": {"width": line_width}},
                 "type": "sunburst",
+                "branchvalues": branchvalues,
             }
         ]
+
+        if opts.get("maxdepth") is not None:
+            data_dict[0]["maxdepth"] = opts.get("maxdepth")
+
         if values is not None:
+            try:
+                values = np.asarray(values, dtype=np.float64)
+            except (TypeError, ValueError):
+                raise AssertionError("values must be numeric")
             values = np.squeeze(values)
             assert values.ndim == 1, "values should be one-dimensional"
-            assert len(parents.tolist()) == len(
-                values.tolist()
+            assert len(values) == len(
+                labels
             ), "length of values should be equal to length of labels and parents"
+            assert not np.any(np.isnan(values)), "values cannot contain NaN"
+            assert np.all(values >= 0), "values cannot contain negative numbers"
 
             data_dict[0]["values"] = values.tolist()
 
