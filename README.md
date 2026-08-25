@@ -356,6 +356,8 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 - [`vis.win_exists`](#viswin_exists) : check if a window already exists by id
 - [`vis.get_env_list`](#visget_env_list) : get a list of all of the environments on your server
 - [`vis.get_window_data`](#visget_window_data): get current data for a window
+- [`vis.set_tags`](#visset_tags): replace or append environment tags
+- [`vis.get_tags`](#visget_tags): read environment tags
 - [`vis.save_plotly_figure`](#visplotlyplot): save a Plotly figure to an image file from code (no browser click)
 - [`vis.check_connection`](#vischeck_connection): check if the server is connected
 - [`vis.replay_log`](#visreplay_log): replay the actions from the provided log file
@@ -860,17 +862,18 @@ The following `opts` are supported:
 - Tensor of size `K` and `K x 3`: Instead of having a unique color per data point, the same color is shared for all points of a particular label.
 
 #### vis.sunburst
-This function draws a sunburst chart. It takes two input arrays: `parents` and `labels`.
-Values from the `parents` array define the hierarchical structure, indicating which parent sector a sector belongs to. Values from the `labels` array define the sector's label or name. Keep in mind that the `parents` and `labels` arrays must be of equal length. There is an optional third array called `values`, which is used to display a numerical value when hovering over a sector. If provided, the `values` array must be the same length as `parents` and `labels`.
+This function draws a sunburst chart. It takes two input arrays: `labels` and `parents`.
+Values from the `labels` array define the sector's label or name. Values from the `parents` array define the hierarchical structure, indicating which parent sector a sector belongs to -- note that at least one entry in `parents` must be an empty string `""`, marking the root of the hierarchy. Keep in mind that the `labels` and `parents` arrays must be of equal length. There is an optional third array called `values`, which is used to display a numerical value when hovering over a sector. If provided, the `values` array must be the same length as `labels` and `parents`.
 
-Examples: `vis.sunburst(parents, labels, opts)` or `vis.sunburst(parents, labels, values, opts)`
+Examples: `vis.sunburst(labels, parents, opts)` or `vis.sunburst(labels, parents, values, opts)`
 
 Following `opts` are currently supported:
 - `opts.font_size`    : define font size of label (`int`)
 - `opts.font_color`    : define font color of label (`string`)
-- `opts.opacity`    : define opacity of chart (`float`)
+- `opts.opacity`    : define opacity of chart (`float`, between 0 and 1)
 - `opts.line_width`    : define distance between two sectors and sector to its parents (`int`)
-
+- `opts.maxdepth`    : maximum number of hierarchy levels visible at once -- a positive integer, or `-1` to show all levels (`int`)
+- `opts.branchvalues`    : `'total'` or `'remainder'` -- how `values` are interpreted relative to children (`string`; default = `'remainder'`)
 
 #### vis.line
 This function draws a line plot. It takes as input an `N` or `NxM` tensor
@@ -1279,6 +1282,35 @@ This function returns the window data for the given window. Returns data for all
 Arguments:
 - `env`: Environment to search for the window in.
 - `win`: Window to return data for. Set to `None` to retrieve all the windows in an environment.
+
+#### vis.set_tags
+
+This function replaces an environment's key/value tags. Pass `append=True` to
+keep its existing tags and add or update the supplied keys instead. `env`
+defaults to the client's current environment. An empty mapping clears all tags
+in replace mode.
+
+```python
+vis.set_tags({"dataset": "cifar10", "stage": "training"})
+vis.set_tags({"stable": ""}, append=True)
+```
+
+Arguments:
+- `tags`: mapping of string tag names to string values (maximum 20 names, 50 characters each)
+- `env`: target environment; defaults to the client's current environment
+- `append`: append/update instead of replace; defaults to `False`
+
+The complete stored tag mapping is returned.
+
+#### vis.get_tags
+
+This function returns an environment's key/value tag mapping. `env` defaults to
+the client's current environment; an environment without tags returns `{}`.
+
+```python
+tags = vis.get_tags()
+# {"dataset": "cifar10", "stage": "training", "stable": ""}
+```
 
 #### vis.check_connection
 
