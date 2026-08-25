@@ -15,6 +15,7 @@ the data_model itself.
 
 import copy
 import getpass
+import hmac
 import json
 import jsonpatch
 import logging
@@ -33,11 +34,14 @@ from visdom.utils.shared_utils import (
 )
 from visdom.utils.server_utils import (
     check_auth,
+    check_readonly,
+    reject_readonly,
     extract_eid,
     window,
     register_window,
     gather_envs,
     broadcast_envs,
+    broadcast_tags,
     escape_eid,
     compare_envs,
     load_env,
@@ -48,15 +52,18 @@ from visdom.utils.server_utils import (
     push_deleted,
     clear_deleted,
     notify,
+    LazyEnvData,
 )
 from visdom.server.handlers.base_handlers import BaseHandler
 from visdom.experiments import (
     DEFAULT_SORT_FIELD,
+    Experiment,
     ExperimentStore,
     ExperimentFinishedError,
     QueryParseError,
     retarget_experiment,
     STATUS_FINISHED,
+    tags_to_mapping,
 )
 
 logger = logging.getLogger(__name__)
@@ -70,6 +77,7 @@ logger = logging.getLogger(__name__)
 
 class PostHandler(BaseHandler):
     @check_auth
+    @check_readonly
     def post(self):
         req = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -349,8 +357,8 @@ class UpdateHandler(BaseHandler):
         # Update traces. An unnamed update may carry fewer entries than the plot
         # has traces, so walk only as far as the data reaches instead of
         # indexing past the end of it.
-        for n, idx in enumerate(idxs[: len(new_data)]):
-            if all(_is_missing_value(i) for i in new_data[n]["x"]):
+        for idx, new_trace in zip(idxs, new_data):
+            if all(_is_missing_value(i) for i in new_trace["x"]):
                 continue
             # handle data for plotting
             axes = ["x", "y"]
@@ -358,26 +366,24 @@ class UpdateHandler(BaseHandler):
                 axes.append("z")
             for axis in axes:
                 pdata[idx][axis] = (
-                    (pdata[idx][axis] + new_data[n][axis])
-                    if append
-                    else new_data[n][axis]
+                    (pdata[idx][axis] + new_trace[axis]) if append else new_trace[axis]
                 )
 
             # handle marker properties
-            if "marker" not in new_data[n]:
+            if "marker" not in new_trace:
                 continue
             if "marker" not in pdata[idx]:
                 pdata[idx]["marker"] = {}
             pdata_marker = pdata[idx]["marker"]
             for marker_prop in ["color"]:
-                if marker_prop not in new_data[n]["marker"]:
+                if marker_prop not in new_trace["marker"]:
                     continue
                 if marker_prop not in pdata[idx]["marker"]:
                     pdata[idx]["marker"][marker_prop] = []
                 pdata_marker[marker_prop] = (
-                    (pdata_marker[marker_prop] + new_data[n]["marker"][marker_prop])
+                    (pdata_marker[marker_prop] + new_trace["marker"][marker_prop])
                     if append
-                    else new_data[n]["marker"][marker_prop]
+                    else new_trace["marker"][marker_prop]
                 )
 
         return p
@@ -488,6 +494,7 @@ class UpdateHandler(BaseHandler):
         handler.write(p["id"])
 
     @check_auth
+    @check_readonly
     def post(self):
         if self.login_enabled and not self.current_user:
             self.set_status(400)
@@ -513,6 +520,7 @@ class CloseHandler(BaseHandler):
             broadcast(handler, json.dumps({"command": "close", "data": win}), eid)
 
     @check_auth
+    @check_readonly
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -534,6 +542,7 @@ class DeleteEnvHandler(BaseHandler):
             broadcast_envs(handler)
 
     @check_auth
+    @check_readonly
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -589,6 +598,7 @@ class ForkEnvHandler(BaseHandler):
         handler.write(eid)
 
     @check_auth
+    @check_readonly
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -693,6 +703,7 @@ class SaveHandler(BaseHandler):
         handler.write(json.dumps(ret))
 
     @check_auth
+    @check_readonly
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -706,7 +717,12 @@ class DataHandler(BaseHandler):
         eid = extract_eid(args)
 
         if "data" in args:
-            # Load data from client
+            # Load data from client. This is the one write behind an endpoint
+            # that also reads, so it cannot be refused by the decorator.
+            if handler.readonly:
+                reject_readonly(handler)
+                return
+
             data = json.loads(args["data"])
 
             if eid not in handler.state:
@@ -782,7 +798,19 @@ class IndexHandler(BaseHandler):
         salt = stored.split("$")[0]
         password = hash_password(json_obj["password"], salt=salt)
 
-        if (username == self.user_credential["username"]) and (password == stored):
+        # Constant-time comparison: `==` on the derived key returns as soon as
+        # two characters differ, so response timing tells an attacker how much
+        # of a guess was right. Both halves are always compared, which keeps a
+        # wrong username costing the same as a wrong password.
+        username_ok = hmac.compare_digest(
+            str(username).encode("utf-8"),
+            self.user_credential["username"].encode("utf-8"),
+        )
+        password_ok = hmac.compare_digest(
+            password.encode("utf-8"), stored.encode("utf-8")
+        )
+
+        if username_ok and password_ok:
             self.set_secure_cookie("user_password", username + password)
         else:
             self.set_status(400)
@@ -814,10 +842,6 @@ class ErrorHandler(BaseHandler):
 
 
 class UploadEnvHandler(BaseHandler):
-    def initialize(self, app):
-        super().initialize(app)
-        self.readonly = app.readonly
-
     @check_auth
     def post(self):
         # 100mb file size limit
@@ -933,10 +957,6 @@ class ExperimentLogHandler(BaseHandler):
     """
 
     VALID_ACTIONS = ("log", "metrics", "finish")
-
-    def initialize(self, app):
-        super().initialize(app)
-        self.readonly = app.readonly
 
     @staticmethod
     def _require_mapping(args, field):
@@ -1236,6 +1256,124 @@ class ExperimentSuggestHandler(BaseHandler):
     def wrap_func(handler, args):
         handler.set_status(501)
         handler.write(json.dumps(ExperimentSuggestHandler.NOT_IMPLEMENTED))
+
+    @check_auth
+    def post(self):
+        self.wrap_func(self, _decode_json_body(self.request.body))
+
+
+class TagsHandler(BaseHandler):
+    """Read and update environment tags backed by experiment metadata."""
+
+    VALID_ACTIONS = ("get", "set")
+
+    def initialize(self, app):
+        super().initialize(app)
+        self.readonly = app.readonly
+
+    @staticmethod
+    def _experiment_from_env(eid, env):
+        """Return an experiment from one materialized in-memory environment."""
+        blob = env.get("experiment")
+        if not isinstance(blob, Mapping):
+            return None
+        experiment = Experiment.from_dict(blob)
+        experiment.env_id = eid
+        return experiment
+
+    @staticmethod
+    def _read_experiment(handler, eid):
+        """Read one experiment without materializing unrelated environments."""
+        env = handler.state.get(eid)
+        if env is None or (isinstance(env, LazyEnvData) and not env.is_loaded):
+            return ExperimentStore(handler.storage).get_experiment(eid)
+        experiment = TagsHandler._experiment_from_env(eid, env)
+        if experiment is not None:
+            return experiment
+        return ExperimentStore(handler.storage).get_experiment(eid)
+
+    @staticmethod
+    def _experiment_map(handler):
+        """Return stored experiments overlaid with materialized state only."""
+        store = ExperimentStore(handler.storage)
+        experiments = {exp.env_id: exp for exp in store.list_experiments()}
+        for eid, env in handler.state.items():
+            if isinstance(env, LazyEnvData) and not env.is_loaded:
+                continue
+            experiment = TagsHandler._experiment_from_env(eid, env)
+            if experiment is not None:
+                experiments[eid] = experiment
+        return experiments
+
+    @staticmethod
+    def _write_tags(handler, eid=None):
+        if eid is not None:
+            experiment = TagsHandler._read_experiment(handler, eid)
+            tags = tags_to_mapping(experiment.tags) if experiment else {}
+            handler.write(json.dumps(tags, cls=NanSafeEncoder))
+            return
+        experiments = TagsHandler._experiment_map(handler)
+        tag_map = {
+            env_id: tags_to_mapping(experiment.tags)
+            for env_id, experiment in experiments.items()
+            if experiment.tags
+        }
+        handler.write(json.dumps(tag_map, cls=NanSafeEncoder))
+
+    @staticmethod
+    def wrap_func(handler, args):
+        action = args.get("action", "set")
+        if action not in TagsHandler.VALID_ACTIONS:
+            raise tornado.web.HTTPError(
+                400, reason="unknown action {0!r}".format(action)
+            )
+
+        if action == "get":
+            eid = extract_eid(args) if args.get("eid") is not None else None
+            TagsHandler._write_tags(handler, eid)
+            return
+
+        if handler.readonly:
+            handler.set_status(403)
+            handler.write(
+                {
+                    "success": False,
+                    "error": "Tag updates are disabled while the server is "
+                    "in readonly mode",
+                }
+            )
+            return
+
+        if "tags" not in args:
+            raise tornado.web.HTTPError(400, reason="'tags' is required for set action")
+
+        eid = extract_eid(args)
+        append = args.get("append", False)
+        store = ExperimentStore(handler.storage)
+        env = handler.state.get(eid)
+        is_new_env = env is None
+        if is_new_env:
+            env = {"jsons": {}, "reload": {}}
+        try:
+            experiment = store.update_tags(
+                eid, args["tags"], append=append, env_data=env
+            )
+        except (TypeError, ValueError) as error:
+            raise tornado.web.HTTPError(400, reason=str(error))
+
+        if is_new_env:
+            handler.state[eid] = env
+
+        tags = tags_to_mapping(experiment.tags)
+        if is_new_env:
+            broadcast_envs(handler)
+        broadcast_tags(handler, eid, tags)
+        handler.write(json.dumps(tags, cls=NanSafeEncoder))
+
+    @check_auth
+    def get(self):
+        eid = self.get_query_argument("eid", default=None)
+        self.wrap_func(self, {"action": "get", "eid": eid})
 
     @check_auth
     def post(self):

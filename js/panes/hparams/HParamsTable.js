@@ -7,21 +7,32 @@
  *
  */
 
-import TreeSelect from 'rc-tree-select';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo } from 'react';
 
 import {
-  buildColumns,
-  filterRecords,
+  cellClass,
+  COLUMN_GROUPS,
+  ColumnSelect,
   formatValue,
-  isNumberLike,
+  groupColumnTree,
   makeComparator,
+  NUMERIC_GROUPS,
   numericExtent,
+  runLabel,
+  selectNumericColumns,
   spineStyle,
+  StatusBadge,
+  useHParamsColumns,
 } from './hparamsUtils';
 
 const RUN_COLUMN_ID = 'run:name';
-const CONTROL_STYLE = { width: 150 };
+const NO_SORT = { by: null, dir: null };
+
+function sortGlyph(dir) {
+  if (dir === 'asc') return '▲';
+  if (dir === 'desc') return '▼';
+  return '⇅';
+}
 
 function nextSort(current, columnId) {
   if (current.by !== columnId) return { by: columnId, dir: 'asc' };
@@ -50,7 +61,6 @@ function directionLabel(sort) {
 
 const SortCaret = ({ sort, columnId }) => {
   const active = sort.by === columnId;
-  const glyph = !active ? '⇅' : sort.dir === 'asc' ? '▲' : '▼';
   return (
     <span
       className={
@@ -59,7 +69,7 @@ const SortCaret = ({ sort, columnId }) => {
       }
       aria-hidden="true"
     >
-      {glyph}
+      {sortGlyph(active ? sort.dir : null)}
     </span>
   );
 };
@@ -97,7 +107,7 @@ const HParamsRow = React.memo(function HParamsRow({
   onToggle,
   groupStartIds,
 }) {
-  const runLabel = record.name || record.env_id || 'run';
+  const label = runLabel(record);
   return (
     <tr
       className={
@@ -109,30 +119,23 @@ const HParamsRow = React.memo(function HParamsRow({
           type="checkbox"
           checked={isSelected}
           onChange={() => onToggle(rowId)}
-          aria-label={'Select ' + runLabel}
+          aria-label={'Select ' + label}
         />
       </td>
       <th scope="row" className="hparams-cell hparams-cell-run">
-        <div className="hparams-run-cell" title={runLabel}>
-          <span className="hparams-run-name">{runLabel}</span>
-          {record.status ? (
-            <span
-              className={'hparams-run-status hparams-status-' + record.status}
-            >
-              {record.status}
-            </span>
-          ) : null}
+        <div className="hparams-run-cell" title={label}>
+          <span className="hparams-run-name">{label}</span>
+          <StatusBadge status={record.status} />
         </div>
       </th>
       {columns.map((col) => {
         const value = col.accessor(record);
         const style =
           colorBy && col.id === colorBy ? spineStyle(value, extent) : null;
-        const cls =
-          'hparams-cell' +
-          (isNumberLike(value) ? ' hparams-cell-num' : '') +
-          (style ? ' hparams-cell-spine' : '') +
-          (groupStartIds.has(col.id) ? ' hparams-col-sep' : '');
+        const cls = cellClass(value, {
+          spine: !!style,
+          separator: groupStartIds.has(col.id),
+        });
         return (
           <td key={col.id} className={cls} style={style || undefined}>
             {formatValue(value)}
@@ -143,68 +146,36 @@ const HParamsRow = React.memo(function HParamsRow({
   );
 });
 
-const HParamsTable = ({ records, paramKeys, metricKeys, tagKeys }) => {
-  const [sort, setSort] = useState({ by: null, dir: null });
-  const [filter, setFilter] = useState('');
-  const [colorBy, setColorBy] = useState(null);
-  const [selected, setSelected] = useState(() => new Set());
-
-  const columns = useMemo(
-    () => buildColumns(paramKeys, metricKeys, tagKeys),
-    [paramKeys, metricKeys, tagKeys]
-  );
+const HParamsTable = ({
+  records,
+  columnRecords,
+  rowIds,
+  paramKeys,
+  metricKeys,
+  tagKeys,
+  sort,
+  setSort,
+  colorBy,
+  setColorBy,
+  selected,
+  setSelected,
+}) => {
+  const columns = useHParamsColumns(paramKeys, metricKeys, tagKeys);
+  const pickerRecords = columnRecords || records;
   const colorCols = useMemo(
-    () =>
-      columns.filter(
-        (c) =>
-          (c.group === 'param' || c.group === 'metric') &&
-          numericExtent(records, c.accessor)
-      ),
-    [columns, records]
-  );
-  const colorParamCols = useMemo(
-    () => colorCols.filter((c) => c.group === 'param'),
-    [colorCols]
-  );
-  const colorMetricCols = useMemo(
-    () => colorCols.filter((c) => c.group === 'metric'),
-    [colorCols]
+    () => selectNumericColumns(pickerRecords, columns),
+    [pickerRecords, columns]
   );
 
-  const rowIds = useMemo(() => {
-    const ids = new Map();
-    records.forEach((record, index) => {
-      ids.set(record, record.env_id || 'row:' + index);
-    });
-    return ids;
-  }, [records]);
+  const activeSort = useMemo(() => {
+    if (!sort.by || sort.by === RUN_COLUMN_ID) return sort;
+    return columns.some((c) => c.id === sort.by) ? sort : NO_SORT;
+  }, [sort, columns]);
 
-  useEffect(() => {
-    setSort((prev) => {
-      if (!prev.by || prev.by === RUN_COLUMN_ID) return prev;
-      return columns.some((c) => c.id === prev.by)
-        ? prev
-        : { by: null, dir: null };
-    });
-  }, [columns]);
-
-  useEffect(() => {
-    setColorBy((prev) =>
-      prev && !colorCols.some((c) => c.id === prev) ? null : prev
-    );
-  }, [colorCols]);
-
-  useEffect(() => {
-    setSelected((prev) => {
-      if (prev.size === 0) return prev;
-      const live = new Set(rowIds.values());
-      const next = new Set();
-      prev.forEach((id) => {
-        if (live.has(id)) next.add(id);
-      });
-      return next.size === prev.size ? prev : next;
-    });
-  }, [rowIds]);
+  const activeColorBy = useMemo(
+    () => (colorBy && colorCols.some((c) => c.id === colorBy) ? colorBy : null),
+    [colorBy, colorCols]
+  );
 
   const groupStartIds = useMemo(() => {
     const ids = new Set();
@@ -216,36 +187,37 @@ const HParamsTable = ({ records, paramKeys, metricKeys, tagKeys }) => {
     return ids;
   }, [columns]);
 
-  const filtered = useMemo(
-    () => filterRecords(records, filter, columns),
-    [records, filter, columns]
-  );
-
   const rows = useMemo(() => {
-    if (!sort.by) return filtered;
-    const accessor = accessorFor(sort.by, columns);
-    if (!accessor) return filtered;
-    return filtered.slice().sort(makeComparator(accessor, sort.dir));
-  }, [filtered, sort, columns]);
+    if (!activeSort.by) return records;
+    const accessor = accessorFor(activeSort.by, columns);
+    if (!accessor) return records;
+    return records.slice().sort(makeComparator(accessor, activeSort.dir));
+  }, [records, activeSort, columns]);
 
   const extent = useMemo(() => {
-    if (!colorBy) return null;
-    const col = columns.find((c) => c.id === colorBy);
+    if (!activeColorBy) return null;
+    const col = columns.find((c) => c.id === activeColorBy);
     if (!col) return null;
     return numericExtent(records, col.accessor);
-  }, [records, colorBy, columns]);
+  }, [records, activeColorBy, columns]);
 
-  const handleSort = useCallback((columnId) => {
-    setSort((prev) => nextSort(prev, columnId));
-  }, []);
+  const handleSort = useCallback(
+    (columnId) => {
+      setSort((prev) => nextSort(prev, columnId));
+    },
+    [setSort]
+  );
 
-  const handleSortSelect = useCallback((value) => {
-    setSort((prev) => {
-      if (!value) return { by: null, dir: null };
-      if (prev.by === value) return { by: value, dir: prev.dir || 'asc' };
-      return { by: value, dir: 'asc' };
-    });
-  }, []);
+  const handleSortSelect = useCallback(
+    (value) => {
+      setSort((prev) => {
+        if (!value) return { by: null, dir: null };
+        if (prev.by === value) return { by: value, dir: prev.dir || 'asc' };
+        return { by: value, dir: 'asc' };
+      });
+    },
+    [setSort]
+  );
 
   const cycleDir = useCallback(() => {
     setSort((prev) => {
@@ -253,16 +225,19 @@ const HParamsTable = ({ records, paramKeys, metricKeys, tagKeys }) => {
       if (prev.dir === 'asc') return { by: prev.by, dir: 'desc' };
       return { by: null, dir: null };
     });
-  }, []);
+  }, [setSort]);
 
-  const toggle = useCallback((rowId) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(rowId)) next.delete(rowId);
-      else next.add(rowId);
-      return next;
-    });
-  }, []);
+  const toggle = useCallback(
+    (rowId) => {
+      setSelected((prev) => {
+        const next = new Set(prev);
+        if (next.has(rowId)) next.delete(rowId);
+        else next.add(rowId);
+        return next;
+      });
+    },
+    [setSelected]
+  );
 
   const allSelected =
     rows.length > 0 && rows.every((r) => selected.has(rowIds.get(r)));
@@ -286,122 +261,64 @@ const HParamsTable = ({ records, paramKeys, metricKeys, tagKeys }) => {
       );
       return next;
     });
-  }, [rows, rowIds]);
+  }, [rows, rowIds, setSelected]);
 
   const bands = useMemo(
     () =>
-      [
-        { key: 'param', label: 'params' },
-        { key: 'metric', label: 'metrics' },
-        { key: 'tag', label: 'tags' },
-      ]
-        .map((b) => ({
-          ...b,
-          span: columns.filter((c) => c.group === b.key).length,
-        }))
-        .filter((b) => b.span > 0),
+      COLUMN_GROUPS.map((b) => ({
+        ...b,
+        span: columns.filter((c) => c.group === b.key).length,
+      })).filter((b) => b.span > 0),
     [columns]
   );
 
   const sortTreeData = useMemo(
     () => [
       { key: RUN_COLUMN_ID, value: RUN_COLUMN_ID, title: 'run' },
-      ...bands.map((b) => ({
-        key: '__g_' + b.key,
-        value: '__g_' + b.key,
-        title: b.label,
-        selectable: false,
-        children: columns
-          .filter((c) => c.group === b.key)
-          .map((c) => ({ key: c.id, value: c.id, title: c.label })),
-      })),
+      ...groupColumnTree(columns, COLUMN_GROUPS),
     ],
-    [bands, columns]
+    [columns]
   );
 
-  const colorTreeData = useMemo(() => {
-    const data = [];
-    if (colorParamCols.length) {
-      data.push({
-        key: '__cg_param',
-        value: '__cg_param',
-        title: 'params',
-        selectable: false,
-        children: colorParamCols.map((c) => ({
-          key: c.id,
-          value: c.id,
-          title: c.label,
-        })),
-      });
-    }
-    if (colorMetricCols.length) {
-      data.push({
-        key: '__cg_metric',
-        value: '__cg_metric',
-        title: 'metrics',
-        selectable: false,
-        children: colorMetricCols.map((c) => ({
-          key: c.id,
-          value: c.id,
-          title: c.label,
-        })),
-      });
-    }
-    return data;
-  }, [colorParamCols, colorMetricCols]);
+  const colorTreeData = useMemo(
+    () => groupColumnTree(colorCols, NUMERIC_GROUPS),
+    [colorCols]
+  );
 
-  const dirLabel = directionLabel(sort);
+  const dirLabel = directionLabel(activeSort);
 
   return (
     <div className="hparams-table-wrap">
       <div className="hparams-toolbar">
-        <input
-          type="text"
-          className="hparams-filter"
-          placeholder="Filter runs…"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          aria-label="Filter runs"
-        />
         <span className="hparams-sortby">
           sort by:
-          <TreeSelect
-            className="hparams-treeselect"
-            style={CONTROL_STYLE}
-            value={sort.by || undefined}
+          <ColumnSelect
+            value={activeSort.by}
             placeholder="none"
-            allowClear
-            treeLine
-            treeDefaultExpandAll
-            dropdownMatchSelectWidth={false}
             treeData={sortTreeData}
-            onChange={(value) => handleSortSelect(value || '')}
+            onChange={handleSortSelect}
+            label="Sort runs by"
           />
           <button
             type="button"
             className="hparams-dir-btn"
             onClick={cycleDir}
-            disabled={!sort.by}
+            disabled={!activeSort.by}
             title={dirLabel}
             aria-label={dirLabel}
           >
-            {!sort.by ? '⇅' : sort.dir === 'asc' ? '▲' : '▼'}
+            {sortGlyph(activeSort.by ? activeSort.dir : null)}
           </button>
         </span>
         {colorCols.length ? (
           <span className="hparams-colorby">
             color by:
-            <TreeSelect
-              className="hparams-treeselect"
-              style={CONTROL_STYLE}
-              value={colorBy || undefined}
+            <ColumnSelect
+              value={activeColorBy}
               placeholder="none"
-              allowClear
-              treeLine
-              treeDefaultExpandAll
-              dropdownMatchSelectWidth={false}
               treeData={colorTreeData}
-              onChange={(value) => setColorBy(value || null)}
+              onChange={setColorBy}
+              label="Color the table by"
             />
           </span>
         ) : null}
@@ -416,6 +333,10 @@ const HParamsTable = ({ records, paramKeys, metricKeys, tagKeys }) => {
 
       <div className="hparams-table-scroll">
         <table className="hparams-table">
+          <caption className="hparams-sr-only">
+            {rows.length} runs with their hyper-parameters, latest metric
+            values, and tags. Use the column headers to sort.
+          </caption>
           <thead>
             <tr className="hparams-group-row">
               <th
@@ -446,7 +367,7 @@ const HParamsTable = ({ records, paramKeys, metricKeys, tagKeys }) => {
                 />
               </th>
               <SortHeader
-                sort={sort}
+                sort={activeSort}
                 columnId={RUN_COLUMN_ID}
                 label="run"
                 scopeClass="hparams-th-run"
@@ -455,7 +376,7 @@ const HParamsTable = ({ records, paramKeys, metricKeys, tagKeys }) => {
               {columns.map((col) => (
                 <SortHeader
                   key={col.id}
-                  sort={sort}
+                  sort={activeSort}
                   columnId={col.id}
                   label={col.label}
                   scopeClass={
@@ -472,7 +393,7 @@ const HParamsTable = ({ records, paramKeys, metricKeys, tagKeys }) => {
             {rows.length === 0 ? (
               <tr>
                 <td className="hparams-nomatch" colSpan={2 + columns.length}>
-                  No runs match “{filter}”.
+                  No runs to show.
                 </td>
               </tr>
             ) : (
@@ -484,7 +405,7 @@ const HParamsTable = ({ records, paramKeys, metricKeys, tagKeys }) => {
                     record={record}
                     rowId={rowId}
                     columns={columns}
-                    colorBy={colorBy}
+                    colorBy={activeColorBy}
                     extent={extent}
                     isSelected={selected.has(rowId)}
                     onToggle={toggle}

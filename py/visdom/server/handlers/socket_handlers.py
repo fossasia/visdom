@@ -77,8 +77,24 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
             self.eid = "main"
             register_list[self.sid] = self
 
-    def broadcast_layouts(self):
-        raise ValueError("Should be replaced in child class")
+    def broadcast_layouts(self, target_subs=None):
+        """Push the saved layouts to subscribers.
+
+        Lives on the base class because ``save_layouts`` is handled here, for
+        every kind of socket: a source connection sending it used to reach an
+        override that only subscriber sockets had, and raise ``ValueError`` out
+        of the message loop. Layouts are a view concern either way, so the
+        recipients are always the subscribers.
+        """
+        if target_subs is None:
+            target_subs = self.subs.values()
+        for sub in target_subs:
+            sub.write_message(
+                json.dumps(
+                    {"command": "layout_update", "data": self.app.layouts},
+                    cls=NanSafeEncoder,
+                )
+            )
 
     def on_message(self, message):
         logging.info(f"from visdom client: {message}")
@@ -94,13 +110,14 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 eid = escape_eid(msg["eid"])
                 if eid not in self.state:
                     return
+                # One pop, under the escaped id. Popping a second time under the
+                # raw id used to blank out p_data before the event was built, so
+                # sources always saw pane_data: None -- and when the raw id was
+                # not itself a key in state, the lookup returned None and the
+                # close was never announced at all.
                 p_data = self.state[eid]["jsons"].pop(msg["data"], None)
                 if p_data is not None:
                     push_deleted(self.storage, eid, msg["data"], p_data)
-                env = self.state.get(msg["eid"])
-                if env is None:
-                    return
-                p_data = env["jsons"].pop(msg["data"], None)
                 event = {
                     "event_type": "close",
                     "target": msg["data"],
@@ -258,9 +275,13 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
 
             if p.get("type") == "plot_history":
                 content_list = p.get("content")
+                # The range check has to come after a type check: a string or
+                # list frame from a client otherwise raises TypeError out of the
+                # message loop. bool is excluded because True would index as 1.
                 if (
                     not isinstance(content_list, list)
-                    or frame is None
+                    or not isinstance(frame, int)
+                    or isinstance(frame, bool)
                     or not (0 <= frame < len(content_list))
                 ):
                     logging.warning(
@@ -517,6 +538,10 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
 
             p["version"] = p.get("version", 1) + 1
             patch.append({"op": "replace", "path": "/version", "value": p["version"]})
+            p["contentID"] = get_rand_id()
+            patch.append(
+                {"op": "replace", "path": "/contentID", "value": p["contentID"]}
+            )
 
             broadcast_packet = {
                 "command": "window_update",
@@ -568,9 +593,19 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 )
                 return
             p = env["jsons"][win]
+            old_content = p.get("old_content")
+            if not old_content:
+                # Nothing left to drill back to. Popping regardless raised
+                # IndexError (or KeyError, for a pane that never had a history)
+                # straight out of the socket's message callback.
+                logging.warning(
+                    f"pop_embeddings_pane: pane {win!r} in env {eid!r} has no"
+                    f" previous content, dropping event"
+                )
+                return
             p["content"]["selected"] = None
-            p["content"]["data"] = p["old_content"].pop()
-            if len(p["old_content"]) == 0:
+            p["content"]["data"] = old_content.pop()
+            if len(old_content) == 0:
                 p["content"]["has_previous"] = False
             p["contentID"] = get_rand_id()
             # Attach eid so the frontend can filter stale messages after env switch.
@@ -706,17 +741,6 @@ class SocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
         self.broadcast_layouts([self])
         broadcast_envs(self, [self])
 
-    def broadcast_layouts(self, target_subs=None):
-        if target_subs is None:
-            target_subs = self.subs.values()
-        for sub in target_subs:
-            sub.write_message(
-                json.dumps(
-                    {"command": "layout_update", "data": self.app.layouts},
-                    cls=NanSafeEncoder,
-                )
-            )
-
     def initialize(self, app):
         super().initialize(app)
         self.broadcast_layouts()
@@ -788,6 +812,11 @@ def WrapSocketWrapper(BaseWrapper):
 
             if BaseWrapper == VisSocketWrapper and sid is None:
                 new_sub = VisSocketWrapper()
+                # open() logs the peer it is mocking a socket for, so the
+                # wrapper needs a request the same way the subscriber path
+                # below gives it one. Without it every polling client raised
+                # AttributeError here and never got a sid back.
+                new_sub.request = self.request
                 new_sub.initialize(self.app)
                 self.write(json.dumps({"success": True, "sid": new_sub.sid}))
                 return

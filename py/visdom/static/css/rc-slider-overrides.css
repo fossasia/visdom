@@ -1,0 +1,44 @@
+/*
+ * Recolours rc-slider's default blue to the Visdom accent so the range filters
+ * in the hyper-parameter pane match the rest of the chrome. Declarations are
+ * marked important for the same reason as the rc-tree-select overrides: the
+ * library ships its stylesheet through the bundle, which loads after this file.
+ */
+
+.hparams-filter-range .rc-slider {
+  height: 14px;
+  padding: 5px 0;
+  margin: 0 6px;
+}
+
+.hparams-filter-range .rc-slider-rail {
+  height: 3px;
+  background-color: #e4e4e4 !important;
+}
+
+.hparams-filter-range .rc-slider-track {
+  height: 3px;
+  background-color: #3b5998 !important;
+}
+
+.hparams-filter-range .rc-slider-handle {
+  width: 12px;
+  height: 12px;
+  margin-top: -5px;
+  opacity: 1;
+  border: 2px solid #3b5998 !important;
+  background-color: #fff !important;
+  box-shadow: none !important;
+}
+
+.hparams-filter-range .rc-slider-handle:hover,
+.hparams-filter-range .rc-slider-handle-dragging {
+  border-color: #2c4479 !important;
+  box-shadow: 0 0 0 3px rgba(59, 89, 152, 0.18) !important;
+}
+
+.hparams-filter-range .rc-slider-handle:focus-visible {
+  outline: 2px solid #3b5998;
+  outline-offset: 2px;
+  box-shadow: none !important;
+}

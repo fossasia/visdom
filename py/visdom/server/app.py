@@ -48,6 +48,7 @@ from visdom.server.handlers.web_handlers import (
     IndexHandler,
     PostHandler,
     SaveHandler,
+    TagsHandler,
     UpdateHandler,
     UploadEnvHandler,
     UserSettingsHandler,
@@ -118,7 +119,14 @@ class Application(tornado.web.Application):
                 tornado_settings["cookie_secret"] = fn.read()
 
         tornado_settings["static_url_prefix"] = self.base_url + "/static/"
-        tornado_settings["debug"] = True
+        # A traceback and the raw request are debugging aids, not something to
+        # hand to whoever provoked the error. `debug` was forced on for every
+        # server, which put both on the 500 page -- and, being tornado's debug
+        # flag, also turned on autoreload. Follow the operator's logging level
+        # instead, and keep the two concerns separate.
+        tornado_settings["show_error_details"] = logging.getLogger().isEnabledFor(
+            logging.DEBUG
+        )
         experiments_url = "%s/experiments" % self.base_url
         handlers = [
             (r"%s/events" % self.base_url, PostHandler, {"app": self}),
@@ -143,6 +151,7 @@ class Application(tornado.web.Application):
             (r"%s/compare" % experiments_url, ExperimentCompareHandler, {"app": self}),
             (r"%s/suggest" % experiments_url, ExperimentSuggestHandler, {"app": self}),
             (r"%s/hparams" % experiments_url, ExperimentHparamsHandler, {"app": self}),
+            (r"%s/tags" % experiments_url, TagsHandler, {"app": self}),
             (r"%s/user/(.*)" % self.base_url, UserSettingsHandler, {"app": self}),
             (r"%s/health" % self.base_url, HealthHandler),
             (r"%s(.*)" % self.base_url, IndexHandler, {"app": self}),
