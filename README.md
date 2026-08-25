@@ -356,6 +356,8 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 - [`vis.win_exists`](#viswin_exists) : check if a window already exists by id
 - [`vis.get_env_list`](#visget_env_list) : get a list of all of the environments on your server
 - [`vis.get_window_data`](#visget_window_data): get current data for a window
+- [`vis.set_tags`](#visset_tags): replace or append environment tags
+- [`vis.get_tags`](#visget_tags): read environment tags
 - [`vis.save_plotly_figure`](#visplotlyplot): save a Plotly figure to an image file from code (no browser click)
 - [`vis.check_connection`](#vischeck_connection): check if the server is connected
 - [`vis.replay_log`](#visreplay_log): replay the actions from the provided log file
@@ -1280,6 +1282,35 @@ This function returns the window data for the given window. Returns data for all
 Arguments:
 - `env`: Environment to search for the window in.
 - `win`: Window to return data for. Set to `None` to retrieve all the windows in an environment.
+
+#### vis.set_tags
+
+This function replaces an environment's key/value tags. Pass `append=True` to
+keep its existing tags and add or update the supplied keys instead. `env`
+defaults to the client's current environment. An empty mapping clears all tags
+in replace mode.
+
+```python
+vis.set_tags({"dataset": "cifar10", "stage": "training"})
+vis.set_tags({"stable": ""}, append=True)
+```
+
+Arguments:
+- `tags`: mapping of string tag names to string values (maximum 20 names, 50 characters each)
+- `env`: target environment; defaults to the client's current environment
+- `append`: append/update instead of replace; defaults to `False`
+
+The complete stored tag mapping is returned.
+
+#### vis.get_tags
+
+This function returns an environment's key/value tag mapping. `env` defaults to
+the client's current environment; an environment without tags returns `{}`.
+
+```python
+tags = vis.get_tags()
+# {"dataset": "cifar10", "stage": "training", "stable": ""}
+```
 
 #### vis.check_connection
 

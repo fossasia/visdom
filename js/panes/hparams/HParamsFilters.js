@@ -8,27 +8,22 @@
  */
 
 import Slider from 'rc-slider';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 import { COLUMN_GROUPS, formatValue, keepsMissing } from './hparamsUtils';
 
-/*
- * Every control edits one field of its filter and leaves the rest alone, so
- * they all build the next entry the same way: the current one where it exists,
- * the spec's full range or an empty tick list where it does not.
- */
 const entryFor = (spec, entry) =>
   entry ||
   (spec.kind === 'range'
     ? { lo: spec.min, hi: spec.max, includeMissing: true }
     : { values: [], includeMissing: true });
 
-/*
- * A range control that tracks the drag locally and lifts the value only once
- * the handle is released. Every commit re-filters the records feeding the
- * Plotly views, so committing per drag frame would rebuild those plots
- * continuously.
- */
 const RangeFilter = ({ spec, entry, onChange }) => {
   const bounds = [entry ? entry.lo : spec.min, entry ? entry.hi : spec.max];
   const [dragging, setDragging] = useState(null);
@@ -90,7 +85,11 @@ const CategoryFilter = ({ spec, entry, onChange }) => {
   );
 };
 
-const FilterSection = ({ spec, entry, onChange }) => {
+const FilterSection = React.memo(function FilterSection({
+  spec,
+  entry,
+  onChange,
+}) {
   const toggleMissing = () => {
     onChange(spec.id, {
       ...entryFor(spec, entry),
@@ -125,7 +124,7 @@ const FilterSection = ({ spec, entry, onChange }) => {
       </label>
     </div>
   );
-};
+});
 
 const HParamsFilters = ({
   specs,
@@ -165,13 +164,31 @@ const HParamsFilters = ({
     setSearch('');
   }, [setFilters, setSearch]);
 
-  const groups = COLUMN_GROUPS.map((group) => ({
-    ...group,
-    specs: specs.filter((spec) => spec.group === group.key),
-  })).filter((group) => group.specs.length > 0);
+  const groups = useMemo(
+    () =>
+      COLUMN_GROUPS.map((group) => ({
+        ...group,
+        specs: specs.filter((spec) => spec.group === group.key),
+      })).filter((group) => group.specs.length > 0),
+    [specs]
+  );
+
+  const rootRef = useRef(null);
+
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return undefined;
+    const onKeyDown = (e) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      onClose();
+    };
+    el.addEventListener('keydown', onKeyDown);
+    return () => el.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
 
   return (
-    <div className="hparams-filters">
+    <div className="hparams-filters" ref={rootRef}>
       <div className="hparams-filters-head">
         <span className="hparams-filters-title">Filters</span>
         <button
@@ -242,4 +259,4 @@ const HParamsFilters = ({
   );
 };
 
-export default HParamsFilters;
+export default React.memo(HParamsFilters);
