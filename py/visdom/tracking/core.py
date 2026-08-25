@@ -612,7 +612,7 @@ class RunTracker:
                 self._finish_locked(STATUS_UNFINISHED, reason)
         return False
 
-    # persistence 
+    # persistence
 
     def to_dict(
         self,
