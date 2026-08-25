@@ -10,23 +10,21 @@
 import React, { useEffect, useRef } from 'react';
 
 import HParamsAxisToolbar from './HParamsAxisToolbar';
-import HParamsMessage from './HParamsMessage';
 import {
+  coincidentRuns,
+  formatValue,
+  HParamsMessage,
   PLOT_COLORSCALE,
   plotAxisStyle,
   plotBaseLayout,
   plotColorbar,
   plotRevision,
   renderPlot,
-  usePlotResize,
-} from './hparamsPlot';
-import {
-  coincidentRuns,
-  formatValue,
   resolveColor,
   toNumericColumn,
+  useHParamsAxes,
+  usePlotResize,
 } from './hparamsUtils';
-import useHParamsAxes from './useHParamsAxes';
 
 const MAX_DIMS = 6;
 
@@ -42,41 +40,43 @@ function axisDimIndex(axis) {
   return Number.isNaN(n) ? 0 : n - 1;
 }
 
-function escapeHtml(text) {
-  return String(text)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+function tipDiv(cls, text) {
+  const el = document.createElement('div');
+  el.className = cls;
+  el.textContent = text;
+  return el;
 }
 
-function tipHtml(names, colX, colY, x, y) {
-  const head =
-    names.length > 1 ? names.length + ' runs here' : escapeHtml(names[0]);
-  const list =
-    names.length > 1
-      ? '<ul class="hparams-splom-tip-list">' +
-        names.map((n) => '<li>' + escapeHtml(n) + '</li>').join('') +
-        '</ul>'
-      : '';
-  const coord =
-    colX.id === colY.id
-      ? escapeHtml(colX.label) + ': ' + escapeHtml(formatValue(x))
-      : escapeHtml(colX.label) +
-        ': ' +
-        escapeHtml(formatValue(x)) +
-        '<br>' +
-        escapeHtml(colY.label) +
-        ': ' +
-        escapeHtml(formatValue(y));
-  return (
-    '<div class="hparams-splom-tip-head">' +
-    head +
-    '</div>' +
-    list +
-    '<div class="hparams-splom-tip-coord">' +
-    coord +
-    '</div>'
+function coordText(col, value) {
+  return col.label + ': ' + formatValue(value);
+}
+
+function renderTip(tip, names, colX, colY, x, y) {
+  tip.textContent = '';
+  tip.appendChild(
+    tipDiv(
+      'hparams-splom-tip-head',
+      names.length > 1 ? names.length + ' runs here' : names[0]
+    )
   );
+  if (names.length > 1) {
+    const list = document.createElement('ul');
+    list.className = 'hparams-splom-tip-list';
+    names.forEach((n) => {
+      const item = document.createElement('li');
+      item.textContent = n;
+      list.appendChild(item);
+    });
+    tip.appendChild(list);
+  }
+  const coord = document.createElement('div');
+  coord.className = 'hparams-splom-tip-coord';
+  coord.textContent = coordText(colX, x);
+  if (colX.id !== colY.id) {
+    coord.appendChild(document.createElement('br'));
+    coord.appendChild(document.createTextNode(coordText(colY, y)));
+  }
+  tip.appendChild(coord);
 }
 
 const HParamsSplom = ({
@@ -196,7 +196,7 @@ const HParamsSplom = ({
       const names = coincidentRuns(records, colX, colY, p.x, p.y);
       if (names.length === 0) return;
 
-      tip.innerHTML = tipHtml(names, colX, colY, p.x, p.y);
+      renderTip(tip, names, colX, colY, p.x, p.y);
       tip.style.display = 'block';
       const rect = wrap.getBoundingClientRect();
       const me = ev.event;

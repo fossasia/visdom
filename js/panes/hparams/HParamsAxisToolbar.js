@@ -9,7 +9,7 @@
 
 import React from 'react';
 
-import { ColumnMultiSelect, ColumnSelect } from './ColumnSelect';
+import { ColumnMultiSelect, ColumnSelect } from './hparamsUtils';
 
 const HParamsAxisToolbar = ({
   axesLabel,

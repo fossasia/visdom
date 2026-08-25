@@ -166,7 +166,7 @@ class ExperimentStore:
         A live env is still preferred, but only when it is *already* resident:
         an env the server is holding may carry changes the file has not seen, so
         it wins; an env that has never been materialised cannot, so the store is
-        asked instead. ``LazyEnvData`` reports this through ``is_loaded()``;
+        asked instead. ``LazyEnvData`` reports this through ``is_loaded``;
         anything else (a plain dict) is resident by definition.
 
         As in :meth:`_read`, the experiment answers to the env it was read from
@@ -174,9 +174,8 @@ class ExperimentStore:
         report its parent's id.
         """
         env = self.env_provider(env_id) if self.env_provider is not None else None
-        if env is not None and getattr(env, "is_loaded", None) is not None:
-            if not env.is_loaded():
-                env = None
+        if env is not None and not getattr(env, "is_loaded", True):
+            env = None
         if env is not None:
             blob = env.get(METADATA_KEY)
         else:
@@ -247,19 +246,32 @@ class ExperimentStore:
         experiment.add_metric(key, value, step)
         return self._write(env_id, env, experiment)
 
-    def update_tags(self, env_id, tags, append=False):
+    def update_tags(self, env_id, tags, append=False, env_data=None):
         """Replace or append organizational tags for ``env_id``.
 
         ``tags`` is the model's ``{key: value}`` representation.  Unlike run
         logging, tag management is allowed after an experiment reaches a
         terminal state: tags organize completed runs and do not alter their
         parameters, metrics, result status, or completion timestamp.
+
+        ``env_data`` may provide the server's current in-memory environment.
+        Using it avoids flushing that environment before validation merely so
+        this store can read it back. Invalid requests therefore perform no
+        writes, while valid requests persist the complete current environment
+        exactly once.
         """
         if not isinstance(append, bool):
             raise TypeError("append must be a boolean")
         tags = normalize_tags(tags)
 
-        env, experiment = self._read(env_id)
+        if env_data is None:
+            env, experiment = self._read(env_id)
+        else:
+            env = env_data
+            blob = env.get(METADATA_KEY)
+            experiment = Experiment.from_dict(blob) if isinstance(blob, dict) else None
+            if experiment is not None:
+                experiment.env_id = env_id
         if experiment is None:
             experiment = Experiment(env_id=env_id, name=env_id)
         if append:

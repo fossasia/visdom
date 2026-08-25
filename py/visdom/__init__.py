@@ -35,6 +35,7 @@ import logging
 import warnings
 import time
 import errno
+from collections.abc import Mapping
 from io import BytesIO, StringIO
 from functools import wraps
 import html
@@ -1284,6 +1285,42 @@ class Visdom(object):
         Returns the stored experiment as a dict.
         """
         return self._experiment_send({"action": "finish", "status": status}, env)
+
+    def set_tags(self, tags, env=None, append=False):
+        """Replace or append key/value tags for an environment.
+
+        ``tags`` is a mapping of string names to string values, for example
+        ``{"dataset": "cifar10", "stable": ""}``. ``env`` defaults to this
+        client's environment. Passing an empty mapping in replace mode clears
+        the environment's tags. Returns the complete stored tag mapping.
+        """
+        if not isinstance(tags, Mapping):
+            raise TypeError("tags must be a mapping of {name: value}")
+        if not all(isstr(name) and isstr(value) for name, value in tags.items()):
+            raise TypeError("tag names and values must be strings")
+        if not isinstance(append, bool):
+            raise TypeError("append must be a boolean")
+
+        return self._experiment_request(
+            {
+                "action": "set",
+                "eid": env if env is not None else self.env,
+                "tags": dict(tags),
+                "append": append,
+            },
+            "experiments/tags",
+        )
+
+    def get_tags(self, env=None):
+        """Return an environment's key/value tags.
+
+        ``env`` defaults to this client's environment. An environment without
+        tags returns an empty mapping.
+        """
+        return self._experiment_request(
+            {"action": "get", "eid": env if env is not None else self.env},
+            "experiments/tags",
+        )
 
     def search_experiments(
         self, query=None, limit=100, offset=0, sort_by=None, descending=True
@@ -3610,7 +3647,11 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
-        minx, maxx = np.nanmin(X), np.nanmax(X)
+        finite = X[np.isfinite(X)]
+        if finite.size > 0:
+            minx, maxx = float(finite.min()), float(finite.max())
+        else:
+            minx, maxx = 0.0, 1.0
         bins = np.histogram(X, bins=opts["numbins"], range=(minx, maxx))[0]
         linrange = np.linspace(minx, maxx, opts["numbins"])
 
