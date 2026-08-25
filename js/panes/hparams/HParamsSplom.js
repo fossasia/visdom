@@ -11,32 +11,27 @@ import React, { useEffect, useRef } from 'react';
 
 import HParamsAxisToolbar from './HParamsAxisToolbar';
 import {
-  PLOT_COLORSCALE,
-  plotBaseLayout,
-  plotColorbar,
-  renderPlot,
-  usePlotResize,
-} from './hparamsPlot';
-import {
   coincidentRuns,
   formatValue,
+  HParamsMessage,
+  PLOT_COLORSCALE,
+  plotAxisStyle,
+  plotBaseLayout,
+  plotColorbar,
+  plotRevision,
+  renderPlot,
   resolveColor,
   toNumericColumn,
+  useHParamsAxes,
+  usePlotResize,
 } from './hparamsUtils';
-import useHParamsAxes from './useHParamsAxes';
 
 const MAX_DIMS = 6;
 
 const AXIS_STYLE = {
-  showline: true,
-  linecolor: '#aab8d8',
-  linewidth: 1,
+  ...plotAxisStyle(),
   mirror: 'all',
-  gridcolor: '#f0f2f8',
-  zeroline: false,
-  ticklen: 3,
   tickfont: { size: 9, color: '#666' },
-  automargin: true,
 };
 
 function axisDimIndex(axis) {
@@ -45,41 +40,43 @@ function axisDimIndex(axis) {
   return Number.isNaN(n) ? 0 : n - 1;
 }
 
-function escapeHtml(text) {
-  return String(text)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+function tipDiv(cls, text) {
+  const el = document.createElement('div');
+  el.className = cls;
+  el.textContent = text;
+  return el;
 }
 
-function tipHtml(names, colX, colY, x, y) {
-  const head =
-    names.length > 1 ? names.length + ' runs here' : escapeHtml(names[0]);
-  const list =
-    names.length > 1
-      ? '<ul class="hparams-splom-tip-list">' +
-        names.map((n) => '<li>' + escapeHtml(n) + '</li>').join('') +
-        '</ul>'
-      : '';
-  const coord =
-    colX.id === colY.id
-      ? escapeHtml(colX.label) + ': ' + formatValue(x)
-      : escapeHtml(colX.label) +
-        ': ' +
-        formatValue(x) +
-        '<br>' +
-        escapeHtml(colY.label) +
-        ': ' +
-        formatValue(y);
-  return (
-    '<div class="hparams-splom-tip-head">' +
-    head +
-    '</div>' +
-    list +
-    '<div class="hparams-splom-tip-coord">' +
-    coord +
-    '</div>'
+function coordText(col, value) {
+  return col.label + ': ' + formatValue(value);
+}
+
+function renderTip(tip, names, colX, colY, x, y) {
+  tip.textContent = '';
+  tip.appendChild(
+    tipDiv(
+      'hparams-splom-tip-head',
+      names.length > 1 ? names.length + ' runs here' : names[0]
+    )
   );
+  if (names.length > 1) {
+    const list = document.createElement('ul');
+    list.className = 'hparams-splom-tip-list';
+    names.forEach((n) => {
+      const item = document.createElement('li');
+      item.textContent = n;
+      list.appendChild(item);
+    });
+    tip.appendChild(list);
+  }
+  const coord = document.createElement('div');
+  coord.className = 'hparams-splom-tip-coord';
+  coord.textContent = coordText(colX, x);
+  if (colX.id !== colY.id) {
+    coord.appendChild(document.createElement('br'));
+    coord.appendChild(document.createTextNode(coordText(colY, y)));
+  }
+  tip.appendChild(coord);
 }
 
 const HParamsSplom = ({
@@ -168,12 +165,11 @@ const HParamsSplom = ({
       dragmode: 'select',
       hovermode: 'closest',
       showlegend: false,
-      datarevision:
-        effectiveDims.join('|') +
-        '::' +
-        (effectiveColorBy || 'order') +
-        '::' +
-        records.length,
+      datarevision: plotRevision(
+        effectiveDims.join('|'),
+        effectiveColorBy || 'order',
+        records.length
+      ),
     };
     for (let i = 1; i <= dimensions.length; i++) {
       const suffix = i === 1 ? '' : String(i);
@@ -200,7 +196,7 @@ const HParamsSplom = ({
       const names = coincidentRuns(records, colX, colY, p.x, p.y);
       if (names.length === 0) return;
 
-      tip.innerHTML = tipHtml(names, colX, colY, p.x, p.y);
+      renderTip(tip, names, colX, colY, p.x, p.y);
       tip.style.display = 'block';
       const rect = wrap.getBoundingClientRect();
       const me = ev.event;
@@ -238,11 +234,9 @@ const HParamsSplom = ({
 
   if (!hasPlot) {
     return (
-      <div className="hparams-splom-wrap">
-        <div className="hparams-message hparams-empty">
-          A scatter matrix needs at least two numeric params or metrics.
-        </div>
-      </div>
+      <HParamsMessage wrapClass="hparams-splom-wrap">
+        A scatter matrix needs at least two numeric params or metrics.
+      </HParamsMessage>
     );
   }
 
