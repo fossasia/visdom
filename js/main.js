@@ -154,6 +154,7 @@ const App = () => {
     sendEnvQuery,
     sendEnvSave,
     sendLayoutsSave,
+    sendTagsUpdate,
     sendPaneClose,
     sendUndo,
     sendPaneLayoutUpdate,
@@ -437,14 +438,14 @@ const App = () => {
     setStoreMeta((prev) => {
       const layoutLists = new Map(prev.layoutLists);
       const tagsByEnv = {};
-      for (var envIdx in data) {
-        if (!layoutLists.has(data[envIdx])) {
-          layoutLists.set(data[envIdx], new Map([[DEFAULT_LAYOUT, new Map()]]));
+      data.forEach((env) => {
+        if (!layoutLists.has(env)) {
+          layoutLists.set(env, new Map([[DEFAULT_LAYOUT, new Map()]]));
         }
-        if (prev.tagsByEnv[data[envIdx]]) {
-          tagsByEnv[data[envIdx]] = prev.tagsByEnv[data[envIdx]];
+        if (prev.tagsByEnv[env]) {
+          tagsByEnv[env] = prev.tagsByEnv[env];
         }
-      }
+      });
       return {
         ...prev,
         envList: data,
@@ -454,14 +455,26 @@ const App = () => {
     });
   };
 
-  const onTagsUpdate = ({ eid, tags }) => {
+  const onTagsSync = (tagsByEnv) => {
     setStoreMeta((prev) => ({
       ...prev,
-      tagsByEnv: {
-        ...prev.tagsByEnv,
-        [eid]: tags,
-      },
+      tagsByEnv: tagsByEnv && typeof tagsByEnv === 'object' ? tagsByEnv : {},
     }));
+  };
+
+  const onTagsUpdate = ({ eid, tags }) => {
+    if (!eid || !tags || typeof tags !== 'object') {
+      return;
+    }
+    setStoreMeta((prev) => {
+      const nextTagsByEnv = { ...prev.tagsByEnv };
+      if (Object.keys(tags).length === 0) {
+        delete nextTagsByEnv[eid];
+      } else {
+        nextTagsByEnv[eid] = tags;
+      }
+      return { ...prev, tagsByEnv: nextTagsByEnv };
+    });
   };
 
   // remove paneID from pane list
@@ -545,11 +558,14 @@ const App = () => {
     setStoreMeta((prev) => {
       const layoutLists = new Map(prev.layoutLists);
       layoutLists.delete(env2delete);
+      const tagsByEnv = { ...prev.tagsByEnv };
+      delete tagsByEnv[env2delete];
       let EnvIds = prev.envList.filter((env) => env !== env2delete);
       return {
         ...prev,
         envList: EnvIds,
         layoutLists: layoutLists,
+        tagsByEnv: tagsByEnv,
       };
     });
 
@@ -565,6 +581,12 @@ const App = () => {
     });
 
     sendEnvDelete(env2delete, previousEnv);
+  };
+
+  const onTagsSave = (env, tags) => {
+    return sendTagsUpdate(env, tags).done((savedTags) => {
+      onTagsUpdate({ eid: env, tags: savedTags });
+    });
   };
 
   const onEnvSave = (env) => {
@@ -1090,6 +1112,8 @@ const App = () => {
       envList={storeMeta.envList}
       onEnvDelete={onEnvDelete}
       onEnvSave={onEnvSave}
+      onTagsSave={onTagsSave}
+      tags={storeMeta.tagsByEnv}
       onModalClose={() => setShowEnvModal(false)}
       show={showEnvModal}
     />,
@@ -1108,6 +1132,7 @@ const App = () => {
     <EnvControls
       envIDs={selection.envIDs}
       envList={storeMeta.envList}
+      tags={storeMeta.tagsByEnv}
       envSelectorStyle={{
         width: Math.max(window.innerWidth / 3, 50),
         wordBreak: 'break-all',
@@ -1178,6 +1203,7 @@ const App = () => {
     onReloadMessage,
     onEnvUpdate,
     onTagsUpdate,
+    onTagsSync,
     onCloseMessage,
     onUndoState,
     onDisconnect,

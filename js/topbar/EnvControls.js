@@ -13,12 +13,20 @@ import React, { useContext, useState } from 'react';
 
 import ApiContext from '../api/ApiContext';
 
+const formatEnvironmentLabel = (env, tags) => {
+  const tagLabels = Object.entries(tags || {}).map(([name, value]) =>
+    value === '' ? name : `${name}=${value}`
+  );
+  return tagLabels.length > 0 ? `${env} [${tagLabels.join(', ')}]` : env;
+};
+
 function EnvControls(props) {
   const { connected, sessionInfo, sendSaveAll } = useContext(ApiContext);
   const readonly = sessionInfo.readonly;
   const {
     envList,
     envIDs,
+    tags = {},
     envSelectorStyle,
     onEnvSelect,
     onEnvClear,
@@ -54,6 +62,7 @@ function EnvControls(props) {
         key: '__group__' + prefix,
         pId: 0,
         label: prefix,
+        title: prefix,
         value: '__group__' + prefix,
       });
     });
@@ -69,10 +78,12 @@ function EnvControls(props) {
       parentKey = parentKeys[env];
     }
 
+    const label = formatEnvironmentLabel(env, tags[env]);
     env_options2.push({
       key: env,
       pId: parentKey,
-      label: env,
+      label: label,
+      title: label,
       value: env,
     });
   });
@@ -116,10 +127,10 @@ function EnvControls(props) {
             placeholder={<i>Select environment(s)</i>}
             treeLine
             maxTagTextLength={1000}
-            inputValue={null}
             value={validEnvIDs}
             treeData={env_options2}
             treeNodeFilterProp="label"
+            treeNodeLabelProp="value"
             treeDataSimpleMode={{ id: 'key', rootPId: 0 }}
             treeCheckable
             showCheckedStrategy={SHOW_CHILD}
