@@ -105,10 +105,13 @@ NON_GRAPH_METHODS = frozenset(
         "compare_experiments",
         "experiment",
         "finish_experiment",
+        "get_tags",
         "hparams",
         "log_metrics",
         "search_experiments",
+        "set_tags",
         "suggest_experiment",
+        "update_hparams",
     }
 )
 
