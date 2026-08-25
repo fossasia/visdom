@@ -417,14 +417,14 @@ class TestReviewRegressions(unittest.TestCase):
 
         events_after_failure = [json.loads(l) for l in open(run.events_path)]
         self.assertEqual([e["type"] for e in events_after_failure], ["created"])
-        self.assertEqual(run.event_count, 1)  # not 2 -- the attempt didn't count
+        self.assertEqual(run.event_count, 1)
 
         run.finish()
 
         events_after_retry = [json.loads(l) for l in open(run.events_path)]
         self.assertEqual(
             [e["type"] for e in events_after_retry], ["created", "status_change"]
-        )  # exactly one status_change, not two
+        )
 
     def test_failed_init_write_leaves_no_orphaned_jsonl_file(self):
         """Companion for __init__ specifically: if the very first metadata
@@ -511,6 +511,13 @@ class TestSlugify(unittest.TestCase):
 
 
 class TestJsonSafe(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.out_dir = self._tmp.name
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
     def test_primitives_pass_through_unchanged(self):
         from visdom.tracking.core import _json_safe
 
@@ -551,6 +558,104 @@ class TestJsonSafe(unittest.TestCase):
             cursor = cursor["next"]
         result = _json_safe(nested)  # must return, not raise/hang
         self.assertIsInstance(result, dict)
+
+    def test_numpy_scalar_types_convert_to_native_python_numbers(self):
+        """Previously: only np.float64 (which happens to subclass Python
+        float) passed through unchanged. np.float32/np.int32/np.int64/
+        np.bool_ don't subclass float/int/bool, so they fell through to
+        the str() fallback -- silently turning e.g. a logged loss value
+        into the *string* "0.4523" instead of the number 0.4523. float32
+        specifically is the default dtype for most ML training, so this
+        affected extremely common usage, not an edge case."""
+        import numpy as np
+        from visdom.tracking.core import _json_safe
+
+        self.assertEqual(_json_safe(np.int64(42)), 42)
+        self.assertIsInstance(_json_safe(np.int64(42)), int)
+        self.assertEqual(_json_safe(np.int32(42)), 42)
+        self.assertIsInstance(_json_safe(np.int32(42)), int)
+        self.assertIsInstance(_json_safe(np.bool_(True)), bool)
+        self.assertEqual(_json_safe(np.bool_(True)), True)
+        # float32 loses precision on the way to float64 (inherent to
+        # float32, not something JSON conversion can avoid) -- check
+        # approximate equality and, importantly, the *type*, not exact
+        # string form.
+        result = _json_safe(np.float32(0.4523))
+        self.assertIsInstance(result, float)
+        self.assertAlmostEqual(result, 0.4523, places=4)
+        self.assertEqual(_json_safe(np.float64(0.01)), 0.01)
+        self.assertIsInstance(_json_safe(np.float64(0.01)), float)
+
+    def test_numpy_arrays_convert_to_full_nested_lists(self):
+        """Previously: numpy arrays fell through to str(array), which (a)
+        truncates large arrays with "..." and (b) isn't valid JSON or even
+        reparseable Python -- "[1 2 3]" has no commas. .tolist() instead
+        preserves every element as real JSON numbers."""
+        import numpy as np
+        from visdom.tracking.core import _json_safe
+
+        self.assertEqual(_json_safe(np.array([1, 2, 3])), [1, 2, 3])
+        self.assertEqual(_json_safe(np.array([[1, 2], [3, 4]])), [[1, 2], [3, 4]])
+        big = np.arange(2000)
+        result = _json_safe(big)
+        self.assertEqual(len(result), 2000)  # not truncated with "..."
+        self.assertEqual(result[0], 0)
+        self.assertEqual(result[-1], 1999)
+
+    def test_nan_and_infinity_convert_to_safe_json_strings(self):
+        """NaN/Infinity/-Infinity aren't valid JSON (RFC 8259) -- Python's
+        json module writes them anyway by default as bare tokens, which
+        breaks any stricter parser (e.g. JavaScript's JSON.parse). Also a
+        very real case for this tool: "loss became NaN" is one of the
+        most common training failure modes there is."""
+        from visdom.tracking.core import _json_safe
+
+        self.assertEqual(_json_safe(float("nan")), "NaN")
+        self.assertEqual(_json_safe(float("inf")), "Infinity")
+        self.assertEqual(_json_safe(float("-inf")), "-Infinity")
+
+        import numpy as np
+
+        self.assertEqual(_json_safe(np.nan), "NaN")
+        self.assertEqual(_json_safe(np.float32("inf")), "Infinity")
+        # NaN/Infinity nested inside an array must be caught too, not just
+        # at the top level.
+        arr = np.array([1.0, np.nan, np.inf, -np.inf])
+        self.assertEqual(_json_safe(arr), [1.0, "NaN", "Infinity", "-Infinity"])
+
+    def test_run_tracker_output_json_has_no_raw_nan_infinity_tokens(self):
+        """End-to-end: a run that logs NaN/Infinity values must produce a
+        file that's valid, standard JSON -- no bare NaN/Infinity/-Infinity
+        tokens anywhere in the bytes on disk."""
+        import numpy as np
+
+        run = RunTracker("exp", out_dir=self.out_dir)
+        run.log_event(
+            "exploded",
+            loss=float("nan"),
+            grad_norm=float("inf"),
+            val=float("-inf"),
+            np_loss=np.float32("nan"),
+        )
+        run.finish()
+
+        raw = open(run.path).read()
+        self.assertNotIn("NaN,", raw)
+        self.assertNotIn(": Infinity", raw)
+        self.assertNotIn(": -Infinity", raw)
+        json.loads(raw)  # must parse cleanly with strict defaults
+
+    def test_write_defense_in_depth_rejects_a_raw_nan_that_bypassed_json_safe(self):
+        """Belt-and-braces check on _write() itself (allow_nan=False):
+        even if some future field forgets to route a value through
+        _json_safe, a raw NaN reaching the JSON writer must raise loudly
+        (ValueError) rather than silently produce an invalid file."""
+        run = RunTracker("exp", out_dir=self.out_dir)
+        payload = run.to_dict()
+        payload["__test_injected_nan"] = float("nan")
+        with self.assertRaises(ValueError):
+            run._write(payload)
+        run.finish()
 
 
 if __name__ == "__main__":

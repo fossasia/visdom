@@ -43,7 +43,6 @@ STATUS_FINISHED = "finished"
 STATUS_FAILED = "failed"
 STATUS_UNFINISHED = "unfinished"
 
-# Terminal states: once set, a run's record is frozen.
 _TERMINAL_STATUSES = (STATUS_FINISHED, STATUS_FAILED, STATUS_UNFINISHED)
 
 DEFAULT_OUT_DIR = "visdom_runs"
@@ -299,7 +298,7 @@ class RunTracker:
         self._last_event_monotonic = self._start_monotonic
 
         # Per-window bookkeeping for log_plot_update (see tracking.graphs):
-        # reports "this is the Nth update to window 'loss', arriving
+        # lets us report "this is the Nth update to window 'loss', arriving
         # M seconds after the (N-1)th" without the caller having to track
         # any of that themselves.
         self._window_update_count: dict = {}
@@ -383,7 +382,7 @@ class RunTracker:
         limitation (documented in the module docstring) rather than
         something silently swept under the rug.
         """
-        line = json.dumps(event, default=str) + "\n"
+        line = json.dumps(event, default=str, allow_nan=False) + "\n"
         with open(self.events_path, "a") as f:
             f.write(line)
 
@@ -562,6 +561,11 @@ class RunTracker:
         try:
             self._append_event_line(event)
         finally:
+            # The metadata write above already succeeded and is the
+            # source of truth for `status`, so unregister regardless of
+            # whether this last (best-effort, supplementary) full-history
+            # append succeeds -- a correctly-finished run shouldn't keep
+            # the atexit reference alive just because this line failed.
             try:
                 atexit.unregister(self._atexit_finalize)
             except Exception:
@@ -606,9 +610,9 @@ class RunTracker:
             else:
                 reason = "{0}: {1}".format(exc_type.__name__, _safe_exc_str(exc))
                 self._finish_locked(STATUS_UNFINISHED, reason)
-        return False  # never swallow the exception
+        return False
 
-    # persistence
+    # persistence 
 
     def to_dict(
         self,
