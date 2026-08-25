@@ -29,7 +29,10 @@ from visdom.server.handlers.socket_handlers import (
     VisSocketHandler,
     VisSocketWrap,
 )
-from visdom.server.handlers.experiments_handler import ExperimentHparamsHandler
+from visdom.server.handlers.experiments_handler import (
+    ExperimentHparamsHandler,
+    ExperimentHparamsUpdateHandler,
+)
 from visdom.server.handlers.web_handlers import (
     CloseHandler,
     CompareHandler,
@@ -150,6 +153,11 @@ class Application(tornado.web.Application):
             (r"%s/compare" % experiments_url, ExperimentCompareHandler, {"app": self}),
             (r"%s/suggest" % experiments_url, ExperimentSuggestHandler, {"app": self}),
             (r"%s/hparams" % experiments_url, ExperimentHparamsHandler, {"app": self}),
+            (
+                r"%s/hparams/update" % experiments_url,
+                ExperimentHparamsUpdateHandler,
+                {"app": self},
+            ),
             (r"%s/tags" % experiments_url, TagsHandler, {"app": self}),
             (r"%s/user/(.*)" % self.base_url, UserSettingsHandler, {"app": self}),
             (r"%s/health" % self.base_url, HealthHandler),
