@@ -7,15 +7,10 @@
  *
  */
 
-import TreeSelect from 'rc-tree-select';
 import React from 'react';
 
-/*
- * The axis picker and colour picker both plot views carry. Only the wording
- * differs between them: a scatter matrix talks about dimensions and falls back
- * to no colour, parallel coordinates talks about axes and falls back to run
- * order. `note` is the trailing status each view fills for itself.
- */
+import { ColumnMultiSelect, ColumnSelect } from './hparamsUtils';
+
 const HParamsAxisToolbar = ({
   axesLabel,
   axesName,
@@ -31,37 +26,23 @@ const HParamsAxisToolbar = ({
   <div className="hparams-toolbar">
     <span className="hparams-sortby">
       {axesLabel}:
-      <TreeSelect
-        className="hparams-treeselect hparams-select-wide"
+      <ColumnMultiSelect
         value={dims}
         placeholder="pick axes"
-        treeCheckable
-        multiple
-        showCheckedStrategy="SHOW_CHILD"
-        treeLine
-        treeDefaultExpandAll
-        maxTagCount={3}
-        dropdownMatchSelectWidth={false}
         treeData={treeData}
-        onChange={(value) =>
-          onDims(Array.isArray(value) ? value.slice(0, maxDims) : [])
-        }
-        aria-label={axesName + ' ' + axesLabel}
+        maxCount={maxDims}
+        onChange={onDims}
+        label={axesName + ' ' + axesLabel}
       />
     </span>
     <span className="hparams-colorby">
       color by:
-      <TreeSelect
-        className="hparams-treeselect hparams-select-narrow"
-        value={colorBy || undefined}
+      <ColumnSelect
+        value={colorBy}
         placeholder={colorFallback}
-        allowClear
-        treeLine
-        treeDefaultExpandAll
-        dropdownMatchSelectWidth={false}
         treeData={treeData}
-        onChange={(value) => onColorBy(value || null)}
-        aria-label={'Color ' + axesName + ' by'}
+        onChange={onColorBy}
+        label={'Color ' + axesName + ' by'}
       />
     </span>
     {note ? <span className="hparams-plot-note">{note}</span> : null}
