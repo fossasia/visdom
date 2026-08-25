@@ -160,11 +160,11 @@ const HParamsTable = ({
   selected,
   setSelected,
 }) => {
-  const allRecords = columnRecords || records;
   const columns = useHParamsColumns(paramKeys, metricKeys, tagKeys);
+  const pickerRecords = columnRecords || records;
   const colorCols = useMemo(
-    () => selectNumericColumns(allRecords, columns),
-    [allRecords, columns]
+    () => selectNumericColumns(pickerRecords, columns),
+    [pickerRecords, columns]
   );
 
   const activeSort = useMemo(() => {

@@ -4,21 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { showToast } from '../toasts/toastEvents';
 import ApiContext from './ApiContext';
 import Poller from './Legacy';
-
-// Normalize window.location by removing specific path segments
-// and ensuring the pathname ends with a '/'
-export function serverPath() {
-  var pathname = window.location.pathname;
-  if (pathname.indexOf('/env/') > -1) {
-    pathname = pathname.split('/env/')[0];
-  } else if (pathname.indexOf('/compare/') > -1) {
-    pathname = pathname.split('/compare/')[0];
-  }
-  if (pathname.slice(-1) != '/') {
-    pathname = pathname + '/';
-  }
-  return pathname;
-}
+import serverPath from './serverPath';
 
 const ApiProvider = ({ children }) => {
   const [connected, setConnected] = useState(false);
@@ -180,6 +166,9 @@ const ApiProvider = ({ children }) => {
         break;
       case 'env_update':
         apiHandlers.current.onEnvUpdate(cmd.data);
+        break;
+      case 'tags_update':
+        apiHandlers.current.onTagsUpdate(cmd.data);
         break;
       case 'undo_state':
         apiHandlers.current.onUndoState(cmd);

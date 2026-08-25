@@ -11,22 +11,20 @@ import React, { useEffect, useRef } from 'react';
 
 import HParamsAxisToolbar from './HParamsAxisToolbar';
 import {
+  coincidentRuns,
+  formatValue,
+  HParamsMessage,
   PLOT_COLORSCALE,
   plotAxisStyle,
   plotBaseLayout,
   plotColorbar,
   plotRevision,
   renderPlot,
-  usePlotResize,
-} from './hparamsPlot';
-import {
-  coincidentRuns,
-  formatValue,
-  HParamsMessage,
   resolveColor,
   toNumericColumn,
+  useHParamsAxes,
+  usePlotResize,
 } from './hparamsUtils';
-import useHParamsAxes from './useHParamsAxes';
 
 const MAX_DIMS = 6;
 
@@ -42,32 +40,41 @@ function axisDimIndex(axis) {
   return Number.isNaN(n) ? 0 : n - 1;
 }
 
-function tipNode(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
+function tipDiv(cls, text) {
+  const el = document.createElement('div');
+  el.className = cls;
+  el.textContent = text;
+  return el;
+}
+
+function coordText(col, value) {
+  return col.label + ': ' + formatValue(value);
 }
 
 function renderTip(tip, names, colX, colY, x, y) {
-  while (tip.firstChild) tip.removeChild(tip.firstChild);
+  tip.textContent = '';
   tip.appendChild(
-    tipNode(
-      'div',
+    tipDiv(
       'hparams-splom-tip-head',
       names.length > 1 ? names.length + ' runs here' : names[0]
     )
   );
   if (names.length > 1) {
-    const list = tipNode('ul', 'hparams-splom-tip-list');
-    names.forEach((n) => list.appendChild(tipNode('li', '', n)));
+    const list = document.createElement('ul');
+    list.className = 'hparams-splom-tip-list';
+    names.forEach((n) => {
+      const item = document.createElement('li');
+      item.textContent = n;
+      list.appendChild(item);
+    });
     tip.appendChild(list);
   }
-  const coord = tipNode('div', 'hparams-splom-tip-coord');
-  coord.appendChild(tipNode('span', '', colX.label + ': ' + formatValue(x)));
+  const coord = document.createElement('div');
+  coord.className = 'hparams-splom-tip-coord';
+  coord.textContent = coordText(colX, x);
   if (colX.id !== colY.id) {
     coord.appendChild(document.createElement('br'));
-    coord.appendChild(tipNode('span', '', colY.label + ': ' + formatValue(y)));
+    coord.appendChild(document.createTextNode(coordText(colY, y)));
   }
   tip.appendChild(coord);
 }

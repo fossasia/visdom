@@ -111,6 +111,11 @@ class LazyEnvData(Mapping):
         self._eid = eid
         self._raw_dict = None
 
+    @property
+    def is_loaded(self):
+        """Whether this environment has been materialized in memory."""
+        return self._raw_dict is not None
+
     def lazy_load_data(self):
         if self._raw_dict is not None:
             return
@@ -344,6 +349,8 @@ def compare_envs(state, eids, socket, store, show_all=False):
 
             destWid = name2Wid[title]
             destWidJson = res["jsons"][destWid]
+            if "content" not in destWidJson:
+                continue  # nothing in the base env to merge into
             base_ptype = destWidJson.get("type", None)
             if base_ptype == "image_compare":
                 base_ptype = "image"
@@ -379,9 +386,10 @@ def compare_envs(state, eids, socket, store, show_all=False):
                     )
                     destWidJson["content"].append(next_img)
             elif ptype == "plot":
+                base_data = destWidJson["content"].get("data") or []
+                if not base_data or "name" not in base_data[0]:
+                    continue  # Skip windows with unnamed data
                 if ix == 0:
-                    if "name" not in destWidJson["content"]["data"][0]:
-                        continue  # Skip windows with unnamed data
                     destWidJson["has_compare"] = False
                     destWidJson["content"]["layout"]["showlegend"] = True
                     destWidJson["contentID"] = get_rand_id()
@@ -392,8 +400,6 @@ def compare_envs(state, eids, socket, store, show_all=False):
                             "name"
                         ] = "{}_{}".format(eidNums[eid], data["name"])
                 else:
-                    if "name" not in destWidJson["content"]["data"][0]:
-                        continue  # Skip windows with unnamed data
                     # has_compare will be set to True only if the window title is
                     # shared by at least 2 envs.
                     destWidJson["has_compare"] = True

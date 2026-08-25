@@ -11,21 +11,19 @@ import React, { useEffect, useMemo, useRef } from 'react';
 
 import HParamsAxisToolbar from './HParamsAxisToolbar';
 import {
+  buildParcoordsDimensions,
+  completeRecords,
+  HParamsMessage,
   PLOT_COLORSCALE,
   plotBaseLayout,
   plotColorbar,
   plotRevision,
   renderPlot,
-  usePlotResize,
-} from './hparamsPlot';
-import {
-  buildParcoordsDimensions,
-  completeRecords,
-  HParamsMessage,
   resolveColor,
   runLabel,
+  useHParamsAxes,
+  usePlotResize,
 } from './hparamsUtils';
-import useHParamsAxes from './useHParamsAxes';
 
 const RUN_LABEL_MAX = 18;
 

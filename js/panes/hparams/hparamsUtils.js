@@ -10,7 +10,7 @@
 import TreeSelect from 'rc-tree-select';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { serverPath } from '../../api/ApiProvider';
+import { fetchExperimentComparison } from '../../api/experimentsApi';
 
 /*
  * Shared helpers for the hyper-parameter views, so the ordering and formatting
@@ -676,15 +676,20 @@ export const ColumnMultiSelect = ({
 const CSV_MIME = 'text/csv;charset=utf-8';
 const JSON_MIME = 'application/json';
 const NEEDS_QUOTING = /[",\r\n]/;
+const FORMULA_START = /^[=+\-@\t\r]/;
+const NUMERIC = /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/;
 
 function csvCell(value) {
   if (isMissing(value)) return '';
-  const text =
+  const raw =
     value !== null && typeof value === 'object'
       ? JSON.stringify(value)
       : String(value);
-  if (NEEDS_QUOTING.test(text)) return '"' + text.replace(/"/g, '""') + '"';
-  return text;
+  if (FORMULA_START.test(raw) && !NUMERIC.test(raw)) {
+    return '"\'' + raw.replace(/"/g, '""') + '"';
+  }
+  if (NEEDS_QUOTING.test(raw)) return '"' + raw.replace(/"/g, '""') + '"';
+  return raw;
 }
 
 export function buildCsv(records, columns) {
@@ -745,30 +750,163 @@ export function exportJson(records, keys, filename) {
   downloadText(text, filename, JSON_MIME);
 }
 
-export function fetchExperimentComparison(envIds, signal) {
-  const ids = (envIds || []).filter((id) => typeof id === 'string');
-  if (ids.length === 0) {
-    return Promise.reject(new Error('No runs to load.'));
-  }
-  return window
-    .fetch(serverPath() + 'experiments/compare', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      body: JSON.stringify({ env_ids: ids }),
-      signal,
+/*
+ * The Plotly-facing helpers below are the one part of this module that reaches
+ * for the global Plotly instance and the DOM rather than staying pure.
+ */
+
+const SNAPSHOT_NOTICE_DELAY = 700;
+
+export const PLOT_COLORSCALE = 'Viridis';
+
+export const RUN_PALETTE = [
+  '#1f77b4',
+  '#ff7f0e',
+  '#2ca02c',
+  '#d62728',
+  '#9467bd',
+  '#8c564b',
+  '#e377c2',
+  '#7f7f7f',
+  '#bcbd22',
+  '#17becf',
+];
+
+export function runColor(index) {
+  const i = Number.isFinite(index) ? Math.abs(Math.trunc(index)) : 0;
+  return RUN_PALETTE[i % RUN_PALETTE.length];
+}
+
+export function notify(message, kind) {
+  const lib = window.Plotly && window.Plotly.Lib;
+  if (lib && typeof lib.notifier === 'function') lib.notifier(message, kind);
+}
+
+export function downloadPlotPng(gd, filename) {
+  if (!window.Plotly || typeof window.Plotly.toImage !== 'function') return;
+  let done = false;
+  const timer = setTimeout(() => {
+    if (!done) notify('Taking snapshot - this may take a few seconds', 'long');
+  }, SNAPSHOT_NOTICE_DELAY);
+
+  window.Plotly.toImage(gd, {
+    format: 'png',
+    width: gd.offsetWidth || 900,
+    height: gd.offsetHeight || 600,
+  })
+    .then((url) => {
+      done = true;
+      clearTimeout(timer);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     })
-    .catch((err) => {
-      if (err && err.name === 'AbortError') throw err;
-      throw new Error('Could not reach the server.');
-    })
-    .then((res) => {
-      if (!res.ok) {
-        const reason = res.statusText || 'request failed';
-        throw new Error('Could not load metric history (' + reason + ').');
-      }
-      return res.json();
+    .catch(() => {
+      done = true;
+      clearTimeout(timer);
+      notify('Snapshot failed', 'long');
     });
+}
+
+export function applySnapshotButton(config, filename) {
+  const icons = window.Plotly && window.Plotly.Icons;
+  const icon = icons && icons.camera;
+  if (!icon) return config;
+  config.modeBarButtonsToRemove = ['toImage'];
+  config.modeBarButtonsToAdd = [
+    {
+      name: 'downloadPng',
+      title: 'Download plot as PNG',
+      icon,
+      click: (gd) => downloadPlotPng(gd, filename),
+    },
+  ];
+  return config;
+}
+
+export function observePlotResize(el) {
+  const isDisplayed = (node) =>
+    !!(node && node.offsetWidth > 0 && node.offsetHeight > 0);
+  const resizeObserver = new ResizeObserver(() => {
+    if (window.Plotly && el._fullLayout && isDisplayed(el)) {
+      window.Plotly.Plots.resize(el);
+    }
+  });
+  resizeObserver.observe(el);
+  return () => {
+    resizeObserver.disconnect();
+    if (window.Plotly && el._fullLayout) window.Plotly.purge(el);
+  };
+}
+
+export function usePlotResize(ref) {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    return observePlotResize(el);
+  }, [ref]);
+}
+
+export function plotBaseLayout() {
+  return {
+    font: { family: '"Open Sans", sans-serif', size: 11, color: '#333' },
+    paper_bgcolor: '#ffffff',
+    plot_bgcolor: '#ffffff',
+  };
+}
+
+export function plotAxisStyle() {
+  return {
+    showline: true,
+    linecolor: '#aab8d8',
+    linewidth: 1,
+    gridcolor: '#f0f2f8',
+    zeroline: false,
+    ticklen: 3,
+    tickfont: { size: 10, color: '#666' },
+    automargin: true,
+  };
+}
+
+export function plotRevision(...parts) {
+  return parts.join('::');
+}
+
+export function plotColorbar(label) {
+  return {
+    title: { text: label, side: 'right', font: { size: 11 } },
+    thickness: 12,
+    len: 0.6,
+    outlinewidth: 0,
+  };
+}
+
+export function renderPlot(el, data, layout, filename, onReady) {
+  if (!el || !window.Plotly) return;
+  const config = applySnapshotButton(
+    {
+      showLink: false,
+      displaylogo: false,
+      responsive: true,
+      doubleClick: 'reset',
+    },
+    filename
+  );
+  try {
+    window.Plotly.react(el, data, layout, config)
+      .then(() => {
+        if (el._fullLayout && el.offsetWidth > 0) {
+          window.Plotly.Plots.resize(el);
+        }
+        if (onReady) onReady(el);
+      })
+      .catch(() => window.Plotly.purge(el));
+  } catch (e) {
+    window.Plotly.purge(el);
+  }
 }
 
 export function useHParamsColumns(paramKeys, metricKeys, tagKeys) {
@@ -776,6 +914,66 @@ export function useHParamsColumns(paramKeys, metricKeys, tagKeys) {
     () => buildColumns(paramKeys, metricKeys, tagKeys),
     [paramKeys, metricKeys, tagKeys]
   );
+}
+
+export function useHParamsAxes({
+  records,
+  columnRecords,
+  paramKeys,
+  metricKeys,
+  tagKeys,
+  selectedDims,
+  colorBy,
+  maxDims,
+  preferDense = false,
+}) {
+  const pickerRecords = columnRecords || records;
+
+  const columns = useHParamsColumns(paramKeys, metricKeys, tagKeys);
+
+  const numericCols = useMemo(
+    () => selectNumericColumns(pickerRecords, columns),
+    [pickerRecords, columns]
+  );
+
+  const dims = useMemo(() => {
+    const valid = new Set(numericCols.map((col) => col.id));
+    if (Array.isArray(selectedDims)) {
+      const chosen = selectedDims.filter((id) => valid.has(id));
+      if (chosen.length > 0 || selectedDims.length === 0) {
+        return chosen.slice(0, maxDims);
+      }
+    }
+    const isDense = preferDense
+      ? (col) => records.every((record) => isNumeric(col.accessor(record)))
+      : null;
+    return defaultDimIds(numericCols, isDense).slice(0, maxDims);
+  }, [selectedDims, numericCols, records, maxDims, preferDense]);
+
+  const activeColorBy = useMemo(() => {
+    if (!colorBy) return null;
+    return numericCols.some((col) => col.id === colorBy) ? colorBy : null;
+  }, [colorBy, numericCols]);
+
+  const treeData = useMemo(
+    () => groupColumnTree(numericCols, NUMERIC_GROUPS),
+    [numericCols]
+  );
+
+  const truncated =
+    (selectedDims || []).filter((id) =>
+      numericCols.some((col) => col.id === id)
+    ).length > maxDims;
+
+  return {
+    columns,
+    numericCols,
+    dims,
+    colorBy: activeColorBy,
+    treeData,
+    truncated,
+    hasPlot: numericCols.length >= 2,
+  };
 }
 
 const NO_EXPERIMENTS = [];
