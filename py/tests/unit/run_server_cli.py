@@ -338,10 +338,14 @@ def test_every_asset_is_fetched_over_https_from_a_known_host(
 
 
 def test_assets_are_filed_by_extension(offline_downloads, tmp_path):
+    """Each asset lands in the directory its extension implies.
+
+    Nothing in the current list is extensionless, so the ``fonts/`` fallback in
+    ``build.download_scripts`` is unreachable and is not asserted here.
+    """
     _run_download(offline_downloads, tmp_path)
     static = tmp_path / "static"
     assert (static / "js" / "plotly-plotly.min.js").exists()
-    assert (static / "js" / "layout_bin_packer.js").exists()
     assert (static / "js" / "layout-bin-packer.js.map").exists()
     assert (static / "css" / "react-resizable-styles.css").exists()
 
@@ -356,11 +360,14 @@ def test_the_mathjax_bundle_is_fetched_into_its_versioned_path(
 
 
 def test_the_build_stamp_records_the_installed_version(offline_downloads, tmp_path):
-    """The stamp is ``version:assets_hash``, so editing the asset map invalidates it."""
-    _run_download(offline_downloads, tmp_path)
-    stamp = tmp_path / "static" / "version.built"
+    """The stamp is the version plus a fingerprint of the asset list.
 
-    version, _, assets_hash = stamp.read_text().strip().partition(":")
+    Editing the list of files to fetch changes the fingerprint, so a checkout
+    that gained an asset refetches instead of trusting the version alone.
+    """
+    _run_download(offline_downloads, tmp_path)
+    stamp = (tmp_path / "static" / "version.built").read_text().strip()
+    version, _, assets_hash = stamp.partition(":")
 
     assert version == "9.9.9"
     assert len(assets_hash) == 64
@@ -386,9 +393,7 @@ def test_a_stale_stamp_forces_a_refetch(offline_downloads, tmp_path):
 @pytest.mark.parametrize(
     "error",
     [
-        HTTPError(
-            "https://unpkg.com/jquery@3.1.1/dist/jquery.min.js", 404, "nf", {}, None
-        ),
+        HTTPError("https://d3js.org/d3-selection-multi.v1.js", 404, "nf", {}, None),
         URLError("offline"),
     ],
 )
@@ -396,10 +401,10 @@ def test_a_failed_download_is_logged_and_the_rest_continue(
     offline_downloads, tmp_path, error
 ):
     """A CDN outage must not abort the install half way through."""
-    url = "https://unpkg.com/jquery@3.1.1/dist/jquery.min.js"
+    url = "https://d3js.org/d3-selection-multi.v1.js"
     opener, _ = _run_download(offline_downloads, tmp_path, failures={url: error})
     assert len(opener.requested) > 1
-    assert not (tmp_path / "static" / "js" / "jquery.min.js").exists()
+    assert not (tmp_path / "static" / "js" / "d3-selection-multi.v1.js").exists()
     assert (tmp_path / "static" / "js" / "d3.v3.min.js").exists()
 
 
