@@ -25,6 +25,7 @@ from __future__ import annotations
 import atexit
 import collections
 import json
+import math
 import os
 import platform
 import socket
@@ -32,6 +33,8 @@ import threading
 import time
 import uuid
 from typing import Any, Optional
+
+import numpy as np
 
 from visdom.utils.shared_utils import ensure_dir_exists
 
@@ -76,7 +79,7 @@ def _slugify(name: str) -> str:
 def _json_safe(value: Any, _depth: int = 0, _max_depth: int = 20) -> Any:
     """Recursively rebuild ``value`` into something guaranteed JSON-safe.
 
-    This exists to fix two related problems with just passing arbitrary
+    This exists to fix several related problems with just passing arbitrary
     caller data straight to ``json.dump(..., default=str)``:
 
     1. A single value whose ``__str__`` itself raises would otherwise make
@@ -89,12 +92,55 @@ def _json_safe(value: Any, _depth: int = 0, _max_depth: int = 20) -> Any:
        entry would re-serialize as. Rebuilding dicts/lists into new
        objects here breaks that aliasing at the point of logging, not at
        write time.
+    3. NumPy scalars (``np.float32``, ``np.int64``, ``np.bool_``, ...)
+       aren't Python ``int``/``float``/``bool`` (only ``np.float64``
+       happens to subclass ``float`` on most platforms -- everything else
+       doesn't) and would otherwise fall through to the ``str()``
+       fallback, silently turning e.g. a logged loss value into the
+       *string* ``"0.4523"`` instead of the number ``0.4523``. Converted
+       via ``.item()`` to the equivalent native Python type instead, since
+       this is an extremely common case: numpy arrays/scalars are what
+       most training loops actually produce.
+    4. NumPy arrays would otherwise stringify via ``str(array)``, which
+       truncates large arrays with ``...`` and isn't valid JSON or even
+       reparseable Python (``"[1 2 3]"`` has no commas). Converted via
+       ``.tolist()`` instead, which recursively yields plain nested
+       Python lists/numbers.
+    5. ``NaN``/``Infinity``/``-Infinity`` are not valid JSON (RFC 8259).
+       Python's ``json`` module writes them anyway by default as bare
+       ``NaN``/``Infinity``/``-Infinity`` tokens, which round-trips inside
+       Python but breaks any stricter parser (e.g. JavaScript's
+       ``JSON.parse``, most other languages' JSON libraries). This is also
+       a very real case for this tool specifically, not just a
+       theoretical one: "loss became NaN" is one of the most common
+       training failure modes there is, and a reproducibility record
+       should capture that cleanly rather than emit a file that then
+       fails to parse elsewhere. Converted to the strings ``"NaN"``/
+       ``"Infinity"``/``"-Infinity"`` instead.
 
     ``_max_depth`` guards against pathological self-referential or very
     deeply nested structures turning one bad call into a stack overflow.
     """
     if _depth > _max_depth:
         return "<max nesting depth exceeded>"
+
+    if isinstance(value, (np.floating, np.integer, np.bool_)):
+        try:
+            return _json_safe(value.item(), _depth, _max_depth)
+        except Exception:
+            pass  # fall through to the str() fallback below
+
+    if isinstance(value, np.ndarray):
+        try:
+            return _json_safe(value.tolist(), _depth, _max_depth)
+        except Exception:
+            pass  # fall through to the str() fallback below
+
+    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+        if math.isnan(value):
+            return "NaN"
+        return "Infinity" if value > 0 else "-Infinity"
+
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
     if isinstance(value, dict):
@@ -644,7 +690,7 @@ class RunTracker:
         tmp_path = self.path + ".tmp"
         try:
             with open(tmp_path, "w") as f:
-                json.dump(payload, f, indent=2, default=str)
+                json.dump(payload, f, indent=2, default=str, allow_nan=False)
             os.replace(tmp_path, self.path)
         except Exception:
             if os.path.exists(tmp_path):
