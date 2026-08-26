@@ -421,6 +421,36 @@ class TestSearchEndpoint(tornado.testing.AsyncHTTPTestCase):
         self.assertIn(resp.code, (200, 400))
         self.assertEqual(self.search_ok({})["total"], 3)
 
+    def test_reply_is_typed_as_json(self):
+        """The reply says it is JSON, and says not to guess otherwise.
+
+        The body is serialized by hand rather than handed to Tornado as a dict
+        (NaN metrics have to become ``null`` first), so nothing sets the content
+        type for us: without these headers the reply keeps Tornado's default
+        ``text/html`` and a browser is free to render an echoed query as a page.
+        """
+        resp = self.search({"query": "name = alpha"})
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(
+            resp.headers["Content-Type"], "application/json; charset=UTF-8"
+        )
+        self.assertEqual(resp.headers["X-Content-Type-Options"], "nosniff")
+
+    def test_echoed_query_cannot_open_a_tag(self):
+        """A query full of markup comes back escaped, and comes back unchanged.
+
+        The characters that could start a tag are written as JSON escapes, so
+        the raw body holds no markup while a client still decodes the exact
+        string it sent.
+        """
+        query = "name = '<script>alert(1)</script>&'"
+        resp = self.search({"query": query})
+        self.assertEqual(resp.code, 200)
+        raw = resp.body.decode("utf-8")
+        for char in ("<", ">", "&"):
+            self.assertNotIn(char, raw)
+        self.assertEqual(json.loads(raw)["query"], query)
+
     def test_search_sees_an_experiment_logged_over_http(self):
         """An experiment logged through /experiments/log is searchable at once."""
         self.fetch(

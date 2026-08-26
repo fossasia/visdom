@@ -1015,7 +1015,7 @@ class ExperimentLogHandler(BaseHandler):
         if is_new_env:
             broadcast_envs(handler)
 
-        handler.write(json.dumps(experiment.to_dict(), cls=NanSafeEncoder))
+        handler.write_json(experiment.to_dict())
 
     @check_auth
     @check_readonly_message(
@@ -1169,17 +1169,14 @@ class ExperimentSearchHandler(BaseHandler):
         except QueryParseError as e:
             raise tornado.web.HTTPError(400, reason=str(e))
 
-        handler.write(
-            json.dumps(
-                {
-                    "experiments": [e.to_dict() for e in page],
-                    "total": total,
-                    "limit": limit,
-                    "offset": offset,
-                    "query": query or "",
-                },
-                cls=NanSafeEncoder,
-            )
+        handler.write_json(
+            {
+                "experiments": [e.to_dict() for e in page],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "query": query or "",
+            }
         )
 
     @check_auth
@@ -1270,7 +1267,7 @@ class ExperimentCompareHandler(BaseHandler):
         except KeyError as e:
             raise tornado.web.HTTPError(404, reason=str(e.args[0]))
 
-        handler.write(json.dumps(comparison, cls=NanSafeEncoder))
+        handler.write_json(comparison)
 
     @check_auth
     def post(self):
@@ -1311,7 +1308,7 @@ class ExperimentSuggestHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
         handler.set_status(501)
-        handler.write(json.dumps(ExperimentSuggestHandler.NOT_IMPLEMENTED))
+        handler.write_json(ExperimentSuggestHandler.NOT_IMPLEMENTED)
 
     @check_auth
     def post(self):
@@ -1366,7 +1363,7 @@ class TagsHandler(BaseHandler):
         if eid is not None:
             experiment = TagsHandler._read_experiment(handler, eid)
             tags = tags_to_mapping(experiment.tags) if experiment else {}
-            handler.write(json.dumps(tags, cls=NanSafeEncoder))
+            handler.write_json(tags)
             return
         experiments = TagsHandler._experiment_map(handler)
         tag_map = {
@@ -1374,7 +1371,7 @@ class TagsHandler(BaseHandler):
             for env_id, experiment in experiments.items()
             if experiment.tags
         }
-        handler.write(json.dumps(tag_map, cls=NanSafeEncoder))
+        handler.write_json(tag_map)
 
     @staticmethod
     def wrap_func(handler, args):
@@ -1424,7 +1421,7 @@ class TagsHandler(BaseHandler):
         if is_new_env:
             broadcast_envs(handler)
         broadcast_tags(handler, eid, tags)
-        handler.write(json.dumps(tags, cls=NanSafeEncoder))
+        handler.write_json(tags)
 
     @check_auth
     def get(self):
