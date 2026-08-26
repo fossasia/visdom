@@ -51,6 +51,23 @@ class TestJSONStoreProjection(unittest.TestCase):
     def test_returns_none_for_unknown_env(self):
         self.assertIsNone(self.store.load_experiment("never-existed"))
 
+    def test_traversal_id_cannot_read_outside_env_path(self):
+        """A crafted id names no experiment instead of reaching a parent file.
+
+        The projection opens a file, so it is a path sink like ``load_env``:
+        the id is escaped and the resolved path is checked against
+        ``env_path`` before anything is read, which leaves ``../<name>``
+        pointing at a sibling that does not exist rather than at the real file
+        one directory up.
+        """
+        outside = os.path.join(os.path.dirname(self._tmp_dir), "outside_meta.json")
+        with open(outside, "w") as fn:
+            fn.write(json.dumps({"jsons": {}, "reload": {}, "experiment": {"a": 1}}))
+        self.addCleanup(os.remove, outside)
+
+        for eid in ("../outside_meta", "../../outside_meta", "/etc/passwd"):
+            self.assertIsNone(self.store.load_experiment(eid))
+
     def test_returns_none_for_unreadable_file(self):
         self._write_raw("broken", {"jsons": {}, "reload": {}})
         with open(os.path.join(self._tmp_dir, "broken.json"), "w") as fn:
