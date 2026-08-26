@@ -269,6 +269,7 @@ class OptunaCallback:
                 plot_intermediate_values,
                 plot_optimization_history,
                 plot_param_importances,
+                plot_pareto_front,
                 plot_timeline,
             )
 
@@ -305,6 +306,18 @@ class OptunaCallback:
                         figures.append(
                             ("optuna-importance{}".format(suffix), importance)
                         )
+
+            if complete_trials and len(objective_names) in (2, 3):
+                try:
+                    pareto = plot_pareto_front(
+                        study,
+                        target_names=list(objective_names),
+                    )
+                except ValueError:
+                    pass
+                else:
+                    pareto.update_layout(title="Optuna Pareto Front")
+                    figures.append(("optuna-pareto-front", pareto))
 
             if any(self._intermediate_values(trial) for trial in trials):
                 try:
