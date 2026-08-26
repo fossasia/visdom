@@ -117,7 +117,7 @@ button {
   border-color: transparent;
 }
 
-button>span.glyphicon {
+button>svg {
   color: grey;
 }
 
@@ -173,7 +173,7 @@ button>span.glyphicon {
   color: #333;
 }
 
-button[title="comment"].active > .glyphicon {
+button[title="comment"].active > svg {
   color: red;
 }
 
@@ -321,7 +321,11 @@ doesn't override our desire to make them non-interactable */
   border: none;
 }
 
-button[title="properties"].active>.glyphicon {
+button[title="properties"].active>svg {
+  color: red;
+}
+
+button.table-edit-toggle.active > svg {
   color: red;
 }
 
@@ -334,6 +338,73 @@ button[title="smooth lines"] {
 
 button[title="smooth lines"].active {
   color: red;
+}
+
+/* read by js/panes/utils/annotations.js to size and place note boxes */
+:root {
+  --annotation-font-size: 11;
+  --annotation-arrow-length: 30;
+  --annotation-gap: 6;
+  --annotation-width-ratio: 0.25;
+  --annotation-height-ratio: 0.2;
+  --annotation-crowd-ratio: 0.08;
+  --annotation-char-width-ratio: 0.6;
+  --annotation-line-height-ratio: 1.3;
+  --annotation-background: #fff;
+}
+
+button[title="annotate points"].active > svg {
+  color: red;
+}
+
+.annotate-editor {
+  position: absolute;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  max-width: 90%;
+  background-color: #fff;
+  border: 1px solid #dedede;
+  border-radius: 4px;
+  box-shadow: rgba(0, 0, 0, 0.15) 1px 1px 4px;
+}
+
+.annotate-editor input {
+  width: 190px;
+  min-width: 0;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: normal;
+  line-height: 16px;
+  color: #333;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+}
+
+.annotate-editor input:focus {
+  border-color: #999;
+  outline: none;
+}
+
+.annotate-editor button {
+  padding: 4px 10px;
+  font-size: 12px;
+  line-height: 16px;
+  color: #333;
+  background-color: #f4f4f4;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+}
+
+.annotate-editor button:hover:not(:disabled) {
+  background-color: #e8e8e8;
+}
+
+.annotate-editor button:disabled {
+  color: #aaa;
+  cursor: default;
 }
 
 .react-grid-item {
@@ -466,9 +537,144 @@ button[title="export"].active {
   background-color: #dedede;
 }
 
+button[title="export latex"].active {
+  background-color: #dedede;
+}
+
 /* Override RGL v2 default pointer-events:none on grid-item images.
    Visdom images are interactive (drag, zoom, click callbacks). */
 .react-grid-item img {
   pointer-events: auto;
   user-select: auto;
+}
+
+.content-table {
+  overflow: auto;
+  height: 100%;
+  background-color: #ffffff;
+}
+
+.table-native {
+  border-collapse: collapse;
+}
+
+.table-native th,
+.table-native td {
+  border: solid 1px #dedede;
+  position: relative;
+  overflow: hidden;
+}
+
+.table-native th.table-header-cell {
+  background-color: #F0F0F0;
+  padding: 0;
+  text-align: left;
+  font-weight: bold;
+}
+
+.table-header-inner {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+}
+
+.table-header-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+
+.table-cell-inner {
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
+.table-native th input[type="text"],
+.table-native td input[type="text"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  padding: 2px 6px;
+  background: transparent;
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.table-cell-readonly {
+  padding: 2px 6px;
+}
+
+.col-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 5;
+}
+
+.row-resize-handle {
+  position: absolute;
+  bottom: -3px;
+  left: 0;
+  height: 6px;
+  width: 100%;
+  cursor: row-resize;
+  z-index: 5;
+}
+
+.table-add-row,
+.table-add-col {
+  text-align: center;
+  color: #999;
+  cursor: pointer;
+  background-color: #fafafa;
+  user-select: none;
+  padding: 0;
+}
+
+.table-add-row button,
+.table-add-col button {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 4px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.table-add-row:hover,
+.table-add-col:hover {
+  background-color: #e0e0e0;
+  color: #333;
+}
+
+.table-delete-row,
+.table-delete-col {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  text-align: center;
+  cursor: pointer;
+  color: #c00;
+  font-size: 10px;
+  line-height: 1;
+  user-select: none;
+  visibility: hidden;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+}
+
+.table-header-cell:hover .table-delete-col,
+.table-cell-first:hover .table-delete-row {
+  visibility: visible;
 }

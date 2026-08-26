@@ -130,6 +130,21 @@ const ApiProvider = ({ children }) => {
   // Process messages received from the server by
   // implicitly defining event handlers for
   // different types of server-commands
+  const syncTags = () => {
+    $.ajax({
+      url: correctPathname() + 'experiments/tags',
+      method: 'GET',
+      dataType: 'json',
+      global: false,
+    })
+      .done((tags) => {
+        apiHandlers.current.onTagsSync(tags);
+      })
+      .fail(() => {
+        showToast('Unable to load environment tags.', 'error');
+      });
+  };
+
   const handleMessage = (evt) => {
     var cmd = JSON.parse(evt.data);
     switch (cmd.command) {
@@ -142,6 +157,7 @@ const ApiProvider = ({ children }) => {
         if (cmd.envList) {
           apiHandlers.current.onEnvUpdate(cmd.envList);
         }
+        syncTags();
         break;
       case 'pane':
       case 'window':
@@ -166,6 +182,9 @@ const ApiProvider = ({ children }) => {
         break;
       case 'env_update':
         apiHandlers.current.onEnvUpdate(cmd.data);
+        break;
+      case 'tags_update':
+        apiHandlers.current.onTagsUpdate(cmd.data);
         break;
       case 'undo_state':
         apiHandlers.current.onUndoState(cmd);
@@ -295,6 +314,23 @@ const ApiProvider = ({ children }) => {
     });
   };
 
+  // Replace or append key/value tags for one environment.
+  const sendTagsUpdate = (envID, tags, append = false) => {
+    return $.ajax({
+      url: correctPathname() + 'experiments/tags',
+      method: 'POST',
+      contentType: 'application/json; charset=utf-8',
+      dataType: 'json',
+      data: JSON.stringify({
+        action: 'set',
+        eid: envID,
+        tags: tags,
+        append: append,
+      }),
+      global: false,
+    });
+  };
+
   const sendSaveAll = () => {
     sendSocketMessage({
       cmd: 'save_all',
@@ -333,6 +369,19 @@ const ApiProvider = ({ children }) => {
       eid: envID,
       win: win,
       data: comment,
+    });
+  };
+
+  const sendTableEdit = (envID, win, op, data) => {
+    if (win === null || sessionInfo.readonly) {
+      return;
+    }
+    sendSocketMessage({
+      cmd: 'table_edit',
+      eid: envID,
+      win: win,
+      op: op,
+      data: data,
     });
   };
 
@@ -393,11 +442,13 @@ const ApiProvider = ({ children }) => {
         sendEnvQuery,
         sendEnvSave,
         sendLayoutsSave,
+        sendTagsUpdate,
         sendPaneClose,
         sendPaneLayoutUpdate,
         sendPlotLayoutUpdate,
         sendPaneMessage,
         sendSaveAll,
+        sendTableEdit,
         sendUndo,
         sessionInfo,
         setConnected,

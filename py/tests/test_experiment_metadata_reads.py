@@ -114,7 +114,7 @@ class TestLiveEnvsAreNotMaterialised(unittest.TestCase):
         shutil.rmtree(self._tmp_dir, ignore_errors=True)
 
     def _loaded(self):
-        return [eid for eid, env in self.state.items() if env.is_loaded()]
+        return [eid for eid, env in self.state.items() if env.is_loaded]
 
     def test_search_materialises_nothing(self):
         found = self.store.search(query="lr < 0.25")
@@ -141,13 +141,13 @@ class TestLiveEnvsAreNotMaterialised(unittest.TestCase):
         """An env already in memory may hold changes the file has not seen."""
         live = self.state["run-4"]
         live["experiment"] = dict(live["experiment"], name="renamed-in-memory")
-        self.assertTrue(live.is_loaded())
+        self.assertTrue(live.is_loaded)
         self.assertEqual(self.store.get_experiment("run-4").name, "renamed-in-memory")
 
     def test_writes_still_go_through_the_live_env(self):
         """Logging keeps writing into the object the server is serving."""
         self.store.log_experiment("run-0", params={"momentum": 0.9})
-        self.assertTrue(self.state["run-0"].is_loaded())
+        self.assertTrue(self.state["run-0"].is_loaded)
         self.assertEqual(
             self.state["run-0"]["experiment"]["params"][-1]["key"], "momentum"
         )

@@ -15,8 +15,10 @@ import logging
 import os
 import platform
 import time
+from collections import Counter
 
 import tornado.web  # noqa E402: gotta install ioloop first
+from tornado.ioloop import PeriodicCallback
 
 from visdom.utils.shared_utils import warn_once, ensure_dir_exists, get_visdom_path
 from visdom.utils.server_utils import LazyEnvData
@@ -50,6 +52,7 @@ from visdom.server.handlers.web_handlers import (
     IndexHandler,
     PostHandler,
     SaveHandler,
+    TagsHandler,
     UpdateHandler,
     UploadEnvHandler,
     UserSettingsHandler,
@@ -60,10 +63,12 @@ from visdom.server.defaults import (
     DEFAULT_HOSTNAME,
     DEFAULT_MAX_IMAGE_HISTORY,
     DEFAULT_MAX_OLD_CONTENT,
+    DEFAULT_MAX_PLOT_HISTORY,
     DEFAULT_MAX_TEXT_LINES,
     DEFAULT_PORT,
+    DEFAULT_SAVE_INTERVAL,
+    DEFAULT_SAVE_THRESHOLD,
 )
-
 
 tornado_settings = {
     "autoescape": None,
@@ -84,16 +89,23 @@ class Application(tornado.web.Application):
         user_credential=None,
         use_frontend_client_polling=False,
         eager_data_loading=False,
+        save_interval=DEFAULT_SAVE_INTERVAL,
+        save_threshold=DEFAULT_SAVE_THRESHOLD,
     ):
         self.eager_data_loading = eager_data_loading
         self.max_image_history = DEFAULT_MAX_IMAGE_HISTORY
         self.max_old_content = DEFAULT_MAX_OLD_CONTENT
+        self.max_plot_history = DEFAULT_MAX_PLOT_HISTORY
         self.max_text_lines = DEFAULT_MAX_TEXT_LINES
         self.env_path = env_path
         self.storage = JSONStore(env_path)
         self.state = self.load_state()
         self.layouts = self.load_layouts()
         self.user_settings = self.load_user_settings()
+        self.save_interval = save_interval
+        self.save_threshold = save_threshold
+        self.dirty_envs = Counter()
+        self.autosave = None
         self.subs = {}
         self.sources = {}
         self.live_updates = make_live_queue(self)
@@ -111,7 +123,15 @@ class Application(tornado.web.Application):
                 tornado_settings["cookie_secret"] = fn.read()
 
         tornado_settings["static_url_prefix"] = self.base_url + "/static/"
-        tornado_settings["debug"] = True
+        # A traceback and the raw request are debugging aids, not something to
+        # hand to whoever provoked the error. `debug` was forced on for every
+        # server, which put both on the 500 page -- and, being tornado's debug
+        # flag, also turned on autoreload. Follow the operator's logging level
+        # instead, and keep the two concerns separate.
+        tornado_settings["show_error_details"] = logging.getLogger().isEnabledFor(
+            logging.DEBUG
+        )
+        experiments_url = "%s/experiments" % self.base_url
         handlers = [
             (r"%s/events" % self.base_url, PostHandler, {"app": self}),
             (r"%s/update" % self.base_url, UpdateHandler, {"app": self}),
@@ -130,36 +150,17 @@ class Application(tornado.web.Application):
             (r"%s/delete_env" % self.base_url, DeleteEnvHandler, {"app": self}),
             (r"%s/env_state" % self.base_url, EnvStateHandler, {"app": self}),
             (r"%s/fork_env" % self.base_url, ForkEnvHandler, {"app": self}),
+            (r"%s/log" % experiments_url, ExperimentLogHandler, {"app": self}),
+            (r"%s/search" % experiments_url, ExperimentSearchHandler, {"app": self}),
+            (r"%s/compare" % experiments_url, ExperimentCompareHandler, {"app": self}),
+            (r"%s/suggest" % experiments_url, ExperimentSuggestHandler, {"app": self}),
+            (r"%s/hparams" % experiments_url, ExperimentHparamsHandler, {"app": self}),
             (
-                r"%s/experiments/log" % self.base_url,
-                ExperimentLogHandler,
-                {"app": self},
-            ),
-            (
-                r"%s/experiments/search" % self.base_url,
-                ExperimentSearchHandler,
-                {"app": self},
-            ),
-            (
-                r"%s/experiments/compare" % self.base_url,
-                ExperimentCompareHandler,
-                {"app": self},
-            ),
-            (
-                r"%s/experiments/suggest" % self.base_url,
-                ExperimentSuggestHandler,
-                {"app": self},
-            ),
-            (
-                r"%s/experiments/hparams" % self.base_url,
-                ExperimentHparamsHandler,
-                {"app": self},
-            ),
-            (
-                r"%s/experiments/hparams/update" % self.base_url,
+                r"%s/hparams/update" % experiments_url,
                 ExperimentHparamsUpdateHandler,
                 {"app": self},
             ),
+            (r"%s/tags" % experiments_url, TagsHandler, {"app": self}),
             (r"%s/user/(.*)" % self.base_url, UserSettingsHandler, {"app": self}),
             (r"%s/health" % self.base_url, HealthHandler),
             (r"%s(.*)" % self.base_url, IndexHandler, {"app": self}),
@@ -172,6 +173,56 @@ class Application(tornado.web.Application):
             # is currently connected to the server
             self.last_access = time.time()
         return self.last_access
+
+    def mark_dirty(self, eid):
+        """Record that ``eid`` has changed in memory and is not yet on disk.
+
+        Environments are saved on a timer rather than on every write, so a busy
+        one would otherwise sit unsaved for a whole interval; once it has taken
+        ``save_threshold`` updates it is written out immediately.
+        """
+        self.dirty_envs[eid] += 1
+        if 0 < self.save_threshold <= self.dirty_envs[eid]:
+            self.flush_envs([eid])
+
+    def flush_envs(self, eids):
+        """Persist the named environments, skipping any already saved.
+
+        Runs on the IO loop rather than in an executor: saving serializes
+        ``state``, and a background thread would be doing that while request
+        handlers mutate the very dictionaries it is walking.
+
+        Only environments the backend reports as written lose their mark, so one
+        it declines is retried on the next pass rather than silently dropped. An
+        environment deleted since it was marked has nothing left to save and is
+        cleared too.
+        """
+        pending = [eid for eid in eids if self.dirty_envs.get(eid)]
+        if not pending:
+            return []
+        written = self.storage.save_envs(self.state, pending)
+        saved = set(written)
+        for eid in pending:
+            if eid in saved or eid not in self.state:
+                del self.dirty_envs[eid]
+        return written
+
+    def flush_dirty(self):
+        """Persist every environment changed since the last save."""
+        return self.flush_envs(list(self.dirty_envs))
+
+    def start_autosave(self):
+        """Begin saving changed environments every ``save_interval`` seconds.
+
+        A no-op when autosaving is disabled or already running. Ticks with
+        nothing dirty cost no IO.
+        """
+        if self.autosave is None and self.save_interval > 0:
+            self.autosave = PeriodicCallback(
+                self.flush_dirty, self.save_interval * 1000
+            )
+            self.autosave.start()
+        return self.autosave
 
     def save_layouts(self):
         if self.env_path is None:
@@ -207,6 +258,8 @@ class Application(tornado.web.Application):
         for eid in self.storage.list_envs():
             if self.eager_data_loading:
                 env_data = self.storage.load_env(eid)
+                if not isinstance(env_data, dict):
+                    env_data = {}
 
                 if "jsons" not in env_data or "reload" not in env_data:
                     logging.warning(
@@ -214,10 +267,13 @@ class Application(tornado.web.Application):
                         eid,
                     )
 
-                state[eid] = {
-                    "jsons": env_data.get("jsons", {}),
-                    "reload": env_data.get("reload", {}),
-                }
+                # Copy the whole env rather than picking out jsons/reload, so
+                # keys the server does not read itself (such as the experiment
+                # metadata blob) survive the load and are still there when the
+                # env is saved back. LazyEnvData keeps them for the lazy path.
+                state[eid] = dict(env_data)
+                state[eid].setdefault("jsons", {})
+                state[eid].setdefault("reload", {})
             else:
                 state[eid] = LazyEnvData(self.storage, eid)
 

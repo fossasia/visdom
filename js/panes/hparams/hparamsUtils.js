@@ -7,8 +7,37 @@
  *
  */
 
+import TreeSelect from 'rc-tree-select';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+
+import { fetchExperimentComparison } from '../../api/experimentsApi';
+
+/*
+ * Shared helpers for the hyper-parameter views, so the ordering and formatting
+ * rules live in one place and can mirror the Python backend exactly. The
+ * comparator matches
+ * visdom.experiments.store._order_key for every value the backend can order --
+ * including booleans, which Python orders by str(value), i.e. "True"/"False"
+ * -- and visdom.experiments.store._sort_pairs for absent values, which sort
+ * last in both directions. NaN is the one deliberate divergence: the backend
+ * leaves it in the ordered bucket, where Python's sort gives it no defined
+ * position, so the table treats it as missing instead.
+ */
+
 const SPINE_LIGHT = [235, 240, 249];
 const SPINE_DARK = [59, 89, 152];
+
+const SPINE_TEXT_CANDIDATES = [
+  { color: '#333', rgb: [51, 51, 51] },
+  { color: '#fff', rgb: [255, 255, 255] },
+  { color: '#000', rgb: [0, 0, 0] },
+];
+
+const MIN_CONTRAST = 4.5;
+
+const PRECISION = 4;
+const EXPONENTIAL_ABOVE = 1e6;
+const EXPONENTIAL_BELOW = 1e-4;
 
 export const COLUMN_GROUPS = [
   { key: 'param', label: 'params' },
@@ -34,11 +63,15 @@ export function isNumeric(value) {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+export function isNumberLike(value) {
+  return typeof value === 'number' && !Number.isNaN(value);
+}
+
 export function orderKey(value) {
   if (typeof value === 'boolean') {
-    return [1, 0, String(value)];
+    return [1, 0, value ? 'True' : 'False'];
   }
-  if (isNumeric(value)) {
+  if (isNumberLike(value)) {
     return [0, value, ''];
   }
   return [1, 0, String(value)];
@@ -46,7 +79,7 @@ export function orderKey(value) {
 
 export function compareOrderKeys(a, b) {
   if (a[0] !== b[0]) return a[0] - b[0];
-  if (a[1] !== b[1]) return a[1] - b[1];
+  if (a[1] !== b[1]) return a[1] < b[1] ? -1 : 1;
   if (a[2] < b[2]) return -1;
   if (a[2] > b[2]) return 1;
   return 0;
@@ -122,9 +155,18 @@ export function groupColumnTree(columns, groups) {
 export function formatValue(value) {
   if (isMissing(value)) return '—';
   if (typeof value === 'number') {
-    if (!Number.isFinite(value)) return '—';
+    if (value === Infinity) return '∞';
+    if (value === -Infinity) return '-∞';
     if (Number.isInteger(value)) return String(value);
-    return String(parseFloat(value.toPrecision(4)));
+    const rounded = parseFloat(value.toPrecision(PRECISION));
+    const magnitude = Math.abs(rounded);
+    if (
+      magnitude >= EXPONENTIAL_ABOVE ||
+      (magnitude > 0 && magnitude < EXPONENTIAL_BELOW)
+    ) {
+      return rounded.toExponential(PRECISION - 1).replace('e+', 'e');
+    }
+    return String(rounded);
   }
   return String(value);
 }
@@ -166,34 +208,83 @@ export function numericExtent(records, accessor) {
   return { min, max };
 }
 
-export function spineStyle(value, extent) {
+function channelLuminance(channel) {
+  const c = channel / 255;
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+export function relativeLuminance(rgb) {
+  return (
+    0.2126 * channelLuminance(rgb[0]) +
+    0.7152 * channelLuminance(rgb[1]) +
+    0.0722 * channelLuminance(rgb[2])
+  );
+}
+
+export function contrastRatio(rgbA, rgbB) {
+  const a = relativeLuminance(rgbA);
+  const b = relativeLuminance(rgbB);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+
+export function textColorFor(rgb) {
+  let fallback = SPINE_TEXT_CANDIDATES[0];
+  let fallbackRatio = 0;
+  for (let i = 0; i < SPINE_TEXT_CANDIDATES.length; i++) {
+    const candidate = SPINE_TEXT_CANDIDATES[i];
+    const ratio = contrastRatio(rgb, candidate.rgb);
+    if (ratio >= MIN_CONTRAST) return candidate.color;
+    if (ratio > fallbackRatio) {
+      fallbackRatio = ratio;
+      fallback = candidate;
+    }
+  }
+  return fallback.color;
+}
+
+export function spineColor(value, extent) {
   if (!extent || !isNumeric(value)) return null;
   const { min, max } = extent;
   let t = max > min ? (value - min) / (max - min) : 1;
   if (t < 0) t = 0;
   else if (t > 1) t = 1;
-  const mix = (a, b) => Math.round(a + (b - a) * t);
-  const bg =
-    'rgb(' +
-    mix(SPINE_LIGHT[0], SPINE_DARK[0]) +
-    ', ' +
-    mix(SPINE_LIGHT[1], SPINE_DARK[1]) +
-    ', ' +
-    mix(SPINE_LIGHT[2], SPINE_DARK[2]) +
-    ')';
-  return { backgroundColor: bg, color: t > 0.62 ? '#fff' : '#333' };
+  return SPINE_LIGHT.map((from, i) =>
+    Math.round(from + (SPINE_DARK[i] - from) * t)
+  );
+}
+
+export function spineStyle(value, extent) {
+  const rgb = spineColor(value, extent);
+  if (!rgb) return null;
+  return {
+    backgroundColor: 'rgb(' + rgb.join(', ') + ')',
+    color: textColorFor(rgb),
+  };
+}
+
+export function buildRowIds(records) {
+  const ids = new Map();
+  (records || []).forEach((record, index) => {
+    ids.set(record, record.env_id || 'row:' + index);
+  });
+  return ids;
 }
 
 export function cellClass(value, options) {
   const opts = options || {};
   return (
     'hparams-cell' +
-    (isNumeric(value) ? ' hparams-cell-num' : '') +
+    (isNumberLike(value) ? ' hparams-cell-num' : '') +
     (opts.spine ? ' hparams-cell-spine' : '') +
     (opts.separator ? ' hparams-col-sep' : '')
   );
 }
 
+/*
+ * Numeric param/metric columns only — the axes a scatter matrix (SPLOM) or a
+ * "color by" ramp can actually plot. Tags are excluded (categorical) and any
+ * column whose values are all missing/non-numeric is dropped.
+ */
 export function selectNumericColumns(records, columns) {
   return (columns || []).filter(
     (col) =>
@@ -254,6 +345,13 @@ export function completeRecords(records, cols) {
   );
 }
 
+/*
+ * Build Plotly `parcoords` dimensions. Plotly cannot render null/NaN cells —
+ * one sparse axis corrupts every line -- so callers pass records that already
+ * hold a numeric value on every axis (see completeRecords). Each axis spans its
+ * exact data range; an axis whose values are all equal gets a small symmetric
+ * range so it does not collapse to zero height.
+ */
 export function buildParcoordsDimensions(records, columns, selectedIds) {
   const byId = new Map((columns || []).map((col) => [col.id, col]));
   const dimensions = [];
@@ -507,4 +605,466 @@ export function selectMetricSeries(runs, metricKey, colorIndex) {
     });
   });
   return { plotted, missing };
+}
+
+export const StatusBadge = ({ status }) =>
+  status ? (
+    <span className={'hparams-run-status hparams-status-' + status}>
+      {status}
+    </span>
+  ) : null;
+
+const TREE_PROPS = {
+  treeLine: true,
+  treeDefaultExpandAll: true,
+  dropdownMatchSelectWidth: false,
+};
+
+export const HParamsMessage = ({ wrapClass, tone, children }) => {
+  const message = (
+    <div className={'hparams-message hparams-' + (tone || 'empty')}>
+      {children}
+    </div>
+  );
+  return wrapClass ? <div className={wrapClass}>{message}</div> : message;
+};
+
+export const ColumnSelect = ({
+  value,
+  placeholder,
+  treeData,
+  onChange,
+  label,
+}) => (
+  <TreeSelect
+    {...TREE_PROPS}
+    className="hparams-treeselect hparams-select-narrow"
+    value={value || undefined}
+    placeholder={placeholder}
+    allowClear
+    treeData={treeData}
+    onChange={(next) => onChange(next || null)}
+    aria-label={label}
+  />
+);
+
+export const ColumnMultiSelect = ({
+  value,
+  placeholder,
+  treeData,
+  maxCount,
+  onChange,
+  label,
+}) => (
+  <TreeSelect
+    {...TREE_PROPS}
+    className="hparams-treeselect hparams-select-wide"
+    value={value}
+    placeholder={placeholder}
+    treeCheckable
+    multiple
+    showCheckedStrategy="SHOW_CHILD"
+    maxTagCount={3}
+    treeData={treeData}
+    onChange={(next) =>
+      onChange(Array.isArray(next) ? next.slice(0, maxCount) : [])
+    }
+    aria-label={label}
+  />
+);
+
+const CSV_MIME = 'text/csv;charset=utf-8';
+const JSON_MIME = 'application/json';
+const NEEDS_QUOTING = /[",\r\n]/;
+const FORMULA_START = /^[=+\-@\t\r]/;
+const NUMERIC = /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/;
+
+function csvCell(value) {
+  if (isMissing(value)) return '';
+  const raw =
+    value !== null && typeof value === 'object'
+      ? JSON.stringify(value)
+      : String(value);
+  if (FORMULA_START.test(raw) && !NUMERIC.test(raw)) {
+    return '"\'' + raw.replace(/"/g, '""') + '"';
+  }
+  if (NEEDS_QUOTING.test(raw)) return '"' + raw.replace(/"/g, '""') + '"';
+  return raw;
+}
+
+export function buildCsv(records, columns) {
+  const cols = columns || [];
+  const header = ['run', 'env_id', 'status'].concat(
+    cols.map((col) => col.group + '.' + col.label)
+  );
+  const lines = [header.map(csvCell).join(',')];
+  (records || []).forEach((record) => {
+    const row = [runLabel(record), record.env_id, record.status].concat(
+      cols.map((col) => col.accessor(record))
+    );
+    lines.push(row.map(csvCell).join(','));
+  });
+  return lines.join('\r\n');
+}
+
+export function buildJson(records, paramKeys, metricKeys, tagKeys) {
+  return JSON.stringify(
+    {
+      records: records || [],
+      param_keys: paramKeys || [],
+      metric_keys: metricKeys || [],
+      tag_keys: tagKeys || [],
+    },
+    null,
+    2
+  );
+}
+
+export function downloadText(text, filename, mime) {
+  const blob = new Blob([text], { type: mime });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.download = filename;
+  link.href = url;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
+
+export function downloadJson(value, filename) {
+  downloadText(JSON.stringify(value), filename, JSON_MIME);
+}
+
+export function exportCsv(records, columns, filename) {
+  downloadText(buildCsv(records, columns), filename, CSV_MIME);
+}
+
+export function exportJson(records, keys, filename) {
+  const text = buildJson(
+    records,
+    keys.paramKeys,
+    keys.metricKeys,
+    keys.tagKeys
+  );
+  downloadText(text, filename, JSON_MIME);
+}
+
+/*
+ * The Plotly-facing helpers below are the one part of this module that reaches
+ * for the global Plotly instance and the DOM rather than staying pure.
+ */
+
+const SNAPSHOT_NOTICE_DELAY = 700;
+
+export const PLOT_COLORSCALE = 'Viridis';
+
+export const RUN_PALETTE = [
+  '#1f77b4',
+  '#ff7f0e',
+  '#2ca02c',
+  '#d62728',
+  '#9467bd',
+  '#8c564b',
+  '#e377c2',
+  '#7f7f7f',
+  '#bcbd22',
+  '#17becf',
+];
+
+export function runColor(index) {
+  const i = Number.isFinite(index) ? Math.abs(Math.trunc(index)) : 0;
+  return RUN_PALETTE[i % RUN_PALETTE.length];
+}
+
+export function notify(message, kind) {
+  const lib = window.Plotly && window.Plotly.Lib;
+  if (lib && typeof lib.notifier === 'function') lib.notifier(message, kind);
+}
+
+export function downloadPlotPng(gd, filename) {
+  if (!window.Plotly || typeof window.Plotly.toImage !== 'function') return;
+  let done = false;
+  const timer = setTimeout(() => {
+    if (!done) notify('Taking snapshot - this may take a few seconds', 'long');
+  }, SNAPSHOT_NOTICE_DELAY);
+
+  window.Plotly.toImage(gd, {
+    format: 'png',
+    width: gd.offsetWidth || 900,
+    height: gd.offsetHeight || 600,
+  })
+    .then((url) => {
+      done = true;
+      clearTimeout(timer);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    })
+    .catch(() => {
+      done = true;
+      clearTimeout(timer);
+      notify('Snapshot failed', 'long');
+    });
+}
+
+export function applySnapshotButton(config, filename) {
+  const icons = window.Plotly && window.Plotly.Icons;
+  const icon = icons && icons.camera;
+  if (!icon) return config;
+  config.modeBarButtonsToRemove = ['toImage'];
+  config.modeBarButtonsToAdd = [
+    {
+      name: 'downloadPng',
+      title: 'Download plot as PNG',
+      icon,
+      click: (gd) => downloadPlotPng(gd, filename),
+    },
+  ];
+  return config;
+}
+
+export function observePlotResize(el) {
+  const isDisplayed = (node) =>
+    !!(node && node.offsetWidth > 0 && node.offsetHeight > 0);
+  const resizeObserver = new ResizeObserver(() => {
+    if (window.Plotly && el._fullLayout && isDisplayed(el)) {
+      window.Plotly.Plots.resize(el);
+    }
+  });
+  resizeObserver.observe(el);
+  return () => {
+    resizeObserver.disconnect();
+    if (window.Plotly && el._fullLayout) window.Plotly.purge(el);
+  };
+}
+
+export function usePlotResize(ref) {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    return observePlotResize(el);
+  }, [ref]);
+}
+
+export function plotBaseLayout() {
+  return {
+    font: { family: '"Open Sans", sans-serif', size: 11, color: '#333' },
+    paper_bgcolor: '#ffffff',
+    plot_bgcolor: '#ffffff',
+  };
+}
+
+export function plotAxisStyle() {
+  return {
+    showline: true,
+    linecolor: '#aab8d8',
+    linewidth: 1,
+    gridcolor: '#f0f2f8',
+    zeroline: false,
+    ticklen: 3,
+    tickfont: { size: 10, color: '#666' },
+    automargin: true,
+  };
+}
+
+export function plotRevision(...parts) {
+  return parts.join('::');
+}
+
+export function plotColorbar(label) {
+  return {
+    title: { text: label, side: 'right', font: { size: 11 } },
+    thickness: 12,
+    len: 0.6,
+    outlinewidth: 0,
+  };
+}
+
+export function renderPlot(el, data, layout, filename, onReady) {
+  if (!el || !window.Plotly) return;
+  const config = applySnapshotButton(
+    {
+      showLink: false,
+      displaylogo: false,
+      responsive: true,
+      doubleClick: 'reset',
+    },
+    filename
+  );
+  try {
+    window.Plotly.react(el, data, layout, config)
+      .then(() => {
+        if (el._fullLayout && el.offsetWidth > 0) {
+          window.Plotly.Plots.resize(el);
+        }
+        if (onReady) onReady(el);
+      })
+      .catch(() => window.Plotly.purge(el));
+  } catch (e) {
+    window.Plotly.purge(el);
+  }
+}
+
+export function useHParamsColumns(paramKeys, metricKeys, tagKeys) {
+  return useMemo(
+    () => buildColumns(paramKeys, metricKeys, tagKeys),
+    [paramKeys, metricKeys, tagKeys]
+  );
+}
+
+export function useHParamsAxes({
+  records,
+  columnRecords,
+  paramKeys,
+  metricKeys,
+  tagKeys,
+  selectedDims,
+  colorBy,
+  maxDims,
+  preferDense = false,
+}) {
+  const pickerRecords = columnRecords || records;
+
+  const columns = useHParamsColumns(paramKeys, metricKeys, tagKeys);
+
+  const numericCols = useMemo(
+    () => selectNumericColumns(pickerRecords, columns),
+    [pickerRecords, columns]
+  );
+
+  const dims = useMemo(() => {
+    const valid = new Set(numericCols.map((col) => col.id));
+    if (Array.isArray(selectedDims)) {
+      const chosen = selectedDims.filter((id) => valid.has(id));
+      if (chosen.length > 0 || selectedDims.length === 0) {
+        return chosen.slice(0, maxDims);
+      }
+    }
+    const isDense = preferDense
+      ? (col) => records.every((record) => isNumeric(col.accessor(record)))
+      : null;
+    return defaultDimIds(numericCols, isDense).slice(0, maxDims);
+  }, [selectedDims, numericCols, records, maxDims, preferDense]);
+
+  const activeColorBy = useMemo(() => {
+    if (!colorBy) return null;
+    return numericCols.some((col) => col.id === colorBy) ? colorBy : null;
+  }, [colorBy, numericCols]);
+
+  const treeData = useMemo(
+    () => groupColumnTree(numericCols, NUMERIC_GROUPS),
+    [numericCols]
+  );
+
+  const truncated =
+    (selectedDims || []).filter((id) =>
+      numericCols.some((col) => col.id === id)
+    ).length > maxDims;
+
+  return {
+    columns,
+    numericCols,
+    dims,
+    colorBy: activeColorBy,
+    treeData,
+    truncated,
+    hasPlot: numericCols.length >= 2,
+  };
+}
+
+const NO_EXPERIMENTS = [];
+const COMPARE_BATCH_SIZE = 1000;
+
+function batchIds(ids) {
+  const batches = [];
+  for (let i = 0; i < ids.length; i += COMPARE_BATCH_SIZE) {
+    batches.push(ids.slice(i, i + COMPARE_BATCH_SIZE));
+  }
+  return batches;
+}
+
+export function useExperimentMetrics(records, cacheRef) {
+  const [nonce, setNonce] = useState(0);
+  const [state, setState] = useState({
+    status: 'idle',
+    error: null,
+    experiments: NO_EXPERIMENTS,
+  });
+
+  const envIds = useMemo(
+    () => (records || []).map((r) => r.env_id).filter((id) => !!id),
+    [records]
+  );
+
+  const refresh = useCallback(() => {
+    const cache = cacheRef.current;
+    if (cache) envIds.forEach((id) => cache.delete(id));
+    setNonce((n) => n + 1);
+  }, [cacheRef, envIds]);
+
+  useEffect(() => {
+    const cache = cacheRef.current;
+    if (envIds.length === 0) {
+      setState({ status: 'idle', error: null, experiments: NO_EXPERIMENTS });
+      return undefined;
+    }
+
+    const readCache = () => envIds.map((id) => cache.get(id)).filter(Boolean);
+    const wanted = envIds.filter((id) => !cache.has(id));
+    if (wanted.length === 0) {
+      setState({ status: 'ready', error: null, experiments: readCache() });
+      return undefined;
+    }
+
+    let cancelled = false;
+    const controller = new AbortController();
+    setState((prev) => ({ ...prev, status: 'loading', error: null }));
+
+    Promise.all(
+      batchIds(wanted).map((ids) =>
+        fetchExperimentComparison(ids, controller.signal)
+      )
+    )
+      .then((replies) => {
+        if (cancelled) return;
+        replies.forEach((reply) => {
+          const loaded = (reply && reply.experiments) || [];
+          loaded.forEach((exp) => {
+            if (exp && typeof exp.env_id === 'string')
+              cache.set(exp.env_id, exp);
+          });
+        });
+        setState({ status: 'ready', error: null, experiments: readCache() });
+      })
+      .catch((err) => {
+        if (cancelled || (err && err.name === 'AbortError')) return;
+        setState({
+          status: 'error',
+          error: (err && err.message) || 'Could not load metric history.',
+          experiments: NO_EXPERIMENTS,
+        });
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [envIds, nonce, cacheRef]);
+
+  const parsed = useMemo(
+    () => buildMetricSeries(state.experiments),
+    [state.experiments]
+  );
+
+  return {
+    status: state.status,
+    error: state.error,
+    runs: parsed.runs,
+    metricKeys: parsed.metricKeys,
+    refresh,
+  };
 }

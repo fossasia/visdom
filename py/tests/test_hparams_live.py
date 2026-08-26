@@ -111,6 +111,7 @@ class TestResolveTargets(unittest.TestCase):
                 super().__init__(*args, **kwargs)
                 self.touched = False
 
+            @property
             def is_loaded(self):
                 return False
 

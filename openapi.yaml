@@ -404,11 +404,13 @@ paths:
         optional `step`, creating the experiment if it does not exist yet.
 
 
-        - `finish`: mark the experiment terminal (`finished` or `failed`).
+        - `finish`: mark the experiment terminal (`finished` or `failed`). An
+        experiment that is already terminal cannot be finished again.
 
 
-        Once an experiment is terminal, `log` and `metrics` are rejected with
-        `409` so a finished run's recorded data cannot change after the fact.
+        Once an experiment is terminal, every action is rejected with `409`, so
+        neither a finished run's recorded data nor its final status can change
+        after the fact.
         Every action writes, so the endpoint is rejected with `403` when the
         server is running in readonly mode.
       requestBody:
@@ -474,7 +476,9 @@ paths:
         "404":
           description: A `finish` was requested for an env that has no experiment.
         "409":
-          description: A `log`/`metrics` write was attempted on a terminal (finished/failed) experiment.
+          description: >
+            A write was attempted on a terminal (finished/failed) experiment —
+            a `log`/`metrics` call, or a second `finish`.
 
   /experiments/search:
     post:
@@ -583,10 +587,11 @@ paths:
                     description: The query used, `""` if none was given.
         "400":
           description: >
-            Invalid request — malformed `query` syntax, a non-string
-            `query`/`sort_by`, a `limit`/`offset` that is not a non-negative
-            integer, or an `offset` + `limit` past the 10000 window. Also
-            returned when authentication is required but not provided.
+            Invalid request — a body that is not a JSON object, malformed
+            `query` syntax, a non-string `query`/`sort_by`, a `limit`/`offset`
+            that is not a non-negative integer, or an `offset` + `limit` past
+            the 10000 window. Also returned when authentication is required but
+            not provided.
 
   /experiments/compare:
     post:
@@ -662,8 +667,9 @@ paths:
                     $ref: "#/components/schemas/ExperimentComparisonSection"
         "400":
           description: >
-            Invalid request — `env_ids` missing, empty, not a list, naming more
-            than 1000 environments, or holding something other than strings.
+            Invalid request — the body is not a JSON object, or `env_ids` is
+            missing, empty, not a list, names more than 1000 environments, or
+            holds something other than strings.
             Also returned when authentication is required but not provided.
         "404":
           description: One or more of the given `env_ids` has no experiment.
@@ -676,7 +682,7 @@ paths:
       description: >
         Reserved endpoint for hyper-parameter suggestion. Choosing the next set
         of parameters to try is a search-strategy problem (Optuna-backed) that
-        lands in a later layer, so this is currently a stub: it accepts the
+        lands in a later release, so this is currently a stub: it accepts the
         request and replies `501 Not Implemented` with a JSON body carrying a
         `suggestion: null` placeholder, rather than a made-up suggestion. The
         route, the `suggest_experiment` client method and this documentation are
@@ -702,7 +708,7 @@ paths:
         "501":
           description: >
             Not implemented — the suggestion strategy is reserved for a later
-            layer. The body is a JSON stub.
+            release. The body is a JSON stub.
           content:
             application/json:
               schema:
@@ -717,6 +723,230 @@ paths:
                   suggestion:
                     nullable: true
                     description: Always `null` while the endpoint is a stub.
+        "400":
+          description: >
+            Invalid request — the body is present but is not valid JSON, or is
+            not a JSON object. Also returned when authentication is required
+            but not provided.
+
+  /experiments/tags:
+    get:
+      operationId: getEnvironmentTags
+      tags: [Experiments]
+      summary: Read experiment tags for environments
+      description: >
+        Returns one environment's key/value tag mapping when `eid` is supplied,
+        or an `{eid: {name: value}}` mapping for all tagged environments.
+        Tags are stored in the existing `Experiment.tags` metadata; no separate
+        tag index or persistence format is maintained.
+      parameters:
+        - in: query
+          name: eid
+          schema:
+            type: string
+          description: Optional environment ID.
+      responses:
+        "200":
+          description: One tag mapping or all environment tag mappings.
+        "401":
+          description: Authentication required but not provided.
+    post:
+      operationId: updateEnvironmentTags
+      tags: [Experiments]
+      summary: Read, replace, or append environment tags
+      description: >
+        With `action: set` (the default), replaces an environment's tags or
+        appends them when `append` is true. `action: get` reads the same data as
+        GET while allowing later clients to use the shared POST transport.
+        The `tags` field is required for `set`; an explicit empty object clears
+        the environment's tags.
+        Tag changes are allowed for completed experiments because they are
+        organizational metadata. Successful writes broadcast `tags_update` to
+        both WebSocket and polling browser clients.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action:
+                  type: string
+                  enum: [get, set]
+                  default: set
+                eid:
+                  type: string
+                  description: Target environment. Defaults to `main` for set.
+                tags:
+                  type: object
+                  maxProperties: 20
+                  description: >
+                    Required for `action: set`. String tag names mapped to string
+                    values. Names are limited to 50 characters by the domain
+                    layer. An empty object explicitly clears all tags.
+                  additionalProperties:
+                    type: string
+                append:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          description: The resulting tags, or the requested tag mapping.
+        "400":
+          description: >
+            Invalid action, missing or invalid tag mapping, tag limit, or append
+            flag.
+        "401":
+          description: Authentication required but not provided.
+        "403":
+          description: Tag writes are disabled in readonly mode.
+
+  /experiments/hparams:
+    post:
+      operationId: createHparamsPane
+      tags: [Experiments]
+      summary: Open a hyper-parameter pane over logged experiments
+      description: >
+        Selects experiments, flattens them into a table of hyper-parameters
+        against their latest metric values (and tags), and registers a
+        dedicated `hparams` window with that content. The window is written
+        into the env state, broadcast to connected clients, and the
+        environment is saved immediately, so the pane is on disk without an
+        explicit save.
+
+
+        `mode` chooses how the runs are selected; when omitted it is inferred
+        from which of `query`/`env_ids` were supplied:
+
+
+        - `query`: the runs matching `query` (the syntax of
+        `/experiments/search`). The query must be non-empty and `env_ids`
+        must not be given.
+
+
+        - `env_ids`: the runs named in `env_ids`, in that order. `env_ids`
+        must be non-empty and `query` must not be given; missing envs are
+        skipped rather than an error.
+
+
+        - `both`: the intersection — runs matching `query` and named in
+        `env_ids`, ordered by `env_ids`. Both must be given and non-empty.
+
+
+        There is no "show everything" call: with neither `query` nor
+        `env_ids` there is nothing to select (400). A blank query counts as
+        no query. The resolved selection is stored on the window so a later
+        `/experiments/hparams/update` can re-run it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                eid:
+                  type: string
+                  description: Environment to register the pane in. Defaults to `main`.
+                query:
+                  type: string
+                  description: Selection query, e.g. `lr < 0.01 AND acc > 0.9`.
+                env_ids:
+                  type: array
+                  items:
+                    type: string
+                  description: Explicit environment ids, kept in the order given.
+                mode:
+                  type: string
+                  enum: [query, env_ids, both]
+                  description: How the runs are selected. Inferred when omitted.
+                win:
+                  type: string
+                  description: Window ID to register the pane under. Autogenerated when omitted.
+                opts:
+                  type: object
+                  additionalProperties: true
+                  description: Window options (`title` defaults to `Hyperparameters`).
+      responses:
+        "200":
+          description: The created window ID as plain text.
+          content:
+            text/plain:
+              schema:
+                type: string
+        "400":
+          description: >
+            Invalid request — no selection given, a mode/argument combination
+            that is not allowed, a malformed `query`, or non-string `env_ids`.
+            Also returned when authentication is required but not provided.
+
+  /experiments/hparams/update:
+    post:
+      operationId: updateHparamsPane
+      tags: [Experiments]
+      summary: Change or refresh an existing hyper-parameter pane
+      description: >
+        The dedicated write path for `hparams` windows — the generic `/update`
+        endpoint only understands plot-shaped content. The target `win` must
+        name an existing window of type `hparams`.
+
+
+        With `query`/`env_ids`/`mode` in the body the pane's selection is
+        replaced, under exactly the rules of `/experiments/hparams`. With none
+        of them the selection stored on the window is re-run — a manual
+        refresh that picks up runs logged (or newly matching) since the pane
+        was built.
+
+
+        The rebuilt window keeps its id and position but carries a fresh
+        `contentID`; it is broadcast to the environment's subscribers and the
+        environment is saved, so state and disk reflect the update
+        immediately. `opts` overrides the pane's title/size; when omitted the
+        current ones are kept.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [win]
+              properties:
+                win:
+                  type: string
+                  description: ID of the hparams window to update.
+                eid:
+                  type: string
+                  description: Environment holding the window. Defaults to `main`.
+                query:
+                  type: string
+                  description: Replacement selection query.
+                env_ids:
+                  type: array
+                  items:
+                    type: string
+                  description: Replacement explicit environment ids.
+                mode:
+                  type: string
+                  enum: [query, env_ids, both]
+                  description: How the replacement selection works. Inferred when omitted.
+                opts:
+                  type: object
+                  additionalProperties: true
+                  description: Overrides for the pane's window options.
+      responses:
+        "200":
+          description: The updated window ID as plain text.
+          content:
+            text/plain:
+              schema:
+                type: string
+        "400":
+          description: >
+            Invalid request — `win` missing, the window is not an `hparams`
+            window, a bare refresh on a window with no stored selection, or an
+            invalid replacement selection. Also returned when authentication
+            is required but not provided.
+        "404":
+          description: The environment or the window does not exist.
 
   /experiments/hparams:
     post:
@@ -1214,8 +1444,9 @@ paths:
         the WebSocket protocol (HTTP Upgrade). On connection, the server
         sends a `register` message with the assigned socket ID, readonly
         status, and current environment list. The server then streams
-        window updates, close events, environment updates, and layout
-        changes. Clients can send commands: `close`, `save`, `save_all`,
+        window updates, close events, environment/tag updates, and layout
+        changes. Tag updates use the `tags_update` command with
+        `{eid, tags}` data. Clients can send commands: `close`, `save`, `save_all`,
         `delete_env`, `save_layouts`, `forward_to_vis`,
         `layout_item_update`, `pop_embeddings_pane`.
 

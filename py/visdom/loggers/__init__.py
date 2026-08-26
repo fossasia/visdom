@@ -9,3 +9,17 @@ from visdom.pytorch import VisdomLogger
 from visdom.loggers.sklearn import VisdomSklearnLogger
 
 __all__ = ["VisdomLogger", "VisdomSklearnLogger"]
+
+try:
+    from visdom.loggers.xgboost import VisdomXGBLogger
+
+    __all__.append("VisdomXGBLogger")
+except ImportError:
+    pass
+
+try:
+    from visdom.loggers.keras import VisdomKerasLogger
+
+    __all__.append("VisdomKerasLogger")
+except ImportError:
+    pass

@@ -31,6 +31,8 @@ from visdom.experiments.query import (
     And,
     Comparison,
     ExperimentLike,
+    MAX_QUERY_DEPTH,
+    MAX_QUERY_LENGTH,
     Node,
     Or,
     Query,
@@ -39,7 +41,16 @@ from visdom.experiments.query import (
     parse_query,
 )
 from visdom.experiments.records import flatten_experiments
-from visdom.experiments.store import DEFAULT_SORT_FIELD, ExperimentStore
+from visdom.experiments.store import (
+    DEFAULT_SORT_FIELD,
+    ExperimentStore,
+    METADATA_KEY,
+    retarget_experiment,
+)
+from visdom.experiments.tags import (
+    normalize_tags,
+    tags_to_mapping,
+)
 
 __all__ = [
     "And",
@@ -52,6 +63,9 @@ __all__ = [
     "ExperimentLike",
     "ExperimentStore",
     "LiveUpdateQueue",
+    "MAX_QUERY_DEPTH",
+    "MAX_QUERY_LENGTH",
+    "METADATA_KEY",
     "Metric",
     "Node",
     "Or",
@@ -60,11 +74,14 @@ __all__ = [
     "QueryParseError",
     "SECTIONS",
     "Tag",
+    "normalize_tags",
+    "tags_to_mapping",
     "build_comparison",
     "build_record",
     "flatten_experiments",
     "parse_query",
     "resolve_targets",
+    "retarget_experiment",
     "STATUS_FAILED",
     "STATUS_FINISHED",
     "STATUS_RUNNING",

@@ -58,8 +58,7 @@ def resolve_targets(state, changed):
         env = state.get(eid)
         if env is None:
             continue
-        is_loaded = getattr(env, "is_loaded", None)
-        if is_loaded is not None and not is_loaded():
+        if not getattr(env, "is_loaded", True):
             continue
         for win_id, win in list((env.get("jsons") or {}).items()):
             if not isinstance(win, dict) or win.get("type") != "hparams":

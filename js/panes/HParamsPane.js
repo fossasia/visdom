@@ -7,12 +7,16 @@
  *
  */
 
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 import HParamsCompare from './hparams/HParamsCompare';
-import { downloadJson, exportCsv, exportJson } from './hparams/hparamsExport';
 import HParamsFilters from './hparams/HParamsFilters';
-import HParamsMessage from './hparams/HParamsMessage';
 import HParamsMetrics from './hparams/HParamsMetrics';
 import HParamsParallelCoords from './hparams/HParamsParallelCoords';
 import HParamsSplom from './hparams/HParamsSplom';
@@ -20,11 +24,16 @@ import HParamsTable from './hparams/HParamsTable';
 import {
   applyFilters,
   buildFilterSpecs,
+  buildRowIds,
   collectStatuses,
   countActiveFilters,
+  downloadJson,
+  exportCsv,
+  exportJson,
   filterRecords,
+  HParamsMessage,
+  useHParamsColumns,
 } from './hparams/hparamsUtils';
-import useHParamsColumns from './hparams/useHParamsColumns';
 import Pane from './Pane';
 
 const VIEWS = [
@@ -110,13 +119,27 @@ var HParamsPane = (props) => {
   const activeFilters =
     countActiveFilters(filters, specs) + (tableFilter.trim() ? 1 : 0);
 
+  const rowIds = useMemo(() => buildRowIds(records), [records]);
+
+  useEffect(() => {
+    setTableSelected((prev) => {
+      if (prev.size === 0) return prev;
+      const live = new Set(rowIds.values());
+      const next = new Set();
+      prev.forEach((id) => {
+        if (live.has(id)) next.add(id);
+      });
+      return next.size === prev.size ? prev : next;
+    });
+  }, [rowIds]);
+
   const selectionActive = tableSelected.size > 0;
   const selectedVisible = useMemo(
     () =>
       selectionActive
-        ? visibleRecords.filter((r) => tableSelected.has(r.env_id))
+        ? visibleRecords.filter((r) => tableSelected.has(rowIds.get(r)))
         : visibleRecords,
-    [selectionActive, visibleRecords, tableSelected]
+    [selectionActive, visibleRecords, tableSelected, rowIds]
   );
   const clearSelection = useCallback(() => setTableSelected(new Set()), []);
   const filtersToggleRef = useRef(null);
@@ -174,6 +197,7 @@ var HParamsPane = (props) => {
       isPlot && selectionActive ? selectedVisible : visibleRecords;
     const viewProps = {
       columnRecords: records,
+      rowIds,
       paramKeys,
       metricKeys,
       tagKeys,
