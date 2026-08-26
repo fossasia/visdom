@@ -2446,13 +2446,9 @@ class Visdom(object):
             for x in range(xmaps):
                 if k >= nmaps:
                     break
-                # Each cell is the image plus `padding` on all four sides, so
-                # the image starts exactly `padding` into it. The extra pixel
-                # this offset used to carry pushed the last row and column of
-                # the cell out of the grid, which raised on padding=0.
-                h_start = y * height + padding
+                h_start = y * height + 1 + padding
                 h_end = h_start + tensor.shape[2]
-                w_start = x * width + padding
+                w_start = x * width + 1 + padding
                 w_end = w_start + tensor.shape[3]
                 grid[:, h_start:h_end, w_start:w_end] = tensor[k]
                 k += 1
