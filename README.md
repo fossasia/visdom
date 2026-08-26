@@ -863,17 +863,18 @@ The following `opts` are supported:
 - Tensor of size `K` and `K x 3`: Instead of having a unique color per data point, the same color is shared for all points of a particular label.
 
 #### vis.sunburst
-This function draws a sunburst chart. It takes two input arrays: `parents` and `labels`.
-Values from the `parents` array define the hierarchical structure, indicating which parent sector a sector belongs to. Values from the `labels` array define the sector's label or name. Keep in mind that the `parents` and `labels` arrays must be of equal length. There is an optional third array called `values`, which is used to display a numerical value when hovering over a sector. If provided, the `values` array must be the same length as `parents` and `labels`.
+This function draws a sunburst chart. It takes two input arrays: `labels` and `parents`.
+Values from the `labels` array define the sector's label or name. Values from the `parents` array define the hierarchical structure, indicating which parent sector a sector belongs to -- note that at least one entry in `parents` must be an empty string `""`, marking the root of the hierarchy. Keep in mind that the `labels` and `parents` arrays must be of equal length. There is an optional third array called `values`, which is used to display a numerical value when hovering over a sector. If provided, the `values` array must be the same length as `labels` and `parents`.
 
-Examples: `vis.sunburst(parents, labels, opts)` or `vis.sunburst(parents, labels, values, opts)`
+Examples: `vis.sunburst(labels, parents, opts)` or `vis.sunburst(labels, parents, values, opts)`
 
 Following `opts` are currently supported:
 - `opts.font_size`    : define font size of label (`int`)
 - `opts.font_color`    : define font color of label (`string`)
-- `opts.opacity`    : define opacity of chart (`float`)
+- `opts.opacity`    : define opacity of chart (`float`, between 0 and 1)
 - `opts.line_width`    : define distance between two sectors and sector to its parents (`int`)
-
+- `opts.maxdepth`    : maximum number of hierarchy levels visible at once -- a positive integer, or `-1` to show all levels (`int`)
+- `opts.branchvalues`    : `'total'` or `'remainder'` -- how `values` are interpreted relative to children (`string`; default = `'remainder'`)
 
 #### vis.line
 This function draws a line plot. It takes as input an `N` or `NxM` tensor

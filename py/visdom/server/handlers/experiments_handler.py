@@ -16,12 +16,12 @@ through the server's ``DataStore`` (:class:`ExperimentStore` over
 ``handler.storage``), so it stays backend-agnostic.
 
 The window is registered like any other pane (:func:`register_window`): written
-into the env state and broadcast to connected clients, and the environment is
-saved as soon as the pane exists, so a pane survives a server crash without
-waiting for an explicit save. ``/experiments/hparams/update`` is the matching
-write path for an existing pane — replace its selection or re-run the stored
-one — since the generic ``/update`` endpoint only understands plot-shaped
-windows.
+into the env state and broadcast to connected clients, so it appears live and is
+also served on the next env load; the environment is saved as soon as the pane
+exists, so a pane survives a server crash without waiting for an explicit save.
+``/experiments/hparams/update`` is the matching write path for an existing pane
+— replace its selection or re-run the stored one — since the generic
+``/update`` endpoint only understands plot-shaped windows.
 """
 
 import tornado.escape
@@ -178,14 +178,17 @@ class ExperimentHparamsHandler(BaseHandler):
         Mirrors the selection the ``Visdom.hparams`` client used to do: a query
         goes through search, an ``env_ids`` selection reads only those
         environments, and ``both`` searches then narrows by ``env_ids``. A
-        malformed query raises ``HTTPError(400)``.
+        malformed query raises ``HTTPError(400)``; ids that name no experiment
+        at all raise ``HTTPError(404)``. Under ``both`` that is only the ids
+        with no experiment behind them — one that exists but does not match the
+        query is filtered out as the query asked.
         """
         wanted = spec.get("env_ids")
 
         if spec.get("mode") == "env_ids":
             experiments = []
             unknown = []
-            for env_id in wanted:
+            for env_id in wanted or []:
                 experiment = store.get_experiment(env_id)
                 if experiment is None:
                     unknown.append(env_id)
