@@ -10,6 +10,7 @@
 Contain the basic web request handlers that all other handlers derive from
 """
 
+import json
 import logging
 import traceback
 import http.client
@@ -18,6 +19,7 @@ import time
 import tornado.web
 import tornado.websocket
 
+from visdom.utils.shared_utils import NanSafeEncoder
 
 _COMMON_APP_ATTRIBUTES = (
     "state",
@@ -94,6 +96,32 @@ class BaseHandler(tornado.web.RequestHandler):
         """
         _copy_app_attributes(self, app, _WEB_APP_ATTRIBUTES)
 
+    _JSON_HTML_ESCAPES = {"<": "\\u003c", ">": "\\u003e", "&": "\\u0026"}
+
+    def write_json(self, payload):
+        """Serialise ``payload`` as JSON and finish the request with it.
+
+        Every JSON reply goes out through here rather than ``write(json.dumps(
+        ...))`` so the three things that make an echoed request value safe are
+        applied in one place and cannot drift apart:
+
+        * ``<``, ``>`` and ``&`` are escaped to their ``\\u003c``-style forms.
+          These are ordinary JSON escapes -- the string a client decodes is
+          byte-for-byte what it was -- but a reply echoing a request value can
+          no longer carry a literal ``<script>`` into a browser that decides to
+          render it.
+        * ``Content-Type: application/json`` plus ``X-Content-Type-Options:
+          nosniff`` tells that browser not to second-guess the type.
+        * ``NanSafeEncoder`` keeps the NaN/Infinity handling every existing
+          reply already relied on.
+        """
+        body = json.dumps(payload, cls=NanSafeEncoder)
+        for char, escape in BaseHandler._JSON_HTML_ESCAPES.items():
+            body = body.replace(char, escape)
+        self.set_header("Content-Type", "application/json; charset=UTF-8")
+        self.set_header("X-Content-Type-Options", "nosniff")
+        self.finish(body)
+
     def is_authorized(self):
         """Update access time and validate authentication for protected methods."""
         self.last_access = time.time()
@@ -147,8 +175,6 @@ class BaseHandler(tornado.web.RequestHandler):
             except Exception as e:
                 logging.error(e)
             self.set_status(status_code)
-            self.write(
-                f"""
+            self.write(f"""
                 <h1>{status_code} - {title}</h1>
-                """
-            )
+                """)

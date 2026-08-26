@@ -1191,17 +1191,14 @@ class ExperimentSearchHandler(BaseHandler):
         except QueryParseError as e:
             raise tornado.web.HTTPError(400, reason=str(e))
 
-        handler.write(
-            json.dumps(
-                {
-                    "experiments": [e.to_dict() for e in page],
-                    "total": total,
-                    "limit": limit,
-                    "offset": offset,
-                    "query": query or "",
-                },
-                cls=NanSafeEncoder,
-            )
+        handler.write_json(
+            {
+                "experiments": [e.to_dict() for e in page],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "query": query or "",
+            }
         )
 
     @check_auth
@@ -1292,7 +1289,7 @@ class ExperimentCompareHandler(BaseHandler):
         except KeyError as e:
             raise tornado.web.HTTPError(404, reason=str(e.args[0]))
 
-        handler.write(json.dumps(comparison, cls=NanSafeEncoder))
+        handler.write_json(comparison)
 
     @check_auth
     def post(self):

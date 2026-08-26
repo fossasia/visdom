@@ -248,6 +248,25 @@ class TestSearchEndpoint(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(body["experiments"][0]["env_id"], "run-b")
         self.assertEqual(body["query"], "lr < 0.01 AND acc > 0.9")
 
+    def test_echoed_query_cannot_carry_markup(self):
+        """The reply escapes ``<``/``>``/``&``, but decodes to the query verbatim."""
+        query = 'name = "<script>alert(1)</script> & co"'
+        resp = self.search({"query": query})
+        self.assertEqual(resp.code, 200)
+        raw = resp.body.decode("utf-8")
+        self.assertNotIn("<script>", raw)
+        self.assertIn("\\u003cscript\\u003e", raw)
+        self.assertNotIn("&", raw)
+        self.assertEqual(json.loads(raw)["query"], query)
+
+    def test_json_replies_are_not_sniffable(self):
+        """The reply is typed as JSON and browsers are told not to re-guess it."""
+        resp = self.search({})
+        self.assertEqual(
+            resp.headers["Content-Type"], "application/json; charset=UTF-8"
+        )
+        self.assertEqual(resp.headers["X-Content-Type-Options"], "nosniff")
+
     def test_experiments_are_returned_in_full(self):
         """Each result is the full experiment dict, params/metrics/tags included."""
         body = self.search_ok({"query": "name = alpha"})
