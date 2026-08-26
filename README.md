@@ -820,9 +820,13 @@ It accepts either:
 - raw binary labels and scores via `y_true` and `y_score`, or
 - precomputed curve points via `precision` and `recall`.
 
+A baseline showing the true class prevalence is only drawn for the
+`y_true`/`y_score` path, since prevalence cannot be recovered from
+`precision`/`recall` points alone.
+
 The following `opts` are supported:
 - `opts.title`      : plot title (`string`; default includes PR-AUC)
-- `opts.legend`     : two legend labels for curve and baseline (`list`)
+- `opts.legend`     : two legend labels for curve and baseline (`list`); the second label is unused when no baseline is drawn
 - `opts.xlabel`     : x-axis label (`string`; default = `Recall`)
 - `opts.ylabel`     : y-axis label (`string`; default = `Precision`)
 - `opts.layoutopts` : additional backend layout options (`dict`)
