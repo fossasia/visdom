@@ -219,16 +219,20 @@ test.describe('Image Pane', () => {
   test('image_basic download', async ({ page }) => {
     await runDemo(page, 'image_basic');
 
-    const saveBtn = page
+    const pane = page
       .locator(IMG_SEL)
       .first()
       .locator(`xpath=ancestor::*[contains(@class,'react-grid-item')]`)
-      .first()
-      .locator('button[title="save"]');
+      .first();
+
+    await pane.locator('button[title="export"]').click();
 
     const [download] = await Promise.all([
       page.waitForEvent('download'),
-      saveBtn.click(),
+      pane
+        .locator('.export-dropdown-menu')
+        .getByRole('menuitem', { name: 'JPG' })
+        .click(),
     ]);
 
     expect(download.suggestedFilename()).toBe('Random!.jpg');
@@ -239,16 +243,20 @@ test.describe('Image Pane', () => {
   test('image_save_jpeg', async ({ page }) => {
     await runDemo(page, 'image_save_jpeg');
 
-    const saveBtn = page
+    const pane = page
       .locator(IMG_SEL)
       .first()
       .locator(`xpath=ancestor::*[contains(@class,'react-grid-item')]`)
-      .first()
-      .locator('button[title="save"]');
+      .first();
+
+    await pane.locator('button[title="export"]').click();
 
     const [download] = await Promise.all([
       page.waitForEvent('download'),
-      saveBtn.click(),
+      pane
+        .locator('.export-dropdown-menu')
+        .getByRole('menuitem', { name: 'JPG' })
+        .click(),
     ]);
 
     expect(download.suggestedFilename()).toBe('Random image as jpg!.jpg');
@@ -270,7 +278,8 @@ test.describe('Image Pane', () => {
     await expect(slider).toBeVisible();
 
     // Use native input value setter — required because React overrides the setter.
-    // This mirrors the identical technique used in the Cypress test.
+    // Trigger the range input through its native setter so React receives the
+    // same input and change events as a user interaction.
     await slider.evaluate((range) => {
       const nativeSet = Object.getOwnPropertyDescriptor(
         window.HTMLInputElement.prototype,

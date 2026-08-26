@@ -39,7 +39,6 @@ from visdom.utils.shared_utils import (
     NanSafeEncoder,
 )
 
-
 # ---- Vaguely server-security related functions ---- #
 
 
@@ -55,6 +54,32 @@ def check_auth(f):
         f(handler, *args, **kwargs)
 
     return _check_auth
+
+
+def reject_readonly(handler):
+    """Answer 403 for a write attempted against a readonly server."""
+    handler.set_status(403)
+    handler.write({"success": False, "error": "The server is running in readonly mode"})
+
+
+def check_readonly(f):
+    """
+    Wrapper for handler methods that change server state, so a server
+    started with ``-readonly`` refuses them instead of applying them.
+
+    Sockets are already short-circuited wholesale in
+    ``AnySocketHandlerOrWrapper.on_message``; this is the HTTP half of the
+    same rule. Stack it under ``check_auth`` so an unauthenticated request
+    still answers 401 rather than 403.
+    """
+
+    def _check_readonly(handler, *args, **kwargs):
+        if handler.readonly:
+            reject_readonly(handler)
+            return
+        f(handler, *args, **kwargs)
+
+    return _check_readonly
 
 
 def set_cookie(value=None):
@@ -86,6 +111,11 @@ class LazyEnvData(Mapping):
         self._eid = eid
         self._raw_dict = None
 
+    @property
+    def is_loaded(self):
+        """Whether this environment has been materialized in memory."""
+        return self._raw_dict is not None
+
     def lazy_load_data(self):
         if self._raw_dict is not None:
             return
@@ -109,6 +139,10 @@ class LazyEnvData(Mapping):
         self.lazy_load_data()
         return self._raw_dict.__setitem__(key, value)
 
+    def __delitem__(self, key):
+        self.lazy_load_data()
+        return self._raw_dict.__delitem__(key)
+
     def __iter__(self):
         self.lazy_load_data()
         return iter(self._raw_dict)
@@ -125,9 +159,22 @@ def escape_eid(eid):
     """Replace forward slashes and other problematic characters
     with underscores and backslashes with hyphen, to avoid recognizing them as
     directories or breaking URLs and filenames.
+
+    Also strips surrounding whitespace. As ``JSONStore`` independently
+    strips whitespace before deriving an on-disk filename from an eid,
+    so two in-memory eids that differ only by leading/trailing whitespace
+    (e.g. ``"main"`` and ``"main "``) would otherwise stay distinct in ``self.state``
+    while silently colliding on disk - whichever one is saved last clobbers the other.
+    Stripping here, at the single choke point every eid passes through (HTTP handlers,
+    websocket handlers, and the storage layer all call this), keeps the in-memory key
+    and the on-disk filename in agreement.
     """
     return (
-        eid.replace("/", "_").replace("\\", "_").replace("\n", "-").replace("\r", "-")
+        eid.strip()
+        .replace("/", "_")
+        .replace("\\", "_")
+        .replace("\n", "-")
+        .replace("\r", "-")
     )
 
 
@@ -210,7 +257,7 @@ def window(args):
                 "show_slider": opts.get("show_slider", True),
             }
         )
-    elif ptype in ["image", "text", "properties"] and is_visdom_type:
+    elif ptype in ["image", "text", "properties", "hparams"] and is_visdom_type:
         p.update({"content": args["data"][0]["content"], "type": ptype})
     elif ptype == "table" and is_visdom_type:
         p.update(
@@ -302,6 +349,8 @@ def compare_envs(state, eids, socket, store, show_all=False):
 
             destWid = name2Wid[title]
             destWidJson = res["jsons"][destWid]
+            if "content" not in destWidJson:
+                continue  # nothing in the base env to merge into
             base_ptype = destWidJson.get("type", None)
             if base_ptype == "image_compare":
                 base_ptype = "image"
@@ -337,9 +386,10 @@ def compare_envs(state, eids, socket, store, show_all=False):
                     )
                     destWidJson["content"].append(next_img)
             elif ptype == "plot":
+                base_data = destWidJson["content"].get("data") or []
+                if not base_data or "name" not in base_data[0]:
+                    continue  # Skip windows with unnamed data
                 if ix == 0:
-                    if "name" not in destWidJson["content"]["data"][0]:
-                        continue  # Skip windows with unnamed data
                     destWidJson["has_compare"] = False
                     destWidJson["content"]["layout"]["showlegend"] = True
                     destWidJson["contentID"] = get_rand_id()
@@ -350,8 +400,6 @@ def compare_envs(state, eids, socket, store, show_all=False):
                             "name"
                         ] = "{}_{}".format(eidNums[eid], data["name"])
                 else:
-                    if "name" not in destWidJson["content"]["data"][0]:
-                        continue  # Skip windows with unnamed data
                     # has_compare will be set to True only if the window title is
                     # shared by at least 2 envs.
                     destWidJson["has_compare"] = True
@@ -457,6 +505,18 @@ def broadcast_envs(handler, target_subs=None):
                 cls=NanSafeEncoder,
             )
         )
+
+
+def broadcast_tags(handler, eid, tags, target_subs=None):
+    """Broadcast one environment's key/value tags to browser clients."""
+    if target_subs is None:
+        target_subs = handler.subs.values()
+    message = json.dumps(
+        {"command": "tags_update", "data": {"eid": eid, "tags": tags}},
+        cls=NanSafeEncoder,
+    )
+    for sub in target_subs:
+        sub.write_message(message)
 
 
 def send_to_sources(handler, msg):
@@ -593,9 +653,12 @@ def register_window(self, p, eid):
         p["i"] = env[p["id"]]["i"]
         p["comment"] = env[p["id"]].get("comment", p.get("comment", ""))
     else:
-        p["i"] = len(env)
+        # not len(env): closing any window but the last would hand the next
+        # one an index that is still in use. Same rule as the undo path.
+        p["i"] = max((w.get("i", -1) for w in env.values()), default=-1) + 1
 
     env[p["id"]] = p
+    self.mark_dirty(eid)
 
     broadcast_msg = dict(p)
     broadcast_msg["eid"] = eid
