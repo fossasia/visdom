@@ -112,16 +112,42 @@ class VisdomKerasLogger(Callback):
         self._step_wins = {}
         self._step = 0
 
+    @staticmethod
+    def _check_experiment_reply(reply, action):
+        """Warn if the server rejected an experiment-tracking call.
+
+        Connection failures raise and are caught by the callers below, but a
+        server-side rejection (readonly server, already-finished experiment,
+        unknown env) comes back as an ordinary reply with no exception. A
+        successful reply is always the stored experiment dict, keyed by
+        "env_id"; anything else means nothing was recorded. `reply is True`
+        is `_send`'s own sentinel for offline mode, where nothing was sent
+        to a server at all, so it is not a rejection.
+
+        Returns True if the call succeeded (or was offline), False if it
+        was rejected, so on_train_begin can stop retrying after a failed
+        handshake.
+        """
+        if reply is True:
+            return True
+        if not isinstance(reply, dict) or "env_id" not in reply:
+            warnings.warn("VisdomKerasLogger failed to {}: {}".format(action, reply))
+            return False
+        return True
+
     def on_train_begin(self, logs=None):
         self._step = 0
         if self._params is not None:
             try:
-                self.viz.experiment(params=self._params, env=self.env)
+                reply = self.viz.experiment(params=self._params, env=self.env)
+                if not self._check_experiment_reply(reply, "start experiment tracking"):
+                    self._params = None
             except Exception as e:
                 warnings.warn(
                     "VisdomKerasLogger failed to start experiment "
                     "tracking: {}".format(e)
                 )
+                self._params = None
 
     def on_epoch_end(self, epoch, logs=None):
         if not logs:
@@ -174,7 +200,10 @@ class VisdomKerasLogger(Callback):
             )
         if self._params is not None:
             try:
-                self.viz.log_metrics(logs, step=epoch, env=self.env)
+                reply = self.viz.log_metrics(logs, step=epoch, env=self.env)
+                self._check_experiment_reply(
+                    reply, "log epoch {} metrics to experiment tracking".format(epoch)
+                )
             except Exception as e:
                 warnings.warn(
                     "VisdomKerasLogger failed to log epoch {} metrics to "
@@ -184,7 +213,8 @@ class VisdomKerasLogger(Callback):
     def on_train_end(self, logs=None):
         if self._params is not None:
             try:
-                self.viz.finish_experiment(env=self.env)
+                reply = self.viz.finish_experiment(env=self.env)
+                self._check_experiment_reply(reply, "finish experiment tracking")
             except Exception as e:
                 warnings.warn(
                     "VisdomKerasLogger failed to finish experiment "
