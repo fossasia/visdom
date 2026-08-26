@@ -3044,7 +3044,9 @@ class Visdom(object):
             y_true_arr = np.ravel(np.asarray(y_true))
             positive_rate = float(np.mean(y_true_arr == pos_label))
         else:
-            positive_rate = float(precision[0]) if float(recall[0]) == 0.0 else None
+            # Precision/recall alone don't preserve class counts, so
+            # prevalence can't be recovered from them.
+            positive_rate = None
 
         baseline = [positive_rate, positive_rate] if positive_rate is not None else None
 
