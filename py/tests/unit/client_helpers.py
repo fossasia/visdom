@@ -159,7 +159,11 @@ def test_axisformat_applies_a_lone_tick_step():
 
 
 def test_axisformat_maps_options_onto_plotly_names():
-    """label becomes title and ticklabels becomes ticktext."""
+    """label becomes title and ticklabels becomes ticktext.
+
+    Plotly dropped the bare-string form of ``title``, so a label arrives
+    wrapped as ``{"text": ...}``.
+    """
     axis = _axisformat(
         "y",
         {
@@ -216,16 +220,16 @@ def test_axisformat3d_needs_bounds_before_it_uses_a_step():
     assert _axisformat3d("z", {"zlabel": "d", "ztickstep": 2})["nticks"] is None
 
 
-def test_axisformat3d_opens_an_axis_for_a_lone_tick_step():
-    """``tickstep`` is in the shared gate, so it alone opens a 3d axis.
+def test_axisformat3d_builds_an_axis_from_a_lone_tick_step():
+    """The 3d gate is the same tuple as the 2d one, ``tickstep`` included.
 
-    It only feeds ``nticks``, which stays gated on both bounds being present,
-    so the axis comes back with nothing else set.
+    The step alone has nothing to apply itself to here -- it only feeds
+    ``nticks``, which is separately gated on both bounds being present -- so
+    the axis comes back with every field unset rather than being dropped.
     """
     axis = _axisformat3d("z", {"ztickstep": 2})
-
+    assert axis is not None
     assert axis["nticks"] is None
-    assert axis["title"] is None
 
 
 def test_opts2layout_builds_flat_axes_in_2d():

@@ -91,13 +91,14 @@ def app_handler(app):
 def offline_client():
     """Visdom client that never opens a connection.
 
-    ``_handle_post`` is the client's only outbound I/O, so stubbing it lets the
-    constructor's env handshake succeed offline and leaves plot methods
-    assertable as pure functions.
+    ``_handle_post`` is the client's only I/O point, so stubbing it leaves
+    ``_send`` and everything above it running their real code -- including the
+    env handshake ``__init__`` performs -- while no socket is ever opened. The
+    ``send`` constructor flag this used to rely on no longer exists.
     """
     import visdom
 
-    with patch.object(visdom.Visdom, "_handle_post", return_value=""):
+    with patch.object(visdom.Visdom, "_handle_post", return_value="win_offline"):
         yield visdom.Visdom(use_incoming_socket=False)
 
 
