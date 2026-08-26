@@ -296,8 +296,8 @@ class OptunaCallback:
         loading trials from a resumed study is handled by the later resume
         integration.
         """
-        payload = self._build_dashboard_payload(study)
         try:
+            payload = self._build_dashboard_payload(study)
             self.viz.text(
                 payload["summary"],
                 win="optuna-summary",
