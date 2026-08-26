@@ -644,5 +644,50 @@ class TestContour(unittest.TestCase):
         self.assertNotIn("scene", sent["payload"]["layout"])
 
 
+class TestPrCurveBaseline(unittest.TestCase):
+    """A PR-curve baseline (true class prevalence) can only be computed
+    from raw y_true/y_score; it cannot be recovered from precomputed
+    (precision, recall) points alone, so no baseline trace should be
+    sent for that input mode."""
+
+    def setUp(self):
+        self.viz = _unconnected_visdom()
+
+    def _pr_curve(self, **kwargs):
+        sent = {}
+
+        def capture(msg, endpoint="events", **_):
+            sent["payload"] = msg
+            sent["endpoint"] = endpoint
+            return "win1"
+
+        with patch.object(self.viz, "_send", side_effect=capture):
+            self.viz.pr_curve(**kwargs)
+        return sent
+
+    def test_precomputed_points_send_no_baseline(self):
+        """precision/recall input mode must not draw a fabricated baseline."""
+        precision = np.array([1.0, 0.8, 0.6, 0.5])
+        recall = np.array([0.0, 0.3, 0.6, 1.0])
+        sent = self._pr_curve(precision=precision, recall=recall)
+        names = [d.get("name") for d in sent["payload"]["data"]]
+        self.assertNotIn("Baseline", names)
+        self.assertEqual(names, ["PR"])
+
+    def test_raw_labels_send_correct_baseline(self):
+        """y_true/y_score input mode must still draw the true prevalence."""
+        rng = np.random.RandomState(0)
+        y_true = (rng.uniform(0, 1, size=100) < 0.3).astype(int)
+        y_score = rng.uniform(0, 1, size=100)
+        true_prevalence = float(np.mean(y_true == 1))
+
+        sent = self._pr_curve(y_true=y_true, y_score=y_score)
+        baseline_traces = [
+            d for d in sent["payload"]["data"] if d.get("name") == "Baseline"
+        ]
+        self.assertEqual(len(baseline_traces), 1)
+        self.assertAlmostEqual(baseline_traces[0]["y"][0], true_prevalence, places=6)
+
+
 if __name__ == "__main__":
     unittest.main()
