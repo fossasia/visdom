@@ -681,7 +681,7 @@ const App = () => {
       }));
       focusPane(panelayout.i);
       updateLayout(storeData.layout);
-      sendPaneLayoutUpdate(selection.envIDs[0], panelayout);
+      sendPaneLayoutUpdate(latestRef.current.selection.envIDs[0], panelayout);
     }
   };
 
