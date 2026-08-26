@@ -17,7 +17,13 @@ import * as THREE from 'three';
 import ApiContext from '../api/ApiContext';
 import EventSystem from '../EventSystem';
 import lasso from '../lasso';
+import { showToast } from '../toasts/toastEvents';
 import Pane from './Pane';
+import {
+  downloadJpegWithDpi,
+  downloadPngWithDpi,
+} from './utils/Embeddpimetadata';
+import { copyLatexToClipboard } from './utils/LatexExport';
 import { downloadImageAsPdf } from './utils/pdfExport';
 
 const SCALE_RADIUS = 2000;
@@ -129,6 +135,29 @@ class EmbeddingsPane extends React.Component {
     link.click();
   };
 
+  handleLatexExport = (style) => {
+    copyLatexToClipboard(style, {
+      contentID: this.props.contentID,
+      id: this.props.id,
+      caption: this.props.title,
+    })
+      .then(() =>
+        showToast('Copied!', 'success', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        })
+      )
+      .catch((err) => {
+        console.error('EmbeddingsPane LaTeX export failed:', err);
+        showToast('Failed to Copy', 'error', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        });
+      });
+  };
+
   handleExport = (format, dpi) => {
     this.setState({ exportError: null });
 
@@ -153,7 +182,7 @@ class EmbeddingsPane extends React.Component {
     const PDF_CAPTURE_DPI = 300;
     const scale = format === 'pdf' ? PDF_CAPTURE_DPI / 96 : dpi ? dpi / 96 : 1;
     const originalPixelRatio = renderer.getPixelRatio();
-    const effectivePdfDpi = Math.round(PDF_CAPTURE_DPI * originalPixelRatio);
+    const effectiveDpi = Math.round(scale * 96 * originalPixelRatio);
 
     try {
       // `updateStyle=false` keeps the on-screen CSS size unchanged while
@@ -173,13 +202,15 @@ class EmbeddingsPane extends React.Component {
         downloadImageAsPdf(
           dataUrl,
           `${this.props.contentID || 'plot'}.pdf`,
-          effectivePdfDpi
+          effectiveDpi
         );
       } else {
-        const link = document.createElement('a');
-        link.download = `${this.props.contentID || 'plot'}.${format}`;
-        link.href = dataUrl;
-        link.click();
+        const filename = `${this.props.contentID || 'plot'}.${format}`;
+        if (format === 'jpg') {
+          downloadJpegWithDpi(dataUrl, filename, effectiveDpi);
+        } else {
+          downloadPngWithDpi(dataUrl, filename, effectiveDpi);
+        }
       }
     } catch (err) {
       // eslint-disable-next-line no-console
@@ -202,6 +233,7 @@ class EmbeddingsPane extends React.Component {
         {...this.props}
         handleExport={this.handleExport}
         handleMetadataExport={this.handleMetadataExport}
+        handleLatexExport={this.handleLatexExport}
         exportFormats={EXPORT_FORMATS}
       >
         {this.state.exportError ? (

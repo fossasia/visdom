@@ -12,14 +12,20 @@ Two kinds of asset live under ``py/visdom/static``:
 
 * **tracked** — ``js/main.js`` and its source map, the three HTML pages, and the
   stylesheets under ``css/``. They are committed, so they are asserted outright.
-* **downloaded** — jQuery, bootstrap and d3, fetched by ``build.py`` and ignored
-  by git (``.gitignore:17,19``). CI installs the package and runs pytest without
-  ever building the frontend, so these are absent there. Asserting them would
-  make the job red for a reason that has nothing to do with the code under test,
-  so each is skipped when it is not on disk and checked when it is.
+* **downloaded** — plotly, d3, MathJax and friends, fetched by
+  ``visdom/server/build.py`` and ignored by git. CI installs the package and
+  runs pytest without ever downloading them, so they are absent there.
+  Asserting them would make the job red for a reason that has nothing to do
+  with the code under test, so each is skipped when it is not on disk and
+  checked when it is.
+
+Both lists mirror what the shipped HTML pages actually reference; when an asset
+is dropped from ``index.html``/``login.html`` or from ``download_scripts()`` it
+belongs out of here too.
 """
 
 import os
+import re
 
 import pytest
 
@@ -35,19 +41,31 @@ TRACKED_ASSETS = [
     "error.html",
     os.path.join("js", "main.js"),
     os.path.join("js", "main.js.map"),
+    os.path.join("css", "base.css"),
     os.path.join("css", "style.css"),
     os.path.join("css", "login.css"),
     os.path.join("css", "error.css"),
     os.path.join("css", "network.css"),
+    os.path.join("css", "hparams.css"),
     os.path.join("css", "rc-tree-select-overrides.css"),
+    os.path.join("css", "rc-slider-overrides.css"),
 ]
 
-# Written by build.py at install time; absent in a plain checkout.
+# Fetched by download_scripts() at first run; absent in a plain checkout.
 DOWNLOADED_ASSETS = [
-    "js/jquery.min.js",
+    "js/plotly-plotly.min.js",
     "js/d3.v3.min.js",
-    "css/bootstrap.min.css",
+    "js/d3-selection-multi.v1.js",
+    "js/saveSvgAsPng.js",
+    "js/layout_bin_packer.js",
+    "js/sjcl.js",
+    "js/mathjax/3.2.2/es5/tex-mml-svg.js",
+    "css/react-resizable-styles.css",
+    "css/react-grid-layout-styles.css",
 ]
+
+# The templates the server renders; every static_url() in them must resolve.
+PAGES = ["index.html", "login.html", "error.html"]
 
 # webpack emits well over a megabyte; anything near zero means a broken build
 # that still produced a file.
@@ -62,6 +80,26 @@ def _static(relpath):
 def test_tracked_asset_exists(relpath):
     """Every committed static asset is present in the installed package."""
     assert os.path.exists(_static(relpath)), f"missing build artifact: {relpath}"
+
+
+def _referenced_assets(page):
+    """The static/ paths an HTML template asks the browser to load."""
+    with open(_static(page), encoding="utf-8") as handle:
+        markup = handle.read()
+    refs = re.findall(r"""static_url\(\s*['"]([^'"]+)['"]""", markup)
+    return [ref for ref in refs if not ref.startswith("..")]
+
+
+@pytest.mark.parametrize("page", PAGES)
+def test_referenced_assets_are_declared(page):
+    """Nothing a page loads is missing from both asset lists."""
+    declared = {
+        os.path.join(*ref.split("/")) for ref in TRACKED_ASSETS + DOWNLOADED_ASSETS
+    }
+    for ref in _referenced_assets(page):
+        assert (
+            os.path.join(*ref.split("/")) in declared
+        ), f"{page} loads {ref}, which is in neither asset list"
 
 
 def test_main_bundle_is_not_a_stub():

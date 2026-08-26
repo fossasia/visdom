@@ -8,19 +8,19 @@
 
 """Unit tests for the client's content panes and its env/window management.
 
-Everything here runs against a ``Visdom(send=False)`` client, so no server and
-no sockets are involved. The methods split in two on how they treat what
-``_send`` hands back, and the tests follow that split:
+Everything here runs against the ``offline_client`` fixture, whose only I/O
+point (``_handle_post``) is stubbed, so no server and no sockets are involved.
+The methods split in two on how they treat what ``_send`` hands back, and the
+tests follow that split:
 
-* **Payload builders** return ``_send``'s value untouched, so the
+* **Payload builders** hand ``_send``'s value straight back, so the
   ``capture_send`` fixture can intercept the message. ``text``, ``properties``,
-  ``table``, ``embeddings``, ``learning_curve``, ``update_window_opts`` and the
-  window/env writes are asserted this way.
+  ``html_table``, ``embeddings``, ``learning_curve``, ``update_window_opts``,
+  the experiment writes and the window/env writes are asserted this way.
 * **Reply parsers** feed the response through ``json.loads`` or compare it
-  against a literal, so ``capture_send`` cannot be used — with ``send=False``
-  ``_send`` returns a ``(msg, endpoint)`` tuple and ``json.loads`` would choke
-  on it. ``win_exists``, ``get_env_list``, ``get_env_state`` and ``delete_envs``
-  patch ``_send`` with a canned reply instead.
+  against a literal, so the canned string ``capture_send`` returns is no use to
+  them. ``win_exists``, ``get_env_list``, ``get_env_state`` and ``delete_envs``
+  patch ``_send`` with a reply of their own instead.
 
 Two behaviours pinned here are current, not desired:
 
@@ -138,11 +138,11 @@ def test_properties_routes_win_and_env(capture_send):
     assert sent["payload"]["eid"] == "e1"
 
 
-# ----------------------------------------------------------------- table ----
+# ------------------------------------------------------------ html_table ----
 
 
 def test_table_renders_headers_and_rows_as_html(capture_send):
-    sent = capture_send(lambda v: v.table(["a", "b"], [[1, 2], [3, 4]]))
+    sent = capture_send(lambda v: v.html_table([[1, 2], [3, 4]], ["a", "b"]))
     html = block(sent)["content"]
     assert block(sent)["type"] == "text"
     assert "<th>a</th><th>b</th>" in html
@@ -152,19 +152,19 @@ def test_table_renders_headers_and_rows_as_html(capture_send):
 
 
 def test_table_escapes_markup_in_cells_and_headers(capture_send):
-    sent = capture_send(lambda v: v.table(["<b>h</b>"], [["<script>x</script>"]]))
+    sent = capture_send(lambda v: v.html_table([["<script>x</script>"]], ["<b>h</b>"]))
     html = block(sent)["content"]
     assert "&lt;b&gt;h&lt;/b&gt;" in html
     assert "<script>" not in html
 
 
 def test_table_accepts_an_empty_body(capture_send):
-    sent = capture_send(lambda v: v.table(["a"], []))
+    sent = capture_send(lambda v: v.html_table([], ["a"]))
     assert "<tbody></tbody>" in block(sent)["content"]
 
 
 def test_table_accepts_tuple_rows(capture_send):
-    sent = capture_send(lambda v: v.table(["a", "b"], [("x", "y")]))
+    sent = capture_send(lambda v: v.html_table([("x", "y")], ["a", "b"]))
     assert "<td>x</td><td>y</td>" in block(sent)["content"]
 
 
@@ -181,7 +181,7 @@ def test_table_accepts_tuple_rows(capture_send):
 )
 def test_table_rejects_malformed_input(capture_send, headers, data):
     with pytest.raises(AssertionError):
-        capture_send(lambda v: v.table(headers, data))
+        capture_send(lambda v: v.html_table(data, headers))
 
 
 # -------------------------------------------------------- learning_curve ----
@@ -201,9 +201,9 @@ def test_learning_curve_stacks_metrics_into_one_plot(capture_send):
 def test_learning_curve_defaults_its_labels(capture_send):
     sent = capture_send(lambda v: v.learning_curve({"loss": [1.0]}))
     layout = sent["payload"]["layout"]
-    assert layout["title"] == "Learning Curve"
-    assert layout["xaxis"]["title"] == "step"
-    assert layout["yaxis"]["title"] == "metric"
+    assert layout["title"] == {"text": "Learning Curve"}
+    assert layout["xaxis"]["title"] == {"text": "step"}
+    assert layout["yaxis"]["title"] == {"text": "metric"}
 
 
 def test_learning_curve_honours_a_supplied_step(capture_send):
@@ -281,8 +281,8 @@ def test_update_window_opts_sends_layout_without_content(capture_send):
     assert "data" not in sent["payload"]
     assert sent["payload"]["win"] == "w1"
     assert sent["payload"]["opts"]["title"] == "T"
-    assert sent["payload"]["layout"]["title"] == "T"
-    assert sent["payload"]["layout"]["xaxis"]["title"] == "x"
+    assert sent["payload"]["layout"]["title"] == {"text": "T"}
+    assert sent["payload"]["layout"]["xaxis"]["title"] == {"text": "x"}
 
 
 def test_update_window_opts_routes_env(capture_send):
@@ -533,13 +533,15 @@ def test_get_env_list_asks_for_every_env_not_just_this_one(offline_client):
 
 def test_send_defaults_the_eid_to_the_client_env(offline_client):
     offline_client.env = "myenv"
-    msg, _ = offline_client._send({"data": []})
+    msg = {"data": []}
+    offline_client._send(msg)
     assert msg["eid"] == "myenv"
 
 
 def test_send_leaves_the_eid_out_when_asked(offline_client):
     offline_client.env = "myenv"
-    msg, _ = offline_client._send({"data": []}, default_eid=False)
+    msg = {"data": []}
+    offline_client._send(msg, default_eid=False)
     assert "eid" not in msg
 
 
@@ -586,12 +588,15 @@ def test_delete_envs_rejects_a_non_string_entry(offline_client):
 # -------------------------------------------------- experiment messages ----
 
 
-def test_experiment_message(offline_client):
+def test_experiment_message(offline_client, capture_send):
     offline_client.env = "expenv"
-    msg, endpoint = offline_client.experiment(
-        name="r1", params={"lr": 0.01}, tags={"ds": "mnist"}, description="d"
+    sent = capture_send(
+        lambda v: v.experiment(
+            name="r1", params={"lr": 0.01}, tags={"ds": "mnist"}, description="d"
+        )
     )
-    assert endpoint == "experiments/log"
+    msg = sent["payload"]
+    assert sent["endpoint"] == "experiments/log"
     assert msg["action"] == "log"
     assert msg["eid"] == "expenv"
     assert msg["params"] == {"lr": 0.01}
@@ -599,28 +604,29 @@ def test_experiment_message(offline_client):
     assert msg["description"] == "d"
 
 
-def test_experiment_env_override(offline_client):
+def test_experiment_env_override(offline_client, capture_send):
     offline_client.env = "expenv"
-    msg, _ = offline_client.experiment(params={"lr": 0.01}, env="other")
-    assert msg["eid"] == "other"
+    sent = capture_send(lambda v: v.experiment(params={"lr": 0.01}, env="other"))
+    assert sent["payload"]["eid"] == "other"
 
 
-def test_log_metrics_message(offline_client):
-    msg, endpoint = offline_client.log_metrics({"acc": 0.9}, step=5)
-    assert endpoint == "experiments/log"
+def test_log_metrics_message(capture_send):
+    sent = capture_send(lambda v: v.log_metrics({"acc": 0.9}, step=5))
+    msg = sent["payload"]
+    assert sent["endpoint"] == "experiments/log"
     assert msg["action"] == "metrics"
     assert msg["metrics"] == {"acc": 0.9}
     assert msg["step"] == 5
 
 
-def test_finish_experiment_message(offline_client):
-    msg, _ = offline_client.finish_experiment(status="failed")
+def test_finish_experiment_message(capture_send):
+    msg = capture_send(lambda v: v.finish_experiment(status="failed"))["payload"]
     assert msg["action"] == "finish"
     assert msg["status"] == "failed"
 
 
-def test_finish_experiment_defaults_to_finished(offline_client):
-    msg, _ = offline_client.finish_experiment()
+def test_finish_experiment_defaults_to_finished(capture_send):
+    msg = capture_send(lambda v: v.finish_experiment())["payload"]
     assert msg["status"] == "finished"
 
 

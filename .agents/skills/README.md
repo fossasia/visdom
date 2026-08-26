@@ -27,7 +27,7 @@ Default scaffold templates are stored in `_defaults/` as:
 
 - **adding-pane** — Step-by-step guide for adding a new visualization pane type
 - **websocket-flow** — Guide for adding new WebSocket commands and API endpoints
-- **cypress-testing** — Cypress test creation and visual regression workflow
+- **playwright-testing** — Playwright test creation and visual regression workflow
 - **release-process** — Version bumping and release workflow
 - **python-client-api** — Add or modify Python client methods with type/server parity
 - **handler-auth-flow** — Safely change handlers and auth-gated endpoints

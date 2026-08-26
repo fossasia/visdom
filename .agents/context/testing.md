@@ -1,6 +1,6 @@
 # Testing Instructions
 
-Two layers: **pytest** for Python unit tests (pure functions, server utils, window/env lifecycle) and **Cypress 9** for E2E and visual regression. Demo scripts remain useful for manual/visual validation.
+Two layers: **pytest** for Python unit tests (pure functions, server utils, window/env lifecycle) and **Playwright** for E2E and visual regression. Demo scripts remain useful for manual/visual validation.
 
 ## Run Python Tests (pytest)
 
@@ -21,27 +21,32 @@ Config lives in `pyproject.toml` (`[tool.pytest.ini_options]`): discovery is sco
 experimental `test_*.py` scripts in the repo root (and `test/`) stay out of scope; `testutils/` is
 excluded via `norecursedirs` so helpers are importable but never collected.
 
-## Run E2E / Visual Tests (Cypress)
+## Run E2E / Visual Tests (Playwright)
 
 ```bash
-visdom -port 8098 -env_path /tmp   # Always start fresh server first
+npx playwright install chromium     # Install the browser once
+npm test                            # WebSocket functional tests
+npm run test:polling                # Polling functional tests
+npm run test:gui                    # Interactive UI
 npm run test:init                   # Generate baseline screenshots
-npm run test                        # Run all tests (CLI)
-npm run test:gui                    # Interactive GUI
-npm run test:visual                 # Visual regression only
+npm run test:visual                 # Compare visual screenshots
 ```
 
-Always use port `8098` and `-env_path /tmp` for isolation.
+Make sure port `8098` is available. The Playwright configuration starts an
+isolated Visdom server automatically.
 
 ## Writing Tests
 
-- Place in `cypress/integration/`, follow `basic.js`, `pane.js`, `text.js` patterns
-- Visual regression uses `pixelmatch` in `cypress/plugins/`
+- Place specs in `playwright/tests/`, follow `basic.spec.js`, `pane.spec.js`, and
+  `text.spec.js` patterns
+- Put shared browser and demo helpers in `playwright/support/`
 - Run `test:init` before `test:visual` for baselines
 
 ## Test Files
 
-`basic.js` (connection), `pane.js` (CRUD), `text.js`, `image.js`, `properties.js`, `modal.js`, `misc.js`, `screenshots.init.js` (baseline), `screenshots.js` (comparison).
+`basic.spec.js` (connection), `pane.spec.js` (CRUD), `text.spec.js`,
+`image.spec.js`, `properties.spec.js`, `modal.spec.js`, `misc.spec.js`,
+`screenshots.init.spec.js` (baseline), `screenshots.spec.js` (comparison).
 
 ## Writing Python Tests
 
@@ -62,8 +67,7 @@ package and is reachable because `py/tests` is on `pythonpath`.
 Everything under `py/tests/` must be **hermetic and collectable**: no externally launched
 server, no browser, no assertion a human has to make. A script that needs a live server and is
 judged by looking at the UI goes in `example/manual/` instead — see
-`example/manual/visual_check.py`. Pixel correctness is Playwright's and Cypress's job, not
-pytest's.
+`example/manual/visual_check.py`. Pixel correctness is Playwright's job, not pytest's.
 
 - Name a file after what it covers — `integration/window_types.py`, not
   `integration/test_window_types.py`. The `unit/` and `integration/` directories already say these
@@ -141,12 +145,15 @@ as a gate, so an unmarked file is in neither job and is effectively only covered
 The invariant to preserve: **`-m unit` and `-m integration` must sum to the whole suite.**
 
 ```bash
-pytest py/tests --collect-only -q -o addopts="" | tail -1   # 1502
-pytest -m unit --collect-only -q -o addopts="" | tail -1    # 1072
-pytest -m integration --collect-only -q -o addopts="" | tail -1  # 430
+pytest py/tests --collect-only -q -o addopts="" | tail -1   # 1852
+pytest -m unit --collect-only -q -o addopts="" | tail -1    # 1235
+pytest -m integration --collect-only -q -o addopts="" | tail -1  # 617
 ```
 
-If those stop adding up, a file lost its marker.
+If those stop adding up, a file lost its marker. The counts assume the optional test
+dependencies are installed: `unit/keras_logger.py` and `unit/test_xgboost_logger.py` need
+`tensorflow` and `xgboost` (both in `test-requirements.txt`), and 39 of the `unit` total
+live in them.
 
 Nothing in the tracked suite is marked `server`; everything under `py/tests/` is hermetic by
 design. A script that needs a live server belongs in `example/manual/`.
@@ -159,7 +166,9 @@ socket connect timeout, costing 6.3 seconds per test. `integration/experiment_lo
 spent 38 of the suite's 43 seconds that way.
 
 Use the `offline_client` fixture rather than constructing a `Visdom` by hand. If you must build
-one, pass `send=False, use_incoming_socket=False`. `pytest --durations=10` shows the outliers.
+one, pass `use_incoming_socket=False` and patch `_handle_post`, which is the client's only I/O
+point — the `send=False` constructor flag no longer exists. `pytest --durations=10` shows the
+outliers.
 
 ## CI
 

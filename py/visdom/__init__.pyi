@@ -4,7 +4,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Optional, List, Any, Union, Mapping, overload, Text, Callable
+from typing import Optional, List, Any, Union, Mapping, overload, Text, Tuple, Callable
 
 ### Type aliases for commonly-used types.
 # For optional 'options' parameters.
@@ -12,6 +12,19 @@ from typing import Optional, List, Any, Union, Mapping, overload, Text, Callable
 # See  http://mypy.readthedocs.io/en/latest/more_types.html#typeddict.
 _OptOps = Optional[Mapping[Text, Any]]
 _OptStr = Optional[Text]  # For optional string parameters, like 'window' and 'env'.
+
+# For the list of environments to compare. Spelled out rather than Sequence[Text]
+# because a bare str is itself a Sequence[str]: 'compare_experiments' rejects one
+# at runtime, so a checker must not accept it here.
+_EnvIds = Union[List[Text], Tuple[Text, ...]]
+
+# The decoded JSON reply of the experiment endpoints.
+_ExperimentReply = Mapping[Text, Any]
+_TagMap = Mapping[Text, Text]
+
+# The reply of the experiment endpoints that only answer questions. An offline
+# client has no server to ask, so those hand back None rather than a reply.
+_ExperimentQueryReply = Optional[_ExperimentReply]
 
 # No widely-deployed stubs exist at the moment for torch or numpy. When they are available, the correct type of the tensor-like inputs
 # to the plotting commands should be
@@ -36,7 +49,7 @@ class Visdom:
         http_proxy_host: _OptStr = ...,
         http_proxy_port: Optional[int] = ...,
         env: Text = ...,
-        send: bool = ...,
+        *,
         raise_exceptions: Optional[bool] = ...,
         use_incoming_socket: bool = ...,
         log_to_filename: _OptStr = ...,
@@ -63,6 +76,43 @@ class Visdom:
     def finish_experiment(
         self, status: Text = ..., env: _OptStr = ...
     ) -> Mapping[Text, Any]: ...
+    def set_tags(
+        self,
+        tags: _TagMap,
+        env: _OptStr = ...,
+        append: bool = ...,
+    ) -> _TagMap: ...
+    def get_tags(self, env: _OptStr = ...) -> _TagMap: ...
+    def search_experiments(
+        self,
+        query: _OptStr = ...,
+        limit: Optional[int] = ...,
+        offset: int = ...,
+        sort_by: _OptStr = ...,
+        descending: bool = ...,
+    ) -> _ExperimentQueryReply: ...
+    def compare_experiments(self, env_ids: _EnvIds) -> _ExperimentQueryReply: ...
+    def suggest_experiment(
+        self, params: _OptOps = ..., env: _OptStr = ...
+    ) -> _ExperimentQueryReply: ...
+    def hparams(
+        self,
+        query: _OptStr = ...,
+        env_ids: Optional[_EnvIds] = ...,
+        mode: _OptStr = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
+    def update_hparams(
+        self,
+        win: Text,
+        query: _OptStr = ...,
+        env_ids: Optional[_EnvIds] = ...,
+        mode: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
     def get_window_data(
         self, win: _OptStr = ..., env: _OptStr = ...
     ) -> _SendReturn: ...
@@ -336,10 +386,10 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
-    def table(
+    def html_table(
         self,
-        headers: List[Any],
-        data: List[List[Any]],
+        data: List[Any],
+        headers: Optional[List[Any]] = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
@@ -371,4 +421,12 @@ class Visdom:
         opts: _OptOps = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
+    ) -> _SendReturn: ...
+    def table(
+        self,
+        data: List[Any],
+        headers: Optional[List[Any]] = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
     ) -> _SendReturn: ...
