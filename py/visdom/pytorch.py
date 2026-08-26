@@ -58,14 +58,39 @@ class VisdomLogger:
         self._counter = {}
         self._pending = {}
 
+    @staticmethod
+    def _check_experiment_reply(reply, action):
+        """Warn if the server rejected an experiment-tracking call.
+
+        Connection failures raise and are caught by the callers below, but a
+        server-side rejection (readonly server, already-finished experiment,
+        unknown env) comes back as an ordinary reply with no exception. A
+        successful reply is always the stored experiment dict, keyed by
+        "env_id"; anything else means nothing was recorded. `reply is True`
+        is `_send`'s own sentinel for offline mode, where nothing was sent
+        to a server at all, so it is not a rejection.
+
+        Returns True if the call succeeded (or was offline), False if it
+        was rejected, so __enter__ can stop retrying after a failed handshake.
+        """
+        if reply is True:
+            return True
+        if not isinstance(reply, dict) or "env_id" not in reply:
+            warnings.warn("VisdomLogger failed to {}: {}".format(action, reply))
+            return False
+        return True
+
     def __enter__(self):
         if self._params is not None:
             try:
-                self.viz.experiment(params=self._params, env=self.env)
+                reply = self.viz.experiment(params=self._params, env=self.env)
+                if not self._check_experiment_reply(reply, "start experiment tracking"):
+                    self._params = None
             except Exception as e:
                 warnings.warn(
                     "VisdomLogger failed to start experiment tracking: {}".format(e)
                 )
+                self._params = None
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -73,9 +98,10 @@ class VisdomLogger:
             self._plot(name, x_val, value, xlabel)
         if self._params is not None:
             try:
-                self.viz.finish_experiment(
+                reply = self.viz.finish_experiment(
                     status="failed" if exc_type else "finished", env=self.env
                 )
+                self._check_experiment_reply(reply, "finish experiment tracking")
             except Exception as e:
                 warnings.warn(
                     "VisdomLogger failed to finish experiment tracking: {}".format(e)
@@ -101,7 +127,8 @@ class VisdomLogger:
                     update="append",
                 )
             if self._params is not None:
-                self.viz.log_metrics({name: value}, step=x_val, env=self.env)
+                reply = self.viz.log_metrics({name: value}, step=x_val, env=self.env)
+                self._check_experiment_reply(reply, "log metric {!r}".format(name))
         except Exception as e:
             warnings.warn("VisdomLogger failed to log {!r}: {}".format(name, e))
 
