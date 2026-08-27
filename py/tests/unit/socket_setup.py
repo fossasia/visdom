@@ -15,6 +15,8 @@ import pytest
 import visdom
 from visdom import Visdom
 
+pytestmark = pytest.mark.unit
+
 
 def _client():
     client = Visdom.__new__(Visdom)

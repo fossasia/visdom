@@ -20,12 +20,15 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
+import pytest
 import tornado.testing
 
 from visdom import Visdom
 from visdom.data_model import JSONStore
 from visdom.experiments import ExperimentStore, QueryParseError
 from visdom.server.app import Application
+
+pytestmark = pytest.mark.integration
 
 
 def seed_experiments(store):

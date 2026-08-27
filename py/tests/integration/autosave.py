@@ -20,6 +20,8 @@ import tempfile
 import unittest
 from unittest import mock
 
+import pytest
+
 from visdom.server.app import Application
 from visdom.server.handlers.socket_handlers import AnySocketHandlerOrWrapper
 from visdom.server.handlers.web_handlers import CloseHandler, UpdateHandler
@@ -27,6 +29,8 @@ from visdom.utils.server_utils import register_window, window
 
 from testutils.fakes import FakeHandler
 from testutils.payloads import embeddings_pane, table_pane, window_args
+
+pytestmark = pytest.mark.integration
 
 
 class AutosaveTestCase(unittest.TestCase):
