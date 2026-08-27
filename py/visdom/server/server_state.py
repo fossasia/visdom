@@ -16,10 +16,12 @@ the "accessor functions on the state" abstraction referenced by the handler
 TODOs, and a natural future home for the data_model classes.
 """
 
+import time
 from collections import Counter
 
 import tornado.ioloop
 
+from visdom.server.defaults import MAX_SOCKET_WAIT
 from visdom.utils.shared_utils import warn_once
 
 
@@ -236,15 +238,33 @@ class ServerState:
 
     # ----- polling socket monitor ----- #
 
-    def ensure_socket_monitor(self, callback, interval_ms=15000):
+    def ensure_socket_monitor(self, interval_ms=15000):
         """Start the periodic monitor that reaps stale polling sockets,
         creating it on first use."""
         if self._socket_wrap_monitor is None:
             self._socket_wrap_monitor = tornado.ioloop.PeriodicCallback(
-                callback, interval_ms
+                self.reap_stale_connections, interval_ms
             )
         if not self._socket_wrap_monitor.is_running():
             self._socket_wrap_monitor.start()
+
+    def reap_stale_connections(self):
+        """Close polling connections that have stopped reading."""
+        if len(self.subs) > 0 or len(self.sources) > 0:
+            for connection in list(self.subs.values()):
+                if (
+                    hasattr(connection, "last_read_time")
+                    and time.time() - connection.last_read_time > MAX_SOCKET_WAIT
+                ):
+                    connection.close()
+            for connection in list(self.sources.values()):
+                if (
+                    hasattr(connection, "last_read_time")
+                    and time.time() - connection.last_read_time > MAX_SOCKET_WAIT
+                ):
+                    connection.close()
+        else:
+            self.stop_socket_monitor()
 
     def stop_socket_monitor(self):
         if self._socket_wrap_monitor is not None:

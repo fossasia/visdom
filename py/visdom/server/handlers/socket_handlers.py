@@ -38,7 +38,6 @@ from visdom.utils.server_utils import (
     notify,
 )
 from visdom.experiments import retarget_experiment
-from visdom.server.defaults import MAX_SOCKET_WAIT
 
 
 # TODO move the logic that actually parses environments and layouts to
@@ -627,24 +626,11 @@ class AnySocketWrapper(AnySocketHandlerOrWrapper):
         self.messages = deque()
         self.last_read_time = time.time()
         self.open()
-        self.server_state.ensure_socket_monitor(self.socket_wrap_monitor_thread)
+        self.server_state.ensure_socket_monitor()
 
     def socket_wrap_monitor_thread(self):
-        if len(self.subs) > 0 or len(self.sources) > 0:
-            for sub in list(self.subs.values()):
-                if (
-                    hasattr(sub, "last_read_time")
-                    and time.time() - sub.last_read_time > MAX_SOCKET_WAIT
-                ):
-                    sub.close()
-            for sub in list(self.sources.values()):
-                if (
-                    hasattr(sub, "last_read_time")
-                    and time.time() - sub.last_read_time > MAX_SOCKET_WAIT
-                ):
-                    sub.close()
-        else:
-            self.server_state.stop_socket_monitor()
+        """Compatibility entry point for the ServerState polling reaper."""
+        return self.server_state.reap_stale_connections()
 
     def close(self):
         self.on_close()
