@@ -91,20 +91,33 @@ def _sort_pairs(pairs, field, descending):
 class ExperimentStore:
     """Read/write experiment metadata attached to environments via a DataStore."""
 
-    def __init__(self, datastore):
-        """Create a store backed by ``datastore`` (a :class:`DataStore`)."""
+    def __init__(self, datastore, env_provider=None):
+        """Create a store backed by ``datastore`` (a :class:`DataStore`).
+
+        ``env_provider`` is an optional callable ``env_id -> env | None`` that
+        returns the *live* environment (the server passes ``state.get``). When
+        it yields one, reads and writes go through that object rather than a
+        fresh copy off disk, so persisting an experiment cannot overwrite the
+        env file with a snapshot that is missing windows created — or reviving
+        windows closed — since the file was last written.
+        """
         if not isinstance(datastore, DataStore):
             raise TypeError(
                 f"datastore must be a DataStore, got {type(datastore).__name__}"
             )
         self.datastore = datastore
+        self.env_provider = env_provider
 
     def _read(self, env_id):
-        """Return ``(env_dict, Experiment|None)`` for ``env_id``.
+        """Return ``(env, Experiment|None)`` for ``env_id``.
 
-        The env dict always has ``jsons``/``reload`` keys so that persisting it
-        back never strips an environment of the fields the rest of the server
-        relies on, even for an env that did not exist before.
+        The live env is preferred when an ``env_provider`` serves it; only then
+        is the file read. The env always has ``jsons``/``reload`` keys so that
+        persisting it back never strips an environment of the fields the rest
+        of the server relies on, even for an env that did not exist before.
+        The env may be a ``LazyEnvData`` rather than a plain dict, so it is
+        mutated through the mapping interface and never copied — a write must
+        land in the same object the server is serving.
 
         The env an experiment is stored under is the authoritative one, so the
         loaded experiment is re-pointed at ``env_id`` rather than trusting the
@@ -113,11 +126,15 @@ class ExperimentStore:
         the env it was forked from; a comparison keyed by experiment env_id
         would then fold the fork and its parent into one column.
         """
-        env = self.datastore.load_env(env_id)
-        if not isinstance(env, dict):
-            env = {}
-        env.setdefault("jsons", {})
-        env.setdefault("reload", {})
+        env = self.env_provider(env_id) if self.env_provider is not None else None
+        if env is None:
+            env = self.datastore.load_env(env_id)
+            if not isinstance(env, dict):
+                env = {}
+        if "jsons" not in env:
+            env["jsons"] = {}
+        if "reload" not in env:
+            env["reload"] = {}
         blob = env.get(METADATA_KEY)
         experiment = Experiment.from_dict(blob) if isinstance(blob, dict) else None
         if experiment is not None:
@@ -184,19 +201,32 @@ class ExperimentStore:
         experiment.add_metric(key, value, step)
         return self._write(env_id, env, experiment)
 
-    def update_tags(self, env_id, tags, append=False):
+    def update_tags(self, env_id, tags, append=False, env_data=None):
         """Replace or append organizational tags for ``env_id``.
 
         ``tags`` is the model's ``{key: value}`` representation.  Unlike run
         logging, tag management is allowed after an experiment reaches a
         terminal state: tags organize completed runs and do not alter their
         parameters, metrics, result status, or completion timestamp.
+
+        ``env_data`` may provide the server's current in-memory environment.
+        Using it avoids flushing that environment before validation merely so
+        this store can read it back. Invalid requests therefore perform no
+        writes, while valid requests persist the complete current environment
+        exactly once.
         """
         if not isinstance(append, bool):
             raise TypeError("append must be a boolean")
         tags = normalize_tags(tags)
 
-        env, experiment = self._read(env_id)
+        if env_data is None:
+            env, experiment = self._read(env_id)
+        else:
+            env = env_data
+            blob = env.get(METADATA_KEY)
+            experiment = Experiment.from_dict(blob) if isinstance(blob, dict) else None
+            if experiment is not None:
+                experiment.env_id = env_id
         if experiment is None:
             experiment = Experiment(env_id=env_id, name=env_id)
         if append:
@@ -287,14 +317,14 @@ class ExperimentStore:
                     type(env_ids).__name__
                 )
             )
-        unique = list(dict.fromkeys(env_ids))
-        for env_id in unique:
+        for env_id in env_ids:
             if not isinstance(env_id, str):
                 raise TypeError(
                     "env_ids must contain strings, got {0}".format(
                         type(env_id).__name__
                     )
                 )
+        unique = list(dict.fromkeys(env_ids))
         if not unique:
             raise ValueError("env_ids must name at least one environment")
         experiments = []
@@ -338,6 +368,6 @@ class ExperimentStore:
         env, experiment = self._read(env_id)
         if experiment is None:
             return False
-        env.pop(METADATA_KEY, None)
+        del env[METADATA_KEY]
         self.datastore.save_env(env_id, env)
         return True

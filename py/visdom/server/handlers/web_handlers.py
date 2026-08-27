@@ -52,6 +52,7 @@ from visdom.utils.server_utils import (
     push_deleted,
     clear_deleted,
     notify,
+    LazyEnvData,
 )
 from visdom.server.handlers.base_handlers import BaseHandler
 from visdom.experiments import (
@@ -976,7 +977,7 @@ class ExperimentLogHandler(BaseHandler):
             )
 
         eid = extract_eid(args)
-        store = ExperimentStore(handler.storage)
+        store = ExperimentStore(handler.storage, env_provider=handler.state.get)
 
         if action == "metrics":
             metrics = ExperimentLogHandler._require_mapping(args, "metrics")
@@ -1122,7 +1123,7 @@ class ExperimentSearchHandler(BaseHandler):
         offset = ExperimentSearchHandler._require_index(args, "offset", 0)
         descending = ExperimentSearchHandler._require_flag(args, "descending", True)
 
-        store = ExperimentStore(handler.storage)
+        store = ExperimentStore(handler.storage, env_provider=handler.state.get)
         try:
             experiments = store.search(
                 query=query,
@@ -1207,7 +1208,7 @@ class ExperimentCompareHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
         env_ids = ExperimentCompareHandler._require_env_ids(args)
-        store = ExperimentStore(handler.storage)
+        store = ExperimentStore(handler.storage, env_provider=handler.state.get)
         try:
             comparison = store.compare(env_ids)
         except KeyError as e:
@@ -1271,24 +1272,47 @@ class TagsHandler(BaseHandler):
         self.readonly = app.readonly
 
     @staticmethod
+    def _experiment_from_env(eid, env):
+        """Return an experiment from one materialized in-memory environment."""
+        blob = env.get("experiment")
+        if not isinstance(blob, Mapping):
+            return None
+        experiment = Experiment.from_dict(blob)
+        experiment.env_id = eid
+        return experiment
+
+    @staticmethod
+    def _read_experiment(handler, eid):
+        """Read one experiment without materializing unrelated environments."""
+        env = handler.state.get(eid)
+        if env is None or (isinstance(env, LazyEnvData) and not env.is_loaded):
+            return ExperimentStore(handler.storage).get_experiment(eid)
+        experiment = TagsHandler._experiment_from_env(eid, env)
+        if experiment is not None:
+            return experiment
+        return ExperimentStore(handler.storage).get_experiment(eid)
+
+    @staticmethod
     def _experiment_map(handler):
-        """Return stored experiments overlaid with current in-memory state."""
+        """Return stored experiments overlaid with materialized state only."""
         store = ExperimentStore(handler.storage)
         experiments = {exp.env_id: exp for exp in store.list_experiments()}
         for eid, env in handler.state.items():
-            blob = env.get("experiment")
-            if isinstance(blob, Mapping):
-                experiments[eid] = Experiment.from_dict(blob)
+            if isinstance(env, LazyEnvData) and not env.is_loaded:
+                continue
+            experiment = TagsHandler._experiment_from_env(eid, env)
+            if experiment is not None:
+                experiments[eid] = experiment
         return experiments
 
     @staticmethod
     def _write_tags(handler, eid=None):
-        experiments = TagsHandler._experiment_map(handler)
         if eid is not None:
-            experiment = experiments.get(eid)
+            experiment = TagsHandler._read_experiment(handler, eid)
             tags = tags_to_mapping(experiment.tags) if experiment else {}
             handler.write(json.dumps(tags, cls=NanSafeEncoder))
             return
+        experiments = TagsHandler._experiment_map(handler)
         tag_map = {
             env_id: tags_to_mapping(experiment.tags)
             for env_id, experiment in experiments.items()
@@ -1326,18 +1350,19 @@ class TagsHandler(BaseHandler):
         eid = extract_eid(args)
         append = args.get("append", False)
         store = ExperimentStore(handler.storage)
-
-        if eid in handler.state:
-            handler.storage.save_env(eid, handler.state[eid])
+        env = handler.state.get(eid)
+        is_new_env = env is None
+        if is_new_env:
+            env = {"jsons": {}, "reload": {}}
         try:
-            experiment = store.update_tags(eid, args["tags"], append=append)
+            experiment = store.update_tags(
+                eid, args["tags"], append=append, env_data=env
+            )
         except (TypeError, ValueError) as error:
             raise tornado.web.HTTPError(400, reason=str(error))
 
-        is_new_env = eid not in handler.state
         if is_new_env:
-            handler.state[eid] = {"jsons": {}, "reload": {}}
-        handler.state[eid]["experiment"] = experiment.to_dict()
+            handler.state[eid] = env
 
         tags = tags_to_mapping(experiment.tags)
         if is_new_env:
