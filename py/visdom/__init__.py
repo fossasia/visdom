@@ -3743,11 +3743,13 @@ class Visdom(object):
         """
 
         X = np.asarray(X)
-        if X.ndim > 2:
+        if X.size == 1:
+            X = X.reshape((1, 1))
+        else:
             X = np.squeeze(X)
+            if X.ndim == 1:
+                X = X[:, None]
         assert X.ndim == 1 or X.ndim == 2, "X should be one or two-dimensional"
-        if X.ndim == 1:
-            X = X[:, None]
 
         opts = {} if opts is None else opts
         _title2str(opts)

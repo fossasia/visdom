@@ -553,6 +553,20 @@ class TestBoxplot(unittest.TestCase):
         self.assertEqual(len(sent["payload"]["data"]), 1)
         self.assertEqual(sent["payload"]["data"][0]["y"], [10.5])
 
+    def test_row_vector_squeezed_to_one_box(self):
+        """(1, N) row vector is squeezed to produce 1 boxplot of N values."""
+        X = np.array([[1.0, 2.0, 3.0, 4.0, 5.0]])
+        sent = self._boxplot(X, opts={"legend": ["Series 1"]})
+        self.assertEqual(len(sent["payload"]["data"]), 1)
+        self.assertEqual(sent["payload"]["data"][0]["y"], [1.0, 2.0, 3.0, 4.0, 5.0])
+        self.assertEqual(sent["payload"]["data"][0]["name"], "Series 1")
+
+    def test_singleton_matrix_one_box(self):
+        """(1, 1) matrix produces 1 boxplot with 1 value."""
+        sent = self._boxplot(np.array([[10.5]]))
+        self.assertEqual(len(sent["payload"]["data"]), 1)
+        self.assertEqual(sent["payload"]["data"][0]["y"], [10.5])
+
 
 class TestSurf(unittest.TestCase):
     def setUp(self):
