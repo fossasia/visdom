@@ -52,6 +52,8 @@ tags:
     description: Query, close, and retrieve window data
   - name: Environment
     description: Manage environments (create, delete, fork, list, save, compare)
+  - name: Experiments
+    description: Track experiment metadata (hyper-parameters, metrics, tags)
   - name: Authentication
     description: Login and session management
   - name: Socket Polling
@@ -381,6 +383,550 @@ paths:
           description: Authentication required but not provided (when login is enabled).
         "500":
           description: Server error. Occurs if the source environment does not exist (unhandled assertion error).
+
+  /experiments/log:
+    post:
+      operationId: logExperiment
+      tags: [Experiments]
+      summary: Record experiment metadata for an environment
+      description: >
+        Attaches experiment metadata (hyper-parameters, metric observations,
+        and tags) to an environment, stored under the environment's
+        `experiment` key and persisted through the server's data store. The
+        `action` field selects the operation:
+
+
+        - `log` (default): create or update the experiment. Repeated calls
+        merge new `params`/`tags` and overwrite `name`/`description`.
+
+
+        - `metrics`: append one or more `{name: value}` observations at an
+        optional `step`, creating the experiment if it does not exist yet.
+
+
+        - `finish`: mark the experiment terminal (`finished` or `failed`). An
+        experiment that is already terminal cannot be finished again.
+
+
+        Once an experiment is terminal, every action is rejected with `409`, so
+        neither a finished run's recorded data nor its final status can change
+        after the fact.
+        Every action writes, so the endpoint is rejected when the server is
+        running in readonly mode.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                eid:
+                  type: string
+                  description: Target environment ID. Defaults to `main`.
+                action:
+                  type: string
+                  enum: [log, metrics, finish]
+                  default: log
+                  description: Operation to perform.
+                name:
+                  type: string
+                  description: Display name (action `log`). Defaults to the eid.
+                description:
+                  type: string
+                  description: Free-form description (action `log`).
+                params:
+                  type: object
+                  additionalProperties: true
+                  description: 'Hyper-parameters as `{name: value}` (action `log`).'
+                tags:
+                  type: object
+                  additionalProperties: true
+                  description: 'Free-form tags as `{name: value}` (action `log`).'
+                metrics:
+                  type: object
+                  additionalProperties:
+                    type: number
+                  description: >
+                    Metric observations as `{name: value}` (action `metrics`).
+                    Must be a non-empty object.
+                step:
+                  type: integer
+                  description: Optional training step for the metrics (action `metrics`).
+                status:
+                  type: string
+                  enum: [finished, failed]
+                  default: finished
+                  description: Terminal status (action `finish`).
+      responses:
+        "200":
+          description: The stored experiment as JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Experiment"
+        "400":
+          description: >
+            Invalid request — unknown `action`, non-object `params`/`tags`/`metrics`,
+            empty `metrics`, or a non-terminal `finish` status. Also returned when
+            authentication is required but not provided.
+        "403":
+          description: >
+            Experiment logging is disabled because the server is in readonly
+            mode.
+        "404":
+          description: A `finish` was requested for an env that has no experiment.
+        "409":
+          description: >
+            A write was attempted on a terminal (finished/failed) experiment —
+            a `log`/`metrics` call, or a second `finish`.
+
+  /experiments/search:
+    post:
+      operationId: searchExperiments
+      tags: [Experiments]
+      summary: Search experiments across all environments
+      description: >
+        Returns the experiments matching `query`, sorted and paged. The query is
+        a small readable syntax of comparisons (`<`, `<=`, `>`, `>=`, `=`, `!=`,
+        `contains`) combined with `AND`/`OR` and parentheses, for example
+        `lr < 0.01 AND (acc > 0.9 OR status = finished)`. Omitting `query`
+        matches every experiment.
+
+
+        Comparison names are the experiment's built-in fields (`name`,
+        `status`, `created_at`, ...), its params, its metrics and its tags. A
+        name may be given bare (`acc`) or namespaced when it is ambiguous
+        (`metric.acc`, `param.lr`, `tag.owner`); metrics compare on their latest
+        logged value. A name no experiment has simply matches nothing.
+
+
+        Queries are parsed into a predicate and evaluated in Python — never
+        eval'd and never turned into SQL — so a hostile query is rejected as a
+        parse error rather than executed.
+
+
+        Experiments are read back through the server's data store, so a server
+        running with no persistence path configured has nothing to search.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query:
+                  type: string
+                  nullable: true
+                  description: >
+                    Filter expression. Omitted, null or blank matches every
+                    experiment.
+                sort_by:
+                  type: string
+                  nullable: true
+                  default: created_at
+                  description: >
+                    Field to sort by — any name a query can compare on.
+                    Experiments lacking the field sort last in both directions.
+                descending:
+                  type: boolean
+                  default: true
+                  description: Sort direction; newest/highest first by default.
+                limit:
+                  type: integer
+                  nullable: true
+                  minimum: 0
+                  default: 100
+                  description: >
+                    Maximum number of experiments in the reply. `0` returns just
+                    the count; `null` returns all matches.
+                offset:
+                  type: integer
+                  minimum: 0
+                  default: 0
+                  description: Number of matches to skip before the returned page.
+      responses:
+        "200":
+          description: The matching page of experiments.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [experiments, total, limit, offset, query]
+                properties:
+                  experiments:
+                    type: array
+                    description: One page of matching experiments.
+                    items:
+                      $ref: "#/components/schemas/Experiment"
+                  total:
+                    type: integer
+                    description: >
+                      Total matches for the query, ignoring `limit`/`offset`.
+                  limit:
+                    type: integer
+                    nullable: true
+                    description: The limit applied to this reply.
+                  offset:
+                    type: integer
+                    description: The offset applied to this reply.
+                  query:
+                    type: string
+                    description: The query used, `""` if none was given.
+        "400":
+          description: >
+            Invalid request — a body that is not a JSON object, malformed
+            `query` syntax, a non-string `query`/`sort_by`, or a `limit`/`offset`
+            that is not a non-negative integer. Also returned when
+            authentication is required but not provided.
+
+  /experiments/compare:
+    post:
+      operationId: compareExperiments
+      tags: [Experiments]
+      summary: Compare experiments field by field
+      description: >
+        Lines several experiments up beside each other and reports, per section
+        (params, metrics and tags), which fields they agree on and which they do
+        not — the short list of knobs that actually changed between runs.
+
+
+        The runs are named by `env_ids` and compared in the order given; every id
+        must have an experiment, otherwise `404`.
+
+
+        Finding the runs is `/experiments/search`'s job: it answers "which runs
+        match?", this answers "how do these runs differ?". To compare a query's
+        matches, search first and pass the resulting ids on.
+
+
+        Metrics are a time series, so a comparison uses each metric's latest
+        observation — the same value a search compares on.
+
+
+        Experiments are read back through the server's data store, so a server
+        running with no persistence path configured has nothing to compare.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [env_ids]
+              properties:
+                env_ids:
+                  type: array
+                  minItems: 1
+                  description: >
+                    Environments to compare, in the order given. Duplicate ids
+                    collapse to one.
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: The comparison of the selected experiments.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [env_ids, experiments, params, metrics, tags]
+                properties:
+                  env_ids:
+                    type: array
+                    description: The runs compared, in the order compared.
+                    items:
+                      type: string
+                  experiments:
+                    type: array
+                    description: The compared experiments, in full.
+                    items:
+                      $ref: "#/components/schemas/Experiment"
+                  params:
+                    $ref: "#/components/schemas/ExperimentComparisonSection"
+                  metrics:
+                    $ref: "#/components/schemas/ExperimentComparisonSection"
+                  tags:
+                    $ref: "#/components/schemas/ExperimentComparisonSection"
+        "400":
+          description: >
+            Invalid request — the body is not a JSON object, or `env_ids` is
+            missing, empty, not a list, or holds something other than strings.
+            Also returned when authentication is required but not provided.
+        "404":
+          description: One or more of the given `env_ids` has no experiment.
+
+  /experiments/suggest:
+    post:
+      operationId: suggestExperiment
+      tags: [Experiments]
+      summary: Suggest parameters for the next run (reserved)
+      description: >
+        Reserved endpoint for hyper-parameter suggestion. Choosing the next set
+        of parameters to try is a search-strategy problem (Optuna-backed) that
+        lands in a later release, so this is currently a stub: it accepts the
+        request and replies `501 Not Implemented` with a JSON body carrying a
+        `suggestion: null` placeholder, rather than a made-up suggestion. The
+        route, the `suggest_experiment` client method and this documentation are
+        in place so the strategy can be wired in later without changing the
+        surface.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                eid:
+                  type: string
+                  description: Target environment ID. Defaults to `main`.
+                params:
+                  type: object
+                  additionalProperties: true
+                  description: >
+                    The search space to suggest over, as `{name: spec}`. Ignored
+                    by the stub; reserved for the eventual strategy.
+      responses:
+        "501":
+          description: >
+            Not implemented — the suggestion strategy is reserved for a later
+            release. The body is a JSON stub.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, detail, suggestion]
+                properties:
+                  status:
+                    type: string
+                    example: not_implemented
+                  detail:
+                    type: string
+                  suggestion:
+                    nullable: true
+                    description: Always `null` while the endpoint is a stub.
+        "400":
+          description: >
+            Invalid request — the body is present but is not valid JSON, or is
+            not a JSON object. Also returned when authentication is required
+            but not provided.
+
+  /experiments/tags:
+    get:
+      operationId: getEnvironmentTags
+      tags: [Experiments]
+      summary: Read experiment tags for environments
+      description: >
+        Returns one environment's key/value tag mapping when `eid` is supplied,
+        or an `{eid: {name: value}}` mapping for all tagged environments.
+        Tags are stored in the existing `Experiment.tags` metadata; no separate
+        tag index or persistence format is maintained.
+      parameters:
+        - in: query
+          name: eid
+          schema:
+            type: string
+          description: Optional environment ID.
+      responses:
+        "200":
+          description: One tag mapping or all environment tag mappings.
+        "401":
+          description: Authentication required but not provided.
+    post:
+      operationId: updateEnvironmentTags
+      tags: [Experiments]
+      summary: Read, replace, or append environment tags
+      description: >
+        With `action: set` (the default), replaces an environment's tags or
+        appends them when `append` is true. `action: get` reads the same data as
+        GET while allowing later clients to use the shared POST transport.
+        The `tags` field is required for `set`; an explicit empty object clears
+        the environment's tags.
+        Tag changes are allowed for completed experiments because they are
+        organizational metadata. Successful writes broadcast `tags_update` to
+        both WebSocket and polling browser clients.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action:
+                  type: string
+                  enum: [get, set]
+                  default: set
+                eid:
+                  type: string
+                  description: Target environment. Defaults to `main` for set.
+                tags:
+                  type: object
+                  maxProperties: 20
+                  description: >
+                    Required for `action: set`. String tag names mapped to string
+                    values. Names are limited to 50 characters by the domain
+                    layer. An empty object explicitly clears all tags.
+                  additionalProperties:
+                    type: string
+                append:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          description: The resulting tags, or the requested tag mapping.
+        "400":
+          description: >
+            Invalid action, missing or invalid tag mapping, tag limit, or append
+            flag.
+        "401":
+          description: Authentication required but not provided.
+        "403":
+          description: Tag writes are disabled in readonly mode.
+
+  /experiments/hparams:
+    post:
+      operationId: createHparamsPane
+      tags: [Experiments]
+      summary: Open a hyper-parameter pane over logged experiments
+      description: >
+        Selects experiments, flattens them into a table of hyper-parameters
+        against their latest metric values (and tags), and registers a
+        dedicated `hparams` window with that content. The window is written
+        into the env state, broadcast to connected clients, and the
+        environment is saved immediately, so the pane is on disk without an
+        explicit save.
+
+
+        `mode` chooses how the runs are selected; when omitted it is inferred
+        from which of `query`/`env_ids` were supplied:
+
+
+        - `query`: the runs matching `query` (the syntax of
+        `/experiments/search`). The query must be non-empty and `env_ids`
+        must not be given.
+
+
+        - `env_ids`: the runs named in `env_ids`, in that order. `env_ids`
+        must be non-empty and `query` must not be given; missing envs are
+        skipped rather than an error.
+
+
+        - `both`: the intersection — runs matching `query` and named in
+        `env_ids`, ordered by `env_ids`. Both must be given and non-empty.
+
+
+        There is no "show everything" call: with neither `query` nor
+        `env_ids` there is nothing to select (400). A blank query counts as
+        no query. The resolved selection is stored on the window so a later
+        `/experiments/hparams/update` can re-run it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                eid:
+                  type: string
+                  description: Environment to register the pane in. Defaults to `main`.
+                query:
+                  type: string
+                  description: Selection query, e.g. `lr < 0.01 AND acc > 0.9`.
+                env_ids:
+                  type: array
+                  items:
+                    type: string
+                  description: Explicit environment ids, kept in the order given.
+                mode:
+                  type: string
+                  enum: [query, env_ids, both]
+                  description: How the runs are selected. Inferred when omitted.
+                win:
+                  type: string
+                  description: Window ID to register the pane under. Autogenerated when omitted.
+                opts:
+                  type: object
+                  additionalProperties: true
+                  description: Window options (`title` defaults to `Hyperparameters`).
+      responses:
+        "200":
+          description: The created window ID as plain text.
+          content:
+            text/plain:
+              schema:
+                type: string
+        "400":
+          description: >
+            Invalid request — no selection given, a mode/argument combination
+            that is not allowed, a malformed `query`, or non-string `env_ids`.
+            Also returned when authentication is required but not provided.
+
+  /experiments/hparams/update:
+    post:
+      operationId: updateHparamsPane
+      tags: [Experiments]
+      summary: Change or refresh an existing hyper-parameter pane
+      description: >
+        The dedicated write path for `hparams` windows — the generic `/update`
+        endpoint only understands plot-shaped content. The target `win` must
+        name an existing window of type `hparams`.
+
+
+        With `query`/`env_ids`/`mode` in the body the pane's selection is
+        replaced, under exactly the rules of `/experiments/hparams`. With none
+        of them the selection stored on the window is re-run — a manual
+        refresh that picks up runs logged (or newly matching) since the pane
+        was built.
+
+
+        The rebuilt window keeps its id and position but carries a fresh
+        `contentID`; it is broadcast to the environment's subscribers and the
+        environment is saved, so state and disk reflect the update
+        immediately. `opts` overrides the pane's title/size; when omitted the
+        current ones are kept.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [win]
+              properties:
+                win:
+                  type: string
+                  description: ID of the hparams window to update.
+                eid:
+                  type: string
+                  description: Environment holding the window. Defaults to `main`.
+                query:
+                  type: string
+                  description: Replacement selection query.
+                env_ids:
+                  type: array
+                  items:
+                    type: string
+                  description: Replacement explicit environment ids.
+                mode:
+                  type: string
+                  enum: [query, env_ids, both]
+                  description: How the replacement selection works. Inferred when omitted.
+                opts:
+                  type: object
+                  additionalProperties: true
+                  description: Overrides for the pane's window options.
+      responses:
+        "200":
+          description: The updated window ID as plain text.
+          content:
+            text/plain:
+              schema:
+                type: string
+        "400":
+          description: >
+            Invalid request — `win` missing, the window is not an `hparams`
+            window, a bare refresh on a window with no stored selection, or an
+            invalid replacement selection. Also returned when authentication
+            is required but not provided.
+        "404":
+          description: The environment or the window does not exist.
 
   /upload_env:
     post:
@@ -722,8 +1268,9 @@ paths:
         the WebSocket protocol (HTTP Upgrade). On connection, the server
         sends a `register` message with the assigned socket ID, readonly
         status, and current environment list. The server then streams
-        window updates, close events, environment updates, and layout
-        changes. Clients can send commands: `close`, `save`, `save_all`,
+        window updates, close events, environment/tag updates, and layout
+        changes. Tag updates use the `tags_update` command with
+        `{eid, tags}` data. Clients can send commands: `close`, `save`, `save_all`,
         `delete_env`, `save_layouts`, `forward_to_vis`,
         `layout_item_update`, `pop_embeddings_pane`.
 
@@ -844,6 +1391,123 @@ components:
         the server is started with `--enable_login`.
 
   schemas:
+
+    ExperimentComparisonSection:
+      type: object
+      description: >
+        One section (params, metrics or tags) of an experiment comparison,
+        diffed across the compared runs.
+      required: [fields, shared, differing, values, groups]
+      properties:
+        fields:
+          type: array
+          description: Every field name any compared run has, sorted.
+          items:
+            type: string
+        shared:
+          type: object
+          additionalProperties: true
+          description: >
+            The fields every compared run carries with the same value, as
+            `{name: value}`.
+        differing:
+          type: array
+          description: >
+            The remaining fields — those whose value varies between runs, or
+            that some run is missing.
+          items:
+            type: string
+        values:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties: true
+          description: >
+            Per-field, per-run values as `{field: {env_id: value}}`. A run that
+            never logged the field is omitted from that field's map.
+        groups:
+          type: object
+          description: >
+            Per field, the runs clustered by the value they used — the finer
+            question "which runs agree?", where `shared`/`differing` answer only
+            "do they all?". With three runs on two learning rates, the two that
+            match share a group. A field appears in `shared` exactly when its
+            groups are a single cluster holding every compared run, so the two
+            never disagree. Groups are ordered by first appearance, and a run
+            that never logged the field is in no group.
+          additionalProperties:
+            type: array
+            items:
+              type: object
+              required: [value, env_ids]
+              properties:
+                value:
+                  description: The value these runs share.
+                env_ids:
+                  type: array
+                  description: The runs that used it, in compared order.
+                  items:
+                    type: string
+
+    Experiment:
+      type: object
+      description: Experiment metadata attached to an environment.
+      properties:
+        env_id:
+          type: string
+          description: Environment the experiment belongs to.
+        name:
+          type: string
+          description: Display name. Defaults to the env_id.
+        description:
+          type: string
+        status:
+          type: string
+          enum: [running, finished, failed]
+          description: Lifecycle state. New experiments start `running`.
+        created_at:
+          type: number
+          description: Unix timestamp when the experiment was created.
+        finished_at:
+          type: [number, "null"]
+          description: Unix timestamp when finished, or `null` while running.
+        params:
+          type: array
+          description: Hyper-parameters, keyed by name.
+          items:
+            type: object
+            properties:
+              key:
+                type: string
+              value: {}
+              dtype:
+                type: string
+                enum: [bool, int, float, str]
+                description: Inferred type, so a stored value can be cast back.
+        metrics:
+          type: array
+          description: Metric observations, appended over time.
+          items:
+            type: object
+            properties:
+              key:
+                type: string
+              value:
+                type: number
+              step:
+                type: [integer, "null"]
+              timestamp:
+                type: number
+        tags:
+          type: array
+          description: Free-form key/value labels.
+          items:
+            type: object
+            properties:
+              key:
+                type: string
+              value:
+                type: string
 
     UploadErrorResponse:
       type: object

@@ -86,6 +86,14 @@ class StateAccessorsMixin:
     def max_image_history(self):
         return self.server_state.max_image_history
 
+    @property
+    def max_plot_history(self):
+        return self.server_state.max_plot_history
+
+    def mark_dirty(self, eid):
+        """Mark an environment for persistence through the shared state."""
+        return self.server_state.mark_dirty(eid)
+
 
 class ServerState:
     """Single shared facade over the server's data containers, configuration,
@@ -111,9 +119,11 @@ class ServerState:
         max_text_lines,
         max_old_content,
         max_image_history,
+        max_plot_history,
     ):
-        # Retained solely to construct nested socket wrappers (see
-        # ``spawn_socket``); handlers must not touch the app directly.
+        # Retained to construct nested socket wrappers (see ``spawn_socket``)
+        # and delegate application-owned lifecycle operations; handlers must
+        # not touch the app directly.
         self._app = app
 
         # Shared mutable containers (passed by reference, never rebound here).
@@ -134,6 +144,7 @@ class ServerState:
         self.max_text_lines = max_text_lines
         self.max_old_content = max_old_content
         self.max_image_history = max_image_history
+        self.max_plot_history = max_plot_history
 
         # Runtime values that get reassigned while the server runs. These are
         # the reason this facade exists: a value copied onto a handler would go
@@ -168,6 +179,12 @@ class ServerState:
             )
             return ""
         return self.storage.load_layouts()
+
+    # ----- environment persistence ----- #
+
+    def mark_dirty(self, eid):
+        """Record a changed environment with the application's autosaver."""
+        return self._app.mark_dirty(eid)
 
     # ----- polling socket monitor ----- #
 

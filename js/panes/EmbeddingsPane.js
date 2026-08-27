@@ -17,13 +17,25 @@ import * as THREE from 'three';
 import ApiContext from '../api/ApiContext';
 import EventSystem from '../EventSystem';
 import lasso from '../lasso';
+import { showToast } from '../toasts/toastEvents';
 import Pane from './Pane';
+import {
+  downloadJpegWithDpi,
+  downloadPngWithDpi,
+} from './utils/Embeddpimetadata';
+import { copyLatexToClipboard } from './utils/LatexExport';
+import { downloadImageAsPdf } from './utils/pdfExport';
 
 const SCALE_RADIUS = 2000;
 const MIN_SELECTION = 22;
 
+const EXPORT_FORMATS = ['png', 'jpg', 'pdf'];
+
 class EmbeddingsPane extends React.Component {
-  shouldComponentUpdate(nextProps) {
+  state = { exportError: null };
+  sceneRef = React.createRef();
+
+  shouldComponentUpdate(nextProps, nextState) {
     if (this.props.contentID !== nextProps.contentID) return true;
     if (
       Math.round(this.props.height) !== Math.round(nextProps.height) ||
@@ -31,6 +43,7 @@ class EmbeddingsPane extends React.Component {
     )
       return true;
     if (this.props.isFocused !== nextProps.isFocused) return true;
+    if (this.state.exportError !== nextState.exportError) return true;
     return false;
   }
 
@@ -109,7 +122,7 @@ class EmbeddingsPane extends React.Component {
     EventSystem.unsubscribe('global.event', this.onEvent);
   }
 
-  handleDownload = () => {
+  handleMetadataExport = () => {
     var blob = new Blob([JSON.stringify(this.props.content.data)], {
       type: 'text/plain',
     });
@@ -122,9 +135,130 @@ class EmbeddingsPane extends React.Component {
     link.click();
   };
 
+  handleLatexExport = (style) => {
+    copyLatexToClipboard(style, {
+      contentID: this.props.contentID,
+      id: this.props.id,
+      caption: this.props.title,
+    })
+      .then(() =>
+        showToast('Copied!', 'success', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        })
+      )
+      .catch((err) => {
+        console.error('EmbeddingsPane LaTeX export failed:', err);
+        showToast('Failed to Copy', 'error', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        });
+      });
+  };
+
+  handleExport = (format, dpi) => {
+    this.setState({ exportError: null });
+
+    const sceneInstance = this.sceneRef.current;
+    if (!sceneInstance) {
+      this.setState({
+        exportError: 'Visualization is not ready yet. Please try again.',
+      });
+      return;
+    }
+
+    const { renderer, scene, camera } = sceneInstance;
+    if (!renderer || !scene || !camera) {
+      this.setState({
+        exportError: 'Visualization is not ready yet. Please try again.',
+      });
+      return;
+    }
+
+    const width = Math.max(1, this.props.width);
+    const height = Math.max(1, this.props.height);
+    const PDF_CAPTURE_DPI = 300;
+    const scale = format === 'pdf' ? PDF_CAPTURE_DPI / 96 : dpi ? dpi / 96 : 1;
+    const originalPixelRatio = renderer.getPixelRatio();
+    const effectiveDpi = Math.round(scale * 96 * originalPixelRatio);
+
+    try {
+      // `updateStyle=false` keeps the on-screen CSS size unchanged while
+      // only the internal render resolution increases
+      renderer.setPixelRatio(originalPixelRatio * scale);
+      renderer.setSize(width, height, false);
+      renderer.render(scene, camera);
+
+      const mime =
+        format === 'jpg' || format === 'pdf' ? 'image/jpeg' : 'image/png';
+      const dataUrl = renderer.domElement.toDataURL(
+        mime,
+        format === 'jpg' || format === 'pdf' ? 0.95 : undefined
+      );
+
+      if (format === 'pdf') {
+        downloadImageAsPdf(
+          dataUrl,
+          `${this.props.contentID || 'plot'}.pdf`,
+          effectiveDpi
+        );
+      } else {
+        const filename = `${this.props.contentID || 'plot'}.${format}`;
+        if (format === 'jpg') {
+          downloadJpegWithDpi(dataUrl, filename, effectiveDpi);
+        } else {
+          downloadPngWithDpi(dataUrl, filename, effectiveDpi);
+        }
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('EmbeddingsPane export failed:', err);
+      this.setState({
+        exportError: 'Export failed: ' + (err.message || 'unknown error'),
+      });
+    } finally {
+      // restore the on-screen resolution and schedule a normal repaint,
+      // regardless of whether the export above succeeded
+      renderer.setPixelRatio(originalPixelRatio);
+      renderer.setSize(width, height, false);
+      sceneInstance.scheduleRender();
+    }
+  };
+
   render() {
     return (
-      <Pane {...this.props} handleDownload={this.handleDownload}>
+      <Pane
+        {...this.props}
+        handleExport={this.handleExport}
+        handleMetadataExport={this.handleMetadataExport}
+        handleLatexExport={this.handleLatexExport}
+        exportFormats={EXPORT_FORMATS}
+      >
+        {this.state.exportError ? (
+          <div
+            style={{
+              position: 'absolute',
+              top: 16,
+              left: 0,
+              right: 0,
+              textAlign: 'center',
+              zIndex: 5,
+            }}
+          >
+            <span
+              style={{
+                backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                color: '#c00',
+                padding: 2,
+                userSelect: 'none',
+              }}
+            >
+              {this.state.exportError}
+            </span>
+          </div>
+        ) : null}
         {this.props.content.isLoading ? (
           <div
             style={{
@@ -141,6 +275,7 @@ class EmbeddingsPane extends React.Component {
           </div>
         ) : (
           <Scene
+            ref={this.sceneRef}
             key={
               this.props.height +
               '===' +
@@ -311,7 +446,9 @@ class Scene extends React.Component {
       '#cab2d6',
       '#cccc00',
     ];
-    let circle_sprite = new THREE.TextureLoader().load(
+    const textureLoader = new THREE.TextureLoader();
+    textureLoader.setCrossOrigin('anonymous');
+    let circle_sprite = textureLoader.load(
       'https://fastforwardlabs.github.io/visualization_assets/circle-sprite.png',
       () => this.scheduleRender()
     );
@@ -359,7 +496,7 @@ class Scene extends React.Component {
     });
 
     let points = new THREE.Points(pointsGeometry, pointsMaterial);
-    let renderer = new THREE.WebGLRenderer();
+    let renderer = new THREE.WebGLRenderer({ preserveDrawingBuffer: true });
 
     let scene = new THREE.Scene();
     scene.add(points);
