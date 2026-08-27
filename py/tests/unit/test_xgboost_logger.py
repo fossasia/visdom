@@ -17,6 +17,8 @@ xgb = pytest.importorskip("xgboost")
 
 from visdom.loggers.xgboost import VisdomXGBLogger
 
+pytestmark = pytest.mark.unit
+
 
 def _unconnected_visdom():
     with (

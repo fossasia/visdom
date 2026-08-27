@@ -1142,7 +1142,15 @@ class Visdom(object):
             r = self.session.post(url, data=data, timeout=(20, None))
             return r.text
 
-    def _send(self, msg, endpoint="events", quiet=False, from_log=False, create=True):
+    def _send(
+        self,
+        msg,
+        endpoint="events",
+        quiet=False,
+        from_log=False,
+        create=True,
+        default_eid=True,
+    ):
         """
         This function sends specified JSON request to the Tornado server. This
         function should generally not be called by the user, unless you want to
@@ -1152,8 +1160,13 @@ class Visdom(object):
         If `create=True`, then if `win=None` in the message a new window will be
         created with a random name. If `create=False`, `win=None` indicates the
         operation should be applied to all windows.
+
+        If `default_eid=False`, a message without an `eid` is left without one
+        rather than being pointed at this client's env. Routes that treat a
+        missing `eid` as "every env" need this: `/env_state` returns the env
+        list only when no `eid` is supplied.
         """
-        if msg.get("eid", None) is None:
+        if msg.get("eid", None) is None and default_eid:
             msg["eid"] = self.env
             self.env_list.add(self.env)
 
@@ -1635,7 +1648,12 @@ class Visdom(object):
         if self.offline:
             return list(self.env_list)
         else:
-            return json.loads(self._send({}, endpoint="env_state", quiet=True))
+            # `default_eid=False` matters here: `/env_state` answers with one
+            # env's windows when it is given an `eid`, and with the env list
+            # only when it is not.
+            return json.loads(
+                self._send({}, endpoint="env_state", quiet=True, default_eid=False)
+            )
 
     def get_env_state(self, env):
         """
