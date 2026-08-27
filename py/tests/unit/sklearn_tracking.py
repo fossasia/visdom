@@ -35,7 +35,7 @@ from unittest.mock import Mock, patch
 # whether or not run= tracking is involved.
 #
 # resolved this using pre-populate sys.modules with dummy stand-in for
-# the shim before collection. Python's import machinery checks sys.modules 
+# the shim before collection. Python's import machinery checks sys.modules
 # first, so pkgutil's __import__() call finds it already "imported" and never
 # executes the broken module body. all_estimators() never actually needs
 # anything from this shim -- it's just an accidental side effect of
