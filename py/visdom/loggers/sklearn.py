@@ -103,48 +103,10 @@ class VisdomSklearnLogger:
         self.viz = viz
         self.env = env
         self.run = run
-        # A plain, lock-protected shared counter, not threading.local():
-        # GridSearchCV/RandomizedSearchCV with a threading-based joblib
-        # backend (n_jobs > 1 with backend="threading", either explicit
-        # via joblib.parallel_backend("threading") or an estimator that
-        # uses threading internally) runs inner fit() calls on worker
-        # threads. threading.local() gives each of those threads its own
-        # independent depth starting at 0, with no way to see they're
-        # nested inside the outer fit -- every inner fit then also looks
-        # like a top-level call and gets logged again (confirmed: 6 extra
-        # spurious "fit" events from a 2-candidate/3-fold GridSearchCV
-        # under a threading backend, expected 0). A ContextVar doesn't
-        # fix this either -- confirmed empirically that joblib's
-        # threading backend does not propagate contextvars to its worker
-        # threads. What *does* work: the threading backend's workers run
-        # in the same process, sharing the same memory as the thread that
-        # dispatched them (unlike the "loky"/multiprocessing backends,
-        # which use separate processes and share nothing) -- so a plain
-        # shared counter, protected by a lock against concurrent workers
-        # incrementing/decrementing at once, correctly reflects "how many
-        # patched fit() calls are currently in flight anywhere for this
-        # instance" and lets a worker's inner fit see it's nested (depth
-        # > 0 from the outer call's own not-yet-released increment) even
-        # though it's running on a different OS thread. See _enter_fit/
-        # _exit_fit. This assumes at most one *unrelated* top-level fit
-        # is ever in flight per instance at a time -- two genuinely
-        # independent top-level fit() calls dispatched concurrently from
-        # different user threads onto the same VisdomSklearnLogger
-        # instance could transiently miscount each other as "nested".
-        # That's a narrower, pre-existing limitation of the single shared
-        # `active` instance design generally (self.viz/self.env/self._wins
-        # are equally unscoped across concurrent unrelated fits already),
-        # not a new one introduced here.
         self._depth_lock = threading.Lock()
         self._depth_value = 0
         self._wins = weakref.WeakKeyDictionary()
         self._seq = 0
-        # (cls, original_fit) for every class _patch() has actually
-        # patched, so unpatch() can restore all of them -- not just a
-        # hand-picked few. autolog() patches every class
-        # sklearn.utils.all_estimators() returns (200+ classes), so
-        # anything less than "every class this instance patched" leaves
-        # most of them permanently monkey-patched with no way back.
         self._patched = []
 
     def _enter_fit(self):

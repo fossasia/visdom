@@ -279,17 +279,7 @@ class TestSklearnLoggerRunTracking(unittest.TestCase):
         """Regression test for a flagged issue: GridSearchCV/RandomizedSearchCV
         with a threading-based joblib backend (n_jobs > 1 under
         joblib.parallel_backend("threading")) dispatches inner fit() calls
-        to worker threads. The old threading.local()-based depth counter
-        gave each worker thread its own independent depth starting at 0,
-        with no way to see it was nested inside the outer CV fit -- every
-        inner fit then also looked like a top-level call and got logged
-        again (confirmed before the fix: 6 extra spurious 'fit' events for
-        a 2-candidate/3-fold grid, expected 0). The fix is a lock-protected
-        shared counter (see VisdomSklearnLogger._enter_fit/_exit_fit),
-        since the threading backend's workers run in the same process/
-        memory space as the dispatching thread -- unlike a ContextVar,
-        which was tried and confirmed NOT to work here (joblib's threading
-        backend does not propagate contextvars to its worker threads)."""
+        to worker threads."""
         import joblib
         from sklearn.linear_model import LogisticRegression
         from sklearn.model_selection import GridSearchCV
@@ -356,7 +346,7 @@ class TestSklearnLoggerRunTracking(unittest.TestCase):
 
         # A class nowhere near the old hardcoded 4-class list must work
         # normally post-unpatch -- this is the exact scenario that used
-        # to crash with AttributeError before the fix.
+        # to crash with AttributeError
         from sklearn.ensemble import RandomForestClassifier
         from sklearn.datasets import make_classification
 
