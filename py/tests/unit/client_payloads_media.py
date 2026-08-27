@@ -13,7 +13,7 @@ decode the payload back into an array and check the pixels the browser would
 receive. That is the only way to catch the failure mode this family actually
 has: a wrong scaling branch produces a valid payload holding a black image.
 
-Three behaviours pinned here are current, not desired:
+Four behaviours pinned here are current, not desired:
 
 * A float image whose maximum is just over 1.0 (1.0001 from a denormalization
   round trip, say) matches neither the [0, 1] nor the [-1, 1] branch, so it is
@@ -22,6 +22,9 @@ Three behaviours pinned here are current, not desired:
 * ``images`` fills the gaps between tiles with 1.0, which the float branch
   scales to white but the uint8 branch leaves as near-black, so the padding
   colour depends on the input dtype.
+* ``images`` insets each tile one pixel past its ``padding``, so the gap below
+  and to the right of a tile is a pixel thinner than the gap above and to its
+  left. See ``test_images_insets_each_tile_by_an_extra_pixel``.
 * ``svg(svgfile=...)`` stringifies the raw bytes, so newlines in the file reach
   the browser as literal backslash-n.
 
@@ -275,31 +278,30 @@ def test_images_accepts_a_list_of_arrays(capture_send):
     assert pixels.shape == (4 + 4, (4 + 4) * 2, 3)
 
 
-def test_images_rejects_a_grid_without_padding(capture_send):
-    """Pinned quirk: each tile sits one pixel into its cell, so padding=0 overruns.
+def test_images_tiles_without_padding(capture_send):
+    """Regression: the cell offset used to overrun the grid and raise on padding=0."""
+    sent = capture_send(
+        lambda v: v.images(np.ones((2, 3, 4, 4), dtype=np.float32), nrow=2, padding=0)
+    )
+    _, pixels = decode(sent)
+    assert pixels.shape == (4, 8, 3)
 
-    The cell is exactly the image when padding is 0, and the extra pixel walks
-    the last row and column off the end of the grid. Fixing the offset is a
-    pixel-level change to every grid Visdom draws, which the Cypress image_grid
-    snapshot catches, so the behaviour is pinned rather than corrected here.
+
+def test_images_insets_each_tile_by_an_extra_pixel(capture_send):
+    """Pinned quirk: the tile sits one pixel low and right inside its cell.
+
+    ``padding`` is added on all four sides of the cell but the tile starts
+    ``padding + 1`` into it, so the gap below and to the right of each tile is
+    one pixel thinner than the gap above and to its left.
     """
-    with pytest.raises(ValueError):
-        capture_send(
-            lambda v: v.images(
-                np.ones((2, 3, 4, 4), dtype=np.float32), nrow=2, padding=0
-            )
-        )
-
-
-def test_images_offsets_each_tile_by_one_pixel_in_its_cell(capture_send):
-    """The tile sits a pixel low and right, so the far edges are thinner."""
     sent = capture_send(
         lambda v: v.images(np.zeros((2, 3, 4, 4), dtype=np.float32), nrow=2, padding=1)
     )
     _, pixels = decode(sent)
     assert pixels.shape == (4 + 2, (4 + 2) * 2, 3)
-    assert (pixels[:2] == 255).all()
+    assert (pixels[:2] == 255).all()  # two rows above, none below
     assert (pixels[2:, 2:6] == 0).all()
+    assert (pixels[2:, 8:12] == 0).all()
 
 
 def test_images_padding_colour_follows_the_input_dtype(capture_send):

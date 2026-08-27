@@ -21,6 +21,7 @@ import {
   downloadJpegWithDpi,
   downloadPngWithDpi,
 } from './utils/Embeddpimetadata';
+import { copyLatexToClipboard } from './utils/LatexExport';
 import { typesetMathJax } from './utils/mathjaxHelpers';
 import { downloadImageAsPdf } from './utils/pdfExport';
 const { sgg } = require('ml-savitzky-golay-generalized');
@@ -148,6 +149,31 @@ var PlotPane = (props) => {
     link.click();
     document.body.removeChild(link);
     setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+  };
+
+  const handleLatexExport = (style) => {
+    const rawTitle = content?.layout?.title;
+    const plotTitle = typeof rawTitle === 'string' ? rawTitle : rawTitle?.text;
+    copyLatexToClipboard(style, {
+      contentID,
+      id: props.id,
+      caption: content?.caption || plotTitle,
+    })
+      .then(() =>
+        showToast('Copied!', 'success', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        })
+      )
+      .catch((err) => {
+        console.error('PlotPane LaTeX export failed:', err);
+        showToast('Failed to Copy', 'error', {
+          position: 'bottom-center',
+          shape: 'pill',
+          duration: 1500,
+        });
+      });
   };
 
   const updateHistorySlider = (ev) => {
@@ -336,12 +362,13 @@ var PlotPane = (props) => {
 
     // draw / redraw plot with layout-options
     Plotly.react(contentID, data.concat(smooth_data), content.layout, {
-      showLink: false,
       displaylogo: false,
       doubleClick: 'reset',
       doubleClickDelay: 500,
-      modeBarButtonsToAdd: ['drawopenpath', 'eraseshape'],
-      modeBarButtonsToRemove: ['toImage'],
+      modeBarButtonsToAdd: ['drawopenpath', 'eraseshape'].concat(
+        annotations.modebarButton ? [annotations.modebarButton] : []
+      ),
+      modeBarButtonsToRemove: ['toImage', 'sendDataToCloud'],
       // dragging a note box leaves its arrow on the data point
       edits: { annotationTail: !sessionInfo?.readonly },
     }).then(() => {
@@ -383,7 +410,7 @@ var PlotPane = (props) => {
               min="1"
               max={maxsmoothvalue}
               value={smoothvalue}
-              onInput={(ev) => updateSmoothSlider(ev.target.value)}
+              onChange={(ev) => updateSmoothSlider(ev.target.value)}
             />
             <span>&nbsp;&nbsp;&nbsp;&nbsp;</span>
           </div>
@@ -429,7 +456,8 @@ var PlotPane = (props) => {
       {...props}
       handleExport={handleExport}
       handleMetadataExport={handleMetadataExport}
-      barwidgets={[smooth_widget_button, annotations.button]}
+      handleLatexExport={handleLatexExport}
+      barwidgets={[smooth_widget_button]}
       widgets={[
         history_widget,
         caption_widget,
@@ -462,6 +490,7 @@ var PlotPane = (props) => {
 PlotPane = React.memo(PlotPane, (props, nextProps) => {
   if (props.contentID !== nextProps.contentID) return false;
   else if (props.h !== nextProps.h || props.w !== nextProps.w) return false;
+  else if (props.comment !== nextProps.comment) return false;
   else if (props.isFocused !== nextProps.isFocused) return false;
   return true;
 });

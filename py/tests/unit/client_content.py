@@ -279,9 +279,9 @@ def test_learning_curve_stacks_metrics_into_one_plot(capture_send):
 def test_learning_curve_defaults_its_labels(capture_send):
     sent = capture_send(lambda v: v.learning_curve({"loss": [1.0]}))
     layout = sent["payload"]["layout"]
-    assert layout["title"] == "Learning Curve"
-    assert layout["xaxis"]["title"] == "step"
-    assert layout["yaxis"]["title"] == "metric"
+    assert layout["title"] == {"text": "Learning Curve"}
+    assert layout["xaxis"]["title"] == {"text": "step"}
+    assert layout["yaxis"]["title"] == {"text": "metric"}
 
 
 def test_learning_curve_honours_a_supplied_step(capture_send):
@@ -359,8 +359,8 @@ def test_update_window_opts_sends_layout_without_content(capture_send):
     assert "data" not in sent["payload"]
     assert sent["payload"]["win"] == "w1"
     assert sent["payload"]["opts"]["title"] == "T"
-    assert sent["payload"]["layout"]["title"] == "T"
-    assert sent["payload"]["layout"]["xaxis"]["title"] == "x"
+    assert sent["payload"]["layout"]["title"] == {"text": "T"}
+    assert sent["payload"]["layout"]["xaxis"]["title"] == {"text": "x"}
 
 
 def test_update_window_opts_routes_env(capture_send):

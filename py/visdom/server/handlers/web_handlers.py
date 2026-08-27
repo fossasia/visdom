@@ -41,6 +41,7 @@ from visdom.utils.server_utils import (
     register_window,
     gather_envs,
     broadcast_envs,
+    broadcast_tags,
     escape_eid,
     compare_envs,
     load_env,
@@ -51,14 +52,18 @@ from visdom.utils.server_utils import (
     push_deleted,
     clear_deleted,
     notify,
+    LazyEnvData,
 )
 from visdom.server.handlers.base_handlers import BaseHandler
 from visdom.experiments import (
     DEFAULT_SORT_FIELD,
+    Experiment,
     ExperimentStore,
     ExperimentFinishedError,
     QueryParseError,
+    retarget_experiment,
     STATUS_FINISHED,
+    tags_to_mapping,
 )
 
 logger = logging.getLogger(__name__)
@@ -200,6 +205,9 @@ class UpdateHandler(BaseHandler):
             utype = args["data"][0]["type"]
             if utype == "plot_history":
                 p["content"].append(args["data"][0]["content"])
+                # A plot frame is a whole figure, so an unbounded history grows
+                # the env until the process runs out of memory. Keep the newest
+                # ``max_plot_history`` frames, as image history already does.
                 if len(p["content"]) > max_plot_history:
                     p["content"] = p["content"][-max_plot_history:]
                 p["selected"] = len(p["content"]) - 1
@@ -224,8 +232,10 @@ class UpdateHandler(BaseHandler):
         p = update_window(p, args)
         name = args.get("name")
         delete = args.get("delete")
-        # a heatmap removal names no trace and carries no data, so ask about the
-        # deletion before reading either as "nothing to do"
+        # An unnamed delete carries no name and no data, which this shortcut used
+        # to read as "opts-only update" and return early, silently dropping the
+        # deletion. Ask about the delete flag first. ``not new_data`` also covers
+        # an empty list, which a layout-only update sends in place of None.
         if not delete and name is None and not new_data:
             return p  # we only updated the opts or layout
         append = args.get("append")
@@ -334,15 +344,19 @@ class UpdateHandler(BaseHandler):
 
             return p
 
-        # inject new trace; the plot may hold none at all if every trace of it
-        # has been deleted
+        # Inject a new trace. This used to clone ``pdata[0]`` before overwriting
+        # every key of the clone, which raised IndexError once a plot had all of
+        # its traces deleted. The clone was dead work anyway, so build the trace
+        # from the update alone.
         if len(idxs) == 0:
             trace = dict(new_data[0])
             trace["name"] = name
             pdata.append(trace)
             return p
 
-        # Update traces, as far as the update supplies them
+        # Update traces. An unnamed update may carry fewer entries than the plot
+        # has traces, so walk only as far as the data reaches instead of
+        # indexing past the end of it.
         for idx, new_trace in zip(idxs, new_data):
             if all(_is_missing_value(i) for i in new_trace["x"]):
                 continue
@@ -450,6 +464,7 @@ class UpdateHandler(BaseHandler):
                 p, args, handler.max_old_content
             )
             UpdateHandler.broadcast_window_update(handler, args, eid, p, diff_packet)
+            handler.mark_dirty(eid)
             handler.write(p["id"])
             return
 
@@ -475,6 +490,7 @@ class UpdateHandler(BaseHandler):
             broadcast(handler, json.dumps(broadcast_msg, cls=NanSafeEncoder), eid)
         else:
             UpdateHandler.broadcast_window_update(handler, args, eid, p, diff_packet)
+        handler.mark_dirty(eid)
         handler.write(p["id"])
 
     @check_auth
@@ -500,6 +516,7 @@ class CloseHandler(BaseHandler):
             p_data = handler.state[eid]["jsons"].pop(win, None)
             if p_data is not None:
                 push_deleted(handler.storage, eid, win, p_data)
+                handler.mark_dirty(eid)
             broadcast(handler, json.dumps({"command": "close", "data": win}), eid)
 
     @check_auth
@@ -567,7 +584,14 @@ class ForkEnvHandler(BaseHandler):
             # which is latin-1 only, and eids are free-form unicode.
             raise tornado.web.HTTPError(400, reason="env to be forked doesn't exist")
 
-        handler.state[eid] = copy.deepcopy(handler.state[prev_eid])
+        # The copy carries the source env's experiment metadata, whose env_id
+        # still names the env it was forked from; retarget it so the fork does
+        # not answer to its parent's id. Reading the copy also materialises it
+        # when the source was still lazy, which is what makes the save below
+        # write the fork out: an unmaterialised LazyEnvData is skipped.
+        handler.state[eid] = retarget_experiment(
+            copy.deepcopy(handler.state[prev_eid]), eid
+        )
         handler.storage.save_env(eid, handler.state[eid])
         broadcast_envs(handler)
 
@@ -709,6 +733,7 @@ class DataHandler(BaseHandler):
             else:
                 handler.state[eid]["jsons"][args["win"]] = data
 
+            handler.mark_dirty(eid)
             broadcast_envs(handler)
         else:
             # Dump data to client
@@ -885,6 +910,28 @@ class UploadEnvHandler(BaseHandler):
         )
 
 
+def _decode_json_body(body):
+    """Return a request body decoded into a dict of arguments.
+
+    Shared by the ``/experiments/*`` endpoints, whose bodies are all optional
+    JSON objects, so an empty body is read as an empty object and each handler
+    decides on its own whether the arguments it needs are missing. Anything else
+    that is not a JSON object is the caller's error: without this check,
+    malformed JSON or a bare list would surface as an unhandled exception and a
+    500 rather than a 400 naming what was wrong with the request.
+    """
+    try:
+        text = tornado.escape.to_basestring(body).strip()
+        if not text:
+            return {}
+        args = tornado.escape.json_decode(text)
+    except ValueError:
+        raise tornado.web.HTTPError(400, reason="request body must be valid JSON")
+    if not isinstance(args, Mapping):
+        raise tornado.web.HTTPError(400, reason="request body must be an object")
+    return args
+
+
 class ExperimentLogHandler(BaseHandler):
     """POST ``/experiments/log`` — record experiment metadata for an environment.
 
@@ -930,7 +977,7 @@ class ExperimentLogHandler(BaseHandler):
             )
 
         eid = extract_eid(args)
-        store = ExperimentStore(handler.storage)
+        store = ExperimentStore(handler.storage, env_provider=handler.state.get)
 
         if action == "metrics":
             metrics = ExperimentLogHandler._require_mapping(args, "metrics")
@@ -972,6 +1019,7 @@ class ExperimentLogHandler(BaseHandler):
         if is_new_env:
             handler.state[eid] = {"jsons": {}, "reload": {}}
         handler.state[eid]["experiment"] = experiment.to_dict()
+        handler.mark_dirty(eid)
         if is_new_env:
             broadcast_envs(handler)
 
@@ -1066,27 +1114,6 @@ class ExperimentSearchHandler(BaseHandler):
         return value
 
     @staticmethod
-    def _decode_body(body):
-        """Return the request body decoded into a dict of arguments.
-
-        The body is optional — the endpoint documents it as such, and a search
-        with no arguments matches everything — so an empty body is read as an
-        empty object. Anything else that is not a JSON object is the caller's
-        error: without this, malformed JSON or a bare list would surface as an
-        unhandled exception and a 500.
-        """
-        try:
-            text = tornado.escape.to_basestring(body).strip()
-            if not text:
-                return {}
-            args = tornado.escape.json_decode(text)
-        except ValueError:
-            raise tornado.web.HTTPError(400, reason="request body must be valid JSON")
-        if not isinstance(args, Mapping):
-            raise tornado.web.HTTPError(400, reason="request body must be an object")
-        return args
-
-    @staticmethod
     def wrap_func(handler, args):
         query = ExperimentSearchHandler._require_text(args, "query")
         sort_by = ExperimentSearchHandler._require_text(args, "sort_by")
@@ -1096,7 +1123,7 @@ class ExperimentSearchHandler(BaseHandler):
         offset = ExperimentSearchHandler._require_index(args, "offset", 0)
         descending = ExperimentSearchHandler._require_flag(args, "descending", True)
 
-        store = ExperimentStore(handler.storage)
+        store = ExperimentStore(handler.storage, env_provider=handler.state.get)
         try:
             experiments = store.search(
                 query=query,
@@ -1124,7 +1151,233 @@ class ExperimentSearchHandler(BaseHandler):
 
     @check_auth
     def post(self):
-        self.wrap_func(self, self._decode_body(self.request.body))
+        self.wrap_func(self, _decode_json_body(self.request.body))
+
+
+class ExperimentCompareHandler(BaseHandler):
+    """POST ``/experiments/compare`` — diff the named experiments field by field.
+
+    The JSON body names the runs to compare::
+
+        {"env_ids": ["run-a", "run-b"]}
+
+    Every id must have an experiment — a 404 names the ones that do not, since
+    quietly comparing the remainder would answer a question the caller did not
+    ask. Finding the runs is ``/experiments/search``'s job: it answers "which runs
+    match?", this answers "how do these runs differ?". A caller comparing a
+    query's matches searches first and passes the ids on.
+
+    The reply carries the compared runs (``env_ids``, ``experiments``) and a diff
+    per section, each listing the union of ``fields``, the ``shared`` ones every
+    run agrees on, the ``differing`` rest, and the per-run ``values``::
+
+        {"env_ids": [...], "experiments": [...],
+         "params": {"fields": [...], "shared": {...},
+                    "differing": [...], "values": {...}},
+         "metrics": {...}, "tags": {...}}
+
+    Experiments are read through the server's ``DataStore``, so as with search a
+    server running with ``env_path=None`` has nothing to compare. The body is
+    decoded by the shared ``_decode_json_body``, so the two endpoints
+    answer malformed JSON and non-object bodies with the same 400; unlike
+    search, an empty body is not a valid request here, since ``env_ids`` is
+    required and there is no comparison to make without it.
+    """
+
+    @staticmethod
+    def _require_env_ids(args):
+        """Return ``args["env_ids"]`` as a list of ids; raise 400 if unusable.
+
+        A bare string is rejected rather than treated as a one-id list: it would
+        otherwise be iterated character by character into a comparison of runs
+        named ``"r"``, ``"u"``, ``"n"``.
+        """
+        value = args.get("env_ids")
+        if value is None:
+            raise tornado.web.HTTPError(400, reason="'env_ids' is required")
+        if not isinstance(value, list):
+            raise tornado.web.HTTPError(400, reason="'env_ids' must be a list of ids")
+        if not value:
+            raise tornado.web.HTTPError(
+                400, reason="'env_ids' must name at least one environment"
+            )
+        if not all(isinstance(env_id, str) for env_id in value):
+            raise tornado.web.HTTPError(400, reason="'env_ids' must contain strings")
+        return value
+
+    @staticmethod
+    def wrap_func(handler, args):
+        env_ids = ExperimentCompareHandler._require_env_ids(args)
+        store = ExperimentStore(handler.storage, env_provider=handler.state.get)
+        try:
+            comparison = store.compare(env_ids)
+        except KeyError as e:
+            raise tornado.web.HTTPError(404, reason=str(e.args[0]))
+
+        handler.write(json.dumps(comparison, cls=NanSafeEncoder))
+
+    @check_auth
+    def post(self):
+        self.wrap_func(self, _decode_json_body(self.request.body))
+
+
+class ExperimentSuggestHandler(BaseHandler):
+    """POST ``/experiments/suggest`` — suggest parameters for the next run.
+
+    Reserved endpoint. Choosing the next set of hyper-parameters to try is a
+    search-strategy problem (Optuna-backed) that belongs to a later release, so
+    this is a stub: it accepts the request and replies ``501 Not Implemented``
+    with a JSON body rather than a made-up suggestion. Wiring the route, the
+    :meth:`Visdom.suggest_experiment` client method and the API docs now means
+    the strategy can be dropped in later without changing the surface, and a
+    caller gets a stable, decodable answer it can tell apart from a real one::
+
+        {"status": "not_implemented", "detail": "...", "suggestion": null}
+
+    The request body is validated and passed through like the sibling handlers
+    so that shape is already in place, but it is otherwise ignored until the
+    strategy lands. A body that is not a JSON object is still rejected with 400:
+    a caller sending a malformed search space should hear about it now rather
+    than have it silently accepted here and rejected once the strategy lands.
+    """
+
+    #: The stub reply, carrying ``suggestion: null`` so the eventual field is
+    #: already named and a caller can distinguish the stub from a real result.
+    NOT_IMPLEMENTED = {
+        "status": "not_implemented",
+        "detail": (
+            "experiment suggestion is not implemented yet; the endpoint is "
+            "reserved for a later release"
+        ),
+        "suggestion": None,
+    }
+
+    @staticmethod
+    def wrap_func(handler, args):
+        handler.set_status(501)
+        handler.write(json.dumps(ExperimentSuggestHandler.NOT_IMPLEMENTED))
+
+    @check_auth
+    def post(self):
+        self.wrap_func(self, _decode_json_body(self.request.body))
+
+
+class TagsHandler(BaseHandler):
+    """Read and update environment tags backed by experiment metadata."""
+
+    VALID_ACTIONS = ("get", "set")
+
+    def initialize(self, app):
+        super().initialize(app)
+        self.readonly = app.readonly
+
+    @staticmethod
+    def _experiment_from_env(eid, env):
+        """Return an experiment from one materialized in-memory environment."""
+        blob = env.get("experiment")
+        if not isinstance(blob, Mapping):
+            return None
+        experiment = Experiment.from_dict(blob)
+        experiment.env_id = eid
+        return experiment
+
+    @staticmethod
+    def _read_experiment(handler, eid):
+        """Read one experiment without materializing unrelated environments."""
+        env = handler.state.get(eid)
+        if env is None or (isinstance(env, LazyEnvData) and not env.is_loaded):
+            return ExperimentStore(handler.storage).get_experiment(eid)
+        experiment = TagsHandler._experiment_from_env(eid, env)
+        if experiment is not None:
+            return experiment
+        return ExperimentStore(handler.storage).get_experiment(eid)
+
+    @staticmethod
+    def _experiment_map(handler):
+        """Return stored experiments overlaid with materialized state only."""
+        store = ExperimentStore(handler.storage)
+        experiments = {exp.env_id: exp for exp in store.list_experiments()}
+        for eid, env in handler.state.items():
+            if isinstance(env, LazyEnvData) and not env.is_loaded:
+                continue
+            experiment = TagsHandler._experiment_from_env(eid, env)
+            if experiment is not None:
+                experiments[eid] = experiment
+        return experiments
+
+    @staticmethod
+    def _write_tags(handler, eid=None):
+        if eid is not None:
+            experiment = TagsHandler._read_experiment(handler, eid)
+            tags = tags_to_mapping(experiment.tags) if experiment else {}
+            handler.write(json.dumps(tags, cls=NanSafeEncoder))
+            return
+        experiments = TagsHandler._experiment_map(handler)
+        tag_map = {
+            env_id: tags_to_mapping(experiment.tags)
+            for env_id, experiment in experiments.items()
+            if experiment.tags
+        }
+        handler.write(json.dumps(tag_map, cls=NanSafeEncoder))
+
+    @staticmethod
+    def wrap_func(handler, args):
+        action = args.get("action", "set")
+        if action not in TagsHandler.VALID_ACTIONS:
+            raise tornado.web.HTTPError(
+                400, reason="unknown action {0!r}".format(action)
+            )
+
+        if action == "get":
+            eid = extract_eid(args) if args.get("eid") is not None else None
+            TagsHandler._write_tags(handler, eid)
+            return
+
+        if handler.readonly:
+            handler.set_status(403)
+            handler.write(
+                {
+                    "success": False,
+                    "error": "Tag updates are disabled while the server is "
+                    "in readonly mode",
+                }
+            )
+            return
+
+        if "tags" not in args:
+            raise tornado.web.HTTPError(400, reason="'tags' is required for set action")
+
+        eid = extract_eid(args)
+        append = args.get("append", False)
+        store = ExperimentStore(handler.storage)
+        env = handler.state.get(eid)
+        is_new_env = env is None
+        if is_new_env:
+            env = {"jsons": {}, "reload": {}}
+        try:
+            experiment = store.update_tags(
+                eid, args["tags"], append=append, env_data=env
+            )
+        except (TypeError, ValueError) as error:
+            raise tornado.web.HTTPError(400, reason=str(error))
+
+        if is_new_env:
+            handler.state[eid] = env
+
+        tags = tags_to_mapping(experiment.tags)
+        if is_new_env:
+            broadcast_envs(handler)
+        broadcast_tags(handler, eid, tags)
+        handler.write(json.dumps(tags, cls=NanSafeEncoder))
+
+    @check_auth
+    def get(self):
+        eid = self.get_query_argument("eid", default=None)
+        self.wrap_func(self, {"action": "get", "eid": eid})
+
+    @check_auth
+    def post(self):
+        self.wrap_func(self, _decode_json_body(self.request.body))
 
 
 class HealthHandler(BaseHandler):

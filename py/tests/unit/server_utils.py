@@ -28,6 +28,31 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.mark.parametrize(
+    "raw",
+    ["  main", "main  ", "  main  "],
+    ids=["leading", "trailing", "surrounding"],
+)
+def test_escape_eid_strips_surrounding_whitespace(raw):
+    assert escape_eid(raw) == "main"
+
+
+def test_escape_eid_collapses_whitespace_only_differing_ids():
+    """'main' and 'main ' must normalise identically.
+
+    JSONStore strips whitespace before deriving an on-disk filename, so if
+    escape_eid did not also strip, these two eids would stay distinct in the
+    in-memory state dict while silently colliding on disk.
+    """
+    assert escape_eid("main") == escape_eid("main ")
+    assert escape_eid("main") == escape_eid(" main")
+
+
+def test_escape_eid_preserves_internal_whitespace():
+    """Only leading/trailing whitespace is stripped, not internal."""
+    assert escape_eid("my env") == "my env"
+
+
+@pytest.mark.parametrize(
     "raw, escaped",
     [
         ("a/b", "a_b"),
@@ -55,6 +80,10 @@ def test_escape_eid_sanitizes(raw, escaped):
 
 
 # ------------------------------------------------------------- extract_eid ----
+
+
+def test_extract_eid_strips_whitespace():
+    assert extract_eid({"eid": "main "}) == "main"
 
 
 @pytest.mark.parametrize(

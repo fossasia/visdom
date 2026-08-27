@@ -26,9 +26,11 @@ from visdom.experiments import (
     Metric,
     Param,
     Tag,
+    normalize_tags,
     STATUS_FAILED,
     STATUS_FINISHED,
     STATUS_RUNNING,
+    tags_to_mapping,
 )
 
 pytestmark = pytest.mark.unit
@@ -41,6 +43,41 @@ def experiments(store):
 
 
 # -- Models -------------------------------------------------------------------
+
+
+def test_tags_to_mapping_preserves_values():
+    """Converting model tags never drops their key/value data."""
+    tags = [Tag("dataset", "cifar10"), Tag("stable", "")]
+    assert tags_to_mapping(tags) == {"dataset": "cifar10", "stable": ""}
+
+
+def test_normalize_tags_trims_names_and_preserves_values():
+    """Normalization changes tag names only, leaving values untouched."""
+    assert normalize_tags({" dataset ": " cifar10 ", "": "ignored"}) == {
+        "dataset": " cifar10 "
+    }
+
+
+@pytest.mark.parametrize(
+    "mapping",
+    [["stable"], {1: "stable"}, {"priority": 1}],
+    ids=["not-a-mapping", "non-str-name", "non-str-value"],
+)
+def test_normalize_tags_rejects_invalid_types(mapping):
+    """The domain accepts only string-to-string mappings."""
+    with pytest.raises(TypeError):
+        normalize_tags(mapping)
+
+
+@pytest.mark.parametrize(
+    "mapping",
+    [{"x" * 51: "value"}, {"tag-{0}".format(i): "" for i in range(21)}],
+    ids=["name-too-long", "too-many-tags"],
+)
+def test_normalize_tags_enforces_limits(mapping):
+    """Tag names and per-environment tag counts stay bounded."""
+    with pytest.raises(ValueError):
+        normalize_tags(mapping)
 
 
 @pytest.mark.parametrize(
@@ -293,6 +330,130 @@ def test_experiment_survives_lazy_env_reload_and_save(experiments, store, env_pa
     exp = ExperimentStore(JSONStore(env_path)).get_experiment("main")
     assert exp is not None, "experiment was clobbered by the full-env save"
     assert exp.get_param("lr").value == 0.01
+
+
+def test_update_tags_appends_and_updates_by_key(experiments):
+    """Append mode keeps unrelated values and updates matching keys."""
+    experiments.log_experiment("main", tags={"dataset": "mnist", "owner": "alice"})
+
+    updated = experiments.update_tags(
+        "main", {"dataset": "cifar10", "stable": ""}, append=True
+    )
+
+    assert tags_to_mapping(updated.tags) == {
+        "dataset": "cifar10",
+        "owner": "alice",
+        "stable": "",
+    }
+
+
+def test_update_tags_replaces_and_preserves_values(experiments, env_path):
+    """Replacing tags persists the complete key/value mapping."""
+    experiments.log_experiment("main", tags={"old": "value"})
+
+    updated = experiments.update_tags("main", {" dataset ": "cifar10", "stable": ""})
+
+    assert tags_to_mapping(updated.tags) == {"dataset": "cifar10", "stable": ""}
+    reopened = ExperimentStore(JSONStore(env_path)).get_experiment("main")
+    assert tags_to_mapping(reopened.tags) == {"dataset": "cifar10", "stable": ""}
+
+
+def test_update_tags_creates_and_can_update_terminal_experiment(experiments):
+    """Tag management creates missing records and remains organizational."""
+    created = experiments.update_tags("main", {"owner": "alice"})
+    assert tags_to_mapping(created.tags) == {"owner": "alice"}
+
+    experiments.finish_experiment("main")
+    updated = experiments.update_tags("main", {"stage": "production"}, append=True)
+
+    assert updated.status == STATUS_FINISHED
+    assert tags_to_mapping(updated.tags) == {"owner": "alice", "stage": "production"}
+
+
+# -- ExperimentStore with a live env_provider ---------------------------------
+#
+# The server passes ``state.get`` so that persisting experiment metadata can
+# never rewrite an env file from a copy that is missing windows created -- or
+# reviving windows closed -- since the file was last written.
+
+
+@pytest.fixture
+def live_state():
+    """The in-memory env state an env_provider-backed store reads through."""
+    return {}
+
+
+@pytest.fixture
+def live_experiments(store, live_state):
+    """ExperimentStore that resolves envs from ``live_state`` before disk."""
+    return ExperimentStore(store, env_provider=live_state.get)
+
+
+def test_write_persists_live_windows(live_experiments, live_state, store):
+    """A window living only in memory reaches disk on the next log."""
+    live_state["main"] = {"jsons": {"hp": {"id": "hp"}}, "reload": {}}
+
+    live_experiments.log_metric("main", "acc", 0.9)
+
+    env = store.load_env("main")
+    assert "hp" in env["jsons"]
+    assert env["experiment"]["metrics"][0]["value"] == 0.9
+
+
+def test_write_lands_in_the_live_env(live_experiments, live_state):
+    """The experiment blob is set on the state env itself, not a copy."""
+    live_state["main"] = {"jsons": {}, "reload": {}}
+
+    live_experiments.log_experiment("main", params={"lr": 0.01})
+
+    assert live_state["main"]["experiment"]["params"][0]["value"] == 0.01
+
+
+def test_closed_window_stays_gone(live_experiments, live_state, store):
+    """A window closed in memory is not resurrected from the stale file."""
+    store.save_env("main", {"jsons": {"doomed": {"id": "doomed"}}, "reload": {}})
+    live_state["main"] = {"jsons": {}, "reload": {}}
+
+    live_experiments.log_metric("main", "acc", 0.9)
+
+    assert "doomed" not in store.load_env("main")["jsons"]
+
+
+def test_env_not_in_state_falls_back_to_disk(live_experiments, store):
+    """An env the provider does not serve is read from (and keeps) its file."""
+    store.save_env("other", {"jsons": {"w": {"id": "w"}}, "reload": {}})
+
+    live_experiments.log_experiment("other", params={"lr": 0.1})
+
+    env = store.load_env("other")
+    assert "w" in env["jsons"]
+    assert env["experiment"]["params"][0]["value"] == 0.1
+
+
+def test_lazy_env_data_round_trips(live_experiments, live_state, store):
+    """A LazyEnvData env is written through and persisted with its windows."""
+    store.save_env("main", {"jsons": {"w": {"id": "w"}}, "reload": {}})
+    live_state["main"] = LazyEnvData(store, "main")
+
+    live_experiments.log_metric("main", "acc", 0.5)
+
+    env = store.load_env("main")
+    assert "w" in env["jsons"]
+    assert env["experiment"]["metrics"][0]["value"] == 0.5
+
+
+def test_delete_experiment_through_lazy_env(live_experiments, live_state, store):
+    """delete_experiment removes the blob from a LazyEnvData live env."""
+    store.save_env("main", {"jsons": {"w": {"id": "w"}}, "reload": {}})
+    live_state["main"] = LazyEnvData(store, "main")
+    live_experiments.log_experiment("main", params={"lr": 0.01})
+
+    assert live_experiments.delete_experiment("main")
+
+    assert "experiment" not in live_state["main"]
+    env = store.load_env("main")
+    assert "experiment" not in env
+    assert "w" in env["jsons"]
 
 
 # -- ExperimentStore with persistence disabled --------------------------------

@@ -159,7 +159,11 @@ def test_axisformat_applies_a_lone_tick_step():
 
 
 def test_axisformat_maps_options_onto_plotly_names():
-    """label becomes title and ticklabels becomes ticktext."""
+    """label becomes title and ticklabels becomes ticktext.
+
+    Plotly dropped the bare-string form of ``title``, so a label arrives
+    wrapped as ``{"text": ...}``.
+    """
     axis = _axisformat(
         "y",
         {
@@ -172,7 +176,7 @@ def test_axisformat_maps_options_onto_plotly_names():
         },
     )
     assert axis["type"] == "log"
-    assert axis["title"] == "loss"
+    assert axis["title"] == {"text": "loss"}
     assert axis["tickvals"] == [1, 2]
     assert axis["ticktext"] == ["a", "b"]
     assert axis["showticklabels"] is True
@@ -189,8 +193,8 @@ def test_axisformat_sets_a_range_only_when_both_bounds_are_given():
 def test_axisformat_keeps_the_axes_independent():
     """The xy prefix means a y option never leaks onto the x axis."""
     opts = {"xlabel": "epoch", "ylabel": "loss"}
-    assert _axisformat("x", opts)["title"] == "epoch"
-    assert _axisformat("y", opts)["title"] == "loss"
+    assert _axisformat("x", opts)["title"] == {"text": "epoch"}
+    assert _axisformat("y", opts)["title"] == {"text": "loss"}
 
 
 def test_axisformat_enables_automargin_for_a_tight_layout():
@@ -231,8 +235,8 @@ def test_axisformat3d_applies_a_lone_tick_step():
 def test_opts2layout_builds_flat_axes_in_2d():
     """A 2d plot carries xaxis and yaxis at the top level."""
     layout = _opts2layout({"xlabel": "e", "ylabel": "l"})
-    assert layout["xaxis"]["title"] == "e"
-    assert layout["yaxis"]["title"] == "l"
+    assert layout["xaxis"]["title"] == {"text": "e"}
+    assert layout["yaxis"]["title"] == {"text": "l"}
     assert "scene" not in layout
 
 
@@ -292,7 +296,7 @@ def test_opts2layout_merges_plotly_layoutopts():
         {"layoutopts": {"plotly": {"hovermode": "x", "title": "raw"}}}
     )
     assert layout["hovermode"] == "x"
-    assert layout["title"] == "raw"
+    assert layout["title"] == {"text": "raw"}
 
 
 def test_opts2layout_ignores_layoutopts_for_another_backend():
