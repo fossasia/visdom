@@ -16,6 +16,8 @@ the "accessor functions on the state" abstraction referenced by the handler
 TODOs, and a natural future home for the data_model classes.
 """
 
+from collections import Counter
+
 import tornado.ioloop
 
 from visdom.utils.shared_utils import warn_once
@@ -102,7 +104,6 @@ class ServerState:
 
     def __init__(
         self,
-        app,
         *,
         state,
         subs,
@@ -120,12 +121,9 @@ class ServerState:
         max_old_content,
         max_image_history,
         max_plot_history,
+        save_interval,
+        save_threshold,
     ):
-        # Retained only to delegate application-owned persistence lifecycle
-        # operations. This dependency is removed when autosave ownership moves
-        # into ServerState.
-        self._app = app
-
         # Shared mutable containers (passed by reference, never rebound here).
         self.state = state
         self.subs = subs
@@ -145,12 +143,16 @@ class ServerState:
         self.max_old_content = max_old_content
         self.max_image_history = max_image_history
         self.max_plot_history = max_plot_history
+        self.save_interval = save_interval
+        self.save_threshold = save_threshold
 
         # Runtime values that get reassigned while the server runs. These are
         # the reason this facade exists: a value copied onto a handler would go
         # stale, but a call through ``server_state`` never does.
         self._layouts = self._load_layouts()
         self._socket_wrap_monitor = None
+        self.dirty_envs = Counter()
+        self.autosave = None
 
     # ----- layouts ----- #
 
@@ -183,8 +185,54 @@ class ServerState:
     # ----- environment persistence ----- #
 
     def mark_dirty(self, eid):
-        """Record a changed environment with the application's autosaver."""
-        return self._app.mark_dirty(eid)
+        """Record that ``eid`` has changed in memory and is not yet on disk.
+
+        Environments are saved on a timer rather than on every write, so a busy
+        one would otherwise sit unsaved for a whole interval; once it has taken
+        ``save_threshold`` updates it is written out immediately.
+        """
+        self.dirty_envs[eid] += 1
+        if 0 < self.save_threshold <= self.dirty_envs[eid]:
+            self.flush_envs([eid])
+
+    def flush_envs(self, eids):
+        """Persist the named environments, skipping any already saved.
+
+        Runs on the IO loop rather than in an executor: saving serializes
+        ``state``, and a background thread would be doing that while request
+        handlers mutate the very dictionaries it is walking.
+
+        Only environments the backend reports as written lose their mark, so one
+        it declines is retried on the next pass rather than silently dropped. An
+        environment deleted since it was marked has nothing left to save and is
+        cleared too.
+        """
+        pending = [eid for eid in eids if self.dirty_envs.get(eid)]
+        if not pending:
+            return []
+        written = self.storage.save_envs(self.state, pending)
+        saved = set(written)
+        for eid in pending:
+            if eid in saved or eid not in self.state:
+                del self.dirty_envs[eid]
+        return written
+
+    def flush_dirty(self):
+        """Persist every environment changed since the last save."""
+        return self.flush_envs(list(self.dirty_envs))
+
+    def start_autosave(self):
+        """Begin saving changed environments every ``save_interval`` seconds.
+
+        A no-op when autosaving is disabled or already running. Ticks with
+        nothing dirty cost no IO.
+        """
+        if self.autosave is None and self.save_interval > 0:
+            self.autosave = tornado.ioloop.PeriodicCallback(
+                self.flush_dirty, self.save_interval * 1000
+            )
+            self.autosave.start()
+        return self.autosave
 
     # ----- polling socket monitor ----- #
 
