@@ -440,14 +440,14 @@ class ExperimentStore:
                     type(env_ids).__name__
                 )
             )
-        unique = list(dict.fromkeys(env_ids))
-        for env_id in unique:
+        for env_id in env_ids:
             if not isinstance(env_id, str):
                 raise TypeError(
                     "env_ids must contain strings, got {0}".format(
                         type(env_id).__name__
                     )
                 )
+        unique = list(dict.fromkeys(env_ids))
         if not unique:
             raise ValueError("env_ids must name at least one environment")
         experiments = []
