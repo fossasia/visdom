@@ -58,6 +58,27 @@ class TestResolveTargets(unittest.TestCase):
         self.assertEqual(resolve_targets(state, {"run-a"}), [("main", "hp1")])
         self.assertEqual(resolve_targets(state, {"run-b"}), [])
 
+    def test_unhashable_env_ids_entries_are_ignored(self):
+        """A stored id that is not a string names no run and cannot be hashed."""
+        state = {
+            "main": {
+                "jsons": {
+                    "hp1": hparams_window(
+                        "env_ids", env_ids=[{"eid": "run-b"}, "run-a"]
+                    )
+                }
+            }
+        }
+        self.assertEqual(resolve_targets(state, {"run-a"}), [("main", "hp1")])
+        self.assertEqual(resolve_targets(state, {"run-b"}), [])
+
+    def test_env_ids_that_are_not_a_list_name_nothing(self):
+        """``env_ids`` written as a mapping is not a selection, so nothing matches."""
+        state = {
+            "main": {"jsons": {"hp1": hparams_window("env_ids", env_ids={"run-a": 1})}}
+        }
+        self.assertEqual(resolve_targets(state, {"run-a"}), [])
+
     def test_both_pane_is_affected_by_any_change(self):
         """``both`` still holds a query, so it is re-run like any other query."""
         state = {

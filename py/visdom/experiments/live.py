@@ -31,6 +31,22 @@ import logging
 DEFAULT_DEBOUNCE_SECONDS = 0.25
 
 
+def _named_env_ids(spec):
+    """Return the run ids a pane names explicitly, ignoring anything else.
+
+    A stored spec holds whatever was written to it, so ``env_ids`` may be
+    missing, a mapping, or a list carrying values that are not ids at all. Only
+    strings inside a sequence name a run; treating the rest as naming nothing
+    keeps the membership test in :func:`resolve_targets` away from values it
+    cannot hash, which would otherwise fail the whole resolve over one bad
+    pane.
+    """
+    env_ids = spec.get("env_ids")
+    if not isinstance(env_ids, (list, tuple, set, frozenset)):
+        return ()
+    return [env_id for env_id in env_ids if isinstance(env_id, str)]
+
+
 def resolve_targets(state, changed):
     """Name the hparams panes that changes to the ``changed`` envs could affect.
 
@@ -67,7 +83,7 @@ def resolve_targets(state, changed):
             if not isinstance(spec, dict):
                 continue
             if spec.get("mode") == "env_ids" and not changed.intersection(
-                spec.get("env_ids") or ()
+                _named_env_ids(spec)
             ):
                 continue
             targets.append((eid, win_id))
