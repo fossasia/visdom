@@ -21,12 +21,15 @@ import unittest
 from unittest.mock import Mock, patch
 
 import numpy as np
+import pytest
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.model_selection import GridSearchCV
 from sklearn.neural_network import MLPClassifier
 
 from visdom.loggers.sklearn import VisdomSklearnLogger
+
+pytestmark = pytest.mark.unit
 
 
 def _logger():

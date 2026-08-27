@@ -23,10 +23,13 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import pytest
 import tornado.testing
 
 from visdom import Visdom
 from visdom.server.app import Application
+
+pytestmark = pytest.mark.integration
 
 
 class TestSuggestEndpoint(tornado.testing.AsyncHTTPTestCase):

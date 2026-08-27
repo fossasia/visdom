@@ -8,8 +8,30 @@ on:
       - dev
 
 jobs:
+  # Fast gate: the unit tests need no Application and no HTTP, so they finish in
+  # about a second. Running them first means an obvious break fails the workflow
+  # before the matrix below spends time installing torch three times over.
+  unit:
+    name: "unit"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install package and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install -r test-requirements.txt
+      - name: Run unit tests
+        run: pytest -m unit
+
   pytest:
     name: "pytest (Python ${{ matrix.python-version }})"
+    needs: unit
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -27,5 +49,15 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e .
           python -m pip install -r test-requirements.txt
-      - name: Run pytest
-        run: pytest -m "not server"
+      # Coverage is reported, not enforced. A --cov-fail-under threshold is a
+      # separate decision -- it needs a number the whole codebase can actually
+      # hold, and picking one belongs in its own PR rather than riding along
+      # with this suite work. The report is here so that number can be chosen
+      # from real data.
+      # The flags live here rather than in pyproject's addopts, which would make
+      # every local pytest hard-require pytest-cov.
+      - name: Run pytest with coverage
+        run: >-
+          pytest -m "not server"
+          --cov=visdom
+          --cov-report=term-missing

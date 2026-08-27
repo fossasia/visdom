@@ -23,10 +23,14 @@ import time
 import unittest
 from unittest.mock import patch
 
+import pytest
+
 from visdom.tracking import (
     RunAlreadyFinishedError,
     RunTracker,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _read_events_jsonl(path):

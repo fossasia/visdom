@@ -20,7 +20,11 @@ import json
 import unittest
 from unittest.mock import Mock, patch
 
+import pytest
+
 from visdom import Visdom
+
+pytestmark = pytest.mark.unit
 
 
 class CapturedTransport(unittest.TestCase):
