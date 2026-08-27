@@ -7,6 +7,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import unittest
+import warnings
 from unittest.mock import Mock, patch
 import numpy as np
 import visdom
@@ -687,6 +688,36 @@ class TestPrCurveBaseline(unittest.TestCase):
         ]
         self.assertEqual(len(baseline_traces), 1)
         self.assertAlmostEqual(baseline_traces[0]["y"][0], true_prevalence, places=6)
+
+    def test_single_custom_legend_label_is_used_without_a_baseline(self):
+        """One label is enough when only the curve is drawn."""
+        precision = np.array([1.0, 0.8, 0.6, 0.5])
+        recall = np.array([0.0, 0.3, 0.6, 1.0])
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            sent = self._pr_curve(
+                precision=precision, recall=recall, opts={"legend": ["My Curve"]}
+            )
+
+        names = [d.get("name") for d in sent["payload"]["data"]]
+        self.assertEqual(names, ["My Curve"])
+        self.assertEqual(sent["payload"]["opts"]["legend"], ["My Curve"])
+        self.assertEqual([w for w in caught if w.category is UserWarning], [])
+
+    def test_single_legend_label_is_rejected_when_a_baseline_is_drawn(self):
+        """Two labels are still required when the baseline is present."""
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            sent = self._pr_curve(
+                y_true=[0, 0, 0, 1],
+                y_score=[0.1, 0.2, 0.3, 0.9],
+                opts={"legend": ["Only One"]},
+            )
+
+        names = [d.get("name") for d in sent["payload"]["data"]]
+        self.assertEqual(names, ["PR", "Baseline"])
+        self.assertTrue([w for w in caught if w.category is UserWarning])
 
 
 if __name__ == "__main__":

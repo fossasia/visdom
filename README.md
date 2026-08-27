@@ -929,7 +929,7 @@ A baseline showing the true class prevalence is only drawn for the
 
 The following `opts` are supported:
 - `opts.title`      : plot title (`string`; default includes PR-AUC)
-- `opts.legend`     : two legend labels for curve and baseline (`list`); the second label is unused when no baseline is drawn
+- `opts.legend`     : two legend labels for curve and baseline (`list`); only one label is needed when no baseline is drawn
 - `opts.xlabel`     : x-axis label (`string`; default = `Recall`)
 - `opts.ylabel`     : y-axis label (`string`; default = `Precision`)
 - `opts.layoutopts` : additional backend layout options (`dict`)
