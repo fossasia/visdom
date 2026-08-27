@@ -22,9 +22,9 @@ Four behaviours pinned here are current, not desired:
 * ``images`` fills the gaps between tiles with 1.0, which the float branch
   scales to white but the uint8 branch leaves as near-black, so the padding
   colour depends on the input dtype.
-* ``images`` writes each tile one pixel into its cell, so the gap is a pixel
-  wider above and to the left of a tile than below and to the right of it, and
-  ``padding=0`` raises because the last row and column no longer fit.
+* ``images`` insets each tile one pixel past its ``padding``, so the gap below
+  and to the right of a tile is a pixel thinner than the gap above and to its
+  left. See ``test_images_insets_each_tile_by_an_extra_pixel``.
 * ``svg(svgfile=...)`` stringifies the raw bytes, so newlines in the file reach
   the browser as literal backslash-n.
 
@@ -278,39 +278,30 @@ def test_images_accepts_a_list_of_arrays(capture_send):
     assert pixels.shape == (4 + 4, (4 + 4) * 2, 3)
 
 
-def test_images_rejects_zero_padding(capture_send):
-    """Pinned quirk: `padding=0` raises instead of tiling the batch edge to edge.
-
-    Each tile is written at a one-pixel offset into its cell, so the last row
-    and column fall outside a cell that has no padding to absorb them and the
-    assignment into the grid fails to broadcast.
-    """
-    with pytest.raises(ValueError, match="broadcast"):
-        capture_send(
-            lambda v: v.images(
-                np.ones((2, 3, 4, 4), dtype=np.float32), nrow=2, padding=0
-            )
-        )
+def test_images_tiles_without_padding(capture_send):
+    """Regression: the cell offset used to overrun the grid and raise on padding=0."""
+    sent = capture_send(
+        lambda v: v.images(np.ones((2, 3, 4, 4), dtype=np.float32), nrow=2, padding=0)
+    )
+    _, pixels = decode(sent)
+    assert pixels.shape == (4, 8, 3)
 
 
-def test_images_offsets_each_tile_by_one_pixel(capture_send):
-    """Pinned quirk: a tile sits one pixel low and right inside its own cell.
+def test_images_insets_each_tile_by_an_extra_pixel(capture_send):
+    """Pinned quirk: the tile sits one pixel low and right inside its cell.
 
-    With `padding=1` the cell is six pixels square, but the gap ends up two
-    pixels wide above and to the left of the image and zero wide below and to
-    the right of it, rather than one pixel on every side.
+    ``padding`` is added on all four sides of the cell but the tile starts
+    ``padding + 1`` into it, so the gap below and to the right of each tile is
+    one pixel thinner than the gap above and to its left.
     """
     sent = capture_send(
         lambda v: v.images(np.zeros((2, 3, 4, 4), dtype=np.float32), nrow=2, padding=1)
     )
     _, pixels = decode(sent)
     assert pixels.shape == (4 + 2, (4 + 2) * 2, 3)
-
-    white_rows = [bool((row == 255).all()) for row in pixels]
-    assert white_rows == [True, True, False, False, False, False]
-
-    white_cols = [bool((pixels[:, c] == 255).all()) for c in range(pixels.shape[1])]
-    assert white_cols == [True, True] + [False] * 4 + [True, True] + [False] * 4
+    assert (pixels[:2] == 255).all()  # two rows above, none below
+    assert (pixels[2:, 2:6] == 0).all()
+    assert (pixels[2:, 8:12] == 0).all()
 
 
 def test_images_padding_colour_follows_the_input_dtype(capture_send):

@@ -412,8 +412,14 @@ def test_dual_axis_lines_has_a_full_set_of_defaults(capture_send):
     )
     layout = sent["payload"]["layout"]
     assert layout["title"] == {"text": "Example Double Y axis"}
-    assert layout["yaxis"]["title"]["text"] == "Y1 axis"
-    assert layout["yaxis2"]["title"]["text"] == "Y2 axis"
+    assert layout["yaxis"]["title"] == {
+        "text": "Y1 axis",
+        "font": {"color": "black"},
+    }
+    assert layout["yaxis2"]["title"] == {
+        "text": "Y2 axis",
+        "font": {"color": "rgb(148, 103, 189)"},
+    }
     assert layout["yaxis2"]["overlaying"] == "y"
     assert layout["yaxis2"]["side"] == "right"
     assert layout["showlegend"] is True
@@ -441,10 +447,12 @@ def test_dual_axis_lines_takes_names_colors_and_side_from_opts(capture_send):
     )
     layout = sent["payload"]["layout"]
     assert layout["title"] == {"text": "two scales"}
-    assert layout["yaxis"]["title"]["text"] == "loss"
-    assert layout["yaxis"]["title"]["font"]["color"] == "blue"
+    assert layout["yaxis"]["title"] == {"text": "loss", "font": {"color": "blue"}}
     assert layout["yaxis"]["tickfont"]["color"] == "navy"
-    assert layout["yaxis2"]["title"]["font"]["color"] == "green"
+    assert layout["yaxis2"]["title"] == {
+        "text": "accuracy",
+        "font": {"color": "green"},
+    }
     assert layout["yaxis2"]["tickfont"]["color"] == "olive"
     assert layout["yaxis2"]["side"] == "left"
     assert layout["showlegend"] is False
