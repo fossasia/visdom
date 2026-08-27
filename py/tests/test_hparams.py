@@ -27,11 +27,11 @@ from visdom import Visdom
 pytestmark = pytest.mark.unit
 
 
-class TestHparamsClientMessage(unittest.TestCase):
-    """Visdom.hparams posts the selection to the experiments/hparams endpoint.
+class CapturedTransport(unittest.TestCase):
+    """A client whose transport is captured at ``_handle_post``.
 
-    The transport is captured at ``_handle_post``, so what is asserted on is
-    the message the client would have put on the wire.
+    What is asserted on is the message the client would have put on the wire,
+    so no server is involved.
     """
 
     def setUp(self):
@@ -53,6 +53,10 @@ class TestHparamsClientMessage(unittest.TestCase):
         url, msg = self.posted[-1]
         prefix = "{}:{}{}/".format(self.vis.server, self.vis.port, self.vis.base_url)
         return msg, url[len(prefix) :]
+
+
+class TestHparamsClientMessage(CapturedTransport):
+    """Visdom.hparams posts the selection to the experiments/hparams endpoint."""
 
     def test_posts_to_hparams_endpoint(self):
         """The selection goes to the experiments/hparams endpoint."""
@@ -86,32 +90,8 @@ class TestHparamsClientMessage(unittest.TestCase):
             self.vis.hparams("acc > 0.9", opts={"opacity": 5})
 
 
-class TestUpdateHparamsClientMessage(unittest.TestCase):
-    """Visdom.update_hparams posts to the experiments/hparams/update endpoint.
-
-    The transport is captured at ``_handle_post``, so what is asserted on is
-    the message the client would have put on the wire.
-    """
-
-    def setUp(self):
-        with (
-            patch.object(Visdom, "_handle_post", return_value=True),
-            patch.object(Visdom, "_start_session_reaper"),
-        ):
-            self.vis = Visdom(raise_exceptions=True, use_incoming_socket=False)
-
-        self.posted = []
-        self.vis._handle_post = Mock(side_effect=self._capture)
-
-    def _capture(self, url, data=None):
-        self.posted.append((url, json.loads(data)))
-        return "{}"
-
-    def sent(self):
-        """The last message posted, as ``(msg, endpoint)``."""
-        url, msg = self.posted[-1]
-        prefix = "{}:{}{}/".format(self.vis.server, self.vis.port, self.vis.base_url)
-        return msg, url[len(prefix) :]
+class TestUpdateHparamsClientMessage(CapturedTransport):
+    """Visdom.update_hparams posts to the experiments/hparams/update endpoint."""
 
     def test_posts_to_update_endpoint(self):
         """The target window and new selection go to the update endpoint."""
