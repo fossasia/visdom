@@ -15,6 +15,8 @@ import weakref
 
 import numpy as np
 
+from visdom.tracking.core import RunAlreadyFinishedError
+
 _TD_KEY = (
     "style='padding:2px 10px 2px 0;" "color:#555;white-space:nowrap;vertical-align:top'"
 )
@@ -56,6 +58,16 @@ class VisdomSklearnLogger:
     estimator replaces its panes instead of opening new ones. Distinct
     estimator objects always get their own panes.
 
+    Pass a :class:`visdom.tracking.RunTracker` via ``run=`` to additionally
+    record each fit's outcome to that run's local reproducibility record:
+    one structured event with the estimator class, hyperparameters, score,
+    and fit time as real typed values (not the HTML-escaped strings the
+    Visdom text pane uses), plus a plot_update entry for every chart drawn
+    (CV-scores bar, loss/score history line, residual scatter). As with
+    :class:`visdom.tracking.graphs.TrackedVisdom`, a failure while
+    recording to ``run`` never affects the Visdom panes themselves — those
+    have already been drawn by the time recording is attempted.
+
     Usage::
 
         from visdom.loggers import VisdomSklearnLogger
@@ -64,17 +76,27 @@ class VisdomSklearnLogger:
 
         clf.fit(X_train, y_train)   # logged automatically
         gs.fit(X_train, y_train)    # logged automatically
+
+    Or with reproducibility tracking::
+
+        from visdom.tracking import RunTracker
+        from visdom.loggers import VisdomSklearnLogger
+
+        with RunTracker("exp1", params={"C": 1.0}) as run:
+            VisdomSklearnLogger.autolog(run=run)
+            clf.fit(X_train, y_train)   # plotted AND tracked
     """
 
     active = None
 
-    def __init__(self, viz=None, env=None):
+    def __init__(self, viz=None, env=None, run=None):
         if viz is None:
             import visdom as _visdom
 
             viz = _visdom.Visdom()
         self.viz = viz
         self.env = env
+        self.run = run
         self._local = threading.local()
         self._wins = weakref.WeakKeyDictionary()
         self._seq = 0
@@ -88,7 +110,7 @@ class VisdomSklearnLogger:
         self._local.depth = value
 
     @classmethod
-    def autolog(cls, viz=None, env=None):
+    def autolog(cls, viz=None, env=None, run=None):
         """Patch all sklearn estimators to log fit() calls to Visdom."""
         try:
             from sklearn.model_selection import (
@@ -101,7 +123,7 @@ class VisdomSklearnLogger:
                 "scikit-learn is required for VisdomSklearnLogger. "
                 "Install with: pip install scikit-learn"
             )
-        instance = cls(viz, env)
+        instance = cls(viz, env, run=run)
         _viz_env = getattr(instance.viz, "env", None)
         instance.env = (
             env
@@ -189,6 +211,72 @@ class VisdomSklearnLogger:
             self._wins[est] = tag
         return "{}_{}".format(tag, name)
 
+    def _log_plot_to_run(self, method, win, **extra):
+        """Best-effort record an already-drawn chart update on self.run.
+
+        Same shape as visdom.tracking.graphs.TrackedVisdom._log_best_effort
+        and visdom.pytorch.VisdomLogger._log_to_run: a tracking failure
+        here must never affect a pane that's already been drawn.
+
+        Deliberately uses only stacklevel=2 (points at the immediate
+        caller -- _log_cv/_log_plain/_plot_history/_plot_residuals --
+        not further). Unlike visdom.pytorch.VisdomLogger, where a fixed
+        call depth back to the user's log() call made a precise
+        stacklevel meaningful, this method is reached from several
+        different depths depending on which chart triggered it (_log_cv
+        calls it directly; _log_plain reaches it by way of
+        _log_history/_plot_history for the history charts, one frame
+        deeper than for the CV bar chart) -- there is no single correct
+        "user's call site" stacklevel across all of them, and the
+        estimator class name already included in the warning message is
+        more useful here than an approximately-right line number would
+        be.
+        """
+        if self.run is None:
+            return
+        try:
+            self.run.log_plot_update(method, win, **extra)
+        except RunAlreadyFinishedError:
+            pass
+        except Exception as e:
+            warnings.warn(
+                "VisdomSklearnLogger: failed to record a {0!r} update "
+                "for {1!r} on run {2!r} ({3}: {4}) -- the plot itself "
+                "still succeeded normally, only the tracking record is "
+                "affected.".format(
+                    method,
+                    win,
+                    self.run.run_id,
+                    type(e).__name__,
+                    e,
+                ),
+                RuntimeWarning,
+                stacklevel=2,
+            )
+
+    def _log_event_to_run(self, event_type, **data):
+        """Best-effort record a structured fit-outcome event on self.run:
+        params/score/timing as real typed values (ints/floats/dicts),
+        not the HTML-escaped display strings the Visdom text pane uses.
+        This is the actual reproducibility record, not just a mirror of
+        what got plotted -- see _log_plot_to_run for that half.
+        """
+        if self.run is None:
+            return
+        try:
+            self.run.log_event(event_type, **data)
+        except RunAlreadyFinishedError:
+            pass
+        except Exception as e:
+            warnings.warn(
+                "VisdomSklearnLogger: failed to record a {0!r} event on "
+                "run {1!r} ({2}: {3}) -- the plot itself still "
+                "succeeded normally, only the tracking record is "
+                "affected.".format(event_type, self.run.run_id, type(e).__name__, e),
+                RuntimeWarning,
+                stacklevel=2,
+            )
+
     @staticmethod
     def _row(key, val):
         return "<tr><td {k}>{key}</td><td {v}>{val}</td></tr>".format(
@@ -208,9 +296,10 @@ class VisdomSklearnLogger:
             )
         scores = est.cv_results_[score_key]
         n = len(scores)
+        bar_win = self._win(est, "cv_scores")
         self.viz.bar(
             X=scores,
-            win=self._win(est, "cv_scores"),
+            win=bar_win,
             env=self.env,
             opts={
                 "title": "{} CV scores".format(type(est).__name__),
@@ -219,7 +308,10 @@ class VisdomSklearnLogger:
                 "rownames": ["combo_{}".format(i) for i in range(n)],
             },
         )
-        if hasattr(est, "best_score_"):
+        self._log_plot_to_run("bar", bar_win, score_key=score_key, n_candidates=n)
+
+        has_best = hasattr(est, "best_score_")
+        if has_best:
             summary_rows = "".join(
                 [
                     self._row("best_score", "{:.4f}".format(est.best_score_)),
@@ -255,19 +347,35 @@ class VisdomSklearnLogger:
             section=_SECTION,
             params=param_rows,
         )
-        self.viz.text(body, win=self._win(est, "summary"), env=self.env)
+        text_win = self._win(est, "summary")
+        self.viz.text(body, win=text_win, env=self.env)
+        self._log_plot_to_run("text", text_win)
+        self._log_event_to_run(
+            "cv_fit",
+            estimator=type(est).__name__,
+            fit_time=duration,
+            n_candidates=n,
+            score_key=score_key,
+            best_score=est.best_score_ if has_best else None,
+            best_params=est.best_params_ if has_best else None,
+            refit=refit,
+        )
 
     def _plot_history(self, est, curve, attr, xlabel, ylabel):
+        win = self._win(est, attr)
         self.viz.line(
             X=list(range(1, len(curve) + 1)),
             Y=curve,
-            win=self._win(est, attr),
+            win=win,
             env=self.env,
             opts={
                 "title": "{} {}".format(type(est).__name__, attr),
                 "xlabel": xlabel,
                 "ylabel": ylabel,
             },
+        )
+        self._log_plot_to_run(
+            "line", win, attr=attr, n_points=len(curve), final_value=curve[-1]
         )
 
     def _log_history(self, est):
@@ -319,9 +427,10 @@ class VisdomSklearnLogger:
         return np.column_stack([y_pred, residuals])
 
     def _plot_residuals(self, est, points):
+        win = self._win(est, "residuals")
         self.viz.scatter(
             X=points,
-            win=self._win(est, "residuals"),
+            win=win,
             env=self.env,
             opts={
                 "title": "{} training residuals".format(type(est).__name__),
@@ -330,17 +439,21 @@ class VisdomSklearnLogger:
                 "markersize": 5,
             },
         )
+        self._log_plot_to_run("scatter", win, n_points=len(points))
 
     def _log_plain(self, est, X, y, duration):
         summary_rows = [self._row("fit_time", "{:.2f}s".format(duration))]
 
         shape = getattr(X, "shape", None)
+        dataset_shape = None
         if shape is not None:
             ncols = shape[1] if len(shape) > 1 else 1
+            dataset_shape = [shape[0], ncols]
             summary_rows.insert(
                 0, self._row("dataset", "{} x {}".format(shape[0], ncols))
             )
 
+        score = None
         try:
             score = est.score(X, y) if y is not None else est.score(X)
             summary_rows.append(self._row("train_score", "{:.4f}".format(score)))
@@ -367,7 +480,23 @@ class VisdomSklearnLogger:
             section=_SECTION,
             params=param_rows,
         )
-        self.viz.text(body, win=self._win(est, "summary"), env=self.env)
+        text_win = self._win(est, "summary")
+        self.viz.text(body, win=text_win, env=self.env)
+        self._log_plot_to_run("text", text_win)
+        # Params come from get_params(), which for a Pipeline/meta-
+        # estimator can include nested estimator objects, not just
+        # plain scalars -- safe to pass straight through here, since
+        # RunTracker.log_event already runs everything through
+        # _json_safe (falls back to a str() representation for
+        # anything that isn't JSON-native, never raises).
+        self._log_event_to_run(
+            "fit",
+            estimator=type(est).__name__,
+            fit_time=duration,
+            dataset_shape=dataset_shape,
+            train_score=score,
+            params=est.get_params(),
+        )
         if residuals is not None:
             self._plot_residuals(est, residuals)
         self._log_history(est)
