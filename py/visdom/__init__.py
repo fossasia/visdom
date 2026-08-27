@@ -1390,12 +1390,26 @@ class Visdom(object):
         `tag.owner`) when it is ambiguous; metrics compare on their latest value.
         `query=None` returns everything. Results are sorted by `sort_by` (any of
         those same names, newest-created first by default) and paged with
-        `limit`/`offset`; pass `limit=None` for all of them.
+        `limit`/`offset`.
+
+        A page is capped by the server. `limit=None` asks for as many as it
+        allows rather than for all of them, and a `limit` above the cap is
+        answered at the cap instead of being refused — so a store larger than
+        one page is read by paging with `offset`, using the `total` to know how
+        far to go.
+
+        Paging is not bottomless: `offset` + `limit` must stay within the
+        server's window, and a page past it raises rather than quietly moving
+        to a page you did not ask for. Deep pages are expensive to find, so
+        reaching the end of a large `total` means narrowing `query` — filtering
+        by a param, a tag or a metric threshold — rather than walking `offset`
+        out to it.
 
         Returns the server's reply as a dict of `experiments` (a list of
         experiment dicts, one page worth), the unpaged `total` matching the
-        query, and the `limit`/`offset`/`query` used. Returns None on an offline
-        client, which has no server to search.
+        query, and the `limit` the server actually applied alongside the
+        `offset`/`query` used. Returns None on an offline client, which has no
+        server to search.
         """
         if query is not None and not isstr(query):
             raise TypeError("query must be a string")
@@ -1426,6 +1440,11 @@ class Visdom(object):
 
             found = vis.search_experiments("lr < 0.01")
             vis.compare_experiments([e["env_id"] for e in found["experiments"]])
+
+        One search page always fits, since the server compares at most as many
+        runs as a page can hold. A longer list is compared in batches rather
+        than trimmed — a diff of some of the runs asked for would be a different
+        answer, not a shorter one, so it raises instead.
 
         Returns the server's reply as a dict: the compared runs (`env_ids` and
         the full `experiments`), plus a `params`, `metrics` and `tags` section.
