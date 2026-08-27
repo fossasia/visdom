@@ -16,6 +16,9 @@ env dict, an environment without an experiment blob behaves exactly as it does
 today — the feature is fully opt-in.
 """
 
+import heapq
+import math
+
 from visdom.data_model.base import DataStore
 from visdom.experiments.compare import build_comparison
 from visdom.experiments.models import (
@@ -31,6 +34,8 @@ METADATA_KEY = "experiment"
 DEFAULT_SORT_FIELD = "created_at"
 
 _MISSING = object()
+
+_MIN_TRIM_AT = 64
 
 
 def retarget_experiment(env, env_id):
@@ -51,6 +56,45 @@ def retarget_experiment(env, env_id):
     return env
 
 
+def _is_number(value):
+    """Return ``True`` for a value :func:`_order_key` can order numerically.
+
+    A ``bool`` is excluded so that ``True`` does not order as ``1``, matching
+    :mod:`~visdom.experiments.query`. A non-finite float is excluded because it
+    has no usable position: NaN compares ``False`` against everything including
+    itself, so admitting one makes the comparison used to sort non-transitive.
+    ``bool`` is not a ``float`` subclass, so :func:`_is_absent` needs no such
+    exclusion — only this one has to name it.
+
+    An ``int`` too wide to become a ``float`` is excluded as well, so it orders
+    by text rather than raising: JSON has no bound on integer length, so a param
+    can hold one, and both the test here and :func:`_order_key`'s conversion
+    would otherwise raise ``OverflowError`` out of a request.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+def _is_absent(value):
+    """Return ``True`` if ``value`` is no value to sort by, and so sorts last.
+
+    That is the field being missing from the record entirely, holding ``None``,
+    or holding a NaN/Inf float. The last case is what a run that logged a
+    diverged metric looks like in memory; once the env has been written and read
+    back it is ``None``, because the JSON encoder has no way to spell a
+    non-finite number. Both spellings mean "this run has no value here", so both
+    sort last and a run's position stops depending on whether its env happens to
+    be loaded.
+    """
+    if value is _MISSING or value is None:
+        return True
+    return isinstance(value, float) and not math.isfinite(value)
+
+
 def _order_key(value):
     """Return a sort key that totally orders values of mixed types.
 
@@ -60,32 +104,46 @@ def _order_key(value):
     is neither is compared by its text form. Booleans are ordered as text rather
     than as 0/1, matching :mod:`~visdom.experiments.query`, which likewise
     refuses to treat a bool as a number.
+
+    A non-finite float is ordered by its text form for the same reason a string
+    is: it is not a position on the number line. :meth:`ExperimentStore._scan`
+    keeps such values out of the ranked bucket entirely, so this is the second
+    of two guarantees rather than the one that matters — but it is the one that
+    keeps the key itself safe to compare, whatever reaches it.
     """
-    if isinstance(value, bool):
-        return (1, 0.0, str(value))
-    if isinstance(value, (int, float)):
+    if _is_number(value):
         return (0, float(value), "")
     return (1, 0.0, str(value))
 
 
-def _sort_pairs(pairs, field, descending):
-    """Sort ``(record, experiment)`` pairs by ``record[field]``.
+def _rank_key(entry, descending):
+    """Sort key for a ``(seq, value, experiment)`` entry: value, then arrival.
 
-    Experiments whose record lacks ``field`` (or holds ``None`` there) keep
-    their relative order and always land last, in both directions: a run that
-    never logged ``acc`` is not the best-scoring run just because the sort was
-    reversed.
+    The arrival counter is negated for a descending sort so that reversing the
+    comparison reverses the values *without* reversing ties. Two experiments
+    scoring the same keep the order they were scanned in, whichever direction
+    the sort runs — the property a stable ``list.sort`` used to provide, which
+    selecting through a heap does not.
     """
-    present = []
-    missing = []
-    for record, experiment in pairs:
-        value = record.get(field, _MISSING)
-        if value is _MISSING or value is None:
-            missing.append((record, experiment))
-        else:
-            present.append((record, experiment))
-    present.sort(key=lambda pair: _order_key(pair[0][field]), reverse=descending)
-    return present + missing
+    seq, value, _ = entry
+    return (_order_key(value), -seq if descending else seq)
+
+
+def _rank(entries, descending, keep=None):
+    """Order scanned ``(seq, value, experiment)`` entries, best first.
+
+    ``keep`` bounds the result to that many entries, selected with a heap so
+    that ranking a large scan costs memory proportional to what is kept rather
+    than to what was seen. Without it every entry is ordered.
+    """
+
+    def key(entry):
+        return _rank_key(entry, descending)
+
+    if keep is not None and keep < len(entries):
+        select = heapq.nlargest if descending else heapq.nsmallest
+        return select(keep, entries, key=key)
+    return sorted(entries, key=key, reverse=descending)
 
 
 class ExperimentStore:
@@ -140,6 +198,37 @@ class ExperimentStore:
         if experiment is not None:
             experiment.env_id = env_id
         return env, experiment
+
+    def _read_metadata(self, env_id):
+        """Return ``env_id``'s :class:`Experiment` without materialising its env.
+
+        The read path for callers that want metadata and nothing else. Unlike
+        :meth:`_read` it never assembles — or forces into memory — the env dict,
+        because reading one experiment must not be a reason to hold an env's
+        windows.
+
+        A live env is still preferred, but only when it is *already* resident:
+        an env the server is holding may carry changes the file has not seen, so
+        it wins; an env that has never been materialised cannot, so the store is
+        asked instead. ``LazyEnvData`` reports this through ``is_loaded``;
+        anything else (a plain dict) is resident by definition.
+
+        As in :meth:`_read`, the experiment answers to the env it was read from
+        rather than to the ``env_id`` its blob records, so a forked env does not
+        report its parent's id.
+        """
+        env = self.env_provider(env_id) if self.env_provider is not None else None
+        if env is not None and not getattr(env, "is_loaded", True):
+            env = None
+        if env is not None:
+            blob = env.get(METADATA_KEY)
+        else:
+            blob = self.datastore.load_experiment(env_id)
+        if not isinstance(blob, dict):
+            return None
+        experiment = Experiment.from_dict(blob)
+        experiment.env_id = env_id
+        return experiment
 
     def _write(self, env_id, env, experiment):
         """Attach ``experiment`` to ``env`` and persist it; return the experiment."""
@@ -257,18 +346,81 @@ class ExperimentStore:
         return self._write(env_id, env, experiment)
 
     def get_experiment(self, env_id):
-        """Return ``env_id``'s :class:`Experiment`, or ``None`` if it has none."""
-        _, experiment = self._read(env_id)
-        return experiment
+        """Return ``env_id``'s :class:`Experiment`, or ``None`` if it has none.
+
+        A pure read, so it goes through :meth:`_read_metadata` and leaves an
+        env that was not already in memory out of it.
+        """
+        return self._read_metadata(env_id)
+
+    def iter_experiments(self):
+        """Yield every stored :class:`Experiment`, one environment at a time.
+
+        A generator rather than a list because the caller is usually filtering:
+        an experiment that does not survive the filter should be collectable
+        immediately, not held until the whole store has been walked.
+        """
+        for env_id in self.datastore.list_envs():
+            experiment = self._read_metadata(env_id)
+            if experiment is not None:
+                yield experiment
 
     def list_experiments(self):
         """Return every stored :class:`Experiment`, across all environments."""
-        experiments = []
-        for env_id in self.datastore.list_envs():
-            experiment = self.get_experiment(env_id)
-            if experiment is not None:
-                experiments.append(experiment)
-        return experiments
+        return list(self.iter_experiments())
+
+    def _scan(self, query, sort_by, descending=True, keep=None):
+        """Scan every experiment once; return matches and how many there were.
+
+        Returns the pieces both search entry points need: ``(present, missing,
+        total)``, where ``present`` are ``(seq, value, experiment)`` entries
+        carrying the value ``sort_by`` will order them by, and ``missing`` are
+        the matches that have no such value and so sort last —
+        :func:`_is_absent` decides which bucket a value falls in, and a NaN or
+        Inf counts as no value. Keeping non-finite values out of ``present`` is
+        what makes the ranking sound: a NaN admitted there compares ``False``
+        against every other entry, and the heap ``keep`` selects through would
+        then drop entries that belong on the page.
+
+        The flattened record is built per experiment and dropped as soon as it
+        has answered — it is several times the size of the experiment it
+        describes, and only the sort value outlives it. Non-matches are held no
+        longer than the loop body.
+
+        ``keep`` bounds what survives the scan to the first ``keep`` results a
+        page could reach: ``present`` is trimmed back to its best ``keep``
+        whenever it has grown to twice that (dropping an entry already outside
+        the top ``keep`` can never change the top ``keep``), and ``missing``
+        stops growing there too. ``total`` still counts every match, since a
+        counter costs nothing. Without ``keep`` every match is retained.
+        """
+        if query is not None and not isinstance(query, str):
+            raise TypeError(
+                "query must be a string or None, got {0}".format(type(query).__name__)
+            )
+        compiled = Query(query) if query is not None and query.strip() else None
+        trim_at = None if keep is None else max(2 * keep, _MIN_TRIM_AT)
+        present = []
+        missing = []
+        total = 0
+        for experiment in self.iter_experiments():
+            record = build_record(experiment)
+            if compiled is not None and not compiled.matches(record):
+                continue
+            total += 1
+            if not sort_by:
+                if keep is None or len(present) < keep:
+                    present.append((total, None, experiment))
+                continue
+            value = record.get(sort_by, _MISSING)
+            if _is_absent(value):
+                if keep is None or len(missing) < keep:
+                    missing.append(experiment)
+            else:
+                present.append((total, value, experiment))
+                if trim_at is not None and len(present) >= trim_at:
+                    present = _rank(present, descending, keep)
+        return present, missing, total
 
     def search(self, query=None, sort_by=DEFAULT_SORT_FIELD, descending=True):
         """Return the experiments matching ``query``, sorted by ``sort_by``.
@@ -283,27 +435,55 @@ class ExperimentStore:
 
         Sorting defaults to newest-first; pass ``descending=False`` for oldest
         first, or ``sort_by=None`` to keep the backend's own ordering. Results
-        are ordinary :class:`Experiment` objects, and paging through them is left
-        to the caller — the whole set is scanned regardless, since every
-        environment must be read to know whether it matches.
+        are ordinary :class:`Experiment` objects. A run whose ``sort_by`` value
+        is absent, ``None``, NaN or Inf has nothing to sort by and comes last,
+        in scan order, whichever direction the sort runs.
+
+        Every match is returned, so the result grows with the store; a caller
+        serving a request should use :meth:`search_page`, which bounds it.
 
         Raises :class:`~visdom.experiments.query.QueryParseError` if ``query``
         is not valid query syntax.
         """
-        if query is not None and not isinstance(query, str):
-            raise TypeError(
-                "query must be a string or None, got {0}".format(type(query).__name__)
-            )
-        pairs = [
-            (build_record(experiment), experiment)
-            for experiment in self.list_experiments()
-        ]
-        if query is not None and query.strip():
-            compiled = Query(query)
-            pairs = [pair for pair in pairs if compiled.matches(pair[0])]
-        if sort_by:
-            pairs = _sort_pairs(pairs, sort_by, descending)
-        return [experiment for _, experiment in pairs]
+        present, missing, _ = self._scan(query, sort_by, descending)
+        if not sort_by:
+            return [experiment for _, _, experiment in present]
+        ordered = _rank(present, descending)
+        return [experiment for _, _, experiment in ordered] + missing
+
+    def search_page(
+        self,
+        query=None,
+        sort_by=DEFAULT_SORT_FIELD,
+        descending=True,
+        offset=0,
+        limit=None,
+    ):
+        """Return one page of matches and the unpaged total, as ``(page, total)``.
+
+        The paged form of :meth:`search`, for callers answering a request. The
+        scan is the same — every environment must be read to know whether it
+        matches, and ``total`` counts all of them — but only the first
+        ``offset + limit`` matches are ever ranked and held, so the memory a
+        request costs is set by the page asked for rather than by how much the
+        server happens to store. ``limit=None`` keeps every match, which is
+        :meth:`search` with a count.
+
+        Experiments with no value for ``sort_by`` — absent, ``None``, NaN or
+        Inf — sort last, so they are only materialised while the page can still
+        reach them.
+        """
+        if offset < 0 or (limit is not None and limit < 0):
+            raise ValueError("offset and limit must not be negative")
+        keep = None if limit is None else offset + limit
+        present, missing, total = self._scan(query, sort_by, descending, keep)
+        if not sort_by:
+            page = [experiment for _, _, experiment in present]
+        else:
+            ordered = _rank(present, descending, keep)
+            page = [experiment for _, _, experiment in ordered] + missing
+        end = keep
+        return page[offset:end], total
 
     def _load_named(self, env_ids):
         """Return the experiments for ``env_ids``, in the order asked for.

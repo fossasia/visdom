@@ -1142,7 +1142,15 @@ class Visdom(object):
             r = self.session.post(url, data=data, timeout=(20, None))
             return r.text
 
-    def _send(self, msg, endpoint="events", quiet=False, from_log=False, create=True):
+    def _send(
+        self,
+        msg,
+        endpoint="events",
+        quiet=False,
+        from_log=False,
+        create=True,
+        default_eid=True,
+    ):
         """
         This function sends specified JSON request to the Tornado server. This
         function should generally not be called by the user, unless you want to
@@ -1152,8 +1160,13 @@ class Visdom(object):
         If `create=True`, then if `win=None` in the message a new window will be
         created with a random name. If `create=False`, `win=None` indicates the
         operation should be applied to all windows.
+
+        If `default_eid=False`, a message without an `eid` is left without one
+        rather than being pointed at this client's env. Routes that treat a
+        missing `eid` as "every env" need this: `/env_state` returns the env
+        list only when no `eid` is supplied.
         """
-        if msg.get("eid", None) is None:
+        if msg.get("eid", None) is None and default_eid:
             msg["eid"] = self.env
             self.env_list.add(self.env)
 
@@ -1377,12 +1390,26 @@ class Visdom(object):
         `tag.owner`) when it is ambiguous; metrics compare on their latest value.
         `query=None` returns everything. Results are sorted by `sort_by` (any of
         those same names, newest-created first by default) and paged with
-        `limit`/`offset`; pass `limit=None` for all of them.
+        `limit`/`offset`.
+
+        A page is capped by the server. `limit=None` asks for as many as it
+        allows rather than for all of them, and a `limit` above the cap is
+        answered at the cap instead of being refused — so a store larger than
+        one page is read by paging with `offset`, using the `total` to know how
+        far to go.
+
+        Paging is not bottomless: `offset` + `limit` must stay within the
+        server's window, and a page past it raises rather than quietly moving
+        to a page you did not ask for. Deep pages are expensive to find, so
+        reaching the end of a large `total` means narrowing `query` — filtering
+        by a param, a tag or a metric threshold — rather than walking `offset`
+        out to it.
 
         Returns the server's reply as a dict of `experiments` (a list of
         experiment dicts, one page worth), the unpaged `total` matching the
-        query, and the `limit`/`offset`/`query` used. Returns None on an offline
-        client, which has no server to search.
+        query, and the `limit` the server actually applied alongside the
+        `offset`/`query` used. Returns None on an offline client, which has no
+        server to search.
         """
         if query is not None and not isstr(query):
             raise TypeError("query must be a string")
@@ -1413,6 +1440,11 @@ class Visdom(object):
 
             found = vis.search_experiments("lr < 0.01")
             vis.compare_experiments([e["env_id"] for e in found["experiments"]])
+
+        One search page always fits, since the server compares at most as many
+        runs as a page can hold. A longer list is compared in batches rather
+        than trimmed — a diff of some of the runs asked for would be a different
+        answer, not a shorter one, so it raises instead.
 
         Returns the server's reply as a dict: the compared runs (`env_ids` and
         the full `experiments`), plus a `params`, `metrics` and `tags` section.
@@ -1635,7 +1667,12 @@ class Visdom(object):
         if self.offline:
             return list(self.env_list)
         else:
-            return json.loads(self._send({}, endpoint="env_state", quiet=True))
+            # `default_eid=False` matters here: `/env_state` answers with one
+            # env's windows when it is given an `eid`, and with the env list
+            # only when it is not.
+            return json.loads(
+                self._send({}, endpoint="env_state", quiet=True, default_eid=False)
+            )
 
     def get_env_state(self, env):
         """
@@ -2422,15 +2459,22 @@ class Visdom(object):
         height = int(tensor.shape[2] + 2 * padding)
         width = int(tensor.shape[3] + 2 * padding)
 
+        # The tile has always been inset one extra pixel into its cell, which
+        # leaves one pixel less padding below and to the right of it. That
+        # extra pixel only fits while `padding` is at least 1; with padding=0
+        # the last row and column ran off the end of the grid and the copy
+        # raised, so drop the offset in that case.
+        offset = padding + 1 if padding > 0 else 0
+
         grid = np.ones([tensor.shape[1], height * ymaps, width * xmaps])
         k = 0
         for y in range(ymaps):
             for x in range(xmaps):
                 if k >= nmaps:
                     break
-                h_start = y * height + 1 + padding
+                h_start = y * height + offset
                 h_end = h_start + tensor.shape[2]
-                w_start = x * width + 1 + padding
+                w_start = x * width + offset
                 w_end = w_start + tensor.shape[3]
                 grid[:, h_start:h_end, w_start:w_end] = tensor[k]
                 k += 1
