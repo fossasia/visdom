@@ -34,9 +34,9 @@ from unittest.mock import Mock, patch
 # Reproduces with any test that calls all_estimators() under pytest,
 # whether or not run= tracking is involved.
 #
-# hence to resolve pre-populate sys.modules with dummy stand-in for shim
-# before collection. Python's import machinery checks sys.modules first, so
-# pkgutil's __import__() call finds it already "imported" and never
+# resolved this using pre-populate sys.modules with dummy stand-in for
+# the shim before collection. Python's import machinery checks sys.modules 
+# first, so pkgutil's __import__() call finds it already "imported" and never
 # executes the broken module body. all_estimators() never actually needs
 # anything from this shim -- it's just an accidental side effect of
 # walking every submodule -- so a stub with no real content behind it is
@@ -91,27 +91,16 @@ class TestSklearnLoggerRunTracking(unittest.TestCase):
 
     @staticmethod
     def _unpatch_all():
-        """Undo VisdomSklearnLogger.autolog()'s monkey-patching so the
-        next test (and any other test file importing sklearn afterwards)
-        sees pristine, unpatched estimator classes."""
-        import sklearn.linear_model
-        import sklearn.model_selection
-        import sklearn.neural_network
-
-        for cls in (
-            sklearn.linear_model.LogisticRegression,
-            sklearn.linear_model.LinearRegression,
-            sklearn.neural_network.MLPRegressor,
-            sklearn.model_selection.GridSearchCV,
-        ):
-            if getattr(cls.fit, "_visdom_patched", False):
-                # The original unpatched fit is reachable via __wrapped__
-                # (functools.wraps sets this); walk back to it.
-                original = cls.fit
-                while getattr(original, "_visdom_patched", False):
-                    original = original.__wrapped__
-                cls.fit = original
-        VisdomSklearnLogger.active = None
+        """Undo whatever the test's autolog() call patched, via the real
+        VisdomSklearnLogger.unpatch() -- not a hand-picked subset of
+        classes. autolog() patches every class sklearn.utils.all_estimators()
+        returns (200+), so anything less than the real unpatch() leaves
+        most of them permanently monkey-patched for every test file run
+        afterwards in the same process (see
+        test_unpatch_restores_every_patched_class_not_just_a_few, which
+        guards against exactly this)."""
+        if VisdomSklearnLogger.active is not None:
+            VisdomSklearnLogger.active.unpatch()
 
     def _events(self, run):
         events_path = os.path.join(
@@ -285,6 +274,105 @@ class TestSklearnLoggerRunTracking(unittest.TestCase):
                     clf = LogisticRegression().fit(X, y)
         self.assertTrue(hasattr(clf, "coef_"))
         run.finish()
+
+    def test_gridsearchcv_under_threading_backend_still_logs_exactly_once(self):
+        """Regression test for a flagged issue: GridSearchCV/RandomizedSearchCV
+        with a threading-based joblib backend (n_jobs > 1 under
+        joblib.parallel_backend("threading")) dispatches inner fit() calls
+        to worker threads. The old threading.local()-based depth counter
+        gave each worker thread its own independent depth starting at 0,
+        with no way to see it was nested inside the outer CV fit -- every
+        inner fit then also looked like a top-level call and got logged
+        again (confirmed before the fix: 6 extra spurious 'fit' events for
+        a 2-candidate/3-fold grid, expected 0). The fix is a lock-protected
+        shared counter (see VisdomSklearnLogger._enter_fit/_exit_fit),
+        since the threading backend's workers run in the same process/
+        memory space as the dispatching thread -- unlike a ContextVar,
+        which was tried and confirmed NOT to work here (joblib's threading
+        backend does not propagate contextvars to its worker threads)."""
+        import joblib
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.model_selection import GridSearchCV
+        from sklearn.datasets import make_classification
+
+        X, y = make_classification(n_samples=100, n_features=4, random_state=0)
+        run = RunTracker("exp", out_dir=self.out_dir)
+        with patch.object(self.vis, "_send", side_effect=_fake_send):
+            VisdomSklearnLogger.autolog(viz=self.vis, run=run)
+            gs = GridSearchCV(LogisticRegression(), {"C": [0.1, 1.0]}, cv=3, n_jobs=4)
+            with joblib.parallel_backend("threading"):
+                gs.fit(X, y)
+        run.finish()
+
+        events = self._events(run)
+        fit_events = [e for e in events if e["type"] == "fit"]
+        cv_fit_events = [e for e in events if e["type"] == "cv_fit"]
+        self.assertEqual(
+            len(fit_events),
+            0,
+            "inner fits dispatched to worker threads must not be logged "
+            "as separate top-level fits",
+        )
+        self.assertEqual(len(cv_fit_events), 1)
+
+    def test_unpatch_restores_every_patched_class_not_just_a_few(self):
+        """Regression test for a flagged issue: autolog() patches every
+        class sklearn.utils.all_estimators() returns (200+), but an
+        earlier version of this test file's own cleanup only restored 4
+        hand-picked classes, leaving ~204 others permanently patched with
+        VisdomSklearnLogger.active set to None -- meaning any later code
+        calling .fit() on one of them (in this process, for the rest of
+        its life) would crash with AttributeError: 'NoneType' object has
+        no attribute '_depth' (or now, '_enter_fit'). unpatch() must
+        restore literally everything it patched, verified against the
+        real, complete list all_estimators() returns rather than a
+        hand-picked sample."""
+        from sklearn.utils import all_estimators
+        from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
+
+        all_ests = list(all_estimators())
+        with patch.object(self.vis, "_send", side_effect=_fake_send):
+            VisdomSklearnLogger.autolog(viz=self.vis)
+
+        patched_before = sum(
+            1 for _, cls in all_ests if getattr(cls.fit, "_visdom_patched", False)
+        )
+        self.assertGreater(
+            patched_before, 100, "sanity check: autolog() should patch 100+ classes"
+        )
+
+        VisdomSklearnLogger.active.unpatch()
+
+        still_patched = [
+            name for name, cls in all_ests if getattr(cls.fit, "_visdom_patched", False)
+        ]
+        self.assertEqual(
+            still_patched,
+            [],
+            "these classes were left monkey-patched: {}".format(still_patched),
+        )
+        self.assertFalse(getattr(GridSearchCV.fit, "_visdom_patched", False))
+        self.assertFalse(getattr(RandomizedSearchCV.fit, "_visdom_patched", False))
+
+        # A class nowhere near the old hardcoded 4-class list must work
+        # normally post-unpatch -- this is the exact scenario that used
+        # to crash with AttributeError before the fix.
+        from sklearn.ensemble import RandomForestClassifier
+        from sklearn.datasets import make_classification
+
+        X, y = make_classification(n_samples=20, n_features=4, random_state=0)
+        clf = RandomForestClassifier(n_estimators=3).fit(X, y)
+        self.assertTrue(hasattr(clf, "estimators_"))
+
+    def test_unpatch_is_idempotent(self):
+        from sklearn.linear_model import LogisticRegression
+
+        with patch.object(self.vis, "_send", side_effect=_fake_send):
+            VisdomSklearnLogger.autolog(viz=self.vis)
+        instance = VisdomSklearnLogger.active
+        instance.unpatch()
+        instance.unpatch()  # must not raise
+        self.assertFalse(getattr(LogisticRegression.fit, "_visdom_patched", False))
 
 
 if __name__ == "__main__":

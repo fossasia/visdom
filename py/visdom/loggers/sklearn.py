@@ -85,6 +85,12 @@ class VisdomSklearnLogger:
         with RunTracker("exp1", params={"C": 1.0}) as run:
             VisdomSklearnLogger.autolog(run=run)
             clf.fit(X_train, y_train)   # plotted AND tracked
+
+    Call ``VisdomSklearnLogger.active.unpatch()`` to undo autolog() and
+    restore every patched estimator class's original fit(). Useful for
+    tests, notebooks re-running autolog() with different settings, or any
+    code that shouldn't leave sklearn's estimator classes monkey-patched
+    once it's done.
     """
 
     active = None
@@ -97,17 +103,65 @@ class VisdomSklearnLogger:
         self.viz = viz
         self.env = env
         self.run = run
-        self._local = threading.local()
+        # A plain, lock-protected shared counter, not threading.local():
+        # GridSearchCV/RandomizedSearchCV with a threading-based joblib
+        # backend (n_jobs > 1 with backend="threading", either explicit
+        # via joblib.parallel_backend("threading") or an estimator that
+        # uses threading internally) runs inner fit() calls on worker
+        # threads. threading.local() gives each of those threads its own
+        # independent depth starting at 0, with no way to see they're
+        # nested inside the outer fit -- every inner fit then also looks
+        # like a top-level call and gets logged again (confirmed: 6 extra
+        # spurious "fit" events from a 2-candidate/3-fold GridSearchCV
+        # under a threading backend, expected 0). A ContextVar doesn't
+        # fix this either -- confirmed empirically that joblib's
+        # threading backend does not propagate contextvars to its worker
+        # threads. What *does* work: the threading backend's workers run
+        # in the same process, sharing the same memory as the thread that
+        # dispatched them (unlike the "loky"/multiprocessing backends,
+        # which use separate processes and share nothing) -- so a plain
+        # shared counter, protected by a lock against concurrent workers
+        # incrementing/decrementing at once, correctly reflects "how many
+        # patched fit() calls are currently in flight anywhere for this
+        # instance" and lets a worker's inner fit see it's nested (depth
+        # > 0 from the outer call's own not-yet-released increment) even
+        # though it's running on a different OS thread. See _enter_fit/
+        # _exit_fit. This assumes at most one *unrelated* top-level fit
+        # is ever in flight per instance at a time -- two genuinely
+        # independent top-level fit() calls dispatched concurrently from
+        # different user threads onto the same VisdomSklearnLogger
+        # instance could transiently miscount each other as "nested".
+        # That's a narrower, pre-existing limitation of the single shared
+        # `active` instance design generally (self.viz/self.env/self._wins
+        # are equally unscoped across concurrent unrelated fits already),
+        # not a new one introduced here.
+        self._depth_lock = threading.Lock()
+        self._depth_value = 0
         self._wins = weakref.WeakKeyDictionary()
         self._seq = 0
+        # (cls, original_fit) for every class _patch() has actually
+        # patched, so unpatch() can restore all of them -- not just a
+        # hand-picked few. autolog() patches every class
+        # sklearn.utils.all_estimators() returns (200+ classes), so
+        # anything less than "every class this instance patched" leaves
+        # most of them permanently monkey-patched with no way back.
+        self._patched = []
 
-    @property
-    def _depth(self):
-        return getattr(self._local, "depth", 0)
+    def _enter_fit(self):
+        """Atomically increment the shared in-flight-fit depth counter,
+        returning the new depth. Must be paired with _exit_fit()."""
+        with self._depth_lock:
+            self._depth_value += 1
+            return self._depth_value
 
-    @_depth.setter
-    def _depth(self, value):
-        self._local.depth = value
+    def _exit_fit(self):
+        """Atomically decrement the shared depth counter, returning the
+        new depth. A return value of 0 means no patched fit() call --
+        on any thread -- is currently in progress for this instance, so
+        whichever call just exited is safe to log as a top-level fit."""
+        with self._depth_lock:
+            self._depth_value -= 1
+            return self._depth_value
 
     @classmethod
     def autolog(cls, viz=None, env=None, run=None):
@@ -150,14 +204,14 @@ class VisdomSklearnLogger:
             @functools.wraps(original)
             def patched_fit(self_est, *args, **kwargs):
                 logger = visdom_cls.active
-                logger._depth += 1
+                logger._enter_fit()
                 t0 = time.time()
                 try:
                     result = original(self_est, *args, **kwargs)
                 finally:
-                    logger._depth -= 1
+                    depth_after = logger._exit_fit()
                 duration = time.time() - t0
-                if logger._depth == 0:
+                if depth_after == 0:
                     try:
                         logger._log_cv(self_est, duration)
                     except Exception as e:
@@ -173,14 +227,14 @@ class VisdomSklearnLogger:
             @functools.wraps(original)
             def patched_fit(self_est, *args, **kwargs):
                 logger = visdom_cls.active
-                logger._depth += 1
+                logger._enter_fit()
                 t0 = time.time()
                 try:
                     result = original(self_est, *args, **kwargs)
                 finally:
-                    logger._depth -= 1
+                    depth_after = logger._exit_fit()
                 duration = time.time() - t0
-                if logger._depth == 0:
+                if depth_after == 0:
                     X = args[0] if args else None
                     y = args[1] if len(args) > 1 else None
                     try:
@@ -195,6 +249,28 @@ class VisdomSklearnLogger:
 
         patched_fit._visdom_patched = True
         cls.fit = patched_fit
+        self._patched.append((cls, original))
+
+    def unpatch(self):
+        """Undo autolog(): restore every class this instance patched to
+        its original, un-monkey-patched fit().
+
+        autolog() patches every class sklearn.utils.all_estimators()
+        returns (200+ classes as of a typical scikit-learn install), not
+        just the handful a given script happens to use -- so this walks
+        the complete list of what was actually patched (tracked in
+        self._patched at patch time), not a hand-picked subset. Safe to
+        call more than once; a second call is a no-op.
+
+        Also clears VisdomSklearnLogger.active if it still points at this
+        instance, so any (already-restored, so harmless either way)
+        stray reference doesn't linger.
+        """
+        for cls, original in self._patched:
+            cls.fit = original
+        self._patched.clear()
+        if VisdomSklearnLogger.active is self:
+            VisdomSklearnLogger.active = None
 
     def _win(self, est, name):
         """Window id for one of est's panes, stable across refits.
