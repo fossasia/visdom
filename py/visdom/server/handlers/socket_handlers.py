@@ -621,8 +621,8 @@ class AnySocketWrapper(AnySocketHandlerOrWrapper):
         self.polling = True
         super().__init__(*args, **kwargs)
 
-    def initialize(self, app):
-        super().initialize(app)
+    def initialize(self, server_state):
+        super().initialize(server_state)
 
         self.messages = deque()
         self.last_read_time = time.time()
@@ -735,8 +735,8 @@ class SocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
         self.broadcast_layouts([self])
         broadcast_envs(self, [self])
 
-    def initialize(self, app):
-        super().initialize(app)
+    def initialize(self, server_state):
+        super().initialize(server_state)
         self.broadcast_layouts()
 
     def on_close(self):
@@ -789,11 +789,16 @@ class SocketFailureReason(Enum):
         return resp
 
 
+def _spawn_socket(cls, server_state, request):
+    """Construct a polling socket wrapper using shared server state."""
+    wrapper = cls()
+    wrapper.request = request
+    wrapper.initialize(server_state)
+    return wrapper
+
+
 def WrapSocketWrapper(BaseWrapper):
     class WrappedSocketWrap(BaseHandler):
-        def initialize(self, app):
-            super().initialize(app)
-
         @check_auth
         def post(self):
             """Either write a message to the socket, or query what's there"""
@@ -808,8 +813,8 @@ def WrapSocketWrapper(BaseWrapper):
                 # wrapper needs a request the same way the subscriber path
                 # below gives it one. Without it every polling client raised
                 # AttributeError here and never got a sid back.
-                new_sub = self.server_state.spawn_socket(
-                    VisSocketWrapper, request=self.request
+                new_sub = _spawn_socket(
+                    VisSocketWrapper, self.server_state, self.request
                 )
                 self.write(json.dumps({"success": True, "sid": new_sub.sid}))
                 return
@@ -856,9 +861,7 @@ def WrapSocketWrapper(BaseWrapper):
         @check_auth
         def _get(self):
             """Create a new socket wrapper for this requester, return the id"""
-            new_sub = self.server_state.spawn_socket(
-                SocketWrapper, request=self.request
-            )
+            new_sub = _spawn_socket(SocketWrapper, self.server_state, self.request)
             self.write(json.dumps({"success": True, "sid": new_sub.sid}))
 
         WrappedSocketWrap.get = _get

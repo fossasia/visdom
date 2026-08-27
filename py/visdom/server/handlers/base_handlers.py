@@ -30,9 +30,9 @@ class BaseWebSocketHandler(StateAccessorsMixin, tornado.websocket.WebSocketHandl
     classes.
     """
 
-    def initialize(self, app=None):
+    def initialize(self, server_state=None):
         """Common initialization shared by WebSocket handlers."""
-        self.server_state = app.server_state if app is not None else None
+        self.server_state = server_state
 
     def get_current_user(self):
         """
@@ -52,19 +52,19 @@ class BaseHandler(StateAccessorsMixin, tornado.web.RequestHandler):
     request handlers, and contains any convenient shared logic helpers.
     """
 
-    def initialize(self, app=None):
+    def initialize(self, server_state=None):
         """Common initialization shared by most handlers.
 
         Stores the shared ``ServerState`` facade; the ``StateAccessorsMixin``
         exposes its fields as ``self.state``, ``self.env_path``, etc.
         Subclasses that need additional attributes should call
-        ``super().initialize(app)`` and then set their own.
+        ``super().initialize(server_state)`` and then set their own.
 
-        The ``app`` parameter defaults to ``None`` so that handlers
-        registered without an ``app`` dict (e.g. HealthHandler) still work;
+        The ``server_state`` parameter defaults to ``None`` so that handlers
+        registered without initialization arguments (e.g. HealthHandler) still work;
         such handlers simply never touch the state accessors.
         """
-        self.server_state = app.server_state if app is not None else None
+        self.server_state = server_state
 
     def write_json(self, payload):
         """Answer with ``payload`` as a JSON body, typed and inert.

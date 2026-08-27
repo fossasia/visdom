@@ -750,8 +750,8 @@ class DataHandler(BaseHandler):
 
 
 class IndexHandler(BaseHandler):
-    def initialize(self, app):
-        super().initialize(app)
+    def initialize(self, server_state):
+        super().initialize(server_state)
         self.base_url = (
             self.server_state.base_url if self.server_state.base_url != "" else "/"
         )

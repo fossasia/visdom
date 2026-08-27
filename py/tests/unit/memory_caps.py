@@ -334,13 +334,11 @@ def test_handler_reads_the_caps_from_server_state():
         max_image_history=8,
         max_plot_history=6,
     )
-    app = SimpleNamespace(server_state=server_state)
-
     # Tornado normally constructs the handler before calling initialize().
     # Bypass RequestHandler.__init__ here because this test only exercises the
     # ServerState wiring and its accessor properties.
     handler = BaseHandler.__new__(BaseHandler)
-    BaseHandler.initialize(handler, app=app)
+    BaseHandler.initialize(handler, server_state=server_state)
 
     assert handler.server_state is server_state
     assert handler.max_text_lines == 100

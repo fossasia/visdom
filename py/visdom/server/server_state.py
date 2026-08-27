@@ -121,9 +121,9 @@ class ServerState:
         max_image_history,
         max_plot_history,
     ):
-        # Retained to construct nested socket wrappers (see ``spawn_socket``)
-        # and delegate application-owned lifecycle operations; handlers must
-        # not touch the app directly.
+        # Retained only to delegate application-owned persistence lifecycle
+        # operations. This dependency is removed when autosave ownership moves
+        # into ServerState.
         self._app = app
 
         # Shared mutable containers (passed by reference, never rebound here).
@@ -201,18 +201,3 @@ class ServerState:
     def stop_socket_monitor(self):
         if self._socket_wrap_monitor is not None:
             self._socket_wrap_monitor.stop()
-
-    # ----- nested socket wrapper construction ----- #
-
-    def spawn_socket(self, cls, request=None):
-        """Construct and initialize a polling socket wrapper.
-
-        This is the one place that still needs the ``Application`` (tornado
-        wrappers are initialized from it), keeping that coupling out of the
-        handlers themselves.
-        """
-        wrapper = cls()
-        if request is not None:
-            wrapper.request = request
-        wrapper.initialize(self._app)
-        return wrapper
