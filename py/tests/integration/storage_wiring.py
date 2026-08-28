@@ -21,6 +21,8 @@ import tempfile
 import unittest
 from unittest import mock
 
+import pytest
+
 from visdom.data_model.base import DataStore
 from visdom.data_model.json_store import JSONStore
 from visdom.server.app import Application
@@ -40,6 +42,8 @@ from visdom.utils.server_utils import (
 
 from testutils.fakes import FakeHandler, FakeSocket, SpyStore
 from testutils.payloads import env_payload
+
+pytestmark = pytest.mark.integration
 
 
 class TestStorageWiring(unittest.TestCase):

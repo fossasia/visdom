@@ -37,3 +37,9 @@ build
 # Misc
 test-bin
 bin
+
+# pytest-cov artifacts, written by the coverage run in CI
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/

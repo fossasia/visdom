@@ -7,7 +7,10 @@
  *
  */
 
-import React from 'react';
+import TreeSelect from 'rc-tree-select';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+
+import { fetchExperimentComparison } from '../../api/experimentsApi';
 
 /*
  * Shared helpers for the hyper-parameter views, so the ordering and formatting
@@ -15,10 +18,10 @@ import React from 'react';
  * comparator matches
  * visdom.experiments.store._order_key for every value the backend can order --
  * including booleans, which Python orders by str(value), i.e. "True"/"False"
- * -- and visdom.experiments.store._sort_pairs for absent values, which sort
- * last in both directions. NaN is the one deliberate divergence: the backend
- * leaves it in the ordered bucket, where Python's sort gives it no defined
- * position, so the table treats it as missing instead.
+ * -- and visdom.experiments.store._is_absent for values with nothing to sort
+ * by, which sort last in both directions. NaN is one of those on both sides:
+ * the backend counts a non-finite number as absent, matching what survives its
+ * own JSON round trip, and isMissing() here counts it the same way.
  */
 
 const SPINE_LIGHT = [235, 240, 249];
@@ -536,9 +539,516 @@ export function buildComparison(records, columns) {
   return sections;
 }
 
+export function buildMetricSeries(experiments) {
+  const runs = [];
+  const metricKeys = new Set();
+  (experiments || []).forEach((exp) => {
+    if (!exp || typeof exp !== 'object') return;
+    if (typeof exp.env_id !== 'string') return;
+    const raw = new Map();
+    (exp.metrics || []).forEach((metric) => {
+      if (!metric || typeof metric.key !== 'string') return;
+      if (!raw.has(metric.key)) raw.set(metric.key, []);
+      raw.get(metric.key).push(metric);
+      metricKeys.add(metric.key);
+    });
+    const series = {};
+    raw.forEach((observations, key) => {
+      const usesIndex = !observations.every((obs) => isNumeric(obs.step));
+      const x = [];
+      const y = [];
+      if (usesIndex) {
+        observations.forEach((obs, index) => {
+          x.push(index);
+          y.push(isNumeric(obs.value) ? obs.value : null);
+        });
+      } else {
+        const byStep = new Map();
+        observations.forEach((obs) => {
+          byStep.set(obs.step, isNumeric(obs.value) ? obs.value : null);
+        });
+        Array.from(byStep.keys())
+          .sort((a, b) => a - b)
+          .forEach((step) => {
+            x.push(step);
+            y.push(byStep.get(step));
+          });
+      }
+      series[key] = { x, y, usesIndex };
+    });
+    runs.push({
+      env_id: exp.env_id,
+      label: runLabel(exp),
+      series,
+    });
+  });
+  return { runs, metricKeys: Array.from(metricKeys).sort() };
+}
+
+export function selectMetricSeries(runs, metricKey, colorIndex) {
+  const plotted = [];
+  const missing = [];
+  (runs || []).forEach((run) => {
+    const series = metricKey && run.series ? run.series[metricKey] : null;
+    if (!series || !series.y.some((value) => isNumeric(value))) {
+      missing.push(run.label);
+      return;
+    }
+    const index = colorIndex ? colorIndex.get(run.env_id) : undefined;
+    plotted.push({
+      env_id: run.env_id,
+      label: run.label,
+      x: series.x,
+      y: series.y,
+      usesIndex: series.usesIndex,
+      colorIndex: index === undefined ? plotted.length : index,
+    });
+  });
+  return { plotted, missing };
+}
+
 export const StatusBadge = ({ status }) =>
   status ? (
     <span className={'hparams-run-status hparams-status-' + status}>
       {status}
     </span>
   ) : null;
+
+const TREE_PROPS = {
+  treeLine: true,
+  treeDefaultExpandAll: true,
+  dropdownMatchSelectWidth: false,
+};
+
+export const HParamsMessage = ({ wrapClass, tone, children }) => {
+  const message = (
+    <div className={'hparams-message hparams-' + (tone || 'empty')}>
+      {children}
+    </div>
+  );
+  return wrapClass ? <div className={wrapClass}>{message}</div> : message;
+};
+
+export const ColumnSelect = ({
+  value,
+  placeholder,
+  treeData,
+  onChange,
+  label,
+}) => (
+  <TreeSelect
+    {...TREE_PROPS}
+    className="hparams-treeselect hparams-select-narrow"
+    value={value || undefined}
+    placeholder={placeholder}
+    allowClear
+    treeData={treeData}
+    onChange={(next) => onChange(next || null)}
+    aria-label={label}
+  />
+);
+
+export const ColumnMultiSelect = ({
+  value,
+  placeholder,
+  treeData,
+  maxCount,
+  onChange,
+  label,
+}) => (
+  <TreeSelect
+    {...TREE_PROPS}
+    className="hparams-treeselect hparams-select-wide"
+    value={value}
+    placeholder={placeholder}
+    treeCheckable
+    multiple
+    showCheckedStrategy="SHOW_CHILD"
+    maxTagCount={3}
+    treeData={treeData}
+    onChange={(next) =>
+      onChange(Array.isArray(next) ? next.slice(0, maxCount) : [])
+    }
+    aria-label={label}
+  />
+);
+
+const CSV_MIME = 'text/csv;charset=utf-8';
+const JSON_MIME = 'application/json';
+const NEEDS_QUOTING = /[",\r\n]/;
+const FORMULA_START = /^[=+\-@\t\r]/;
+const NUMERIC = /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/;
+
+function csvCell(value) {
+  if (isMissing(value)) return '';
+  const raw =
+    value !== null && typeof value === 'object'
+      ? JSON.stringify(value)
+      : String(value);
+  if (FORMULA_START.test(raw) && !NUMERIC.test(raw)) {
+    return '"\'' + raw.replace(/"/g, '""') + '"';
+  }
+  if (NEEDS_QUOTING.test(raw)) return '"' + raw.replace(/"/g, '""') + '"';
+  return raw;
+}
+
+export function buildCsv(records, columns) {
+  const cols = columns || [];
+  const header = ['run', 'env_id', 'status'].concat(
+    cols.map((col) => col.group + '.' + col.label)
+  );
+  const lines = [header.map(csvCell).join(',')];
+  (records || []).forEach((record) => {
+    const row = [runLabel(record), record.env_id, record.status].concat(
+      cols.map((col) => col.accessor(record))
+    );
+    lines.push(row.map(csvCell).join(','));
+  });
+  return lines.join('\r\n');
+}
+
+export function buildJson(records, paramKeys, metricKeys, tagKeys) {
+  return JSON.stringify(
+    {
+      records: records || [],
+      param_keys: paramKeys || [],
+      metric_keys: metricKeys || [],
+      tag_keys: tagKeys || [],
+    },
+    null,
+    2
+  );
+}
+
+export function downloadText(text, filename, mime) {
+  const blob = new Blob([text], { type: mime });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.download = filename;
+  link.href = url;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
+
+export function downloadJson(value, filename) {
+  downloadText(JSON.stringify(value), filename, JSON_MIME);
+}
+
+export function exportCsv(records, columns, filename) {
+  downloadText(buildCsv(records, columns), filename, CSV_MIME);
+}
+
+export function exportJson(records, keys, filename) {
+  const text = buildJson(
+    records,
+    keys.paramKeys,
+    keys.metricKeys,
+    keys.tagKeys
+  );
+  downloadText(text, filename, JSON_MIME);
+}
+
+/*
+ * The Plotly-facing helpers below are the one part of this module that reaches
+ * for the global Plotly instance and the DOM rather than staying pure.
+ */
+
+const SNAPSHOT_NOTICE_DELAY = 700;
+
+export const PLOT_COLORSCALE = 'Viridis';
+
+export const RUN_PALETTE = [
+  '#1f77b4',
+  '#ff7f0e',
+  '#2ca02c',
+  '#d62728',
+  '#9467bd',
+  '#8c564b',
+  '#e377c2',
+  '#7f7f7f',
+  '#bcbd22',
+  '#17becf',
+];
+
+export function runColor(index) {
+  const i = Number.isFinite(index) ? Math.abs(Math.trunc(index)) : 0;
+  return RUN_PALETTE[i % RUN_PALETTE.length];
+}
+
+export function notify(message, kind) {
+  const lib = window.Plotly && window.Plotly.Lib;
+  if (lib && typeof lib.notifier === 'function') lib.notifier(message, kind);
+}
+
+export function downloadPlotPng(gd, filename) {
+  if (!window.Plotly || typeof window.Plotly.toImage !== 'function') return;
+  let done = false;
+  const timer = setTimeout(() => {
+    if (!done) notify('Taking snapshot - this may take a few seconds', 'long');
+  }, SNAPSHOT_NOTICE_DELAY);
+
+  window.Plotly.toImage(gd, {
+    format: 'png',
+    width: gd.offsetWidth || 900,
+    height: gd.offsetHeight || 600,
+  })
+    .then((url) => {
+      done = true;
+      clearTimeout(timer);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    })
+    .catch(() => {
+      done = true;
+      clearTimeout(timer);
+      notify('Snapshot failed', 'long');
+    });
+}
+
+export function applySnapshotButton(config, filename) {
+  const icons = window.Plotly && window.Plotly.Icons;
+  const icon = icons && icons.camera;
+  if (!icon) return config;
+  config.modeBarButtonsToRemove = ['toImage'];
+  config.modeBarButtonsToAdd = [
+    {
+      name: 'downloadPng',
+      title: 'Download plot as PNG',
+      icon,
+      click: (gd) => downloadPlotPng(gd, filename),
+    },
+  ];
+  return config;
+}
+
+export function observePlotResize(el) {
+  const isDisplayed = (node) =>
+    !!(node && node.offsetWidth > 0 && node.offsetHeight > 0);
+  const resizeObserver = new ResizeObserver(() => {
+    if (window.Plotly && el._fullLayout && isDisplayed(el)) {
+      window.Plotly.Plots.resize(el);
+    }
+  });
+  resizeObserver.observe(el);
+  return () => {
+    resizeObserver.disconnect();
+    if (window.Plotly && el._fullLayout) window.Plotly.purge(el);
+  };
+}
+
+export function usePlotResize(ref) {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    return observePlotResize(el);
+  }, [ref]);
+}
+
+export function plotBaseLayout() {
+  return {
+    font: { family: '"Open Sans", sans-serif', size: 11, color: '#333' },
+    paper_bgcolor: '#ffffff',
+    plot_bgcolor: '#ffffff',
+  };
+}
+
+export function plotAxisStyle() {
+  return {
+    showline: true,
+    linecolor: '#aab8d8',
+    linewidth: 1,
+    gridcolor: '#f0f2f8',
+    zeroline: false,
+    ticklen: 3,
+    tickfont: { size: 10, color: '#666' },
+    automargin: true,
+  };
+}
+
+export function plotRevision(...parts) {
+  return parts.join('::');
+}
+
+export function plotColorbar(label) {
+  return {
+    title: { text: label, side: 'right', font: { size: 11 } },
+    thickness: 12,
+    len: 0.6,
+    outlinewidth: 0,
+  };
+}
+
+export function renderPlot(el, data, layout, filename, onReady) {
+  if (!el || !window.Plotly) return;
+  const config = applySnapshotButton(
+    {
+      showLink: false,
+      displaylogo: false,
+      responsive: true,
+      doubleClick: 'reset',
+    },
+    filename
+  );
+  try {
+    window.Plotly.react(el, data, layout, config)
+      .then(() => {
+        if (el._fullLayout && el.offsetWidth > 0) {
+          window.Plotly.Plots.resize(el);
+        }
+        if (onReady) onReady(el);
+      })
+      .catch(() => window.Plotly.purge(el));
+  } catch (e) {
+    window.Plotly.purge(el);
+  }
+}
+
+export function useHParamsColumns(paramKeys, metricKeys, tagKeys) {
+  return useMemo(
+    () => buildColumns(paramKeys, metricKeys, tagKeys),
+    [paramKeys, metricKeys, tagKeys]
+  );
+}
+
+export function useHParamsAxes({
+  records,
+  columnRecords,
+  paramKeys,
+  metricKeys,
+  tagKeys,
+  selectedDims,
+  colorBy,
+  maxDims,
+  preferDense = false,
+}) {
+  const pickerRecords = columnRecords || records;
+
+  const columns = useHParamsColumns(paramKeys, metricKeys, tagKeys);
+
+  const numericCols = useMemo(
+    () => selectNumericColumns(pickerRecords, columns),
+    [pickerRecords, columns]
+  );
+
+  const dims = useMemo(() => {
+    const valid = new Set(numericCols.map((col) => col.id));
+    if (Array.isArray(selectedDims)) {
+      const chosen = selectedDims.filter((id) => valid.has(id));
+      if (chosen.length > 0 || selectedDims.length === 0) {
+        return chosen.slice(0, maxDims);
+      }
+    }
+    const isDense = preferDense
+      ? (col) => records.every((record) => isNumeric(col.accessor(record)))
+      : null;
+    return defaultDimIds(numericCols, isDense).slice(0, maxDims);
+  }, [selectedDims, numericCols, records, maxDims, preferDense]);
+
+  const activeColorBy = useMemo(() => {
+    if (!colorBy) return null;
+    return numericCols.some((col) => col.id === colorBy) ? colorBy : null;
+  }, [colorBy, numericCols]);
+
+  const treeData = useMemo(
+    () => groupColumnTree(numericCols, NUMERIC_GROUPS),
+    [numericCols]
+  );
+
+  const truncated =
+    (selectedDims || []).filter((id) =>
+      numericCols.some((col) => col.id === id)
+    ).length > maxDims;
+
+  return {
+    columns,
+    numericCols,
+    dims,
+    colorBy: activeColorBy,
+    treeData,
+    truncated,
+    hasPlot: numericCols.length >= 2,
+  };
+}
+
+const NO_EXPERIMENTS = [];
+
+export function useExperimentMetrics(records, cacheRef) {
+  const [nonce, setNonce] = useState(0);
+  const [state, setState] = useState({
+    status: 'idle',
+    error: null,
+    experiments: NO_EXPERIMENTS,
+  });
+
+  const envIds = useMemo(
+    () => (records || []).map((r) => r.env_id).filter((id) => !!id),
+    [records]
+  );
+
+  const refresh = useCallback(() => {
+    const cache = cacheRef.current;
+    if (cache) envIds.forEach((id) => cache.delete(id));
+    setNonce((n) => n + 1);
+  }, [cacheRef, envIds]);
+
+  useEffect(() => {
+    const cache = cacheRef.current;
+    if (envIds.length === 0) {
+      setState({ status: 'idle', error: null, experiments: NO_EXPERIMENTS });
+      return undefined;
+    }
+
+    const readCache = () => envIds.map((id) => cache.get(id)).filter(Boolean);
+    const wanted = envIds.filter((id) => !cache.has(id));
+    if (wanted.length === 0) {
+      setState({ status: 'ready', error: null, experiments: readCache() });
+      return undefined;
+    }
+
+    let cancelled = false;
+    const controller = new AbortController();
+    setState((prev) => ({ ...prev, status: 'loading', error: null }));
+
+    fetchExperimentComparison(wanted, controller.signal)
+      .then((reply) => {
+        if (cancelled) return;
+        const loaded = (reply && reply.experiments) || [];
+        loaded.forEach((exp) => {
+          if (exp && typeof exp.env_id === 'string') cache.set(exp.env_id, exp);
+        });
+        setState({ status: 'ready', error: null, experiments: readCache() });
+      })
+      .catch((err) => {
+        if (cancelled || (err && err.name === 'AbortError')) return;
+        setState({
+          status: 'error',
+          error: (err && err.message) || 'Could not load metric history.',
+          experiments: NO_EXPERIMENTS,
+        });
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [envIds, nonce, cacheRef]);
+
+  const parsed = useMemo(
+    () => buildMetricSeries(state.experiments),
+    [state.experiments]
+  );
+
+  return {
+    status: state.status,
+    error: state.error,
+    runs: parsed.runs,
+    metricKeys: parsed.metricKeys,
+    refresh,
+  };
+}

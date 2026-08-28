@@ -56,10 +56,18 @@ def check_auth(f):
     return _check_auth
 
 
-def reject_readonly(handler):
-    """Answer 403 for a write attempted against a readonly server."""
+DEFAULT_READONLY_MESSAGE = "The server is running in readonly mode"
+
+
+def reject_readonly(handler, message=DEFAULT_READONLY_MESSAGE):
+    """Answer 403 for a write attempted against a readonly server.
+
+    ``message`` names the capability that is disabled, since "uploads" and
+    "experiment logging" are refused for the same reason but are not the same
+    thing to the caller.
+    """
     handler.set_status(403)
-    handler.write({"success": False, "error": "The server is running in readonly mode"})
+    handler.write({"success": False, "error": message})
 
 
 def check_readonly(f):
@@ -80,6 +88,29 @@ def check_readonly(f):
         f(handler, *args, **kwargs)
 
     return _check_readonly
+
+
+def check_readonly_message(message):
+    """``check_readonly`` for a handler that names the capability it refuses.
+
+    The guarded method is never entered: the response is 403 with a JSON body
+    explaining which capability is disabled.
+
+    Written as a decorator, and applied under ``check_auth``, so that a handler
+    declares "this writes" once at its entry point rather than restating the
+    check in the body -- the omission that let readonly writes through before.
+    """
+
+    def _decorate(f):
+        def _check_readonly(handler, *args, **kwargs):
+            if getattr(handler, "readonly", False):
+                reject_readonly(handler, message)
+                return
+            f(handler, *args, **kwargs)
+
+        return _check_readonly
+
+    return _decorate
 
 
 def set_cookie(value=None):
@@ -111,6 +142,11 @@ class LazyEnvData(Mapping):
         self._eid = eid
         self._raw_dict = None
 
+    @property
+    def is_loaded(self):
+        """Whether this environment has been materialized in memory."""
+        return self._raw_dict is not None
+
     def lazy_load_data(self):
         if self._raw_dict is not None:
             return
@@ -133,6 +169,10 @@ class LazyEnvData(Mapping):
     def __setitem__(self, key, value):
         self.lazy_load_data()
         return self._raw_dict.__setitem__(key, value)
+
+    def __delitem__(self, key):
+        self.lazy_load_data()
+        return self._raw_dict.__delitem__(key)
 
     def __iter__(self):
         self.lazy_load_data()

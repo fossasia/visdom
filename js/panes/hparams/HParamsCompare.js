@@ -10,23 +10,21 @@
 import React, { useMemo, useState } from 'react';
 
 import {
-  buildColumns,
   buildComparison,
   cellClass,
   formatValue,
+  HParamsMessage,
   numericExtent,
   runLabel,
   spineStyle,
   StatusBadge,
+  useHParamsColumns,
 } from './hparamsUtils';
 
 const HParamsCompare = ({ records, paramKeys, metricKeys, tagKeys }) => {
   const [showIdentical, setShowIdentical] = useState(true);
 
-  const columns = useMemo(
-    () => buildColumns(paramKeys, metricKeys, tagKeys),
-    [paramKeys, metricKeys, tagKeys]
-  );
+  const columns = useHParamsColumns(paramKeys, metricKeys, tagKeys);
   const comparison = useMemo(
     () => buildComparison(records, columns),
     [records, columns]
@@ -34,11 +32,9 @@ const HParamsCompare = ({ records, paramKeys, metricKeys, tagKeys }) => {
 
   if (records.length < 2) {
     return (
-      <div className="hparams-compare-wrap">
-        <div className="hparams-message hparams-empty">
-          Pick two or more runs in the table to compare them.
-        </div>
-      </div>
+      <HParamsMessage wrapClass="hparams-compare-wrap">
+        Pick two or more runs in the table to compare them.
+      </HParamsMessage>
     );
   }
 

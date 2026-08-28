@@ -8,7 +8,13 @@
  */
 
 import Slider from 'rc-slider';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 import { COLUMN_GROUPS, formatValue, keepsMissing } from './hparamsUtils';
 
@@ -167,8 +173,22 @@ const HParamsFilters = ({
     [specs]
   );
 
+  const rootRef = useRef(null);
+
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return undefined;
+    const onKeyDown = (e) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      onClose();
+    };
+    el.addEventListener('keydown', onKeyDown);
+    return () => el.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
   return (
-    <div className="hparams-filters">
+    <div className="hparams-filters" ref={rootRef}>
       <div className="hparams-filters-head">
         <span className="hparams-filters-title">Filters</span>
         <button
