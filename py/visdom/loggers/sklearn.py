@@ -10,12 +10,11 @@ import functools
 import html
 import threading
 import time
-import warnings
 import weakref
 
 import numpy as np
 
-from visdom.tracking.core import RunAlreadyFinishedError
+from visdom.tracking.core import RunAlreadyFinishedError, _safe_warn
 
 _TD_KEY = (
     "style='padding:2px 10px 2px 0;" "color:#555;white-space:nowrap;vertical-align:top'"
@@ -227,7 +226,7 @@ class VisdomSklearnLogger:
                     try:
                         logger._log_cv(self_est, duration)
                     except Exception as e:
-                        warnings.warn(
+                        _safe_warn(
                             "VisdomSklearnLogger failed to log {}: {}".format(
                                 type(self_est).__name__, e
                             )
@@ -261,7 +260,7 @@ class VisdomSklearnLogger:
                     try:
                         logger._log_plain(self_est, X, y, duration)
                     except Exception as e:
-                        warnings.warn(
+                        _safe_warn(
                             "VisdomSklearnLogger failed to log {}: {}".format(
                                 type(self_est).__name__, e
                             )
@@ -336,7 +335,7 @@ class VisdomSklearnLogger:
         except RunAlreadyFinishedError:
             pass
         except Exception as e:
-            warnings.warn(
+            _safe_warn(
                 "VisdomSklearnLogger: failed to record a {0!r} update "
                 "for {1!r} on run {2!r} ({3}: {4}) -- the plot itself "
                 "still succeeded normally, only the tracking record is "
@@ -365,7 +364,7 @@ class VisdomSklearnLogger:
         except RunAlreadyFinishedError:
             pass
         except Exception as e:
-            warnings.warn(
+            _safe_warn(
                 "VisdomSklearnLogger: failed to record a {0!r} event on "
                 "run {1!r} ({2}: {3}) -- the plot itself still "
                 "succeeded normally, only the tracking record is "

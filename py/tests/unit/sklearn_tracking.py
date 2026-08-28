@@ -34,13 +34,13 @@ from unittest.mock import Mock, patch
 # Reproduces with any test that calls all_estimators() under pytest,
 # whether or not run= tracking is involved.
 #
-# this is resolved pre-populate sys.modules with dummy stand-in for
-# the shim before collection. Python's import machinery checks sys.modules
-# first, so pkgutil's __import__() call finds it already "imported" and never
-# executes the broken module body. all_estimators() never actually needs
-# anything from this shim -- it's just an accidental side effect of
-# walking every submodule -- so a stub with no real content behind it is
-# harmless here.
+# this is resolved with pre-populate sys.modules with dummy stand-in
+# for the shim before collection. Python's import machinery checks
+# sys.modules first, so pkgutil's __import__() call finds it already
+# "imported" and neverexecutes the broken module body. all_estimators()
+# never actually needs anything from this shim -- it's just an accidental
+# side effect of walking every submodule -- so a stub with no real content
+# behind it is harmless here.
 import sys
 import types
 
@@ -346,7 +346,7 @@ class TestSklearnLoggerRunTracking(unittest.TestCase):
 
         # A class nowhere near the old hardcoded 4-class list must work
         # normally post-unpatch -- this is the exact scenario that used
-        # to crash with AttributeError before
+        # to crash with AttributeError
         from sklearn.ensemble import RandomForestClassifier
         from sklearn.datasets import make_classification
 
@@ -494,6 +494,39 @@ class TestSklearnLoggerRunTracking(unittest.TestCase):
         data = fit_events[0]["data"]
         self.assertEqual(data["dataset_shape"], [40, 4])
         self.assertIsInstance(data["train_score"], float)
+
+    def test_warnings_as_errors_does_not_break_fit(self):
+        """Regression test for a flagged issue: if the calling application
+        has configured warnings.simplefilter("error") (broadest form, or
+        specifically for RuntimeWarning), a bare warnings.warn(...,
+        RuntimeWarning) call raises that warning as an exception instead
+        of just recording it. That would propagate out of
+        _log_event_to_run/_log_plot_to_run, get caught by patched_fit's
+        own outer `except Exception: warnings.warn(...)` safety net --
+        and *that* warn call could itself raise too under a broad enough
+        filter, escaping all the way out and breaking fit(). Both call
+        sites now use visdom.tracking.core._safe_warn. Tested against
+        the broadest possible filter (every category) as the worst case,
+        since a RuntimeWarning-only filter could "accidentally" survive
+        via the outer handler's un-categorized (UserWarning-by-default)
+        re-warn -- the broad filter is what actually exercises every
+        warning call site in the chain."""
+        import warnings
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.datasets import make_classification
+
+        X, y = make_classification(n_samples=30, n_features=4, random_state=0)
+        run = RunTracker("exp", out_dir=self.out_dir)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")  # broadest possible filter
+            with patch.object(
+                _RunTrackerClass, "log_event", side_effect=TypeError("injected bug")
+            ):
+                with patch.object(self.vis, "_send", side_effect=_fake_send):
+                    VisdomSklearnLogger.autolog(viz=self.vis, run=run)
+                    clf = LogisticRegression().fit(X, y)  # must not raise
+        self.assertTrue(hasattr(clf, "coef_"))
+        run.finish()
 
 
 if __name__ == "__main__":
