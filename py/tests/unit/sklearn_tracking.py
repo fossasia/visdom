@@ -34,7 +34,7 @@ from unittest.mock import Mock, patch
 # Reproduces with any test that calls all_estimators() under pytest,
 # whether or not run= tracking is involved.
 #
-# resolved this using pre-populate sys.modules with dummy stand-in for
+# this is resolved pre-populate sys.modules with dummy stand-in for
 # the shim before collection. Python's import machinery checks sys.modules
 # first, so pkgutil's __import__() call finds it already "imported" and never
 # executes the broken module body. all_estimators() never actually needs
@@ -346,7 +346,7 @@ class TestSklearnLoggerRunTracking(unittest.TestCase):
 
         # A class nowhere near the old hardcoded 4-class list must work
         # normally post-unpatch -- this is the exact scenario that used
-        # to crash with AttributeError
+        # to crash with AttributeError before
         from sklearn.ensemble import RandomForestClassifier
         from sklearn.datasets import make_classification
 
@@ -363,6 +363,137 @@ class TestSklearnLoggerRunTracking(unittest.TestCase):
         instance.unpatch()
         instance.unpatch()  # must not raise
         self.assertFalse(getattr(LogisticRegression.fit, "_visdom_patched", False))
+
+    def test_calling_autolog_again_without_unpatching_first_does_not_break_it(self):
+        """Regression test for a flagged issue: autolog() called a second
+        time (as the class docstring explicitly shows as supported,
+        without requiring the caller to unpatch() first) used to leave
+        the *new* instance's _patched list empty, because _patch() skips
+        every class whose fit is already marked patched -- it had no way
+        to know the first instance had already patched everything. The
+        new instance's own unpatch() would then restore nothing while
+        still clearing `active`, leaving every class wrapped with the
+        first instance's now-orphaned patched_fit, which crashed on the
+        very next fit() call. autolog() now unpatches any previous
+        active instance first, so the second call always starts from a
+        genuinely clean slate."""
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.datasets import make_classification
+
+        X, y = make_classification(n_samples=30, n_features=4, random_state=0)
+        with patch.object(self.vis, "_send", side_effect=_fake_send):
+            VisdomSklearnLogger.autolog(viz=self.vis)
+            first_active = VisdomSklearnLogger.active
+
+            VisdomSklearnLogger.autolog(viz=self.vis)  # again, no unpatch() in between
+            second_active = VisdomSklearnLogger.active
+
+        self.assertIsNot(first_active, second_active)
+        self.assertGreater(
+            len(second_active._patched),
+            100,
+            "the second instance must have recorded (and thus be able to "
+            "restore) everything it patched, same as a first call would",
+        )
+
+        second_active.unpatch()
+        # this used to crash with AttributeError: 'NoneType' object has
+        # no attribute '_enter_fit' -- active was cleared but the
+        # classes were still wrapped with the first instance's fit.
+        clf = LogisticRegression().fit(X, y)
+        self.assertTrue(hasattr(clf, "coef_"))
+
+    def test_enter_fit_decides_top_level_at_entry_not_at_exit(self):
+        """Regression test for a flagged issue: two genuinely independent
+        top-level fit() calls overlapping in time (neither nested inside
+        the other) used to depend on *finishing* order -- whichever fit
+        finished first would see the shared depth drop to 1 (not 0) and
+        silently never get logged; only whichever finished *last* would
+        see depth reach 0 and get logged. That's not fully fixable with
+        a shared counter alone (a second, unrelated top-level call is
+        indistinguishable from a legitimate nested one purely from the
+        counter's perspective -- see _exit_fit's docstring), but it's now
+        decided once at *entry* instead of racily at exit, which this
+        tests directly against _enter_fit/_exit_fit rather than via a
+        real, timing-dependent thread race (which would make this test
+        itself flaky).
+
+        With entry-time semantics: whichever call enters while depth is
+        genuinely 0 is "top-level" -- decided then and there, and later
+        exits (in any order) don't change that earlier decision.
+        """
+        with patch.object(self.vis, "_send", side_effect=_fake_send):
+            VisdomSklearnLogger.autolog(viz=self.vis)
+        logger = VisdomSklearnLogger.active
+        self.addCleanup(logger.unpatch)
+
+        # Call A enters first (depth 0->1): top-level.
+        a_is_top_level = logger._enter_fit()
+        # Call B enters while A is still in flight (depth 1->2): not
+        # top-level, whether or not it's actually related to A.
+        b_is_top_level = logger._enter_fit()
+        self.assertTrue(a_is_top_level)
+        self.assertFalse(b_is_top_level)
+
+        # A finishes FIRST (depth 2->1) -- under the old exit-time check
+        # (`depth_after == 0`), this would have incorrectly decided "not
+        # top-level" for A, since depth is 1, not 0, at this point. Under
+        # entry-time semantics, A's already-decided True is unaffected by
+        # what order things exit in.
+        logger._exit_fit()
+        self.assertTrue(a_is_top_level, "A's top-level status must not change on exit")
+
+        # B finishes last (depth 1->0).
+        logger._exit_fit()
+        self.assertFalse(
+            b_is_top_level, "B's top-level status must not change on exit either"
+        )
+
+    def test_keyword_argument_fit_call_is_tracked_correctly(self):
+        """Regression test for a flagged issue: the wrapper extracted X/y
+        only from positional args, so estimator.fit(X=X, y=y) -- valid,
+        common usage -- silently passed None into the tracking logic. The
+        fit() call itself always worked fine (the *real* sklearn fit
+        received the kwargs correctly regardless); only this integration's
+        own bookkeeping was blind to keyword-form arguments. The result
+        was a tracking event silently recording dataset_shape=None and
+        train_score=None even though the fit succeeded normally --
+        exactly the kind of wrong-but-not-crashing value that, once
+        written to a run's append-only .jsonl record, can't be corrected
+        by fixing the code afterwards."""
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.datasets import make_classification
+
+        X, y = make_classification(n_samples=50, n_features=4, random_state=0)
+        run = RunTracker("exp", out_dir=self.out_dir)
+        with patch.object(self.vis, "_send", side_effect=_fake_send):
+            VisdomSklearnLogger.autolog(viz=self.vis, run=run)
+            LogisticRegression().fit(X=X, y=y)  # both keyword
+        run.finish()
+
+        fit_events = [e for e in self._events(run) if e["type"] == "fit"]
+        self.assertEqual(len(fit_events), 1)
+        data = fit_events[0]["data"]
+        self.assertEqual(data["dataset_shape"], [50, 4])
+        self.assertIsInstance(data["train_score"], float)
+
+    def test_mixed_positional_and_keyword_fit_call_is_tracked_correctly(self):
+        """Same as the above, for the equally valid fit(X, y=y) form
+        (X positional, y by keyword) -- not just the fully-keyword case."""
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.datasets import make_classification
+
+        X, y = make_classification(n_samples=40, n_features=4, random_state=0)
+        run = RunTracker("exp", out_dir=self.out_dir)
+        with patch.object(self.vis, "_send", side_effect=_fake_send):
+            VisdomSklearnLogger.autolog(viz=self.vis, run=run)
+            LogisticRegression().fit(X, y=y)  # X positional, y by keyword
+        run.finish()
+
+        fit_events = [e for e in self._events(run) if e["type"] == "fit"]
+        data = fit_events[0]["data"]
+        self.assertEqual(data["dataset_shape"], [40, 4])
+        self.assertIsInstance(data["train_score"], float)
 
 
 if __name__ == "__main__":

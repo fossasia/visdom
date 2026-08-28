@@ -110,20 +110,56 @@ class VisdomSklearnLogger:
         self._patched = []
 
     def _enter_fit(self):
-        """Atomically increment the shared in-flight-fit depth counter,
-        returning the new depth. Must be paired with _exit_fit()."""
+        """Atomically increment the shared in-flight-fit depth counter.
+
+        Returns whether *this* call is the one that takes depth from 0
+        to 1 -- i.e. whether it's the top-level call for whatever's
+        currently in flight. This is decided once, here, at entry, and
+        the caller should hang onto the returned value rather than
+        re-deriving "am I top-level" from the depth at exit time (see
+        _exit_fit for why that would be wrong under concurrent fits).
+        Must be paired with a matching _exit_fit() call.
+        """
         with self._depth_lock:
             self._depth_value += 1
-            return self._depth_value
+            return self._depth_value == 1
 
     def _exit_fit(self):
-        """Atomically decrement the shared depth counter, returning the
-        new depth. A return value of 0 means no patched fit() call --
-        on any thread -- is currently in progress for this instance, so
-        whichever call just exited is safe to log as a top-level fit."""
+        """Atomically decrement the shared depth counter.
+
+        Deliberately does not return whether the counter reached 0, and
+        callers should not use "did depth reach 0 at exit" to decide
+        whether to log: under two independent top-level fits overlapping
+        in time (different threads, unrelated calls, not one nested in
+        the other), the *first* of the two to finish would see depth
+        drop to 1, not 0 -- so an exit-time check would silently never
+        log it at all, only whichever fit happens to finish *last*. Using
+        the entry-time result from _enter_fit() instead means whichever
+        fit was actually top-level at its own start gets logged, decided
+        once and not dependent on how the calls happen to interleave or
+        finish relative to each other.
+
+        This is not a complete fix for concurrent independent fits, just
+        a strictly better-defined one: a second, unrelated top-level fit
+        that starts while a first one is still in flight is still
+        indistinguishable, from in here, from a legitimate inner fit
+        dispatched by that first one (e.g. a GridSearchCV worker thread)
+        -- there is no cheap, reliable way to tell "nested in an active
+        call tree" apart from "coincidentally overlapping but unrelated"
+        using only a shared counter, since joblib's threading backend
+        propagates neither threading.local() nor contextvars.ContextVar
+        state to its worker threads (both confirmed empirically not to
+        work here). What this fix guarantees is that exactly the call
+        that was top-level *at its own entry* gets logged -- deterministically,
+        based on entry order, not on an exit-time race -- rather than an
+        essentially arbitrary one determined by finishing order. Running
+        genuinely independent, unrelated fits concurrently while sharing
+        one VisdomSklearnLogger.active instance is not fully supported;
+        use separate RunTracker/VisdomSklearnLogger configurations per
+        independent job if that matters for your use case.
+        """
         with self._depth_lock:
             self._depth_value -= 1
-            return self._depth_value
 
     @classmethod
     def autolog(cls, viz=None, env=None, run=None):
@@ -139,6 +175,20 @@ class VisdomSklearnLogger:
                 "scikit-learn is required for VisdomSklearnLogger. "
                 "Install with: pip install scikit-learn"
             )
+        # Calling autolog() again while a previous instance is still
+        # active must not leave that previous instance's monkey-patches
+        # stranded: _patch() below skips any class whose fit is already
+        # marked patched, so if we didn't unpatch first, the *new*
+        # instance's own _patched list would end up empty (every class
+        # already looks patched to it) -- and unpatch() on the new
+        # instance would then clear `active` while leaving every class
+        # wrapped with the *old* instance's patched_fit, which
+        # dereferences the now-None `active` on the very next fit() call.
+        # Unpatching first guarantees every class is genuinely unpatched
+        # before re-patching, so the new instance's _patch() calls always
+        # see and record every class themselves.
+        if cls.active is not None:
+            cls.active.unpatch()
         instance = cls(viz, env, run=run)
         _viz_env = getattr(instance.viz, "env", None)
         instance.env = (
@@ -166,14 +216,14 @@ class VisdomSklearnLogger:
             @functools.wraps(original)
             def patched_fit(self_est, *args, **kwargs):
                 logger = visdom_cls.active
-                logger._enter_fit()
+                is_top_level = logger._enter_fit()
                 t0 = time.time()
                 try:
                     result = original(self_est, *args, **kwargs)
                 finally:
-                    depth_after = logger._exit_fit()
+                    logger._exit_fit()
                 duration = time.time() - t0
-                if depth_after == 0:
+                if is_top_level:
                     try:
                         logger._log_cv(self_est, duration)
                     except Exception as e:
@@ -189,16 +239,25 @@ class VisdomSklearnLogger:
             @functools.wraps(original)
             def patched_fit(self_est, *args, **kwargs):
                 logger = visdom_cls.active
-                logger._enter_fit()
+                is_top_level = logger._enter_fit()
                 t0 = time.time()
                 try:
                     result = original(self_est, *args, **kwargs)
                 finally:
-                    depth_after = logger._exit_fit()
+                    logger._exit_fit()
                 duration = time.time() - t0
-                if depth_after == 0:
-                    X = args[0] if args else None
-                    y = args[1] if len(args) > 1 else None
+                if is_top_level:
+                    # X/y are the estimator's own fit() parameter names
+                    # (universal sklearn convention: fit(self, X, y=None,
+                    # ...)) -- a caller is free to pass either or both by
+                    # keyword (fit(X=X, y=y), fit(X, y=y), ...), which
+                    # leaves args empty or short. Checking kwargs too
+                    # means dataset_shape/train_score/residuals still get
+                    # computed correctly regardless of calling
+                    # convention, instead of silently landing on None
+                    # whenever X/y weren't passed positionally.
+                    X = args[0] if args else kwargs.get("X")
+                    y = args[1] if len(args) > 1 else kwargs.get("y")
                     try:
                         logger._log_plain(self_est, X, y, duration)
                     except Exception as e:
