@@ -23,6 +23,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
+import pytest
 import tornado.testing
 
 from visdom import Visdom
@@ -33,6 +34,8 @@ from visdom.server.handlers.web_handlers import (
     ExperimentCompareHandler,
     ExperimentSearchHandler,
 )
+
+pytestmark = pytest.mark.integration
 
 
 def seed_experiments(store):

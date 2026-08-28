@@ -56,37 +56,18 @@ def check_auth(f):
     return _check_auth
 
 
-def check_readonly_message(message):
-    """Wrapper for handler methods that write, refusing them in readonly mode.
+DEFAULT_READONLY_MESSAGE = "The server is running in readonly mode"
 
-    A readonly server must not accept a request that changes stored state, so
-    the guarded method is never entered: the response is 403 with a JSON body
-    explaining which capability is disabled. ``message`` names that capability,
-    since "uploads" and "experiment logging" are refused for the same reason but
-    are not the same thing to the caller.
 
-    Written as a decorator, and applied under ``check_auth``, so that a handler
-    declares "this writes" once at its entry point rather than restating the
-    check in the body -- the omission that let readonly writes through before.
+def reject_readonly(handler, message=DEFAULT_READONLY_MESSAGE):
+    """Answer 403 for a write attempted against a readonly server.
+
+    ``message`` names the capability that is disabled, since "uploads" and
+    "experiment logging" are refused for the same reason but are not the same
+    thing to the caller.
     """
-
-    def _decorate(f):
-        def _check_readonly_message(handler, *args, **kwargs):
-            if getattr(handler, "readonly", False):
-                handler.set_status(403)
-                handler.write({"success": False, "error": message})
-                return
-            f(handler, *args, **kwargs)
-
-        return _check_readonly_message
-
-    return _decorate
-
-
-def reject_readonly(handler):
-    """Answer 403 for a write attempted against a readonly server."""
     handler.set_status(403)
-    handler.write({"success": False, "error": "The server is running in readonly mode"})
+    handler.write({"success": False, "error": message})
 
 
 def check_readonly(f):
@@ -107,6 +88,29 @@ def check_readonly(f):
         f(handler, *args, **kwargs)
 
     return _check_readonly
+
+
+def check_readonly_message(message):
+    """``check_readonly`` for a handler that names the capability it refuses.
+
+    The guarded method is never entered: the response is 403 with a JSON body
+    explaining which capability is disabled.
+
+    Written as a decorator, and applied under ``check_auth``, so that a handler
+    declares "this writes" once at its entry point rather than restating the
+    check in the body -- the omission that let readonly writes through before.
+    """
+
+    def _decorate(f):
+        def _check_readonly(handler, *args, **kwargs):
+            if getattr(handler, "readonly", False):
+                reject_readonly(handler, message)
+                return
+            f(handler, *args, **kwargs)
+
+        return _check_readonly
+
+    return _decorate
 
 
 def set_cookie(value=None):
@@ -140,13 +144,7 @@ class LazyEnvData(Mapping):
 
     @property
     def is_loaded(self):
-        """Whether this environment has been materialized in memory.
-
-        Every mapping operation materialises the env, so a caller that only
-        wants to know *whether* it is resident cannot ask by touching it. Bulk
-        readers use this to leave an untouched env untouched: while it is not
-        loaded, nothing has changed it, so the store's copy is the current one.
-        """
+        """Whether this environment has been materialized in memory."""
         return self._raw_dict is not None
 
     def lazy_load_data(self):

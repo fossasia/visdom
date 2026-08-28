@@ -13,6 +13,8 @@ No server needed — these test pure functions directly.
 
 import unittest
 
+import pytest
+
 from visdom.utils.server_utils import (
     escape_eid,
     extract_eid,
@@ -20,6 +22,8 @@ from visdom.utils.server_utils import (
     stringify,
     recursive_order,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class TestEscapeEid(unittest.TestCase):

@@ -18,10 +18,10 @@ import { fetchExperimentComparison } from '../../api/experimentsApi';
  * comparator matches
  * visdom.experiments.store._order_key for every value the backend can order --
  * including booleans, which Python orders by str(value), i.e. "True"/"False"
- * -- and visdom.experiments.store._sort_pairs for absent values, which sort
- * last in both directions. NaN is the one deliberate divergence: the backend
- * leaves it in the ordered bucket, where Python's sort gives it no defined
- * position, so the table treats it as missing instead.
+ * -- and visdom.experiments.store._is_absent for values with nothing to sort
+ * by, which sort last in both directions. NaN is one of those on both sides:
+ * the backend counts a non-finite number as absent, matching what survives its
+ * own JSON round trip, and isMissing() here counts it the same way.
  */
 
 const SPINE_LIGHT = [235, 240, 249];

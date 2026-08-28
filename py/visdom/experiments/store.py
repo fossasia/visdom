@@ -17,6 +17,7 @@ today — the feature is fully opt-in.
 """
 
 import heapq
+import math
 
 from visdom.data_model.base import DataStore
 from visdom.experiments.compare import build_comparison
@@ -55,6 +56,45 @@ def retarget_experiment(env, env_id):
     return env
 
 
+def _is_number(value):
+    """Return ``True`` for a value :func:`_order_key` can order numerically.
+
+    A ``bool`` is excluded so that ``True`` does not order as ``1``, matching
+    :mod:`~visdom.experiments.query`. A non-finite float is excluded because it
+    has no usable position: NaN compares ``False`` against everything including
+    itself, so admitting one makes the comparison used to sort non-transitive.
+    ``bool`` is not a ``float`` subclass, so :func:`_is_absent` needs no such
+    exclusion — only this one has to name it.
+
+    An ``int`` too wide to become a ``float`` is excluded as well, so it orders
+    by text rather than raising: JSON has no bound on integer length, so a param
+    can hold one, and both the test here and :func:`_order_key`'s conversion
+    would otherwise raise ``OverflowError`` out of a request.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+def _is_absent(value):
+    """Return ``True`` if ``value`` is no value to sort by, and so sorts last.
+
+    That is the field being missing from the record entirely, holding ``None``,
+    or holding a NaN/Inf float. The last case is what a run that logged a
+    diverged metric looks like in memory; once the env has been written and read
+    back it is ``None``, because the JSON encoder has no way to spell a
+    non-finite number. Both spellings mean "this run has no value here", so both
+    sort last and a run's position stops depending on whether its env happens to
+    be loaded.
+    """
+    if value is _MISSING or value is None:
+        return True
+    return isinstance(value, float) and not math.isfinite(value)
+
+
 def _order_key(value):
     """Return a sort key that totally orders values of mixed types.
 
@@ -64,10 +104,14 @@ def _order_key(value):
     is neither is compared by its text form. Booleans are ordered as text rather
     than as 0/1, matching :mod:`~visdom.experiments.query`, which likewise
     refuses to treat a bool as a number.
+
+    A non-finite float is ordered by its text form for the same reason a string
+    is: it is not a position on the number line. :meth:`ExperimentStore._scan`
+    keeps such values out of the ranked bucket entirely, so this is the second
+    of two guarantees rather than the one that matters — but it is the one that
+    keeps the key itself safe to compare, whatever reaches it.
     """
-    if isinstance(value, bool):
-        return (1, 0.0, str(value))
-    if isinstance(value, (int, float)):
+    if _is_number(value):
         return (0, float(value), "")
     return (1, 0.0, str(value))
 
@@ -168,6 +212,10 @@ class ExperimentStore:
         it wins; an env that has never been materialised cannot, so the store is
         asked instead. ``LazyEnvData`` reports this through ``is_loaded``;
         anything else (a plain dict) is resident by definition.
+
+        As in :meth:`_read`, the experiment answers to the env it was read from
+        rather than to the ``env_id`` its blob records, so a forked env does not
+        report its parent's id.
         """
         env = self.env_provider(env_id) if self.env_provider is not None else None
         if env is not None and not getattr(env, "is_loaded", True):
@@ -176,9 +224,10 @@ class ExperimentStore:
             blob = env.get(METADATA_KEY)
         else:
             blob = self.datastore.load_experiment(env_id)
-        experiment = Experiment.from_dict(blob) if isinstance(blob, dict) else None
-        if experiment is not None:
-            experiment.env_id = env_id
+        if not isinstance(blob, dict):
+            return None
+        experiment = Experiment.from_dict(blob)
+        experiment.env_id = env_id
         return experiment
 
     def _write(self, env_id, env, experiment):
@@ -326,7 +375,12 @@ class ExperimentStore:
         Returns the pieces both search entry points need: ``(present, missing,
         total)``, where ``present`` are ``(seq, value, experiment)`` entries
         carrying the value ``sort_by`` will order them by, and ``missing`` are
-        the matches that have no such value and so sort last.
+        the matches that have no such value and so sort last —
+        :func:`_is_absent` decides which bucket a value falls in, and a NaN or
+        Inf counts as no value. Keeping non-finite values out of ``present`` is
+        what makes the ranking sound: a NaN admitted there compares ``False``
+        against every other entry, and the heap ``keep`` selects through would
+        then drop entries that belong on the page.
 
         The flattened record is built per experiment and dropped as soon as it
         has answered — it is several times the size of the experiment it
@@ -359,7 +413,7 @@ class ExperimentStore:
                     present.append((total, None, experiment))
                 continue
             value = record.get(sort_by, _MISSING)
-            if value is _MISSING or value is None:
+            if _is_absent(value):
                 if keep is None or len(missing) < keep:
                     missing.append(experiment)
             else:
@@ -381,7 +435,9 @@ class ExperimentStore:
 
         Sorting defaults to newest-first; pass ``descending=False`` for oldest
         first, or ``sort_by=None`` to keep the backend's own ordering. Results
-        are ordinary :class:`Experiment` objects.
+        are ordinary :class:`Experiment` objects. A run whose ``sort_by`` value
+        is absent, ``None``, NaN or Inf has nothing to sort by and comes last,
+        in scan order, whichever direction the sort runs.
 
         Every match is returned, so the result grows with the store; a caller
         serving a request should use :meth:`search_page`, which bounds it.
@@ -413,8 +469,9 @@ class ExperimentStore:
         server happens to store. ``limit=None`` keeps every match, which is
         :meth:`search` with a count.
 
-        Experiments with no value for ``sort_by`` sort last, so they are only
-        materialised while the page can still reach them.
+        Experiments with no value for ``sort_by`` — absent, ``None``, NaN or
+        Inf — sort last, so they are only materialised while the page can still
+        reach them.
         """
         if offset < 0 or (limit is not None and limit < 0):
             raise ValueError("offset and limit must not be negative")

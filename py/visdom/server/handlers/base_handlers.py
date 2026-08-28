@@ -21,6 +21,7 @@ import tornado.websocket
 
 from visdom.utils.shared_utils import NanSafeEncoder
 
+
 _COMMON_APP_ATTRIBUTES = (
     "state",
     "subs",
@@ -96,28 +97,25 @@ class BaseHandler(tornado.web.RequestHandler):
         """
         _copy_app_attributes(self, app, _WEB_APP_ATTRIBUTES)
 
-    _JSON_HTML_ESCAPES = {"<": "\\u003c", ">": "\\u003e", "&": "\\u0026"}
-
     def write_json(self, payload):
-        """Serialise ``payload`` as JSON and finish the request with it.
+        """Answer with ``payload`` as a JSON body, typed and inert.
 
-        Every JSON reply goes out through here rather than ``write(json.dumps(
-        ...))`` so the three things that make an echoed request value safe are
-        applied in one place and cannot drift apart:
-
-        * ``<``, ``>`` and ``&`` are escaped to their ``\\u003c``-style forms.
-          These are ordinary JSON escapes -- the string a client decodes is
-          byte-for-byte what it was -- but a reply echoing a request value can
-          no longer carry a literal ``<script>`` into a browser that decides to
-          render it.
-        * ``Content-Type: application/json`` plus ``X-Content-Type-Options:
-          nosniff`` tells that browser not to second-guess the type.
-        * ``NanSafeEncoder`` keeps the NaN/Infinity handling every existing
-          reply already relied on.
+        ``self.write(a_dict)`` would already do this, but the endpoints that
+        echo experiment data serialize through :class:`NanSafeEncoder` first,
+        so a NaN metric reaches the client as ``null`` rather than as the
+        ``NaN`` literal no JSON parser accepts. Handing the resulting *string*
+        back to ``write`` would leave Tornado's default ``text/html`` on a body
+        that repeats the caller's own query verbatim, which a browser is then
+        free to render as a page — so the type is declared, ``nosniff`` stops
+        it being guessed back to HTML, and the three characters that could open
+        a tag are written as JSON escapes, which decode to the same string.
         """
-        body = json.dumps(payload, cls=NanSafeEncoder)
-        for char, escape in BaseHandler._JSON_HTML_ESCAPES.items():
-            body = body.replace(char, escape)
+        body = (
+            json.dumps(payload, cls=NanSafeEncoder)
+            .replace("<", "\\u003c")
+            .replace(">", "\\u003e")
+            .replace("&", "\\u0026")
+        )
         self.set_header("Content-Type", "application/json; charset=UTF-8")
         self.set_header("X-Content-Type-Options", "nosniff")
         self.finish(body)

@@ -35,6 +35,7 @@ from visdom.utils.shared_utils import (
 from visdom.utils.server_utils import (
     check_auth,
     check_readonly,
+    check_readonly_message,
     reject_readonly,
     extract_eid,
     window,
@@ -52,7 +53,6 @@ from visdom.utils.server_utils import (
     push_deleted,
     clear_deleted,
     notify,
-    check_readonly_message,
     LazyEnvData,
 )
 from visdom.server.handlers.base_handlers import BaseHandler
@@ -1026,24 +1026,13 @@ class ExperimentLogHandler(BaseHandler):
         if live_updates is not None:
             live_updates.mark(eid)
 
-        handler.write(json.dumps(experiment.to_dict(), cls=NanSafeEncoder))
+        handler.write_json(experiment.to_dict())
 
     @check_auth
     @check_readonly_message(
         "Experiment logging is disabled while the server is in readonly mode"
     )
     def post(self):
-        if self.readonly:
-            self.set_status(403)
-            self.write(
-                {
-                    "success": False,
-                    "error": "Experiment logging is disabled while the server "
-                    "is in readonly mode",
-                }
-            )
-            return
-
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
@@ -1330,7 +1319,7 @@ class ExperimentSuggestHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
         handler.set_status(501)
-        handler.write(json.dumps(ExperimentSuggestHandler.NOT_IMPLEMENTED))
+        handler.write_json(ExperimentSuggestHandler.NOT_IMPLEMENTED)
 
     @check_auth
     def post(self):
@@ -1385,7 +1374,7 @@ class TagsHandler(BaseHandler):
         if eid is not None:
             experiment = TagsHandler._read_experiment(handler, eid)
             tags = tags_to_mapping(experiment.tags) if experiment else {}
-            handler.write(json.dumps(tags, cls=NanSafeEncoder))
+            handler.write_json(tags)
             return
         experiments = TagsHandler._experiment_map(handler)
         tag_map = {
@@ -1393,7 +1382,7 @@ class TagsHandler(BaseHandler):
             for env_id, experiment in experiments.items()
             if experiment.tags
         }
-        handler.write(json.dumps(tag_map, cls=NanSafeEncoder))
+        handler.write_json(tag_map)
 
     @staticmethod
     def wrap_func(handler, args):
@@ -1443,7 +1432,7 @@ class TagsHandler(BaseHandler):
         if is_new_env:
             broadcast_envs(handler)
         broadcast_tags(handler, eid, tags)
-        handler.write(json.dumps(tags, cls=NanSafeEncoder))
+        handler.write_json(tags)
 
     @check_auth
     def get(self):

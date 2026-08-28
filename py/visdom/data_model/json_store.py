@@ -49,7 +49,18 @@ class JSONStore(DataStore):
         """Return the canonical ``<env_path>/<eid>.json`` path for ``eid``.
 
         Returns ``None`` if the resolved path would escape ``env_path`` (guards
-        against path traversal via a crafted env id).
+        against path traversal via a crafted env id). Every read, write and
+        delete resolves through here, so the containment check is the single
+        point where an id stops being user input and becomes a path.
+
+        The check is a prefix comparison against the normalised root -- the
+        path is made absolute first, so ``..`` segments are already collapsed
+        by the time it is tested, and ``os.path.join(base, "")`` supplies the
+        trailing separator that keeps a sibling directory (``/envs-evil``) from
+        matching the root (``/envs``). ``os.path.commonpath`` decides the same
+        question, but only after the fact and only for a reader who knows it
+        raises on mixed drives; the prefix form is the shape both static
+        analysis and a reader recognise as "compared against env_path".
         """
         safe_eid = self._safe_eid(eid)
         base = os.path.abspath(self.env_path)
