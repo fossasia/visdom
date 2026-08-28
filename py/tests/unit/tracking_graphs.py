@@ -20,9 +20,12 @@ import unittest
 from unittest.mock import Mock, patch
 
 import numpy as np
+import pytest
 import visdom
 
 from visdom.tracking import GRAPH_METHODS, NON_GRAPH_METHODS, RunTracker
+
+pytestmark = pytest.mark.unit
 
 
 def _unconnected_visdom():
