@@ -19,52 +19,20 @@ import time
 import tornado.web
 import tornado.websocket
 
+from visdom.server.server_state import StateAccessorsMixin
 from visdom.utils.shared_utils import NanSafeEncoder
 
 
-_COMMON_APP_ATTRIBUTES = (
-    "state",
-    "subs",
-    "sources",
-    "port",
-    "env_path",
-    "storage",
-    "login_enabled",
-    "readonly",
-    "mark_dirty",
-)
-
-_WEB_APP_ATTRIBUTES = _COMMON_APP_ATTRIBUTES + (
-    "max_text_lines",
-    "max_old_content",
-    "max_image_history",
-    "max_plot_history",
-)
-
-_SOCKET_APP_ATTRIBUTES = _COMMON_APP_ATTRIBUTES
-
-
-def _copy_app_attributes(handler, app, attrs, store_app=False):
-    if app is None:
-        return
-
-    if store_app:
-        handler.app = app
-
-    for attr in attrs:
-        setattr(handler, attr, getattr(app, attr))
-
-
-class BaseWebSocketHandler(tornado.websocket.WebSocketHandler):
+class BaseWebSocketHandler(StateAccessorsMixin, tornado.websocket.WebSocketHandler):
     """
     Implements any required overriden functionality from the basic tornado
     websocket handler. Also contains some shared logic for all WebSocketHandler
     classes.
     """
 
-    def initialize(self, app=None):
+    def initialize(self, server_state=None):
         """Common initialization shared by WebSocket handlers."""
-        _copy_app_attributes(self, app, _SOCKET_APP_ATTRIBUTES, store_app=True)
+        self.server_state = server_state
 
     def get_current_user(self):
         """
@@ -78,23 +46,25 @@ class BaseWebSocketHandler(tornado.websocket.WebSocketHandler):
             return None
 
 
-class BaseHandler(tornado.web.RequestHandler):
+class BaseHandler(StateAccessorsMixin, tornado.web.RequestHandler):
     """
     Implements any required overriden functionality from the basic tornado
     request handlers, and contains any convenient shared logic helpers.
     """
 
-    def initialize(self, app=None):
+    def initialize(self, server_state=None):
         """Common initialization shared by most handlers.
 
-        Copies frequently-used attributes from the application instance.
+        Stores the shared ``ServerState`` facade; the ``StateAccessorsMixin``
+        exposes its fields as ``self.state``, ``self.env_path``, etc.
         Subclasses that need additional attributes should call
-        ``super().initialize(app)`` and then set their own.
+        ``super().initialize(server_state)`` and then set their own.
 
-        The ``app`` parameter defaults to ``None`` so that handlers
-        registered without an ``app`` dict (e.g. HealthHandler) still work.
+        The ``server_state`` parameter defaults to ``None`` so that handlers
+        registered without initialization arguments (e.g. HealthHandler) still work;
+        such handlers simply never touch the state accessors.
         """
-        _copy_app_attributes(self, app, _WEB_APP_ATTRIBUTES)
+        self.server_state = server_state
 
     def write_json(self, payload):
         """Answer with ``payload`` as a JSON body, typed and inert.
