@@ -49,16 +49,25 @@ class JSONStore(DataStore):
         """Return the canonical ``<env_path>/<eid>.json`` path for ``eid``.
 
         Returns ``None`` if the resolved path would escape ``env_path`` (guards
-        against path traversal via a crafted env id).
+        against path traversal via a crafted env id). Every read, write and
+        delete resolves through here, so the containment check is the single
+        point where an id stops being user input and becomes a path.
+
+        The check is a prefix comparison against the normalised root -- the
+        path is made absolute first, so ``..`` segments are already collapsed
+        by the time it is tested, and ``os.path.join(base, "")`` supplies the
+        trailing separator that keeps a sibling directory (``/envs-evil``) from
+        matching the root (``/envs``). ``os.path.commonpath`` decides the same
+        question, but only after the fact and only for a reader who knows it
+        raises on mixed drives; the prefix form is the shape both static
+        analysis and a reader recognise as "compared against env_path".
         """
         safe_eid = self._safe_eid(eid)
         base = os.path.abspath(self.env_path)
         path = os.path.abspath(os.path.join(base, "{0}.json".format(safe_eid)))
-        try:
-            is_safe = os.path.commonpath([path, base]) == base
-        except ValueError:
-            is_safe = False
-        return path if is_safe else None
+        if not path.startswith(os.path.join(base, "")):
+            return None
+        return path
 
     def _hash_path(self, eid):
         """Return the ``hash_<sha256>.json`` fallback path for ``eid``."""
@@ -180,12 +189,55 @@ class JSONStore(DataStore):
             env["experiment"] = data["experiment"]
         return env
 
+    def load_experiment(self, eid):
+        """Read only ``eid``'s experiment blob; return ``None`` if it has none.
+
+        One env is one JSON document, so the file still has to be parsed to
+        reach the metadata inside it -- but the windows are dropped the moment
+        the blob is taken, instead of being assembled into an env dict and
+        handed to a caller that never wanted them. That is what makes a search
+        across every environment cost one env's memory rather than all of them.
+
+        Reading the metadata without the env is only safe because the file is
+        authoritative for it: an experiment write persists immediately, and
+        :meth:`serialize_env` skips envs that were never materialised precisely
+        because their on-disk copy is current.
+        """
+        if self.env_path is None:
+            return None
+        path = self._resolve_existing(eid)
+        if path is None:
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as fn:
+                data = json.load(fn)
+        except (OSError, ValueError):
+            return None
+        if not isinstance(data, dict):
+            return None
+        blob = data.get("experiment")
+        return blob if isinstance(blob, dict) else None
+
     def list_envs(self):
         """Return the ids of all environments stored on disk.
 
         Hash-fallback files are recognised by their exact ``hash_<64 hex>.json``
         shape and resolved to the real id kept inside; every other ``.json`` file
         yields its filename stem. Sub-directories (e.g. ``view/``) are skipped.
+
+        The ``hash_<64 hex>.json`` shape is only a naming convention, not a
+        guarantee: a user-chosen eid that happens to equal that exact pattern
+        (e.g. an environment literally named ``hash_<64 hex chars>``) is short
+        enough to be written as an ordinary primary file, with none of the
+        hash-fallback bookkeeping -- there is no ``name`` field inside it. Such
+        a file is indistinguishable from a genuine hash-fallback file by name
+        alone, so it is resolved the same way an unreadable ``name`` field
+        would be: fall back to the filename stem. That stem is the correct id
+        either way -- for a colliding primary file it *is* the real,
+        already-escaped id, and for a hash-fallback file with unusable
+        metadata it is still the best identifier available. Surfacing it beats
+        silently hiding the environment.
+
         """
         if self.env_path is None or not os.path.isdir(self.env_path):
             return []
@@ -196,14 +248,19 @@ class JSONStore(DataStore):
             path = os.path.join(self.env_path, name)
             if not os.path.isfile(path):
                 continue
+            stem = name[: -len(".json")]
             if HASHED_ENV_RE.match(name):
+                real_name = None
                 try:
                     with open(path, "r", encoding="utf-8") as fn:
-                        envs.append(json.load(fn)["name"])
-                except (OSError, UnicodeError, ValueError, KeyError):
+                        data = json.load(fn)
+                    if isinstance(data, dict) and isinstance(data.get("name"), str):
+                        real_name = data["name"]
+                except (OSError, UnicodeError, ValueError):
                     continue
+                envs.append(real_name if real_name is not None else stem)
             else:
-                envs.append(name[: -len(".json")])
+                envs.append(stem)
         return sorted(envs)
 
     def delete_env(self, eid):

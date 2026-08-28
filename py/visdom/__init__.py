@@ -35,6 +35,7 @@ import logging
 import warnings
 import time
 import errno
+from collections.abc import Mapping
 from io import BytesIO, StringIO
 from functools import wraps
 import html
@@ -299,11 +300,12 @@ def _normalize_labels(Y):
     Y = np.ravel(Y)
 
     try:
-        is_integer_labels = (
-            np.issubdtype(Y.dtype, np.number)
-            and np.equal(np.mod(Y, 1), 0).all()
-            and np.nanmin(Y) >= 1
-        )
+        with np.errstate(invalid="ignore"):
+            is_integer_labels = (
+                np.issubdtype(Y.dtype, np.number)
+                and np.equal(np.mod(Y, 1), 0).all()
+                and np.nanmin(Y) >= 1
+            )
     except TypeError:
         is_integer_labels = False
 
@@ -465,6 +467,44 @@ def _assert_opts(opts):
 
     if "title" in opts and opts.get("title") is not None:
         assert isstr(opts.get("title")), "title should be a string"
+
+
+def _assert_sunburst_opts(opts):
+    """
+    Validation for opts that are specific for sunburst charts.
+    Kept separate from `_assert_opts` on purpose --`_assert_opts`
+    is called by every plot type, and these keys (especially the
+    generic-sounding `size`) are not reserved names elsewhere, so
+    validating them globally would risk breaking unrelated plot calls that
+    happen to carry an opts key of the same name for unrelated reasons.
+    """
+    if opts.get("font_size") is not None or opts.get("size") is not None:
+        fs = opts.get("font_size")
+        fs = fs if fs is not None else opts.get("size")
+        assert isnum(fs) and fs > 0, "font_size should be a positive number"
+
+    if opts.get("line_width") is not None or opts.get("marker_width") is not None:
+        lw = opts.get("line_width")
+        lw = lw if lw is not None else opts.get("marker_width")
+        assert isnum(lw) and lw >= 0, "line_width should be a nonnegative number"
+
+    if opts.get("font_color") is not None:
+        assert isstr(opts.get("font_color")), "font_color should be a string"
+
+    if opts.get("maxdepth") is not None:
+        md = opts.get("maxdepth")
+        assert isinstance(md, (int, np.integer)) and not isinstance(
+            md, bool
+        ), "maxdepth should be an integer"
+        assert (
+            md == -1 or md >= 1
+        ), "maxdepth should be -1 (show all levels) or a positive integer"
+
+    if opts.get("branchvalues") is not None:
+        assert opts.get("branchvalues") in (
+            "total",
+            "remainder",
+        ), "branchvalues must be 'total' or 'remainder'"
 
 
 torch_types = []
@@ -1102,7 +1142,15 @@ class Visdom(object):
             r = self.session.post(url, data=data, timeout=(20, None))
             return r.text
 
-    def _send(self, msg, endpoint="events", quiet=False, from_log=False, create=True):
+    def _send(
+        self,
+        msg,
+        endpoint="events",
+        quiet=False,
+        from_log=False,
+        create=True,
+        default_eid=True,
+    ):
         """
         This function sends specified JSON request to the Tornado server. This
         function should generally not be called by the user, unless you want to
@@ -1112,8 +1160,13 @@ class Visdom(object):
         If `create=True`, then if `win=None` in the message a new window will be
         created with a random name. If `create=False`, `win=None` indicates the
         operation should be applied to all windows.
+
+        If `default_eid=False`, a message without an `eid` is left without one
+        rather than being pointed at this client's env. Routes that treat a
+        missing `eid` as "every env" need this: `/env_state` returns the env
+        list only when no `eid` is supplied.
         """
-        if msg.get("eid", None) is None:
+        if msg.get("eid", None) is None and default_eid:
             msg["eid"] = self.env
             self.env_list.add(self.env)
 
@@ -1285,6 +1338,42 @@ class Visdom(object):
         """
         return self._experiment_send({"action": "finish", "status": status}, env)
 
+    def set_tags(self, tags, env=None, append=False):
+        """Replace or append key/value tags for an environment.
+
+        ``tags`` is a mapping of string names to string values, for example
+        ``{"dataset": "cifar10", "stable": ""}``. ``env`` defaults to this
+        client's environment. Passing an empty mapping in replace mode clears
+        the environment's tags. Returns the complete stored tag mapping.
+        """
+        if not isinstance(tags, Mapping):
+            raise TypeError("tags must be a mapping of {name: value}")
+        if not all(isstr(name) and isstr(value) for name, value in tags.items()):
+            raise TypeError("tag names and values must be strings")
+        if not isinstance(append, bool):
+            raise TypeError("append must be a boolean")
+
+        return self._experiment_request(
+            {
+                "action": "set",
+                "eid": env if env is not None else self.env,
+                "tags": dict(tags),
+                "append": append,
+            },
+            "experiments/tags",
+        )
+
+    def get_tags(self, env=None):
+        """Return an environment's key/value tags.
+
+        ``env`` defaults to this client's environment. An environment without
+        tags returns an empty mapping.
+        """
+        return self._experiment_request(
+            {"action": "get", "eid": env if env is not None else self.env},
+            "experiments/tags",
+        )
+
     def search_experiments(
         self, query=None, limit=100, offset=0, sort_by=None, descending=True
     ):
@@ -1301,12 +1390,26 @@ class Visdom(object):
         `tag.owner`) when it is ambiguous; metrics compare on their latest value.
         `query=None` returns everything. Results are sorted by `sort_by` (any of
         those same names, newest-created first by default) and paged with
-        `limit`/`offset`; pass `limit=None` for all of them.
+        `limit`/`offset`.
+
+        A page is capped by the server. `limit=None` asks for as many as it
+        allows rather than for all of them, and a `limit` above the cap is
+        answered at the cap instead of being refused — so a store larger than
+        one page is read by paging with `offset`, using the `total` to know how
+        far to go.
+
+        Paging is not bottomless: `offset` + `limit` must stay within the
+        server's window, and a page past it raises rather than quietly moving
+        to a page you did not ask for. Deep pages are expensive to find, so
+        reaching the end of a large `total` means narrowing `query` — filtering
+        by a param, a tag or a metric threshold — rather than walking `offset`
+        out to it.
 
         Returns the server's reply as a dict of `experiments` (a list of
         experiment dicts, one page worth), the unpaged `total` matching the
-        query, and the `limit`/`offset`/`query` used. Returns None on an offline
-        client, which has no server to search.
+        query, and the `limit` the server actually applied alongside the
+        `offset`/`query` used. Returns None on an offline client, which has no
+        server to search.
         """
         if query is not None and not isstr(query):
             raise TypeError("query must be a string")
@@ -1337,6 +1440,11 @@ class Visdom(object):
 
             found = vis.search_experiments("lr < 0.01")
             vis.compare_experiments([e["env_id"] for e in found["experiments"]])
+
+        One search page always fits, since the server compares at most as many
+        runs as a page can hold. A longer list is compared in batches rather
+        than trimmed — a diff of some of the runs asked for would be a different
+        answer, not a shorter one, so it raises instead.
 
         Returns the server's reply as a dict: the compared runs (`env_ids` and
         the full `experiments`), plus a `params`, `metrics` and `tags` section.
@@ -1437,6 +1545,50 @@ class Visdom(object):
             endpoint="experiments/hparams",
         )
 
+    def update_hparams(
+        self, win, query=None, env_ids=None, mode=None, env=None, opts=None
+    ):
+        """Change or refresh an existing hyper-parameter pane.
+
+        Posts to the ``experiments/hparams/update`` endpoint, the dedicated
+        write path for ``hparams`` windows (the generic update route only
+        understands plot windows). `win` must name a window created by
+        :meth:`hparams`; the server rejects an unknown window (404) or a window
+        of any other type (400). The pane keeps its id and position but is
+        rebuilt in place — table, latest metric values and status badges — and
+        the environment is saved, so the update reaches disk immediately.
+
+        Called with a `query`/`env_ids`/`mode` selection, the pane's selection
+        is **replaced**, under exactly the rules documented on :meth:`hparams`.
+        Called with only `win`, the selection stored on the window is re-run —
+        a manual refresh that picks up runs logged (or newly matching) since the
+        pane was last built::
+
+            win = vis.hparams("lr < 0.01")
+            vis.update_hparams(win, "lr < 0.1 AND acc > 0.9")  # new selection
+            vis.update_hparams(win)                            # refresh as-is
+
+        `opts` overrides the pane's title/size; when omitted the current ones
+        are kept. Returns the window id.
+        """
+        if not isstr(win) or not win:
+            raise ValueError("win must be the id of an existing hparams window")
+        if opts is not None:
+            _title2str(opts)
+            _assert_opts(opts)
+
+        return self._send(
+            {
+                "win": win,
+                "query": query,
+                "env_ids": env_ids,
+                "mode": mode,
+                "eid": env,
+                "opts": opts,
+            },
+            endpoint="experiments/hparams/update",
+        )
+
     def get_window_data(self, win=None, env=None):
         """
         This function returns all the window data for a specified window in
@@ -1515,7 +1667,12 @@ class Visdom(object):
         if self.offline:
             return list(self.env_list)
         else:
-            return json.loads(self._send({}, endpoint="env_state", quiet=True))
+            # `default_eid=False` matters here: `/env_state` answers with one
+            # env's windows when it is given an `eid`, and with the env list
+            # only when it is not.
+            return json.loads(
+                self._send({}, endpoint="env_state", quiet=True, default_eid=False)
+            )
 
     def get_env_state(self, env):
         """
@@ -2302,15 +2459,22 @@ class Visdom(object):
         height = int(tensor.shape[2] + 2 * padding)
         width = int(tensor.shape[3] + 2 * padding)
 
+        # The tile has always been inset one extra pixel into its cell, which
+        # leaves one pixel less padding below and to the right of it. That
+        # extra pixel only fits while `padding` is at least 1; with padding=0
+        # the last row and column ran off the end of the grid and the copy
+        # raised, so drop the offset in that case.
+        offset = padding + 1 if padding > 0 else 0
+
         grid = np.ones([tensor.shape[1], height * ymaps, width * xmaps])
         k = 0
         for y in range(ymaps):
             for x in range(xmaps):
                 if k >= nmaps:
                     break
-                h_start = y * height + 1 + padding
+                h_start = y * height + offset
                 h_end = h_start + tensor.shape[2]
-                w_start = x * width + 1 + padding
+                w_start = x * width + offset
                 w_end = w_start + tensor.shape[3]
                 grid[:, h_start:h_end, w_start:w_end] = tensor[k]
                 k += 1
@@ -3547,7 +3711,11 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
-        minx, maxx = np.nanmin(X), np.nanmax(X)
+        finite = X[np.isfinite(X)]
+        if finite.size > 0:
+            minx, maxx = float(finite.min()), float(finite.max())
+        else:
+            minx, maxx = 0.0, 1.0
         bins = np.histogram(X, bins=opts["numbins"], range=(minx, maxx))[0]
         linrange = np.linspace(minx, maxx, opts["numbins"])
 
@@ -3890,18 +4058,72 @@ class Visdom(object):
 
     @pytorch_wrap
     def sunburst(self, labels, parents, values=None, win=None, env=None, opts=None):
+        """
+        This function draws a sunburst chart. It takes two input arrays:
+        `labels` and `parents`. Values from the `labels` array define the
+        sector's label or name. Values from the `parents` array define the
+        hierarchical structure, indicating which parent sector a sector
+        belongs to -- note that at least one entry in `parents` must be an
+        empty string `""` (or `None`, which is treated the same way),
+        marking the root of the hierarchy. Keep in mind that the `labels`
+        and `parents` arrays must be of equal length. There is an optional
+        third array called `values`, which is used to display a numerical
+        value when hovering over a sector. If provided, the `values` array
+        must be the same length as `labels` and `parents`, and every entry
+        must be a non-negative, non-NaN number -- omit `values` entirely if
+        some sectors don't have a known value, rather than passing NaN.
+
+
+        Examples: `vis.sunburst(labels, parents, opts)` or
+        `vis.sunburst(labels, parents, values, opts)`
+
+        The following `opts` are supported:
+
+        - `opts.font_size`    : define font size of label (`int`)
+        - `opts.font_color`    : define font color of label (`string`)
+        - `opts.opacity`    : define opacity of chart (`float`, between 0 and 1)
+        - `opts.line_width`    : define distance between two sectors and
+                                  sector to its parents (`int`)
+        - `opts.maxdepth`    :  maximum number of hierarchy levels visible
+                                at once -- a positive integer, or `-1` to
+                                show all levels (`int`)
+        - `opts.branchvalues`    : `'total'` or `'remainder'` -- how
+                                    `values` are interpreted relative to
+                                    children (`string`; default = `'remainder'`)
+        """
         opts = {} if opts is None else opts
         _title2str(opts)
         _assert_opts(opts)
+        _assert_sunburst_opts(opts)
 
-        font_size = opts.get("size")
+        labels = np.squeeze(np.asarray(labels))
+        parents = np.squeeze(np.asarray(parents))
+        assert labels.ndim <= 1, "labels should be one-dimensional"
+        assert parents.ndim <= 1, "parents should be one-dimensional"
+        labels = np.atleast_1d(labels)
+        parents = np.atleast_1d(parents)
+        if parents.dtype == object:
+            parents = np.array(["" if p is None else p for p in parents], dtype=object)
+
+        labels = labels.astype(str)
+        parents = parents.astype(str)
+        assert len(labels) > 0, "labels cannot be empty"
+        assert len(labels) == len(
+            parents
+        ), "length of parents and labels should be equal"
+        assert np.any(
+            parents == ""
+        ), "at least one node must have an empty parent ('') marking the root"
+
+        font_size = opts.get("font_size")
+        font_size = font_size if font_size is not None else opts.get("size")
         font_color = opts.get("font_color")
         opacity = opts.get("opacity")
-        line_width = opts.get("marker_width")
+        line_width = opts.get("line_width")
+        line_width = line_width if line_width is not None else opts.get("marker_width")
 
-        assert len(parents.tolist()) == len(
-            labels.tolist()
-        ), "length of parents and labels should be equal"
+        branchvalues = opts.get("branchvalues")
+        branchvalues = branchvalues if branchvalues is not None else "remainder"
 
         data_dict = [
             {
@@ -3911,14 +4133,25 @@ class Visdom(object):
                 "leaf": {"opacity": opacity},
                 "marker": {"line": {"width": line_width}},
                 "type": "sunburst",
+                "branchvalues": branchvalues,
             }
         ]
+
+        if opts.get("maxdepth") is not None:
+            data_dict[0]["maxdepth"] = opts.get("maxdepth")
+
         if values is not None:
+            try:
+                values = np.asarray(values, dtype=np.float64)
+            except (TypeError, ValueError):
+                raise AssertionError("values must be numeric")
             values = np.squeeze(values)
             assert values.ndim == 1, "values should be one-dimensional"
-            assert len(parents.tolist()) == len(
-                values.tolist()
+            assert len(values) == len(
+                labels
             ), "length of values should be equal to length of labels and parents"
+            assert not np.any(np.isnan(values)), "values cannot contain NaN"
+            assert np.all(values >= 0), "values cannot contain negative numbers"
 
             data_dict[0]["values"] = values.tolist()
 

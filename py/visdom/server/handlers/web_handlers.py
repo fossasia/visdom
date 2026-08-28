@@ -15,6 +15,7 @@ the data_model itself.
 
 import copy
 import getpass
+import hmac
 import json
 import jsonpatch
 import logging
@@ -33,6 +34,9 @@ from visdom.utils.shared_utils import (
 )
 from visdom.utils.server_utils import (
     check_auth,
+    check_readonly,
+    check_readonly_message,
+    reject_readonly,
     extract_eid,
     window,
     register_window,
@@ -49,6 +53,7 @@ from visdom.utils.server_utils import (
     push_deleted,
     clear_deleted,
     notify,
+    LazyEnvData,
 )
 from visdom.server.handlers.base_handlers import BaseHandler
 from visdom.experiments import (
@@ -67,12 +72,9 @@ logger = logging.getLogger(__name__)
 
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
-# TODO abstract out any direct references to the app where possible from
-# all handlers. Can instead provide accessor functions on the state?
-
-
 class PostHandler(BaseHandler):
     @check_auth
+    @check_readonly
     def post(self):
         req = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -489,6 +491,7 @@ class UpdateHandler(BaseHandler):
         handler.write(p["id"])
 
     @check_auth
+    @check_readonly
     def post(self):
         if self.login_enabled and not self.current_user:
             self.set_status(400)
@@ -514,6 +517,7 @@ class CloseHandler(BaseHandler):
             broadcast(handler, json.dumps({"command": "close", "data": win}), eid)
 
     @check_auth
+    @check_readonly
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -535,6 +539,7 @@ class DeleteEnvHandler(BaseHandler):
             broadcast_envs(handler)
 
     @check_auth
+    @check_readonly
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -590,6 +595,7 @@ class ForkEnvHandler(BaseHandler):
         handler.write(eid)
 
     @check_auth
+    @check_readonly
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -598,10 +604,6 @@ class ForkEnvHandler(BaseHandler):
 
 
 class EnvHandler(BaseHandler):
-    def initialize(self, app):
-        super().initialize(app)
-        self.wrap_socket = app.wrap_socket
-
     @check_auth
     def get(self, eid):
         if eid not in self.state:
@@ -642,10 +644,6 @@ class EnvHandler(BaseHandler):
 
 
 class CompareHandler(BaseHandler):
-    def initialize(self, app):
-        super().initialize(app)
-        self.wrap_socket = app.wrap_socket
-
     @check_auth
     def get(self, eids):
         for eid in eids.split("+"):
@@ -694,6 +692,7 @@ class SaveHandler(BaseHandler):
         handler.write(json.dumps(ret))
 
     @check_auth
+    @check_readonly
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -707,7 +706,12 @@ class DataHandler(BaseHandler):
         eid = extract_eid(args)
 
         if "data" in args:
-            # Load data from client
+            # Load data from client. This is the one write behind an endpoint
+            # that also reads, so it cannot be refused by the decorator.
+            if handler.readonly:
+                reject_readonly(handler)
+                return
+
             data = json.loads(args["data"])
 
             if eid not in handler.state:
@@ -746,11 +750,11 @@ class DataHandler(BaseHandler):
 
 
 class IndexHandler(BaseHandler):
-    def initialize(self, app):
-        super().initialize(app)
-        self.user_credential = app.user_credential
-        self.base_url = app.base_url if app.base_url != "" else "/"
-        self.wrap_socket = app.wrap_socket
+    def initialize(self, server_state):
+        super().initialize(server_state)
+        self.base_url = (
+            self.server_state.base_url if self.server_state.base_url != "" else "/"
+        )
 
     def get(self, args, **kwargs):
         if (not self.login_enabled) or self.current_user:
@@ -783,17 +787,25 @@ class IndexHandler(BaseHandler):
         salt = stored.split("$")[0]
         password = hash_password(json_obj["password"], salt=salt)
 
-        if (username == self.user_credential["username"]) and (password == stored):
+        # Constant-time comparison: `==` on the derived key returns as soon as
+        # two characters differ, so response timing tells an attacker how much
+        # of a guess was right. Both halves are always compared, which keeps a
+        # wrong username costing the same as a wrong password.
+        username_ok = hmac.compare_digest(
+            str(username).encode("utf-8"),
+            self.user_credential["username"].encode("utf-8"),
+        )
+        password_ok = hmac.compare_digest(
+            password.encode("utf-8"), stored.encode("utf-8")
+        )
+
+        if username_ok and password_ok:
             self.set_secure_cookie("user_password", username + password)
         else:
             self.set_status(400)
 
 
 class UserSettingsHandler(BaseHandler):
-    def initialize(self, app):
-        super().initialize(app)
-        self.user_settings = app.user_settings
-
     def get(self, path):
         if path == "style.css":
             self.set_status(200)
@@ -815,24 +827,11 @@ class ErrorHandler(BaseHandler):
 
 
 class UploadEnvHandler(BaseHandler):
-    def initialize(self, app):
-        super().initialize(app)
-        self.readonly = app.readonly
-
     @check_auth
+    @check_readonly_message("Uploads are disabled while the server is in readonly mode")
     def post(self):
         # 100mb file size limit
         MAX_SIZE = 100 * 1024 * 1024
-
-        if self.readonly:
-            self.set_status(403)
-            self.write(
-                {
-                    "success": False,
-                    "error": "Uploads are disabled while the server is in readonly mode",
-                }
-            )
-            return
 
         if "file" not in self.request.files:
             self.set_status(400)
@@ -935,10 +934,6 @@ class ExperimentLogHandler(BaseHandler):
 
     VALID_ACTIONS = ("log", "metrics", "finish")
 
-    def initialize(self, app):
-        super().initialize(app)
-        self.readonly = app.readonly
-
     @staticmethod
     def _require_mapping(args, field):
         """Return ``args[field]`` if it is a mapping (or absent); else raise 400."""
@@ -958,7 +953,7 @@ class ExperimentLogHandler(BaseHandler):
             )
 
         eid = extract_eid(args)
-        store = ExperimentStore(handler.storage)
+        store = ExperimentStore(handler.storage, env_provider=handler.state.get)
 
         if action == "metrics":
             metrics = ExperimentLogHandler._require_mapping(args, "metrics")
@@ -1004,21 +999,13 @@ class ExperimentLogHandler(BaseHandler):
         if is_new_env:
             broadcast_envs(handler)
 
-        handler.write(json.dumps(experiment.to_dict(), cls=NanSafeEncoder))
+        handler.write_json(experiment.to_dict())
 
     @check_auth
+    @check_readonly_message(
+        "Experiment logging is disabled while the server is in readonly mode"
+    )
     def post(self):
-        if self.readonly:
-            self.set_status(403)
-            self.write(
-                {
-                    "success": False,
-                    "error": "Experiment logging is disabled while the server "
-                    "is in readonly mode",
-                }
-            )
-            return
-
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
@@ -1043,20 +1030,42 @@ class ExperimentSearchHandler(BaseHandler):
     Experiments are read back through the server's ``DataStore``, which means a
     server running with ``env_path=None`` — where nothing is persisted at all —
     has nothing to search and returns no results.
+
+    A reply is capped at ``MAX_LIMIT`` experiments. A larger ``limit``, or a
+    ``null`` one, is coerced down rather than refused, and the reply reports the
+    ``limit`` it actually applied, so a caller can always see what it got; the
+    ``total`` is unaffected and remains the count of every match. Without a cap
+    one request could ask the server to serialize everything it stores.
+
+    Paging depth is capped too: a page at ``offset`` is found by ranking every
+    match down to ``offset + limit`` and discarding all but the last ``limit``
+    of them, so a deep page costs the server its whole depth even though it
+    returns one page. ``MAX_WINDOW`` bounds that depth, and a request past it is
+    refused with a 400 rather than coerced — a coerced ``limit`` returns fewer
+    experiments and says so, but a coerced ``offset`` would return a *different*
+    page than the one asked for, and the caller could not tell. Reaching further
+    than the window means narrowing the query, not paging deeper.
     """
 
     DEFAULT_LIMIT = 100
+    MAX_LIMIT = 1000
+    MAX_WINDOW = 10000
 
     @staticmethod
-    def _require_index(args, field, default):
-        """Return ``args[field]`` as a non-negative int (``None`` = unbounded).
+    def _require_index(args, field, default, maximum=None):
+        """Return ``args[field]`` as a non-negative int, capped at ``maximum``.
 
         A JSON body has no int/float distinction, so a client that sends ``10.0``
         means the index 10; anything with a fractional part is a mistake.
+
+        ``None`` means "as many as allowed": with a ``maximum`` it becomes that
+        maximum, and without one it stays unbounded. A value above ``maximum``
+        is coerced down rather than rejected, so raising a page size can never
+        turn a working request into a failing one.
         """
         value = args.get(field, default)
         if value is None:
-            return None
+            return maximum
         if isinstance(value, float) and value.is_integer():
             value = int(value)
         if isinstance(value, bool) or not isinstance(value, int):
@@ -1067,7 +1076,31 @@ class ExperimentSearchHandler(BaseHandler):
             raise tornado.web.HTTPError(
                 400, reason="'{0}' must not be negative".format(field)
             )
+        if maximum is not None and value > maximum:
+            return maximum
         return value
+
+    @staticmethod
+    def _require_window(offset, limit):
+        """Raise 400 if the page at ``offset`` reaches past ``MAX_WINDOW``.
+
+        ``offset`` is checked against ``limit`` rather than on its own because
+        the cost is the pair: the store ranks ``offset + limit`` matches to
+        answer either. Capping ``limit`` alone would leave a one-experiment page
+        at a large enough ``offset`` costing more than the whole-store reply the
+        ``limit`` cap exists to prevent.
+        """
+        window = offset + limit
+        if window > ExperimentSearchHandler.MAX_WINDOW:
+            raise tornado.web.HTTPError(
+                400,
+                reason=(
+                    "'offset' + 'limit' must not exceed {0} (got {1}); "
+                    "narrow the query instead of paging further".format(
+                        ExperimentSearchHandler.MAX_WINDOW, window
+                    )
+                ),
+            )
 
     @staticmethod
     def _require_text(args, field):
@@ -1099,35 +1132,35 @@ class ExperimentSearchHandler(BaseHandler):
         query = ExperimentSearchHandler._require_text(args, "query")
         sort_by = ExperimentSearchHandler._require_text(args, "sort_by")
         limit = ExperimentSearchHandler._require_index(
-            args, "limit", ExperimentSearchHandler.DEFAULT_LIMIT
+            args,
+            "limit",
+            ExperimentSearchHandler.DEFAULT_LIMIT,
+            maximum=ExperimentSearchHandler.MAX_LIMIT,
         )
         offset = ExperimentSearchHandler._require_index(args, "offset", 0)
         descending = ExperimentSearchHandler._require_flag(args, "descending", True)
+        ExperimentSearchHandler._require_window(offset, limit)
 
-        store = ExperimentStore(handler.storage)
+        store = ExperimentStore(handler.storage, env_provider=handler.state.get)
         try:
-            experiments = store.search(
+            page, total = store.search_page(
                 query=query,
                 sort_by=sort_by or DEFAULT_SORT_FIELD,
                 descending=descending,
+                offset=offset,
+                limit=limit,
             )
         except QueryParseError as e:
             raise tornado.web.HTTPError(400, reason=str(e))
 
-        end = None if limit is None else offset + limit
-        page = experiments[offset:end]
-
-        handler.write(
-            json.dumps(
-                {
-                    "experiments": [e.to_dict() for e in page],
-                    "total": len(experiments),
-                    "limit": limit,
-                    "offset": offset,
-                    "query": query or "",
-                },
-                cls=NanSafeEncoder,
-            )
+        handler.write_json(
+            {
+                "experiments": [e.to_dict() for e in page],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "query": query or "",
+            }
         )
 
     @check_auth
@@ -1163,7 +1196,17 @@ class ExperimentCompareHandler(BaseHandler):
     answer malformed JSON and non-object bodies with the same 400; unlike
     search, an empty body is not a valid request here, since ``env_ids`` is
     required and there is no comparison to make without it.
+
+    At most ``MAX_ENV_IDS`` runs are compared in one request: every named run is
+    loaded and echoed back in full, so the reply grows with the list. The list
+    is refused rather than truncated, for the same reason a missing run is a 404
+    — a diff of some of the runs asked for is a different answer, not a smaller
+    one, and nothing in the reply would reveal the difference. The cap matches
+    search's ``MAX_LIMIT``, so any single page of search results can be handed
+    straight to compare; a longer list is compared in batches.
     """
+
+    MAX_ENV_IDS = 1000
 
     @staticmethod
     def _require_env_ids(args):
@@ -1172,6 +1215,9 @@ class ExperimentCompareHandler(BaseHandler):
         A bare string is rejected rather than treated as a one-id list: it would
         otherwise be iterated character by character into a comparison of runs
         named ``"r"``, ``"u"``, ``"n"``.
+
+        Length is checked before the ids are read, since the cost being bounded
+        is loading them.
         """
         value = args.get("env_ids")
         if value is None:
@@ -1182,6 +1228,16 @@ class ExperimentCompareHandler(BaseHandler):
             raise tornado.web.HTTPError(
                 400, reason="'env_ids' must name at least one environment"
             )
+        if len(value) > ExperimentCompareHandler.MAX_ENV_IDS:
+            raise tornado.web.HTTPError(
+                400,
+                reason=(
+                    "'env_ids' must not name more than {0} environments "
+                    "(got {1}); compare them in batches".format(
+                        ExperimentCompareHandler.MAX_ENV_IDS, len(value)
+                    )
+                ),
+            )
         if not all(isinstance(env_id, str) for env_id in value):
             raise tornado.web.HTTPError(400, reason="'env_ids' must contain strings")
         return value
@@ -1189,13 +1245,13 @@ class ExperimentCompareHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
         env_ids = ExperimentCompareHandler._require_env_ids(args)
-        store = ExperimentStore(handler.storage)
+        store = ExperimentStore(handler.storage, env_provider=handler.state.get)
         try:
             comparison = store.compare(env_ids)
         except KeyError as e:
             raise tornado.web.HTTPError(404, reason=str(e.args[0]))
 
-        handler.write(json.dumps(comparison, cls=NanSafeEncoder))
+        handler.write_json(comparison)
 
     @check_auth
     def post(self):
@@ -1236,7 +1292,7 @@ class ExperimentSuggestHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
         handler.set_status(501)
-        handler.write(json.dumps(ExperimentSuggestHandler.NOT_IMPLEMENTED))
+        handler.write_json(ExperimentSuggestHandler.NOT_IMPLEMENTED)
 
     @check_auth
     def post(self):
@@ -1248,35 +1304,54 @@ class TagsHandler(BaseHandler):
 
     VALID_ACTIONS = ("get", "set")
 
-    def initialize(self, app):
-        super().initialize(app)
-        self.readonly = app.readonly
+    @staticmethod
+    def _experiment_from_env(eid, env):
+        """Return an experiment from one materialized in-memory environment."""
+        blob = env.get("experiment")
+        if not isinstance(blob, Mapping):
+            return None
+        experiment = Experiment.from_dict(blob)
+        experiment.env_id = eid
+        return experiment
+
+    @staticmethod
+    def _read_experiment(handler, eid):
+        """Read one experiment without materializing unrelated environments."""
+        env = handler.state.get(eid)
+        if env is None or (isinstance(env, LazyEnvData) and not env.is_loaded):
+            return ExperimentStore(handler.storage).get_experiment(eid)
+        experiment = TagsHandler._experiment_from_env(eid, env)
+        if experiment is not None:
+            return experiment
+        return ExperimentStore(handler.storage).get_experiment(eid)
 
     @staticmethod
     def _experiment_map(handler):
-        """Return stored experiments overlaid with current in-memory state."""
+        """Return stored experiments overlaid with materialized state only."""
         store = ExperimentStore(handler.storage)
         experiments = {exp.env_id: exp for exp in store.list_experiments()}
         for eid, env in handler.state.items():
-            blob = env.get("experiment")
-            if isinstance(blob, Mapping):
-                experiments[eid] = Experiment.from_dict(blob)
+            if isinstance(env, LazyEnvData) and not env.is_loaded:
+                continue
+            experiment = TagsHandler._experiment_from_env(eid, env)
+            if experiment is not None:
+                experiments[eid] = experiment
         return experiments
 
     @staticmethod
     def _write_tags(handler, eid=None):
-        experiments = TagsHandler._experiment_map(handler)
         if eid is not None:
-            experiment = experiments.get(eid)
+            experiment = TagsHandler._read_experiment(handler, eid)
             tags = tags_to_mapping(experiment.tags) if experiment else {}
-            handler.write(json.dumps(tags, cls=NanSafeEncoder))
+            handler.write_json(tags)
             return
+        experiments = TagsHandler._experiment_map(handler)
         tag_map = {
             env_id: tags_to_mapping(experiment.tags)
             for env_id, experiment in experiments.items()
             if experiment.tags
         }
-        handler.write(json.dumps(tag_map, cls=NanSafeEncoder))
+        handler.write_json(tag_map)
 
     @staticmethod
     def wrap_func(handler, args):
@@ -1308,24 +1383,25 @@ class TagsHandler(BaseHandler):
         eid = extract_eid(args)
         append = args.get("append", False)
         store = ExperimentStore(handler.storage)
-
-        if eid in handler.state:
-            handler.storage.save_env(eid, handler.state[eid])
+        env = handler.state.get(eid)
+        is_new_env = env is None
+        if is_new_env:
+            env = {"jsons": {}, "reload": {}}
         try:
-            experiment = store.update_tags(eid, args["tags"], append=append)
+            experiment = store.update_tags(
+                eid, args["tags"], append=append, env_data=env
+            )
         except (TypeError, ValueError) as error:
             raise tornado.web.HTTPError(400, reason=str(error))
 
-        is_new_env = eid not in handler.state
         if is_new_env:
-            handler.state[eid] = {"jsons": {}, "reload": {}}
-        handler.state[eid]["experiment"] = experiment.to_dict()
+            handler.state[eid] = env
 
         tags = tags_to_mapping(experiment.tags)
         if is_new_env:
             broadcast_envs(handler)
         broadcast_tags(handler, eid, tags)
-        handler.write(json.dumps(tags, cls=NanSafeEncoder))
+        handler.write_json(tags)
 
     @check_auth
     def get(self):

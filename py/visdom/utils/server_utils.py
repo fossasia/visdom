@@ -56,6 +56,63 @@ def check_auth(f):
     return _check_auth
 
 
+DEFAULT_READONLY_MESSAGE = "The server is running in readonly mode"
+
+
+def reject_readonly(handler, message=DEFAULT_READONLY_MESSAGE):
+    """Answer 403 for a write attempted against a readonly server.
+
+    ``message`` names the capability that is disabled, since "uploads" and
+    "experiment logging" are refused for the same reason but are not the same
+    thing to the caller.
+    """
+    handler.set_status(403)
+    handler.write({"success": False, "error": message})
+
+
+def check_readonly(f):
+    """
+    Wrapper for handler methods that change server state, so a server
+    started with ``-readonly`` refuses them instead of applying them.
+
+    Sockets are already short-circuited wholesale in
+    ``AnySocketHandlerOrWrapper.on_message``; this is the HTTP half of the
+    same rule. Stack it under ``check_auth`` so an unauthenticated request
+    still answers 401 rather than 403.
+    """
+
+    def _check_readonly(handler, *args, **kwargs):
+        if handler.readonly:
+            reject_readonly(handler)
+            return
+        f(handler, *args, **kwargs)
+
+    return _check_readonly
+
+
+def check_readonly_message(message):
+    """``check_readonly`` for a handler that names the capability it refuses.
+
+    The guarded method is never entered: the response is 403 with a JSON body
+    explaining which capability is disabled.
+
+    Written as a decorator, and applied under ``check_auth``, so that a handler
+    declares "this writes" once at its entry point rather than restating the
+    check in the body -- the omission that let readonly writes through before.
+    """
+
+    def _decorate(f):
+        def _check_readonly(handler, *args, **kwargs):
+            if getattr(handler, "readonly", False):
+                reject_readonly(handler, message)
+                return
+            f(handler, *args, **kwargs)
+
+        return _check_readonly
+
+    return _decorate
+
+
 def set_cookie(value=None):
     """Create cookie secret key for authentication"""
     if value is not None:
@@ -85,6 +142,11 @@ class LazyEnvData(Mapping):
         self._eid = eid
         self._raw_dict = None
 
+    @property
+    def is_loaded(self):
+        """Whether this environment has been materialized in memory."""
+        return self._raw_dict is not None
+
     def lazy_load_data(self):
         if self._raw_dict is not None:
             return
@@ -107,6 +169,10 @@ class LazyEnvData(Mapping):
     def __setitem__(self, key, value):
         self.lazy_load_data()
         return self._raw_dict.__setitem__(key, value)
+
+    def __delitem__(self, key):
+        self.lazy_load_data()
+        return self._raw_dict.__delitem__(key)
 
     def __iter__(self):
         self.lazy_load_data()
@@ -314,6 +380,8 @@ def compare_envs(state, eids, socket, store, show_all=False):
 
             destWid = name2Wid[title]
             destWidJson = res["jsons"][destWid]
+            if "content" not in destWidJson:
+                continue  # nothing in the base env to merge into
             base_ptype = destWidJson.get("type", None)
             if base_ptype == "image_compare":
                 base_ptype = "image"
@@ -349,9 +417,10 @@ def compare_envs(state, eids, socket, store, show_all=False):
                     )
                     destWidJson["content"].append(next_img)
             elif ptype == "plot":
+                base_data = destWidJson["content"].get("data") or []
+                if not base_data or "name" not in base_data[0]:
+                    continue  # Skip windows with unnamed data
                 if ix == 0:
-                    if "name" not in destWidJson["content"]["data"][0]:
-                        continue  # Skip windows with unnamed data
                     destWidJson["has_compare"] = False
                     destWidJson["content"]["layout"]["showlegend"] = True
                     destWidJson["contentID"] = get_rand_id()
@@ -362,8 +431,6 @@ def compare_envs(state, eids, socket, store, show_all=False):
                             "name"
                         ] = "{}_{}".format(eidNums[eid], data["name"])
                 else:
-                    if "name" not in destWidJson["content"]["data"][0]:
-                        continue  # Skip windows with unnamed data
                     # has_compare will be set to True only if the window title is
                     # shared by at least 2 envs.
                     destWidJson["has_compare"] = True

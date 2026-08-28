@@ -18,15 +18,19 @@ seeded through a real ``ExperimentStore`` over a temporary directory.
 """
 
 import json
+import os
 import shutil
 import tempfile
 import unittest
 
+import pytest
 import tornado.testing
 
 from visdom.data_model import JSONStore
 from visdom.experiments import ExperimentStore, flatten_experiments
 from visdom.server.app import Application
+
+pytestmark = pytest.mark.integration
 
 
 def seed_experiments(store):
@@ -182,6 +186,28 @@ class TestHparamsEndpoint(tornado.testing.AsyncHTTPTestCase):
         resp = self.hparams({"query": "epochs > 0", "win": "hp1"})
         self.assertEqual(resp.body.decode(), "hp1")
         self.assertIn("hp1", self._app.state["main"]["jsons"])
+
+    def test_window_carries_its_selection(self):
+        """The resolved selection is stored on the window for later updates."""
+        resp = self.hparams({"query": "lr < 0.01"})
+        self.assertEqual(
+            self._window(resp)["hparams"],
+            {"query": "lr < 0.01", "env_ids": None, "mode": "query"},
+        )
+
+    def test_pane_is_on_disk_at_creation(self):
+        """Creating the pane saves the env, so the pane survives a crash."""
+        resp = self.hparams({"query": "lr < 0.01", "win": "hp1"})
+        self.assertEqual(resp.code, 200)
+        with open(os.path.join(self._tmp_dir, "main.json")) as fn:
+            env = json.load(fn)
+        window = env["jsons"]["hp1"]
+        self.assertEqual(window["type"], "hparams")
+        self.assertEqual(window["hparams"]["query"], "lr < 0.01")
+        self.assertEqual(
+            [record["env_id"] for record in window["content"]["records"]],
+            ["run-b"],
+        )
 
     def test_no_selection_is_400(self):
         """With neither query nor env_ids there is nothing to select."""

@@ -39,6 +39,7 @@ TRACKED_ASSETS = [
     "index.html",
     "login.html",
     "error.html",
+    "favicon.png",
     os.path.join("js", "main.js"),
     os.path.join("js", "main.js.map"),
     os.path.join("css", "base.css"),
@@ -48,6 +49,7 @@ TRACKED_ASSETS = [
     os.path.join("css", "network.css"),
     os.path.join("css", "hparams.css"),
     os.path.join("css", "rc-tree-select-overrides.css"),
+    os.path.join("css", "rc-slider-overrides.css"),
 ]
 
 # Fetched by download_scripts() at first run; absent in a plain checkout.
