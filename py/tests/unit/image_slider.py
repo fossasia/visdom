@@ -10,9 +10,12 @@ import unittest
 from unittest.mock import Mock, patch
 
 import numpy as np
+import pytest
 import visdom
 
 from visdom.server.handlers.web_handlers import UpdateHandler
+
+pytestmark = pytest.mark.unit
 
 
 def _unconnected_visdom():
