@@ -13,7 +13,8 @@ Covers the four pieces the compare layer is built from: the pure
 over the named runs against a real ``JSONStore`` over a temporary
 directory; the ``/experiments/compare`` endpoint end-to-end through a real
 :class:`~visdom.server.app.Application` with Tornado's ``AsyncHTTPTestCase``; and
-the ``Visdom.compare_experiments`` message shape with a mocked transport (no server).
+the ``Visdom.compare_experiments`` message shape with a mocked transport (no
+server).
 """
 
 import json
@@ -22,12 +23,19 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
+import pytest
 import tornado.testing
 
 from visdom import Visdom
 from visdom.data_model import JSONStore
 from visdom.experiments import Experiment, ExperimentStore, build_comparison
 from visdom.server.app import Application
+from visdom.server.handlers.web_handlers import (
+    ExperimentCompareHandler,
+    ExperimentSearchHandler,
+)
+
+pytestmark = pytest.mark.integration
 
 
 def seed_experiments(store):
@@ -408,19 +416,19 @@ class TestCompareEndpoint(tornado.testing.AsyncHTTPTestCase):
             headers={"Content-Type": "application/json"},
         )
 
-    def compare_ok(self, body):
-        resp = self.compare(body)
-        self.assertEqual(resp.code, 200)
-        return json.loads(resp.body)
-
     def post_raw(self, body):
-        """POST a body that is not necessarily valid JSON."""
+        """POST a body verbatim, so malformed JSON reaches the handler."""
         return self.fetch(
             "/experiments/compare",
             method="POST",
             body=body,
             headers={"Content-Type": "application/json"},
         )
+
+    def compare_ok(self, body):
+        resp = self.compare(body)
+        self.assertEqual(resp.code, 200)
+        return json.loads(resp.body)
 
     def test_compare_by_env_ids(self):
         """The named runs are compared, in the order given."""
@@ -486,6 +494,38 @@ class TestCompareEndpoint(tornado.testing.AsyncHTTPTestCase):
 
     def test_non_string_env_id_is_400(self):
         self.assertEqual(self.compare({"env_ids": ["run-a", 7]}).code, 400)
+
+    def test_too_many_env_ids_is_400(self):
+        """Every named run is loaded and echoed back, so the list is bounded."""
+        ids = ["run-%d" % i for i in range(ExperimentCompareHandler.MAX_ENV_IDS + 1)]
+        resp = self.compare({"env_ids": ids})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("env_ids", resp.reason)
+
+    def test_too_many_env_ids_is_refused_before_loading(self):
+        """The cap is a 400 about the list, not a 404 about the runs in it.
+
+        Every id past the first two is unknown here, so a check that ran after
+        the load would answer 404 and hide the real reason.
+        """
+        ids = ["run-%d" % i for i in range(ExperimentCompareHandler.MAX_ENV_IDS + 1)]
+        self.assertEqual(self.compare({"env_ids": ids}).code, 400)
+
+    def test_a_full_search_page_can_be_compared(self):
+        """The cap is not below what one search page returns, so the documented
+        search-then-compare flow can never be refused for its length."""
+        self.assertGreaterEqual(
+            ExperimentCompareHandler.MAX_ENV_IDS,
+            ExperimentSearchHandler.MAX_LIMIT,
+        )
+
+    def test_the_cap_itself_is_not_refused(self):
+        """The boundary is inclusive: exactly MAX_ENV_IDS is a valid request,
+        so it fails on the unknown runs rather than on the list's length."""
+        ids = ["run-a"] + [
+            "run-%d" % i for i in range(ExperimentCompareHandler.MAX_ENV_IDS - 1)
+        ]
+        self.assertEqual(self.compare({"env_ids": ids}).code, 404)
 
     def test_malformed_json_is_400(self):
         """A body that is not JSON is the caller's error, not a 500.

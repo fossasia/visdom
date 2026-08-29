@@ -15,10 +15,10 @@ the data_model itself.
 
 import copy
 import getpass
+import hmac
 import json
 import jsonpatch
 import logging
-import math
 import os
 import uuid
 from collections import OrderedDict
@@ -29,15 +29,20 @@ import tornado.escape
 from visdom.utils.shared_utils import (
     get_rand_id,
     _coerce_image_slider_index,
+    _is_missing_value,
     NanSafeEncoder,
 )
 from visdom.utils.server_utils import (
     check_auth,
+    check_readonly,
+    check_readonly_message,
+    reject_readonly,
     extract_eid,
     window,
     register_window,
     gather_envs,
     broadcast_envs,
+    broadcast_tags,
     escape_eid,
     compare_envs,
     load_env,
@@ -48,15 +53,18 @@ from visdom.utils.server_utils import (
     push_deleted,
     clear_deleted,
     notify,
+    LazyEnvData,
 )
 from visdom.server.handlers.base_handlers import BaseHandler
 from visdom.experiments import (
     DEFAULT_SORT_FIELD,
+    Experiment,
     ExperimentStore,
     ExperimentFinishedError,
     QueryParseError,
     retarget_experiment,
     STATUS_FINISHED,
+    tags_to_mapping,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,12 +72,9 @@ logger = logging.getLogger(__name__)
 
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
-# TODO abstract out any direct references to the app where possible from
-# all handlers. Can instead provide accessor functions on the state?
-
-
 class PostHandler(BaseHandler):
     @check_auth
+    @check_readonly
     def post(self):
         req = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -110,7 +115,9 @@ class ExistsHandler(BaseHandler):
 
 class UpdateHandler(BaseHandler):
     @staticmethod
-    def update_packet(p, args, max_text_lines, max_old_content, max_image_history):
+    def update_packet(
+        p, args, max_text_lines, max_old_content, max_image_history, max_plot_history
+    ):
         # Shallow copy the packet to dynamically capture changes to top-level keys.
         old_p = p.copy()
 
@@ -121,7 +128,12 @@ class UpdateHandler(BaseHandler):
             old_p["old_content"] = copy.deepcopy(p["old_content"])
 
         p = UpdateHandler.update(
-            p, args, max_text_lines, max_old_content, max_image_history
+            p,
+            args,
+            max_text_lines,
+            max_old_content,
+            max_image_history,
+            max_plot_history,
         )
         p["contentID"] = get_rand_id()
 
@@ -162,7 +174,9 @@ class UpdateHandler(BaseHandler):
         return []
 
     @staticmethod
-    def update(p, args, max_text_lines, max_old_content, max_image_history):
+    def update(
+        p, args, max_text_lines, max_old_content, max_image_history, max_plot_history
+    ):
         # Update text in window, separated by a line break
         if p["type"] == "text":
             p["content"] += "<br>" + args["data"][0]["content"]
@@ -188,6 +202,11 @@ class UpdateHandler(BaseHandler):
             utype = args["data"][0]["type"]
             if utype == "plot_history":
                 p["content"].append(args["data"][0]["content"])
+                # A plot frame is a whole figure, so an unbounded history grows
+                # the env until the process runs out of memory. Keep the newest
+                # ``max_plot_history`` frames, as image history already does.
+                if len(p["content"]) > max_plot_history:
+                    p["content"] = p["content"][-max_plot_history:]
                 p["selected"] = len(p["content"]) - 1
             elif utype == "plot_update_selected":
                 selected = args["data"][0]["selected"]
@@ -209,18 +228,26 @@ class UpdateHandler(BaseHandler):
         new_data = args.get("data")
         p = update_window(p, args)
         name = args.get("name")
-        if name is None and new_data is None:
+        delete = args.get("delete")
+        # An unnamed delete carries no name and no data, which this shortcut used
+        # to read as "opts-only update" and return early, silently dropping the
+        # deletion. Ask about the delete flag first. ``not new_data`` also covers
+        # an empty list, which a layout-only update sends in place of None.
+        if not delete and name is None and not new_data:
             return p  # we only updated the opts or layout
         append = args.get("append")
 
         idxs = list(range(len(pdata)))
 
         if name is not None:
-            assert len(new_data) == 1 or args.get("delete")
+            if not delete and len(new_data) != 1:
+                raise tornado.web.HTTPError(
+                    400, reason="a named trace update takes exactly one data entry"
+                )
             idxs = [i for i in idxs if pdata[i]["name"] == name]
 
         # Delete a trace
-        if args.get("delete"):
+        if delete:
             idxs_set = set(idxs)
             p["content"]["data"] = [e for i, e in enumerate(pdata) if i not in idxs_set]
             return p
@@ -314,23 +341,21 @@ class UpdateHandler(BaseHandler):
 
             return p
 
-        # inject new trace
+        # Inject a new trace. This used to clone ``pdata[0]`` before overwriting
+        # every key of the clone, which raised IndexError once a plot had all of
+        # its traces deleted. The clone was dead work anyway, so build the trace
+        # from the update alone.
         if len(idxs) == 0:
-            idx = len(pdata)
-            pdata.append(dict(pdata[0]))  # plot is not empty, clone an entry
-            idxs = [idx]
-            append = False
-            pdata[idx] = new_data[0]
-            for k, v in new_data[0].items():
-                pdata[idx][k] = v
-            pdata[idx]["name"] = name
+            trace = dict(new_data[0])
+            trace["name"] = name
+            pdata.append(trace)
             return p
 
-        # Update traces
-        for n, idx in enumerate(idxs):
-            if all(
-                i is None or math.isnan(i) or math.isinf(i) for i in new_data[n]["x"]
-            ):
+        # Update traces. An unnamed update may carry fewer entries than the plot
+        # has traces, so walk only as far as the data reaches instead of
+        # indexing past the end of it.
+        for idx, new_trace in zip(idxs, new_data):
+            if all(_is_missing_value(i) for i in new_trace["x"]):
                 continue
             # handle data for plotting
             axes = ["x", "y"]
@@ -338,26 +363,24 @@ class UpdateHandler(BaseHandler):
                 axes.append("z")
             for axis in axes:
                 pdata[idx][axis] = (
-                    (pdata[idx][axis] + new_data[n][axis])
-                    if append
-                    else new_data[n][axis]
+                    (pdata[idx][axis] + new_trace[axis]) if append else new_trace[axis]
                 )
 
             # handle marker properties
-            if "marker" not in new_data[n]:
+            if "marker" not in new_trace:
                 continue
             if "marker" not in pdata[idx]:
                 pdata[idx]["marker"] = {}
             pdata_marker = pdata[idx]["marker"]
             for marker_prop in ["color"]:
-                if marker_prop not in new_data[n]["marker"]:
+                if marker_prop not in new_trace["marker"]:
                     continue
                 if marker_prop not in pdata[idx]["marker"]:
                     pdata[idx]["marker"][marker_prop] = []
                 pdata_marker[marker_prop] = (
-                    (pdata_marker[marker_prop] + new_data[n]["marker"][marker_prop])
+                    (pdata_marker[marker_prop] + new_trace["marker"][marker_prop])
                     if append
-                    else new_data[n]["marker"][marker_prop]
+                    else new_trace["marker"][marker_prop]
                 )
 
         return p
@@ -438,6 +461,7 @@ class UpdateHandler(BaseHandler):
                 p, args, handler.max_old_content
             )
             UpdateHandler.broadcast_window_update(handler, args, eid, p, diff_packet)
+            handler.mark_dirty(eid)
             handler.write(p["id"])
             return
 
@@ -448,6 +472,7 @@ class UpdateHandler(BaseHandler):
                 handler.max_text_lines,
                 handler.max_old_content,
                 handler.max_image_history,
+                handler.max_plot_history,
             )
         except (TypeError, ValueError) as exc:
             if is_image_slider_update:
@@ -462,9 +487,11 @@ class UpdateHandler(BaseHandler):
             broadcast(handler, json.dumps(broadcast_msg, cls=NanSafeEncoder), eid)
         else:
             UpdateHandler.broadcast_window_update(handler, args, eid, p, diff_packet)
+        handler.mark_dirty(eid)
         handler.write(p["id"])
 
     @check_auth
+    @check_readonly
     def post(self):
         if self.login_enabled and not self.current_user:
             self.set_status(400)
@@ -486,9 +513,11 @@ class CloseHandler(BaseHandler):
             p_data = handler.state[eid]["jsons"].pop(win, None)
             if p_data is not None:
                 push_deleted(handler.storage, eid, win, p_data)
+                handler.mark_dirty(eid)
             broadcast(handler, json.dumps({"command": "close", "data": win}), eid)
 
     @check_auth
+    @check_readonly
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -510,6 +539,7 @@ class DeleteEnvHandler(BaseHandler):
             broadcast_envs(handler)
 
     @check_auth
+    @check_readonly
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -546,7 +576,10 @@ class ForkEnvHandler(BaseHandler):
         prev_eid = escape_eid(args.get("prev_eid"))
         eid = escape_eid(args.get("eid"))
 
-        assert prev_eid in handler.state, "env to be forked doesn't exist"
+        if prev_eid not in handler.state:
+            # the eid stays out of the reason: it is echoed on the status line,
+            # which is latin-1 only, and eids are free-form unicode.
+            raise tornado.web.HTTPError(400, reason="env to be forked doesn't exist")
 
         # The copy carries the source env's experiment metadata, whose env_id
         # still names the env it was forked from; retarget it so the fork does
@@ -562,6 +595,7 @@ class ForkEnvHandler(BaseHandler):
         handler.write(eid)
 
     @check_auth
+    @check_readonly
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -570,10 +604,6 @@ class ForkEnvHandler(BaseHandler):
 
 
 class EnvHandler(BaseHandler):
-    def initialize(self, app):
-        super().initialize(app)
-        self.wrap_socket = app.wrap_socket
-
     @check_auth
     def get(self, eid):
         if eid not in self.state:
@@ -614,10 +644,6 @@ class EnvHandler(BaseHandler):
 
 
 class CompareHandler(BaseHandler):
-    def initialize(self, app):
-        super().initialize(app)
-        self.wrap_socket = app.wrap_socket
-
     @check_auth
     def get(self, eids):
         for eid in eids.split("+"):
@@ -666,6 +692,7 @@ class SaveHandler(BaseHandler):
         handler.write(json.dumps(ret))
 
     @check_auth
+    @check_readonly
     def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
@@ -679,7 +706,12 @@ class DataHandler(BaseHandler):
         eid = extract_eid(args)
 
         if "data" in args:
-            # Load data from client
+            # Load data from client. This is the one write behind an endpoint
+            # that also reads, so it cannot be refused by the decorator.
+            if handler.readonly:
+                reject_readonly(handler)
+                return
+
             data = json.loads(args["data"])
 
             if eid not in handler.state:
@@ -690,6 +722,7 @@ class DataHandler(BaseHandler):
             else:
                 handler.state[eid]["jsons"][args["win"]] = data
 
+            handler.mark_dirty(eid)
             broadcast_envs(handler)
         else:
             # Dump data to client
@@ -698,9 +731,10 @@ class DataHandler(BaseHandler):
                     json.dumps(handler.state[eid]["jsons"], cls=NanSafeEncoder)
                 )
             else:
-                assert (
-                    args["win"] in handler.state[eid]["jsons"]
-                ), "Window {} doesn't exist in env {}".format(args["win"], eid)
+                if args["win"] not in handler.state[eid]["jsons"]:
+                    raise tornado.web.HTTPError(
+                        400, reason="window doesn't exist in this env"
+                    )
                 handler.write(
                     json.dumps(
                         handler.state[eid]["jsons"][args["win"]], cls=NanSafeEncoder
@@ -716,11 +750,11 @@ class DataHandler(BaseHandler):
 
 
 class IndexHandler(BaseHandler):
-    def initialize(self, app):
-        super().initialize(app)
-        self.user_credential = app.user_credential
-        self.base_url = app.base_url if app.base_url != "" else "/"
-        self.wrap_socket = app.wrap_socket
+    def initialize(self, server_state):
+        super().initialize(server_state)
+        self.base_url = (
+            self.server_state.base_url if self.server_state.base_url != "" else "/"
+        )
 
     def get(self, args, **kwargs):
         if (not self.login_enabled) or self.current_user:
@@ -753,17 +787,25 @@ class IndexHandler(BaseHandler):
         salt = stored.split("$")[0]
         password = hash_password(json_obj["password"], salt=salt)
 
-        if (username == self.user_credential["username"]) and (password == stored):
+        # Constant-time comparison: `==` on the derived key returns as soon as
+        # two characters differ, so response timing tells an attacker how much
+        # of a guess was right. Both halves are always compared, which keeps a
+        # wrong username costing the same as a wrong password.
+        username_ok = hmac.compare_digest(
+            str(username).encode("utf-8"),
+            self.user_credential["username"].encode("utf-8"),
+        )
+        password_ok = hmac.compare_digest(
+            password.encode("utf-8"), stored.encode("utf-8")
+        )
+
+        if username_ok and password_ok:
             self.set_secure_cookie("user_password", username + password)
         else:
             self.set_status(400)
 
 
 class UserSettingsHandler(BaseHandler):
-    def initialize(self, app):
-        super().initialize(app)
-        self.user_settings = app.user_settings
-
     def get(self, path):
         if path == "style.css":
             self.set_status(200)
@@ -785,24 +827,11 @@ class ErrorHandler(BaseHandler):
 
 
 class UploadEnvHandler(BaseHandler):
-    def initialize(self, app):
-        super().initialize(app)
-        self.readonly = app.readonly
-
     @check_auth
+    @check_readonly_message("Uploads are disabled while the server is in readonly mode")
     def post(self):
         # 100mb file size limit
         MAX_SIZE = 100 * 1024 * 1024
-
-        if self.readonly:
-            self.set_status(403)
-            self.write(
-                {
-                    "success": False,
-                    "error": "Uploads are disabled while the server is in readonly mode",
-                }
-            )
-            return
 
         if "file" not in self.request.files:
             self.set_status(400)
@@ -857,6 +886,28 @@ class UploadEnvHandler(BaseHandler):
         )
 
 
+def _decode_json_body(body):
+    """Return a request body decoded into a dict of arguments.
+
+    Shared by the ``/experiments/*`` endpoints, whose bodies are all optional
+    JSON objects, so an empty body is read as an empty object and each handler
+    decides on its own whether the arguments it needs are missing. Anything else
+    that is not a JSON object is the caller's error: without this check,
+    malformed JSON or a bare list would surface as an unhandled exception and a
+    500 rather than a 400 naming what was wrong with the request.
+    """
+    try:
+        text = tornado.escape.to_basestring(body).strip()
+        if not text:
+            return {}
+        args = tornado.escape.json_decode(text)
+    except ValueError:
+        raise tornado.web.HTTPError(400, reason="request body must be valid JSON")
+    if not isinstance(args, Mapping):
+        raise tornado.web.HTTPError(400, reason="request body must be an object")
+    return args
+
+
 class ExperimentLogHandler(BaseHandler):
     """POST ``/experiments/log`` — record experiment metadata for an environment.
 
@@ -883,10 +934,6 @@ class ExperimentLogHandler(BaseHandler):
 
     VALID_ACTIONS = ("log", "metrics", "finish")
 
-    def initialize(self, app):
-        super().initialize(app)
-        self.readonly = app.readonly
-
     @staticmethod
     def _require_mapping(args, field):
         """Return ``args[field]`` if it is a mapping (or absent); else raise 400."""
@@ -906,7 +953,7 @@ class ExperimentLogHandler(BaseHandler):
             )
 
         eid = extract_eid(args)
-        store = ExperimentStore(handler.storage)
+        store = ExperimentStore(handler.storage, env_provider=handler.state.get)
 
         if action == "metrics":
             metrics = ExperimentLogHandler._require_mapping(args, "metrics")
@@ -948,24 +995,17 @@ class ExperimentLogHandler(BaseHandler):
         if is_new_env:
             handler.state[eid] = {"jsons": {}, "reload": {}}
         handler.state[eid]["experiment"] = experiment.to_dict()
+        handler.mark_dirty(eid)
         if is_new_env:
             broadcast_envs(handler)
 
-        handler.write(json.dumps(experiment.to_dict(), cls=NanSafeEncoder))
+        handler.write_json(experiment.to_dict())
 
     @check_auth
+    @check_readonly_message(
+        "Experiment logging is disabled while the server is in readonly mode"
+    )
     def post(self):
-        if self.readonly:
-            self.set_status(403)
-            self.write(
-                {
-                    "success": False,
-                    "error": "Experiment logging is disabled while the server "
-                    "is in readonly mode",
-                }
-            )
-            return
-
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
@@ -990,20 +1030,42 @@ class ExperimentSearchHandler(BaseHandler):
     Experiments are read back through the server's ``DataStore``, which means a
     server running with ``env_path=None`` — where nothing is persisted at all —
     has nothing to search and returns no results.
+
+    A reply is capped at ``MAX_LIMIT`` experiments. A larger ``limit``, or a
+    ``null`` one, is coerced down rather than refused, and the reply reports the
+    ``limit`` it actually applied, so a caller can always see what it got; the
+    ``total`` is unaffected and remains the count of every match. Without a cap
+    one request could ask the server to serialize everything it stores.
+
+    Paging depth is capped too: a page at ``offset`` is found by ranking every
+    match down to ``offset + limit`` and discarding all but the last ``limit``
+    of them, so a deep page costs the server its whole depth even though it
+    returns one page. ``MAX_WINDOW`` bounds that depth, and a request past it is
+    refused with a 400 rather than coerced — a coerced ``limit`` returns fewer
+    experiments and says so, but a coerced ``offset`` would return a *different*
+    page than the one asked for, and the caller could not tell. Reaching further
+    than the window means narrowing the query, not paging deeper.
     """
 
     DEFAULT_LIMIT = 100
+    MAX_LIMIT = 1000
+    MAX_WINDOW = 10000
 
     @staticmethod
-    def _require_index(args, field, default):
-        """Return ``args[field]`` as a non-negative int (``None`` = unbounded).
+    def _require_index(args, field, default, maximum=None):
+        """Return ``args[field]`` as a non-negative int, capped at ``maximum``.
 
         A JSON body has no int/float distinction, so a client that sends ``10.0``
         means the index 10; anything with a fractional part is a mistake.
+
+        ``None`` means "as many as allowed": with a ``maximum`` it becomes that
+        maximum, and without one it stays unbounded. A value above ``maximum``
+        is coerced down rather than rejected, so raising a page size can never
+        turn a working request into a failing one.
         """
         value = args.get(field, default)
         if value is None:
-            return None
+            return maximum
         if isinstance(value, float) and value.is_integer():
             value = int(value)
         if isinstance(value, bool) or not isinstance(value, int):
@@ -1014,7 +1076,31 @@ class ExperimentSearchHandler(BaseHandler):
             raise tornado.web.HTTPError(
                 400, reason="'{0}' must not be negative".format(field)
             )
+        if maximum is not None and value > maximum:
+            return maximum
         return value
+
+    @staticmethod
+    def _require_window(offset, limit):
+        """Raise 400 if the page at ``offset`` reaches past ``MAX_WINDOW``.
+
+        ``offset`` is checked against ``limit`` rather than on its own because
+        the cost is the pair: the store ranks ``offset + limit`` matches to
+        answer either. Capping ``limit`` alone would leave a one-experiment page
+        at a large enough ``offset`` costing more than the whole-store reply the
+        ``limit`` cap exists to prevent.
+        """
+        window = offset + limit
+        if window > ExperimentSearchHandler.MAX_WINDOW:
+            raise tornado.web.HTTPError(
+                400,
+                reason=(
+                    "'offset' + 'limit' must not exceed {0} (got {1}); "
+                    "narrow the query instead of paging further".format(
+                        ExperimentSearchHandler.MAX_WINDOW, window
+                    )
+                ),
+            )
 
     @staticmethod
     def _require_text(args, field):
@@ -1042,65 +1128,44 @@ class ExperimentSearchHandler(BaseHandler):
         return value
 
     @staticmethod
-    def _decode_body(body):
-        """Return the request body decoded into a dict of arguments.
-
-        The body is optional — the endpoint documents it as such, and a search
-        with no arguments matches everything — so an empty body is read as an
-        empty object. Anything else that is not a JSON object is the caller's
-        error: without this, malformed JSON or a bare list would surface as an
-        unhandled exception and a 500.
-        """
-        try:
-            text = tornado.escape.to_basestring(body).strip()
-            if not text:
-                return {}
-            args = tornado.escape.json_decode(text)
-        except ValueError:
-            raise tornado.web.HTTPError(400, reason="request body must be valid JSON")
-        if not isinstance(args, Mapping):
-            raise tornado.web.HTTPError(400, reason="request body must be an object")
-        return args
-
-    @staticmethod
     def wrap_func(handler, args):
         query = ExperimentSearchHandler._require_text(args, "query")
         sort_by = ExperimentSearchHandler._require_text(args, "sort_by")
         limit = ExperimentSearchHandler._require_index(
-            args, "limit", ExperimentSearchHandler.DEFAULT_LIMIT
+            args,
+            "limit",
+            ExperimentSearchHandler.DEFAULT_LIMIT,
+            maximum=ExperimentSearchHandler.MAX_LIMIT,
         )
         offset = ExperimentSearchHandler._require_index(args, "offset", 0)
         descending = ExperimentSearchHandler._require_flag(args, "descending", True)
+        ExperimentSearchHandler._require_window(offset, limit)
 
-        store = ExperimentStore(handler.storage)
+        store = ExperimentStore(handler.storage, env_provider=handler.state.get)
         try:
-            experiments = store.search(
+            page, total = store.search_page(
                 query=query,
                 sort_by=sort_by or DEFAULT_SORT_FIELD,
                 descending=descending,
+                offset=offset,
+                limit=limit,
             )
         except QueryParseError as e:
             raise tornado.web.HTTPError(400, reason=str(e))
 
-        end = None if limit is None else offset + limit
-        page = experiments[offset:end]
-
-        handler.write(
-            json.dumps(
-                {
-                    "experiments": [e.to_dict() for e in page],
-                    "total": len(experiments),
-                    "limit": limit,
-                    "offset": offset,
-                    "query": query or "",
-                },
-                cls=NanSafeEncoder,
-            )
+        handler.write_json(
+            {
+                "experiments": [e.to_dict() for e in page],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "query": query or "",
+            }
         )
 
     @check_auth
     def post(self):
-        self.wrap_func(self, self._decode_body(self.request.body))
+        self.wrap_func(self, _decode_json_body(self.request.body))
 
 
 class ExperimentCompareHandler(BaseHandler):
@@ -1127,11 +1192,21 @@ class ExperimentCompareHandler(BaseHandler):
 
     Experiments are read through the server's ``DataStore``, so as with search a
     server running with ``env_path=None`` has nothing to compare. The body is
-    decoded by ``ExperimentSearchHandler._decode_body``, so the two endpoints
+    decoded by the shared ``_decode_json_body``, so the two endpoints
     answer malformed JSON and non-object bodies with the same 400; unlike
     search, an empty body is not a valid request here, since ``env_ids`` is
     required and there is no comparison to make without it.
+
+    At most ``MAX_ENV_IDS`` runs are compared in one request: every named run is
+    loaded and echoed back in full, so the reply grows with the list. The list
+    is refused rather than truncated, for the same reason a missing run is a 404
+    — a diff of some of the runs asked for is a different answer, not a smaller
+    one, and nothing in the reply would reveal the difference. The cap matches
+    search's ``MAX_LIMIT``, so any single page of search results can be handed
+    straight to compare; a longer list is compared in batches.
     """
+
+    MAX_ENV_IDS = 1000
 
     @staticmethod
     def _require_env_ids(args):
@@ -1140,6 +1215,9 @@ class ExperimentCompareHandler(BaseHandler):
         A bare string is rejected rather than treated as a one-id list: it would
         otherwise be iterated character by character into a comparison of runs
         named ``"r"``, ``"u"``, ``"n"``.
+
+        Length is checked before the ids are read, since the cost being bounded
+        is loading them.
         """
         value = args.get("env_ids")
         if value is None:
@@ -1150,6 +1228,16 @@ class ExperimentCompareHandler(BaseHandler):
             raise tornado.web.HTTPError(
                 400, reason="'env_ids' must name at least one environment"
             )
+        if len(value) > ExperimentCompareHandler.MAX_ENV_IDS:
+            raise tornado.web.HTTPError(
+                400,
+                reason=(
+                    "'env_ids' must not name more than {0} environments "
+                    "(got {1}); compare them in batches".format(
+                        ExperimentCompareHandler.MAX_ENV_IDS, len(value)
+                    )
+                ),
+            )
         if not all(isinstance(env_id, str) for env_id in value):
             raise tornado.web.HTTPError(400, reason="'env_ids' must contain strings")
         return value
@@ -1157,17 +1245,172 @@ class ExperimentCompareHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
         env_ids = ExperimentCompareHandler._require_env_ids(args)
-        store = ExperimentStore(handler.storage)
+        store = ExperimentStore(handler.storage, env_provider=handler.state.get)
         try:
             comparison = store.compare(env_ids)
         except KeyError as e:
             raise tornado.web.HTTPError(404, reason=str(e.args[0]))
 
-        handler.write(json.dumps(comparison, cls=NanSafeEncoder))
+        handler.write_json(comparison)
 
     @check_auth
     def post(self):
-        self.wrap_func(self, ExperimentSearchHandler._decode_body(self.request.body))
+        self.wrap_func(self, _decode_json_body(self.request.body))
+
+
+class ExperimentSuggestHandler(BaseHandler):
+    """POST ``/experiments/suggest`` — suggest parameters for the next run.
+
+    Reserved endpoint. Choosing the next set of hyper-parameters to try is a
+    search-strategy problem (Optuna-backed) that belongs to a later release, so
+    this is a stub: it accepts the request and replies ``501 Not Implemented``
+    with a JSON body rather than a made-up suggestion. Wiring the route, the
+    :meth:`Visdom.suggest_experiment` client method and the API docs now means
+    the strategy can be dropped in later without changing the surface, and a
+    caller gets a stable, decodable answer it can tell apart from a real one::
+
+        {"status": "not_implemented", "detail": "...", "suggestion": null}
+
+    The request body is validated and passed through like the sibling handlers
+    so that shape is already in place, but it is otherwise ignored until the
+    strategy lands. A body that is not a JSON object is still rejected with 400:
+    a caller sending a malformed search space should hear about it now rather
+    than have it silently accepted here and rejected once the strategy lands.
+    """
+
+    #: The stub reply, carrying ``suggestion: null`` so the eventual field is
+    #: already named and a caller can distinguish the stub from a real result.
+    NOT_IMPLEMENTED = {
+        "status": "not_implemented",
+        "detail": (
+            "experiment suggestion is not implemented yet; the endpoint is "
+            "reserved for a later release"
+        ),
+        "suggestion": None,
+    }
+
+    @staticmethod
+    def wrap_func(handler, args):
+        handler.set_status(501)
+        handler.write_json(ExperimentSuggestHandler.NOT_IMPLEMENTED)
+
+    @check_auth
+    def post(self):
+        self.wrap_func(self, _decode_json_body(self.request.body))
+
+
+class TagsHandler(BaseHandler):
+    """Read and update environment tags backed by experiment metadata."""
+
+    VALID_ACTIONS = ("get", "set")
+
+    @staticmethod
+    def _experiment_from_env(eid, env):
+        """Return an experiment from one materialized in-memory environment."""
+        blob = env.get("experiment")
+        if not isinstance(blob, Mapping):
+            return None
+        experiment = Experiment.from_dict(blob)
+        experiment.env_id = eid
+        return experiment
+
+    @staticmethod
+    def _read_experiment(handler, eid):
+        """Read one experiment without materializing unrelated environments."""
+        env = handler.state.get(eid)
+        if env is None or (isinstance(env, LazyEnvData) and not env.is_loaded):
+            return ExperimentStore(handler.storage).get_experiment(eid)
+        experiment = TagsHandler._experiment_from_env(eid, env)
+        if experiment is not None:
+            return experiment
+        return ExperimentStore(handler.storage).get_experiment(eid)
+
+    @staticmethod
+    def _experiment_map(handler):
+        """Return stored experiments overlaid with materialized state only."""
+        store = ExperimentStore(handler.storage)
+        experiments = {exp.env_id: exp for exp in store.list_experiments()}
+        for eid, env in handler.state.items():
+            if isinstance(env, LazyEnvData) and not env.is_loaded:
+                continue
+            experiment = TagsHandler._experiment_from_env(eid, env)
+            if experiment is not None:
+                experiments[eid] = experiment
+        return experiments
+
+    @staticmethod
+    def _write_tags(handler, eid=None):
+        if eid is not None:
+            experiment = TagsHandler._read_experiment(handler, eid)
+            tags = tags_to_mapping(experiment.tags) if experiment else {}
+            handler.write_json(tags)
+            return
+        experiments = TagsHandler._experiment_map(handler)
+        tag_map = {
+            env_id: tags_to_mapping(experiment.tags)
+            for env_id, experiment in experiments.items()
+            if experiment.tags
+        }
+        handler.write_json(tag_map)
+
+    @staticmethod
+    def wrap_func(handler, args):
+        action = args.get("action", "set")
+        if action not in TagsHandler.VALID_ACTIONS:
+            raise tornado.web.HTTPError(
+                400, reason="unknown action {0!r}".format(action)
+            )
+
+        if action == "get":
+            eid = extract_eid(args) if args.get("eid") is not None else None
+            TagsHandler._write_tags(handler, eid)
+            return
+
+        if handler.readonly:
+            handler.set_status(403)
+            handler.write(
+                {
+                    "success": False,
+                    "error": "Tag updates are disabled while the server is "
+                    "in readonly mode",
+                }
+            )
+            return
+
+        if "tags" not in args:
+            raise tornado.web.HTTPError(400, reason="'tags' is required for set action")
+
+        eid = extract_eid(args)
+        append = args.get("append", False)
+        store = ExperimentStore(handler.storage)
+        env = handler.state.get(eid)
+        is_new_env = env is None
+        if is_new_env:
+            env = {"jsons": {}, "reload": {}}
+        try:
+            experiment = store.update_tags(
+                eid, args["tags"], append=append, env_data=env
+            )
+        except (TypeError, ValueError) as error:
+            raise tornado.web.HTTPError(400, reason=str(error))
+
+        if is_new_env:
+            handler.state[eid] = env
+
+        tags = tags_to_mapping(experiment.tags)
+        if is_new_env:
+            broadcast_envs(handler)
+        broadcast_tags(handler, eid, tags)
+        handler.write_json(tags)
+
+    @check_auth
+    def get(self):
+        eid = self.get_query_argument("eid", default=None)
+        self.wrap_func(self, {"action": "get", "eid": eid})
+
+    @check_auth
+    def post(self):
+        self.wrap_func(self, _decode_json_body(self.request.body))
 
 
 class HealthHandler(BaseHandler):

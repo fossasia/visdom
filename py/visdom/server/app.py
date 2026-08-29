@@ -27,6 +27,10 @@ from visdom.server.handlers.socket_handlers import (
     VisSocketHandler,
     VisSocketWrap,
 )
+from visdom.server.handlers.experiments_handler import (
+    ExperimentHparamsHandler,
+    ExperimentHparamsUpdateHandler,
+)
 from visdom.server.handlers.web_handlers import (
     CloseHandler,
     CompareHandler,
@@ -39,25 +43,30 @@ from visdom.server.handlers.web_handlers import (
     ExperimentCompareHandler,
     ExperimentLogHandler,
     ExperimentSearchHandler,
+    ExperimentSuggestHandler,
     ForkEnvHandler,
     HealthHandler,
     IndexHandler,
     PostHandler,
     SaveHandler,
+    TagsHandler,
     UpdateHandler,
     UploadEnvHandler,
     UserSettingsHandler,
 )
+from visdom.server.server_state import ServerState
 from visdom.server.defaults import (
     DEFAULT_BASE_URL,
     DEFAULT_ENV_PATH,
     DEFAULT_HOSTNAME,
     DEFAULT_MAX_IMAGE_HISTORY,
     DEFAULT_MAX_OLD_CONTENT,
+    DEFAULT_MAX_PLOT_HISTORY,
     DEFAULT_MAX_TEXT_LINES,
     DEFAULT_PORT,
+    DEFAULT_SAVE_INTERVAL,
+    DEFAULT_SAVE_THRESHOLD,
 )
-
 
 tornado_settings = {
     "autoescape": None,
@@ -78,15 +87,17 @@ class Application(tornado.web.Application):
         user_credential=None,
         use_frontend_client_polling=False,
         eager_data_loading=False,
+        save_interval=DEFAULT_SAVE_INTERVAL,
+        save_threshold=DEFAULT_SAVE_THRESHOLD,
     ):
         self.eager_data_loading = eager_data_loading
         self.max_image_history = DEFAULT_MAX_IMAGE_HISTORY
         self.max_old_content = DEFAULT_MAX_OLD_CONTENT
+        self.max_plot_history = DEFAULT_MAX_PLOT_HISTORY
         self.max_text_lines = DEFAULT_MAX_TEXT_LINES
         self.env_path = env_path
         self.storage = JSONStore(env_path)
         self.state = self.load_state()
-        self.layouts = self.load_layouts()
         self.user_settings = self.load_user_settings()
         self.subs = {}
         self.sources = {}
@@ -103,33 +114,94 @@ class Application(tornado.web.Application):
             with open(DEFAULT_ENV_PATH + "COOKIE_SECRET", "r") as fn:
                 tornado_settings["cookie_secret"] = fn.read()
 
+        self.server_state = ServerState(
+            state=self.state,
+            subs=self.subs,
+            sources=self.sources,
+            storage=self.storage,
+            env_path=self.env_path,
+            port=self.port,
+            login_enabled=self.login_enabled,
+            readonly=self.readonly,
+            user_credential=self.user_credential,
+            base_url=self.base_url,
+            wrap_socket=self.wrap_socket,
+            user_settings=self.user_settings,
+            max_text_lines=self.max_text_lines,
+            max_old_content=self.max_old_content,
+            max_image_history=self.max_image_history,
+            max_plot_history=self.max_plot_history,
+            save_interval=save_interval,
+            save_threshold=save_threshold,
+        )
+
         tornado_settings["static_url_prefix"] = self.base_url + "/static/"
-        tornado_settings["debug"] = True
+        # A traceback and the raw request are debugging aids, not something to
+        # hand to whoever provoked the error. `debug` was forced on for every
+        # server, which put both on the 500 page -- and, being tornado's debug
+        # flag, also turned on autoreload. Follow the operator's logging level
+        # instead, and keep the two concerns separate.
+        tornado_settings["show_error_details"] = logging.getLogger().isEnabledFor(
+            logging.DEBUG
+        )
         experiments_url = "%s/experiments" % self.base_url
+        server_state_args = {"server_state": self.server_state}
         handlers = [
-            (r"%s/events" % self.base_url, PostHandler, {"app": self}),
-            (r"%s/update" % self.base_url, UpdateHandler, {"app": self}),
-            (r"%s/close" % self.base_url, CloseHandler, {"app": self}),
-            (r"%s/socket" % self.base_url, SocketHandler, {"app": self}),
-            (r"%s/socket_wrap" % self.base_url, SocketWrap, {"app": self}),
-            (r"%s/vis_socket" % self.base_url, VisSocketHandler, {"app": self}),
-            (r"%s/vis_socket_wrap" % self.base_url, VisSocketWrap, {"app": self}),
-            (r"%s/env/(.*)" % self.base_url, EnvHandler, {"app": self}),
-            (r"%s/compare/(.*)" % self.base_url, CompareHandler, {"app": self}),
-            (r"%s/save" % self.base_url, SaveHandler, {"app": self}),
-            (r"%s/upload_env" % self.base_url, UploadEnvHandler, {"app": self}),
-            (r"%s/error/(.*)" % self.base_url, ErrorHandler, {"app": self}),
-            (r"%s/win_exists" % self.base_url, ExistsHandler, {"app": self}),
-            (r"%s/win_data" % self.base_url, DataHandler, {"app": self}),
-            (r"%s/delete_env" % self.base_url, DeleteEnvHandler, {"app": self}),
-            (r"%s/env_state" % self.base_url, EnvStateHandler, {"app": self}),
-            (r"%s/fork_env" % self.base_url, ForkEnvHandler, {"app": self}),
-            (r"%s/log" % experiments_url, ExperimentLogHandler, {"app": self}),
-            (r"%s/search" % experiments_url, ExperimentSearchHandler, {"app": self}),
-            (r"%s/compare" % experiments_url, ExperimentCompareHandler, {"app": self}),
-            (r"%s/user/(.*)" % self.base_url, UserSettingsHandler, {"app": self}),
+            (r"%s/events" % self.base_url, PostHandler, server_state_args),
+            (r"%s/update" % self.base_url, UpdateHandler, server_state_args),
+            (r"%s/close" % self.base_url, CloseHandler, server_state_args),
+            (r"%s/socket" % self.base_url, SocketHandler, server_state_args),
+            (r"%s/socket_wrap" % self.base_url, SocketWrap, server_state_args),
+            (r"%s/vis_socket" % self.base_url, VisSocketHandler, server_state_args),
+            (
+                r"%s/vis_socket_wrap" % self.base_url,
+                VisSocketWrap,
+                server_state_args,
+            ),
+            (r"%s/env/(.*)" % self.base_url, EnvHandler, server_state_args),
+            (r"%s/compare/(.*)" % self.base_url, CompareHandler, server_state_args),
+            (r"%s/save" % self.base_url, SaveHandler, server_state_args),
+            (r"%s/upload_env" % self.base_url, UploadEnvHandler, server_state_args),
+            (r"%s/error/(.*)" % self.base_url, ErrorHandler, server_state_args),
+            (r"%s/win_exists" % self.base_url, ExistsHandler, server_state_args),
+            (r"%s/win_data" % self.base_url, DataHandler, server_state_args),
+            (r"%s/delete_env" % self.base_url, DeleteEnvHandler, server_state_args),
+            (r"%s/env_state" % self.base_url, EnvStateHandler, server_state_args),
+            (r"%s/fork_env" % self.base_url, ForkEnvHandler, server_state_args),
+            (r"%s/log" % experiments_url, ExperimentLogHandler, server_state_args),
+            (
+                r"%s/search" % experiments_url,
+                ExperimentSearchHandler,
+                server_state_args,
+            ),
+            (
+                r"%s/compare" % experiments_url,
+                ExperimentCompareHandler,
+                server_state_args,
+            ),
+            (
+                r"%s/suggest" % experiments_url,
+                ExperimentSuggestHandler,
+                server_state_args,
+            ),
+            (
+                r"%s/hparams" % experiments_url,
+                ExperimentHparamsHandler,
+                server_state_args,
+            ),
+            (
+                r"%s/hparams/update" % experiments_url,
+                ExperimentHparamsUpdateHandler,
+                server_state_args,
+            ),
+            (r"%s/tags" % experiments_url, TagsHandler, server_state_args),
+            (
+                r"%s/user/(.*)" % self.base_url,
+                UserSettingsHandler,
+                server_state_args,
+            ),
             (r"%s/health" % self.base_url, HealthHandler),
-            (r"%s(.*)" % self.base_url, IndexHandler, {"app": self}),
+            (r"%s(.*)" % self.base_url, IndexHandler, server_state_args),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)
 
@@ -140,17 +212,57 @@ class Application(tornado.web.Application):
             self.last_access = time.time()
         return self.last_access
 
+    @property
+    def layouts(self):
+        """Compatibility view of layouts owned by ``ServerState``."""
+        return self.server_state.get_layouts()
+
+    @layouts.setter
+    def layouts(self, layouts):
+        self.server_state.set_layouts(layouts)
+
+    @property
+    def save_interval(self):
+        """Compatibility view of the ServerState autosave interval."""
+        return self.server_state.save_interval
+
+    @property
+    def save_threshold(self):
+        """Compatibility view of the ServerState update threshold."""
+        return self.server_state.save_threshold
+
+    @property
+    def dirty_envs(self):
+        """Compatibility view of environments pending persistence."""
+        return self.server_state.dirty_envs
+
+    @property
+    def autosave(self):
+        """Compatibility view of the ServerState autosave timer."""
+        return self.server_state.autosave
+
+    def mark_dirty(self, eid):
+        """Compatibility wrapper for the ServerState dirty tracker."""
+        return self.server_state.mark_dirty(eid)
+
+    def flush_envs(self, eids):
+        """Compatibility wrapper for selective ServerState persistence."""
+        return self.server_state.flush_envs(eids)
+
+    def flush_dirty(self):
+        """Compatibility wrapper for flushing dirty environments."""
+        return self.server_state.flush_dirty()
+
+    def start_autosave(self):
+        """Compatibility wrapper for starting ServerState autosave."""
+        return self.server_state.start_autosave()
+
     def save_layouts(self):
-        if self.env_path is None:
-            warn_once(
-                "Saving and loading to disk has no effect when running with "
-                "env_path=None.",
-                RuntimeWarning,
-            )
-            return
-        self.storage.save_layouts(self.layouts)
+        """Compatibility wrapper for callers that still use ``Application``."""
+        self.server_state.save_layouts()
 
     def load_layouts(self):
+        """Read layouts through the configured ``DataStore`` backend."""
         if self.env_path is None:
             warn_once(
                 "Saving and loading to disk has no effect when running with "

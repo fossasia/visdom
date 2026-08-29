@@ -269,7 +269,7 @@ const clampEditor = (editor, pendingPoint) => {
 };
 
 // Owns the note state for one plot pane and hands back the pieces it renders:
-// the pencil button, the hint bar and the floating editor.
+// the marker button, the hint bar and the floating editor.
 const useAnnotations = ({
   plotlyRef,
   content,
@@ -379,21 +379,23 @@ const useAnnotations = ({
     };
   }, [active, envID, paneID, frame, content]);
 
-  const button = enabled ? (
-    <button
-      key="annotate_widget_button"
-      title="annotate points"
-      onClick={() => {
-        setActive(!active);
-        setPendingPoint(null);
-      }}
-      className={active ? 'pull-right active' : 'pull-right'}
-    >
-      <span className="glyphicon glyphicon-pencil" />
-    </button>
-  ) : (
-    ''
-  );
+  // path data from lucide-react's pencil-line icon (24x24 viewBox)
+  const modebarButton = enabled
+    ? {
+        name: 'annotate',
+        title: active ? 'stop annotating' : 'annotate points',
+        icon: {
+          width: 24,
+          height: 24,
+          path: 'M13 21h8 m15 5 4 4 M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z',
+        },
+        toggle: true,
+        click: () => {
+          setActive((wasActive) => !wasActive);
+          setPendingPoint(null);
+        },
+      }
+    : null;
 
   const hint =
     active && !pendingPoint ? (
@@ -439,7 +441,7 @@ const useAnnotations = ({
       ''
     );
 
-  return { button, hint, editor };
+  return { modebarButton, hint, editor };
 };
 
 export { draggedIndexes, pinDragged, useAnnotations };

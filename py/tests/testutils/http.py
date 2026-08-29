@@ -52,6 +52,8 @@ class VisdomHTTPTestCase(tornado.testing.AsyncHTTPTestCase):
             headers={"Content-Type": "application/json"},
         )
 
+    # -- Window helpers -------------------------------------------------------
+
     def create_window(self, data, eid="main", win=None, opts=None, layout=None):
         """POST to ``/events`` and return the assigned window id."""
         payload = {"data": data, "eid": eid, "layout": {} if layout is None else layout}
@@ -66,15 +68,28 @@ class VisdomHTTPTestCase(tornado.testing.AsyncHTTPTestCase):
             [{"type": "text", "content": content}], eid=eid, win=win, opts=opts
         )
 
-    def get_envs(self):
-        return json.loads(self.post_json("/env_state", {}).body)
+    def update(self, win, data, eid="main", **extra):
+        payload = {"win": win, "eid": eid, "data": data}
+        payload.update(extra)
+        return self.post_json("/update", payload)
+
+    def close_window(self, win, eid="main"):
+        return self.post_json("/close", {"win": win, "eid": eid})
+
+    def win_exists(self, win, eid="main"):
+        return self.post_json("/win_exists", {"eid": eid, "win": win}).body == b"true"
 
     def get_win_data(self, win=None, eid="main"):
         """Raw pane JSON for one window, or the whole env when ``win`` is None."""
         return json.loads(self.post_json("/win_data", {"eid": eid, "win": win}).body)
 
-    def win_exists(self, win, eid="main"):
-        return self.post_json("/win_exists", {"eid": eid, "win": win}).body == b"true"
+    # -- Environment helpers --------------------------------------------------
+
+    def get_envs(self):
+        return json.loads(self.post_json("/env_state", {}).body)
+
+    def save(self, eids):
+        return self.post_json("/save", {"data": eids})
 
     def panes(self, eid="main"):
         """Live pane dict for ``eid`` straight off the application state."""

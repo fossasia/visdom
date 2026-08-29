@@ -18,43 +18,51 @@ LICENSE file in the root directory of this source tree.
 
     <title>Visdom Login</title>
 
-    <!-- Bootstrap core CSS -->
-    <link href={{ static_url("css/bootstrap.min.css") }} rel="stylesheet">
+    <link rel="icon" type="image/png" href={{ static_url("favicon.png") }}>
+
+    <link href={{ static_url("css/base.css") }} rel="stylesheet">
 
     <!-- Custom styles for this template -->
     <link href={{ static_url("css/login.css") }} rel="stylesheet">
-
-    <!-- jQuery -->
-    <script src={{ static_url("js/jquery.min.js") }}></script>
 
     <!-- Hashing Password using Stanford Javascript Crypto Library-->
     <script src={{ static_url("js/sjcl.js") }}></script>
 
     <script>
-      $(document).ready(function () {
+      document.addEventListener('DOMContentLoaded', () => {
           // initialize the viewer
-          $('#submitButton').click(function (event) {
-              var username = $("#inputUsername").val();
-              var password = $("#inputPassword").val();
+          document.getElementById('submitButton').addEventListener('click', (event) => {
+              const username = document.getElementById('inputUsername').value;
+              let password = document.getElementById('inputPassword').value;
               password = sjcl.hash.sha256.hash(password)
-              var data =
+              const data =
               {
                   username: username,
                   password: sjcl.codec.hex.fromBits(password)
               };
-              var dataToSend = JSON.stringify(data);
-              $.ajax(
-                      {
-                          url: '{{base_url}}',
-                          type: 'POST',
-                          data: dataToSend,
-                          success:function() {
-                            window.location.replace("{{base_url}}")
-                          },
-                          error: function () {
-                            $("#errorMessage").text("Invalid Login Information");
-                          }
-                      });
+              const dataToSend = JSON.stringify(data);
+              fetch('{{base_url}}', {
+                  method: 'POST',
+                  mode: 'cors',
+                  cache: 'no-cache',
+                  credentials: 'same-origin',
+                  headers: {
+                      'Content-Type': 'application/json; charset=utf-8',
+                  },
+                  redirect: 'follow',
+                  referrer: 'no-referrer',
+                  body: dataToSend,
+              })
+                  .then((response) => {
+                      if (!response.ok) {
+                          throw new Error('Invalid login');
+                      }
+                      window.location.replace("{{base_url}}")
+                  })
+                  .catch((err) => {
+                      console.error('Login request failed:', err);
+                      document.getElementById("errorMessage").textContent = "Invalid Login Information";
+                  });
               event.preventDefault();
           });
       });

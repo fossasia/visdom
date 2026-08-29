@@ -10,9 +10,12 @@ import unittest
 from unittest.mock import Mock, patch
 
 import numpy as np
+import pytest
 import visdom
 
 from visdom.server.handlers.web_handlers import UpdateHandler
+
+pytestmark = pytest.mark.unit
 
 
 def _unconnected_visdom():
@@ -62,7 +65,7 @@ class TestImageUpdateSelected(unittest.TestCase):
         }
 
     def _update(self, pane, args):
-        return UpdateHandler.update(pane, args, 500, 50, 4)
+        return UpdateHandler.update(pane, args, 500, 50, 4, 4)
 
     def test_sets_index(self):
         p = self._update(self._pane(), self._args(3))
@@ -170,6 +173,7 @@ class TestImageUpdateSelected(unittest.TestCase):
                 self.max_text_lines = 500
                 self.max_old_content = 50
                 self.max_image_history = 4
+                self.max_plot_history = 4
 
             def set_status(self, code):
                 self.status = code

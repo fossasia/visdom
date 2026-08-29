@@ -299,6 +299,7 @@ Visdom offers the following basic visualization functions:
 - [`vis.text`](#vistext)     : arbitrary HTML
 - [`vis.properties`](#visproperties)     : properties grid
 - [`vis.table`](#vistable)     : editable, resizable table pane
+- [`vis.html_table`](#vishtml_table)     : static styled HTML table
 - [`vis.audio`](#visaudio)    : audio
 - [`vis.video`](#visvideo)    : videos
 - [`vis.svg`](#vissvg)      : SVG object
@@ -355,16 +356,31 @@ vis._send({'data': [trace], 'layout': layout, 'win': 'mywin'})
 - [`vis.win_exists`](#viswin_exists) : check if a window already exists by id
 - [`vis.get_env_list`](#visget_env_list) : get a list of all of the environments on your server
 - [`vis.get_window_data`](#visget_window_data): get current data for a window
+- [`vis.set_tags`](#visset_tags): replace or append environment tags
+- [`vis.get_tags`](#visget_tags): read environment tags
 - [`vis.save_plotly_figure`](#visplotlyplot): save a Plotly figure to an image file from code (no browser click)
 - [`vis.check_connection`](#vischeck_connection): check if the server is connected
 - [`vis.replay_log`](#visreplay_log): replay the actions from the provided log file
 
+### Experiments
+Track experiment metadata (hyper-parameters, metrics, tags) alongside your plots, then search and compare runs across your server:
+- [`vis.experiment`](#visexperiment)  : create or update experiment metadata for an env
+- [`vis.log_metrics`](#vislog_metrics)  : append metric observations to an env's experiment
+- [`vis.finish_experiment`](#visfinish_experiment)  : mark an experiment terminal (finished/failed)
+- [`vis.search_experiments`](#vissearch_experiments)  : search experiments across envs with a query
+- [`vis.compare_experiments`](#viscompare_experiments)  : diff experiments field by field
+- [`vis.suggest_experiment`](#vissuggest_experiment)  : suggest parameters for the next run (reserved)
+- [`vis.hparams`](#vishparams)  : open a hyper-parameter pane over the selected runs
+- [`vis.update_hparams`](#visupdate_hparams)  : change or refresh an existing hyper-parameter pane
+
 
 ## Loggers
 
-Framework-specific logging bridges that wrap the Visdom API so training loops stay focused on training. Each logger lives in its own submodule and handles window creation, step tracking, and throttling internally.
+Framework-specific logging bridges that wrap the Visdom API so training loops stay focused on training. Each logger lives in its own submodule and handles window creation, step tracking, and throttling internally. None of the framework packages below are part of Visdom's own install — each logger imports its framework lazily and raises a clear `ImportError` with the `pip install` command if it's missing.
 
 ### PyTorch
+
+**Requirements:** `pip install visdom torch`
 
 `visdom.pytorch.VisdomLogger` is a context manager for raw PyTorch training loops. Call `tracker.log(name, value)` for any scalar — no `viz.line()` arguments needed.
 
@@ -411,6 +427,8 @@ Each unique name passed to `tracker.log()` gets its own window. The first call c
 
 ### scikit-learn
 
+**Requirements:** `pip install visdom scikit-learn`
+
 `visdom.loggers.VisdomSklearnLogger` patches all sklearn `fit()` calls so every estimator trained after `autolog()` logs to Visdom automatically — no per-estimator code needed.
 
 **Plain estimators** (classifiers, regressors, clusterers) produce a text pane with the estimator name, dataset shape, training score, fit time, and all hyperparameters.
@@ -424,6 +442,8 @@ Each unique name passed to `tracker.log()` gets its own window. The first call c
 **Note:** `train_score`, `train_rmse`, `train_mae` and the residual scatter are all measured on the data passed to `fit()`. They describe fit quality on the training set and are not held-out estimates — score your own test set for that.
 
 **Note:** panes are keyed on the estimator instance, so refitting the same estimator updates the panes it already owns instead of opening new ones. Two different estimator objects always get their own panes, even of the same class.
+
+**Note:** one logger is active at a time. Calling `autolog()` again switches the active env **silently** — no warning is raised, and the previous env stops receiving updates.
 
 ```python
 import visdom
@@ -462,6 +482,8 @@ See `example/train_sklearn_example.py` for a full working example covering plain
 
 ### XGBoost
 
+**Requirements:** `pip install visdom xgboost`
+
 `visdom.loggers.VisdomXGBLogger` implements XGBoost's `TrainingCallback` protocol, plotting train/eval metrics to Visdom after every boosting round.
 
 There was no way to visualize XGBoost training runs in Visdom without manually attaching a `TrainingCallback` and wiring up `viz.line()` calls yourself. This adds opt-in auto-logging behind a single `autolog()` call, with no changes required to model, `train()`, or `fit()` code.
@@ -489,6 +511,97 @@ booster = xgb.train(params, dtrain, evals=[(dtrain, "train"), (dval, "eval")], c
 Each eval metric gets its own window with one trace per data name (`train`/`eval`), and `best_iteration`/`best_score` are logged as a text pane once training finishes. See `example/train_xgboost_example.py` for a full working example.
 
 **Note:** one logger is active at a time. Calling `autolog()` again for a different env moves logging there and warns; the previous env keeps the windows it already has. Import `cross_validate` after `autolog()` — importing it first binds the original function, and every fold then opens its own window instead of sharing one per metric.
+
+### TensorFlow / Keras
+
+**Requirements:** `pip install visdom tensorflow` (or `pip install visdom keras`)
+
+`visdom.loggers.VisdomKerasLogger` implements Keras's `Callback` protocol, plotting train/val metrics to Visdom after every epoch.
+
+```python
+from tensorflow import keras
+from tensorflow.keras import layers
+import visdom
+from visdom.loggers import VisdomKerasLogger
+
+viz = visdom.Visdom()
+logger = VisdomKerasLogger(viz, env="keras_run")
+
+model = keras.Sequential([
+    layers.Input(shape=(20,)),
+    layers.Dense(32, activation="relu"),
+    layers.Dense(1, activation="sigmoid"),
+])
+model.compile(optimizer="adam", loss="binary_crossentropy", metrics=["accuracy"])
+
+model.fit(
+    x_train, y_train,
+    validation_data=(x_val, y_val),
+    epochs=20,
+    callbacks=[logger],
+)
+```
+
+A metric named `val_<name>` is plotted as a `val` trace on the same window its train counterpart `<name>` plots as a `train` trace, matching how Keras already splits train/val by key prefix. One instance can be reused across multiple `fit()` calls — a new run's epoch 0 replaces the previous run's curve on the same windows in place, rather than opening a duplicate set of windows.
+
+**Per-batch logging with `log_every`** — use when you also want step-level detail on large datasets. Off by default, since `on_train_batch_end` otherwise fires every batch regardless of whether step-level detail is wanted:
+
+```python
+logger = VisdomKerasLogger(viz, env="keras_run", log_every=50)
+model.fit(x_train, y_train, epochs=20, callbacks=[logger])
+```
+
+Each metric gets its own window titled `"<name> (step)"`, throttled to one send every `log_every` batches. The optimizer's current learning rate is read (not computed) and plotted alongside as `lr`.
+
+**Parameters:**
+- `viz`: a connected `visdom.Visdom()` instance
+- `env`: environment name (default: `viz.env` if set, otherwise auto-generated from timestamp)
+- `log_every`: also plot metrics at batch granularity, one send every N batches (default: `None`, disabled)
+
+**Note:** each call to `viz.line()` is a synchronous network request made on the training thread. Pick a `log_every` large enough that it doesn't stall training waiting on the server — 50+ is a reasonable default on GPU.
+
+**Note:** not thread-safe — internal state has no locking, so calling `fit()` on the same logger instance from multiple threads can race.
+
+See `example/train_keras_example.py` for a full working example.
+
+### Optuna
+
+**Requirements:** `pip install visdom optuna`
+
+`visdom.integrations.OptunaCallback` implements Optuna's study callback
+protocol. After each trial finishes it records the trial's parameters, objective
+values and state as a Visdom experiment in a dedicated environment. Optuna is
+not a Visdom dependency, so existing Visdom users do not install it unless they
+choose this integration.
+
+```python
+import optuna
+import visdom
+from visdom.integrations import OptunaCallback
+
+viz = visdom.Visdom()
+callback = OptunaCallback(
+    viz,
+    dashboard_env="optuna_quadratic",
+    objective_names=["loss"],
+)
+
+
+def objective(trial):
+    x = trial.suggest_float("x", -10, 10)
+    return (x - 2) ** 2
+
+
+study = optuna.create_study(study_name="quadratic", direction="minimize")
+study.optimize(objective, n_trials=100, callbacks=[callback])
+```
+
+This first-stage integration records one experiment per trial, using names such
+as `optuna_quadratic_trial_000017`. Pass `raise_on_error=True` if a Visdom
+logging failure should stop optimization; by default it emits a warning and
+allows the study to continue. Single- and multi-objective studies are supported,
+and `COMPLETE`, `PRUNED` and `FAIL` states are preserved in the
+`optuna_state` tag.
 
 ## Details
 <img src="https://user-images.githubusercontent.com/19650074/198747904-7a8a580f-851a-45fb-8f45-94e54a910ee2.png"/>
@@ -599,6 +712,34 @@ Callback are called on property value update:
  - `value`: new value
 
 No specific `opts` are currently supported.
+
+#### vis.html_table
+This function renders structured data as a styled, static HTML
+table (read-only — use `vis.table` if you need an editable pane).
+
+Arguments:
+- `data`: a 2D `list`/`tuple` of rows, a 2D numpy array, or a
+  `list` of `dict`s (in which case `headers` is derived from the
+  first dict's keys unless explicitly given). In case of an empty
+  list, a table with only the header row is rendered.
+- `headers`: a `list`/`tuple`/1D numpy array of column names.
+  Required unless `data` is a list of dicts.
+
+`vis.html_table` accepts the exact same `data`/`headers` input
+shapes as `vis.table` (including numpy arrays and lists of dicts),
+so the two functions are interchangeable in how you call them —
+only the rendered pane differs (editable native table vs. static
+HTML).
+
+The following `opts` are supported:
+- `opts.title`: title for the window (`string`; optional)
+
+```python
+vis.html_table(
+    data=[["Alice", 92], ["Bob", 87]],
+    headers=["Name", "Score"],
+)
+```
 
 #### vis.table
 This function renders a native, structured, editable table pane. Cells
@@ -761,17 +902,18 @@ The following `opts` are supported:
 - Tensor of size `K` and `K x 3`: Instead of having a unique color per data point, the same color is shared for all points of a particular label.
 
 #### vis.sunburst
-This function draws a sunburst chart. It takes two input arrays: `parents` and `labels`.
-Values from the `parents` array define the hierarchical structure, indicating which parent sector a sector belongs to. Values from the `labels` array define the sector's label or name. Keep in mind that the `parents` and `labels` arrays must be of equal length. There is an optional third array called `values`, which is used to display a numerical value when hovering over a sector. If provided, the `values` array must be the same length as `parents` and `labels`.
+This function draws a sunburst chart. It takes two input arrays: `labels` and `parents`.
+Values from the `labels` array define the sector's label or name. Values from the `parents` array define the hierarchical structure, indicating which parent sector a sector belongs to -- note that at least one entry in `parents` must be an empty string `""`, marking the root of the hierarchy. Keep in mind that the `labels` and `parents` arrays must be of equal length. There is an optional third array called `values`, which is used to display a numerical value when hovering over a sector. If provided, the `values` array must be the same length as `labels` and `parents`.
 
-Examples: `vis.sunburst(parents, labels, opts)` or `vis.sunburst(parents, labels, values, opts)`
+Examples: `vis.sunburst(labels, parents, opts)` or `vis.sunburst(labels, parents, values, opts)`
 
 Following `opts` are currently supported:
 - `opts.font_size`    : define font size of label (`int`)
 - `opts.font_color`    : define font color of label (`string`)
-- `opts.opacity`    : define opacity of chart (`float`)
+- `opts.opacity`    : define opacity of chart (`float`, between 0 and 1)
 - `opts.line_width`    : define distance between two sectors and sector to its parents (`int`)
-
+- `opts.maxdepth`    : maximum number of hierarchy levels visible at once -- a positive integer, or `-1` to show all levels (`int`)
+- `opts.branchvalues`    : `'total'` or `'remainder'` -- how `values` are interpreted relative to children (`string`; default = `'remainder'`)
 
 #### vis.line
 This function draws a line plot. It takes as input an `N` or `NxM` tensor
@@ -1181,6 +1323,35 @@ Arguments:
 - `env`: Environment to search for the window in.
 - `win`: Window to return data for. Set to `None` to retrieve all the windows in an environment.
 
+#### vis.set_tags
+
+This function replaces an environment's key/value tags. Pass `append=True` to
+keep its existing tags and add or update the supplied keys instead. `env`
+defaults to the client's current environment. An empty mapping clears all tags
+in replace mode.
+
+```python
+vis.set_tags({"dataset": "cifar10", "stage": "training"})
+vis.set_tags({"stable": ""}, append=True)
+```
+
+Arguments:
+- `tags`: mapping of string tag names to string values (maximum 20 names, 50 characters each)
+- `env`: target environment; defaults to the client's current environment
+- `append`: append/update instead of replace; defaults to `False`
+
+The complete stored tag mapping is returned.
+
+#### vis.get_tags
+
+This function returns an environment's key/value tag mapping. `env` defaults to
+the client's current environment; an environment without tags returns `{}`.
+
+```python
+tags = vis.get_tags()
+# {"dataset": "cifar10", "stage": "training", "stable": ""}
+```
+
 #### vis.check_connection
 
 This function returns a bool indicating whether or not the server is connected. It accepts an optional argument `timeout_seconds` for a number of seconds to wait for the server to come up.
@@ -1190,6 +1361,123 @@ This function takes the contents of a visdom log and replays them to the current
 
 Arguments:
 - `log_filename`: log file to replay the contents of.
+
+### Experiments
+
+Attach experiment metadata — hyper-parameters, metric observations and tags — to an environment, then search and compare runs across your server. Metadata is stored under the environment's `experiment` key and persisted through the server's data store, so a server started without a persistence path (`env_path=None`) has nothing to store, search or compare. Each function returns the server's reply decoded as a dict.
+
+#### vis.experiment
+
+This function creates or updates the experiment metadata for an environment. Calling it again for the same env merges in new params/tags and overwrites the name/description, so it is safe to call at the start of and again during a run.
+
+Arguments:
+- `name`: Display name for the experiment. Defaults to the env id.
+- `params`: Hyper-parameters as a dict of `{name: value}`.
+- `tags`: Free-form tags as a dict of `{name: value}`.
+- `description`: Free-form description.
+- `env`: Environment to attach the experiment to. Defaults to the client's env.
+
+#### vis.log_metrics
+
+This function appends one or more metric observations to an env's experiment, creating the experiment automatically if it does not exist yet.
+
+Arguments:
+- `metrics`: A non-empty dict of `{name: value}` observations.
+- `step`: Optional training step the observations were recorded at.
+- `env`: Environment whose experiment to log to. Defaults to the client's env.
+
+> **Note**: once an experiment is finished (see `finish_experiment`), further `experiment`/`log_metrics` writes are rejected so a completed run's recorded data cannot change after the fact.
+
+#### vis.finish_experiment
+
+This function marks an env's experiment terminal so its recorded data is frozen.
+
+Arguments:
+- `status`: Terminal status, either `finished` (default) or `failed`.
+- `env`: Environment whose experiment to finish. Defaults to the client's env.
+
+#### vis.search_experiments
+
+This function searches the experiments logged on the server, across all environments. The `query` uses a small readable syntax — comparisons (`<`, `<=`, `>`, `>=`, `=`, `!=`, `contains`) over param, metric and tag names, combined with `AND`/`OR` and parentheses. A name is matched bare (`acc`) or namespaced (`metric.acc`, `param.lr`, `tag.owner`) when ambiguous; metrics compare on their latest value. Queries are evaluated in Python, never `eval`'d, so a hostile query is a parse error rather than code execution.
+
+```python
+vis.search_experiments("lr < 0.01 AND acc > 0.9")
+vis.search_experiments("status = finished AND (dataset contains mnist)")
+```
+
+Arguments:
+- `query`: The filter string. `None` (default) returns everything.
+- `limit`: Maximum results to return (default `100`). `None` returns all matches.
+- `offset`: Number of results to skip, for paging (default `0`).
+- `sort_by`: Field to sort by (any of the same names). Defaults to newest-created first.
+- `descending`: Sort direction (default `True`).
+
+Returns a dict of `experiments` (one page's worth), the unpaged `total` matching the query, and the `limit`/`offset`/`query` used.
+
+`search_experiments`, `compare_experiments` and `suggest_experiment` ask the server a question rather than record something, so an offline client (`Visdom(offline=True)`) has nothing to answer with and each returns `None`.
+
+#### vis.compare_experiments
+
+This function compares the named experiments field by field to see what differs. Finding the runs is `search_experiments`' job — it answers "which runs match?"; this answers "how do these runs differ?". To compare a query's matches, search first and pass the resulting ids on.
+
+Arguments:
+- `env_ids`: A list (or tuple) of environment ids to compare, in the order given. Each must have an experiment.
+
+Returns a dict with the compared runs (`env_ids`, full `experiments`) and a `params`, `metrics` and `tags` section. Each section lists the union of `fields`, the `shared` ones every run agrees on, the `differing` rest, the per-run `values`, and `groups` clustering the runs that agree per field.
+
+#### vis.suggest_experiment
+
+> **Reserved**: this endpoint is a stub. Choosing the next set of hyper-parameters to try (an Optuna-backed search strategy) is planned for a later release, so the server currently replies `501 Not Implemented` and this function returns a stub dict `{"status": "not_implemented", "suggestion": None, ...}` rather than a real suggestion. The method, its arguments and the endpoint are in place so callers and docs are ready for when the strategy is wired in.
+
+Arguments:
+- `params`: The search space to suggest over, as a dict of `{name: spec}`. Currently ignored by the stub.
+- `env`: Environment (study) to suggest against. Defaults to the client's env.
+
+#### vis.hparams
+
+This function opens a hyper-parameter pane over the experiments logged on the server. The selection is resolved server-side: the matching runs are flattened into one record each — the run's hyper-parameters, the latest value of each of its metrics, and its tags — and registered as an `hparams` window, so the pane appears in the browser like any other visualization and reloads with its environment. The environment is saved as soon as the pane exists, so it survives a server restart without an explicit save. The pane heads the window with how many runs, params, metrics and tags the selection holds and lists the runs by name with their status; its download button saves the records as JSON.
+
+```python
+vis.hparams("lr < 0.01 AND acc > 0.9")          # by query
+vis.hparams(env_ids=["run-a", "run-b"])         # by env id
+vis.hparams("acc > 0.9", ["run-a", "run-b"])    # both
+```
+
+Arguments:
+- `query`: Filter string selecting the runs to show, in the same readable syntax as [`vis.search_experiments`](#vissearch_experiments). Defaults to `None`.
+- `env_ids`: Explicit list of environment ids to show, kept in the order given. Defaults to `None`.
+- `mode`: One of `query`, `env_ids` or `both`. Defaults to `None`, which infers the mode from the arguments given; passing it explicitly rejects the argument that mode does not accept.
+- `win`: Window id to draw into, as for the plotting functions.
+- `env`: Environment to open the pane in. Defaults to the client's env.
+- `opts`: Window options (`title`, `width`, `height`, ...), as for the plotting functions.
+
+Returns the id of the created window. The resolved selection is stored on the window, so [`vis.update_hparams`](#visupdate_hparams) can re-run it later.
+
+The modes select as follows:
+
+- `query`: the runs matching `query`. The query must be non-empty and `env_ids` must not be given.
+- `env_ids`: the runs named in `env_ids`, in that order; only those environments are read rather than every experiment. `env_ids` must be non-empty and `query` must not be given.
+- `both`: the intersection — runs that match `query` *and* are named in `env_ids`, ordered by `env_ids`. Both must be given and non-empty.
+
+There is no "show everything" call: with neither `query` nor `env_ids` the server has nothing to select and rejects the request. A blank or whitespace-only `query` counts as no query. Every id in `env_ids` must name an environment that has an experiment: a mistyped or deleted one is a `404` naming it rather than a run quietly missing from the pane. Under `both`, an id that does have an experiment but does not match the query is filtered out as the query asked.
+
+#### vis.update_hparams
+
+This function changes or refreshes an existing hyper-parameter pane — the dedicated write path for `hparams` windows, since the generic update route only understands plot windows. Called with a `query`/`env_ids`/`mode` selection the pane's selection is replaced, under the rules of [`vis.hparams`](#vishparams); called with only `win` the selection stored on the window is re-run, a manual refresh that picks up runs logged (or newly matching) since the pane was built. The pane keeps its id and position, is rebuilt in place, and the environment is saved so the update reaches disk immediately.
+
+```python
+win = vis.hparams("lr < 0.01")
+vis.update_hparams(win, "lr < 0.1 AND acc > 0.9")  # replace the selection
+vis.update_hparams(win)                            # refresh as-is
+```
+
+Arguments:
+- `win`: Id of the pane to update (required). Unknown windows are a 404; non-hparams windows a 400.
+- `query` / `env_ids` / `mode`: The replacement selection, validated exactly as on [`vis.hparams`](#vishparams).
+- `env`: Environment holding the window. Defaults to the client's env.
+- `opts`: Overrides the pane's title/size; when omitted the current ones are kept.
+
+Returns the window id.
 
 ## Customizing Visdom
 The user config directory for visdom is
@@ -1207,7 +1495,7 @@ visdom is Apache 2.0 licensed, as found in the LICENSE file.
 Support for Lua Torch was deprecated following `v0.1.8.4`. If you'd like to use torch support, you'll need to download that release. You can follow the usage instructions there, but it is no longer officially supported.
 
 ## Contributing
-See guidelines for contributing and running E2E/visual tests (Cypress and Playwright) [here.](./CONTRIBUTING.md)
+See guidelines for contributing and running E2E/visual tests with Playwright [here.](./CONTRIBUTING.md)
 
 ## Acknowledgments
 Visdom was inspired by tools like [display](https://github.com/szym/display) and relies on [Plotly](https://plot.ly/) as a plotting front-end.
