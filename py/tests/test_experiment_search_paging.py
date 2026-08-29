@@ -22,9 +22,13 @@ import shutil
 import tempfile
 import unittest
 
+import pytest
+
 from visdom.data_model import JSONStore
 from visdom.experiments import ExperimentStore
 from visdom.experiments.store import _MIN_TRIM_AT, _is_absent, _order_key
+
+pytestmark = pytest.mark.unit
 
 
 def ids(experiments):

@@ -18,10 +18,14 @@ import shutil
 import tempfile
 import unittest
 
+import pytest
+
 from visdom.data_model import JSONStore
 from visdom.data_model.base import DataStore
 from visdom.experiments import ExperimentStore
 from visdom.utils.server_utils import LazyEnvData
+
+pytestmark = pytest.mark.unit
 
 
 class TestJSONStoreProjection(unittest.TestCase):
