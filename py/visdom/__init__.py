@@ -595,8 +595,23 @@ def _compute_pr_curve(y_true, y_score, pos_label=1):
     return precision, recall
 
 
-def _coerce_curve_xy(x, y, x_name, y_name):
-    """Validate and sort precomputed curve arrays by x."""
+def _coerce_curve_xy(x, y, x_name, y_name, y_tiebreak_descending=False):
+    """Validate and sort precomputed curve arrays by x, breaking ties in y.
+
+    A tied-``x`` group must be ordered to match how the curve was
+    actually traversed, or downstream area calculations that are
+    sensitive to point order (e.g. :func:`_average_precision`'s
+    precision-weighted sum) can silently compute the wrong value even
+    though a trapezoidal area (:func:`_trapz_area`, used for ROC) would
+    be unaffected either way.
+
+    For a precision-recall curve, precision only decreases as more
+    points are accepted at a fixed recall, so pass
+    ``y_tiebreak_descending=True`` to put the higher-precision point
+    first within each tied-recall group. ROC's fpr/tpr pairs need no
+    such tiebreak (tpr ascends within a tied-fpr group, matching a plain
+    ascending sort), so the default preserves that.
+    """
     x = np.asarray(x)
     y = np.asarray(y)
     if x.ndim != 1:
@@ -610,7 +625,8 @@ def _coerce_curve_xy(x, y, x_name, y_name):
             "{} and {} should have at least 2 points".format(x_name, y_name)
         )
 
-    order = np.argsort(x, kind="mergesort")
+    tiebreak = -y if y_tiebreak_descending else y
+    order = np.lexsort((tiebreak, x))
     return x[order], y[order]
 
 
@@ -3276,7 +3292,7 @@ class Visdom(object):
             if precision is None or recall is None:
                 raise ValueError("both precision and recall are required")
             recall, precision = _coerce_curve_xy(
-                recall, precision, "recall", "precision"
+                recall, precision, "recall", "precision", y_tiebreak_descending=True
             )
 
         _validate_curve_range(recall, "recall")

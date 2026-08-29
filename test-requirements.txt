@@ -2,6 +2,7 @@ pytest>=9.1.1
 pytest-cov
 matplotlib
 numpy
+scikit-learn
 av
 tensorflow
 scikit-learn
