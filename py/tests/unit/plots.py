@@ -550,6 +550,26 @@ class TestBoxplot(unittest.TestCase):
         with self.assertRaises(AssertionError):
             self.viz.boxplot(X, opts={"legend": ["only_one"]})
 
+    def test_size_1_x(self):
+        """Single-observation boxplot (size-1 X) produces one trace."""
+        sent = self._boxplot(np.array([10.5]))
+        self.assertEqual(len(sent["payload"]["data"]), 1)
+        self.assertEqual(sent["payload"]["data"][0]["y"], [10.5])
+
+    def test_row_vector_squeezed_to_one_box(self):
+        """(1, N) row vector is squeezed to produce 1 boxplot of N values."""
+        X = np.array([[1.0, 2.0, 3.0, 4.0, 5.0]])
+        sent = self._boxplot(X, opts={"legend": ["Series 1"]})
+        self.assertEqual(len(sent["payload"]["data"]), 1)
+        self.assertEqual(sent["payload"]["data"][0]["y"], [1.0, 2.0, 3.0, 4.0, 5.0])
+        self.assertEqual(sent["payload"]["data"][0]["name"], "Series 1")
+
+    def test_singleton_matrix_one_box(self):
+        """(1, 1) matrix produces 1 boxplot with 1 value."""
+        sent = self._boxplot(np.array([[10.5]]))
+        self.assertEqual(len(sent["payload"]["data"]), 1)
+        self.assertEqual(sent["payload"]["data"][0]["y"], [10.5])
+
 
 class TestSurf(unittest.TestCase):
     def setUp(self):
@@ -619,6 +639,21 @@ class TestSurf(unittest.TestCase):
         sent = self._surf(np.ones((2, 2)))
         self.assertIn("scene", sent["payload"]["layout"])
 
+    def test_size_1_row_and_col(self):
+        """surf accepts 1xN and Nx1 size-1 row and column matrices."""
+        sent_row = self._surf(np.ones((1, 5)))
+        self.assertEqual(sent_row["payload"]["data"][0]["type"], "surface")
+        self.assertEqual(
+            sent_row["payload"]["data"][0]["z"],
+            [[1.0, 1.0, 1.0, 1.0, 1.0]],
+        )
+        sent_col = self._surf(np.ones((5, 1)))
+        self.assertEqual(sent_col["payload"]["data"][0]["type"], "surface")
+        self.assertEqual(
+            sent_col["payload"]["data"][0]["z"],
+            [[1.0], [1.0], [1.0], [1.0], [1.0]],
+        )
+
 
 class TestContour(unittest.TestCase):
     def setUp(self):
@@ -645,6 +680,70 @@ class TestContour(unittest.TestCase):
         """contour renders flat, without the 3D scene surf builds."""
         sent = self._contour(np.ones((2, 2)))
         self.assertNotIn("scene", sent["payload"]["layout"])
+
+    def test_size_1_row_and_col(self):
+        """contour accepts 1xN and Nx1 size-1 row and column matrices."""
+        sent_row = self._contour(np.ones((1, 5)))
+        self.assertEqual(sent_row["payload"]["data"][0]["type"], "contour")
+        self.assertEqual(
+            sent_row["payload"]["data"][0]["z"],
+            [[1.0, 1.0, 1.0, 1.0, 1.0]],
+        )
+        sent_col = self._contour(np.ones((5, 1)))
+        self.assertEqual(sent_col["payload"]["data"][0]["type"], "contour")
+        self.assertEqual(
+            sent_col["payload"]["data"][0]["z"],
+            [[1.0], [1.0], [1.0], [1.0], [1.0]],
+        )
+
+
+class TestPie(unittest.TestCase):
+    def setUp(self):
+        self.viz = _unconnected_visdom()
+
+    def _pie(self, X, **kwargs):
+        sent = {}
+
+        def capture(msg, endpoint="events", **_):
+            sent["payload"] = msg
+            sent["endpoint"] = endpoint
+            return "win1"
+
+        with patch.object(self.viz, "_send", side_effect=capture):
+            self.viz.pie(X, **kwargs)
+        return sent
+
+    def test_size_1_x(self):
+        """Single-slice pie chart (size-1 X) produces a pie trace."""
+        sent = self._pie(np.array([100]))
+        self.assertEqual(sent["payload"]["data"][0]["type"], "pie")
+        self.assertEqual(sent["payload"]["data"][0]["values"], [100])
+
+
+class TestStem(unittest.TestCase):
+    def setUp(self):
+        self.viz = _unconnected_visdom()
+
+    def _stem(self, X, **kwargs):
+        sent = {}
+
+        def capture(msg, endpoint="events", **_):
+            sent["payload"] = msg
+            sent["endpoint"] = endpoint
+            return "win1"
+
+        with patch.object(self.viz, "_send", side_effect=capture):
+            self.viz.stem(X, **kwargs)
+        return sent
+
+    def test_size_1_x(self):
+        """Single-point stem plot (size-1 X) produces scatter trace with expected point data."""
+        sent = self._stem(np.array([5.0]))
+        trace = sent["payload"]["data"][0]
+        self.assertEqual(trace["type"], "scatter")
+        self.assertEqual(trace["mode"], "lines")
+        self.assertEqual(trace["x"][:2], [1.0, 1.0])
+        self.assertEqual(trace["y"][:2], [0.0, 5.0])
 
 
 if __name__ == "__main__":
