@@ -458,7 +458,7 @@ class TestLiveHparamsPanes(tornado.testing.AsyncHTTPTestCase):
         self.create({"query": "lr < 0.01", "win": "hp1"})
         content_id = self._window("hp1")["contentID"]
 
-        self._app.readonly = True
+        self._app.server_state.readonly = True
         resp = self.log({"eid": "run-b", "params": {"lr": 0.001}})
         self.settle()
 

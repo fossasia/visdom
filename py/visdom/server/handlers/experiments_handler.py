@@ -356,22 +356,24 @@ class ExperimentHparamsUpdateHandler(BaseHandler):
 
 
 class LivePaneWriter:
-    """The application, shaped like the handler the window helpers expect.
+    """The shared server state, shaped like the handler the window helpers
+    expect.
 
     ``wrap_func`` was written to run without a live request — it takes the
     handler and a plain args dict, and every ``post`` in the server is a decode
     followed by a call to it. The one thing it still assumes is a response:
     :func:`register_window` finishes by writing the window id back to the
     client. A live rebuild has nobody to answer, so that write is dropped here
-    and everything else the rebuild touches — ``state``, ``subs``, ``storage`` —
-    is the application's own.
+    and everything else the rebuild touches — ``state``, ``subs``, ``storage``,
+    ``mark_dirty`` — is read off the same ``ServerState`` a real handler reaches
+    through, so a rebuild can never see staler values than a request does.
     """
 
-    def __init__(self, app):
-        self._app = app
+    def __init__(self, server_state):
+        self._server_state = server_state
 
     def __getattr__(self, name):
-        return getattr(self._app, name)
+        return getattr(self._server_state, name)
 
     def write(self, chunk):
         """Swallow the window id ``register_window`` writes to the response."""
@@ -390,8 +392,9 @@ def _schedule_on_ioloop(delay, callback):
         callback()
 
 
-def make_live_queue(app, delay=DEFAULT_DEBOUNCE_SECONDS):
-    """Build the queue that keeps ``app``'s hparams panes in step with its runs.
+def make_live_queue(server_state, delay=DEFAULT_DEBOUNCE_SECONDS):
+    """Build the queue that keeps ``server_state``'s hparams panes in step with
+    its runs.
 
     Logging a run marks its environment on this queue; a drain asks
     :func:`~visdom.experiments.live.resolve_targets` which panes that could
@@ -410,7 +413,7 @@ def make_live_queue(app, delay=DEFAULT_DEBOUNCE_SECONDS):
     and the readonly refusal belong to the ``experiments/log`` request that
     triggered this, and it passed both before anything was marked.
     """
-    writer = LivePaneWriter(app)
+    writer = LivePaneWriter(server_state)
 
     def rebuild(eid, win_id):
         try:
@@ -426,7 +429,7 @@ def make_live_queue(app, delay=DEFAULT_DEBOUNCE_SECONDS):
             )
 
     return LiveUpdateQueue(
-        resolve=lambda changed: resolve_targets(app.state, changed),
+        resolve=lambda changed: resolve_targets(server_state.state, changed),
         rebuild=rebuild,
         delay=delay,
         schedule=_schedule_on_ioloop,

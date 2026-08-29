@@ -12,8 +12,8 @@
 an unbound function, and ``storage_wiring.py`` does exactly that. It runs
 out of road for three things this suite needs:
 
-* ``save_layouts`` calls ``self.broadcast_layouts()`` and reads ``self.app`` —
-  neither exists on a duck type.
+* ``save_layouts`` calls ``self.broadcast_layouts()`` and reads shared server
+  state — neither exists on a duck type.
 * ``VisSocketHandlerOrWrapper.on_message`` ends in a zero-argument ``super()``
   call, which raises ``TypeError`` unless ``self`` really is an instance.
 * ``open`` / ``on_close`` are the subject of the lifecycle tests, so they have
@@ -41,7 +41,7 @@ from visdom.server.handlers.socket_handlers import SocketWrapper, VisSocketWrapp
 
 
 def socket_double(cls, app, remote_ip="127.0.0.1"):
-    """Build a ``cls`` bound to ``app`` with no network underneath it.
+    """Build a ``cls`` bound to ``app.server_state`` with no network underneath it.
 
     ``cls`` is :class:`SocketWrapper` (a subscriber) or
     :class:`VisSocketWrapper` (a source). The returned object is not registered
@@ -55,7 +55,7 @@ def socket_double(cls, app, remote_ip="127.0.0.1"):
     sock.request = types.SimpleNamespace(remote_ip=remote_ip)
     sock.messages = deque()
     sock.last_read_time = time.time()
-    BaseWebSocketHandler.initialize(sock, app)
+    BaseWebSocketHandler.initialize(sock, app.server_state)
     return sock
 
 
