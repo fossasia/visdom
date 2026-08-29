@@ -623,17 +623,24 @@ def _validate_curve_range(values, name):
         raise ValueError("{} should be within [0, 1]".format(name))
 
 
-def _curve_legend(legend, default_legend):
-    """Return user-provided legend or default 2-element list."""
-    if not isinstance(legend, (tuple, list)) or len(legend) < 2:
+def _curve_legend(legend, default_legend, required=None):
+    """Return exactly ``required`` legend labels (defaults to the length of
+    ``default_legend``), falling back to the defaults if too few are given."""
+    if required is None:
+        required = len(default_legend)
+    if not isinstance(legend, (tuple, list)) or len(legend) < required:
         if legend is not None:
             warnings.warn(
-                "legend should be a list/tuple with at least 2 elements, "
-                "falling back to default: {}".format(default_legend),
+                "legend should be a list/tuple with at least {} element{}, "
+                "falling back to default: {}".format(
+                    required,
+                    "" if required == 1 else "s",
+                    default_legend[:required],
+                ),
                 UserWarning,
             )
-        return list(default_legend)
-    return list(legend)
+        return list(default_legend[:required])
+    return list(legend[:required])
 
 
 def _trapz_area(y, x):
@@ -3242,12 +3249,16 @@ class Visdom(object):
         Draw a precision-recall curve for binary classification.
 
         You can either provide raw labels/scores (`y_true`, `y_score`) or
-        precomputed points (`precision`, `recall`).
+        precomputed points (`precision`, `recall`). A baseline showing the
+        true class prevalence is only drawn for the `y_true`/`y_score`
+        path, since prevalence cannot be recovered from `precision`/
+        `recall` points alone.
 
         The following `opts` are supported:
 
         - `opts.title`      : plot title (`string`; default includes PR-AUC)
-        - `opts.legend`     : two legend labels for curve and baseline (`list`)
+        - `opts.legend`     : two legend labels for curve and baseline
+          (`list`); only one label is needed when no baseline is drawn
         - `opts.xlabel`     : x-axis label (`string`; default = `Recall`)
         - `opts.ylabel`     : y-axis label (`string`; default = `Precision`)
         - `opts.layoutopts` : additional backend layout options (`dict`)
@@ -3284,19 +3295,25 @@ class Visdom(object):
 
         auc = _average_precision(precision, recall)
 
-        opts = dict(opts)
-        opts["xlabel"] = opts.get("xlabel", "Recall")
-        opts["ylabel"] = opts.get("ylabel", "Precision")
-        opts["legend"] = _curve_legend(opts.get("legend"), ["PR", "Baseline"])
-        opts["title"] = opts.get("title", "PR Curve (AUC={:.4f})".format(auc))
-
         if has_raw:
             y_true_arr = np.ravel(np.asarray(y_true))
             positive_rate = float(np.mean(y_true_arr == pos_label))
         else:
-            positive_rate = float(precision[0]) if float(recall[0]) == 0.0 else None
+            # Precision/recall alone don't preserve class counts, so
+            # prevalence can't be recovered from them.
+            positive_rate = None
 
         baseline = [positive_rate, positive_rate] if positive_rate is not None else None
+
+        opts = dict(opts)
+        opts["xlabel"] = opts.get("xlabel", "Recall")
+        opts["ylabel"] = opts.get("ylabel", "Precision")
+        opts["legend"] = _curve_legend(
+            opts.get("legend"),
+            ["PR", "Baseline"],
+            required=2 if baseline is not None else 1,
+        )
+        opts["title"] = opts.get("title", "PR Curve (AUC={:.4f})".format(auc))
 
         data = [
             {

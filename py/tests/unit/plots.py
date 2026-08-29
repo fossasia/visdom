@@ -7,6 +7,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import unittest
+import warnings
 from unittest.mock import Mock, patch
 import numpy as np
 import pytest
@@ -645,6 +646,126 @@ class TestContour(unittest.TestCase):
         """contour renders flat, without the 3D scene surf builds."""
         sent = self._contour(np.ones((2, 2)))
         self.assertNotIn("scene", sent["payload"]["layout"])
+
+
+class TestPrCurveBaseline(unittest.TestCase):
+    """A PR-curve baseline (true class prevalence) can only be computed
+    from raw y_true/y_score; it cannot be recovered from precomputed
+    (precision, recall) points alone, so no baseline trace should be
+    sent for that input mode."""
+
+    def setUp(self):
+        self.viz = _unconnected_visdom()
+
+    def _pr_curve(self, **kwargs):
+        sent = {}
+
+        def capture(msg, endpoint="events", **_):
+            sent["payload"] = msg
+            sent["endpoint"] = endpoint
+            return "win1"
+
+        with patch.object(self.viz, "_send", side_effect=capture):
+            self.viz.pr_curve(**kwargs)
+        return sent
+
+    def test_precomputed_points_send_no_baseline(self):
+        """precision/recall input mode must not draw a fabricated baseline."""
+        precision = np.array([1.0, 0.8, 0.6, 0.5])
+        recall = np.array([0.0, 0.3, 0.6, 1.0])
+        sent = self._pr_curve(precision=precision, recall=recall)
+        names = [d.get("name") for d in sent["payload"]["data"]]
+        self.assertNotIn("Baseline", names)
+        self.assertEqual(names, ["PR"])
+
+    def test_raw_labels_send_correct_baseline(self):
+        """y_true/y_score input mode must still draw the true prevalence."""
+        rng = np.random.RandomState(0)
+        y_true = (rng.uniform(0, 1, size=100) < 0.3).astype(int)
+        y_score = rng.uniform(0, 1, size=100)
+        true_prevalence = float(np.mean(y_true == 1))
+
+        sent = self._pr_curve(y_true=y_true, y_score=y_score)
+        baseline_traces = [
+            d for d in sent["payload"]["data"] if d.get("name") == "Baseline"
+        ]
+        self.assertEqual(len(baseline_traces), 1)
+        self.assertAlmostEqual(baseline_traces[0]["y"][0], true_prevalence, places=6)
+
+    def test_single_custom_legend_label_is_used_without_a_baseline(self):
+        """One label is enough when only the curve is drawn."""
+        precision = np.array([1.0, 0.8, 0.6, 0.5])
+        recall = np.array([0.0, 0.3, 0.6, 1.0])
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            sent = self._pr_curve(
+                precision=precision, recall=recall, opts={"legend": ["My Curve"]}
+            )
+
+        names = [d.get("name") for d in sent["payload"]["data"]]
+        self.assertEqual(names, ["My Curve"])
+        self.assertEqual(sent["payload"]["opts"]["legend"], ["My Curve"])
+        self.assertEqual([w for w in caught if w.category is UserWarning], [])
+
+    def test_single_legend_label_is_rejected_when_a_baseline_is_drawn(self):
+        """Two labels are still required when the baseline is present."""
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            sent = self._pr_curve(
+                y_true=[0, 0, 0, 1],
+                y_score=[0.1, 0.2, 0.3, 0.9],
+                opts={"legend": ["Only One"]},
+            )
+
+        names = [d.get("name") for d in sent["payload"]["data"]]
+        self.assertEqual(names, ["PR", "Baseline"])
+        self.assertTrue([w for w in caught if w.category is UserWarning])
+
+    def test_extra_legend_labels_are_dropped_without_a_baseline(self):
+        """A legend must not name traces the plot does not draw."""
+        precision = np.array([1.0, 0.8, 0.6, 0.5])
+        recall = np.array([0.0, 0.3, 0.6, 1.0])
+        sent = self._pr_curve(
+            precision=precision,
+            recall=recall,
+            opts={"legend": ["Curve", "Baseline", "Extra"]},
+        )
+
+        names = [d.get("name") for d in sent["payload"]["data"]]
+        self.assertEqual(names, ["Curve"])
+        self.assertEqual(sent["payload"]["opts"]["legend"], ["Curve"])
+
+    def test_extra_legend_labels_are_dropped_with_a_baseline(self):
+        """The same holds for the two-trace case."""
+        sent = self._pr_curve(
+            y_true=[0, 0, 0, 1],
+            y_score=[0.1, 0.2, 0.3, 0.9],
+            opts={"legend": ["Curve", "Base", "Extra", "More"]},
+        )
+
+        names = [d.get("name") for d in sent["payload"]["data"]]
+        self.assertEqual(names, ["Curve", "Base"])
+        self.assertEqual(sent["payload"]["opts"]["legend"], ["Curve", "Base"])
+
+    def test_roc_curve_drops_extra_legend_labels(self):
+        """roc_curve always draws two traces, so it keeps exactly two labels."""
+        sent = {}
+
+        def capture(msg, endpoint="events", **_):
+            sent["payload"] = msg
+            return "win1"
+
+        with patch.object(self.viz, "_send", side_effect=capture):
+            self.viz.roc_curve(
+                y_true=[0, 0, 0, 1],
+                y_score=[0.1, 0.2, 0.3, 0.9],
+                opts={"legend": ["Roc", "Chance", "Extra"]},
+            )
+
+        names = [d.get("name") for d in sent["payload"]["data"]]
+        self.assertEqual(names, ["Roc", "Chance"])
+        self.assertEqual(sent["payload"]["opts"]["legend"], ["Roc", "Chance"])
 
 
 if __name__ == "__main__":

@@ -311,9 +311,14 @@ def test_curve_legend_warns_when_a_legend_is_unusable(legend):
 
 
 def test_curve_legend_passes_a_valid_legend_through():
-    """Two or more elements are accepted verbatim, as a list."""
+    """A legend of the required length is accepted verbatim, as a list."""
     assert _curve_legend(("a", "b"), ["ROC", "Chance"]) == ["a", "b"]
-    assert _curve_legend(["a", "b", "c"], ["ROC", "Chance"]) == ["a", "b", "c"]
+
+
+def test_curve_legend_drops_labels_beyond_the_required_count():
+    """Extra labels would name traces the plot does not draw."""
+    assert _curve_legend(["a", "b", "c"], ["ROC", "Chance"]) == ["a", "b"]
+    assert _curve_legend(["a", "b"], ["PR", "Baseline"], required=1) == ["a"]
 
 
 @pytest.mark.parametrize(
@@ -559,12 +564,17 @@ def test_pr_curve_default_title_carries_the_average_precision(capture_send):
     assert sent["payload"]["opts"]["ylabel"] == "Precision"
 
 
-def test_pr_curve_from_precomputed_points_infers_the_baseline(capture_send):
-    """With recall starting at 0, precision[0] stands in for the positive rate."""
+def test_pr_curve_from_precomputed_points_omits_the_baseline(capture_send):
+    """Precision at recall 0 is a curve endpoint, not the positive rate.
+
+    Precision and recall are both ratios and neither carries the class
+    counts, so the positive rate cannot be recovered from precomputed
+    points -- not even when recall starts at 0.
+    """
     sent = capture_send(
         lambda v: v.pr_curve(recall=[0.0, 0.5, 1.0], precision=[0.4, 0.4, 0.4])
     )
-    assert sent["payload"]["data"][1]["y"] == [0.4, 0.4]
+    assert len(sent["payload"]["data"]) == 1
 
 
 def test_pr_curve_omits_the_baseline_when_it_cannot_be_inferred(capture_send):
