@@ -70,19 +70,32 @@ class JSONStore(DataStore):
         return path
 
     def _hash_path(self, eid):
-        """Return the ``hash_<sha256>.json`` fallback path for ``eid``."""
+        """Return the ``hash_<sha256>.json`` fallback path for ``eid``.
+
+        No containment check is needed here: the filename is entirely a hex
+        digest, so no part of ``eid`` survives into it.
+        """
         safe_eid = self._safe_eid(eid)
+        base = os.path.abspath(self.env_path)
         hashed_id = hashlib.sha256(safe_eid.encode("utf-8")).hexdigest()
-        return os.path.join(self.env_path, "hash_{0}.json".format(hashed_id))
+        return os.path.abspath(os.path.join(base, "hash_{0}.json".format(hashed_id)))
 
     def _resolve_existing(self, eid):
-        """Return the existing file path for ``eid`` (primary or hash), or ``None``."""
-        primary = self._primary_path(eid)
-        if primary is not None and os.path.exists(primary):
-            return primary
-        hashed = self._hash_path(eid)
-        if os.path.exists(hashed):
-            return hashed
+        """Return the existing file path for ``eid`` (primary or hash), or ``None``.
+
+        Every candidate is re-checked here rather than trusted from its
+        builder: this is the method whose return value is opened, so the
+        containment guarantee has to hold at the point the path leaves it.
+        """
+        base = os.path.abspath(self.env_path)
+        for candidate in (self._primary_path(eid), self._hash_path(eid)):
+            if candidate is None:
+                continue
+            path = os.path.abspath(candidate)
+            if not path.startswith(os.path.join(base, "")):
+                continue
+            if os.path.exists(path):
+                return path
         return None
 
     def save_env(self, eid, env_data):

@@ -94,6 +94,10 @@ class StateAccessorsMixin:
     def max_plot_history(self):
         return self.server_state.max_plot_history
 
+    @property
+    def live_updates(self):
+        return self.server_state.live_updates
+
     def mark_dirty(self, eid):
         """Mark an environment for persistence through the shared state."""
         return self.server_state.mark_dirty(eid)
@@ -155,6 +159,10 @@ class ServerState:
         self._socket_wrap_monitor = None
         self.dirty_envs = Counter()
         self.autosave = None
+        # Set by the application once the handlers it drives can be imported;
+        # a queue built here would need experiments_handler, which needs the
+        # handlers that need this module.
+        self.live_updates = None
 
     # ----- layouts ----- #
 
