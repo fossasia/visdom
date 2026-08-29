@@ -41,7 +41,8 @@ def main():
 
     viz = visdom.Visdom()
 
-    with VisdomLogger(viz, env="mlp_run") as tracker:
+    params = {"lr": 1e-2, "batch_size": 32}
+    with VisdomLogger(viz, env="mlp_run", params=params) as tracker:
         for epoch in range(50):
 
             # training
