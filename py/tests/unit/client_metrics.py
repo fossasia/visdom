@@ -311,9 +311,14 @@ def test_curve_legend_warns_when_a_legend_is_unusable(legend):
 
 
 def test_curve_legend_passes_a_valid_legend_through():
-    """Two or more elements are accepted verbatim, as a list."""
+    """A legend of the required length is accepted verbatim, as a list."""
     assert _curve_legend(("a", "b"), ["ROC", "Chance"]) == ["a", "b"]
-    assert _curve_legend(["a", "b", "c"], ["ROC", "Chance"]) == ["a", "b", "c"]
+
+
+def test_curve_legend_drops_labels_beyond_the_required_count():
+    """Extra labels would name traces the plot does not draw."""
+    assert _curve_legend(["a", "b", "c"], ["ROC", "Chance"]) == ["a", "b"]
+    assert _curve_legend(["a", "b"], ["PR", "Baseline"], required=1) == ["a"]
 
 
 @pytest.mark.parametrize(
