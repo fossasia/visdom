@@ -418,10 +418,26 @@ with VisdomLogger(viz, env="my_run", log_every=50) as tracker:
             tracker.log("LR",         optimizer.param_groups[0]["lr"], xlabel="step")
 ```
 
+**Experiment tracking with `params`** — pass hyperparameters to also record the run as a queryable experiment, alongside the usual charts:
+
+```python
+params = {"lr": 1e-2, "batch_size": 32}
+with VisdomLogger(viz, env="my_run", params=params) as tracker:
+    for epoch in range(num_epochs):
+        tracker.log("Train Loss", train_loss)
+
+# later, from anywhere
+viz.search_experiments("lr < 0.01 AND status = finished")
+viz.compare_experiments(["my_run", "my_other_run"])
+```
+
+Tracking is opt-in: without `params`, `VisdomLogger` only ever calls `viz.line()`, unchanged from before this existed. With `params`, the run's status is recorded as `finished` on a normal exit or `failed` if the `with`-block raised, and every logged metric is mirrored into the experiment alongside the chart it's plotted on.
+
 **Parameters:**
 - `viz`: a connected `visdom.Visdom()` instance
 - `env`: environment name (default: auto-generated from timestamp)
 - `log_every`: send every N calls per metric — use with per-batch logging on large datasets (default: `1`)
+- `params`: dict of hyperparameters; opts into experiment tracking (default: `None`, tracking off)
 
 Each unique name passed to `tracker.log()` gets its own window. The first call creates it; subsequent calls append. See `example/train_example.py` for a full working example.
 
@@ -1461,9 +1477,11 @@ The modes select as follows:
 
 There is no "show everything" call: with neither `query` nor `env_ids` the server has nothing to select and rejects the request. A blank or whitespace-only `query` counts as no query. Every id in `env_ids` must name an environment that has an experiment: a mistyped or deleted one is a `404` naming it rather than a run quietly missing from the pane. Under `both`, an id that does have an experiment but does not match the query is filtered out as the query asked.
 
+The pane then keeps itself current: logging a run (`log_experiment`, `log_metrics`, `finish_experiment`) refreshes every open pane whose selection that run could affect, and pushes the rebuilt pane to connected clients. A pane selected by `query` is re-run on any logged run, since a run that did not match before may match now; a pane selected by `env_ids` only follows the runs it names. Refreshes are batched over a short window, so a training loop logging a metric every step costs one rebuild per burst rather than one per step.
+
 #### vis.update_hparams
 
-This function changes or refreshes an existing hyper-parameter pane — the dedicated write path for `hparams` windows, since the generic update route only understands plot windows. Called with a `query`/`env_ids`/`mode` selection the pane's selection is replaced, under the rules of [`vis.hparams`](#vishparams); called with only `win` the selection stored on the window is re-run, a manual refresh that picks up runs logged (or newly matching) since the pane was built. The pane keeps its id and position, is rebuilt in place, and the environment is saved so the update reaches disk immediately.
+This function changes or refreshes an existing hyper-parameter pane — the dedicated write path for `hparams` windows, since the generic update route only understands plot windows. Called with a `query`/`env_ids`/`mode` selection the pane's selection is replaced, under the rules of [`vis.hparams`](#vishparams); called with only `win` the selection stored on the window is re-run, a manual refresh that picks up runs logged (or newly matching) since the pane was built. That refresh is also what a logged run triggers on its own, so calling it by hand is mainly for panes in environments the server has not loaded. The pane keeps its id and position, is rebuilt in place, and the environment is saved so the update reaches disk immediately.
 
 ```python
 win = vis.hparams("lr < 0.01")

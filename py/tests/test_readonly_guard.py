@@ -17,11 +17,14 @@ import shutil
 import tempfile
 import unittest
 
+import pytest
 import tornado.testing
 
 from visdom.data_model import JSONStore
 from visdom.experiments import ExperimentStore
 from visdom.server.app import Application
+
+pytestmark = pytest.mark.integration
 
 
 class ReadonlyEndpointCase(tornado.testing.AsyncHTTPTestCase):

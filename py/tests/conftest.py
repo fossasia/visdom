@@ -13,7 +13,7 @@ no network. Tests that genuinely need an externally launched visdom must carry
 ``@pytest.mark.server`` so CI can deselect them.
 """
 
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -91,15 +91,24 @@ def app_handler(app):
 def offline_client():
     """Visdom client that never opens a connection.
 
-    ``_handle_post`` is the client's only I/O point, so stubbing it leaves
-    ``_send`` and everything above it running their real code -- including the
-    env handshake ``__init__`` performs -- while no socket is ever opened. The
-    ``send`` constructor flag this used to rely on no longer exists.
+    The transport is mocked out from construction onwards, so plot methods can
+    be asserted as pure functions. ``_handle_post`` is then armed to raise, so a
+    call that slips past a test's own patch fails loudly instead of reaching the
+    network -- pair this with ``capture_send`` to assert on a payload.
     """
     import visdom
 
-    with patch.object(visdom.Visdom, "_handle_post", return_value="win_offline"):
-        yield visdom.Visdom(use_incoming_socket=False)
+    with (
+        patch.object(visdom.Visdom, "_handle_post", return_value=True),
+        patch.object(visdom.Visdom, "_start_session_reaper"),
+        patch.object(visdom.logger, "warning"),
+    ):
+        client = visdom.Visdom(use_incoming_socket=False)
+
+    client._handle_post = Mock(
+        side_effect=AssertionError("unexpected transport call in unit test")
+    )
+    return client
 
 
 @pytest.fixture

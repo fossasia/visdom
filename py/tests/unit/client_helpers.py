@@ -220,15 +220,15 @@ def test_axisformat3d_needs_bounds_before_it_uses_a_step():
     assert _axisformat3d("z", {"zlabel": "d", "ztickstep": 2})["nticks"] is None
 
 
-def test_axisformat3d_builds_an_axis_from_a_lone_tick_step():
-    """The 3d gate is the same tuple as the 2d one, ``tickstep`` included.
+def test_axisformat3d_applies_a_lone_tick_step():
+    """A 3d step alone reaches plotly as ``dtick``.
 
-    The step alone has nothing to apply itself to here -- it only feeds
-    ``nticks``, which is separately gated on both bounds being present -- so
-    the axis comes back with every field unset rather than being dropped.
+    It used to feed only ``nticks``, which is gated on both bounds, so a lone
+    step built no axis at all. The 3d axis now carries ``dtick`` just like the
+    2d one, which is what makes the step meaningful on its own.
     """
     axis = _axisformat3d("z", {"ztickstep": 2})
-    assert axis is not None
+    assert axis["dtick"] == 2
     assert axis["nticks"] is None
 
 

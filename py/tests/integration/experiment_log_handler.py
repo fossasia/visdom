@@ -13,8 +13,8 @@ Drives a real :class:`~visdom.server.app.Application` over a temp env dir with
 ``JSONStore`` path is exercised.
 
 The client-side ``Visdom.experiment``/``log_metrics``/``finish_experiment``
-message shapes were asserted here too, against a ``send=False`` client built
-per test. That client still opened an incoming socket and waited out the
+message shapes were asserted here too, against a client built per test. That
+client still opened an incoming socket and waited out the
 connect timeout, costing 6.3s a test. They now live in ``unit/client_content.py``
 on the ``offline_client`` fixture, which is where a test that drives no
 Application belongs.

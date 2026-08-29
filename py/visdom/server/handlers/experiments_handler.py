@@ -22,15 +22,25 @@ exists, so a pane survives a server crash without waiting for an explicit save.
 ``/experiments/hparams/update`` is the matching write path for an existing pane
 — replace its selection or re-run the stored one — since the generic
 ``/update`` endpoint only understands plot-shaped windows.
+
+That update path is also how a pane refreshes itself: :func:`make_live_queue`
+builds the queue that logging a run feeds, and drains it back into this module's
+own update handler, so a live refresh and a hand-written one are the same code.
 """
 
+import logging
+
 import tornado.escape
+import tornado.ioloop
 import tornado.web
 
 from visdom.experiments import (
+    DEFAULT_DEBOUNCE_SECONDS,
     ExperimentStore,
+    LiveUpdateQueue,
     QueryParseError,
     flatten_experiments,
+    resolve_targets,
 )
 from visdom.server.handlers.base_handlers import BaseHandler
 from visdom.utils.server_utils import (
@@ -272,6 +282,9 @@ class ExperimentHparamsUpdateHandler(BaseHandler):
     the env state, broadcast to that env's subscribers, and the env is saved so
     disk reflects the update immediately.
 
+    The refresh case is what a live update is, so :func:`make_live_queue` drives
+    :meth:`wrap_func` directly rather than growing a second rebuild path.
+
     That write reaches disk, so the endpoint is rejected with 403 while the
     server runs in readonly mode.
     """
@@ -340,3 +353,84 @@ class ExperimentHparamsUpdateHandler(BaseHandler):
             tornado.escape.to_basestring(self.request.body)
         )
         self.wrap_func(self, args)
+
+
+class LivePaneWriter:
+    """The shared server state, shaped like the handler the window helpers
+    expect.
+
+    ``wrap_func`` was written to run without a live request — it takes the
+    handler and a plain args dict, and every ``post`` in the server is a decode
+    followed by a call to it. The one thing it still assumes is a response:
+    :func:`register_window` finishes by writing the window id back to the
+    client. A live rebuild has nobody to answer, so that write is dropped here
+    and everything else the rebuild touches — ``state``, ``subs``, ``storage``,
+    ``mark_dirty`` — is read off the same ``ServerState`` a real handler reaches
+    through, so a rebuild can never see staler values than a request does.
+    """
+
+    def __init__(self, server_state):
+        self._server_state = server_state
+
+    def __getattr__(self, name):
+        return getattr(self._server_state, name)
+
+    def write(self, chunk):
+        """Swallow the window id ``register_window`` writes to the response."""
+
+
+def _schedule_on_ioloop(delay, callback):
+    """Run ``callback`` on the event loop after ``delay`` seconds.
+
+    Without a running loop — an application built outside a server, as tests
+    and embedders do — there is nothing to defer onto, so the drain runs inline
+    rather than being lost.
+    """
+    try:
+        tornado.ioloop.IOLoop.current().call_later(delay, callback)
+    except RuntimeError:
+        callback()
+
+
+def make_live_queue(server_state, delay=DEFAULT_DEBOUNCE_SECONDS):
+    """Build the queue that keeps ``server_state``'s hparams panes in step with
+    its runs.
+
+    Logging a run marks its environment on this queue; a drain asks
+    :func:`~visdom.experiments.live.resolve_targets` which panes that could
+    affect, and refreshes each through
+    :meth:`ExperimentHparamsUpdateHandler.wrap_func` with args naming only the
+    window — the endpoint's "re-run the stored selection" case. Going through
+    the handler rather than around it means a live refresh is validated exactly
+    like a requested one, and cannot drift from it.
+
+    Those checks reject what a detached rebuild is bound to meet eventually: a
+    pane closed or retyped between the mark and the drain. That is an ordinary
+    race rather than a fault, so an ``HTTPError`` is logged at debug and the
+    remaining panes still update.
+
+    The decorators on ``post`` are deliberately not re-run here. Authorisation
+    and the readonly refusal belong to the ``experiments/log`` request that
+    triggered this, and it passed both before anything was marked.
+    """
+    writer = LivePaneWriter(server_state)
+
+    def rebuild(eid, win_id):
+        try:
+            ExperimentHparamsUpdateHandler.wrap_func(
+                writer, {"win": win_id, "eid": eid}
+            )
+        except tornado.web.HTTPError as e:
+            logging.debug(
+                "skipped live update of hparams window %r in env %r: %s",
+                win_id,
+                eid,
+                e,
+            )
+
+    return LiveUpdateQueue(
+        resolve=lambda changed: resolve_targets(server_state.state, changed),
+        rebuild=rebuild,
+        delay=delay,
+        schedule=_schedule_on_ioloop,
+    )
