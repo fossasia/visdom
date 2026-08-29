@@ -580,6 +580,45 @@ Each metric gets its own window titled `"<name> (step)"`, throttled to one send 
 
 See `example/train_keras_example.py` for a full working example.
 
+### Optuna
+
+**Requirements:** `pip install visdom optuna`
+
+`visdom.integrations.OptunaCallback` implements Optuna's study callback
+protocol. After each trial finishes it records the trial's parameters, objective
+values and state as a Visdom experiment in a dedicated environment. Optuna is
+not a Visdom dependency, so existing Visdom users do not install it unless they
+choose this integration.
+
+```python
+import optuna
+import visdom
+from visdom.integrations import OptunaCallback
+
+viz = visdom.Visdom()
+callback = OptunaCallback(
+    viz,
+    dashboard_env="optuna_quadratic",
+    objective_names=["loss"],
+)
+
+
+def objective(trial):
+    x = trial.suggest_float("x", -10, 10)
+    return (x - 2) ** 2
+
+
+study = optuna.create_study(study_name="quadratic", direction="minimize")
+study.optimize(objective, n_trials=100, callbacks=[callback])
+```
+
+This first-stage integration records one experiment per trial, using names such
+as `optuna_quadratic_trial_000017`. Pass `raise_on_error=True` if a Visdom
+logging failure should stop optimization; by default it emits a warning and
+allows the study to continue. Single- and multi-objective studies are supported,
+and `COMPLETE`, `PRUNED` and `FAIL` states are preserved in the
+`optuna_state` tag.
+
 ## Details
 <img src="https://user-images.githubusercontent.com/19650074/198747904-7a8a580f-851a-45fb-8f45-94e54a910ee2.png"/>
 
