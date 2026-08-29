@@ -23,7 +23,16 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from visdom.experiments.tags import normalize_tags
+from visdom.experiments.tags import MAX_TAGS_PER_ENV, normalize_tags
+
+
+_OPTUNA_TAG_NAMES = {
+    "integration",
+    "optuna_study",
+    "optuna_trial",
+    "optuna_state",
+    "optuna_direction",
+}
 
 
 class OptunaCallback:
@@ -127,7 +136,14 @@ class OptunaCallback:
             return {}
         if not isinstance(tags, Mapping):
             raise TypeError("tags must be a mapping of string names to string values")
-        return normalize_tags(dict(tags))
+        normalized = normalize_tags(dict(tags))
+        if len(set(normalized) | _OPTUNA_TAG_NAMES) > MAX_TAGS_PER_ENV:
+            raise ValueError(
+                "OptunaCallback tags may contain at most {} non-reserved tags".format(
+                    MAX_TAGS_PER_ENV - len(_OPTUNA_TAG_NAMES)
+                )
+            )
+        return normalized
 
     def study_env(self, study: Any) -> str:
         """Return the environment namespace for an Optuna study."""
@@ -153,7 +169,7 @@ class OptunaCallback:
         if self.objective_names is not None:
             names = self.objective_names
         else:
-            study_names = study.metric_names
+            study_names = getattr(study, "metric_names", None)
             if study_names is not None:
                 names = tuple(study_names)
             elif value_count == 1:
