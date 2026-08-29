@@ -18,7 +18,11 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import pytest
+
 from visdom.loggers.keras import VisdomKerasLogger
+
+pytestmark = pytest.mark.unit
 
 
 def _logger(**kwargs):

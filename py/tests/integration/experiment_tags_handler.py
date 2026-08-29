@@ -10,11 +10,15 @@
 
 import json
 
+import pytest
+
 from visdom.data_model import JSONStore
 from visdom.experiments import ExperimentStore, tags_to_mapping
 
 from testutils.fakes import FakeSocket
 from testutils.http import VisdomHTTPTestCase
+
+pytestmark = pytest.mark.integration
 
 
 class TestTagsEndpoint(VisdomHTTPTestCase):

@@ -137,7 +137,7 @@ def start_server(
     atexit.register(app.storage.save_all, app.state)
     signal.signal(signal.SIGTERM, _exit_cleanly)
 
-    app.start_autosave()
+    app.server_state.start_autosave()
 
     if "HOSTNAME" in os.environ and hostname == DEFAULT_HOSTNAME:
         hostname = os.environ["HOSTNAME"]

@@ -20,12 +20,16 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
+import pytest
 import tornado.testing
 
 from visdom import Visdom
 from visdom.data_model import JSONStore
 from visdom.experiments import ExperimentStore, QueryParseError
 from visdom.server.app import Application
+from visdom.server.handlers.web_handlers import ExperimentSearchHandler
+
+pytestmark = pytest.mark.integration
 
 
 def seed_experiments(store):
@@ -281,11 +285,71 @@ class TestSearchEndpoint(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(body["experiments"], [])
         self.assertEqual(body["total"], 3)
 
-    def test_null_limit_returns_all(self):
-        """An explicit null limit lifts the cap."""
+    def test_null_limit_asks_for_as_many_as_allowed(self):
+        """A null limit means "everything you'll give me", which is the cap."""
         body = self.search_ok({"limit": None})
         self.assertEqual(len(body["experiments"]), 3)
-        self.assertIsNone(body["limit"])
+        self.assertEqual(body["limit"], ExperimentSearchHandler.MAX_LIMIT)
+
+    def test_limit_above_the_cap_is_coerced_down(self):
+        """An over-large page is answered at the cap, not refused."""
+        body = self.search_ok({"limit": ExperimentSearchHandler.MAX_LIMIT * 10})
+        self.assertEqual(body["limit"], ExperimentSearchHandler.MAX_LIMIT)
+        self.assertEqual(body["total"], 3)
+
+    def test_reply_reports_the_limit_it_applied(self):
+        """The cap is visible in the reply, so a client is never misled."""
+        for asked in (2, None, ExperimentSearchHandler.MAX_LIMIT + 1):
+            body = self.search_ok({"limit": asked})
+            expected = min(
+                ExperimentSearchHandler.MAX_LIMIT,
+                asked if asked is not None else ExperimentSearchHandler.MAX_LIMIT,
+            )
+            self.assertEqual(body["limit"], expected)
+            self.assertLessEqual(len(body["experiments"]), body["limit"])
+
+    def test_offset_past_the_window_is_400(self):
+        """A page deeper than the window is refused, since finding it costs
+        the whole depth even though it returns one page."""
+        resp = self.search({"offset": ExperimentSearchHandler.MAX_WINDOW, "limit": 1})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("offset", resp.reason)
+
+    def test_offset_is_never_coerced(self):
+        """A too-deep offset raises rather than answering a page nobody asked
+        for: a coerced limit is visible in the reply, a coerced offset is not."""
+        deep = ExperimentSearchHandler.MAX_WINDOW * 10
+        self.assertEqual(self.search({"offset": deep, "limit": 1}).code, 400)
+        self.assertEqual(self.search({"offset": deep, "limit": None}).code, 400)
+
+    def test_the_whole_window_is_reachable(self):
+        """The cap bounds the window without shrinking it: the deepest allowed
+        page is served, and one experiment further is not."""
+        edge = ExperimentSearchHandler.MAX_WINDOW - ExperimentSearchHandler.MAX_LIMIT
+        body = self.search_ok(
+            {"offset": edge, "limit": ExperimentSearchHandler.MAX_LIMIT}
+        )
+        self.assertEqual(body["offset"], edge)
+        self.assertEqual(body["total"], 3)
+        self.assertEqual(
+            self.search(
+                {"offset": edge + 1, "limit": ExperimentSearchHandler.MAX_LIMIT}
+            ).code,
+            400,
+        )
+
+    def test_capped_limit_counts_against_the_window(self):
+        """The window is checked against the limit actually applied, so a null
+        limit cannot buy a deeper page than the cap it was coerced to."""
+        offset = ExperimentSearchHandler.MAX_WINDOW - 1
+        self.assertEqual(self.search({"offset": offset, "limit": None}).code, 400)
+        self.assertEqual(self.search_ok({"offset": offset, "limit": 1})["total"], 3)
+
+    def test_total_is_never_capped(self):
+        """total counts every match even when the page cannot hold them."""
+        body = self.search_ok({"limit": 1})
+        self.assertEqual(len(body["experiments"]), 1)
+        self.assertEqual(body["total"], 3)
 
     def test_default_limit_is_applied(self):
         """A body that omits limit is capped at the handler's default."""
@@ -359,6 +423,36 @@ class TestSearchEndpoint(tornado.testing.AsyncHTTPTestCase):
         resp = self.search({"query": "name = 'x'; DROP TABLE experiments'"})
         self.assertIn(resp.code, (200, 400))
         self.assertEqual(self.search_ok({})["total"], 3)
+
+    def test_reply_is_typed_as_json(self):
+        """The reply says it is JSON, and says not to guess otherwise.
+
+        The body is serialized by hand rather than handed to Tornado as a dict
+        (NaN metrics have to become ``null`` first), so nothing sets the content
+        type for us: without these headers the reply keeps Tornado's default
+        ``text/html`` and a browser is free to render an echoed query as a page.
+        """
+        resp = self.search({"query": "name = alpha"})
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(
+            resp.headers["Content-Type"], "application/json; charset=UTF-8"
+        )
+        self.assertEqual(resp.headers["X-Content-Type-Options"], "nosniff")
+
+    def test_echoed_query_cannot_open_a_tag(self):
+        """A query full of markup comes back escaped, and comes back unchanged.
+
+        The characters that could start a tag are written as JSON escapes, so
+        the raw body holds no markup while a client still decodes the exact
+        string it sent.
+        """
+        query = "name = '<script>alert(1)</script>&'"
+        resp = self.search({"query": query})
+        self.assertEqual(resp.code, 200)
+        raw = resp.body.decode("utf-8")
+        for char in ("<", ">", "&"):
+            self.assertNotIn(char, raw)
+        self.assertEqual(json.loads(raw)["query"], query)
 
     def test_search_sees_an_experiment_logged_over_http(self):
         """An experiment logged through /experiments/log is searchable at once."""

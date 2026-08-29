@@ -19,6 +19,8 @@ boundary, injection-style strings (which must be inert), and the
 
 import unittest
 
+import pytest
+
 from visdom.experiments import (
     Experiment,
     MAX_QUERY_DEPTH,
@@ -29,6 +31,8 @@ from visdom.experiments import (
     parse_query,
 )
 from visdom.experiments.query import And, Comparison, Or, tokenize
+
+pytestmark = pytest.mark.unit
 
 
 def match(text, record):

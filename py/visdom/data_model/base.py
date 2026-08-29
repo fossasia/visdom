@@ -40,6 +40,11 @@ class DataStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def load_experiment(self, eid):
+        """Read and return only ``eid``'s experiment metadata, without its env."""
+        raise NotImplementedError
+
+    @abstractmethod
     def list_envs(self):
         """Return the ids of all stored environments."""
         raise NotImplementedError

@@ -39,6 +39,7 @@ TRACKED_ASSETS = [
     "index.html",
     "login.html",
     "error.html",
+    "favicon.png",
     os.path.join("js", "main.js"),
     os.path.join("js", "main.js.map"),
     os.path.join("css", "base.css"),
