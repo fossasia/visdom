@@ -195,14 +195,21 @@ def test_socket_delete_routes_through_storage(spy_store, env_path):
 # -- Layouts ------------------------------------------------------------------
 
 
-def test_layout_save_and_load_route_through_storage(app, app_factory, spy_store):
-    """save_layouts writes through the store, and a new app reads it back."""
-    app.storage = spy_store
+def test_layout_save_and_load_route_through_storage(app_factory):
+    """save_layouts writes through the store, and a new app reads it back.
+
+    The spy has to be the store the app builds for itself: ``ServerState``
+    takes its own reference at construction, so a store swapped in afterwards
+    would be observed by nobody.
+    """
+    with mock.patch("visdom.server.app.JSONStore", SpyStore):
+        app = app_factory()
+
     app.layouts = '[["v", {}]]'
 
     app.save_layouts()
 
-    assert spy_store.calls["save_layouts"] == ['[["v", {}]]']
+    assert app.storage.calls["save_layouts"] == ['[["v", {}]]']
     assert app_factory().layouts == '[["v", {}]]'
 
 
