@@ -16,7 +16,7 @@ than read from ``defaults``, so these drive ``UpdateHandler`` directly with
 small limits instead of appending five hundred times.
 """
 
-from unittest.mock import MagicMock
+from types import SimpleNamespace
 
 import pytest
 
@@ -327,16 +327,20 @@ def test_default_plot_history_cap():
 # -- Handler wiring ----------------------------------------------------------
 
 
-def test_handler_copies_the_caps_off_the_application():
-    app = MagicMock()
-    app.max_text_lines = 100
-    app.max_old_content = 20
-    app.max_image_history = 8
-    app.max_plot_history = 6
+def test_handler_reads_the_caps_from_server_state():
+    server_state = SimpleNamespace(
+        max_text_lines=100,
+        max_old_content=20,
+        max_image_history=8,
+        max_plot_history=6,
+    )
+    # Tornado normally constructs the handler before calling initialize().
+    # Bypass RequestHandler.__init__ here because this test only exercises the
+    # ServerState wiring and its accessor properties.
+    handler = BaseHandler.__new__(BaseHandler)
+    BaseHandler.initialize(handler, server_state=server_state)
 
-    handler = MagicMock(spec=BaseHandler)
-    BaseHandler.initialize(handler, app=app)
-
+    assert handler.server_state is server_state
     assert handler.max_text_lines == 100
     assert handler.max_old_content == 20
     assert handler.max_image_history == 8
