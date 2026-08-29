@@ -657,7 +657,7 @@ const App = () => {
     }));
     focusPane(layoutItem.i);
     updateLayout(layout);
-    sendPaneLayoutUpdate(selection.envIDs[0], layoutItem);
+    sendPaneLayoutUpdate(latestRef.current.selection.envIDs[0], layoutItem);
   };
 
   const handlePaneDoubleClick = (e, panelayout) => {
@@ -681,7 +681,7 @@ const App = () => {
       }));
       focusPane(panelayout.i);
       updateLayout(storeData.layout);
-      sendPaneLayoutUpdate(selection.envIDs[0], panelayout);
+      sendPaneLayoutUpdate(latestRef.current.selection.envIDs[0], panelayout);
     }
   };
 
@@ -794,12 +794,12 @@ const App = () => {
   const updateLayout = (layout) => {
     setStoreData((prev) => ({ ...prev, layout: layout }));
   };
-  const resizePaneLive = (layout) => {
-    updateLayout(layout);
-  };
+  const resizePaneLive = () => {};
+
   useLayoutEffect(() => {
     _bin.current = createBin(storeData.layout, windowSize.current.cols);
   }, [storeData.layout]);
+
   useEffect(() => {
     clearTimeout(localStorageTimer.current);
     localStorageTimer.current = setTimeout(() => {
