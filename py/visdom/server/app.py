@@ -30,6 +30,7 @@ from visdom.server.handlers.socket_handlers import (
 from visdom.server.handlers.experiments_handler import (
     ExperimentHparamsHandler,
     ExperimentHparamsUpdateHandler,
+    make_live_queue,
 )
 from visdom.server.handlers.web_handlers import (
     CloseHandler,
@@ -134,6 +135,7 @@ class Application(tornado.web.Application):
             save_interval=save_interval,
             save_threshold=save_threshold,
         )
+        self.server_state.live_updates = make_live_queue(self.server_state)
 
         tornado_settings["static_url_prefix"] = self.base_url + "/static/"
         # A traceback and the raw request are debugging aids, not something to
@@ -240,6 +242,11 @@ class Application(tornado.web.Application):
     def autosave(self):
         """Compatibility view of the ServerState autosave timer."""
         return self.server_state.autosave
+
+    @property
+    def live_updates(self):
+        """Compatibility view of the ServerState hparams refresh queue."""
+        return self.server_state.live_updates
 
     def mark_dirty(self, eid):
         """Compatibility wrapper for the ServerState dirty tracker."""

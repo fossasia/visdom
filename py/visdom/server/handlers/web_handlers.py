@@ -928,6 +928,13 @@ class ExperimentLogHandler(BaseHandler):
     in-memory env state so a later full-env save writes it back rather than
     dropping it. The stored experiment is written back to the client as JSON.
 
+    Each action then marks the environment on the server's live-update queue
+    (:func:`~visdom.server.handlers.experiments_handler.make_live_queue`), which
+    refreshes the hyper-parameter panes showing this run shortly afterwards.
+    ``finish`` marks too: the status a pane displays has just changed. Marking
+    only records the environment, so a run logging every step pays for a set
+    insert rather than a rebuild.
+
     All three actions write, so the endpoint is rejected with 403 while the
     server runs in readonly mode.
     """
@@ -998,6 +1005,10 @@ class ExperimentLogHandler(BaseHandler):
         handler.mark_dirty(eid)
         if is_new_env:
             broadcast_envs(handler)
+
+        live_updates = getattr(handler, "live_updates", None)
+        if live_updates is not None:
+            live_updates.mark(eid)
 
         handler.write_json(experiment.to_dict())
 

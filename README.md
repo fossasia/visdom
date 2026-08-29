@@ -1477,9 +1477,11 @@ The modes select as follows:
 
 There is no "show everything" call: with neither `query` nor `env_ids` the server has nothing to select and rejects the request. A blank or whitespace-only `query` counts as no query. Every id in `env_ids` must name an environment that has an experiment: a mistyped or deleted one is a `404` naming it rather than a run quietly missing from the pane. Under `both`, an id that does have an experiment but does not match the query is filtered out as the query asked.
 
+The pane then keeps itself current: logging a run (`log_experiment`, `log_metrics`, `finish_experiment`) refreshes every open pane whose selection that run could affect, and pushes the rebuilt pane to connected clients. A pane selected by `query` is re-run on any logged run, since a run that did not match before may match now; a pane selected by `env_ids` only follows the runs it names. Refreshes are batched over a short window, so a training loop logging a metric every step costs one rebuild per burst rather than one per step.
+
 #### vis.update_hparams
 
-This function changes or refreshes an existing hyper-parameter pane — the dedicated write path for `hparams` windows, since the generic update route only understands plot windows. Called with a `query`/`env_ids`/`mode` selection the pane's selection is replaced, under the rules of [`vis.hparams`](#vishparams); called with only `win` the selection stored on the window is re-run, a manual refresh that picks up runs logged (or newly matching) since the pane was built. The pane keeps its id and position, is rebuilt in place, and the environment is saved so the update reaches disk immediately.
+This function changes or refreshes an existing hyper-parameter pane — the dedicated write path for `hparams` windows, since the generic update route only understands plot windows. Called with a `query`/`env_ids`/`mode` selection the pane's selection is replaced, under the rules of [`vis.hparams`](#vishparams); called with only `win` the selection stored on the window is re-run, a manual refresh that picks up runs logged (or newly matching) since the pane was built. That refresh is also what a logged run triggers on its own, so calling it by hand is mainly for panes in environments the server has not loaded. The pane keeps its id and position, is rebuilt in place, and the environment is saved so the update reaches disk immediately.
 
 ```python
 win = vis.hparams("lr < 0.01")
