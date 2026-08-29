@@ -29,6 +29,9 @@ from visdom.experiments import ExperimentStore, QueryParseError
 from visdom.server.app import Application
 from visdom.server.handlers.web_handlers import ExperimentSearchHandler
 
+# The endpoint class drives a real Application, so the whole module rides in
+# the integration bucket even though the store and client-message classes
+# would qualify as unit on their own.
 pytestmark = pytest.mark.integration
 
 
