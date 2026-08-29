@@ -23,8 +23,8 @@ without a request and stay plain functions.
 
 import json
 import time
-import types
 import unittest
+from unittest import mock
 
 import pytest
 
@@ -344,21 +344,18 @@ class TestPollingUnderReadonly(PollingTestCase):
 # -- The idle reaper ---------------------------------------------------------
 #
 # ``socket_wrap_monitor_thread`` runs on a 15s PeriodicCallback and closes
-# polling clients that have stopped reading. Calling it directly needs no
-# loop, only a monitor object to stop.
+# polling clients that have stopped reading. Calling it directly needs no loop.
 
 
 def _reaper(app, sockets):
     """Register ``sockets`` and return the wrapper the monitor runs on."""
-    stopped = []
-    app.socket_wrap_monitor = types.SimpleNamespace(stop=lambda: stopped.append(True))
     for sock in sockets:
         sock.open()
-    return sockets[0] if sockets else socket_double(SocketWrapper, app), stopped
+    return sockets[0] if sockets else socket_double(SocketWrapper, app)
 
 
 def test_the_reaper_closes_an_idle_subscriber(app):
-    sub, _ = _reaper(app, [socket_double(SocketWrapper, app)])
+    sub = _reaper(app, [socket_double(SocketWrapper, app)])
     sub.last_read_time = time.time() - MAX_SOCKET_WAIT - 1
 
     sub.socket_wrap_monitor_thread()
@@ -367,7 +364,7 @@ def test_the_reaper_closes_an_idle_subscriber(app):
 
 
 def test_the_reaper_keeps_a_subscriber_that_still_polls(app):
-    sub, _ = _reaper(app, [socket_double(SocketWrapper, app)])
+    sub = _reaper(app, [socket_double(SocketWrapper, app)])
     sub.last_read_time = time.time()
 
     sub.socket_wrap_monitor_thread()
@@ -376,7 +373,7 @@ def test_the_reaper_keeps_a_subscriber_that_still_polls(app):
 
 
 def test_the_reaper_closes_an_idle_source(app):
-    source, _ = _reaper(app, [socket_double(VisSocketWrapper, app)])
+    source = _reaper(app, [socket_double(VisSocketWrapper, app)])
     source.last_read_time = time.time() - MAX_SOCKET_WAIT - 1
 
     source.socket_wrap_monitor_thread()
@@ -397,16 +394,17 @@ def test_the_reaper_leaves_the_other_clients_alone(app):
 
 
 def test_the_reaper_stops_itself_once_everyone_has_gone(app):
-    sub, stopped = _reaper(app, [socket_double(SocketWrapper, app)])
+    sub = _reaper(app, [socket_double(SocketWrapper, app)])
     sub.on_close()
 
-    sub.socket_wrap_monitor_thread()
+    with mock.patch.object(app.server_state, "stop_socket_monitor") as stop:
+        sub.socket_wrap_monitor_thread()
 
-    assert stopped == [True]
+    stop.assert_called_once_with()
 
 
 def test_a_query_postpones_the_reaper(app):
-    sub, _ = _reaper(app, [socket_double(SocketWrapper, app)])
+    sub = _reaper(app, [socket_double(SocketWrapper, app)])
     sub.last_read_time = time.time() - MAX_SOCKET_WAIT - 1
 
     sub.get_messages()
