@@ -624,8 +624,8 @@ def _validate_curve_range(values, name):
 
 
 def _curve_legend(legend, default_legend, required=None):
-    """Return user-provided legend, or default if it has fewer than
-    ``required`` labels (defaults to the length of ``default_legend``)."""
+    """Return exactly ``required`` legend labels (defaults to the length of
+    ``default_legend``), falling back to the defaults if too few are given."""
     if required is None:
         required = len(default_legend)
     if not isinstance(legend, (tuple, list)) or len(legend) < required:
@@ -640,7 +640,7 @@ def _curve_legend(legend, default_legend, required=None):
                 UserWarning,
             )
         return list(default_legend[:required])
-    return list(legend)
+    return list(legend[:required])
 
 
 def _trapz_area(y, x):

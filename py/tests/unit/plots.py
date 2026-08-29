@@ -719,6 +719,51 @@ class TestPrCurveBaseline(unittest.TestCase):
         self.assertEqual(names, ["PR", "Baseline"])
         self.assertTrue([w for w in caught if w.category is UserWarning])
 
+    def test_extra_legend_labels_are_dropped_without_a_baseline(self):
+        """A legend must not name traces the plot does not draw."""
+        precision = np.array([1.0, 0.8, 0.6, 0.5])
+        recall = np.array([0.0, 0.3, 0.6, 1.0])
+        sent = self._pr_curve(
+            precision=precision,
+            recall=recall,
+            opts={"legend": ["Curve", "Baseline", "Extra"]},
+        )
+
+        names = [d.get("name") for d in sent["payload"]["data"]]
+        self.assertEqual(names, ["Curve"])
+        self.assertEqual(sent["payload"]["opts"]["legend"], ["Curve"])
+
+    def test_extra_legend_labels_are_dropped_with_a_baseline(self):
+        """The same holds for the two-trace case."""
+        sent = self._pr_curve(
+            y_true=[0, 0, 0, 1],
+            y_score=[0.1, 0.2, 0.3, 0.9],
+            opts={"legend": ["Curve", "Base", "Extra", "More"]},
+        )
+
+        names = [d.get("name") for d in sent["payload"]["data"]]
+        self.assertEqual(names, ["Curve", "Base"])
+        self.assertEqual(sent["payload"]["opts"]["legend"], ["Curve", "Base"])
+
+    def test_roc_curve_drops_extra_legend_labels(self):
+        """roc_curve always draws two traces, so it keeps exactly two labels."""
+        sent = {}
+
+        def capture(msg, endpoint="events", **_):
+            sent["payload"] = msg
+            return "win1"
+
+        with patch.object(self.viz, "_send", side_effect=capture):
+            self.viz.roc_curve(
+                y_true=[0, 0, 0, 1],
+                y_score=[0.1, 0.2, 0.3, 0.9],
+                opts={"legend": ["Roc", "Chance", "Extra"]},
+            )
+
+        names = [d.get("name") for d in sent["payload"]["data"]]
+        self.assertEqual(names, ["Roc", "Chance"])
+        self.assertEqual(sent["payload"]["opts"]["legend"], ["Roc", "Chance"])
+
 
 if __name__ == "__main__":
     unittest.main()
