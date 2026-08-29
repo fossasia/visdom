@@ -3786,9 +3786,9 @@ class Visdom(object):
         - `opts.legend`: labels for each of the columns in `X`
         """
 
-        X = np.asarray(X)
-        if X.ndim > 2:
-            X = np.squeeze(X)
+        X = np.squeeze(np.asarray(X))
+        if X.ndim == 0:
+            X = X.reshape(1)
         assert X.ndim == 1 or X.ndim == 2, "X should be one or two-dimensional"
         if X.ndim == 1:
             X = X[:, None]
@@ -4026,9 +4026,9 @@ class Visdom(object):
         - `opts.legend`  : `list` containing legend names
         """
 
-        X = np.asarray(X)
-        if X.ndim > 2:
-            X = np.squeeze(X)
+        X = np.squeeze(np.asarray(X))
+        if X.ndim == 0:
+            X = X.reshape(1)
         assert X.ndim == 1 or X.ndim == 2, "X should be one or two-dimensional"
         if X.ndim == 1:
             X = X[:, None]

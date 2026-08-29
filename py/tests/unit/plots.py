@@ -511,6 +511,29 @@ class TestBoxplot(unittest.TestCase):
         sent = self._boxplot(np.array([1.0, 2.0, 3.0]))
         self.assertEqual(len(sent["payload"]["data"]), 1)
         self.assertEqual(sent["payload"]["data"][0]["type"], "box")
+        self.assertEqual(sent["payload"]["data"][0]["y"], [1.0, 2.0, 3.0])
+
+    def test_single_value_produces_one_box(self):
+        """Size-1 1D or 2D singleton input produces 1 box with 1 value."""
+        sent = self._boxplot([10.5])
+        self.assertEqual(len(sent["payload"]["data"]), 1)
+        self.assertEqual(sent["payload"]["data"][0]["y"], [10.5])
+
+        sent2 = self._boxplot([[10.5]])
+        self.assertEqual(len(sent2["payload"]["data"]), 1)
+        self.assertEqual(sent2["payload"]["data"][0]["y"], [10.5])
+
+    def test_2d_row_vector_produces_one_box(self):
+        """1xN 2D row vector is squeezed to produce a single box with N values."""
+        sent = self._boxplot(np.array([[1.0, 2.0, 3.0, 4.0, 5.0]]))
+        self.assertEqual(len(sent["payload"]["data"]), 1)
+        self.assertEqual(sent["payload"]["data"][0]["y"], [1.0, 2.0, 3.0, 4.0, 5.0])
+
+    def test_2d_col_vector_produces_one_box(self):
+        """Nx1 2D column vector produces a single box with N values."""
+        sent = self._boxplot(np.array([[1.0], [2.0], [3.0], [4.0], [5.0]]))
+        self.assertEqual(len(sent["payload"]["data"]), 1)
+        self.assertEqual(sent["payload"]["data"][0]["y"], [1.0, 2.0, 3.0, 4.0, 5.0])
 
     def test_2d_x_one_box_per_column(self):
         """NxM X produces M box traces."""
