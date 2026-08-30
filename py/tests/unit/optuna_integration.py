@@ -52,7 +52,7 @@ def fake_visualization_module(intermediate_error=None):
         "importance": Mock(name="importance"),
         "intermediate": Mock(name="intermediate"),
         "pareto": Mock(name="pareto"),
-        "timeline": Mock(name="timeline"),
+        "timeline": Mock(name="timeline", data=()),
     }
     visualization.plot_optimization_history = Mock(return_value=figures["history"])
     visualization.plot_param_importances = Mock(return_value=figures["importance"])
