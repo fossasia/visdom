@@ -10,10 +10,12 @@ import warnings
 
 try:
     from lightning.pytorch.loggers import Logger
+    from lightning.pytorch.loggers.logger import rank_zero_experiment
     from lightning.pytorch.utilities import rank_zero_only
 except ImportError:
     try:
         from pytorch_lightning.loggers import Logger
+        from pytorch_lightning.loggers.logger import rank_zero_experiment
         from pytorch_lightning.utilities import rank_zero_only
     except ImportError:
         raise ImportError(
@@ -53,9 +55,12 @@ class VisdomLightningLogger(Logger):
     Lightning computes the norms with its own utility and they arrive
     through ``log_metrics`` like any other metric.
 
-    Multi-GPU: ``log_metrics`` and ``log_hyperparams`` run on rank zero
-    only. Use one logger instance per ``Trainer`` run. Not thread-safe:
-    ``_wins``/``_step`` have no locking.
+    When training ends (success or failure) ``finalize`` saves the env on
+    the server so the run can be reloaded later.
+
+    Multi-GPU: ``log_metrics``, ``log_hyperparams`` and ``finalize`` run
+    on rank zero only. Use one logger instance per ``Trainer`` run. Not
+    thread-safe: ``_wins``/``_step`` have no locking.
 
     Usage::
 
@@ -93,6 +98,7 @@ class VisdomLightningLogger(Logger):
         return self.env
 
     @property
+    @rank_zero_experiment
     def experiment(self):
         return self.viz
 
@@ -137,7 +143,7 @@ class VisdomLightningLogger(Logger):
         if params is None:
             return
         if not isinstance(params, dict):
-            params = vars(params)
+            params = dict(params) if hasattr(params, "items") else vars(params)
         if not params:
             return
         content = [
@@ -159,3 +165,10 @@ class VisdomLightningLogger(Logger):
             warnings.warn(
                 "VisdomLightningLogger failed to log hyperparameters: {}".format(e)
             )
+
+    @rank_zero_only
+    def finalize(self, status):
+        try:
+            self.viz.save([self.env])
+        except Exception as e:
+            warnings.warn("VisdomLightningLogger failed to save env: {}".format(e))
