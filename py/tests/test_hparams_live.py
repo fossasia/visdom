@@ -26,6 +26,7 @@ import shutil
 import tempfile
 import unittest
 
+import pytest
 import tornado.testing
 import tornado.web
 
@@ -42,6 +43,7 @@ def hparams_window(mode, query=None, env_ids=None):
     }
 
 
+@pytest.mark.unit
 class TestResolveTargets(unittest.TestCase):
     """resolve_targets names the panes a set of changed envs could affect."""
 
@@ -145,6 +147,7 @@ class TestResolveTargets(unittest.TestCase):
         self.assertFalse(cold.touched)
 
 
+@pytest.mark.unit
 class TestLiveUpdateQueue(unittest.TestCase):
     """The queue coalesces marks and survives a rebuild that fails."""
 
@@ -294,6 +297,7 @@ class TestLiveUpdateQueue(unittest.TestCase):
         self.assertEqual(self.rebuilt, [("main", "hp1")])
 
 
+@pytest.mark.integration
 class TestLiveHparamsPanes(tornado.testing.AsyncHTTPTestCase):
     """Logging a run refreshes the panes that show it, in state and on disk."""
 

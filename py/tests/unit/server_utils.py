@@ -13,10 +13,14 @@ No server needed — these test pure functions directly.
 
 import pytest
 
+from visdom.data_model.json_store import JSONStore
 from visdom.utils.server_utils import (
+    LazyEnvData,
     escape_eid,
     extract_eid,
     hash_password,
+    snapshot_env,
+    snapshot_state,
     stringify,
     recursive_order,
 )
@@ -198,3 +202,104 @@ def test_recursive_order_scalars(value, expected, expected_type):
     result = recursive_order(value)
     assert result == expected
     assert isinstance(result, expected_type)
+
+
+# ------------------------------------------------- off-loop storage helpers ----
+
+
+def env_dict(win="win_0"):
+    return {"jsons": {win: {"id": win, "content": {}}}, "reload": {}}
+
+
+def test_snapshot_env_copies_a_plain_dict():
+    live = env_dict()
+    copied = snapshot_env(live)
+
+    assert copied == live
+    assert copied is not live
+    assert copied["jsons"] is not live["jsons"]
+    assert copied["jsons"]["win_0"] is not live["jsons"]["win_0"]
+
+
+def test_snapshot_env_is_unaffected_by_later_mutation():
+    """The whole point: the worker sees the env as it was at hand-off."""
+    live = env_dict()
+    copied = snapshot_env(live)
+
+    live["jsons"]["win_late"] = {"id": "win_late"}
+    live["jsons"]["win_0"]["content"] = {"changed": True}
+
+    assert list(copied["jsons"]) == ["win_0"]
+    assert copied["jsons"]["win_0"]["content"] == {}
+
+
+def test_snapshot_env_skips_a_cold_lazy_env(tmp_path):
+    """A never-read env is already current on disk, so there is nothing to write."""
+    lazy = LazyEnvData(JSONStore(str(tmp_path)), "cold")
+
+    assert snapshot_env(lazy) is None
+    assert not lazy.is_loaded
+
+
+def test_snapshot_env_copies_a_primed_lazy_env(tmp_path):
+    lazy = LazyEnvData(JSONStore(str(tmp_path)), "warm")
+    lazy.prime(env_dict())
+
+    copied = snapshot_env(lazy)
+
+    assert copied["jsons"]["win_0"]["id"] == "win_0"
+    assert copied["jsons"] is not lazy["jsons"]
+
+
+def test_snapshot_state_drops_cold_envs_and_copies_the_rest(tmp_path):
+    store = JSONStore(str(tmp_path))
+    warm = LazyEnvData(store, "warm")
+    warm.prime(env_dict("win_warm"))
+    state = {
+        "plain": env_dict("win_plain"),
+        "warm": warm,
+        "cold": LazyEnvData(store, "cold"),
+    }
+
+    snapshot = snapshot_state(state)
+
+    assert sorted(snapshot) == ["plain", "warm"]
+    assert snapshot["plain"] is not state["plain"]
+    assert list(snapshot["warm"]["jsons"]) == ["win_warm"]
+
+
+# ------------------------------------------------------------- LazyEnvData ----
+
+
+def test_lazy_env_is_not_loaded_until_read(tmp_path):
+    lazy = LazyEnvData(JSONStore(str(tmp_path)), "cold")
+    assert lazy.is_loaded is False
+
+
+def test_prime_installs_the_env_without_touching_disk(tmp_path):
+    """Priming is how the off-loop read hands its result back to the loop."""
+
+    class ExplodingStore(JSONStore):
+        def load_env(self, eid):
+            raise AssertionError("prime must not read from disk")
+
+    lazy = LazyEnvData(ExplodingStore(str(tmp_path)), "warm")
+    lazy.prime(env_dict())
+
+    assert lazy.is_loaded is True
+    assert lazy["jsons"]["win_0"]["id"] == "win_0"
+
+
+def test_prime_leaves_an_already_loaded_env_alone():
+    """Two racing primes must not clobber whichever landed first."""
+    lazy = LazyEnvData(None, "warm")
+    lazy.prime(env_dict("first"))
+    lazy.prime(env_dict("second"))
+
+    assert list(lazy["jsons"]) == ["first"]
+
+
+def test_prime_rejects_a_malformed_env():
+    lazy = LazyEnvData(None, "broken")
+    with pytest.raises(ValueError):
+        lazy.prime({"jsons": {}})

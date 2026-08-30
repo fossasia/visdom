@@ -14,17 +14,15 @@ comments and the embeddings drill-down. None of it needed a WebSocket to test:
 ``testutils.socket_double`` builds the real handler classes over a real
 ``Application`` with a recording ``write_message``.
 
-Two commands hand work to ``IOLoop.current().run_in_executor``. The
+Some commands hand work to ``IOLoop.current().run_in_executor``. The shared
 ``inline_executor`` fixture replaces that with a synchronous stand-in, so the
 side effect has happened by the time the call returns and the assertions do not
 race a thread pool.
 """
 
 import json
-import types
 
 import pytest
-import tornado.ioloop
 
 from visdom.server.defaults import DEFAULT_MAX_UNDO_HISTORY
 from visdom.utils.server_utils import count_deleted, push_deleted
@@ -32,28 +30,6 @@ from visdom.utils.server_utils import count_deleted, push_deleted
 from testutils import commands, last, open_source, open_sub, sent
 
 pytestmark = pytest.mark.integration
-
-
-@pytest.fixture
-def inline_executor(monkeypatch):
-    """Run ``IOLoop.current().run_in_executor`` calls immediately, in-thread.
-
-    Records ``(func, args)`` so a test can assert what was scheduled as well as
-    what it did.
-    """
-    scheduled = []
-
-    def run_in_executor(_self_executor, func, *args):
-        scheduled.append((func, args))
-        return func(*args)
-
-    loop = types.SimpleNamespace(
-        run_in_executor=lambda executor, func, *args: run_in_executor(
-            executor, func, *args
-        )
-    )
-    monkeypatch.setattr(tornado.ioloop.IOLoop, "current", staticmethod(lambda: loop))
-    return scheduled
 
 
 def send(sock, **msg):
@@ -233,7 +209,7 @@ def test_undo_of_an_unknown_environment_is_a_noop(env):
 # -- delete_env --------------------------------------------------------------
 
 
-def test_delete_env_drops_the_environment(env):
+def test_delete_env_drops_the_environment(env, inline_executor):
     sub = open_sub(env)
 
     send(sub, cmd="delete_env", eid="expt")
@@ -242,7 +218,7 @@ def test_delete_env_drops_the_environment(env):
     assert not env.storage.env_exists("expt")
 
 
-def test_delete_env_clears_the_undo_history(env):
+def test_delete_env_clears_the_undo_history(env, inline_executor):
     sub = open_sub(env)
     send(sub, cmd="close", eid="expt", data="win_0")
 
@@ -251,7 +227,7 @@ def test_delete_env_clears_the_undo_history(env):
     assert count_deleted(env.storage, "expt") == 0
 
 
-def test_delete_env_announces_the_new_environment_list(env):
+def test_delete_env_announces_the_new_environment_list(env, inline_executor):
     sub = open_sub(env)
 
     send(sub, cmd="delete_env", eid="expt")
@@ -267,7 +243,7 @@ def test_delete_env_refuses_to_remove_main(env):
     assert "main" in env.state
 
 
-def test_delete_env_escapes_the_environment_id(app):
+def test_delete_env_escapes_the_environment_id(app, inline_executor):
     app.state["a_b"] = {"jsons": {}, "reload": {}}
     sub = open_sub(app)
 
@@ -349,7 +325,38 @@ def test_save_all_is_handed_to_the_executor(env, inline_executor):
 
     func, args = inline_executor[0]
     assert func == env.storage.save_all
-    assert args == (env.state,)
+    assert list(args[0]) == list(env.state)
+
+
+def test_save_all_hands_the_worker_a_snapshot(env, inline_executor):
+    """The worker must not receive the live state dict."""
+    sub = open_sub(env)
+
+    send(sub, cmd="save_all")
+
+    _func, args = inline_executor[0]
+    payload = args[0]
+    assert payload is not env.state
+    assert payload["expt"] is not env.state["expt"]
+    assert payload["expt"]["jsons"] is not env.state["expt"]["jsons"]
+
+
+def test_save_all_snapshot_ignores_later_mutations(env, inline_executor):
+    """What reaches disk is the state as it was when the command arrived."""
+    sub = open_sub(env)
+    captured = {}
+
+    def capture(state):
+        captured["eids"] = sorted(state)
+        captured["panes"] = sorted(state["expt"]["jsons"])
+        env.state["expt"]["jsons"]["win_late"] = pane("win_late")
+        return []
+
+    env.storage.save_all = capture
+    send(sub, cmd="save_all")
+
+    assert captured["panes"] == ["win_0"]
+    assert "win_late" in env.state["expt"]["jsons"]
 
 
 # -- save_layouts ------------------------------------------------------------
@@ -557,22 +564,24 @@ def test_update_comment_broadcasts_a_json_patch(env, inline_executor):
     ]
 
 
-def test_update_comment_marks_the_environment_dirty(env):
-    """A comment is not written inline; it marks the env for the next save.
+def test_update_comment_does_not_persist_on_its_own(env, inline_executor):
+    """The comment lands in memory only; writing it out is the save flow's job.
 
-    ``update_comment`` used to schedule a ``save_env`` of its own. It now calls
-    ``mark_dirty``, so with the default ``save_threshold`` the comment sits in
-    memory and nothing reaches disk until the autosave or a flush runs.
+    ``update_comment`` used to call ``storage.save_env`` itself. That separate
+    path was dropped so the command persists the same way every other one does,
+    which means nothing reaches disk until an ordinary save runs.
     """
     sub = open_sub(env)
 
     send(sub, cmd="update_comment", eid="expt", win="win_0", data="looks good")
 
-    assert env.dirty_envs["expt"] == 1
-    assert env.storage.load_env("expt") == {}
+    assert env.state["expt"]["jsons"]["win_0"]["comment"] == "looks good"
+    assert inline_executor == []
+    assert not env.storage.env_exists("expt")
 
 
-def test_flushing_persists_the_comment(env):
+def test_flushing_persists_the_comment(env, inline_executor):
+    """The ordinary save flow is what puts the comment on disk."""
     sub = open_sub(env)
 
     send(sub, cmd="update_comment", eid="expt", win="win_0", data="looks good")
@@ -831,7 +840,7 @@ def test_echo_does_not_fall_through_to_the_base_commands(env):
     assert commands(sub) == ["register", "layout_update", "env_update"]
 
 
-def test_a_source_socket_handles_the_shared_commands_too(env):
+def test_a_source_socket_handles_the_shared_commands_too(env, inline_executor):
     """Anything that is not ``echo`` falls through to the shared dispatch."""
     source = open_source(env)
 
@@ -860,3 +869,86 @@ def test_an_unrecognised_command_is_ignored(env, cmd):
 
     assert commands(sub) == ["register", "layout_update", "env_update"]
     assert env.state["expt"]["jsons"].keys() == {"win_0"}
+
+
+# -- autosave bookkeeping ----------------------------------------------------
+
+
+def test_close_marks_the_environment_dirty(env):
+    """Every command below edits state that autosave has to notice.
+
+    Only the HTTP handlers marked their writes, so a pane closed, a comment
+    added, a layout dragged or a table edited from the browser -- all of which
+    arrive over the socket -- were never written out by the timer, and were
+    lost unless something else happened to save the environment.
+    """
+    sub = open_sub(env)
+
+    send(sub, cmd="close", eid="expt", data="win_0")
+
+    assert env.dirty_envs["expt"] == 1
+
+
+def test_undo_marks_the_environment_dirty(env):
+    sub = open_sub(env)
+    send(sub, cmd="close", eid="expt", data="win_0")
+    env.dirty_envs.clear()
+
+    send(sub, cmd="undo", eid="expt")
+
+    assert env.dirty_envs["expt"] == 1
+
+
+def test_layout_item_update_marks_the_environment_dirty(env):
+    sub = open_sub(env)
+
+    send(sub, cmd="layout_item_update", eid="expt", win="win_0", data=[0, 0, 4, 4])
+
+    assert env.dirty_envs["expt"] == 1
+
+
+def test_update_plot_layout_marks_the_environment_dirty(env):
+    sub = open_sub(env)
+
+    send(sub, cmd="update_plot_layout", eid="expt", win="win_0", data={"title": "new"})
+
+    assert env.dirty_envs["expt"] == 1
+
+
+def test_update_comment_marks_the_environment_dirty(env):
+    sub = open_sub(env)
+
+    send(sub, cmd="update_comment", eid="expt", win="win_0", data="looks good")
+
+    assert env.dirty_envs["expt"] == 1
+
+
+def test_table_edit_marks_the_environment_dirty(app):
+    app.state["expt"] = {
+        "jsons": {
+            "win_0": pane(ptype="table", content={"headers": ["a"], "rows": [["x"]]})
+        },
+        "reload": {},
+    }
+    sub = open_sub(app)
+
+    send(
+        sub,
+        cmd="table_edit",
+        eid="expt",
+        win="win_0",
+        op="edit_cell",
+        data={"row": 0, "col": 0, "value": "y"},
+    )
+
+    assert app.state["expt"]["jsons"]["win_0"]["content"]["rows"] == [["y"]]
+    assert app.dirty_envs["expt"] == 1
+
+
+def test_a_dropped_command_leaves_the_environment_clean(env):
+    """Nothing changed, so nothing is owed to disk."""
+    sub = open_sub(env)
+
+    send(sub, cmd="update_comment", eid="expt", win="ghost", data="hi")
+
+    assert env.dirty_envs == {}
