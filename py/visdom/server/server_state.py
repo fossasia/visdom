@@ -16,12 +16,15 @@ the "accessor functions on the state" abstraction referenced by the handler
 TODOs, and a natural future home for the data_model classes.
 """
 
+import logging
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 
 import tornado.ioloop
 
 from visdom.server.defaults import MAX_SOCKET_WAIT
+from visdom.utils.server_utils import run_on_storage_executor, snapshot_env
 from visdom.utils.shared_utils import warn_once
 
 
@@ -49,6 +52,10 @@ class StateAccessorsMixin:
     @property
     def storage(self):
         return self.server_state.storage
+
+    @property
+    def storage_executor(self):
+        return self.server_state.storage_executor
 
     @property
     def env_path(self):
@@ -136,6 +143,12 @@ class ServerState:
         self.sources = sources
         self.storage = storage
 
+        # Disk work runs on a single worker, so writes stay ordered with
+        # respect to each other and to the deletes queued behind them.
+        self.storage_executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="visdom-storage"
+        )
+
         # Startup configuration (effectively immutable after construction).
         self.env_path = env_path
         self.port = port
@@ -158,6 +171,7 @@ class ServerState:
         self._layouts = self._load_layouts()
         self._socket_wrap_monitor = None
         self.dirty_envs = Counter()
+        self.saving_envs = set()
         self.autosave = None
         # Set by the application once the handlers it drives can be imported;
         # a queue built here would need experiments_handler, which needs the
@@ -199,33 +213,72 @@ class ServerState:
 
         Environments are saved on a timer rather than on every write, so a busy
         one would otherwise sit unsaved for a whole interval; once it has taken
-        ``save_threshold`` updates it is written out immediately.
+        ``save_threshold`` updates its write is queued straight away instead of
+        waiting for the next tick.
         """
         self.dirty_envs[eid] += 1
         if 0 < self.save_threshold <= self.dirty_envs[eid]:
             self.flush_envs([eid])
 
     def flush_envs(self, eids):
-        """Persist the named environments, skipping any already saved.
+        """Persist the named environments off the loop; return the write future.
 
-        Runs on the IO loop rather than in an executor: saving serializes
-        ``state``, and a background thread would be doing that while request
-        handlers mutate the very dictionaries it is walking.
+        Serializing an environment is the expensive half of a save, so it
+        happens on the storage worker rather than here. Only a deep copy taken
+        on the loop travels there: handing a thread ``state`` itself would have
+        it walking dictionaries that request handlers are still mutating.
 
-        Only environments the backend reports as written lose their mark, so one
-        it declines is retried on the next pass rather than silently dropped. An
-        environment deleted since it was marked has nothing left to save and is
-        cleared too.
+        ``None`` comes back when there is nothing to do -- nothing marked, or
+        everything marked has since been deleted or was never read off disk, in
+        which case the copy on disk is already current and the mark is dropped.
+        Environments with a write already in flight keep their mark and are
+        picked up by the next pass instead of queueing a second write.
         """
-        pending = [eid for eid in eids if self.dirty_envs.get(eid)]
-        if not pending:
-            return []
-        written = self.storage.save_envs(self.state, pending)
-        saved = set(written)
-        for eid in pending:
-            if eid in saved or eid not in self.state:
+        pending = {}
+        snapshots = {}
+        for eid in eids:
+            marked = self.dirty_envs.get(eid)
+            if not marked or eid in self.saving_envs:
+                continue
+            env = self.state.get(eid)
+            snapshot = None if env is None else snapshot_env(env)
+            if snapshot is None:
                 del self.dirty_envs[eid]
-        return written
+                continue
+            pending[eid] = marked
+            snapshots[eid] = snapshot
+
+        if not snapshots:
+            return None
+
+        self.saving_envs.update(snapshots)
+        future = run_on_storage_executor(
+            self, self.storage.save_envs, snapshots, list(snapshots)
+        )
+        future.add_done_callback(lambda done: self._settle_flush(done, pending))
+        return future
+
+    def _settle_flush(self, future, pending):
+        """Clear the marks the completed write covered, and only those.
+
+        An environment changed while its write was in flight was not in the
+        snapshot the worker serialized, so its mark is decremented by what was
+        written rather than cleared: the change stays pending for the next
+        pass. One the backend declined, or a write that raised, keeps its mark
+        in full and is retried.
+        """
+        self.saving_envs.difference_update(pending)
+        try:
+            written = future.result()
+        except Exception:
+            logging.exception("Automatic environment save failed; will retry")
+            return
+        for eid in written:
+            remaining = self.dirty_envs.get(eid, 0) - pending[eid]
+            if remaining > 0:
+                self.dirty_envs[eid] = remaining
+            else:
+                self.dirty_envs.pop(eid, None)
 
     def flush_dirty(self):
         """Persist every environment changed since the last save."""
@@ -243,6 +296,26 @@ class ServerState:
             )
             self.autosave.start()
         return self.autosave
+
+    def stop_autosave(self):
+        """Stop the timer, so no further tick can queue a write."""
+        if self.autosave is not None:
+            self.autosave.stop()
+            self.autosave = None
+
+    def shutdown_storage(self):
+        """Stop autosaving, drain queued writes, then flush the final state.
+
+        The timer goes first so a tick cannot queue work behind the drain.
+        Draining next stops an already-queued write from landing after the
+        final save and putting a stale env back on disk. The final save covers
+        whatever was still marked dirty, so the marks are cleared with it.
+        """
+        self.stop_autosave()
+        self.storage_executor.shutdown(wait=True)
+        self.storage.save_all(self.state)
+        self.dirty_envs.clear()
+        self.saving_envs.clear()
 
     # ----- polling socket monitor ----- #
 

@@ -19,8 +19,11 @@ Nothing here speaks HTTP -- the handlers are driven through ``wrap_func`` and
 shared fixtures, and ``SpyStore`` stands in wherever a call has to be observed.
 """
 
+import asyncio
 import json
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor
 from unittest import mock
 
 import pytest
@@ -36,6 +39,7 @@ from visdom.utils.server_utils import (
     compare_envs,
     count_deleted,
     gather_envs,
+    ensure_env_loaded,
     load_env,
     pop_deleted,
     push_deleted,
@@ -145,7 +149,7 @@ def test_missing_main_is_created_and_persisted(app, store):
 # -- Delete -------------------------------------------------------------------
 
 
-def test_web_delete_routes_through_storage(spy_store, env_path):
+def test_web_delete_routes_through_storage(spy_store, env_path, inline_executor):
     """DeleteEnvHandler drops the env via storage.delete_env, not os.remove."""
     spy_store.save_env("expt", env_payload())
     assert spy_store.env_exists("expt")
@@ -174,7 +178,7 @@ def test_web_delete_protects_main(spy_store, env_path):
     assert spy_store.env_exists("main")
 
 
-def test_socket_delete_routes_through_storage(spy_store, env_path):
+def test_socket_delete_routes_through_storage(spy_store, env_path, inline_executor):
     """The socket delete_env command reaches the same backend call."""
     spy_store.save_env("expt", env_payload())
     handler = FakeHandler(
@@ -326,3 +330,65 @@ def test_compare_envs_reads_cold_env_through_store(spy_store, fake_socket):
 
     assert spy_store.calls["load_env"] == ["cold"]
     assert "cold" in state
+
+
+# -- Storage executor ---------------------------------------------------------
+
+
+def test_application_owns_a_single_worker_storage_executor(app):
+    """One worker is what serializes writes, so two saves cannot interleave."""
+    assert isinstance(app.storage_executor, ThreadPoolExecutor)
+    assert app.storage_executor._max_workers == 1
+
+
+def test_handlers_receive_the_storage_executor(app):
+    handler = SaveHandler(app, mock.Mock())
+    handler.initialize(app)
+
+    assert handler.storage_executor is app.storage_executor
+
+
+def test_shutdown_drains_the_queue_before_the_final_save(app):
+    """A queued write landing after the final save would restore a stale env."""
+    order = []
+
+    def slow_write():
+        time.sleep(0.05)
+        order.append("queued-write")
+
+    app.storage.save_all = lambda state: order.append("final-save")
+    app.storage_executor.submit(slow_write)
+
+    app.shutdown_storage()
+
+    assert order == ["queued-write", "final-save"]
+
+
+def test_shutdown_flushes_state_through_storage(app):
+    app.state["expt"] = env_payload()
+
+    app.shutdown_storage()
+
+    assert app.storage.env_exists("expt")
+
+
+def test_ensure_env_loaded_primes_a_cold_env(spy_store):
+    """The read happens off the loop, then the result is handed back."""
+    spy_store.save_env("cold", env_payload())
+    handler = FakeHandler(
+        state={"cold": LazyEnvData(spy_store, "cold")}, storage=spy_store
+    )
+    assert handler.state["cold"].is_loaded is False
+
+    asyncio.run(ensure_env_loaded(handler, "cold"))
+
+    assert handler.state["cold"].is_loaded is True
+    assert "win_0" in handler.state["cold"]["jsons"]
+
+
+def test_ensure_env_loaded_skips_an_env_already_in_memory(app, spy_store):
+    handler = FakeHandler(state={"warm": env_payload()}, storage=spy_store)
+
+    asyncio.run(ensure_env_loaded(handler, "warm"))
+
+    assert spy_store.calls["load_env"] == []

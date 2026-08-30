@@ -28,7 +28,8 @@ The following options can be provided to the server:
 Environments are held in memory and written to `-env_path` automatically: every
 `-save_interval` seconds, and immediately once an environment has taken
 `-save_threshold` updates. Only environments that changed since the last write are
-saved.
+saved. The write runs on a background storage thread, so a large environment
+reaching disk does not hold up the requests arriving while it is written.
 
 Setting both to 0 restores the older behaviour of saving only when asked, and once
 more at shutdown.

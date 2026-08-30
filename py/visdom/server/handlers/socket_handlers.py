@@ -36,6 +36,8 @@ from visdom.utils.server_utils import (
     clear_deleted,
     broadcast_undo_state,
     notify,
+    fire_and_forget_save_all,
+    delete_env_off_loop,
 )
 from visdom.experiments import retarget_experiment
 
@@ -168,9 +170,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 self.storage.save_env(self.eid, self.state[self.eid])
 
         elif cmd == "save_all":
-            tornado.ioloop.IOLoop.current().run_in_executor(
-                None, self.storage.save_all, self.state
-            )
+            fire_and_forget_save_all(self)
 
         elif cmd == "delete_env":
             if "eid" in msg:
@@ -180,7 +180,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 logging.info(f"closing environment {eid}")
                 self.state.pop(eid, None)
                 clear_deleted(self.storage, eid)
-                self.storage.delete_env(eid)
+                delete_env_off_loop(self, eid)
                 broadcast_envs(self)
 
         elif cmd == "save_layouts":
