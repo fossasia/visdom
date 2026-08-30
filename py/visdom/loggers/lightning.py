@@ -102,6 +102,15 @@ class VisdomLightningLogger(Logger):
     def experiment(self):
         return self.viz
 
+    @staticmethod
+    def _to_float(value):
+        """Coerce a logged value to a plottable float, or None if it is
+        not numeric (a string, None, a multi-element array, ...)."""
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
     def _plot(self, key, x, value):
         if key not in self._wins:
             self._wins[key] = self.viz.line(
@@ -127,12 +136,22 @@ class VisdomLightningLogger(Logger):
             x = self._step
             self._step += 1
         else:
-            x = int(step)
+            try:
+                x = int(step)
+            except (TypeError, ValueError):
+                x = self._step
+                self._step += 1
         for key, value in metrics.items():
             if key == "epoch":
                 continue
+            y = self._to_float(value)
+            if y is None:
+                warnings.warn(
+                    "VisdomLightningLogger skipping non-numeric metric {}".format(key)
+                )
+                continue
             try:
-                self._plot(key, x, float(value))
+                self._plot(key, x, y)
             except Exception as e:
                 warnings.warn(
                     "VisdomLightningLogger failed to log {}: {}".format(key, e)
