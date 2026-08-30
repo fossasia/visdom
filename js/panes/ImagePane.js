@@ -38,7 +38,10 @@ var ImagePane = function (props) {
   const mouseLocationRef = useRef({ x: null, y: null });
   const [view, setView] = useState({ scale: 1, tx: 0, ty: 0 });
   const [imgDim, setImgDim] = useState({ width: null, height: 0 });
-  const [actualSelected, setActualSelected] = useState(props.selected);
+  const isHistory = type === 'image_history';
+  const [actualSelected, setActualSelected] = useState(
+    isHistory ? selected || 0 : 0
+  );
   const [mouseLocation, setMouseLocation] = useState({
     x: 0,
     y: 0,
@@ -241,8 +244,10 @@ var ImagePane = function (props) {
 
   // reset image selection upon property change
   useEffect(() => {
-    setActualSelected(selected);
-  }, [selected]);
+    if (isHistory && selected !== undefined) {
+      setActualSelected(selected);
+    }
+  }, [selected, isHistory]);
 
   useEffect(() => {
     return () => {
@@ -373,8 +378,14 @@ var ImagePane = function (props) {
   const divstyle = { left: view['tx'], top: view['ty'], position: 'absolute' };
 
   // add image slider as widget
-  if (type === 'image_history') {
-    if (props.show_slider) {
+  if (isHistory) {
+    const historyLen = Array.isArray(content) ? content.length : 0;
+    const safeIdx =
+      historyLen > 0
+        ? Math.min(Math.max(0, actualSelected || 0), historyLen - 1)
+        : 0;
+
+    if (props.show_slider && historyLen > 0) {
       widgets.push(
         <div className="widget" key="image_slider">
           <div style={{ display: 'flex' }}>
@@ -382,18 +393,20 @@ var ImagePane = function (props) {
             <input
               type="range"
               min="0"
-              max={content.length - 1}
-              value={actualSelected}
+              max={Math.max(0, historyLen - 1)}
+              value={safeIdx}
               onChange={updateSlider}
               onPointerUp={finalizeSlider}
               onKeyUp={finalizeSlider}
             />
-            <span>&nbsp;&nbsp;{actualSelected}&nbsp;&nbsp;</span>
+            <span>&nbsp;&nbsp;{safeIdx}&nbsp;&nbsp;</span>
           </div>
         </div>
       );
     }
-    content = content[actualSelected];
+    content = (Array.isArray(content) && content[safeIdx]) || {};
+  } else {
+    content = content || {};
   }
 
   useEffect(() => {
@@ -402,10 +415,10 @@ var ImagePane = function (props) {
     return () => {
       cancelled = true;
     };
-  }, [content.caption]);
+  }, [content?.caption]);
 
   // add caption as widget
-  if (content.caption) {
+  if (content?.caption) {
     widgets.splice(
       0,
       0,
