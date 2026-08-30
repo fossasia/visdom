@@ -92,6 +92,10 @@ class VisdomLightningLogger(Logger):
     def version(self):
         return self.env
 
+    @property
+    def experiment(self):
+        return self.viz
+
     def _plot(self, key, x, value):
         if key not in self._wins:
             self._wins[key] = self.viz.line(
@@ -118,15 +122,15 @@ class VisdomLightningLogger(Logger):
             self._step += 1
         else:
             x = int(step)
-        try:
-            for key, value in metrics.items():
-                if key == "epoch":
-                    continue
+        for key, value in metrics.items():
+            if key == "epoch":
+                continue
+            try:
                 self._plot(key, x, float(value))
-        except Exception as e:
-            warnings.warn(
-                "VisdomLightningLogger failed to log step {}: {}".format(step, e)
-            )
+            except Exception as e:
+                warnings.warn(
+                    "VisdomLightningLogger failed to log {}: {}".format(key, e)
+                )
 
     @rank_zero_only
     def log_hyperparams(self, params, *args, **kwargs):
