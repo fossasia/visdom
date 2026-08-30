@@ -15,6 +15,7 @@ in the previous server.py class.
 """
 
 import copy
+import functools
 import hashlib
 import html
 import json
@@ -22,6 +23,8 @@ import logging
 import os
 import errno
 from collections import OrderedDict
+
+import tornado.ioloop
 
 MAX_ENV_NAME_LEN = 25
 from collections.abc import Mapping, Sequence
@@ -46,12 +49,16 @@ def check_auth(f):
     """
     Wrapper for server access methods to ensure that the access
     is authorized.
+
+    The wrapped method's return value is handed back untouched, so an
+    ``async def`` handler's coroutine reaches tornado to be awaited.
     """
 
+    @functools.wraps(f)
     def _check_auth(handler, *args, **kwargs):
         if not handler.is_authorized():
-            return
-        f(handler, *args, **kwargs)
+            return None
+        return f(handler, *args, **kwargs)
 
     return _check_auth
 
@@ -79,13 +86,17 @@ def check_readonly(f):
     ``AnySocketHandlerOrWrapper.on_message``; this is the HTTP half of the
     same rule. Stack it under ``check_auth`` so an unauthenticated request
     still answers 401 rather than 403.
+
+    Passes the wrapped method's return value through for the same reason
+    ``check_auth`` does.
     """
 
+    @functools.wraps(f)
     def _check_readonly(handler, *args, **kwargs):
         if handler.readonly:
             reject_readonly(handler)
-            return
-        f(handler, *args, **kwargs)
+            return None
+        return f(handler, *args, **kwargs)
 
     return _check_readonly
 
@@ -99,14 +110,18 @@ def check_readonly_message(message):
     Written as a decorator, and applied under ``check_auth``, so that a handler
     declares "this writes" once at its entry point rather than restating the
     check in the body -- the omission that let readonly writes through before.
+
+    Passes the wrapped method's return value through for the same reason
+    ``check_auth`` does.
     """
 
     def _decorate(f):
+        @functools.wraps(f)
         def _check_readonly(handler, *args, **kwargs):
             if getattr(handler, "readonly", False):
                 reject_readonly(handler, message)
-                return
-            f(handler, *args, **kwargs)
+                return None
+            return f(handler, *args, **kwargs)
 
         return _check_readonly
 
@@ -150,17 +165,25 @@ class LazyEnvData(Mapping):
     def lazy_load_data(self):
         if self._raw_dict is not None:
             return
+        self.prime(self._store.load_env(self._eid))
+
+    def prime(self, env_data):
+        """Install an env that has already been read, skipping the disk hit.
+
+        Priming an env that is already loaded leaves it alone.
+        """
+        if self._raw_dict is not None:
+            return
 
         try:
-            env_data = self._store.load_env(self._eid)
             raw = dict(env_data)
             raw["jsons"] = env_data["jsons"]
             raw["reload"] = env_data["reload"]
-            self._raw_dict = raw
         except (KeyError, TypeError) as e:
             raise ValueError(
                 "Failed loading environment json: {} - {}".format(self._eid, repr(e))
             )
+        self._raw_dict = raw
 
     def __getitem__(self, key):
         self.lazy_load_data()
@@ -181,6 +204,95 @@ class LazyEnvData(Mapping):
     def __len__(self):
         self.lazy_load_data()
         return len(self._raw_dict)
+
+
+# ------- Off-loop storage helpers ----- #
+
+
+def snapshot_env(env):
+    """Deep-copy one env so a worker thread can serialize it safely.
+
+    Returns ``None`` for a lazy env that was never read: its on-disk copy is
+    already current, so there is nothing to write.
+    """
+    if isinstance(env, LazyEnvData) and not env.is_loaded:
+        return None
+    return copy.deepcopy(dict(env))
+
+
+def snapshot_state(state):
+    """Deep-copy every materialised env, dropping the ones still cold."""
+    snapshot = {}
+    for eid, env in state.items():
+        copied = snapshot_env(env)
+        if copied is not None:
+            snapshot[eid] = copied
+    return snapshot
+
+
+def run_on_storage_executor(handler, func, *args):
+    """Submit disk work to the app's storage executor, returning a future."""
+    return tornado.ioloop.IOLoop.current().run_in_executor(
+        getattr(handler, "storage_executor", None), func, *args
+    )
+
+
+def save_env_off_loop(handler, eid):
+    """Persist one env off the loop, or ``None`` when there is nothing to write."""
+    snapshot = snapshot_env(handler.state[eid])
+    if snapshot is None:
+        return None
+    return run_on_storage_executor(handler, handler.storage.save_env, eid, snapshot)
+
+
+def save_all_off_loop(handler):
+    """Persist every materialised env off the loop."""
+    return run_on_storage_executor(
+        handler, handler.storage.save_all, snapshot_state(handler.state)
+    )
+
+
+def load_env_off_loop(handler, eid):
+    """Read one env from disk off the loop."""
+    return run_on_storage_executor(handler, handler.storage.load_env, eid)
+
+
+def delete_env_off_loop(handler, eid):
+    """Remove one env from disk off the loop, behind any save already queued.
+
+    Deleting here on the loop is what let a deleted environment come back: an
+    autosave hands the worker a snapshot taken while the env still existed, the
+    delete then removes the file, and the write lands afterwards and recreates
+    it. The worker runs one task at a time, so submitting the delete rather
+    than running it orders it after every save queued before it, and a save
+    queued after it cannot see the env at all -- the loop dropped it from
+    ``state`` before this was called.
+    """
+    future = run_on_storage_executor(handler, handler.storage.delete_env, eid)
+    future.add_done_callback(_log_storage_failure)
+    return future
+
+
+async def ensure_env_loaded(handler, eid):
+    """Materialise a cold lazy env without blocking the loop on the read."""
+    env = handler.state.get(eid)
+    if not isinstance(env, LazyEnvData) or env.is_loaded:
+        return
+    env.prime(await load_env_off_loop(handler, eid))
+
+
+def _log_storage_failure(future):
+    try:
+        future.result()
+    except Exception:
+        logging.exception("Background storage write failed")
+
+
+def fire_and_forget_save_all(handler):
+    """Schedule a full save whose failure is logged rather than swallowed."""
+    future = save_all_off_loop(handler)
+    future.add_done_callback(_log_storage_failure)
+    return future
 
 
 # ------- Environment management helpers ----- #

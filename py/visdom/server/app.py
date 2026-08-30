@@ -244,6 +244,16 @@ class Application(tornado.web.Application):
         return self.server_state.autosave
 
     @property
+    def storage_executor(self):
+        """Compatibility view of the ServerState storage worker."""
+        return self.server_state.storage_executor
+
+    @property
+    def saving_envs(self):
+        """Compatibility view of environments with a write in flight."""
+        return self.server_state.saving_envs
+
+    @property
     def live_updates(self):
         """Compatibility view of the ServerState hparams refresh queue."""
         return self.server_state.live_updates
@@ -263,6 +273,14 @@ class Application(tornado.web.Application):
     def start_autosave(self):
         """Compatibility wrapper for starting ServerState autosave."""
         return self.server_state.start_autosave()
+
+    def stop_autosave(self):
+        """Compatibility wrapper for stopping ServerState autosave."""
+        return self.server_state.stop_autosave()
+
+    def shutdown_storage(self):
+        """Compatibility wrapper for draining ServerState storage on exit."""
+        return self.server_state.shutdown_storage()
 
     def save_layouts(self):
         """Compatibility wrapper for callers that still use ``Application``."""

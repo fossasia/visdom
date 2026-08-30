@@ -15,7 +15,7 @@ Automated checks belong elsewhere:
 | Question | Where it is answered |
 |---|---|
 | Does the server behave correctly? | `py/tests/` (pytest) |
-| Does the UI still render the same pixels? | `playwright/`, `cypress/` |
+| Does the UI still render the same pixels? | `playwright/` |
 | Does this *look* right to a person? | here |
 
 ## `visual_check.py`

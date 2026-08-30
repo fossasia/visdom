@@ -152,7 +152,7 @@ class JSONStore(DataStore):
         stranded one is never mistaken for an environment by :meth:`list_envs`.
         """
         if isinstance(env_data, LazyEnvData):
-            if env_data._raw_dict is None:
+            if not env_data.is_loaded:
                 return False
             env_data.lazy_load_data()
             payload = env_data._raw_dict

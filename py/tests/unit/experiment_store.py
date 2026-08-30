@@ -448,7 +448,7 @@ def test_delete_experiment_through_lazy_env(live_experiments, live_state, store)
     live_state["main"] = LazyEnvData(store, "main")
     live_experiments.log_experiment("main", params={"lr": 0.01})
 
-    assert live_experiments.delete_experiment("main")
+    assert live_experiments.delete_experiment("main") is True
 
     assert "experiment" not in live_state["main"]
     env = store.load_env("main")

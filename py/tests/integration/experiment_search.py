@@ -34,6 +34,11 @@ from visdom.server.handlers.web_handlers import ExperimentSearchHandler
 # would qualify as unit on their own.
 pytestmark = pytest.mark.integration
 
+# The endpoint class drives a real Application, so the whole module rides in
+# the integration bucket even though the store and client-message classes
+# would qualify as unit on their own.
+pytestmark = pytest.mark.integration
+
 
 def seed_experiments(store):
     """Log three experiments with known params/metrics/tags and created_at order.
