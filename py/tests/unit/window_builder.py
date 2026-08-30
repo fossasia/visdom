@@ -286,16 +286,18 @@ def test_caption_is_skipped_when_content_is_not_a_dict():
     assert text_pane["content"] == "hello"
 
 
-def test_version_is_bumped_once_per_update(titled_pane):
-    update_window(titled_pane, {"opts": {"title": "a"}})
-    assert titled_pane["version"] == 2
-    update_window(titled_pane, {"opts": {"title": "b"}})
-    assert titled_pane["version"] == 3
+@pytest.mark.parametrize("args", [{"opts": {"title": "a"}}, {}])
+def test_version_is_left_to_the_caller(titled_pane, args):
+    """``update_window`` merges fields; it does not sequence the broadcast.
 
-
-def test_version_is_bumped_even_for_an_empty_update(titled_pane):
-    update_window(titled_pane, {})
-    assert titled_pane["version"] == 2
+    Only some updates reach this helper -- ``UpdateHandler.update()`` returns
+    before it for text, image_history, plot_history and table panes -- so
+    bumping here left those types stuck at version 1 and made the frontend
+    reload the whole environment on every update. The counter now moves in
+    ``UpdateHandler.update_packet()``; see ``unit/pane_versions.py``.
+    """
+    update_window(titled_pane, args)
+    assert titled_pane["version"] == 1
 
 
 def test_returns_the_same_pane_object(titled_pane):

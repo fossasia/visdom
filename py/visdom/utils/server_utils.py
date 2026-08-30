@@ -412,7 +412,14 @@ def extract_eid(args):
 
 
 def update_window(p, args):
-    """Adds new args to a window if they exist"""
+    """Merge an update's ``layout``/``opts``/``legend`` into an existing window.
+
+    Does not touch ``p["version"]``. That counter sequences the incremental
+    ``window_update`` broadcast, and only some updates reach this helper --
+    ``UpdateHandler.update()`` returns before it for text, image_history,
+    plot_history and table panes -- so it is advanced once per accepted update
+    by ``UpdateHandler.update_packet()`` instead.
+    """
     content = p["content"]
     layout_update = args.get("layout", {})
     for layout_name, layout_val in layout_update.items():
@@ -447,7 +454,6 @@ def update_window(p, args):
             for i, d in enumerate(pdata):
                 if i < len(legend):
                     d["name"] = legend[i]
-    p["version"] += 1
     return p
 
 
