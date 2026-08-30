@@ -15,6 +15,7 @@ in the previous server.py class.
 """
 
 import copy
+import functools
 import hashlib
 import html
 import json
@@ -22,6 +23,8 @@ import logging
 import os
 import errno
 from collections import OrderedDict
+
+import tornado.ioloop
 
 MAX_ENV_NAME_LEN = 25
 from collections.abc import Mapping, Sequence
@@ -39,7 +42,6 @@ from visdom.utils.shared_utils import (
     NanSafeEncoder,
 )
 
-
 # ---- Vaguely server-security related functions ---- #
 
 
@@ -47,14 +49,83 @@ def check_auth(f):
     """
     Wrapper for server access methods to ensure that the access
     is authorized.
+
+    The wrapped method's return value is handed back untouched, so an
+    ``async def`` handler's coroutine reaches tornado to be awaited.
     """
 
+    @functools.wraps(f)
     def _check_auth(handler, *args, **kwargs):
         if not handler.is_authorized():
-            return
-        f(handler, *args, **kwargs)
+            return None
+        return f(handler, *args, **kwargs)
 
     return _check_auth
+
+
+DEFAULT_READONLY_MESSAGE = "The server is running in readonly mode"
+
+
+def reject_readonly(handler, message=DEFAULT_READONLY_MESSAGE):
+    """Answer 403 for a write attempted against a readonly server.
+
+    ``message`` names the capability that is disabled, since "uploads" and
+    "experiment logging" are refused for the same reason but are not the same
+    thing to the caller.
+    """
+    handler.set_status(403)
+    handler.write({"success": False, "error": message})
+
+
+def check_readonly(f):
+    """
+    Wrapper for handler methods that change server state, so a server
+    started with ``-readonly`` refuses them instead of applying them.
+
+    Sockets are already short-circuited wholesale in
+    ``AnySocketHandlerOrWrapper.on_message``; this is the HTTP half of the
+    same rule. Stack it under ``check_auth`` so an unauthenticated request
+    still answers 401 rather than 403.
+
+    Passes the wrapped method's return value through for the same reason
+    ``check_auth`` does.
+    """
+
+    @functools.wraps(f)
+    def _check_readonly(handler, *args, **kwargs):
+        if handler.readonly:
+            reject_readonly(handler)
+            return None
+        return f(handler, *args, **kwargs)
+
+    return _check_readonly
+
+
+def check_readonly_message(message):
+    """``check_readonly`` for a handler that names the capability it refuses.
+
+    The guarded method is never entered: the response is 403 with a JSON body
+    explaining which capability is disabled.
+
+    Written as a decorator, and applied under ``check_auth``, so that a handler
+    declares "this writes" once at its entry point rather than restating the
+    check in the body -- the omission that let readonly writes through before.
+
+    Passes the wrapped method's return value through for the same reason
+    ``check_auth`` does.
+    """
+
+    def _decorate(f):
+        @functools.wraps(f)
+        def _check_readonly(handler, *args, **kwargs):
+            if getattr(handler, "readonly", False):
+                reject_readonly(handler, message)
+                return None
+            return f(handler, *args, **kwargs)
+
+        return _check_readonly
+
+    return _decorate
 
 
 def set_cookie(value=None):
@@ -86,20 +157,33 @@ class LazyEnvData(Mapping):
         self._eid = eid
         self._raw_dict = None
 
+    @property
+    def is_loaded(self):
+        """Whether this environment has been materialized in memory."""
+        return self._raw_dict is not None
+
     def lazy_load_data(self):
+        if self._raw_dict is not None:
+            return
+        self.prime(self._store.load_env(self._eid))
+
+    def prime(self, env_data):
+        """Install an env that has already been read, skipping the disk hit.
+
+        Priming an env that is already loaded leaves it alone.
+        """
         if self._raw_dict is not None:
             return
 
         try:
-            env_data = self._store.load_env(self._eid)
             raw = dict(env_data)
             raw["jsons"] = env_data["jsons"]
             raw["reload"] = env_data["reload"]
-            self._raw_dict = raw
         except (KeyError, TypeError) as e:
             raise ValueError(
                 "Failed loading environment json: {} - {}".format(self._eid, repr(e))
             )
+        self._raw_dict = raw
 
     def __getitem__(self, key):
         self.lazy_load_data()
@@ -108,6 +192,10 @@ class LazyEnvData(Mapping):
     def __setitem__(self, key, value):
         self.lazy_load_data()
         return self._raw_dict.__setitem__(key, value)
+
+    def __delitem__(self, key):
+        self.lazy_load_data()
+        return self._raw_dict.__delitem__(key)
 
     def __iter__(self):
         self.lazy_load_data()
@@ -118,6 +206,95 @@ class LazyEnvData(Mapping):
         return len(self._raw_dict)
 
 
+# ------- Off-loop storage helpers ----- #
+
+
+def snapshot_env(env):
+    """Deep-copy one env so a worker thread can serialize it safely.
+
+    Returns ``None`` for a lazy env that was never read: its on-disk copy is
+    already current, so there is nothing to write.
+    """
+    if isinstance(env, LazyEnvData) and not env.is_loaded:
+        return None
+    return copy.deepcopy(dict(env))
+
+
+def snapshot_state(state):
+    """Deep-copy every materialised env, dropping the ones still cold."""
+    snapshot = {}
+    for eid, env in state.items():
+        copied = snapshot_env(env)
+        if copied is not None:
+            snapshot[eid] = copied
+    return snapshot
+
+
+def run_on_storage_executor(handler, func, *args):
+    """Submit disk work to the app's storage executor, returning a future."""
+    return tornado.ioloop.IOLoop.current().run_in_executor(
+        getattr(handler, "storage_executor", None), func, *args
+    )
+
+
+def save_env_off_loop(handler, eid):
+    """Persist one env off the loop, or ``None`` when there is nothing to write."""
+    snapshot = snapshot_env(handler.state[eid])
+    if snapshot is None:
+        return None
+    return run_on_storage_executor(handler, handler.storage.save_env, eid, snapshot)
+
+
+def save_all_off_loop(handler):
+    """Persist every materialised env off the loop."""
+    return run_on_storage_executor(
+        handler, handler.storage.save_all, snapshot_state(handler.state)
+    )
+
+
+def load_env_off_loop(handler, eid):
+    """Read one env from disk off the loop."""
+    return run_on_storage_executor(handler, handler.storage.load_env, eid)
+
+
+def delete_env_off_loop(handler, eid):
+    """Remove one env from disk off the loop, behind any save already queued.
+
+    Deleting here on the loop is what let a deleted environment come back: an
+    autosave hands the worker a snapshot taken while the env still existed, the
+    delete then removes the file, and the write lands afterwards and recreates
+    it. The worker runs one task at a time, so submitting the delete rather
+    than running it orders it after every save queued before it, and a save
+    queued after it cannot see the env at all -- the loop dropped it from
+    ``state`` before this was called.
+    """
+    future = run_on_storage_executor(handler, handler.storage.delete_env, eid)
+    future.add_done_callback(_log_storage_failure)
+    return future
+
+
+async def ensure_env_loaded(handler, eid):
+    """Materialise a cold lazy env without blocking the loop on the read."""
+    env = handler.state.get(eid)
+    if not isinstance(env, LazyEnvData) or env.is_loaded:
+        return
+    env.prime(await load_env_off_loop(handler, eid))
+
+
+def _log_storage_failure(future):
+    try:
+        future.result()
+    except Exception:
+        logging.exception("Background storage write failed")
+
+
+def fire_and_forget_save_all(handler):
+    """Schedule a full save whose failure is logged rather than swallowed."""
+    future = save_all_off_loop(handler)
+    future.add_done_callback(_log_storage_failure)
+    return future
+
+
 # ------- Environment management helpers ----- #
 
 
@@ -125,9 +302,22 @@ def escape_eid(eid):
     """Replace forward slashes and other problematic characters
     with underscores and backslashes with hyphen, to avoid recognizing them as
     directories or breaking URLs and filenames.
+
+    Also strips surrounding whitespace. As ``JSONStore`` independently
+    strips whitespace before deriving an on-disk filename from an eid,
+    so two in-memory eids that differ only by leading/trailing whitespace
+    (e.g. ``"main"`` and ``"main "``) would otherwise stay distinct in ``self.state``
+    while silently colliding on disk - whichever one is saved last clobbers the other.
+    Stripping here, at the single choke point every eid passes through (HTTP handlers,
+    websocket handlers, and the storage layer all call this), keeps the in-memory key
+    and the on-disk filename in agreement.
     """
     return (
-        eid.replace("/", "_").replace("\\", "_").replace("\n", "-").replace("\r", "-")
+        eid.strip()
+        .replace("/", "_")
+        .replace("\\", "_")
+        .replace("\n", "-")
+        .replace("\r", "-")
     )
 
 
@@ -210,7 +400,7 @@ def window(args):
                 "show_slider": opts.get("show_slider", True),
             }
         )
-    elif ptype in ["image", "text", "properties"] and is_visdom_type:
+    elif ptype in ["image", "text", "properties", "hparams"] and is_visdom_type:
         p.update({"content": args["data"][0]["content"], "type": ptype})
     elif ptype == "table" and is_visdom_type:
         p.update(
@@ -302,6 +492,8 @@ def compare_envs(state, eids, socket, store, show_all=False):
 
             destWid = name2Wid[title]
             destWidJson = res["jsons"][destWid]
+            if "content" not in destWidJson:
+                continue  # nothing in the base env to merge into
             base_ptype = destWidJson.get("type", None)
             if base_ptype == "image_compare":
                 base_ptype = "image"
@@ -337,9 +529,10 @@ def compare_envs(state, eids, socket, store, show_all=False):
                     )
                     destWidJson["content"].append(next_img)
             elif ptype == "plot":
+                base_data = destWidJson["content"].get("data") or []
+                if not base_data or "name" not in base_data[0]:
+                    continue  # Skip windows with unnamed data
                 if ix == 0:
-                    if "name" not in destWidJson["content"]["data"][0]:
-                        continue  # Skip windows with unnamed data
                     destWidJson["has_compare"] = False
                     destWidJson["content"]["layout"]["showlegend"] = True
                     destWidJson["contentID"] = get_rand_id()
@@ -350,8 +543,6 @@ def compare_envs(state, eids, socket, store, show_all=False):
                             "name"
                         ] = "{}_{}".format(eidNums[eid], data["name"])
                 else:
-                    if "name" not in destWidJson["content"]["data"][0]:
-                        continue  # Skip windows with unnamed data
                     # has_compare will be set to True only if the window title is
                     # shared by at least 2 envs.
                     destWidJson["has_compare"] = True
@@ -388,11 +579,11 @@ def compare_envs(state, eids, socket, store, show_all=False):
                 )
                 win_copy["title"] = label
                 if isinstance(win_copy.get("layout"), dict):
-                    win_copy["layout"]["title"] = label
+                    win_copy["layout"]["title"] = {"text": label}
                 if isinstance(win_copy.get("content"), dict) and isinstance(
                     win_copy["content"].get("layout"), dict
                 ):
-                    win_copy["content"]["layout"]["title"] = label
+                    win_copy["content"]["layout"]["title"] = {"text": label}
                 win_copy["has_compare"] = True
                 res["jsons"][new_wid] = win_copy
 
@@ -425,7 +616,7 @@ def compare_envs(state, eids, socket, store, show_all=False):
         "contentID": "compare_legend",
         "content": tbl,
         "type": "text",
-        "layout": {"title": "compare_legend"},
+        "layout": {"title": {"text": "compare_legend"}},
         "i": 1,
         "has_compare": True,
         "commentsDisabled": True,
@@ -457,6 +648,18 @@ def broadcast_envs(handler, target_subs=None):
                 cls=NanSafeEncoder,
             )
         )
+
+
+def broadcast_tags(handler, eid, tags, target_subs=None):
+    """Broadcast one environment's key/value tags to browser clients."""
+    if target_subs is None:
+        target_subs = handler.subs.values()
+    message = json.dumps(
+        {"command": "tags_update", "data": {"eid": eid, "tags": tags}},
+        cls=NanSafeEncoder,
+    )
+    for sub in target_subs:
+        sub.write_message(message)
 
 
 def send_to_sources(handler, msg):
@@ -593,9 +796,12 @@ def register_window(self, p, eid):
         p["i"] = env[p["id"]]["i"]
         p["comment"] = env[p["id"]].get("comment", p.get("comment", ""))
     else:
-        p["i"] = len(env)
+        # not len(env): closing any window but the last would hand the next
+        # one an index that is still in use. Same rule as the undo path.
+        p["i"] = max((w.get("i", -1) for w in env.values()), default=-1) + 1
 
     env[p["id"]] = p
+    self.mark_dirty(eid)
 
     broadcast_msg = dict(p)
     broadcast_msg["eid"] = eid

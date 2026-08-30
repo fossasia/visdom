@@ -20,6 +20,19 @@ The following options can be provided to the server:
 | `-force_new_cookie` | Flag to reset the secure cookie used by the server, invalidating current login cookies. Requires `-enable_login` |
 | `-bind_local` | Flag to make the server accessible only from localhost |
 | `-eager_data_loading` | By default visdom loads environments lazily upon user request. Setting this flag lets visdom pre-fetch all environments upon startup |
+| `-save_interval` | Seconds between automatic saves of changed environments (default = 30). Set to 0 to disable the timer |
+| `-save_threshold` | Save an environment early once it has taken this many updates (default = 50), so a busy one is not left unsaved for a whole interval. Set to 0 to disable |
+
+## Saving
+
+Environments are held in memory and written to `-env_path` automatically: every
+`-save_interval` seconds, and immediately once an environment has taken
+`-save_threshold` updates. Only environments that changed since the last write are
+saved. The write runs on a background storage thread, so a large environment
+reaching disk does not hold up the requests arriving while it is written.
+
+Setting both to 0 restores the older behaviour of saving only when asked, and once
+more at shutdown.
 
 ## Authentication
 

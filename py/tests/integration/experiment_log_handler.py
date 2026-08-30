@@ -9,44 +9,33 @@
 """End-to-end tests for the ``/experiments/log`` endpoint.
 
 Drives a real :class:`~visdom.server.app.Application` over a temp env dir with
-Tornado's ``AsyncHTTPTestCase``, so the full route -> handler -> ``ExperimentStore``
--> ``JSONStore`` path is exercised. Also unit-tests the client-side
-``Visdom.experiment``/``log_metrics``/``finish_experiment`` message shapes with
-a mocked transport (no server needed).
+``VisdomHTTPTestCase``, so the full route -> handler -> ``ExperimentStore`` ->
+``JSONStore`` path is exercised.
+
+The client-side ``Visdom.experiment``/``log_metrics``/``finish_experiment``
+message shapes were asserted here too, against a client built per test. That
+client still opened an incoming socket and waited out the
+connect timeout, costing 6.3s a test. They now live in ``unit/client_content.py``
+on the ``offline_client`` fixture, which is where a test that drives no
+Application belongs.
 """
 
 import json
-import tempfile
-import unittest
-from unittest.mock import Mock, patch
 
-import tornado.testing
+import pytest
 
-from visdom import Visdom
 from visdom.data_model import JSONStore
 from visdom.experiments import ExperimentStore
-from visdom.server.app import Application
+
+from testutils.http import VisdomHTTPTestCase
+
+pytestmark = pytest.mark.integration
 
 
-class TestExperimentLogEndpoint(tornado.testing.AsyncHTTPTestCase):
-    def setUp(self):
-        self._tmp_dir = tempfile.mkdtemp(prefix="visdom_exp_test_")
-        super().setUp()
-
-    def get_app(self):
-        return Application(port=self.get_http_port(), env_path=self._tmp_dir)
-
-    def post_json(self, path, body):
-        return self.fetch(
-            path,
-            method="POST",
-            body=json.dumps(body),
-            headers={"Content-Type": "application/json"},
-        )
-
+class TestExperimentLogEndpoint(VisdomHTTPTestCase):
     def read_experiment(self, eid):
         """Read the persisted experiment straight from disk via a fresh store."""
-        return ExperimentStore(JSONStore(self._tmp_dir)).get_experiment(eid)
+        return ExperimentStore(JSONStore(self.env_path)).get_experiment(eid)
 
     def test_log_creates_and_persists_experiment(self):
         resp = self.post_json(
@@ -184,97 +173,25 @@ class TestExperimentLogEndpoint(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(exp.get_param("lr").value, 0.01)
 
 
-class TestExperimentLogReadonly(tornado.testing.AsyncHTTPTestCase):
+class TestExperimentLogReadonly(VisdomHTTPTestCase):
     """A readonly server must reject every write action with 403."""
 
-    def setUp(self):
-        self._tmp_dir = tempfile.mkdtemp(prefix="visdom_exp_ro_test_")
-        super().setUp()
+    app_kwargs = {"readonly": True}
 
-    def get_app(self):
-        return Application(
-            port=self.get_http_port(), env_path=self._tmp_dir, readonly=True
-        )
-
-    def post_json(self, body):
-        return self.fetch(
-            "/experiments/log",
-            method="POST",
-            body=json.dumps(body),
-            headers={"Content-Type": "application/json"},
-        )
+    def log(self, body):
+        return self.post_json("/experiments/log", body)
 
     def test_log_is_403(self):
-        resp = self.post_json({"eid": "main", "params": {"lr": 0.01}})
+        resp = self.log({"eid": "main", "params": {"lr": 0.01}})
         self.assertEqual(resp.code, 403)
         self.assertFalse(json.loads(resp.body)["success"])
-        store = ExperimentStore(JSONStore(self._tmp_dir))
+        store = ExperimentStore(JSONStore(self.env_path))
         self.assertIsNone(store.get_experiment("main"))
 
     def test_metrics_is_403(self):
-        resp = self.post_json(
-            {"eid": "main", "action": "metrics", "metrics": {"acc": 0.9}}
-        )
+        resp = self.log({"eid": "main", "action": "metrics", "metrics": {"acc": 0.9}})
         self.assertEqual(resp.code, 403)
 
     def test_finish_is_403(self):
-        resp = self.post_json({"eid": "main", "action": "finish"})
+        resp = self.log({"eid": "main", "action": "finish"})
         self.assertEqual(resp.code, 403)
-
-
-class TestClientMessageShapes(unittest.TestCase):
-    """Client methods build the right request without needing a server.
-
-    The transport is mocked to return the ``(msg, endpoint)`` it would have
-    posted, so we can assert on it directly.
-    """
-
-    def _client(self):
-        with (
-            patch.object(Visdom, "_handle_post", return_value=True),
-            patch.object(Visdom, "_start_session_reaper"),
-        ):
-            client = Visdom(env="expenv", use_incoming_socket=False)
-
-        client._send = Mock(
-            side_effect=lambda msg, endpoint="events", **_: (msg, endpoint)
-        )
-        return client
-
-    def test_experiment_message(self):
-        msg, endpoint = self._client().experiment(
-            name="r1", params={"lr": 0.01}, tags={"ds": "mnist"}, description="d"
-        )
-        self.assertEqual(endpoint, "experiments/log")
-        self.assertEqual(msg["action"], "log")
-        self.assertEqual(msg["eid"], "expenv")
-        self.assertEqual(msg["params"], {"lr": 0.01})
-        self.assertEqual(msg["tags"], {"ds": "mnist"})
-
-    def test_experiment_env_override(self):
-        msg, _ = self._client().experiment(params={"lr": 0.01}, env="other")
-        self.assertEqual(msg["eid"], "other")
-
-    def test_log_metrics_message(self):
-        msg, endpoint = self._client().log_metrics({"acc": 0.9}, step=5)
-        self.assertEqual(endpoint, "experiments/log")
-        self.assertEqual(msg["action"], "metrics")
-        self.assertEqual(msg["metrics"], {"acc": 0.9})
-        self.assertEqual(msg["step"], 5)
-
-    def test_finish_experiment_message(self):
-        msg, _ = self._client().finish_experiment(status="failed")
-        self.assertEqual(msg["action"], "finish")
-        self.assertEqual(msg["status"], "failed")
-
-    def test_experiment_rejects_bad_params(self):
-        with self.assertRaises(TypeError):
-            self._client().experiment(params=[1, 2, 3])
-
-    def test_log_metrics_rejects_empty(self):
-        with self.assertRaises(TypeError):
-            self._client().log_metrics({})
-
-
-if __name__ == "__main__":
-    unittest.main()

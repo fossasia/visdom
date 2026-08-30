@@ -13,9 +13,12 @@ no network. Tests that genuinely need an externally launched visdom must carry
 ``@pytest.mark.server`` so CI can deselect them.
 """
 
-from unittest.mock import patch
+import types
+from concurrent.futures import Future
+from unittest.mock import Mock, patch
 
 import pytest
+import tornado.ioloop
 
 from visdom.data_model.json_store import JSONStore
 from visdom.server.app import Application
@@ -65,6 +68,40 @@ def app_factory(env_path):
 
 
 @pytest.fixture
+def inline_executor(monkeypatch):
+    """Run ``IOLoop.current().run_in_executor`` calls immediately, in-thread.
+
+    Records ``(func, args)`` so a test can assert what was scheduled as well as
+    what it did. A settled ``Future`` is handed back rather than the bare
+    result, because that is what the real call returns and callers attach a
+    done-callback to it.
+
+    Every path that touches an environment file off the loop -- the autosave
+    flush, ``save_all``, the env reads and the deletes -- goes through here, so
+    a test that takes this fixture sees the disk settled by the time the call
+    it made returns.
+    """
+    scheduled = []
+
+    def run_in_executor(_self_executor, func, *args):
+        scheduled.append((func, args))
+        future = Future()
+        try:
+            future.set_result(func(*args))
+        except Exception as exc:
+            future.set_exception(exc)
+        return future
+
+    loop = types.SimpleNamespace(
+        run_in_executor=lambda executor, func, *args: run_in_executor(
+            executor, func, *args
+        )
+    )
+    monkeypatch.setattr(tornado.ioloop.IOLoop, "current", staticmethod(lambda: loop))
+    return scheduled
+
+
+@pytest.fixture
 def fake_socket():
     return FakeSocket()
 
@@ -91,12 +128,24 @@ def app_handler(app):
 def offline_client():
     """Visdom client that never opens a connection.
 
-    With ``send=False`` the client's ``_send`` returns the payload instead of
-    performing I/O, so plot methods can be asserted as pure functions.
+    The transport is mocked out from construction onwards, so plot methods can
+    be asserted as pure functions. ``_handle_post`` is then armed to raise, so a
+    call that slips past a test's own patch fails loudly instead of reaching the
+    network -- pair this with ``capture_send`` to assert on a payload.
     """
     import visdom
 
-    return visdom.Visdom(send=False, use_incoming_socket=False)
+    with (
+        patch.object(visdom.Visdom, "_handle_post", return_value=True),
+        patch.object(visdom.Visdom, "_start_session_reaper"),
+        patch.object(visdom.logger, "warning"),
+    ):
+        client = visdom.Visdom(use_incoming_socket=False)
+
+    client._handle_post = Mock(
+        side_effect=AssertionError("unexpected transport call in unit test")
+    )
+    return client
 
 
 @pytest.fixture

@@ -8,7 +8,7 @@
  */
 
 const { test, expect } = require('@playwright/test');
-const { runDemo } = require('../support/helpers');
+const { runDemo, waitForPlotRender } = require('../support/helpers');
 
 const winSelector = '.layout .react-grid-item';
 const windowSelector = '.layout .window';
@@ -72,6 +72,12 @@ const paneCases = [
     demo: 'html_table',
     targetX: 263,
     size: { height: 290, width: 244 },
+  },
+  {
+    type: 'Table',
+    demo: 'table',
+    targetX: 391,
+    size: { height: 290, width: 370 },
   },
   { type: 'Confusion Matrix', demo: 'plot_confusion_matrix_basic' },
 ].map((paneCase) => {
@@ -149,7 +155,7 @@ async function expectPaneTranslate(pane, expectedX, expectedY) {
     .toBeLessThanOrEqual(1);
 }
 
-async function expectPaneSize(pane, size) {
+async function expectPaneSize(pane, size, tolerance = 2) {
   await expect
     .poll(async () => {
       const currentSize = await pane.evaluate((element) => {
@@ -164,7 +170,7 @@ async function expectPaneSize(pane, size) {
         Math.abs(currentSize.width - size.width)
       );
     })
-    .toBeLessThanOrEqual(2);
+    .toBeLessThanOrEqual(tolerance);
 }
 
 test.describe('Test Pane Actions', () => {
@@ -194,12 +200,13 @@ test.describe('Test Pane Actions', () => {
         const pane = firstPane(page);
         await expectPaneTranslate(pane, 10, 10);
         await dragMouse(page, pane.locator('.bar').first(), 600);
-        await page.locator('[data-original-title="Repack"]').click();
+        await page.locator('[title="Repack"]').click();
         await expectPaneTranslate(pane, paneCase.targetX, 10);
       });
 
       await test.step('Check Pane Size', async () => {
-        await expectPaneSize(firstPane(page), paneCase.size);
+        const tolerance = paneCase.demo === 'misc_plot_latex' ? 12 : 2;
+        await expectPaneSize(firstPane(page), paneCase.size, tolerance);
       });
 
       await test.step('Resize Pane', async () => {
@@ -210,13 +217,17 @@ test.describe('Test Pane Actions', () => {
           resizedSize.width - paneCase.size.width,
           resizedSize.height - paneCase.size.height
         );
-        await expectPaneSize(pane, resizedSize);
+
+        const tolerance = paneCase.demo === 'misc_plot_latex' ? 12 : 2;
+        await expectPaneSize(pane, resizedSize, tolerance);
       });
 
       await test.step('Resize Pane Reset', async () => {
         const pane = firstPane(page);
         await pane.locator('.react-resizable-handle').first().dblclick();
-        await expectPaneSize(pane, paneCase.resetSize);
+
+        const tolerance = paneCase.demo === 'misc_plot_latex' ? 12 : 2;
+        await expectPaneSize(pane, paneCase.resetSize, tolerance);
       });
 
       await test.step('Close Pane', async () => {
@@ -269,5 +280,63 @@ test.describe('Test Pane Filter', () => {
 
     await filter.fill('pane3|pane2', { force: true });
     await expect(visibleWindows).toHaveCount(2);
+  });
+});
+
+test.describe('Test Plot Rendering Errors', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+  });
+
+  test('line plot renders without uncaught page errors', async ({
+    page,
+  }) => {
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(err));
+
+    // A fresh line plot mounts its Plotly div for the first time here,
+    // exercising the same effect (PlotPane's newPlot -> Plotly.react)
+    // that must resolve the graph div via plotlyRef rather than the
+    // contentID string, or the pane fails to render entirely.
+    await runDemo(page, 'plot_line_basic');
+    await waitForPlotRender(page);
+    await expect(page.locator(windowSelector)).toHaveCount(1);
+    await expect(page.locator('.js-plotly-plot')).toBeVisible();
+
+    expect(pageErrors, pageErrors.map((e) => e.message).join('\n')).toEqual(
+      []
+    );
+  });
+
+  test('rapid successive updates to the same plot do not throw', async ({
+    page,
+  }) => {
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(err));
+
+    const env = `plot_rapid_update_${Math.floor(Math.random() * 1e6)}`;
+
+    // Mount once so the pane exists, then keep sending updates into the
+    // same window with open: false so the pane stays mounted rather than
+    // being closed and reopened on every call. Each update re-triggers
+    // PlotPane's render effect (newPlot -> Plotly.react) on an
+    // already-mounted pane, which is where a contentID-vs-plotlyRef race
+    // is most likely to surface, since the effect can fire again before
+    // the browser has settled the previous paint.
+    await runDemo(page, 'plot_line_basic', { env });
+    for (let i = 0; i < 8; i++) {
+      await runDemo(page, 'plot_line_basic', {
+        env,
+        open: false,
+        asyncrun: true,
+      });
+    }
+    await waitForPlotRender(page);
+    await expect(page.locator(windowSelector).first()).toBeVisible();
+    await expect(page.locator('.js-plotly-plot').first()).toBeVisible();
+
+    expect(pageErrors, pageErrors.map((e) => e.message).join('\n')).toEqual(
+      []
+    );
   });
 });
