@@ -480,6 +480,10 @@ def on_before_optimizer_step(self, optimizer):
 
 **Note:** `log_metrics` and `log_hyperparams` run on rank zero only. Use one logger instance per `Trainer` run. Not thread-safe — internal state has no locking.
 
+**Note:** when the run ends (success or failure) the logger saves the env on the server, so it can be reloaded later.
+
+**Note:** values that don't convert to a float (non-numeric strings, multi-element tensors, `None`) are skipped with a warning rather than raising.
+
 See `example/train_lightning_example.py` for a full working example.
 
 ### scikit-learn

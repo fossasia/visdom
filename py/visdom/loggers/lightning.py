@@ -35,7 +35,9 @@ class VisdomLightningLogger(Logger):
 
     Each metric key gets its own window -- one key, one line chart, with
     no train/val name parsing. The bookkeeping ``epoch`` key Lightning
-    mixes into the dict is not plotted.
+    mixes into the dict is not plotted. Values that do not convert to a
+    float (non-numeric strings, multi-element tensors, ``None``) are
+    skipped with a warning rather than raising.
 
     How often ``log_metrics`` fires is controlled entirely by Lightning
     (``Trainer(log_every_n_steps=...)`` for step metrics, once per epoch
