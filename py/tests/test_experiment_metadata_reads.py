@@ -27,6 +27,10 @@ from visdom.utils.server_utils import LazyEnvData
 
 pytestmark = pytest.mark.unit
 
+# Sentinel for blob(): "drop this key" rather than "set it to None", since None
+# is itself a value a blob can legitimately hold.
+MISSING = object()
+
 
 class TestJSONStoreProjection(unittest.TestCase):
     """JSONStore.load_experiment returns the blob, or None, and never raises."""
@@ -172,6 +176,125 @@ class TestLiveEnvsAreNotMaterialised(unittest.TestCase):
         self.assertEqual(
             self.state["run-0"]["experiment"]["params"][-1]["key"], "momentum"
         )
+
+
+class TestMalformedMetadataIsSkipped(unittest.TestCase):
+    """An unreadable blob is skipped by the read, never raised out of it.
+
+    ``_read_metadata`` is the read every bulk walk goes through, so an
+    exception escaping it costs far more than the run it came from: ``search``
+    and ``iter_experiments`` visit every environment, and one blob that was
+    hand-edited or only half-written would fail every query until someone
+    found and deleted the file. The storage layer underneath already refuses
+    to behave that way — ``load_env`` and ``list_envs`` skip a file they
+    cannot parse — and these pin the same contract one layer up.
+    """
+
+    def setUp(self):
+        self._tmp_dir = tempfile.mkdtemp(prefix="visdom_meta_bad_")
+        self.backing = JSONStore(self._tmp_dir)
+        self.store = ExperimentStore(self.backing)
+        self.store.log_experiment("healthy", params={"lr": 0.1})
+        self.healthy = self.backing.load_experiment("healthy")
+
+    def tearDown(self):
+        shutil.rmtree(self._tmp_dir, ignore_errors=True)
+
+    def blob(self, **overrides):
+        """A copy of the healthy blob with ``overrides`` applied.
+
+        A key set to ``MISSING`` is removed rather than overwritten, which is
+        how the absent-``env_id`` case is spelled.
+        """
+        blob = dict(self.healthy)
+        for key, value in overrides.items():
+            if value is MISSING:
+                blob.pop(key, None)
+            else:
+                blob[key] = value
+        return blob
+
+    def write(self, eid, blob):
+        """Persist ``blob`` as ``eid``'s metadata, bypassing the model.
+
+        The corruption this guards against did not come through
+        :class:`Experiment`, so neither does the fixture: the file is written
+        by hand, exactly as a stray editor or a half-finished write would
+        leave it.
+        """
+        path = os.path.join(self._tmp_dir, eid + ".json")
+        with open(path, "w") as fn:
+            fn.write(json.dumps({"jsons": {}, "reload": {}, "experiment": blob}))
+        return eid
+
+    def cases(self):
+        """The malformed shapes, each named by what a reader would hit on it."""
+        return (
+            ("status outside VALID_STATUSES", self.blob(status="cancelled")),
+            ("env_id missing entirely", self.blob(env_id=MISSING)),
+            ("params holding an object", self.blob(params={"lr": 0.1})),
+            ("params holding a scalar", self.blob(params=7)),
+            ("a param that is not an object", self.blob(params=["lr"])),
+            ("a param without a key", self.blob(params=[{"value": 0.1}])),
+            ("a metric that is not an object", self.blob(metrics=[3])),
+            ("a tag without a key", self.blob(tags=[{"value": "mnist"}])),
+        )
+
+    def test_get_experiment_returns_none_for_every_bad_blob(self):
+        """Each shape reads as "this env has no experiment", not as an error."""
+        for label, blob in self.cases():
+            with self.subTest(label):
+                eid = self.write("bad", blob)
+                self.assertIsNone(self.store.get_experiment(eid))
+
+    def test_search_survives_a_bad_blob(self):
+        """One unreadable env does not take the whole scan with it."""
+        for label, blob in self.cases():
+            with self.subTest(label):
+                self.write("bad", blob)
+                found = [e.env_id for e in self.store.search()]
+                self.assertEqual(found, ["healthy"])
+
+    def test_a_sorted_and_filtered_search_survives_it_too(self):
+        """The guard is in the read, so every entry point past it is covered."""
+        self.write("bad", self.blob(status="cancelled"))
+        self.assertEqual(
+            [e.env_id for e in self.store.search(query="lr > 0.01", sort_by="lr")],
+            ["healthy"],
+        )
+        page, total = self.store.search_page(sort_by="lr", limit=10)
+        self.assertEqual([e.env_id for e in page], ["healthy"])
+        self.assertEqual(total, 1)
+
+    def test_iter_experiments_skips_it(self):
+        """The generator yields the readable runs and stops at none of them."""
+        self.write("bad", self.blob(env_id=MISSING))
+        self.store.log_experiment("healthy-2", params={"lr": 0.2})
+        self.assertEqual(
+            sorted(e.env_id for e in self.store.iter_experiments()),
+            ["healthy", "healthy-2"],
+        )
+
+    def test_the_skip_is_logged_with_the_env_id(self):
+        """Skipping silently would leave the bad file impossible to find."""
+        self.write("bad", self.blob(status="cancelled"))
+        with self.assertLogs(level="WARNING") as captured:
+            self.assertIsNone(self.store.get_experiment("bad"))
+        self.assertTrue(any("bad" in line for line in captured.output))
+
+    def test_a_resident_live_env_is_guarded_as_well(self):
+        """The live-env branch reads the same blob and must not raise either."""
+        state = {"bad": {"jsons": {}, "reload": {}, "experiment": self.blob(params=7)}}
+        store = ExperimentStore(self.backing, env_provider=state.get)
+        self.assertIsNone(store.get_experiment("bad"))
+
+    def test_a_healthy_blob_is_still_read(self):
+        """The guard catches corruption, not everything: valid runs still load."""
+        self.write("bad", self.blob(status="cancelled"))
+        experiment = self.store.get_experiment("healthy")
+        self.assertIsNotNone(experiment)
+        self.assertEqual(experiment.env_id, "healthy")
+        self.assertEqual(experiment.get_param("lr").value, 0.1)
 
 
 if __name__ == "__main__":

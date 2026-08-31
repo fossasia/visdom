@@ -16,6 +16,7 @@ the ``Visdom.search_experiments`` message shape with a mocked transport (no serv
 """
 
 import json
+import os
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
@@ -461,6 +462,46 @@ class TestSearchEndpoint(tornado.testing.AsyncHTTPTestCase):
         for char in ("<", ">", "&"):
             self.assertNotIn(char, raw)
         self.assertEqual(json.loads(raw)["query"], query)
+
+    def write_corrupt_env(self, eid, blob):
+        """Write an env whose experiment blob the model cannot rebuild.
+
+        Written by hand rather than through the store, because the shapes that
+        break the read are exactly the ones :class:`Experiment` never produces:
+        a status it would have rejected, a field its writer always emits, a
+        list that is no longer a list.
+        """
+        with open(os.path.join(self._tmp_dir, eid + ".json"), "w") as fn:
+            fn.write(json.dumps({"jsons": {}, "reload": {}, "experiment": blob}))
+
+    def test_a_corrupt_blob_does_not_500_the_endpoint(self):
+        """One unreadable env is skipped; the readable ones still answer.
+
+        The scan reads every environment, so an exception escaping one blob is
+        not one missing run — it is the endpoint returning 500 for every query
+        until somebody finds the offending file and deletes it.
+        """
+        for label, blob in (
+            ("status outside VALID_STATUSES", {"env_id": "bad", "status": "cancelled"}),
+            ("env_id missing entirely", {"name": "bad"}),
+            ("params holding an object", {"env_id": "bad", "params": {"lr": 0.1}}),
+            ("a param without a key", {"env_id": "bad", "params": [{"value": 1}]}),
+        ):
+            with self.subTest(label):
+                self.write_corrupt_env("bad", blob)
+                body = self.search_ok({})
+                self.assertEqual(
+                    [e["env_id"] for e in body["experiments"]],
+                    ["run-c", "run-b", "run-a"],
+                )
+                self.assertEqual(body["total"], 3)
+
+    def test_a_corrupt_blob_does_not_break_a_filtered_search(self):
+        """Filtering and sorting read through the same guard, so they survive it."""
+        self.write_corrupt_env("bad", {"env_id": "bad", "status": "cancelled"})
+        body = self.search_ok({"query": "lr < 0.01 AND acc > 0.9", "sort_by": "lr"})
+        self.assertEqual([e["env_id"] for e in body["experiments"]], ["run-b"])
+        self.assertEqual(body["total"], 1)
 
     def test_search_sees_an_experiment_logged_over_http(self):
         """An experiment logged through /experiments/log is searchable at once."""

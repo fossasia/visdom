@@ -17,6 +17,7 @@ today — the feature is fully opt-in.
 """
 
 import heapq
+import logging
 import math
 
 from visdom.data_model.base import DataStore
@@ -216,6 +217,14 @@ class ExperimentStore:
         As in :meth:`_read`, the experiment answers to the env it was read from
         rather than to the ``env_id`` its blob records, so a forked env does not
         report its parent's id.
+
+        A blob that cannot be rebuilt into an :class:`Experiment` is skipped and
+        logged, the way ``JSONStore`` skips a file it cannot parse. This is the
+        read every bulk walk goes through, one environment at a time, so a blob
+        that was hand-edited or only half-written — a status outside
+        ``VALID_STATUSES``, a missing ``env_id``, a ``params`` field that is not
+        a list — would otherwise raise out of the scan and fail *every* search
+        for *every* query, rather than hide the single run it describes.
         """
         env = self.env_provider(env_id) if self.env_provider is not None else None
         if env is not None and not getattr(env, "is_loaded", True):
@@ -226,7 +235,13 @@ class ExperimentStore:
             blob = self.datastore.load_experiment(env_id)
         if not isinstance(blob, dict):
             return None
-        experiment = Experiment.from_dict(blob)
+        try:
+            experiment = Experiment.from_dict(blob)
+        except (KeyError, TypeError, ValueError) as e:
+            logging.warning(
+                f"Could not read experiment metadata for env {env_id}; skipping it: {e}"
+            )
+            return None
         experiment.env_id = env_id
         return experiment
 
