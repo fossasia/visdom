@@ -647,16 +647,20 @@ callback.update_dashboard(study)
 The integration records one experiment per trial, using names such as
 `optuna_quadratic_trial_000017`. Intermediate values reported with
 `trial.report(value, step)` are stored as the `intermediate_value` metric in
-step order before the final objective value. With `create_dashboard=True`, the
-first trial creates summary, HParams, optimization history and timeline panes,
-plus intermediate-value and parameter-importance panes when Optuna can compute
-them. Completed studies with two or three objectives also get a Pareto-front
-pane. Later trials refresh the panes in `optuna_quadratic` every `refresh_every`
-successful writes. The explicit final `update_dashboard()` includes any trials
-left since the last scheduled refresh. Plotly is only needed for the Optuna
-visualization panes. Timeline bars preserve each trial's true duration, and a
-fixed-size marker at the true start time keeps even sub-pixel trials visible and
-hoverable without exaggerating their runtime.
+step order before the final objective value. Each experiment also carries a
+stable `optuna_dashboard_env` tag. With `create_dashboard=True`, the first trial
+creates summary, HParams, optimization history and timeline panes, plus
+intermediate-value and parameter-importance panes when Optuna can compute them.
+The HParams pane selects experiments by that dashboard tag rather than by a
+callback-local list, so `update_dashboard()` on a new callback recovers trials
+logged before a process restart and workers sharing a dashboard see the same
+trial selection. Completed studies with two or three objectives also get a
+Pareto-front pane. Later trials refresh the panes in `optuna_quadratic` every
+`refresh_every` successful writes. The explicit final `update_dashboard()`
+includes any trials left since the last scheduled refresh. Plotly is only needed
+for the Optuna visualization panes. Timeline bars preserve each trial's true
+duration, and a fixed-size marker at the true start time keeps even sub-pixel
+trials visible and hoverable without exaggerating their runtime.
 
 The summary pane links directly to the best and latest terminal trial
 environments. The callback never opens a browser on its own.

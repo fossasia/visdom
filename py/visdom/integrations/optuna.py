@@ -29,6 +29,7 @@ from visdom.utils.server_utils import escape_eid
 
 
 _INTERMEDIATE_METRIC_NAME = "intermediate_value"
+_DASHBOARD_TAG_NAME = "optuna_dashboard_env"
 
 
 class OptunaCallback:
@@ -46,7 +47,10 @@ class OptunaCallback:
     creates the dashboard; later trials refresh it every ``refresh_every``
     successful writes. Call :meth:`update_dashboard` after ``Study.optimize``
     to ensure the final trials are included when the total is not an exact
-    multiple of that interval.
+    multiple of that interval. The HParams pane selects trials through stable
+    experiment tags rather than callback-local state, so a new callback can
+    rebuild a persisted study dashboard and multiple workers share the same
+    trial selection.
 
     Optuna is intentionally not imported here. This keeps the integration
     optional and also means importing :mod:`visdom.integrations` never requires
@@ -193,9 +197,35 @@ class OptunaCallback:
                 "optuna_direction": ",".join(
                     direction.name.lower() for direction in study.directions
                 ),
+                _DASHBOARD_TAG_NAME: self.study_env(study),
             }
         )
         return normalize_tags(tags)
+
+    @staticmethod
+    def _query_literal(value: Any) -> str:
+        """Quote a string for Visdom's experiment query language."""
+        value = str(value)
+        escaped = (
+            value.replace("\\", "\\\\")
+            .replace('"', '\\"')
+            .replace("\n", "\\n")
+            .replace("\t", "\\t")
+        )
+        return '"{}"'.format(escaped)
+
+    def _dashboard_query(self, study: Any) -> str:
+        """Select every trial logged for this study and dashboard namespace."""
+        return " AND ".join(
+            (
+                'tag.integration = "optuna"',
+                "tag.optuna_study = {}".format(self._query_literal(study.study_name)),
+                "tag.{} = {}".format(
+                    _DASHBOARD_TAG_NAME,
+                    self._query_literal(self.study_env(study)),
+                ),
+            )
+        )
 
     @staticmethod
     def _intermediate_values(trial: Any) -> list[tuple[int, float]]:
@@ -385,11 +415,9 @@ class OptunaCallback:
             return []
 
     def _build_dashboard_payload(self, study: Any) -> dict[str, Any]:
-        if not self._trial_envs:
-            raise ValueError("cannot create an Optuna dashboard before logging a trial")
         return {
             "env": self.study_env(study),
-            "env_ids": list(self._trial_envs),
+            "query": self._dashboard_query(study),
             "summary": self._summary_html(study),
             "figures": self._dashboard_figures(study),
         }
@@ -397,10 +425,10 @@ class OptunaCallback:
     def update_dashboard(self, study: Any) -> bool:
         """Create or refresh all dashboard panes for ``study``.
 
-        Returns whether the dashboard was written successfully. Only trials
-        logged by this callback instance are included in the HParams pane;
-        loading trials from a resumed study is handled by the later resume
-        integration.
+        Returns whether the dashboard was written successfully. The HParams
+        pane queries the server for every trial carrying this study's stable
+        dashboard tag. It therefore includes trials logged by earlier callback
+        instances and by other workers that share the dashboard namespace.
         """
         payload = self._build_dashboard_payload(study)
         try:
@@ -411,7 +439,7 @@ class OptunaCallback:
                 opts={"title": "Optuna Study"},
             )
             self.viz.hparams(
-                env_ids=payload["env_ids"],
+                query=payload["query"],
                 win="optuna-trials",
                 env=payload["env"],
                 opts={"title": "Optuna Trials"},
