@@ -35,6 +35,7 @@ from visdom.utils.shared_utils import (
 from visdom.utils.server_utils import (
     check_auth,
     check_readonly,
+    ensure_env_loaded,
     check_readonly_message,
     reject_readonly,
     extract_eid,
@@ -76,7 +77,7 @@ logger = logging.getLogger(__name__)
 class PostHandler(BaseHandler):
     @check_auth
     @check_readonly
-    def post(self):
+    async def post(self):
         req = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
@@ -90,6 +91,7 @@ class PostHandler(BaseHandler):
             )
 
         eid = extract_eid(req)
+        await ensure_env_loaded(self, eid)
 
         p = window(req)
         register_window(self, p, eid)
@@ -107,10 +109,11 @@ class ExistsHandler(BaseHandler):
             handler.write("false")
 
     @check_auth
-    def post(self):
+    async def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
+        await ensure_env_loaded(self, extract_eid(args))
         self.wrap_func(self, args)
 
 
@@ -493,13 +496,14 @@ class UpdateHandler(BaseHandler):
 
     @check_auth
     @check_readonly
-    def post(self):
+    async def post(self):
         if self.login_enabled and not self.current_user:
             self.set_status(400)
             return
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
+        await ensure_env_loaded(self, extract_eid(args))
         self.wrap_func(self, args)
 
 
@@ -519,10 +523,11 @@ class CloseHandler(BaseHandler):
 
     @check_auth
     @check_readonly
-    def post(self):
+    async def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
+        await ensure_env_loaded(self, extract_eid(args))
         self.wrap_func(self, args)
 
 
@@ -754,10 +759,11 @@ class DataHandler(BaseHandler):
                 )
 
     @check_auth
-    def post(self):
+    async def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
+        await ensure_env_loaded(self, extract_eid(args))
         self.wrap_func(self, args)
 
 

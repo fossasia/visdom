@@ -8,20 +8,19 @@
 
 """Unit tests for the client's content panes and its env/window management.
 
-Everything here runs against the ``offline_client`` fixture, whose only I/O
-point (``_handle_post``) is stubbed, so no server and no sockets are involved.
-The methods split in two on how they treat what ``_send`` hands back, and the
-tests follow that split:
+Everything here runs against the ``offline_client`` fixture, so no server and
+no sockets are involved. The methods split in two on how they treat what
+``_send`` hands back, and the tests follow that split:
 
-* **Payload builders** hand ``_send``'s value straight back, so the
+* **Payload builders** return ``_send``'s value untouched, so the
   ``capture_send`` fixture can intercept the message. ``text``, ``properties``,
   ``table``, ``html_table``, ``embeddings``, ``learning_curve``,
-  ``update_window_opts``, the experiment writes and the window/env writes are
-  asserted this way.
+  ``update_window_opts`` and the window/env writes are asserted this way.
 * **Reply parsers** feed the response through ``json.loads`` or compare it
-  against a literal, so the canned string ``capture_send`` returns is no use to
-  them. ``win_exists``, ``get_env_list``, ``get_env_state`` and ``delete_envs``
-  patch ``_send`` with a reply of their own instead.
+  against a literal, so ``capture_send`` cannot be used — it would hand them a
+  ``(msg, endpoint)`` tuple and ``json.loads`` would choke on it. ``win_exists``,
+  ``get_env_list``, ``get_env_state`` and ``delete_envs`` patch ``_send`` with a
+  canned reply instead.
 
 Two behaviours pinned here are current, not desired:
 
@@ -55,6 +54,13 @@ def block(sent):
 def replies(client, value):
     """Patch ``_send`` to answer with ``value`` and record the calls."""
     return patch.object(client, "_send", return_value=value)
+
+
+def echoes(client):
+    """Patch ``_send`` to hand back the ``(msg, endpoint)`` it would have posted."""
+    return patch.object(
+        client, "_send", side_effect=lambda msg, endpoint="events", **_: (msg, endpoint)
+    )
 
 
 @contextmanager
@@ -243,6 +249,7 @@ def test_html_table_renders_headers_and_rows_as_html(capture_send):
 
 
 def test_html_table_escapes_markup_in_cells_and_headers(capture_send):
+    """This one builds the markup itself, so it must escape on the way out."""
     sent = capture_send(lambda v: v.html_table([["<script>x</script>"]], ["<b>h</b>"]))
     html = block(sent)["content"]
     assert "&lt;b&gt;h&lt;/b&gt;" in html
@@ -705,15 +712,13 @@ def test_delete_envs_rejects_a_non_string_entry(offline_client):
 # -------------------------------------------------- experiment messages ----
 
 
-def test_experiment_message(offline_client, capture_send):
+def test_experiment_message(offline_client):
     offline_client.env = "expenv"
-    sent = capture_send(
-        lambda v: v.experiment(
+    with echoes(offline_client):
+        msg, endpoint = offline_client.experiment(
             name="r1", params={"lr": 0.01}, tags={"ds": "mnist"}, description="d"
         )
-    )
-    msg = sent["payload"]
-    assert sent["endpoint"] == "experiments/log"
+    assert endpoint == "experiments/log"
     assert msg["action"] == "log"
     assert msg["eid"] == "expenv"
     assert msg["params"] == {"lr": 0.01}
@@ -721,29 +726,32 @@ def test_experiment_message(offline_client, capture_send):
     assert msg["description"] == "d"
 
 
-def test_experiment_env_override(offline_client, capture_send):
+def test_experiment_env_override(offline_client):
     offline_client.env = "expenv"
-    sent = capture_send(lambda v: v.experiment(params={"lr": 0.01}, env="other"))
-    assert sent["payload"]["eid"] == "other"
+    with echoes(offline_client):
+        msg, _ = offline_client.experiment(params={"lr": 0.01}, env="other")
+    assert msg["eid"] == "other"
 
 
-def test_log_metrics_message(capture_send):
-    sent = capture_send(lambda v: v.log_metrics({"acc": 0.9}, step=5))
-    msg = sent["payload"]
-    assert sent["endpoint"] == "experiments/log"
+def test_log_metrics_message(offline_client):
+    with echoes(offline_client):
+        msg, endpoint = offline_client.log_metrics({"acc": 0.9}, step=5)
+    assert endpoint == "experiments/log"
     assert msg["action"] == "metrics"
     assert msg["metrics"] == {"acc": 0.9}
     assert msg["step"] == 5
 
 
-def test_finish_experiment_message(capture_send):
-    msg = capture_send(lambda v: v.finish_experiment(status="failed"))["payload"]
+def test_finish_experiment_message(offline_client):
+    with echoes(offline_client):
+        msg, _ = offline_client.finish_experiment(status="failed")
     assert msg["action"] == "finish"
     assert msg["status"] == "failed"
 
 
-def test_finish_experiment_defaults_to_finished(capture_send):
-    msg = capture_send(lambda v: v.finish_experiment())["payload"]
+def test_finish_experiment_defaults_to_finished(offline_client):
+    with echoes(offline_client):
+        msg, _ = offline_client.finish_experiment()
     assert msg["status"] == "finished"
 
 
