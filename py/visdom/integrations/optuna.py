@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import html
 import json
+import threading
 import warnings
 from collections import Counter
 from collections.abc import Mapping, Sequence
@@ -50,7 +51,9 @@ class OptunaCallback:
     multiple of that interval. The HParams pane selects trials through stable
     experiment tags rather than callback-local state, so a new callback can
     rebuild a persisted study dashboard and multiple workers share the same
-    trial selection.
+    trial selection. Dashboard refreshes are serialized within one callback
+    instance. When separate processes share a dashboard namespace, only one
+    callback should enable ``create_dashboard`` and act as its writer.
 
     Optuna is intentionally not imported here. This keeps the integration
     optional and also means importing :mod:`visdom.integrations` never requires
@@ -110,6 +113,7 @@ class OptunaCallback:
         self._dashboard_created = False
         self._trials_since_refresh = 0
         self._trial_envs: list[str] = []
+        self._dashboard_lock = threading.RLock()
 
     @staticmethod
     def _validate_objective_names(
@@ -428,44 +432,49 @@ class OptunaCallback:
         Returns whether the dashboard was written successfully. The HParams
         pane queries the server for every trial carrying this study's stable
         dashboard tag. It therefore includes trials logged by earlier callback
-        instances and by other workers that share the dashboard namespace.
+        instances and by other workers that share the dashboard namespace. A
+        callback-local lock prevents concurrent refreshes from overwriting a
+        newer payload. Separate processes must designate a single dashboard
+        writer because they do not share this lock.
         """
-        payload = self._build_dashboard_payload(study)
-        try:
-            self.viz.text(
-                payload["summary"],
-                win="optuna-summary",
-                env=payload["env"],
-                opts={"title": "Optuna Study"},
-            )
-            self.viz.hparams(
-                query=payload["query"],
-                win="optuna-trials",
-                env=payload["env"],
-                opts={"title": "Optuna Trials"},
-            )
-            for win, figure in payload["figures"]:
-                self.viz.plotlyplot(figure, win=win, env=payload["env"])
-        except Exception as error:
-            if self.raise_on_error:
-                raise
-            warnings.warn(
-                "OptunaCallback failed to update the dashboard: {}".format(error),
-                RuntimeWarning,
-                stacklevel=2,
-            )
-            return False
-        self._dashboard_created = True
-        self._trials_since_refresh = 0
-        return True
+        with self._dashboard_lock:
+            payload = self._build_dashboard_payload(study)
+            try:
+                self.viz.text(
+                    payload["summary"],
+                    win="optuna-summary",
+                    env=payload["env"],
+                    opts={"title": "Optuna Study"},
+                )
+                self.viz.hparams(
+                    query=payload["query"],
+                    win="optuna-trials",
+                    env=payload["env"],
+                    opts={"title": "Optuna Trials"},
+                )
+                for win, figure in payload["figures"]:
+                    self.viz.plotlyplot(figure, win=win, env=payload["env"])
+            except Exception as error:
+                if self.raise_on_error:
+                    raise
+                warnings.warn(
+                    "OptunaCallback failed to update the dashboard: {}".format(error),
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+                return False
+            self._dashboard_created = True
+            self._trials_since_refresh = 0
+            return True
 
     def _maybe_update_dashboard(self, study: Any) -> None:
-        self._trials_since_refresh += 1
-        if (
-            not self._dashboard_created
-            or self._trials_since_refresh >= self.refresh_every
-        ):
-            self.update_dashboard(study)
+        with self._dashboard_lock:
+            self._trials_since_refresh += 1
+            if (
+                not self._dashboard_created
+                or self._trials_since_refresh >= self.refresh_every
+            ):
+                self.update_dashboard(study)
 
     def _build_payload(self, study: Any, trial: Any) -> dict[str, Any]:
         env = self.trial_env(trial, study)
