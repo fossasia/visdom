@@ -13,14 +13,38 @@ Covers the routes a client touches for the whole life of a pane --
 against a real ``Application``. Pane construction itself is unit-tested in
 ``unit/window_builder.py``; here we assert what survives the round trip
 through the server's state.
+
+The same five routes are also the ones a plotting client hits in a loop, so
+the second half of this file exercises them against an environment that is
+still on disk. Each used to reach into ``handler.state[eid]`` and run a whole
+``load_env`` inline, with every other connection waiting on that read; they are
+coroutines now and prime the environment through the storage executor first.
+The proof is which thread the read lands on, so ``ThreadRecordingStore``
+remembers it -- a correct answer proves nothing on its own, because the
+blocking version returned the same body, just later and at everyone else's
+expense.
 """
 
+import inspect
 import json
+import threading
 import unittest
+from unittest import mock
 
 import pytest
 
+from visdom.data_model.json_store import JSONStore
+from visdom.server.handlers.web_handlers import (
+    CloseHandler,
+    DataHandler,
+    ExistsHandler,
+    PostHandler,
+    UpdateHandler,
+)
+from visdom.utils.server_utils import LazyEnvData
+
 from testutils.http import VisdomHTTPTestCase
+from testutils.payloads import env_payload
 
 pytestmark = pytest.mark.integration
 
@@ -143,6 +167,192 @@ class TestWindowOrdering(VisdomHTTPTestCase):
 
             indices = [pane["i"] for pane in self.panes().values()]
             self.assertEqual(len(set(indices)), len(indices), indices)
+
+
+COLD = "cold"
+COLD_WIN = "win_cold"
+
+
+def cold_env():
+    """One text pane, as an environment that was written by an earlier run."""
+    return env_payload(
+        jsons={COLD_WIN: {"id": COLD_WIN, "type": "text", "content": "seeded", "i": 0}}
+    )
+
+
+class ThreadRecordingStore(JSONStore):
+    """JSONStore that remembers which thread each read ran on."""
+
+    def __init__(self, env_path):
+        super().__init__(env_path)
+        self.load_threads = []
+
+    def load_env(self, eid):
+        self.load_threads.append(threading.current_thread().name)
+        return super().load_env(eid)
+
+
+class ColdEnvTestCase(VisdomHTTPTestCase):
+    """App booted with ``cold`` already on disk, so state holds it lazily."""
+
+    def get_app(self):
+        JSONStore(self.env_path).save_env(COLD, cold_env())
+        with mock.patch("visdom.server.app.JSONStore", ThreadRecordingStore):
+            app = super().get_app()
+        self.recorder = app.storage
+        return app
+
+    def assertLoadedOffLoop(self):
+        """The cold read happened, and not on the thread serving requests."""
+        self.assertEqual(len(self.recorder.load_threads), 1)
+        self.assertNotEqual(
+            self.recorder.load_threads[0], threading.current_thread().name
+        )
+        self.assertTrue(self.recorder.load_threads[0].startswith("visdom-storage"))
+
+
+class TestColdEnvStartsLazy(ColdEnvTestCase):
+    def test_the_seeded_env_is_not_read_at_boot(self):
+        self.assertIsInstance(self._app.state[COLD], LazyEnvData)
+        self.assertFalse(self._app.state[COLD].is_loaded)
+
+    def test_a_request_for_another_env_leaves_it_cold(self):
+        self.create_text_window(eid="main")
+
+        self.assertFalse(self._app.state[COLD].is_loaded)
+        self.assertEqual(self.recorder.load_threads, [])
+
+
+class TestEventsPrimesOffLoop(ColdEnvTestCase):
+    def test_the_read_runs_on_the_storage_worker(self):
+        self.create_text_window(eid=COLD, win="fresh")
+
+        self.assertLoadedOffLoop()
+
+    def test_the_new_pane_joins_the_ones_from_disk(self):
+        self.create_text_window(eid=COLD, win="fresh")
+
+        self.assertEqual(set(self.panes(COLD)), {COLD_WIN, "fresh"})
+
+    def test_the_new_pane_is_numbered_after_the_seeded_one(self):
+        self.create_text_window(eid=COLD, win="fresh")
+
+        self.assertEqual(self.panes(COLD)["fresh"]["i"], 1)
+
+
+class TestWinExistsPrimesOffLoop(ColdEnvTestCase):
+    def test_the_read_runs_on_the_storage_worker(self):
+        self.win_exists(COLD_WIN, eid=COLD)
+
+        self.assertLoadedOffLoop()
+
+    def test_a_pane_only_on_disk_is_reported_present(self):
+        self.assertTrue(self.win_exists(COLD_WIN, eid=COLD))
+
+    def test_a_pane_in_no_env_is_still_reported_absent(self):
+        self.assertFalse(self.win_exists("ghost", eid=COLD))
+
+
+class TestUpdatePrimesOffLoop(ColdEnvTestCase):
+    def test_the_read_runs_on_the_storage_worker(self):
+        self.update(COLD_WIN, [{"content": " more"}], eid=COLD)
+
+        self.assertLoadedOffLoop()
+
+    def test_the_pane_from_disk_is_the_one_appended_to(self):
+        resp = self.update(COLD_WIN, [{"content": " more"}], eid=COLD, append=True)
+
+        self.assertEqual(resp.body.decode(), COLD_WIN)
+        self.assertIn("seeded", self.panes(COLD)[COLD_WIN]["content"])
+
+    def test_an_append_to_a_missing_pane_still_creates_it(self):
+        self.update("fresh", [{"type": "text", "content": "hi"}], eid=COLD, append=True)
+
+        self.assertIn("fresh", self.panes(COLD))
+
+
+class TestClosePrimesOffLoop(ColdEnvTestCase):
+    def test_the_read_runs_on_the_storage_worker(self):
+        self.close_window(COLD_WIN, eid=COLD)
+
+        self.assertLoadedOffLoop()
+
+    def test_a_pane_only_on_disk_can_be_closed(self):
+        self.close_window(COLD_WIN, eid=COLD)
+
+        self.assertEqual(self.panes(COLD), {})
+
+    def test_closing_marks_the_env_for_saving(self):
+        self.close_window(COLD_WIN, eid=COLD)
+
+        self.assertEqual(self._app.dirty_envs[COLD], 1)
+
+
+class TestWinDataPrimesOffLoop(ColdEnvTestCase):
+    def test_the_read_runs_on_the_storage_worker(self):
+        self.get_win_data(COLD_WIN, eid=COLD)
+
+        self.assertLoadedOffLoop()
+
+    def test_the_pane_from_disk_is_returned(self):
+        self.assertEqual(self.get_win_data(COLD_WIN, eid=COLD)["content"], "seeded")
+
+    def test_a_write_through_win_data_lands_on_the_primed_env(self):
+        self.post_json(
+            "/win_data", {"eid": COLD, "win": "fresh", "data": '{"id": "fresh"}'}
+        )
+
+        self.assertEqual(set(self.panes(COLD)), {COLD_WIN, "fresh"})
+
+
+class TestWarmEnvIsNotReRead(ColdEnvTestCase):
+    def test_a_second_request_reuses_the_primed_env(self):
+        self.win_exists(COLD_WIN, eid=COLD)
+        self.win_exists(COLD_WIN, eid=COLD)
+
+        self.assertEqual(len(self.recorder.load_threads), 1)
+
+    def test_two_different_routes_share_one_read(self):
+        self.win_exists(COLD_WIN, eid=COLD)
+        self.get_win_data(COLD_WIN, eid=COLD)
+        self.create_text_window(eid=COLD, win="fresh")
+
+        self.assertEqual(len(self.recorder.load_threads), 1)
+
+
+class TestHotPostsAreCoroutines(VisdomHTTPTestCase):
+    """The decorators hand their return value back, so the shells stay awaitable.
+
+    ``check_auth`` discarding the wrapped result is what made this conversion
+    impossible before -- an ``async def post`` became a coroutine nobody
+    awaited, and the client got a silent empty 200. Guard the shape.
+    """
+
+    def test_every_hot_post_is_a_coroutine_function(self):
+        for handler in (
+            PostHandler,
+            ExistsHandler,
+            UpdateHandler,
+            CloseHandler,
+            DataHandler,
+        ):
+            with self.subTest(handler=handler.__name__):
+                self.assertTrue(
+                    inspect.iscoroutinefunction(inspect.unwrap(handler.post))
+                )
+
+
+class TestErrorsSurviveTheAsyncShells(VisdomHTTPTestCase):
+    """An exception raised inside a coroutine still reaches the client."""
+
+    def test_update_without_a_win_is_a_400(self):
+        self.assertEqual(self.post_json("/update", {"eid": "main"}).code, 400)
+
+    def test_win_exists_without_a_win_is_a_400(self):
+        self.assertEqual(self.post_json("/win_exists", {"eid": "main"}).code, 400)
+
+    def test_the_lua_torch_payload_still_fails_loudly(self):
+        self.assertEqual(self.post_json("/events", {"func": "anything"}).code, 500)
 
 
 if __name__ == "__main__":

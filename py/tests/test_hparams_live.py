@@ -417,8 +417,20 @@ class TestLiveHparamsPanes(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(self._window("hp1")["contentID"], content_id)
 
     def test_a_burst_of_metrics_rebuilds_the_pane_once(self):
-        """Marks coalesce across requests, not just within one."""
+        """Marks coalesce across requests, not just within one.
+
+        The drain is held rather than outrun. Leaving the debounce armed makes
+        the claim "five requests finish inside ``DEBOUNCE``", and a burst that
+        misses that deadline -- a loaded machine, coverage tracing -- drains
+        mid-loop and rebuilds the pane while the marks are still arriving,
+        failing on the clock rather than on any coalescing. Capturing the
+        callback instead of arming the loop leaves the queue to say it itself:
+        five marks arrange exactly one drain.
+        """
         self.create({"query": "lr < 0.01", "win": "hp1"})
+        queue = self._app.live_updates
+        drains = []
+        queue._schedule = lambda delay, callback: drains.append(callback)
         content_ids = set()
 
         for step in range(5):
@@ -432,8 +444,10 @@ class TestLiveHparamsPanes(tornado.testing.AsyncHTTPTestCase):
             )
             content_ids.add(self._window("hp1")["contentID"])
 
+        self.assertEqual(len(drains), 1)
         self.assertEqual(len(content_ids), 1)
-        self.settle()
+
+        drains[0]()
         self.assertNotIn(self._window("hp1")["contentID"], content_ids)
 
     def test_a_pane_closed_before_the_drain_is_skipped(self):
