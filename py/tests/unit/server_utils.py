@@ -32,31 +32,6 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.mark.parametrize(
-    "raw",
-    ["  main", "main  ", "  main  "],
-    ids=["leading", "trailing", "surrounding"],
-)
-def test_escape_eid_strips_surrounding_whitespace(raw):
-    assert escape_eid(raw) == "main"
-
-
-def test_escape_eid_collapses_whitespace_only_differing_ids():
-    """'main' and 'main ' must normalise identically.
-
-    JSONStore strips whitespace before deriving an on-disk filename, so if
-    escape_eid did not also strip, these two eids would stay distinct in the
-    in-memory state dict while silently colliding on disk.
-    """
-    assert escape_eid("main") == escape_eid("main ")
-    assert escape_eid("main") == escape_eid(" main")
-
-
-def test_escape_eid_preserves_internal_whitespace():
-    """Only leading/trailing whitespace is stripped, not internal."""
-    assert escape_eid("my env") == "my env"
-
-
-@pytest.mark.parametrize(
     "raw, escaped",
     [
         ("a/b", "a_b"),
@@ -67,6 +42,10 @@ def test_escape_eid_preserves_internal_whitespace():
         ("my_environment", "my_environment"),
         ("env_éàü", "env_éàü"),
         ("", ""),
+        ("  main", "main"),
+        ("main  ", "main"),
+        ("  main  ", "main"),
+        ("my env", "my env"),
     ],
     ids=[
         "forward_slash",
@@ -77,17 +56,28 @@ def test_escape_eid_preserves_internal_whitespace():
         "normal_string",
         "unicode",
         "empty",
+        "leading_whitespace",
+        "trailing_whitespace",
+        "surrounding_whitespace",
+        "internal_whitespace_preserved",
     ],
 )
 def test_escape_eid_sanitizes(raw, escaped):
     assert escape_eid(raw) == escaped
 
 
+@pytest.mark.parametrize("padded", ["main ", " main"], ids=["trailing", "leading"])
+def test_escape_eid_collapses_whitespace_only_differing_ids(padded):
+    """'main' and 'main ' must normalise identically.
+
+    JSONStore strips whitespace before deriving an on-disk filename, so if
+    escape_eid did not also strip, these two eids would stay distinct in the
+    in-memory state dict while silently colliding on disk.
+    """
+    assert escape_eid(padded) == escape_eid("main")
+
+
 # ------------------------------------------------------------- extract_eid ----
-
-
-def test_extract_eid_strips_whitespace():
-    assert extract_eid({"eid": "main "}) == "main"
 
 
 @pytest.mark.parametrize(
@@ -97,8 +87,9 @@ def test_extract_eid_strips_whitespace():
         ({"eid": None}, "main"),
         ({"eid": "test"}, "test"),
         ({"eid": "a/b"}, "a_b"),
+        ({"eid": "main "}, "main"),
     ],
-    ids=["default", "none_value", "with_value", "escapes_value"],
+    ids=["default", "none_value", "with_value", "escapes_value", "strips_whitespace"],
 )
 def test_extract_eid(args, eid):
     assert extract_eid(args) == eid
