@@ -604,12 +604,14 @@ callback = OptunaCallback(
     objective_names=["loss"],
     create_dashboard=True,
     refresh_every=10,
+    contour_params=["x", "y"],
 )
 
 
 def objective(trial):
     x = trial.suggest_float("x", -10, 10)
-    return (x - 2) ** 2
+    y = trial.suggest_float("y", -10, 10)
+    return (x - 2) ** 2 + (y + 1) ** 2
 
 
 study = optuna.create_study(study_name="quadratic", direction="minimize")
@@ -651,6 +653,9 @@ step order before the final objective value. Each experiment also carries a
 stable `optuna_dashboard_env` tag. With `create_dashboard=True`, the first trial
 creates summary, HParams, optimization history and timeline panes, plus
 intermediate-value and parameter-importance panes when Optuna can compute them.
+Supplying at least two parameter names through `contour_params` adds a contour
+pane for each objective; Optuna handles numerical, categorical and log-scaled
+parameters when it builds those Plotly figures.
 The HParams pane selects experiments by that dashboard tag rather than by a
 callback-local list, so `update_dashboard()` on a new callback recovers trials
 logged before a process restart. Dashboard refreshes from one callback are
