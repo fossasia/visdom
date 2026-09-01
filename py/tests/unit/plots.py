@@ -13,9 +13,12 @@ receives, so these run on the ``capture_send`` fixture, which intercepts the
 payload, and on ``offline_client`` where only the input validation is under
 test. Neither opens a socket or reaches a server.
 """
-
+import math
+import unittest
+from unittest.mock import patch
 import numpy as np
 import pytest
+import visdom
 
 pytestmark = pytest.mark.unit
 
@@ -604,3 +607,58 @@ def test_contour_layout_is_flat(capture_send):
     """contour renders flat, without the 3D scene surf builds."""
     sent = capture_send(lambda v: v.contour(np.ones((2, 2))))
     assert "scene" not in sent["payload"]["layout"]
+
+
+# --------------------------------------------------------- matplot resizable ----
+
+
+class _FakePlot:
+    """Minimal stand-in for a matplotlib figure.
+
+    ``matplot()`` only ever calls ``savefig(buffer, format="svg")`` on the plot
+    object, so we just emit an SVG string carrying the given point dimensions
+    and ignore everything else. This lets us test the pt-stripping math without
+    importing matplotlib or opening a socket.
+    """
+
+    def __init__(self, width_pt, height_pt):
+        self._svg = (
+            '<?xml version="1.0" encoding="utf-8"?>\n'
+            f'<svg width="{width_pt}pt" height="{height_pt}pt" '
+            'xmlns="http://www.w3.org/2000/svg" '
+            'xmlns:xlink="http://www.w3.org/1999/xlink">'
+            "<g></g></svg>"
+        )
+
+    def savefig(self, buffer, format=None):
+        buffer.write(self._svg)
+
+
+@pytest.mark.skipif(not visdom.BS4_AVAILABLE, reason="requires bs4/lxml")
+class TestMatplotResizable(unittest.TestCase):
+    def setUp(self):
+        self.viz = visdom.Visdom(use_incoming_socket=False)
+
+    def _matplot(self, plot, **extra_opts):
+        """Run matplot(resizable=True) and capture the opts handed to svg()."""
+        captured = {}
+
+        def fake_svg(svgstr=None, opts=None, env=None, win=None):
+            captured["opts"] = opts
+            return "win"
+
+        with patch.object(self.viz, "svg", side_effect=fake_svg):
+            self.viz.matplot(plot, opts=dict(resizable=True, **extra_opts))
+        return captured["opts"]
+
+    def test_whole_number_pt_not_inflated(self):
+        # 432pt must strip to "432", not "43200". ceil(432) * 1.4 == 604.8
+        opts = self._matplot(_FakePlot(width_pt="432", height_pt="432"))
+        self.assertEqual(opts["height"], 1.4 * math.ceil(432))  # 604.8
+        self.assertEqual(opts["width"], 1.35 * math.ceil(432))  # 583.2
+
+    def test_decimal_pt_still_correct(self):
+        # decimal points still round up via ceil after stripping "pt"
+        opts = self._matplot(_FakePlot(width_pt="100.5", height_pt="200.5"))
+        self.assertEqual(opts["height"], 1.4 * math.ceil(200.5))  # 1.4 * 201
+        self.assertEqual(opts["width"], 1.35 * math.ceil(100.5))  # 1.35 * 101
