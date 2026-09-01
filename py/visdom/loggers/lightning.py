@@ -114,21 +114,24 @@ class VisdomLightningLogger(Logger):
             return None
 
     def _plot(self, key, x, value):
-        if key not in self._wins:
-            self._wins[key] = self.viz.line(
-                X=[x],
-                Y=[value],
-                env=self.env,
-                opts={"title": key, "xlabel": "step", "ylabel": key},
-            )
-        else:
+        win = self._wins.get(key)
+        if win:
             self.viz.line(
                 X=[x],
                 Y=[value],
-                win=self._wins[key],
+                win=win,
                 env=self.env,
                 update="append",
             )
+            return
+        win = self.viz.line(
+            X=[x],
+            Y=[value],
+            env=self.env,
+            opts={"title": key, "xlabel": "step", "ylabel": key},
+        )
+        if win:
+            self._wins[key] = win
 
     @rank_zero_only
     def log_metrics(self, metrics, step=None):
@@ -171,17 +174,19 @@ class VisdomLightningLogger(Logger):
             {"type": "text", "name": str(k), "value": str(v)} for k, v in params.items()
         ]
         try:
-            if self._hparam_win is None:
-                self._hparam_win = self.viz.properties(
-                    content, env=self.env, opts={"title": "hyperparameters"}
-                )
-            else:
+            if self._hparam_win:
                 self.viz.properties(
                     content,
                     win=self._hparam_win,
                     env=self.env,
                     opts={"title": "hyperparameters"},
                 )
+            else:
+                win = self.viz.properties(
+                    content, env=self.env, opts={"title": "hyperparameters"}
+                )
+                if win:
+                    self._hparam_win = win
         except Exception as e:
             warnings.warn(
                 "VisdomLightningLogger failed to log hyperparameters: {}".format(e)
