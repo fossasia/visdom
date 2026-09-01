@@ -14,7 +14,12 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
+import pytest
+
 from visdom.integrations import OptunaCallback
+
+
+pytestmark = pytest.mark.unit
 
 
 def make_trial(
@@ -45,7 +50,7 @@ def make_study(trials):
     )
 
 
-def fake_visualization_module(intermediate_error=None):
+def fake_visualization_module(intermediate_error=None, history_error=None):
     visualization = types.ModuleType("optuna.visualization")
     figures = {
         "history": Mock(name="history"),
@@ -54,7 +59,9 @@ def fake_visualization_module(intermediate_error=None):
         "pareto": Mock(name="pareto"),
         "timeline": Mock(name="timeline", data=()),
     }
-    visualization.plot_optimization_history = Mock(return_value=figures["history"])
+    visualization.plot_optimization_history = Mock(
+        return_value=figures["history"], side_effect=history_error
+    )
     visualization.plot_param_importances = Mock(return_value=figures["importance"])
     visualization.plot_intermediate_values = Mock(
         return_value=figures["intermediate"], side_effect=intermediate_error
@@ -66,6 +73,59 @@ def fake_visualization_module(intermediate_error=None):
     optuna.__path__ = []
     optuna.visualization = visualization
     return optuna, visualization, figures
+
+
+class TestOptunaEnvironmentIds(unittest.TestCase):
+    def test_study_name_slashes_are_sanitized_before_trial_ids_are_used(self):
+        trial = make_trial(number=3)
+        study = make_study([trial])
+        study.study_name = "team/study"
+        viz = Mock()
+        callback = OptunaCallback(viz)
+
+        callback(study, trial)
+
+        self.assertEqual(callback.study_env(study), "optuna_team_study")
+        self.assertEqual(
+            callback.trial_env(trial, study),
+            "optuna_team_study_trial_000003",
+        )
+        self.assertEqual(callback._trial_envs, ["optuna_team_study_trial_000003"])
+        self.assertEqual(
+            viz.experiment.call_args.kwargs["env"],
+            "optuna_team_study_trial_000003",
+        )
+
+
+class TestOptunaDashboardErrorHandling(unittest.TestCase):
+    def test_figure_generation_failure_uses_dashboard_error_policy(self):
+        trial = make_trial()
+        study = make_study([trial])
+        study.best_trial = trial
+        optuna, visualization, _ = fake_visualization_module(
+            history_error=RuntimeError("figure exploded")
+        )
+        modules = {
+            "optuna": optuna,
+            "optuna.visualization": visualization,
+        }
+
+        warning_viz = Mock()
+        warning_callback = OptunaCallback(warning_viz)
+        warning_callback._trial_envs = [warning_callback.trial_env(trial, study)]
+        with patch.dict(sys.modules, modules):
+            with self.assertWarnsRegex(
+                RuntimeWarning,
+                "failed to update the dashboard: figure exploded",
+            ):
+                self.assertFalse(warning_callback.update_dashboard(study))
+        warning_viz.text.assert_not_called()
+
+        raising_callback = OptunaCallback(Mock(), raise_on_error=True)
+        raising_callback._trial_envs = [raising_callback.trial_env(trial, study)]
+        with patch.dict(sys.modules, modules):
+            with self.assertRaisesRegex(RuntimeError, "figure exploded"):
+                raising_callback.update_dashboard(study)
 
 
 class TestOptunaIntermediateValues(unittest.TestCase):
