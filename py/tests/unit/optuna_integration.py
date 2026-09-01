@@ -14,7 +14,12 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
+import pytest
+
 from visdom.integrations import OptunaCallback
+
+
+pytestmark = pytest.mark.unit
 
 
 def make_trial(
