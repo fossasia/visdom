@@ -24,13 +24,13 @@ from visdom.experiments import (
     ExperimentFinishedError,
     ExperimentStore,
     Metric,
+    normalize_tags,
     Param,
     Tag,
-    normalize_tags,
+    tags_to_mapping,
     STATUS_FAILED,
     STATUS_FINISHED,
     STATUS_RUNNING,
-    tags_to_mapping,
 )
 
 pytestmark = pytest.mark.unit
@@ -42,42 +42,19 @@ def experiments(store):
     return ExperimentStore(store)
 
 
+@pytest.fixture
+def live_state():
+    """Stand-in for the server's ``state`` dict of live environments."""
+    return {}
+
+
+@pytest.fixture
+def live_experiments(store, live_state):
+    """ExperimentStore reading live envs through an ``env_provider``."""
+    return ExperimentStore(store, env_provider=live_state.get)
+
+
 # -- Models -------------------------------------------------------------------
-
-
-def test_tags_to_mapping_preserves_values():
-    """Converting model tags never drops their key/value data."""
-    tags = [Tag("dataset", "cifar10"), Tag("stable", "")]
-    assert tags_to_mapping(tags) == {"dataset": "cifar10", "stable": ""}
-
-
-def test_normalize_tags_trims_names_and_preserves_values():
-    """Normalization changes tag names only, leaving values untouched."""
-    assert normalize_tags({" dataset ": " cifar10 ", "": "ignored"}) == {
-        "dataset": " cifar10 "
-    }
-
-
-@pytest.mark.parametrize(
-    "mapping",
-    [["stable"], {1: "stable"}, {"priority": 1}],
-    ids=["not-a-mapping", "non-str-name", "non-str-value"],
-)
-def test_normalize_tags_rejects_invalid_types(mapping):
-    """The domain accepts only string-to-string mappings."""
-    with pytest.raises(TypeError):
-        normalize_tags(mapping)
-
-
-@pytest.mark.parametrize(
-    "mapping",
-    [{"x" * 51: "value"}, {"tag-{0}".format(i): "" for i in range(21)}],
-    ids=["name-too-long", "too-many-tags"],
-)
-def test_normalize_tags_enforces_limits(mapping):
-    """Tag names and per-environment tag counts stay bounded."""
-    with pytest.raises(ValueError):
-        normalize_tags(mapping)
 
 
 @pytest.mark.parametrize(
@@ -171,6 +148,45 @@ def test_round_trip_serialisation():
     assert isinstance(rebuilt.tags[0], Tag)
 
 
+# -- Tag helpers --------------------------------------------------------------
+
+
+def test_tags_to_mapping_preserves_values():
+    """Converting model tags never drops their key/value data."""
+    tags = [Tag("dataset", "cifar10"), Tag("stable", "")]
+
+    assert tags_to_mapping(tags) == {"dataset": "cifar10", "stable": ""}
+
+
+def test_normalize_tags_trims_names_and_preserves_values():
+    """Normalization changes tag names only, leaving values untouched."""
+    normalized = normalize_tags({" dataset ": " cifar10 ", "": "ignored"})
+
+    assert normalized == {"dataset": " cifar10 "}
+
+
+@pytest.mark.parametrize(
+    "tags",
+    [["stable"], {1: "stable"}, {"priority": 1}],
+    ids=["not_a_mapping", "non_string_name", "non_string_value"],
+)
+def test_normalize_tags_rejects_invalid_types(tags):
+    """The domain accepts only string-to-string mappings."""
+    with pytest.raises(TypeError):
+        normalize_tags(tags)
+
+
+@pytest.mark.parametrize(
+    "tags",
+    [{"x" * 51: "value"}, {"tag-{0}".format(i): "" for i in range(21)}],
+    ids=["name_too_long", "too_many_tags"],
+)
+def test_normalize_tags_enforces_limits(tags):
+    """Tag names and per-environment tag counts stay bounded."""
+    with pytest.raises(ValueError):
+        normalize_tags(tags)
+
+
 # -- ExperimentStore over a real backend --------------------------------------
 
 
@@ -217,6 +233,47 @@ def test_log_metric_auto_creates_experiment(experiments):
     exp = experiments.get_experiment("main")
     assert exp is not None
     assert exp.latest_metric("loss").value == 1.5
+
+
+def test_update_tags_replaces_and_preserves_values(experiments, store, env_path):
+    """Replacing tags persists the complete key/value mapping."""
+    experiments.log_experiment("main", tags={"old": "value"})
+
+    updated = experiments.update_tags("main", {" dataset ": "cifar10", "stable": ""})
+
+    assert tags_to_mapping(updated.tags) == {"dataset": "cifar10", "stable": ""}
+    reopened = ExperimentStore(JSONStore(env_path))
+    assert tags_to_mapping(reopened.get_experiment("main").tags) == {
+        "dataset": "cifar10",
+        "stable": "",
+    }
+
+
+def test_update_tags_appends_and_updates_by_key(experiments):
+    """Append mode keeps unrelated values and updates matching keys."""
+    experiments.log_experiment("main", tags={"dataset": "mnist", "owner": "alice"})
+
+    updated = experiments.update_tags(
+        "main", {"dataset": "cifar10", "stable": ""}, append=True
+    )
+
+    assert tags_to_mapping(updated.tags) == {
+        "dataset": "cifar10",
+        "owner": "alice",
+        "stable": "",
+    }
+
+
+def test_update_tags_creates_and_can_update_terminal_experiment(experiments):
+    """Tag management creates missing records and remains organizational."""
+    created = experiments.update_tags("main", {"owner": "alice"})
+    assert tags_to_mapping(created.tags) == {"owner": "alice"}
+
+    experiments.finish_experiment("main")
+    updated = experiments.update_tags("main", {"stage": "production"}, append=True)
+
+    assert updated.status == STATUS_FINISHED
+    assert tags_to_mapping(updated.tags) == {"owner": "alice", "stage": "production"}
 
 
 def test_finish_experiment(experiments):
@@ -332,61 +389,11 @@ def test_experiment_survives_lazy_env_reload_and_save(experiments, store, env_pa
     assert exp.get_param("lr").value == 0.01
 
 
-def test_update_tags_appends_and_updates_by_key(experiments):
-    """Append mode keeps unrelated values and updates matching keys."""
-    experiments.log_experiment("main", tags={"dataset": "mnist", "owner": "alice"})
-
-    updated = experiments.update_tags(
-        "main", {"dataset": "cifar10", "stable": ""}, append=True
-    )
-
-    assert tags_to_mapping(updated.tags) == {
-        "dataset": "cifar10",
-        "owner": "alice",
-        "stable": "",
-    }
-
-
-def test_update_tags_replaces_and_preserves_values(experiments, env_path):
-    """Replacing tags persists the complete key/value mapping."""
-    experiments.log_experiment("main", tags={"old": "value"})
-
-    updated = experiments.update_tags("main", {" dataset ": "cifar10", "stable": ""})
-
-    assert tags_to_mapping(updated.tags) == {"dataset": "cifar10", "stable": ""}
-    reopened = ExperimentStore(JSONStore(env_path)).get_experiment("main")
-    assert tags_to_mapping(reopened.tags) == {"dataset": "cifar10", "stable": ""}
-
-
-def test_update_tags_creates_and_can_update_terminal_experiment(experiments):
-    """Tag management creates missing records and remains organizational."""
-    created = experiments.update_tags("main", {"owner": "alice"})
-    assert tags_to_mapping(created.tags) == {"owner": "alice"}
-
-    experiments.finish_experiment("main")
-    updated = experiments.update_tags("main", {"stage": "production"}, append=True)
-
-    assert updated.status == STATUS_FINISHED
-    assert tags_to_mapping(updated.tags) == {"owner": "alice", "stage": "production"}
-
-
-# -- ExperimentStore with a live env_provider ---------------------------------
+# -- ExperimentStore with a live env provider ---------------------------------
 #
 # The server passes ``state.get`` so that persisting experiment metadata can
-# never rewrite an env file from a copy that is missing windows created -- or
-# reviving windows closed -- since the file was last written.
-
-
-@pytest.fixture
-def live_state():
-    """The in-memory env state an env_provider-backed store reads through."""
-    return {}
-
-
-@pytest.fixture
-def live_experiments(store, live_state):
-    """ExperimentStore that resolves envs from ``live_state`` before disk."""
-    return ExperimentStore(store, env_provider=live_state.get)
+# never rewrite an env file from a copy that is missing windows created - or
+# reviving windows closed - since the file was last written.
 
 
 def test_write_persists_live_windows(live_experiments, live_state, store):
