@@ -65,7 +65,8 @@ class OptunaCallback:
             warning is emitted so an unavailable dashboard does not stop the
             optimization.
         create_dashboard: Create and periodically refresh the study dashboard.
-        refresh_every: Number of newly logged trials between dashboard refreshes.
+        refresh_every: Positive integer number of newly logged trials between
+            dashboard refreshes.
 
     Example::
 
@@ -93,6 +94,8 @@ class OptunaCallback:
             raise TypeError("dashboard_env must be a string or None")
         if dashboard_env == "":
             raise ValueError("dashboard_env must not be empty")
+        if isinstance(refresh_every, bool) or not isinstance(refresh_every, int):
+            raise TypeError("refresh_every must be an integer")
         if refresh_every < 1:
             raise ValueError("refresh_every must be at least 1")
 
@@ -137,8 +140,10 @@ class OptunaCallback:
     def study_env(self, study: Any) -> str:
         """Return the environment namespace for an Optuna study."""
         if self.dashboard_env is not None:
-            return self.dashboard_env
-        return "optuna_{}".format(study.study_name)
+            env = self.dashboard_env
+        else:
+            env = "optuna_{}".format(study.study_name)
+        return escape_eid(env)
 
     def trial_env(self, trial: Any, study: Any = None) -> str:
         """Return the deterministic Visdom environment for an Optuna trial.
@@ -345,8 +350,8 @@ class OptunaCallback:
         loading trials from a resumed study is handled by the later resume
         integration.
         """
-        payload = self._build_dashboard_payload(study)
         try:
+            payload = self._build_dashboard_payload(study)
             self.viz.text(
                 payload["summary"],
                 win="optuna-summary",
