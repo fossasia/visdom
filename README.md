@@ -653,14 +653,22 @@ creates summary, HParams, optimization history and timeline panes, plus
 intermediate-value and parameter-importance panes when Optuna can compute them.
 The HParams pane selects experiments by that dashboard tag rather than by a
 callback-local list, so `update_dashboard()` on a new callback recovers trials
-logged before a process restart and workers sharing a dashboard see the same
-trial selection. Completed studies with two or three objectives also get a
-Pareto-front pane. Later trials refresh the panes in `optuna_quadratic` every
-`refresh_every` successful writes. The explicit final `update_dashboard()`
-includes any trials left since the last scheduled refresh. Plotly is only needed
-for the Optuna visualization panes. Timeline bars preserve each trial's true
-duration, and a fixed-size marker at the true start time keeps even sub-pixel
-trials visible and hoverable without exaggerating their runtime.
+logged before a process restart. Dashboard refreshes from one callback are
+serialized, so `study.optimize(..., n_jobs=N)` cannot publish them out of order.
+When multiple processes or nodes share a study and dashboard namespace, enable
+`create_dashboard=True` in exactly one process; callbacks in the other workers
+still log their trials with the default `create_dashboard=False`. The designated
+writer's tag query includes trials from every worker. After all workers finish,
+have the coordinating process call `update_dashboard()` once for the final
+refresh.
+
+Completed studies with two or three objectives also get a Pareto-front pane.
+Later trials refresh the panes in `optuna_quadratic` every `refresh_every`
+successful writes by the dashboard writer. The explicit final
+`update_dashboard()` includes any trials left since the last scheduled refresh.
+Plotly is only needed for the Optuna visualization panes. Timeline bars preserve
+each trial's true duration, and a fixed-size marker at the true start time keeps
+even sub-pixel trials visible and hoverable without exaggerating their runtime.
 
 The summary pane links directly to the best and latest terminal trial
 environments. The callback never opens a browser on its own.
