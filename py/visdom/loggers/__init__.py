@@ -23,3 +23,10 @@ try:
     __all__.append("VisdomKerasLogger")
 except ImportError:
     pass
+
+try:
+    from visdom.loggers.lightning import VisdomLightningLogger
+
+    __all__.append("VisdomLightningLogger")
+except ImportError:
+    pass
