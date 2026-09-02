@@ -22,7 +22,7 @@ import pytest
 
 from visdom.data_model import JSONStore
 from visdom.data_model.base import DataStore
-from visdom.experiments import ExperimentStore
+from visdom.experiments import ExperimentStore, STATUS_RUNNING, tags_to_mapping
 from visdom.utils.server_utils import LazyEnvData
 
 pytestmark = pytest.mark.unit
@@ -178,16 +178,11 @@ class TestLiveEnvsAreNotMaterialised(unittest.TestCase):
         )
 
 
-class TestMalformedMetadataIsSkipped(unittest.TestCase):
-    """An unreadable blob is skipped by the read, never raised out of it.
+class MalformedBlobCase(unittest.TestCase):
+    """A store holding one healthy run, plus the means to corrupt a blob.
 
-    ``_read_metadata`` is the read every bulk walk goes through, so an
-    exception escaping it costs far more than the run it came from: ``search``
-    and ``iter_experiments`` visit every environment, and one blob that was
-    hand-edited or only half-written would fail every query until someone
-    found and deleted the file. The storage layer underneath already refuses
-    to behave that way — ``load_env`` and ``list_envs`` skip a file they
-    cannot parse — and these pin the same contract one layer up.
+    Not collected on its own (pytest wants a ``Test*`` name): it carries only
+    the fixture the read-path and write-path cases share.
     """
 
     def setUp(self):
@@ -226,6 +221,19 @@ class TestMalformedMetadataIsSkipped(unittest.TestCase):
         with open(path, "w") as fn:
             fn.write(json.dumps({"jsons": {}, "reload": {}, "experiment": blob}))
         return eid
+
+
+class TestMalformedMetadataIsSkipped(MalformedBlobCase):
+    """An unreadable blob is skipped by the read, never raised out of it.
+
+    ``_read_metadata`` is the read every bulk walk goes through, so an
+    exception escaping it costs far more than the run it came from: ``search``
+    and ``iter_experiments`` visit every environment, and one blob that was
+    hand-edited or only half-written would fail every query until someone
+    found and deleted the file. The storage layer underneath already refuses
+    to behave that way — ``load_env`` and ``list_envs`` skip a file they
+    cannot parse — and these pin the same contract one layer up.
+    """
 
     def cases(self):
         """The malformed shapes, each named by what a reader would hit on it."""
@@ -295,6 +303,123 @@ class TestMalformedMetadataIsSkipped(unittest.TestCase):
         self.assertIsNotNone(experiment)
         self.assertEqual(experiment.env_id, "healthy")
         self.assertEqual(experiment.get_param("lr").value, 0.1)
+
+
+class TestMalformedMetadataOnWritePaths(MalformedBlobCase):
+    """Updating or deleting an env is not blocked by its blob being unreadable.
+
+    A guard on the read alone would leave the corrupt environment visible-but-
+    frozen: search would skip it, and every attempt to fix it — log to it, tag
+    it, delete it — would still raise. Recovering would mean shell access to
+    the env directory. So the write paths read through the same guard, which
+    gives them the behaviour they already have for an env that never had
+    metadata: logging starts a fresh experiment (replacing the bad blob),
+    deleting removes it, and the operations that genuinely need an existing run
+    refuse with their ordinary ``KeyError``.
+    """
+
+    def test_log_experiment_replaces_an_unreadable_blob(self):
+        """Logging repairs the env instead of failing on it forever."""
+        self.write("bad", self.blob(status="cancelled"))
+        self.store.log_experiment("bad", params={"lr": 0.5})
+        experiment = self.store.get_experiment("bad")
+        self.assertIsNotNone(experiment)
+        self.assertEqual(experiment.env_id, "bad")
+        self.assertEqual(experiment.status, STATUS_RUNNING)
+        self.assertEqual(experiment.get_param("lr").value, 0.5)
+
+    def test_log_metric_replaces_an_unreadable_blob(self):
+        """The metric path starts a run the same way, rather than raising."""
+        self.write("bad", self.blob(env_id=MISSING))
+        self.store.log_metric("bad", "acc", 0.9)
+        experiment = self.store.get_experiment("bad")
+        self.assertIsNotNone(experiment)
+        self.assertEqual(experiment.latest_metric("acc").value, 0.9)
+
+    def test_update_tags_replaces_an_unreadable_blob(self):
+        """Tagging is how an env gets organised; a bad blob must not block it."""
+        self.write("bad", self.blob(params=7))
+        experiment = self.store.update_tags("bad", {"dataset": "mnist"})
+        self.assertEqual(tags_to_mapping(experiment.tags), {"dataset": "mnist"})
+        self.assertEqual(
+            tags_to_mapping(self.store.get_experiment("bad").tags),
+            {"dataset": "mnist"},
+        )
+
+    def test_update_tags_is_guarded_on_the_supplied_env_too(self):
+        """The env_data branch parses a blob of its own, so it needs the guard.
+
+        The tags handler passes the server's live env rather than making the
+        store read one back, which is a second place the same corrupt blob is
+        rebuilt.
+        """
+        env = {"jsons": {}, "reload": {}, "experiment": self.blob(status="cancelled")}
+        experiment = self.store.update_tags("bad", {"stage": "eval"}, env_data=env)
+        self.assertEqual(tags_to_mapping(experiment.tags), {"stage": "eval"})
+
+    def test_finish_experiment_refuses_the_way_it_refuses_an_empty_env(self):
+        """An unreadable run reads as no run, so finishing it is a KeyError.
+
+        The distinction that matters is not that it raises but *what*: a
+        KeyError is the store's ordinary "no experiment logged" answer, which
+        the handler already turns into a 400 rather than a 500.
+        """
+        self.write("bad", self.blob(status="cancelled"))
+        with self.assertRaises(KeyError):
+            self.store.finish_experiment("bad")
+
+    def test_compare_names_the_unreadable_env(self):
+        """compare() reports the env as having no experiment, and says which."""
+        self.write("bad", self.blob(env_id=MISSING))
+        with self.assertRaises(KeyError) as caught:
+            self.store.compare(["healthy", "bad"])
+        self.assertIn("bad", str(caught.exception))
+
+    def test_delete_experiment_removes_an_unreadable_blob(self):
+        """The blob an operator most needs to delete is the one that will not load."""
+        for label, blob in (
+            ("status outside VALID_STATUSES", self.blob(status="cancelled")),
+            ("env_id missing entirely", self.blob(env_id=MISSING)),
+            ("params holding a scalar", self.blob(params=7)),
+            ("a blob that is not an object at all", "nope"),
+        ):
+            with self.subTest(label):
+                self.write("bad", blob)
+                self.assertTrue(self.store.delete_experiment("bad"))
+                self.assertIsNone(self.backing.load_experiment("bad"))
+                self.assertIsNone(self.store.get_experiment("bad"))
+
+    def test_deleting_an_unreadable_blob_keeps_the_environment(self):
+        """Only the metadata goes; the env and its windows survive."""
+        path = os.path.join(self._tmp_dir, "bad.json")
+        with open(path, "w") as fn:
+            fn.write(
+                json.dumps(
+                    {
+                        "jsons": {"win_1": {"content": "keep me"}},
+                        "reload": {},
+                        "experiment": self.blob(status="cancelled"),
+                    }
+                )
+            )
+        self.assertTrue(self.store.delete_experiment("bad"))
+        env = self.backing.load_env("bad")
+        self.assertEqual(env["jsons"], {"win_1": {"content": "keep me"}})
+        self.assertNotIn("experiment", env)
+
+    def test_delete_experiment_still_reports_an_env_that_had_none(self):
+        """Keying off the blob's presence must not turn "nothing" into "deleted"."""
+        self.backing.save_env("plain", {"jsons": {}, "reload": {}})
+        self.assertFalse(self.store.delete_experiment("plain"))
+        self.assertFalse(self.store.delete_experiment("never-existed"))
+
+    def test_one_unreadable_env_does_not_block_writes_to_another(self):
+        """The corrupt env is contained: its neighbours write as they always did."""
+        self.write("bad", self.blob(status="cancelled"))
+        self.store.log_metric("healthy", "acc", 0.75)
+        self.assertEqual(
+            self.store.get_experiment("healthy").latest_metric("acc").value, 0.75
+        )
 
 
 if __name__ == "__main__":
