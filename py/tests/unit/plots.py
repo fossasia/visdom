@@ -274,6 +274,44 @@ def test_scatter_name_based_update_1d_x_1d_y(capture_send):
     assert data["y"] == [4.0, 5.0, 6.0]
 
 
+def test_scatter_3d_aspectmode_forwarded_to_scene(capture_send):
+    """aspectmode opt reaches layout.scene for a 3D scatter."""
+    X = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    sent = capture_send(lambda v: v.scatter(X, opts={"aspectmode": "data"}))
+    assert sent["payload"]["layout"]["scene"]["aspectmode"] == "data"
+
+
+def test_scatter_3d_aspectmode_absent_by_default(capture_send):
+    """No aspectmode key is emitted when the opt is not set."""
+    X = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    sent = capture_send(lambda v: v.scatter(X))
+    assert "aspectmode" not in sent["payload"]["layout"]["scene"]
+
+
+def test_scatter_2d_ignores_aspectmode(capture_send):
+    """A 2D scatter builds no scene, so aspectmode has nowhere to land."""
+    X = np.array([[1.0, 2.0], [3.0, 4.0]])
+    sent = capture_send(lambda v: v.scatter(X, opts={"aspectmode": "data"}))
+    assert "scene" not in sent["payload"]["layout"]
+
+
+def test_scatter_invalid_aspectmode_raises(offline_client):
+    """An unknown aspectmode value raises in _assert_opts."""
+    X = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    with pytest.raises(AssertionError):
+        offline_client.scatter(X, opts={"aspectmode": "bogus"})
+
+
+def test_line_3d_aspectmode_forwarded_to_scene(capture_send):
+    """aspectmode opt reaches layout.scene for a 3D line."""
+    Y = np.array([1.0, 2.0, 3.0])
+    Z = np.array([4.0, 5.0, 6.0])
+    sent = capture_send(
+        lambda v: v.line(Y, X=Y, Z=Z, is3d=True, opts={"aspectmode": "cube"})
+    )
+    assert sent["payload"]["layout"]["scene"]["aspectmode"] == "cube"
+
+
 # ------------------------------------------------------------------- heatmap ----
 
 
@@ -594,6 +632,12 @@ def test_surf_layout_is_3d(capture_send):
     assert "scene" in sent["payload"]["layout"]
 
 
+def test_surf_aspectmode_forwarded_to_scene(capture_send):
+    """aspectmode opt reaches layout.scene for surf."""
+    sent = capture_send(lambda v: v.surf(np.ones((2, 2)), opts={"aspectmode": "data"}))
+    assert sent["payload"]["layout"]["scene"]["aspectmode"] == "data"
+
+
 # ------------------------------------------------------------------- contour ----
 
 
@@ -606,6 +650,31 @@ def test_contour_type_is_contour(capture_send):
 def test_contour_layout_is_flat(capture_send):
     """contour renders flat, without the 3D scene surf builds."""
     sent = capture_send(lambda v: v.contour(np.ones((2, 2))))
+    assert "scene" not in sent["payload"]["layout"]
+
+
+# ---------------------------------------------------------------------- mesh ----
+
+
+def test_mesh_3d_builds_scene_layout(capture_send):
+    """An Nx3 mesh renders as mesh3d with a 3D scene layout."""
+    X = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    sent = capture_send(lambda v: v.mesh(X))
+    assert sent["payload"]["data"][0]["type"] == "mesh3d"
+    assert "scene" in sent["payload"]["layout"]
+
+
+def test_mesh_3d_aspectmode_forwarded_to_scene(capture_send):
+    """aspectmode opt reaches layout.scene for a 3D mesh."""
+    X = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    sent = capture_send(lambda v: v.mesh(X, opts={"aspectmode": "data"}))
+    assert sent["payload"]["layout"]["scene"]["aspectmode"] == "data"
+
+
+def test_mesh_2d_layout_is_flat(capture_send):
+    """An Nx2 mesh builds no 3D scene."""
+    X = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
+    sent = capture_send(lambda v: v.mesh(X))
     assert "scene" not in sent["payload"]["layout"]
 
 

@@ -952,6 +952,11 @@ The following `opts` are supported:
 - `opts.markerborderwidth`: marker border line width (`float`; default = 0.5)
 - `opts.legend`           : `table` containing legend names
 - `opts.textlabels`       : text label for each point (`list`: default = `None`)
+- `opts.aspectmode`       : how the three axes of a 3D plot are scaled (`string`; default = `'auto'`). One of:
+  - `auto`   : each axis stretched independently to fill the view -- fine for abstract data, but distorts real-world geometry (a sphere looks like an ellipsoid).
+  - `data`   : axes share one scale taken from the data's own extents -- use this for point clouds, SLAM maps, trajectories, or anything where shape must be preserved.
+  - `cube`   : force an equal-length bounding box on all three axes, ignoring the data extents.
+  - `manual` : use the ratio you pass in `layoutopts` as `{'plotly': {'scene': {'aspectratio': {'x': .., 'y': .., 'z': ..}}}}` (falls back to `1:1:1` if none given).
 - `opts.layoutopts`       : dict of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 - `opts.traceopts`        : dict mapping trace names or indices to dicts of additional options that the graph backend accepts. For example `traceopts = {'plotly': {'myTrace': {'mode': 'markers'}}}`.
 - `opts.webgl`            : use WebGL for plotting (`boolean`; default = `false`). It is faster if a plot contains too many points. Use sparingly as browsers won't allow more than a couple of WebGL contexts on a single page.
@@ -998,6 +1003,7 @@ The following `opts` are supported:
 - `opts.linecolor`   : line colors (`np.array`; default = None)
 - `opts.dash`        : line dash type for each line (`np.array`; default = 'solid'), one of `solid`, `dash`, `dashdot` or `dash`, size should match number of lines being drawn
 - `opts.legend`      : `table` containing legend names
+- `opts.aspectmode`  : axis scaling for 3D line plots (`string`; default = `'auto'`); `auto` stretches each axis to fit, `data` keeps the true shape from the data extents, `cube` forces an equal box, `manual` uses `layoutopts` `scene.aspectratio`.
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 - `opts.traceopts`   : `dict` mapping trace names or indices to `dict`s of additional options that plot.ly accepts for a trace.
 - `opts.webgl`       : use WebGL for plotting (`boolean`; default = `false`). It is faster if a plot contains too many points. Use sparingly as browsers won't allow more than a couple of WebGL contexts on a single page.
@@ -1191,6 +1197,7 @@ The following `opts` are supported:
 - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
 - `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
 - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
+- `opts.aspectmode`  : axis scaling for the 3D surface (`string`; default = `'auto'`); `auto` stretches each axis to fit, `data` keeps the true shape from the data extents, `cube` forces an equal box, `manual` uses `layoutopts` `scene.aspectratio`.
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 
 #### vis.contour
@@ -1225,6 +1232,7 @@ The following `opts` are supported:
 
 - `opts.color`: color (`string`)
 - `opts.opacity`: opacity of polygons (`number` between 0 and 1)
+- `opts.aspectmode`: axis scaling for a 3D (`Nx3`) mesh (`string`; default = `'auto'`); `auto` stretches each axis to fit, `data` keeps the true shape from the data extents, `cube` forces an equal box, `manual` uses `layoutopts` `scene.aspectratio`.
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 
 #### vis.sankey
