@@ -35,10 +35,17 @@ from visdom.utils.shared_utils import (
 from visdom.utils.server_utils import (
     check_auth,
     check_readonly,
+    delete_env_off_loop,
     ensure_env_loaded,
+    ensure_env_present,
     check_readonly_message,
     reject_readonly,
     extract_eid,
+    run_on_storage_executor,
+    save_env_off_loop,
+    save_envs_off_loop,
+    snapshot_env,
+    warm_env,
     window,
     register_window,
     gather_envs,
@@ -49,11 +56,10 @@ from visdom.utils.server_utils import (
     load_env,
     broadcast,
     update_window,
-    hash_password,
+    hash_password_off_loop,
     stringify,
     push_deleted,
     clear_deleted,
-    delete_env_off_loop,
     notify,
     LazyEnvData,
 )
@@ -580,16 +586,19 @@ class EnvStateHandler(BaseHandler):
             handler.write(json.dumps(all_eids))
 
     @check_auth
-    def post(self):
+    async def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
+        eid = args.get("eid")
+        if eid is not None:
+            await ensure_env_loaded(self, escape_eid(str(eid)))
         self.wrap_func(self, args)
 
 
 class ForkEnvHandler(BaseHandler):
     @staticmethod
-    def wrap_func(handler, args):
+    async def wrap_func(handler, args):
         prev_eid = escape_eid(args.get("prev_eid"))
         eid = escape_eid(args.get("eid"))
 
@@ -598,26 +607,28 @@ class ForkEnvHandler(BaseHandler):
             # which is latin-1 only, and eids are free-form unicode.
             raise tornado.web.HTTPError(400, reason="env to be forked doesn't exist")
 
-        # The copy carries the source env's experiment metadata, whose env_id
-        # still names the env it was forked from; retarget it so the fork does
-        # not answer to its parent's id. Reading the copy also materialises it
-        # when the source was still lazy, which is what makes the save below
-        # write the fork out: an unmaterialised LazyEnvData is skipped.
+        # the source is read before it is copied: deep-copying a cold
+        # LazyEnvData copied its source's id rather than its data, so the fork
+        # had nothing of its own to write out and went on reading whatever the
+        # env it was forked from held. The copy also carries the source env's
+        # experiment metadata, whose env_id still names the env it was forked
+        # from; retarget it so the fork does not answer to its parent's id.
+        await ensure_env_loaded(handler, prev_eid)
         handler.state[eid] = retarget_experiment(
-            copy.deepcopy(handler.state[prev_eid]), eid
+            snapshot_env(handler.state[prev_eid]), eid
         )
-        handler.storage.save_env(eid, handler.state[eid])
+        await save_env_off_loop(handler, eid)
         broadcast_envs(handler)
 
         handler.write(eid)
 
     @check_auth
     @check_readonly
-    def post(self):
+    async def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
-        self.wrap_func(self, args)
+        await self.wrap_func(self, args)
 
 
 class EnvHandler(BaseHandler):
@@ -631,21 +642,24 @@ class EnvHandler(BaseHandler):
         )
 
     @check_auth
-    def post(self, args):
+    async def post(self, args):
         msg_args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
         if "sid" in msg_args:
             sid = msg_args["sid"]
             if sid in self.subs:
+                eid = escape_eid(args)
                 try:
+                    undo_count = await warm_env(self, eid)
                     load_env(
                         self.state,
-                        escape_eid(args),
+                        eid,
                         self.subs[sid],
                         self.storage,
+                        undo_count,
                     )
-                except ValueError as e:
+                except ValueError:
                     notify(
                         self,
                         "Could not load environment: invalid environment JSON format",
@@ -674,22 +688,28 @@ class CompareHandler(BaseHandler):
         )
 
     @check_auth
-    def post(self, args):
+    async def post(self, args):
         body = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
         sid = body["sid"]
         show_all = body.get("show_all", False)
         if sid in self.subs:
+            eids = args.split("+")
             try:
+                # comparison reads every named env in full, and reads it from
+                # state -- so each one is brought into memory here, where the
+                # read costs a worker thread rather than the loop.
+                for eid in eids:
+                    await ensure_env_present(self, eid)
                 compare_envs(
                     self.state,
-                    args.split("+"),
+                    eids,
                     self.subs[sid],
                     self.storage,
                     show_all=show_all,
                 )
-            except ValueError as e:
+            except ValueError:
                 notify(
                     self,
                     "Could not compare environments: invalid environment JSON format",
@@ -701,20 +721,20 @@ class CompareHandler(BaseHandler):
 
 class SaveHandler(BaseHandler):
     @staticmethod
-    def wrap_func(handler, args):
+    async def wrap_func(handler, args):
         envs = args["data"]
         envs = [escape_eid(eid) for eid in envs]
         # this drops invalid env ids
-        ret = handler.storage.save_envs(handler.state, envs)
+        ret = await save_envs_off_loop(handler, envs)
         handler.write(json.dumps(ret))
 
     @check_auth
     @check_readonly
-    def post(self):
+    async def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
-        self.wrap_func(self, args)
+        await self.wrap_func(self, args)
 
 
 class DataHandler(BaseHandler):
@@ -798,12 +818,12 @@ class IndexHandler(BaseHandler):
                 base_url=self.base_url,
             )
 
-    def post(self, arg, **kwargs):
+    async def post(self, arg, **kwargs):
         json_obj = tornado.escape.json_decode(self.request.body)
         username = json_obj["username"]
         stored = self.user_credential["password"]
         salt = stored.split("$")[0]
-        password = hash_password(json_obj["password"], salt=salt)
+        password = await hash_password_off_loop(json_obj["password"], salt)
 
         # Constant-time comparison: `==` on the derived key returns as soon as
         # two characters differ, so response timing tells an attacker how much
@@ -847,7 +867,7 @@ class ErrorHandler(BaseHandler):
 class UploadEnvHandler(BaseHandler):
     @check_auth
     @check_readonly_message("Uploads are disabled while the server is in readonly mode")
-    def post(self):
+    async def post(self):
         # 100mb file size limit
         MAX_SIZE = 100 * 1024 * 1024
 
@@ -891,7 +911,7 @@ class UploadEnvHandler(BaseHandler):
 
         self.state[new_eid] = {"jsons": data["jsons"], "reload": data["reload"]}
 
-        self.storage.save_env(new_eid, self.state[new_eid])
+        await save_env_off_loop(self, new_eid)
 
         broadcast_envs(self)
 
@@ -902,6 +922,59 @@ class UploadEnvHandler(BaseHandler):
                 "message": f"Dashboard loaded successfully as '{new_eid}'",
             }
         )
+
+
+# ---- Experiment work, as it runs on the storage worker ---- #
+#
+# Every one of these reads (and for the logging ones, rewrites) environment
+# files, which is the whole of what the experiment endpoints cost. They take
+# the DataStore rather than a live ``ExperimentStore`` because the executor is
+# handed plain positional arguments, and they touch no server state, so the
+# worker is never looking at anything the loop may be editing underneath it.
+
+
+def _log_experiment(store, eid, name, params, tags, description):
+    return ExperimentStore(store).log_experiment(
+        eid, name=name, params=params, tags=tags, description=description
+    )
+
+
+def _log_all_metrics(store, eid, metrics, step):
+    """Record one request's metrics in a single visit to the worker.
+
+    Each observation is written as it was before -- read, append, save -- so a
+    metric the store rejects still leaves the ones before it recorded; batching
+    only saves the round trips to the worker, not the trips to disk.
+    """
+    experiment_store = ExperimentStore(store)
+    experiment = None
+    for key, value in metrics.items():
+        experiment = experiment_store.log_metric(eid, key, value, step)
+    return experiment
+
+
+def _finish_experiment(store, eid, status):
+    return ExperimentStore(store).finish_experiment(eid, status)
+
+
+def _search_experiments(store, query, sort_by, descending, offset, limit):
+    """Return one page of matches and the unpaged total, as ``(page, total)``.
+
+    Paging on the worker rather than after it keeps the memory a search costs
+    set by the page asked for, so the ranking never holds every experiment on
+    the server just to hand back the first few.
+    """
+    return ExperimentStore(store).search_page(
+        query=query,
+        sort_by=sort_by,
+        descending=descending,
+        offset=offset,
+        limit=limit,
+    )
+
+
+def _compare_experiments(store, env_ids):
+    return ExperimentStore(store).compare(env_ids)
 
 
 def _decode_json_body(body):
@@ -970,7 +1043,7 @@ class ExperimentLogHandler(BaseHandler):
         return value
 
     @staticmethod
-    def wrap_func(handler, args):
+    async def wrap_func(handler, args):
         action = args.get("action", "log")
         if action not in ExperimentLogHandler.VALID_ACTIONS:
             raise tornado.web.HTTPError(
@@ -978,7 +1051,6 @@ class ExperimentLogHandler(BaseHandler):
             )
 
         eid = extract_eid(args)
-        store = ExperimentStore(handler.storage, env_provider=handler.state.get)
 
         if action == "metrics":
             metrics = ExperimentLogHandler._require_mapping(args, "metrics")
@@ -992,20 +1064,32 @@ class ExperimentLogHandler(BaseHandler):
 
         try:
             if action == "log":
-                experiment = store.log_experiment(
+                experiment = await run_on_storage_executor(
+                    handler,
+                    _log_experiment,
+                    handler.storage,
                     eid,
-                    name=args.get("name"),
-                    params=params,
-                    tags=tags,
-                    description=args.get("description"),
+                    args.get("name"),
+                    params,
+                    tags,
+                    args.get("description"),
                 )
             elif action == "metrics":
-                step = args.get("step")
-                for key, value in metrics.items():
-                    experiment = store.log_metric(eid, key, value, step)
+                experiment = await run_on_storage_executor(
+                    handler,
+                    _log_all_metrics,
+                    handler.storage,
+                    eid,
+                    metrics,
+                    args.get("step"),
+                )
             else:
-                experiment = store.finish_experiment(
-                    eid, args.get("status", STATUS_FINISHED)
+                experiment = await run_on_storage_executor(
+                    handler,
+                    _finish_experiment,
+                    handler.storage,
+                    eid,
+                    args.get("status", STATUS_FINISHED),
                 )
         except ExperimentFinishedError as e:
             raise tornado.web.HTTPError(409, reason=str(e))
@@ -1015,6 +1099,11 @@ class ExperimentLogHandler(BaseHandler):
             )
         except ValueError as e:
             raise tornado.web.HTTPError(400, reason=str(e))
+
+        # mirroring the experiment into a cold env would read it in through
+        # LazyEnvData, on the loop and behind the write that just landed; this
+        # reads it on the worker instead, and reads what the write left.
+        await ensure_env_loaded(handler, eid)
 
         is_new_env = eid not in handler.state
         if is_new_env:
@@ -1034,11 +1123,11 @@ class ExperimentLogHandler(BaseHandler):
     @check_readonly_message(
         "Experiment logging is disabled while the server is in readonly mode"
     )
-    def post(self):
+    async def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
-        self.wrap_func(self, args)
+        await self.wrap_func(self, args)
 
 
 class ExperimentSearchHandler(BaseHandler):
@@ -1157,7 +1246,7 @@ class ExperimentSearchHandler(BaseHandler):
         return value
 
     @staticmethod
-    def wrap_func(handler, args):
+    async def wrap_func(handler, args):
         query = ExperimentSearchHandler._require_text(args, "query")
         sort_by = ExperimentSearchHandler._require_text(args, "sort_by")
         limit = ExperimentSearchHandler._require_index(
@@ -1170,14 +1259,18 @@ class ExperimentSearchHandler(BaseHandler):
         descending = ExperimentSearchHandler._require_flag(args, "descending", True)
         ExperimentSearchHandler._require_window(offset, limit)
 
-        store = ExperimentStore(handler.storage, env_provider=handler.state.get)
         try:
-            page, total = store.search_page(
-                query=query,
-                sort_by=sort_by or DEFAULT_SORT_FIELD,
-                descending=descending,
-                offset=offset,
-                limit=limit,
+            # searching reads every environment on disk -- the longest read the
+            # server makes, and the one it must not make on the loop.
+            page, total = await run_on_storage_executor(
+                handler,
+                _search_experiments,
+                handler.storage,
+                query,
+                sort_by or DEFAULT_SORT_FIELD,
+                descending,
+                offset,
+                limit,
             )
         except QueryParseError as e:
             raise tornado.web.HTTPError(400, reason=str(e))
@@ -1193,8 +1286,8 @@ class ExperimentSearchHandler(BaseHandler):
         )
 
     @check_auth
-    def post(self):
-        self.wrap_func(self, _decode_json_body(self.request.body))
+    async def post(self):
+        await self.wrap_func(self, _decode_json_body(self.request.body))
 
 
 class ExperimentCompareHandler(BaseHandler):
@@ -1272,19 +1365,20 @@ class ExperimentCompareHandler(BaseHandler):
         return value
 
     @staticmethod
-    def wrap_func(handler, args):
+    async def wrap_func(handler, args):
         env_ids = ExperimentCompareHandler._require_env_ids(args)
-        store = ExperimentStore(handler.storage, env_provider=handler.state.get)
         try:
-            comparison = store.compare(env_ids)
+            comparison = await run_on_storage_executor(
+                handler, _compare_experiments, handler.storage, env_ids
+            )
         except KeyError as e:
             raise tornado.web.HTTPError(404, reason=str(e.args[0]))
 
         handler.write_json(comparison)
 
     @check_auth
-    def post(self):
-        self.wrap_func(self, _decode_json_body(self.request.body))
+    async def post(self):
+        await self.wrap_func(self, _decode_json_body(self.request.body))
 
 
 class ExperimentSuggestHandler(BaseHandler):
