@@ -39,6 +39,10 @@ from visdom.utils.server_utils import (
     check_readonly_message,
     reject_readonly,
     extract_eid,
+    save_env_off_loop,
+    save_envs_off_loop,
+    snapshot_env,
+    warm_env,
     window,
     register_window,
     gather_envs,
@@ -49,7 +53,7 @@ from visdom.utils.server_utils import (
     load_env,
     broadcast,
     update_window,
-    hash_password,
+    hash_password_off_loop,
     stringify,
     push_deleted,
     clear_deleted,
@@ -580,16 +584,19 @@ class EnvStateHandler(BaseHandler):
             handler.write(json.dumps(all_eids))
 
     @check_auth
-    def post(self):
+    async def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
+        eid = args.get("eid")
+        if eid is not None:
+            await ensure_env_loaded(self, escape_eid(str(eid)))
         self.wrap_func(self, args)
 
 
 class ForkEnvHandler(BaseHandler):
     @staticmethod
-    def wrap_func(handler, args):
+    async def wrap_func(handler, args):
         prev_eid = escape_eid(args.get("prev_eid"))
         eid = escape_eid(args.get("eid"))
 
@@ -598,26 +605,28 @@ class ForkEnvHandler(BaseHandler):
             # which is latin-1 only, and eids are free-form unicode.
             raise tornado.web.HTTPError(400, reason="env to be forked doesn't exist")
 
-        # The copy carries the source env's experiment metadata, whose env_id
-        # still names the env it was forked from; retarget it so the fork does
-        # not answer to its parent's id. Reading the copy also materialises it
-        # when the source was still lazy, which is what makes the save below
-        # write the fork out: an unmaterialised LazyEnvData is skipped.
+        # the source is read before it is copied: deep-copying a cold
+        # LazyEnvData copied its source's id rather than its data, so the fork
+        # had nothing of its own to write out and went on reading whatever the
+        # env it was forked from held. The copy also carries the source env's
+        # experiment metadata, whose env_id still names the env it was forked
+        # from; retarget it so the fork does not answer to its parent's id.
+        await ensure_env_loaded(handler, prev_eid)
         handler.state[eid] = retarget_experiment(
-            copy.deepcopy(handler.state[prev_eid]), eid
+            snapshot_env(handler.state[prev_eid]), eid
         )
-        handler.storage.save_env(eid, handler.state[eid])
+        await save_env_off_loop(handler, eid)
         broadcast_envs(handler)
 
         handler.write(eid)
 
     @check_auth
     @check_readonly
-    def post(self):
+    async def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
-        self.wrap_func(self, args)
+        await self.wrap_func(self, args)
 
 
 class EnvHandler(BaseHandler):
@@ -631,21 +640,24 @@ class EnvHandler(BaseHandler):
         )
 
     @check_auth
-    def post(self, args):
+    async def post(self, args):
         msg_args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
         if "sid" in msg_args:
             sid = msg_args["sid"]
             if sid in self.subs:
+                eid = escape_eid(args)
                 try:
+                    undo_count = await warm_env(self, eid)
                     load_env(
                         self.state,
-                        escape_eid(args),
+                        eid,
                         self.subs[sid],
                         self.storage,
+                        undo_count,
                     )
-                except ValueError as e:
+                except ValueError:
                     notify(
                         self,
                         "Could not load environment: invalid environment JSON format",
@@ -701,20 +713,20 @@ class CompareHandler(BaseHandler):
 
 class SaveHandler(BaseHandler):
     @staticmethod
-    def wrap_func(handler, args):
+    async def wrap_func(handler, args):
         envs = args["data"]
         envs = [escape_eid(eid) for eid in envs]
         # this drops invalid env ids
-        ret = handler.storage.save_envs(handler.state, envs)
+        ret = await save_envs_off_loop(handler, envs)
         handler.write(json.dumps(ret))
 
     @check_auth
     @check_readonly
-    def post(self):
+    async def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
-        self.wrap_func(self, args)
+        await self.wrap_func(self, args)
 
 
 class DataHandler(BaseHandler):
@@ -798,12 +810,12 @@ class IndexHandler(BaseHandler):
                 base_url=self.base_url,
             )
 
-    def post(self, arg, **kwargs):
+    async def post(self, arg, **kwargs):
         json_obj = tornado.escape.json_decode(self.request.body)
         username = json_obj["username"]
         stored = self.user_credential["password"]
         salt = stored.split("$")[0]
-        password = hash_password(json_obj["password"], salt=salt)
+        password = await hash_password_off_loop(json_obj["password"], salt)
 
         # Constant-time comparison: `==` on the derived key returns as soon as
         # two characters differ, so response timing tells an attacker how much
@@ -847,7 +859,7 @@ class ErrorHandler(BaseHandler):
 class UploadEnvHandler(BaseHandler):
     @check_auth
     @check_readonly_message("Uploads are disabled while the server is in readonly mode")
-    def post(self):
+    async def post(self):
         # 100mb file size limit
         MAX_SIZE = 100 * 1024 * 1024
 
@@ -891,7 +903,7 @@ class UploadEnvHandler(BaseHandler):
 
         self.state[new_eid] = {"jsons": data["jsons"], "reload": data["reload"]}
 
-        self.storage.save_env(new_eid, self.state[new_eid])
+        await save_env_off_loop(self, new_eid)
 
         broadcast_envs(self)
 
