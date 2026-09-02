@@ -274,6 +274,7 @@ def _opts2layout(opts, is3d=False):
             "yaxis": _axisformat3d("y", opts),
             "zaxis": _axisformat3d("z", opts),
             "aspectmode": opts.get("aspectmode"),
+            "aspectratio": opts.get("aspectratio"),
         }
     else:
         layout["xaxis"] = _axisformat("x", opts)
@@ -425,13 +426,19 @@ def _assert_opts(opts):
     if opts.get("mode"):
         assert isstr(opts.get("mode")), "mode should be a string"
 
-    if opts.get("aspectmode"):
+    if opts.get("aspectmode") is not None:
         assert opts.get("aspectmode") in (
             "auto",
             "cube",
             "data",
             "manual",
         ), "aspectmode should be one of 'auto', 'cube', 'data', 'manual'"
+
+    if opts.get("aspectratio") is not None:
+        ar = opts.get("aspectratio")
+        assert isinstance(ar, dict) and all(
+            k in ar for k in ("x", "y", "z")
+        ), "aspectratio should be a dict with 'x', 'y' and 'z' keys"
 
     if opts.get("markersymbol"):
         assert isstr(opts.get("markersymbol")), "marker symbol should be string"
@@ -2812,6 +2819,8 @@ class Visdom(object):
         - `opts.legend`           : `list` or `tuple` containing legend names
         - `opts.aspectmode`       : 3D axis scaling: `'auto'`, `'cube'`, `'data'`
                                     or `'manual'` (`string`; default = `'auto'`)
+        - `opts.aspectratio`      : `{'x', 'y', 'z'}` scale dict, applied when
+                                    `aspectmode` is `'manual'`
         """
         if opts and opts.get("store_history") and update is not None:
             raise ValueError(
@@ -3072,6 +3081,7 @@ class Visdom(object):
         - `opts.legend`      : `list` or `tuple` containing legend names
         - `opts.aspectmode`  : 3D axis scaling: `'auto'`, `'cube'`, `'data'` or
                                `'manual'` (`string`; default = `'auto'`)
+        - `opts.aspectratio` : `{'x', 'y', 'z'}` scale dict for `'manual'` mode
 
         If `update` is specified, the figure will be updated without
         creating a new plot -- this can be used for efficient updating.
@@ -3902,6 +3912,7 @@ class Visdom(object):
         - `opts.xmax`      : clip maximum value (`number`; default = `X:max()`)
         - `opts.aspectmode`: 3D axis scaling: `'auto'`, `'cube'`, `'data'` or
                              `'manual'` (`string`; default = `'auto'`)
+        - `opts.aspectratio`: `{'x', 'y', 'z'}` scale dict for `'manual'` mode
         """
 
         return self._surface(X=X, stype="surface", opts=opts, win=win, env=env)
@@ -4236,6 +4247,7 @@ class Visdom(object):
         - `opts.opacity`: opacity of polygons (`number` between 0 and 1)
         - `opts.aspectmode`: 3D axis scaling: `'auto'`, `'cube'`, `'data'` or
           `'manual'` (`string`; default = `'auto'`; 3D mesh only)
+        - `opts.aspectratio`: `{'x', 'y', 'z'}` scale dict for `'manual'` mode
         """
         opts = {} if opts is None else opts
         _title2str(opts)
