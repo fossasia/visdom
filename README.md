@@ -629,6 +629,8 @@ See `example/train_keras_example.py` for a full working example.
 
 **Requirements:** `pip install visdom optuna`
 
+**Dashboard visualizations:** `pip install plotly`
+
 `visdom.integrations.OptunaCallback` implements Optuna's study callback
 protocol. After each trial finishes it records the trial's parameters, objective
 values and state as a Visdom experiment in a dedicated environment. Optuna is
@@ -645,6 +647,8 @@ callback = OptunaCallback(
     viz,
     dashboard_env="optuna_quadratic",
     objective_names=["loss"],
+    create_dashboard=True,
+    refresh_every=10,
 )
 
 
@@ -655,14 +659,21 @@ def objective(trial):
 
 study = optuna.create_study(study_name="quadratic", direction="minimize")
 study.optimize(objective, n_trials=100, callbacks=[callback])
+callback.update_dashboard(study)
 ```
 
-This first-stage integration records one experiment per trial, using names such
-as `optuna_quadratic_trial_000017`. Pass `raise_on_error=True` if a Visdom
-logging failure should stop optimization; by default it emits a warning and
-allows the study to continue. Single- and multi-objective studies are supported,
-and `COMPLETE`, `PRUNED` and `FAIL` states are preserved in the
-`optuna_state` tag.
+The integration records one experiment per trial, using names such as
+`optuna_quadratic_trial_000017`. With `create_dashboard=True`, the first trial
+creates summary, HParams, optimization history and timeline panes, plus
+parameter importance when Optuna can compute it. Later trials refresh the panes
+in `optuna_quadratic` every `refresh_every` successful writes. The explicit
+final `update_dashboard()` includes any trials left since the last scheduled
+refresh. Plotly is only needed for the Optuna visualization panes.
+
+Pass `raise_on_error=True` if a Visdom logging failure should stop optimization;
+by default it emits a warning and allows the study to continue. Single- and
+multi-objective studies are supported, and `COMPLETE`, `PRUNED` and `FAIL`
+states are preserved in the `optuna_state` tag.
 
 ## Details
 <img src="https://user-images.githubusercontent.com/19650074/198747904-7a8a580f-851a-45fb-8f45-94e54a910ee2.png"/>
