@@ -611,8 +611,15 @@ def compare_envs(state, eids, socket, store, show_all=False):
                 else:
                     # has_compare will be set to True only if the window title is
                     # shared by at least 2 envs.
+                    incoming_data = win["content"].get("data") or []
+                    if not incoming_data:
+                        # A contributor with no traces cannot be merged; treat it
+                        # like any other malformed contributor and withdraw the
+                        # pane rather than presenting a one-sided comparison.
+                        destWidJson["has_compare"] = False
+                        continue
                     destWidJson["has_compare"] = True
-                    for _dataIdx, data in enumerate(win["content"]["data"]):
+                    for data in incoming_data:
                         data = copy.deepcopy(data)
                         if "name" not in data:
                             destWidJson["has_compare"] = False
