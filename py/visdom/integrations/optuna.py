@@ -172,7 +172,7 @@ class OptunaCallback:
         if self.objective_names is not None:
             names = self.objective_names
         else:
-            study_names = study.metric_names
+            study_names = getattr(study, "metric_names", None)
             if study_names is not None:
                 names = tuple(study_names)
             elif value_count == 1:
