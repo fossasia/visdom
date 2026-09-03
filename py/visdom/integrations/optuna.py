@@ -224,20 +224,27 @@ class OptunaCallback:
             ("Failed", states["FAIL"]),
         ]
         if len(study.directions) == 1 and states["COMPLETE"]:
-            links.append(("Open best trial", self._trial_url(study.best_trial, study)))
-            rows.extend(
-                [
-                    ("Best value", study.best_value),
-                    (
-                        "Best parameters",
-                        json.dumps(
-                            study.best_params,
-                            ensure_ascii=False,
-                            sort_keys=True,
+            try:
+                best_trial = study.best_trial
+                best_value = study.best_value
+                best_params = study.best_params
+            except ValueError:
+                pass
+            else:
+                links.append(("Open best trial", self._trial_url(best_trial, study)))
+                rows.extend(
+                    [
+                        ("Best value", best_value),
+                        (
+                            "Best parameters",
+                            json.dumps(
+                                best_params,
+                                ensure_ascii=False,
+                                sort_keys=True,
+                            ),
                         ),
-                    ),
-                ]
-            )
+                    ]
+                )
         elif states["COMPLETE"]:
             rows.append(("Pareto trials", len(study.best_trials)))
 
