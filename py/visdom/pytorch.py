@@ -6,7 +6,8 @@
 # LICENSE file in the root directory of this source tree.
 
 import datetime
-import warnings
+
+from visdom.tracking.core import RunAlreadyFinishedError, _safe_warn
 
 
 class VisdomLogger:
@@ -24,6 +25,41 @@ class VisdomLogger:
     Without params, VisdomLogger only ever calls viz.line() — same as
     before this existed. status is "failed" if the with-block raised,
     "finished" otherwise.
+
+    Separately, pass a :class:`visdom.tracking.RunTracker` via ``run=`` to
+    additionally record every metric update to that run's local
+    reproducibility record (params, environment, and this training curve's
+    timeline) — a different, local-JSON-file mechanism from the
+    server-side ExperimentStore that ``params=`` uses. The two are
+    independent and can be used together, separately, or not at all; the
+    run's own lifecycle (finish reason, params, etc.) stays entirely under
+    your control, since the two context managers compose independently
+    rather than one driving the other::
+
+        from visdom.tracking import RunTracker
+        from visdom.pytorch import VisdomLogger
+
+        with RunTracker("exp1", params={"lr": 0.01}) as run:
+            with VisdomLogger(viz, env="run_1", run=run) as tracker:
+                for epoch in range(num_epochs):
+                    tracker.log("Train Loss", train_loss)  # plotted AND tracked
+
+    Only values that actually get plotted are recorded to ``run`` — a value
+    withheld by ``log_every`` throttling and later flushed on exit is
+    recorded once, at the point it's actually plotted, not once per raw
+    ``log()`` call. A failure while recording to ``run`` never breaks the
+    plot itself: the ``viz.line()`` call has already succeeded by the time
+    recording is attempted, and any unexpected recording failure surfaces
+    as a warning rather than an exception (the run already having finished
+    is expected/benign and stays silent).
+
+    Do not pass a proxy returned by ``run.track(viz)`` as ``viz`` here
+    while also passing that same run as ``run=`` — that double-tracks
+    every update (once via the proxy, once via this class's own ``run=``
+    handling). Use exactly one of the two integration points for a given
+    ``viz``/``run`` pair: either ``VisdomLogger(viz, run=run)`` with the
+    *plain* Visdom instance, or ``run.track(viz)`` on its own without also
+    passing ``run=`` here.
 
     Usage::
 
@@ -44,7 +80,7 @@ class VisdomLogger:
                 tracker.log("Train Loss", train_loss)
     """
 
-    def __init__(self, viz, env=None, log_every=1, params=None):
+    def __init__(self, viz, env=None, log_every=1, params=None, run=None):
         self.viz = viz
         self.env = env or "run_{}".format(
             datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -53,6 +89,26 @@ class VisdomLogger:
         if self.log_every < 1:
             raise ValueError("log_every must be >= 1, got {}".format(log_every))
         self._params = params
+        self.run = run
+        # Best-effort detection of the double-tracking mistake described
+        # above: run.track(viz) returns a proxy that stores the run it's
+        # attached to as `_run` (see visdom.tracking.graphs.TrackedVisdom).
+        # Not imported/isinstance-checked here on purpose, to avoid a
+        # hard dependency on that module from this one -- duck-typed
+        # instead, since all that actually matters is "does this viz
+        # appear to already be tracking to the exact run= we were also
+        # given".
+        if run is not None and getattr(viz, "_run", None) is run:
+            _safe_warn(
+                "VisdomLogger was given a viz that already tracks to "
+                "the same run (e.g. via run.track(viz)) and run= was "
+                "also passed -- every logged metric will be recorded "
+                "twice. Use either run.track(viz) on its own, or "
+                "VisdomLogger(viz, run=run) with the plain Visdom "
+                "instance, not both together.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
         self._wins = {}
         self._step = {}
         self._counter = {}
@@ -76,7 +132,9 @@ class VisdomLogger:
         if reply is True:
             return True
         if not isinstance(reply, dict) or "env_id" not in reply:
-            warnings.warn("VisdomLogger failed to {}: {}".format(action, reply))
+            _safe_warn(
+                "VisdomLogger failed to {}: {}".format(action, reply), UserWarning
+            )
             return False
         return True
 
@@ -87,8 +145,9 @@ class VisdomLogger:
                 if not self._check_experiment_reply(reply, "start experiment tracking"):
                     self._params = None
             except Exception as e:
-                warnings.warn(
-                    "VisdomLogger failed to start experiment tracking: {}".format(e)
+                _safe_warn(
+                    "VisdomLogger failed to start experiment tracking: {}".format(e),
+                    UserWarning,
                 )
                 self._params = None
         return self
@@ -103,8 +162,9 @@ class VisdomLogger:
                 )
                 self._check_experiment_reply(reply, "finish experiment tracking")
             except Exception as e:
-                warnings.warn(
-                    "VisdomLogger failed to finish experiment tracking: {}".format(e)
+                _safe_warn(
+                    "VisdomLogger failed to finish experiment tracking: {}".format(e),
+                    UserWarning,
                 )
         return False
 
@@ -130,7 +190,51 @@ class VisdomLogger:
                 reply = self.viz.log_metrics({name: value}, step=x_val, env=self.env)
                 self._check_experiment_reply(reply, "log metric {!r}".format(name))
         except Exception as e:
-            warnings.warn("VisdomLogger failed to log {!r}: {}".format(name, e))
+            _safe_warn(
+                "VisdomLogger failed to log {!r}: {}".format(name, e), UserWarning
+            )
+            return
+        if self.run is not None:
+            self._log_to_run(name, self._wins[name], x_val, value, xlabel)
+
+    def _log_to_run(self, name, win, x_val, value, xlabel):
+        """Best-effort record this already-plotted update on self.run.
+
+        Reuses RunTracker.log_plot_update -- the same per-window
+        sequence/timing primitive TrackedVisdom (visdom.tracking.graphs)
+        uses for auto-logged chart calls -- rather than a separate,
+        parallel bookkeeping mechanism. Kept as a separate try/except from
+        _plot()'s own (which guards the actual viz.line()/log_metrics()
+        calls) so a tracking-only failure here is reported with its own,
+        more specific message rather than being folded into _plot()'s
+        generic "failed to log" warning -- and, since this method never
+        lets anything escape (RunAlreadyFinishedError is swallowed
+        silently, anything else becomes a warning via _safe_warn), it's
+        safe to call after _plot()'s own try/except has already
+        succeeded, with no risk of a tracking failure retroactively
+        looking like a plotting failure.
+        """
+        try:
+            self.run.log_plot_update(
+                "line", win, name=name, value=value, x=x_val, xlabel=xlabel
+            )
+        except RunAlreadyFinishedError:
+            pass
+        except Exception as e:
+            # stacklevel=4: warn() -> _log_to_run -> _plot -> log() (or
+            # __exit__, for a value flushed at context-manager exit) ->
+            # the user's call site. One deeper than the equivalent warning
+            # in visdom.tracking.graphs, since _plot is an extra frame of
+            # indirection that TrackedVisdom's wrapper doesn't have.
+            _safe_warn(
+                "visdom.pytorch: failed to record metric {0!r} on run "
+                "{1!r} ({2}: {3}) -- the plot itself still succeeded "
+                "normally, only the tracking record is affected.".format(
+                    name, self.run.run_id, type(e).__name__, e
+                ),
+                RuntimeWarning,
+                stacklevel=4,
+            )
 
     def log(self, name, value, x=None, xlabel="epoch"):
         """Log a scalar value under the given metric name.
