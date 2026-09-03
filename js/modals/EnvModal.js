@@ -271,6 +271,14 @@ function EnvModal(props) {
               sortedEnvs.push(activeEnv);
             }
             onEnvDelete(sortedEnvs, activeEnv);
+            if (
+              deletedEnvs.includes(tagEnv) &&
+              !deletedEnvs.includes(activeEnv)
+            ) {
+              setTagEnv(activeEnv || 'main');
+              setTagSaveStatus('idle');
+              setTagSaveError('');
+            }
             setSelectedEnvs([]);
             showToast(
               deletedEnvs.length === 1

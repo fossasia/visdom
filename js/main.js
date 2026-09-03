@@ -554,6 +554,9 @@ const App = () => {
       setSelection((prev) => ({
         ...prev,
         envIDs: nextEnvIDs,
+        layoutID: deletedEnvs.has(prev.envIDs[0])
+          ? DEFAULT_LAYOUT
+          : prev.layoutID,
       }));
       localStorage.setItem('envIDs', JSON.stringify(nextEnvIDs));
     }
