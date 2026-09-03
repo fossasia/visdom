@@ -10,7 +10,7 @@
 // ignoring errors due to statically loaded d3 and saveSvgAsPng
 /* eslint-disable no-undef */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 import Pane from './Pane';
 
@@ -24,13 +24,79 @@ function NetworkPane(props) {
     _height,
   } = props;
 
+  const containerRef = useRef(null);
+  const timeoutRef = useRef(null);
+  const forceRef = useRef(null);
+  const [downloadError, setDownloadError] = useState(null);
+
   // private events
   // --------------
-  const handleDownload = () => {
-    saveSvgAsPng(document.getElementsByTagName('svg')[0], 'plot.png', {
-      scale: 2,
-      backgroundColor: '#FFFFFF',
+  const handleExport = (format, dpi) => {
+    const svg = containerRef.current?.querySelector('svg');
+
+    if (!svg) {
+      setDownloadError('Graph is not ready yet. Please try again.');
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      timeoutRef.current = setTimeout(() => {
+        setDownloadError(null);
+      }, 3000);
+      return;
+    }
+
+    const filename = `${props.contentID || 'plot'}.${format}`;
+
+    const scale = dpi ? dpi / 96 : 2;
+
+    requestAnimationFrame(() => {
+      if (format === 'svg') {
+        const clone = svg.cloneNode(true);
+        inlineComputedStyles(svg, clone);
+        const source = new XMLSerializer().serializeToString(clone);
+        const blob = new Blob([source], {
+          type: 'image/svg+xml;charset=utf-8',
+        });
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+        return;
+      }
+
+      saveSvgAsPng(svg, filename, {
+        scale,
+        backgroundColor: '#FFFFFF',
+        encoderType: format === 'jpg' ? 'image/jpeg' : 'image/png',
+        encoderOptions: format === 'jpg' ? 0.92 : undefined,
+      });
     });
+  };
+
+  const SVG_STYLE_PROPS = [
+    'fill',
+    'stroke',
+    'stroke-width',
+    'stroke-opacity',
+    'fill-opacity',
+    'opacity',
+    'font-family',
+    'font-size',
+  ];
+  const inlineComputedStyles = (liveEl, cloneEl) => {
+    const computed = window.getComputedStyle(liveEl);
+    const styleStr = SVG_STYLE_PROPS.map(
+      (prop) => `${prop}:${computed.getPropertyValue(prop)}`
+    ).join(';');
+    cloneEl.setAttribute('style', styleStr);
+
+    for (let i = 0; i < liveEl.children.length; i++) {
+      inlineComputedStyles(liveEl.children[i], cloneEl.children[i]);
+    }
   };
 
   // effects
@@ -38,7 +104,27 @@ function NetworkPane(props) {
 
   // initialize d3
   useEffect(() => {
+    // stop the previous simulation's timer before starting a new one
+    if (forceRef.current) {
+      forceRef.current.stop();
+    }
+    d3.select(containerRef.current).selectAll('*').remove();
     CreateNetwork(content);
+
+    return () => {
+      if (forceRef.current) {
+        forceRef.current.stop();
+        forceRef.current = null;
+      }
+    };
+  }, [content, directed, showEdgeLabels, showVertexLabels]);
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
   }, []);
 
   const CreateNetwork = (graph) => {
@@ -50,18 +136,20 @@ function NetworkPane(props) {
       .charge(-120)
       .linkDistance(120)
       .size([width, height]);
+    forceRef.current = force;
     var svg = d3
-      .select('.Network_Div')
+      .select(containerRef.current)
       .select('svg')
       .attr('viewBox', '0 0 ' + width + ' ' + height)
       .attr('preserveAspectRatio', 'xMinYMin meet')
-      .classed('.svg-content', true);
+      .classed('svg-content', true);
     if (svg.empty()) {
       svg = d3
-        .select('.Network_Div')
+        .select(containerRef.current)
         .append('svg')
         .attr('viewBox', '0 0 ' + width + ' ' + height)
-        .attr('preserveAspectRatio', 'xMinYMin meet');
+        .attr('preserveAspectRatio', 'xMinYMin meet')
+        .classed('svg-content', true);
     }
 
     if (directed) {
@@ -210,9 +298,10 @@ function NetworkPane(props) {
   // ---------
 
   return (
-    <Pane {...props} handleDownload={handleDownload}>
+    <Pane {...props} handleExport={handleExport}>
+      {downloadError && <div className="error-message">{downloadError}</div>}
       <div
-        id="Network_Div"
+        ref={containerRef}
         style={{ height: '100%', width: '100%', flex: 1 }}
         className="Network_Div"
       />

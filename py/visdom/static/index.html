@@ -30,9 +30,15 @@ LICENSE file in the root directory of this source tree.
     <script src={{ static_url("js/layout_bin_packer.js") }}></script>
 
     <!-- Mathjax -->
-	  <script type='text/javascript' src={{ static_url('js/mathjax/2.7.5/MathJax.js') }}></script>
-    <script type='text/x-mathjax-config'>MathJax.Hub.Config({tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']], processEscapes: true}});</script>
-    <script type='text/javascript' src={{ static_url('js/mathjax/2.7.5/config/TeX-AMS-MML_HTMLorMML.js') }}></script>
+    <script type='text/javascript'>
+      window.MathJax = {
+        tex: {
+          inlineMath: [['$', '$'], ['\\(', '\\)']],
+          processEscapes: true
+        }
+      };
+    </script>
+    <script type='text/javascript' id="MathJax-script" src={{ static_url('js/mathjax/3.2.2/es5/tex-mml-svg.js') }}></script>
 
     <!-- Plotly -->
     <script src={{ static_url("js/plotly-plotly.min.js") }}></script>
@@ -46,13 +52,26 @@ LICENSE file in the root directory of this source tree.
     <script>
     // TODO: this is not great. Should probably be an endpoint with a JSON
     // response or the first thing the socket sends back.
-    var ENV_LIST = [
-      {% for item in items %}
-      '{{escape(item)}}',
-      {% end %}
-    ];
-    var ACTIVE_ENV = '{{escape(active_item)}}';
-    var USER = '{{escape(user)}}';
+    var ENV_LIST = [];
+    function getActiveEnvFromPath() {
+      var path = window.location.pathname || '';
+      if (path.includes('/env/')) {
+        try {
+          return decodeURIComponent(path.split('/env/')[1]);
+        } catch (e) {
+          return '';
+        }
+      }
+      if (path.includes('/compare/')) {
+        try {
+          return decodeURIComponent(path.split('/compare/')[1]);
+        } catch (e) {
+          return '';
+        }
+      }
+      return '';
+    }
+    var ACTIVE_ENV = getActiveEnvFromPath();
     var USE_POLLING = ('{{wrap_socket}}' == 'True');
 
     // Plotly setup
@@ -62,6 +81,7 @@ LICENSE file in the root directory of this source tree.
     </script>
     <script src={{ static_url("js/main.js") }}></script>
     <link rel="stylesheet" href={{ static_url("css/style.css") }}>
+    <link rel="stylesheet" href={{ static_url("css/rc-tree-select-overrides.css") }}>
     <link rel="stylesheet" href={{ static_url("../user/style.css") }}>
     <!-- Added Script for NetworkPane -->
     <link rel="stylesheet" href={{ static_url("css/network.css") }}>

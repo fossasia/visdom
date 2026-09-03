@@ -1,3 +1,5 @@
+pytest>=8
+pytest-cov
 matplotlib
 numpy
 av

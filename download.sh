@@ -5,15 +5,15 @@ wget https://unpkg.com/jquery@3.1.1/dist/jquery.min.js -O py/static/js/jquery.mi
 wget https://unpkg.com/bootstrap@3.3.7/dist/js/bootstrap.min.js -O py/static/js/bootstrap.min.js
 wget https://unpkg.com/react@16.2.0/umd/react.production.min.js -O py/static/js/react-react.min.js
 wget https://unpkg.com/react-dom@16.2.0/umd/react-dom.production.min.js -O py/static/js/react-dom.min.js
-wget "https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_SVG" -O py/static/js/mathjax-MathJax.js
+wget "https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-mml-svg.js" -O py/static/js/mathjax-tex-mml-svg.js
 wget https://cdn.rawgit.com/plotly/plotly.js/master/dist/plotly.min.js -O py/static/js/plotly-plotly.min.js
 wget https://unpkg.com/sjcl@1.0.7/sjcl.js -O py/static/js/sjcl.js
 wget https://cdnjs.cloudflare.com/ajax/libs/react-modal/3.6.1/react-modal.min.js -o py/static/js/react-modal.min.js
 
 
 mkdir -p py/static/css
-wget https://unpkg.com/react-resizable@1.4.6/css/styles.css -O py/static/css/react-resizable-styles.css
-wget https://unpkg.com/react-grid-layout@0.16.3/css/styles.css -O py/static/css/react-grid-layout-styles.css
+wget https://unpkg.com/react-resizable@3.1.3/css/styles.css -O py/static/css/react-resizable-styles.css
+wget https://unpkg.com/react-grid-layout@2.2.3/css/styles.css -O py/static/css/react-grid-layout-styles.css
 wget https://unpkg.com/bootstrap@3.3.7/dist/css/bootstrap.min.css -O py/static/css/bootstrap.min.css
 
 

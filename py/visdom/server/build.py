@@ -45,13 +45,13 @@ def download_scripts(proxies=None, install_dir=None):
         "%slayout-bin-packer@1.4.0/dist/layout-bin-packer.js.map"
         % b: "layout-bin-packer.js.map",
         # d3 Libraries for plotting d3 graphs!
-        "http://d3js.org/d3.v3.min.js": "d3.v3.min.js",
+        "https://d3js.org/d3.v3.min.js": "d3.v3.min.js",
         "https://d3js.org/d3-selection-multi.v1.js": "d3-selection-multi.v1.js",
         # Library to download the svg to png
         "%ssave-svg-as-png@1.4.17/lib/saveSvgAsPng.js" % b: "saveSvgAsPng.js",
         # - css
-        "%sreact-resizable@1.4.6/css/styles.css" % b: "react-resizable-styles.css",
-        "%sreact-grid-layout@0.16.3/css/styles.css" % b: "react-grid-layout-styles.css",
+        "%sreact-resizable@3.1.3/css/styles.css" % b: "react-resizable-styles.css",
+        "%sreact-grid-layout@2.2.3/css/styles.css" % b: "react-grid-layout-styles.css",
         "%scss/bootstrap.min.css" % bb: "bootstrap.min.css",
         # - fonts
         "%sclassnames@2.2.5" % b: "classnames",
@@ -126,17 +126,11 @@ def download_scripts(proxies=None, install_dir=None):
     # Download MathJax Js Files
     import requests
 
-    cdnjs_url = "https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.5/"
+    mathjax_version = "3.2.2"
+    cdnjs_url = "https://cdnjs.cloudflare.com/ajax/libs/mathjax/%s/" % mathjax_version
     mathjax_dir = os.path.join(*cdnjs_url.split("/")[-3:])
     mathjax_path = [
-        "config/Safe.js?V=2.7.5",
-        "config/TeX-AMS-MML_HTMLorMML.js?V=2.7.5",
-        "extensions/Safe.js?V=2.7.5",
-        "jax/output/SVG/fonts/TeX/fontdata.js?V=2.7.5",
-        "jax/output/SVG/jax.js?V=2.7.5",
-        "jax/output/SVG/fonts/TeX/Size1/Regular/Main.js?V=2.7.5",
-        "jax/output/SVG/config.js?V=2.7.5",
-        "MathJax.js?config=TeX-AMS-MML_HTMLorMML%2CSafe.js&#038;ver=4.1",
+        "es5/tex-mml-svg.js",
     ]
     mathjax_dir_path = "%s/static/%s/%s" % (install_dir, "js", mathjax_dir)
 

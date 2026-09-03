@@ -17,10 +17,10 @@ import platform
 import time
 
 import tornado.web  # noqa E402: gotta install ioloop first
-import tornado.escape  # noqa E402: gotta install ioloop first
 
 from visdom.utils.shared_utils import warn_once, ensure_dir_exists, get_visdom_path
-from visdom.utils.server_utils import serialize_env, LazyEnvData
+from visdom.utils.server_utils import LazyEnvData
+from visdom.data_model.json_store import JSONStore
 from visdom.server.handlers.socket_handlers import (
     SocketHandler,
     SocketWrap,
@@ -36,19 +36,27 @@ from visdom.server.handlers.web_handlers import (
     EnvStateHandler,
     ErrorHandler,
     ExistsHandler,
+    ExperimentCompareHandler,
+    ExperimentLogHandler,
+    ExperimentSearchHandler,
+    ExperimentSuggestHandler,
     ForkEnvHandler,
+    HealthHandler,
     IndexHandler,
     PostHandler,
     SaveHandler,
     UpdateHandler,
+    UploadEnvHandler,
     UserSettingsHandler,
 )
 from visdom.server.defaults import (
     DEFAULT_BASE_URL,
     DEFAULT_ENV_PATH,
     DEFAULT_HOSTNAME,
+    DEFAULT_MAX_IMAGE_HISTORY,
+    DEFAULT_MAX_OLD_CONTENT,
+    DEFAULT_MAX_TEXT_LINES,
     DEFAULT_PORT,
-    LAYOUT_FILE,
 )
 
 
@@ -73,7 +81,11 @@ class Application(tornado.web.Application):
         eager_data_loading=False,
     ):
         self.eager_data_loading = eager_data_loading
+        self.max_image_history = DEFAULT_MAX_IMAGE_HISTORY
+        self.max_old_content = DEFAULT_MAX_OLD_CONTENT
+        self.max_text_lines = DEFAULT_MAX_TEXT_LINES
         self.env_path = env_path
+        self.storage = JSONStore(env_path)
         self.state = self.load_state()
         self.layouts = self.load_layouts()
         self.user_settings = self.load_user_settings()
@@ -94,6 +106,7 @@ class Application(tornado.web.Application):
 
         tornado_settings["static_url_prefix"] = self.base_url + "/static/"
         tornado_settings["debug"] = True
+        experiments_url = "%s/experiments" % self.base_url
         handlers = [
             (r"%s/events" % self.base_url, PostHandler, {"app": self}),
             (r"%s/update" % self.base_url, UpdateHandler, {"app": self}),
@@ -105,13 +118,19 @@ class Application(tornado.web.Application):
             (r"%s/env/(.*)" % self.base_url, EnvHandler, {"app": self}),
             (r"%s/compare/(.*)" % self.base_url, CompareHandler, {"app": self}),
             (r"%s/save" % self.base_url, SaveHandler, {"app": self}),
+            (r"%s/upload_env" % self.base_url, UploadEnvHandler, {"app": self}),
             (r"%s/error/(.*)" % self.base_url, ErrorHandler, {"app": self}),
             (r"%s/win_exists" % self.base_url, ExistsHandler, {"app": self}),
             (r"%s/win_data" % self.base_url, DataHandler, {"app": self}),
             (r"%s/delete_env" % self.base_url, DeleteEnvHandler, {"app": self}),
             (r"%s/env_state" % self.base_url, EnvStateHandler, {"app": self}),
             (r"%s/fork_env" % self.base_url, ForkEnvHandler, {"app": self}),
+            (r"%s/log" % experiments_url, ExperimentLogHandler, {"app": self}),
+            (r"%s/search" % experiments_url, ExperimentSearchHandler, {"app": self}),
+            (r"%s/compare" % experiments_url, ExperimentCompareHandler, {"app": self}),
+            (r"%s/suggest" % experiments_url, ExperimentSuggestHandler, {"app": self}),
             (r"%s/user/(.*)" % self.base_url, UserSettingsHandler, {"app": self}),
+            (r"%s/health" % self.base_url, HealthHandler),
             (r"%s(.*)" % self.base_url, IndexHandler, {"app": self}),
         ]
         super(Application, self).__init__(handlers, **tornado_settings)
@@ -131,9 +150,7 @@ class Application(tornado.web.Application):
                 RuntimeWarning,
             )
             return
-        layout_filepath = os.path.join(self.env_path, "view", LAYOUT_FILE)
-        with open(layout_filepath, "w") as fn:
-            fn.write(self.layouts)
+        self.storage.save_layouts(self.layouts)
 
     def load_layouts(self):
         if self.env_path is None:
@@ -143,14 +160,7 @@ class Application(tornado.web.Application):
                 RuntimeWarning,
             )
             return ""
-        layout_dir = os.path.join(self.env_path, "view")
-        layout_filepath = os.path.join(layout_dir, LAYOUT_FILE)
-        if os.path.isfile(layout_filepath):
-            with open(layout_filepath, "r") as fn:
-                return fn.read()
-        else:
-            ensure_dir_exists(layout_dir)
-            return ""
+        return self.storage.load_layouts()
 
     def load_state(self):
         state = {}
@@ -163,30 +173,31 @@ class Application(tornado.web.Application):
             )
             return {"main": {"jsons": {}, "reload": {}}}
         ensure_dir_exists(env_path)
-        env_jsons = [i for i in os.listdir(env_path) if ".json" in i]
-        for env_json in env_jsons:
-            eid = env_json.replace(".json", "")
-            env_path_file = os.path.join(env_path, env_json)
-
+        for eid in self.storage.list_envs():
             if self.eager_data_loading:
-                try:
-                    with open(env_path_file, "r") as fn:
-                        env_data = tornado.escape.json_decode(fn.read())
-                except Exception as e:
-                    logging.warn(
-                        "Failed loading environment json: {} - {}".format(
-                            env_path_file, repr(e)
-                        )
+                env_data = self.storage.load_env(eid)
+                if not isinstance(env_data, dict):
+                    env_data = {}
+
+                if "jsons" not in env_data or "reload" not in env_data:
+                    logging.warning(
+                        "Environment '%s' is malformed or missing expected fields.",
+                        eid,
                     )
-                    continue
 
-                state[eid] = {"jsons": env_data["jsons"], "reload": env_data["reload"]}
+                # Copy the whole env rather than picking out jsons/reload, so
+                # keys the server does not read itself (such as the experiment
+                # metadata blob) survive the load and are still there when the
+                # env is saved back. LazyEnvData keeps them for the lazy path.
+                state[eid] = dict(env_data)
+                state[eid].setdefault("jsons", {})
+                state[eid].setdefault("reload", {})
             else:
-                state[eid] = LazyEnvData(env_path_file)
+                state[eid] = LazyEnvData(self.storage, eid)
 
-        if "main" not in state and "main.json" not in env_jsons:
+        if "main" not in state:
             state["main"] = {"jsons": {}, "reload": {}}
-            serialize_env(state, ["main"], env_path=self.env_path)
+            self.storage.save_env("main", state["main"])
 
         return state
 
@@ -196,6 +207,17 @@ class Application(tornado.web.Application):
         """Determines & uses the platform-specific root directory for user configurations."""
         if platform.system() == "Windows":
             base_dir = os.getenv("APPDATA")
+
+            if not base_dir:
+                fallback = os.path.expanduser("~")
+
+                if not fallback or fallback == "~":
+                    raise RuntimeError(
+                        "Could not determine base directory for user configurations."
+                    )
+                logging.warning("APPDATA not set, falling back to base directory")
+                base_dir = fallback
+
         elif platform.system() == "Darwin":  # osx
             base_dir = os.path.expanduser("~/Library/Preferences")
         else:
@@ -208,10 +230,11 @@ class Application(tornado.web.Application):
         if os.path.exists(home_style_path):
             with open(home_style_path, "r") as f:
                 user_css += "\n" + f.read()
-        project_style_path = os.path.join(self.env_path, "style.css")
-        if os.path.exists(project_style_path):
-            with open(project_style_path, "r") as f:
-                user_css += "\n" + f.read()
+        if self.env_path is not None:
+            project_style_path = os.path.join(self.env_path, "style.css")
+            if os.path.exists(project_style_path):
+                with open(project_style_path, "r") as f:
+                    user_css += "\n" + f.read()
 
         settings["config_dir"] = config_dir
         settings["user_css"] = user_css
