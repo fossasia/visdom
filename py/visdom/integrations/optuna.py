@@ -65,7 +65,8 @@ class OptunaCallback:
             warning is emitted so an unavailable dashboard does not stop the
             optimization.
         create_dashboard: Create and periodically refresh the study dashboard.
-        refresh_every: Number of newly logged trials between dashboard refreshes.
+        refresh_every: Positive integer number of newly logged trials between
+            dashboard refreshes.
 
     Example::
 
@@ -93,6 +94,8 @@ class OptunaCallback:
             raise TypeError("dashboard_env must be a string or None")
         if dashboard_env == "":
             raise ValueError("dashboard_env must not be empty")
+        if isinstance(refresh_every, bool) or not isinstance(refresh_every, int):
+            raise TypeError("refresh_every must be an integer")
         if refresh_every < 1:
             raise ValueError("refresh_every must be at least 1")
 
