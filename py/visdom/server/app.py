@@ -239,6 +239,11 @@ class Application(tornado.web.Application):
         return self.server_state.dirty_envs
 
     @property
+    def saving_envs(self):
+        """Compatibility view of environments with a write in flight."""
+        return self.server_state.saving_envs
+
+    @property
     def autosave(self):
         """Compatibility view of the ServerState autosave timer."""
         return self.server_state.autosave

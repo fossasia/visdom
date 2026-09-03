@@ -148,6 +148,20 @@ def hash_password(password, salt=None):
     return salt.hex() + "$" + dk.hex()
 
 
+def hash_password_off_loop(password, salt):
+    """Derive the key on a worker thread, returning a future.
+
+    The derivation is deliberately expensive -- 100k iterations, tens of
+    milliseconds of solid CPU -- which is the whole server stalled for the
+    length of every login attempt. It goes to the default executor rather than
+    the storage worker: a login has no reason to queue behind environment
+    writes, and several may be in flight at once.
+    """
+    return tornado.ioloop.IOLoop.current().run_in_executor(
+        None, hash_password, password, salt
+    )
+
+
 # ------- File management helpers ----- #
 
 
@@ -220,14 +234,20 @@ def snapshot_env(env):
     return copy.deepcopy(dict(env))
 
 
-def snapshot_state(state):
-    """Deep-copy every materialised env, dropping the ones still cold."""
+def snapshot_envs(state, eids):
+    """Deep-copy the named envs, dropping the unknown and the still-cold ones."""
     snapshot = {}
-    for eid, env in state.items():
-        copied = snapshot_env(env)
+    for eid in eids:
+        env = state.get(eid)
+        copied = None if env is None else snapshot_env(env)
         if copied is not None:
             snapshot[eid] = copied
     return snapshot
+
+
+def snapshot_state(state):
+    """Deep-copy every materialised env, dropping the ones still cold."""
+    return snapshot_envs(state, list(state))
 
 
 def run_on_storage_executor(handler, func, *args):
@@ -243,6 +263,20 @@ def save_env_off_loop(handler, eid):
     if snapshot is None:
         return None
     return run_on_storage_executor(handler, handler.storage.save_env, eid, snapshot)
+
+
+def save_envs_off_loop(handler, eids):
+    """Persist the named envs off the loop; resolves to the ids written.
+
+    The ids travel to the backend untouched, so it keeps the last word on what
+    it accepted: an env that is unknown, or was never read off disk, has no
+    snapshot to write and comes back unreported -- exactly as it did when the
+    save ran inline.
+    """
+    eids = list(eids)
+    return run_on_storage_executor(
+        handler, handler.storage.save_envs, snapshot_envs(handler.state, eids), eids
+    )
 
 
 def save_all_off_loop(handler):
@@ -279,6 +313,38 @@ async def ensure_env_loaded(handler, eid):
     if not isinstance(env, LazyEnvData) or env.is_loaded:
         return
     env.prime(await load_env_off_loop(handler, eid))
+
+
+def _read_env_for_serving(store, eid, want_env):
+    """Read what serving an env costs: the env itself and its undo depth."""
+    return (store.load_env(eid) if want_env else None), len(store.load_undo(eid))
+
+
+async def warm_env(handler, eid):
+    """Bring an env into memory off the loop; return its undo depth.
+
+    ``ensure_env_loaded`` serves the handlers that only ever address an env the
+    application already knows about. Handing one to a browser is the wider
+    case: it may be a cold ``LazyEnvData``, or absent from ``state`` altogether
+    and known only by its file. Both reads that serving it needs -- the env and
+    the undo stack behind the pane counter -- go to the worker as one task.
+
+    A malformed env still raises ``ValueError`` here, as reading it through
+    ``LazyEnvData`` did, so callers keep reporting it the way they always have.
+    """
+    env = handler.state.get(eid)
+    cold = env is None or (isinstance(env, LazyEnvData) and not env.is_loaded)
+    raw, undo_count = await run_on_storage_executor(
+        handler, _read_env_for_serving, handler.storage, eid, cold
+    )
+    if not cold:
+        return undo_count
+    if env is None:
+        if raw:
+            handler.state[eid] = raw
+    else:
+        env.prime(raw)
+    return undo_count
 
 
 def _log_storage_failure(future):
@@ -668,8 +734,13 @@ def send_to_sources(handler, msg):
         source.write_message(json.dumps(msg, cls=NanSafeEncoder))
 
 
-def load_env(state, eid, socket, store):
-    """load an environment to a client by socket"""
+def load_env(state, eid, socket, store, undo_count=None):
+    """load an environment to a client by socket
+
+    A caller that already warmed the env off the loop passes its ``undo_count``
+    in rather than have the undo stack read here, where the read would land on
+    the loop.
+    """
     env = {}
     if eid in state:
         env = state.get(eid)
@@ -697,7 +768,9 @@ def load_env(state, eid, socket, store):
             {
                 "command": "undo_state",
                 "eid": eid,
-                "count": count_deleted(store, eid),
+                "count": (
+                    count_deleted(store, eid) if undo_count is None else undo_count
+                ),
             },
             cls=NanSafeEncoder,
         )
