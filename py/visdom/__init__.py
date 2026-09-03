@@ -439,6 +439,9 @@ def _assert_opts(opts):
         assert isinstance(ar, dict) and all(
             k in ar for k in ("x", "y", "z")
         ), "aspectratio should be a dict with 'x', 'y' and 'z' keys"
+        assert all(
+            isnum(ar[k]) and math.isfinite(ar[k]) and ar[k] > 0 for k in ("x", "y", "z")
+        ), "aspectratio values should be finite positive numbers"
 
     if opts.get("markersymbol"):
         assert isstr(opts.get("markersymbol")), "marker symbol should be string"
