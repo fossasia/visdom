@@ -378,6 +378,17 @@ def test_shutdown_drains_the_queue_before_the_final_save(app):
     assert order == ["queued-write", "final-save"]
 
 
+def test_a_second_shutdown_does_not_write_again(app):
+    """The graceful stop drains, then the atexit hook calls it once more."""
+    saves = []
+    app.storage.save_all = lambda state: saves.append(state)
+
+    app.shutdown_storage()
+    app.shutdown_storage()
+
+    assert len(saves) == 1
+
+
 def test_shutdown_flushes_state_through_storage(app):
     app.state["expt"] = env_payload()
 

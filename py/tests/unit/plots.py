@@ -131,6 +131,42 @@ def test_line_update_append_new_window_no_append_key(capture_send):
     assert "append" not in sent["payload"]
 
 
+def test_line_update_append_without_preflight_skips_the_probe(
+    capture_send, offline_client
+):
+    """With the preflight off the append is one POST, not two.
+
+    The layout an append deliberately leaves empty rides along as
+    ``layout_create``, which the server reads only if it has to create the
+    window this append landed on.
+    """
+    offline_client.use_preflight_checks = False
+    Y = np.array([1.0, 2.0])
+    X = np.array([0.0, 1.0])
+    with patch.object(offline_client, "win_exists") as probe:
+        sent = capture_send(
+            lambda v: v.line(Y, X=X, win="w", update="append", opts=dict(title="t"))
+        )
+    assert not probe.called
+    assert sent["endpoint"] == "update"
+    assert sent["payload"]["append"]
+    assert sent["payload"]["layout"] == {}
+    assert sent["payload"]["layout_create"]["title"] == {"text": "t"}
+
+
+def test_line_update_replace_without_preflight_sends_no_layout_create(
+    capture_send, offline_client
+):
+    """Only an append can create a window, so only an append carries the key."""
+    offline_client.use_preflight_checks = False
+    sent = capture_send(
+        lambda v: v.line(
+            np.array([1.0, 2.0]), X=np.array([0.0, 1.0]), win="w", update="replace"
+        )
+    )
+    assert "layout_create" not in sent["payload"]
+
+
 def test_line_update_remove_sends_delete(capture_send):
     """update='remove' sends delete=True without touching Y."""
     sent = capture_send(lambda v: v.line(None, win="w", name="trace1", update="remove"))
@@ -213,6 +249,22 @@ def test_scatter_name_with_multiple_labels_raises(offline_client):
     X = np.array([[1.0, 2.0], [3.0, 4.0]])
     with pytest.raises(AssertionError):
         offline_client.scatter(X, Y=np.array([1, 2]), name="trace1")
+
+
+def test_scatter_store_history_without_preflight_always_updates(
+    capture_send, offline_client
+):
+    """One POST either way: /update appends the frame, or builds the pane."""
+    offline_client.use_preflight_checks = False
+    with patch.object(offline_client, "win_exists") as probe:
+        sent = capture_send(
+            lambda v: v.scatter(
+                np.array([[1.0, 2.0]]), win="w", opts=dict(store_history=True)
+            )
+        )
+    assert not probe.called
+    assert sent["endpoint"] == "update"
+    assert sent["payload"]["append"]
 
 
 def test_scatter_store_history_with_update_raises(offline_client):
