@@ -195,3 +195,76 @@ class TestExperimentLogReadonly(VisdomHTTPTestCase):
     def test_finish_is_403(self):
         resp = self.log({"eid": "main", "action": "finish"})
         self.assertEqual(resp.code, 403)
+
+
+class TestExperimentLogWritesTheLiveEnv(VisdomHTTPTestCase):
+    """Logging must write the env the server holds, not a copy off disk.
+
+    An environment file is only ever as new as the last save: windows created
+    since then live in server state alone. Writing an experiment is a write of
+    the whole environment, so an experiment applied to what the file happens to
+    hold takes the file back to that point -- silently, and for every window
+    that arrived in between.
+    """
+
+    def stored_env(self, eid="main"):
+        return JSONStore(self.env_path).load_env(eid)
+
+    def stale_file(self, eid="main"):
+        """Leave ``eid``'s file as it was before its windows existed."""
+        JSONStore(self.env_path).save_env(eid, {"jsons": {}, "reload": {}})
+
+    def test_log_keeps_windows_the_file_has_not_seen(self):
+        win = self.create_text_window(eid="main", content="unsaved")
+        self.stale_file()
+
+        resp = self.post_json(
+            "/experiments/log", {"eid": "main", "action": "log", "name": "run-1"}
+        )
+        self.assertEqual(resp.code, 200)
+
+        stored = self.stored_env()
+        self.assertIn(win, stored["jsons"], "logging dropped an unsaved window")
+        self.assertEqual(stored["experiment"]["name"], "run-1")
+
+    def test_metrics_keep_windows_the_file_has_not_seen(self):
+        win = self.create_text_window(eid="main", content="unsaved")
+        self.stale_file()
+
+        resp = self.post_json(
+            "/experiments/log",
+            {"eid": "main", "action": "metrics", "metrics": {"acc": 0.9}},
+        )
+        self.assertEqual(resp.code, 200)
+
+        stored = self.stored_env()
+        self.assertIn(win, stored["jsons"], "logging a metric dropped a window")
+
+    def test_log_does_not_revive_a_window_the_server_closed(self):
+        """The reverse loss: a close that the file has not caught up with."""
+        win = self.create_text_window(eid="main", content="doomed")
+        self.save(["main"])
+        self.close_window(win)
+
+        resp = self.post_json(
+            "/experiments/log", {"eid": "main", "action": "log", "name": "run-1"}
+        )
+        self.assertEqual(resp.code, 200)
+
+        stored = self.stored_env()
+        self.assertNotIn(win, stored["jsons"], "logging revived a closed window")
+
+    def test_log_keeps_the_windows_of_an_env_it_has_never_read(self):
+        """An env the server knows only by its file keeps everything in it."""
+        JSONStore(self.env_path).save_env(
+            "offline", {"jsons": {"window_1": {"id": "window_1"}}, "reload": {}}
+        )
+
+        resp = self.post_json(
+            "/experiments/log", {"eid": "offline", "action": "log", "name": "run-1"}
+        )
+        self.assertEqual(resp.code, 200)
+
+        stored = self.stored_env("offline")
+        self.assertIn("window_1", stored["jsons"])
+        self.assertEqual(stored["experiment"]["name"], "run-1")
