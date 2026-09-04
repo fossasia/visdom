@@ -368,6 +368,27 @@ def test_a_contributor_whose_data_is_not_a_list_is_skipped(fake_socket, store):
     assert _by_title(fake_socket, "loss") is None
 
 
+def test_a_base_pane_with_a_none_trace_after_a_valid_one_is_skipped(fake_socket, store):
+    """Validation covers every base trace, not just the first."""
+    pane = _plot_pane("w1", "loss")
+    pane["content"]["data"] = [{"type": "scatter", "name": "loss"}, None]
+    state = {"a": _env(pane), "b": _env(_plot_pane("w2", "loss"))}
+    compare_envs(state, ["a", "b"], fake_socket, store)
+    assert _by_title(fake_socket, "loss") is None
+
+
+def test_a_partly_named_base_pane_is_never_half_renamed(fake_socket, store):
+    """A base pane with one unnamed trace withdraws instead of leaking it."""
+    pane = _plot_pane("w1", "loss")
+    pane["content"]["data"] = [
+        {"type": "scatter", "name": "loss"},
+        {"type": "scatter"},
+    ]
+    state = {"a": _env(pane), "b": _env(_plot_pane("w2", "loss"))}
+    compare_envs(state, ["a", "b"], fake_socket, store)
+    assert _by_title(fake_socket, "loss") is None
+
+
 def test_an_empty_title_is_never_merged(fake_socket, store):
     state = {"a": _env(_plot_pane("w1", "")), "b": _env(_plot_pane("w2", ""))}
     compare_envs(state, ["a", "b"], fake_socket, store)

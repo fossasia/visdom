@@ -609,15 +609,15 @@ def compare_envs(state, eids, socket, store, show_all=False):
                 base_data = destWidJson["content"].get("data")
                 if not isinstance(base_data, list) or not base_data:
                     continue  # Skip windows with no usable data
-                if not _is_named_trace(base_data[0]):
+                if not all(_is_named_trace(trace) for trace in base_data):
                     continue  # Skip windows with unnamed data
                 if ix == 0:
                     destWidJson["has_compare"] = False
                     destWidJson["content"]["layout"]["showlegend"] = True
                     destWidJson["contentID"] = get_rand_id()
+                    # Every base trace was validated above, so the rename
+                    # cannot stop half way and leave the pane part renamed.
                     for dataIdx, data in enumerate(destWidJson["content"]["data"]):
-                        if "name" not in data:
-                            break  # stop working with this plot, not right format
                         destWidJson["content"]["data"][dataIdx][
                             "name"
                         ] = "{}_{}".format(eidNums[eid], data["name"])
