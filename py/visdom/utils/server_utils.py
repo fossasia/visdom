@@ -510,6 +510,17 @@ def gather_envs(state, store):
     return sorted(set(store.list_envs() + list(state.keys())))
 
 
+def _is_named_trace(trace):
+    """True if ``trace`` is a mapping carrying a ``name``.
+
+    Pane content is read back from stored env JSON, so a trace list can hold
+    anything -- ``None`` and non-mapping entries included. Checking the shape
+    before testing for ``"name"`` keeps a malformed env from raising out of a
+    comparison.
+    """
+    return isinstance(trace, dict) and "name" in trace
+
+
 def compare_envs(state, eids, socket, store, show_all=False):
     logging.info("comparing envs")
     use_env_names = all(len(str(eid)) <= MAX_ENV_NAME_LEN for eid in eids)
@@ -595,8 +606,10 @@ def compare_envs(state, eids, socket, store, show_all=False):
                     )
                     destWidJson["content"].append(next_img)
             elif ptype == "plot":
-                base_data = destWidJson["content"].get("data") or []
-                if not base_data or "name" not in base_data[0]:
+                base_data = destWidJson["content"].get("data")
+                if not isinstance(base_data, list) or not base_data:
+                    continue  # Skip windows with no usable data
+                if not _is_named_trace(base_data[0]):
                     continue  # Skip windows with unnamed data
                 if ix == 0:
                     destWidJson["has_compare"] = False
@@ -617,10 +630,10 @@ def compare_envs(state, eids, socket, store, show_all=False):
                     # skip: if an earlier env already contributed, that
                     # comparison is still valid, and if none has, the flag is
                     # still False from the base env and the pane drops out below.
-                    incoming_data = win["content"].get("data") or []
-                    if not incoming_data:
+                    incoming_data = win["content"].get("data")
+                    if not isinstance(incoming_data, list) or not incoming_data:
                         continue
-                    if any("name" not in trace for trace in incoming_data):
+                    if not all(_is_named_trace(trace) for trace in incoming_data):
                         continue  # not the right format for this plot
                     destWidJson["has_compare"] = True
                     for data in incoming_data:

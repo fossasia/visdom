@@ -341,6 +341,33 @@ def test_a_partly_named_contributor_merges_none_of_its_traces(fake_socket, store
     assert _trace_names(win) == ["a_loss", "c_loss"]
 
 
+def test_a_contributor_with_a_none_trace_is_skipped(fake_socket, store):
+    """A trace list holding None is malformed input, not a crash."""
+    pane = _plot_pane("w2", "loss")
+    pane["content"]["data"] = [None]
+    state = {"a": _env(_plot_pane("w1", "loss")), "b": _env(pane)}
+    compare_envs(state, ["a", "b"], fake_socket, store)
+    assert _by_title(fake_socket, "loss") is None
+
+
+def test_a_base_pane_with_a_none_trace_is_skipped(fake_socket, store):
+    """The same malformed trace list in the base env is also survivable."""
+    pane = _plot_pane("w1", "loss")
+    pane["content"]["data"] = [None]
+    state = {"a": _env(pane), "b": _env(_plot_pane("w2", "loss"))}
+    compare_envs(state, ["a", "b"], fake_socket, store)
+    assert _by_title(fake_socket, "loss") is None
+
+
+def test_a_contributor_whose_data_is_not_a_list_is_skipped(fake_socket, store):
+    """Content that is not a trace list at all is skipped rather than iterated."""
+    pane = _plot_pane("w2", "loss")
+    pane["content"]["data"] = {"name": "loss"}
+    state = {"a": _env(_plot_pane("w1", "loss")), "b": _env(pane)}
+    compare_envs(state, ["a", "b"], fake_socket, store)
+    assert _by_title(fake_socket, "loss") is None
+
+
 def test_an_empty_title_is_never_merged(fake_socket, store):
     state = {"a": _env(_plot_pane("w1", "")), "b": _env(_plot_pane("w2", ""))}
     compare_envs(state, ["a", "b"], fake_socket, store)
