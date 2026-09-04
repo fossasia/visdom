@@ -315,6 +315,23 @@ async def ensure_env_loaded(handler, eid):
     env.prime(await load_env_off_loop(handler, eid))
 
 
+async def ensure_env_present(handler, eid):
+    """Materialise an env the loop is about to read, cold or unknown alike.
+
+    ``ensure_env_loaded`` serves the callers that only ever name an env the
+    application already tracks. Comparison also names envs the store alone
+    knows, and read those inline; this reads one off the loop and files it
+    under ``state`` exactly as that inline read did. An env with nothing on
+    disk stays absent, so the caller still decides what a missing env means.
+    """
+    if eid in handler.state:
+        await ensure_env_loaded(handler, eid)
+        return
+    raw = await load_env_off_loop(handler, eid)
+    if raw:
+        handler.state[eid] = raw
+
+
 def _read_env_for_serving(store, eid, want_env):
     """Read what serving an env costs: the env itself and its undo depth."""
     return (store.load_env(eid) if want_env else None), len(store.load_undo(eid))
