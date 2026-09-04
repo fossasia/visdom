@@ -611,20 +611,20 @@ def compare_envs(state, eids, socket, store, show_all=False):
                 else:
                     # has_compare will be set to True only if the window title is
                     # shared by at least 2 envs.
+                    # A contributor is merged only if every one of its traces
+                    # is named, so a malformed one cannot leave half its traces
+                    # behind. has_compare is deliberately left untouched when we
+                    # skip: if an earlier env already contributed, that
+                    # comparison is still valid, and if none has, the flag is
+                    # still False from the base env and the pane drops out below.
                     incoming_data = win["content"].get("data") or []
                     if not incoming_data:
-                        # A contributor with no traces has nothing to merge, so
-                        # skip it. has_compare is deliberately left as it is: if
-                        # an earlier env already contributed, that comparison is
-                        # still valid, and if none has, it is still False from
-                        # the base env and the pane drops out below.
                         continue
+                    if any("name" not in trace for trace in incoming_data):
+                        continue  # not the right format for this plot
                     destWidJson["has_compare"] = True
                     for data in incoming_data:
                         data = copy.deepcopy(data)
-                        if "name" not in data:
-                            destWidJson["has_compare"] = False
-                            break  # stop working with this plot, not right format
                         data["name"] = "{}_{}".format(eidNums[eid], data["name"])
                         destWidJson["content"]["data"].append(data)
 

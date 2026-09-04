@@ -315,6 +315,32 @@ def test_an_empty_contributor_does_not_block_a_later_valid_one(fake_socket, stor
     assert _trace_names(win) == ["a_loss", "c_loss"]
 
 
+def test_a_malformed_contributor_does_not_undo_an_earlier_valid_one(fake_socket, store):
+    """An unnamed trace withdraws its own env, not comparisons already made."""
+    state = {
+        "a": _env(_plot_pane("w1", "loss")),
+        "b": _env(_plot_pane("w2", "loss")),
+        "c": _env(_plot_pane("w3", "loss", names=(None,))),
+    }
+    compare_envs(state, ["a", "b", "c"], fake_socket, store)
+    win = _by_title(fake_socket, "loss")
+    assert win is not None
+    assert _trace_names(win) == ["a_loss", "b_loss"]
+
+
+def test_a_partly_named_contributor_merges_none_of_its_traces(fake_socket, store):
+    """A contributor is all-or-nothing: one unnamed trace drops the whole env."""
+    state = {
+        "a": _env(_plot_pane("w1", "loss")),
+        "b": _env(_plot_pane("w2", "loss", names=("good", None))),
+        "c": _env(_plot_pane("w3", "loss")),
+    }
+    compare_envs(state, ["a", "b", "c"], fake_socket, store)
+    win = _by_title(fake_socket, "loss")
+    assert win is not None
+    assert _trace_names(win) == ["a_loss", "c_loss"]
+
+
 def test_an_empty_title_is_never_merged(fake_socket, store):
     state = {"a": _env(_plot_pane("w1", "")), "b": _env(_plot_pane("w2", ""))}
     compare_envs(state, ["a", "b"], fake_socket, store)
