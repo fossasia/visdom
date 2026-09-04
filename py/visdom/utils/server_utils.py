@@ -613,10 +613,11 @@ def compare_envs(state, eids, socket, store, show_all=False):
                     # shared by at least 2 envs.
                     incoming_data = win["content"].get("data") or []
                     if not incoming_data:
-                        # A contributor with no traces cannot be merged; treat it
-                        # like any other malformed contributor and withdraw the
-                        # pane rather than presenting a one-sided comparison.
-                        destWidJson["has_compare"] = False
+                        # A contributor with no traces has nothing to merge, so
+                        # skip it. has_compare is deliberately left as it is: if
+                        # an earlier env already contributed, that comparison is
+                        # still valid, and if none has, it is still False from
+                        # the base env and the pane drops out below.
                         continue
                     destWidJson["has_compare"] = True
                     for data in incoming_data:

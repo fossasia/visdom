@@ -289,6 +289,19 @@ def test_a_later_env_without_a_data_key_is_skipped(fake_socket, store):
     assert _by_title(fake_socket, "loss") is None
 
 
+def test_an_empty_contributor_does_not_undo_an_earlier_valid_one(fake_socket, store):
+    """A comparison already established survives a later empty contributor."""
+    state = {
+        "a": _env(_plot_pane("w1", "loss")),
+        "b": _env(_plot_pane("w2", "loss")),
+        "c": _env(_plot_pane("w3", "loss", names=())),
+    }
+    compare_envs(state, ["a", "b", "c"], fake_socket, store)
+    win = _by_title(fake_socket, "loss")
+    assert win is not None
+    assert _trace_names(win) == ["a_loss", "b_loss"]
+
+
 def test_an_empty_contributor_does_not_block_a_later_valid_one(fake_socket, store):
     """A pane still compares when a good contributor follows an empty one."""
     state = {
