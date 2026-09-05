@@ -280,16 +280,16 @@ class Application(tornado.web.Application):
         return self.server_state.start_autosave()
 
     def stop_autosave(self):
-        """Compatibility wrapper for stopping ServerState autosave."""
+        """Compatibility wrapper for stopping the ServerState autosave."""
         return self.server_state.stop_autosave()
 
     def shutdown_storage(self):
-        """Compatibility wrapper for draining ServerState storage on exit."""
+        """Compatibility wrapper for draining ServerState storage."""
         return self.server_state.shutdown_storage()
 
-    def save_layouts(self):
+    def save_layouts(self, layouts=None):
         """Compatibility wrapper for callers that still use ``Application``."""
-        self.server_state.save_layouts()
+        self.server_state.save_layouts(layouts)
 
     def load_layouts(self):
         """Read layouts through the configured ``DataStore`` backend."""
