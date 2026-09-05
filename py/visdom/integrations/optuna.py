@@ -22,10 +22,13 @@ import warnings
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from typing import Any
+from urllib.parse import quote
 
 from visdom.experiments.tags import MAX_TAGS_PER_ENV, normalize_tags
+from visdom.utils.server_utils import escape_eid
 
 
+_INTERMEDIATE_METRIC_NAME = "intermediate_value"
 _OPTUNA_TAG_NAMES = {
     "integration",
     "optuna_study",
@@ -40,8 +43,8 @@ class OptunaCallback:
 
     Instances are passed to ``Study.optimize(callbacks=[...])``. Optuna calls
     the instance with a ``Study`` and ``FrozenTrial`` after a trial finishes;
-    the callback stores the trial's parameters, objective values and state via
-    Visdom's experiment API.
+    the callback stores the trial's parameters, objective values, reported
+    intermediate values and state via Visdom's experiment API.
 
     ``dashboard_env`` is the namespace for the study and its trial
     environments. When omitted it is derived from the Optuna study name.
@@ -69,7 +72,8 @@ class OptunaCallback:
             warning is emitted so an unavailable dashboard does not stop the
             optimization.
         create_dashboard: Create and periodically refresh the study dashboard.
-        refresh_every: Number of newly logged trials between dashboard refreshes.
+        refresh_every: Positive integer number of newly logged trials between
+            dashboard refreshes.
 
     Example::
 
@@ -97,6 +101,8 @@ class OptunaCallback:
             raise TypeError("dashboard_env must be a string or None")
         if dashboard_env == "":
             raise ValueError("dashboard_env must not be empty")
+        if isinstance(refresh_every, bool) or not isinstance(refresh_every, int):
+            raise TypeError("refresh_every must be an integer")
         if refresh_every < 1:
             raise ValueError("refresh_every must be at least 1")
 
@@ -148,8 +154,10 @@ class OptunaCallback:
     def study_env(self, study: Any) -> str:
         """Return the environment namespace for an Optuna study."""
         if self.dashboard_env is not None:
-            return self.dashboard_env
-        return "optuna_{}".format(study.study_name)
+            env = self.dashboard_env
+        else:
+            env = "optuna_{}".format(study.study_name)
+        return escape_eid(env)
 
     def trial_env(self, trial: Any, study: Any = None) -> str:
         """Return the deterministic Visdom environment for an Optuna trial.
@@ -164,6 +172,15 @@ class OptunaCallback:
         if self.dashboard_env is None and study is None:
             raise ValueError("study is required when dashboard_env was not supplied")
         return "{}_trial_{:06d}".format(self.study_env(study), trial.number)
+
+    def _trial_url(self, trial: Any, study: Any) -> str:
+        root = "{}:{}{}".format(
+            self.viz.server,
+            self.viz.port,
+            self.viz.base_url,
+        ).rstrip("/")
+        env = quote(escape_eid(self.trial_env(trial, study)), safe="")
+        return "{}/env/{}".format(root, env)
 
     def _metric_names(self, study: Any, value_count: int) -> tuple[str, ...]:
         if self.objective_names is not None:
@@ -199,9 +216,16 @@ class OptunaCallback:
         )
         return normalize_tags(tags)
 
+    @staticmethod
+    def _intermediate_values(trial: Any) -> list[tuple[int, float]]:
+        """Return reported intermediate values ordered by training step."""
+        values = getattr(trial, "intermediate_values", None) or {}
+        return sorted(values.items())
+
     def _summary_html(self, study: Any) -> str:
         trials = study.get_trials(deepcopy=False)
         states = Counter(trial.state.name for trial in trials)
+        links = []
         rows = [
             ("Study", study.study_name),
             (
@@ -214,21 +238,38 @@ class OptunaCallback:
             ("Failed", states["FAIL"]),
         ]
         if len(study.directions) == 1 and states["COMPLETE"]:
-            rows.extend(
-                [
-                    ("Best value", study.best_value),
-                    (
-                        "Best parameters",
-                        json.dumps(
-                            study.best_params,
-                            ensure_ascii=False,
-                            sort_keys=True,
+            try:
+                best_trial = study.best_trial
+                best_value = study.best_value
+                best_params = study.best_params
+            except ValueError:
+                pass
+            else:
+                links.append(("Open best trial", self._trial_url(best_trial, study)))
+                rows.extend(
+                    [
+                        ("Best value", best_value),
+                        (
+                            "Best parameters",
+                            json.dumps(
+                                best_params,
+                                ensure_ascii=False,
+                                sort_keys=True,
+                            ),
                         ),
-                    ),
-                ]
-            )
+                    ]
+                )
         elif states["COMPLETE"]:
             rows.append(("Pareto trials", len(study.best_trials)))
+
+        terminal_trials = [
+            trial
+            for trial in trials
+            if trial.state.name in ("COMPLETE", "PRUNED", "FAIL")
+        ]
+        if terminal_trials:
+            latest_trial = max(terminal_trials, key=lambda trial: trial.number)
+            links.append(("Open latest trial", self._trial_url(latest_trial, study)))
 
         body = "".join(
             "<tr><th>{}</th><td>{}</td></tr>".format(
@@ -236,11 +277,22 @@ class OptunaCallback:
             )
             for label, value in rows
         )
-        return "<h3>Optuna Study</h3><table>{}</table>".format(body)
+        navigation = ""
+        if links:
+            anchors = " | ".join(
+                '<a href="{}" target="_blank" rel="noopener noreferrer">{}</a>'.format(
+                    html.escape(url, quote=True),
+                    html.escape(label),
+                )
+                for label, url in links
+            )
+            navigation = "<p><strong>Open in Visdom:</strong> {}</p>".format(anchors)
+        return "<h3>Optuna Study</h3><table>{}</table>{}".format(body, navigation)
 
     def _dashboard_figures(self, study: Any) -> list[tuple[str, Any]]:
         try:
             from optuna.visualization import (
+                plot_intermediate_values,
                 plot_optimization_history,
                 plot_param_importances,
                 plot_timeline,
@@ -249,10 +301,8 @@ class OptunaCallback:
             objective_names = self._metric_names(study, len(study.directions))
             figures = []
             multi_objective = len(objective_names) > 1
-            complete_trials = sum(
-                trial.state.name == "COMPLETE"
-                for trial in study.get_trials(deepcopy=False)
-            )
+            trials = study.get_trials(deepcopy=False)
+            complete_trials = sum(trial.state.name == "COMPLETE" for trial in trials)
             for index, objective_name in enumerate(objective_names):
                 target = (
                     (lambda trial, i=index: trial.values[i])
@@ -281,6 +331,15 @@ class OptunaCallback:
                         figures.append(
                             ("optuna-importance{}".format(suffix), importance)
                         )
+
+            if any(self._intermediate_values(trial) for trial in trials):
+                try:
+                    intermediate = plot_intermediate_values(study)
+                except ValueError:
+                    pass
+                else:
+                    intermediate.update_layout(title="Optuna Intermediate Values")
+                    figures.append(("optuna-intermediate-values", intermediate))
 
             timeline = plot_timeline(study)
             timeline.update_layout(title="Optuna Trial Timeline")
@@ -383,6 +442,12 @@ class OptunaCallback:
                 description=payload["description"],
                 env=payload["env"],
             )
+            for step, value in self._intermediate_values(trial):
+                self.viz.log_metrics(
+                    {_INTERMEDIATE_METRIC_NAME: value},
+                    step=step,
+                    env=payload["env"],
+                )
             if payload["metrics"]:
                 self.viz.log_metrics(payload["metrics"], env=payload["env"])
             self.viz.finish_experiment(
