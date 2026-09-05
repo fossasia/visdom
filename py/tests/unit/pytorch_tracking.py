@@ -270,6 +270,75 @@ class TestVisdomLoggerRunTracking(unittest.TestCase):
         run.finish()
         self.assertEqual(self._plot_update_events(run), [])
 
+    def test_log_metrics_failure_does_not_suppress_run_tracking(self):
+        """Regression test for a flagged issue: log_metrics() (the
+        ExperimentStore call, only made when params= is set) used to run
+        inside the same try/except as viz.line(). If viz.line() succeeded
+        but log_metrics() then raised, the shared except caught it and
+        returned early -- skipping run= tracking for a point that had
+        genuinely already been plotted. run= tracking must not depend on
+        the unrelated params=/ExperimentStore integration succeeding."""
+        run = RunTracker("exp", out_dir=self.out_dir)
+        with patch.object(self.vis, "log_metrics", side_effect=ConnectionError("down")):
+            with patch.object(self.vis, "_send", side_effect=_unique_win_send):
+                with self.assertWarns(UserWarning):
+                    tracker = VisdomLogger(
+                        self.vis, env="e1", params={"lr": 0.01}, run=run
+                    )
+                    tracker.log("loss", 0.5)  # viz.line() succeeds, log_metrics fails
+        run.finish()
+        updates = self._plot_update_events(run)
+        self.assertEqual(len(updates), 1)
+        self.assertEqual(updates[0]["data"]["value"], 0.5)
+
+    def test_offline_mode_sentinel_does_not_collapse_per_metric_windows(self):
+        """Regression test for a flagged issue: self._wins[name] holds
+        whatever self.viz.line() returns, which in offline mode is True
+        (_send's own sentinel, not a real window id) rather than a
+        string -- and a client built with raise_exceptions=False can
+        similarly return False/None on a failed send. Passed straight
+        through, every metric would key RunTracker's per-window counters
+        on the identical True/False/None value, merging window_update_seq
+        across unrelated metrics instead of keeping each one independent.
+        name (already guaranteed to be a unique, non-empty string per
+        metric within one VisdomLogger instance) is used as the tracked
+        window id whenever the real one isn't a usable string."""
+        run = RunTracker("exp", out_dir=self.out_dir)
+        with patch.object(self.vis, "_send", return_value=True):  # offline sentinel
+            with VisdomLogger(self.vis, env="e1", run=run) as tracker:
+                tracker.log("Train Loss", 1.0)
+                tracker.log("Val Loss", 2.0)
+                tracker.log("Train Loss", 0.9)
+        run.finish()
+
+        updates = self._plot_update_events(run)
+        by_name = {}
+        for e in updates:
+            by_name.setdefault(e["data"]["name"], []).append(
+                (e["data"]["win"], e["data"]["window_update_seq"])
+            )
+        # each metric's win is a real string (its own name), never the
+        # raw True sentinel
+        for name, entries in by_name.items():
+            for win, _ in entries:
+                self.assertIsInstance(win, str)
+                self.assertEqual(win, name)
+        # and sequences stay independent per metric rather than merging
+        self.assertEqual([seq for _, seq in by_name["Train Loss"]], [1, 2])
+        self.assertEqual([seq for _, seq in by_name["Val Loss"]], [1])
+
+    def test_failed_send_with_raise_exceptions_false_falls_back_to_name(self):
+        """Same fallback, for the other non-string sentinel a client
+        built with raise_exceptions=False can return on a failed send
+        (False/None) instead of raising."""
+        run = RunTracker("exp", out_dir=self.out_dir)
+        with patch.object(self.vis, "_send", return_value=False):
+            with VisdomLogger(self.vis, env="e1", run=run) as tracker:
+                tracker.log("loss", 0.5)
+        run.finish()
+        updates = self._plot_update_events(run)
+        self.assertEqual(updates[0]["data"]["win"], "loss")
+
     def test_unexpected_internal_bug_warns_but_does_not_break_logging(self):
         run = RunTracker("exp", out_dir=self.out_dir)
         with patch.object(

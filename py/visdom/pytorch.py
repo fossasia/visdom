@@ -186,16 +186,46 @@ class VisdomLogger:
                     env=self.env,
                     update="append",
                 )
-            if self._params is not None:
-                reply = self.viz.log_metrics({name: value}, step=x_val, env=self.env)
-                self._check_experiment_reply(reply, "log metric {!r}".format(name))
         except Exception as e:
             _safe_warn(
                 "VisdomLogger failed to log {!r}: {}".format(name, e), UserWarning
             )
             return
+        if self._params is not None:
+            # Its own try/except, separate from the viz.line() one above:
+            # log_metrics() is a second, unrelated call (to the
+            # ExperimentStore, not the plot itself), and a failure here
+            # must not look like the plot itself failed -- in particular,
+            # it must not suppress run= tracking below, since the point
+            # genuinely was plotted successfully regardless of whether
+            # this ExperimentStore call succeeds.
+            try:
+                reply = self.viz.log_metrics({name: value}, step=x_val, env=self.env)
+                self._check_experiment_reply(reply, "log metric {!r}".format(name))
+            except Exception as e:
+                _safe_warn(
+                    "VisdomLogger failed to log metric {!r}: {}".format(name, e),
+                    UserWarning,
+                )
         if self.run is not None:
-            self._log_to_run(name, self._wins[name], x_val, value, xlabel)
+            # self.viz.line() doesn't always return a real window id:
+            # True is _send's own offline-mode sentinel (see
+            # _check_experiment_reply's docstring above), and a client
+            # built with raise_exceptions=False can return False/None on
+            # a failed send instead of raising. RunTracker.log_plot_update
+            # keys its per-window sequence counters on win, so passing a
+            # non-string straight through would collapse every metric
+            # onto the one shared True/False/None key instead of keeping
+            # each metric's window_update_seq independent (every
+            # offline-mode call returns the identical True sentinel).
+            # visdom.tracking.graphs._resolve_win applies the same check
+            # for TrackedVisdom; name is used as the fallback here
+            # specifically because it's already guaranteed to be a
+            # non-empty string, unique per metric within this
+            # VisdomLogger instance.
+            win = self._wins[name]
+            tracked_win = win if isinstance(win, str) and win else name
+            self._log_to_run(name, tracked_win, x_val, value, xlabel)
 
     def _log_to_run(self, name, win, x_val, value, xlabel):
         """Best-effort record this already-plotted update on self.run.
