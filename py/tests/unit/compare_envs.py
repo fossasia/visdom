@@ -389,6 +389,39 @@ def test_a_partly_named_base_pane_is_never_half_renamed(fake_socket, store):
     assert _by_title(fake_socket, "loss") is None
 
 
+@pytest.mark.parametrize("content", [[{"name": "x"}], None, "loss"])
+def test_a_contributor_whose_content_is_not_a_dict_is_skipped(
+    content, fake_socket, store
+):
+    """Pane content of the wrong shape is skipped, not called .get() on."""
+    pane = _plot_pane("w2", "loss")
+    pane["content"] = content
+    state = {"a": _env(_plot_pane("w1", "loss")), "b": _env(pane)}
+    compare_envs(state, ["a", "b"], fake_socket, store)
+    assert _by_title(fake_socket, "loss") is None
+
+
+@pytest.mark.parametrize("content", [[{"name": "x"}], None, "loss"])
+def test_a_base_pane_whose_content_is_not_a_dict_is_skipped(
+    content, fake_socket, store
+):
+    """The same wrong-shaped content in the base env is also survivable."""
+    pane = _plot_pane("w1", "loss")
+    pane["content"] = content
+    state = {"a": _env(pane), "b": _env(_plot_pane("w2", "loss"))}
+    compare_envs(state, ["a", "b"], fake_socket, store)
+    assert _by_title(fake_socket, "loss") is None
+
+
+def test_an_image_base_pane_with_non_dict_content_is_skipped(fake_socket, store):
+    """The image branch deep-copies base content and reads a caption from it."""
+    pane = _image_pane("w1", "shot")
+    pane["content"] = ["not", "a", "dict"]
+    state = {"a": _env(pane), "b": _env(_image_pane("w2", "shot"))}
+    compare_envs(state, ["a", "b"], fake_socket, store)
+    assert _by_title(fake_socket, "shot") is None
+
+
 def test_an_empty_title_is_never_merged(fake_socket, store):
     state = {"a": _env(_plot_pane("w1", "")), "b": _env(_plot_pane("w2", ""))}
     compare_envs(state, ["a", "b"], fake_socket, store)

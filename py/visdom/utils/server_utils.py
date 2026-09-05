@@ -559,8 +559,8 @@ def compare_envs(state, eids, socket, store, show_all=False):
             ptype = win.get("type", None)
             if ptype not in ["plot", "image"]:
                 continue
-            if "content" not in win:
-                continue
+            if not isinstance(win.get("content"), dict):
+                continue  # pane content is missing or not in the expected shape
             if "title" not in win:
                 continue
             title = win["title"]
@@ -587,6 +587,8 @@ def compare_envs(state, eids, socket, store, show_all=False):
                     destWidJson["has_compare"] = False
                     destWidJson["contentID"] = get_rand_id()
 
+                    if not isinstance(destWidJson["content"], dict):
+                        continue  # base image content is not in the expected shape
                     first_img = copy.deepcopy(destWidJson["content"])
                     caption = first_img.get("caption")
                     first_img["caption"] = "{}_{}".format(
@@ -606,6 +608,8 @@ def compare_envs(state, eids, socket, store, show_all=False):
                     )
                     destWidJson["content"].append(next_img)
             elif ptype == "plot":
+                if not isinstance(destWidJson["content"], dict):
+                    continue  # base plot content is not in the expected shape
                 base_data = destWidJson["content"].get("data")
                 if not isinstance(base_data, list) or not base_data:
                     continue  # Skip windows with no usable data
