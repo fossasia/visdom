@@ -629,6 +629,8 @@ See `example/train_keras_example.py` for a full working example.
 
 **Requirements:** `pip install visdom optuna`
 
+**Dashboard visualizations:** `pip install plotly`
+
 `visdom.integrations.OptunaCallback` implements Optuna's study callback
 protocol. After each trial finishes it records the trial's parameters, objective
 values and state as a Visdom experiment in a dedicated environment. Optuna is
@@ -645,6 +647,8 @@ callback = OptunaCallback(
     viz,
     dashboard_env="optuna_quadratic",
     objective_names=["loss"],
+    create_dashboard=True,
+    refresh_every=10,
 )
 
 
@@ -655,14 +659,33 @@ def objective(trial):
 
 study = optuna.create_study(study_name="quadratic", direction="minimize")
 study.optimize(objective, n_trials=100, callbacks=[callback])
+callback.update_dashboard(study)
 ```
 
-This first-stage integration records one experiment per trial, using names such
-as `optuna_quadratic_trial_000017`. Pass `raise_on_error=True` if a Visdom
-logging failure should stop optimization; by default it emits a warning and
-allows the study to continue. Single- and multi-objective studies are supported,
-and `COMPLETE`, `PRUNED` and `FAIL` states are preserved in the
-`optuna_state` tag.
+The integration records one experiment per trial, using names such as
+`optuna_quadratic_trial_000017`. Intermediate values reported with
+`trial.report(value, step)` are stored as the `intermediate_value` metric in
+step order before the final objective value. With `create_dashboard=True`, the
+first trial creates summary, HParams, optimization history and timeline panes,
+plus intermediate-value and parameter-importance panes when Optuna can compute
+them. Later trials refresh the panes in `optuna_quadratic` every `refresh_every`
+successful writes. The explicit final `update_dashboard()` includes any trials
+left since the last scheduled refresh. Plotly is only needed for the Optuna
+visualization panes.
+
+The summary pane links directly to the best and latest terminal trial
+environments. The callback never opens a browser on its own.
+
+Pass `raise_on_error=True` if a Visdom logging failure should stop optimization;
+by default it emits a warning and allows the study to continue. Single- and
+multi-objective studies are supported, and `COMPLETE`, `PRUNED` and `FAIL`
+states are preserved in the `optuna_state` tag. A pruned trial retains every
+intermediate value reported before pruning. Optuna remains responsible for the
+pruning decision: call `trial.report()` and `trial.should_prune()` inside the
+objective and raise `optuna.TrialPruned` when requested. Because Optuna invokes
+study callbacks after a trial reaches a terminal state, `OptunaCallback`
+records these values after the trial finishes rather than streaming them while
+the trial is running.
 
 ## Details
 <img src="https://user-images.githubusercontent.com/19650074/198747904-7a8a580f-851a-45fb-8f45-94e54a910ee2.png"/>
