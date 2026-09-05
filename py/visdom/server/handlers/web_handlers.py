@@ -35,10 +35,13 @@ from visdom.utils.shared_utils import (
 from visdom.utils.server_utils import (
     check_auth,
     check_readonly,
+    delete_env_off_loop,
     ensure_env_loaded,
+    ensure_env_present,
     check_readonly_message,
     reject_readonly,
     extract_eid,
+    run_on_storage_executor,
     save_env_off_loop,
     save_envs_off_loop,
     snapshot_env,
@@ -57,7 +60,6 @@ from visdom.utils.server_utils import (
     stringify,
     push_deleted,
     clear_deleted,
-    delete_env_off_loop,
     notify,
     LazyEnvData,
 )
@@ -686,22 +688,28 @@ class CompareHandler(BaseHandler):
         )
 
     @check_auth
-    def post(self, args):
+    async def post(self, args):
         body = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
         sid = body["sid"]
         show_all = body.get("show_all", False)
         if sid in self.subs:
+            eids = args.split("+")
             try:
+                # comparison reads every named env in full, and reads it from
+                # state -- so each one is brought into memory here, where the
+                # read costs a worker thread rather than the loop.
+                for eid in eids:
+                    await ensure_env_present(self, eid)
                 compare_envs(
                     self.state,
-                    args.split("+"),
+                    eids,
                     self.subs[sid],
                     self.storage,
                     show_all=show_all,
                 )
-            except ValueError as e:
+            except ValueError:
                 notify(
                     self,
                     "Could not compare environments: invalid environment JSON format",
@@ -916,6 +924,95 @@ class UploadEnvHandler(BaseHandler):
         )
 
 
+# ---- Experiment metadata, written on the loop and persisted off it ---- #
+
+
+def _no_write(eid, env):
+    """``ExperimentStore`` persist hook that writes nothing.
+
+    Handed to a store whose caller does the writing itself, so the change lands
+    on the env here and the file write happens where the caller puts it.
+    """
+
+
+async def _write_experiment_metadata(handler, eid, mutate):
+    """Apply one metadata change to ``eid``'s env; return it and whether it is new.
+
+    Both trips to disk stay off the loop -- the env is read through
+    ``ensure_env_present`` and written through ``save_env_off_loop`` -- but the
+    change itself is applied here, to the very object the server is serving.
+
+    Applying it on the worker instead means reading the env from its file,
+    editing that copy, and writing the whole file back, while the loop goes on
+    editing the env it holds for the entire time the worker takes. Nothing
+    reconciles the two: whichever writes the file last wins it outright, and
+    everything the other one changed is gone. That is a window added while an
+    experiment was being logged, or a tag set while a metric was, and no error
+    is raised for either -- the losing request has already answered 200. The
+    env is the unit that is written, so it is the unit that is lost.
+
+    Applied here, every writer of an environment is back to being serialised by
+    the loop, and the snapshots they produce reach the single-threaded storage
+    worker in the order the loop made them. ``mutate`` runs before the env is
+    filed under ``state`` and before anything is queued, so a change the store
+    rejects leaves behind neither a new environment nor a write.
+    """
+    is_new_env = eid not in handler.state
+    await ensure_env_present(handler, eid)
+    env = handler.state.get(eid)
+    if env is None:
+        env = {"jsons": {}, "reload": {}}
+
+    # the env is handed over directly rather than through ``state.get``: it has
+    # just been materialised, and a store that went looking for it again would
+    # read the file for an env that has none -- on the loop.
+    experiment = mutate(
+        ExperimentStore(
+            handler.storage,
+            env_provider=lambda _eid, _env=env: _env,
+            persist=_no_write,
+        )
+    )
+    if experiment is None:
+        return None, is_new_env
+
+    if eid not in handler.state:
+        handler.state[eid] = env
+    await save_env_off_loop(handler, eid)
+    return experiment, is_new_env
+
+
+# ---- Experiment reads, as they run on the storage worker ---- #
+#
+# Both of these read every environment file the store knows, which is the whole
+# of what the endpoints below cost. They take the DataStore rather than a live
+# ``ExperimentStore`` because the executor is handed plain positional
+# arguments, and they touch no server state, so the worker is never looking at
+# anything the loop may be editing underneath it. Reading metadata from the
+# files alone is still current: every endpoint that changes an experiment
+# persists it before it answers.
+
+
+def _search_experiments(store, query, sort_by, descending, offset, limit):
+    """Return one page of matches and the unpaged total, as ``(page, total)``.
+
+    Paging on the worker rather than after it keeps the memory a search costs
+    set by the page asked for, so the ranking never holds every experiment on
+    the server just to hand back the first few.
+    """
+    return ExperimentStore(store).search_page(
+        query=query,
+        sort_by=sort_by,
+        descending=descending,
+        offset=offset,
+        limit=limit,
+    )
+
+
+def _compare_experiments(store, env_ids):
+    return ExperimentStore(store).compare(env_ids)
+
+
 def _decode_json_body(body):
     """Return a request body decoded into a dict of arguments.
 
@@ -982,7 +1079,7 @@ class ExperimentLogHandler(BaseHandler):
         return value
 
     @staticmethod
-    def wrap_func(handler, args):
+    async def wrap_func(handler, args):
         action = args.get("action", "log")
         if action not in ExperimentLogHandler.VALID_ACTIONS:
             raise tornado.web.HTTPError(
@@ -990,7 +1087,6 @@ class ExperimentLogHandler(BaseHandler):
             )
 
         eid = extract_eid(args)
-        store = ExperimentStore(handler.storage, env_provider=handler.state.get)
 
         if action == "metrics":
             metrics = ExperimentLogHandler._require_mapping(args, "metrics")
@@ -1004,20 +1100,56 @@ class ExperimentLogHandler(BaseHandler):
 
         try:
             if action == "log":
-                experiment = store.log_experiment(
+                experiment, is_new_env = await _write_experiment_metadata(
+                    handler,
                     eid,
-                    name=args.get("name"),
-                    params=params,
-                    tags=tags,
-                    description=args.get("description"),
+                    lambda store: store.log_experiment(
+                        eid,
+                        name=args.get("name"),
+                        params=params,
+                        tags=tags,
+                        description=args.get("description"),
+                    ),
                 )
             elif action == "metrics":
-                step = args.get("step")
-                for key, value in metrics.items():
-                    experiment = store.log_metric(eid, key, value, step)
+                rejected = []
+
+                def apply_metrics(store):
+                    """Apply the request's observations, holding back a rejection.
+
+                    Each is applied in turn, as it was when every observation
+                    was its own read-append-write, so a metric the store
+                    refuses still leaves the ones before it recorded. The
+                    refusal is held rather than raised so that what did apply
+                    is persisted before the request reports it.
+                    """
+                    experiment = None
+                    for key, value in metrics.items():
+                        try:
+                            experiment = store.log_metric(
+                                eid, key, value, args.get("step")
+                            )
+                        except (
+                            ExperimentFinishedError,
+                            TypeError,
+                            ValueError,
+                        ) as error:
+                            rejected.append(error)
+                            break
+                    return experiment
+
+                experiment, is_new_env = await _write_experiment_metadata(
+                    handler, eid, apply_metrics
+                )
+                if rejected:
+                    raise rejected[0]
             else:
-                experiment = store.finish_experiment(
-                    eid, args.get("status", STATUS_FINISHED)
+                experiment, is_new_env = await _write_experiment_metadata(
+                    handler,
+                    eid,
+                    lambda store: store.finish_experiment(
+                        eid, args.get("status", STATUS_FINISHED)
+                    ),
                 )
         except ExperimentFinishedError as e:
             raise tornado.web.HTTPError(409, reason=str(e))
@@ -1028,10 +1160,9 @@ class ExperimentLogHandler(BaseHandler):
         except ValueError as e:
             raise tornado.web.HTTPError(400, reason=str(e))
 
-        is_new_env = eid not in handler.state
-        if is_new_env:
-            handler.state[eid] = {"jsons": {}, "reload": {}}
-        handler.state[eid]["experiment"] = experiment.to_dict()
+        # the store wrote the blob into the env the server is holding, so there
+        # is nothing left to mirror here; the env is marked so the autosave
+        # covers it too, whatever else on it has changed since.
         handler.mark_dirty(eid)
         if is_new_env:
             broadcast_envs(handler)
@@ -1046,11 +1177,11 @@ class ExperimentLogHandler(BaseHandler):
     @check_readonly_message(
         "Experiment logging is disabled while the server is in readonly mode"
     )
-    def post(self):
+    async def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
-        self.wrap_func(self, args)
+        await self.wrap_func(self, args)
 
 
 class ExperimentSearchHandler(BaseHandler):
@@ -1169,7 +1300,7 @@ class ExperimentSearchHandler(BaseHandler):
         return value
 
     @staticmethod
-    def wrap_func(handler, args):
+    async def wrap_func(handler, args):
         query = ExperimentSearchHandler._require_text(args, "query")
         sort_by = ExperimentSearchHandler._require_text(args, "sort_by")
         limit = ExperimentSearchHandler._require_index(
@@ -1182,14 +1313,18 @@ class ExperimentSearchHandler(BaseHandler):
         descending = ExperimentSearchHandler._require_flag(args, "descending", True)
         ExperimentSearchHandler._require_window(offset, limit)
 
-        store = ExperimentStore(handler.storage, env_provider=handler.state.get)
         try:
-            page, total = store.search_page(
-                query=query,
-                sort_by=sort_by or DEFAULT_SORT_FIELD,
-                descending=descending,
-                offset=offset,
-                limit=limit,
+            # searching reads every environment on disk -- the longest read the
+            # server makes, and the one it must not make on the loop.
+            page, total = await run_on_storage_executor(
+                handler,
+                _search_experiments,
+                handler.storage,
+                query,
+                sort_by or DEFAULT_SORT_FIELD,
+                descending,
+                offset,
+                limit,
             )
         except QueryParseError as e:
             raise tornado.web.HTTPError(400, reason=str(e))
@@ -1205,8 +1340,8 @@ class ExperimentSearchHandler(BaseHandler):
         )
 
     @check_auth
-    def post(self):
-        self.wrap_func(self, _decode_json_body(self.request.body))
+    async def post(self):
+        await self.wrap_func(self, _decode_json_body(self.request.body))
 
 
 class ExperimentCompareHandler(BaseHandler):
@@ -1284,19 +1419,20 @@ class ExperimentCompareHandler(BaseHandler):
         return value
 
     @staticmethod
-    def wrap_func(handler, args):
+    async def wrap_func(handler, args):
         env_ids = ExperimentCompareHandler._require_env_ids(args)
-        store = ExperimentStore(handler.storage, env_provider=handler.state.get)
         try:
-            comparison = store.compare(env_ids)
+            comparison = await run_on_storage_executor(
+                handler, _compare_experiments, handler.storage, env_ids
+            )
         except KeyError as e:
             raise tornado.web.HTTPError(404, reason=str(e.args[0]))
 
         handler.write_json(comparison)
 
     @check_auth
-    def post(self):
-        self.wrap_func(self, _decode_json_body(self.request.body))
+    async def post(self):
+        await self.wrap_func(self, _decode_json_body(self.request.body))
 
 
 class ExperimentSuggestHandler(BaseHandler):
@@ -1395,7 +1531,7 @@ class TagsHandler(BaseHandler):
         handler.write_json(tag_map)
 
     @staticmethod
-    def wrap_func(handler, args):
+    async def wrap_func(handler, args):
         action = args.get("action", "set")
         if action not in TagsHandler.VALID_ACTIONS:
             raise tornado.web.HTTPError(
@@ -1423,20 +1559,18 @@ class TagsHandler(BaseHandler):
 
         eid = extract_eid(args)
         append = args.get("append", False)
-        store = ExperimentStore(handler.storage)
-        env = handler.state.get(eid)
-        is_new_env = env is None
-        if is_new_env:
-            env = {"jsons": {}, "reload": {}}
         try:
-            experiment = store.update_tags(
-                eid, args["tags"], append=append, env_data=env
+            # tags share the environment file with the experiment they organise
+            # and with every window in it, so setting one goes through the same
+            # single writer as the rest: applied to the live env here, queued
+            # onto the storage worker behind whatever the loop queued before it.
+            experiment, is_new_env = await _write_experiment_metadata(
+                handler,
+                eid,
+                lambda store: store.update_tags(eid, args["tags"], append=append),
             )
         except (TypeError, ValueError) as error:
             raise tornado.web.HTTPError(400, reason=str(error))
-
-        if is_new_env:
-            handler.state[eid] = env
 
         tags = tags_to_mapping(experiment.tags)
         if is_new_env:
@@ -1445,13 +1579,13 @@ class TagsHandler(BaseHandler):
         handler.write_json(tags)
 
     @check_auth
-    def get(self):
+    async def get(self):
         eid = self.get_query_argument("eid", default=None)
-        self.wrap_func(self, {"action": "get", "eid": eid})
+        await self.wrap_func(self, {"action": "get", "eid": eid})
 
     @check_auth
-    def post(self):
-        self.wrap_func(self, _decode_json_body(self.request.body))
+    async def post(self):
+        await self.wrap_func(self, _decode_json_body(self.request.body))
 
 
 class HealthHandler(BaseHandler):
