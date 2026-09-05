@@ -527,6 +527,17 @@ def gather_envs(state, store):
     return sorted(set(store.list_envs() + list(state.keys())))
 
 
+def _is_named_trace(trace):
+    """True if ``trace`` is a mapping carrying a ``name``.
+
+    Pane content is read back from stored env JSON, so a trace list can hold
+    anything -- ``None`` and non-mapping entries included. Checking the shape
+    before testing for ``"name"`` keeps a malformed env from raising out of a
+    comparison.
+    """
+    return isinstance(trace, dict) and "name" in trace
+
+
 def compare_envs(state, eids, socket, store, show_all=False):
     logging.info("comparing envs")
     use_env_names = all(len(str(eid)) <= MAX_ENV_NAME_LEN for eid in eids)
@@ -565,8 +576,8 @@ def compare_envs(state, eids, socket, store, show_all=False):
             ptype = win.get("type", None)
             if ptype not in ["plot", "image"]:
                 continue
-            if "content" not in win:
-                continue
+            if not isinstance(win.get("content"), dict):
+                continue  # pane content is missing or not in the expected shape
             if "title" not in win:
                 continue
             title = win["title"]
@@ -593,6 +604,8 @@ def compare_envs(state, eids, socket, store, show_all=False):
                     destWidJson["has_compare"] = False
                     destWidJson["contentID"] = get_rand_id()
 
+                    if not isinstance(destWidJson["content"], dict):
+                        continue  # base image content is not in the expected shape
                     first_img = copy.deepcopy(destWidJson["content"])
                     caption = first_img.get("caption")
                     first_img["caption"] = "{}_{}".format(
@@ -612,28 +625,40 @@ def compare_envs(state, eids, socket, store, show_all=False):
                     )
                     destWidJson["content"].append(next_img)
             elif ptype == "plot":
-                base_data = destWidJson["content"].get("data") or []
-                if not base_data or "name" not in base_data[0]:
+                if not isinstance(destWidJson["content"], dict):
+                    continue  # base plot content is not in the expected shape
+                base_data = destWidJson["content"].get("data")
+                if not isinstance(base_data, list) or not base_data:
+                    continue  # Skip windows with no usable data
+                if not all(_is_named_trace(trace) for trace in base_data):
                     continue  # Skip windows with unnamed data
                 if ix == 0:
                     destWidJson["has_compare"] = False
                     destWidJson["content"]["layout"]["showlegend"] = True
                     destWidJson["contentID"] = get_rand_id()
+                    # Every base trace was validated above, so the rename
+                    # cannot stop half way and leave the pane part renamed.
                     for dataIdx, data in enumerate(destWidJson["content"]["data"]):
-                        if "name" not in data:
-                            break  # stop working with this plot, not right format
                         destWidJson["content"]["data"][dataIdx][
                             "name"
                         ] = "{}_{}".format(eidNums[eid], data["name"])
                 else:
                     # has_compare will be set to True only if the window title is
                     # shared by at least 2 envs.
+                    # A contributor is merged only if every one of its traces
+                    # is named, so a malformed one cannot leave half its traces
+                    # behind. has_compare is deliberately left untouched when we
+                    # skip: if an earlier env already contributed, that
+                    # comparison is still valid, and if none has, the flag is
+                    # still False from the base env and the pane drops out below.
+                    incoming_data = win["content"].get("data")
+                    if not isinstance(incoming_data, list) or not incoming_data:
+                        continue
+                    if not all(_is_named_trace(trace) for trace in incoming_data):
+                        continue  # not the right format for this plot
                     destWidJson["has_compare"] = True
-                    for _dataIdx, data in enumerate(win["content"]["data"]):
+                    for data in incoming_data:
                         data = copy.deepcopy(data)
-                        if "name" not in data:
-                            destWidJson["has_compare"] = False
-                            break  # stop working with this plot, not right format
                         data["name"] = "{}_{}".format(eidNums[eid], data["name"])
                         destWidJson["content"]["data"].append(data)
 

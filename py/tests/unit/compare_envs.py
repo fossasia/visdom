@@ -270,6 +270,158 @@ def test_a_later_env_with_an_unnamed_trace_clears_has_compare(fake_socket, store
     assert _by_title(fake_socket, "loss") is None
 
 
+def test_a_later_env_with_no_traces_clears_has_compare(fake_socket, store):
+    """An empty contributor withdraws the pane instead of half-merging it."""
+    state = {
+        "a": _env(_plot_pane("w1", "loss")),
+        "b": _env(_plot_pane("w2", "loss", names=())),
+    }
+    compare_envs(state, ["a", "b"], fake_socket, store)
+    assert _by_title(fake_socket, "loss") is None
+
+
+def test_a_later_env_without_a_data_key_is_skipped(fake_socket, store):
+    """A contributor whose content carries no data at all is not a crash."""
+    pane = _plot_pane("w2", "loss")
+    del pane["content"]["data"]
+    state = {"a": _env(_plot_pane("w1", "loss")), "b": _env(pane)}
+    compare_envs(state, ["a", "b"], fake_socket, store)
+    assert _by_title(fake_socket, "loss") is None
+
+
+def test_an_empty_contributor_does_not_undo_an_earlier_valid_one(fake_socket, store):
+    """A comparison already established survives a later empty contributor."""
+    state = {
+        "a": _env(_plot_pane("w1", "loss")),
+        "b": _env(_plot_pane("w2", "loss")),
+        "c": _env(_plot_pane("w3", "loss", names=())),
+    }
+    compare_envs(state, ["a", "b", "c"], fake_socket, store)
+    win = _by_title(fake_socket, "loss")
+    assert win is not None
+    assert _trace_names(win) == ["a_loss", "b_loss"]
+
+
+def test_an_empty_contributor_does_not_block_a_later_valid_one(fake_socket, store):
+    """A pane still compares when a good contributor follows an empty one."""
+    state = {
+        "a": _env(_plot_pane("w1", "loss")),
+        "b": _env(_plot_pane("w2", "loss", names=())),
+        "c": _env(_plot_pane("w3", "loss")),
+    }
+    compare_envs(state, ["a", "b", "c"], fake_socket, store)
+    win = _by_title(fake_socket, "loss")
+    assert win is not None
+    assert _trace_names(win) == ["a_loss", "c_loss"]
+
+
+def test_a_malformed_contributor_does_not_undo_an_earlier_valid_one(fake_socket, store):
+    """An unnamed trace withdraws its own env, not comparisons already made."""
+    state = {
+        "a": _env(_plot_pane("w1", "loss")),
+        "b": _env(_plot_pane("w2", "loss")),
+        "c": _env(_plot_pane("w3", "loss", names=(None,))),
+    }
+    compare_envs(state, ["a", "b", "c"], fake_socket, store)
+    win = _by_title(fake_socket, "loss")
+    assert win is not None
+    assert _trace_names(win) == ["a_loss", "b_loss"]
+
+
+def test_a_partly_named_contributor_merges_none_of_its_traces(fake_socket, store):
+    """A contributor is all-or-nothing: one unnamed trace drops the whole env."""
+    state = {
+        "a": _env(_plot_pane("w1", "loss")),
+        "b": _env(_plot_pane("w2", "loss", names=("good", None))),
+        "c": _env(_plot_pane("w3", "loss")),
+    }
+    compare_envs(state, ["a", "b", "c"], fake_socket, store)
+    win = _by_title(fake_socket, "loss")
+    assert win is not None
+    assert _trace_names(win) == ["a_loss", "c_loss"]
+
+
+def test_a_contributor_with_a_none_trace_is_skipped(fake_socket, store):
+    """A trace list holding None is malformed input, not a crash."""
+    pane = _plot_pane("w2", "loss")
+    pane["content"]["data"] = [None]
+    state = {"a": _env(_plot_pane("w1", "loss")), "b": _env(pane)}
+    compare_envs(state, ["a", "b"], fake_socket, store)
+    assert _by_title(fake_socket, "loss") is None
+
+
+def test_a_base_pane_with_a_none_trace_is_skipped(fake_socket, store):
+    """The same malformed trace list in the base env is also survivable."""
+    pane = _plot_pane("w1", "loss")
+    pane["content"]["data"] = [None]
+    state = {"a": _env(pane), "b": _env(_plot_pane("w2", "loss"))}
+    compare_envs(state, ["a", "b"], fake_socket, store)
+    assert _by_title(fake_socket, "loss") is None
+
+
+def test_a_contributor_whose_data_is_not_a_list_is_skipped(fake_socket, store):
+    """Content that is not a trace list at all is skipped rather than iterated."""
+    pane = _plot_pane("w2", "loss")
+    pane["content"]["data"] = {"name": "loss"}
+    state = {"a": _env(_plot_pane("w1", "loss")), "b": _env(pane)}
+    compare_envs(state, ["a", "b"], fake_socket, store)
+    assert _by_title(fake_socket, "loss") is None
+
+
+def test_a_base_pane_with_a_none_trace_after_a_valid_one_is_skipped(fake_socket, store):
+    """Validation covers every base trace, not just the first."""
+    pane = _plot_pane("w1", "loss")
+    pane["content"]["data"] = [{"type": "scatter", "name": "loss"}, None]
+    state = {"a": _env(pane), "b": _env(_plot_pane("w2", "loss"))}
+    compare_envs(state, ["a", "b"], fake_socket, store)
+    assert _by_title(fake_socket, "loss") is None
+
+
+def test_a_partly_named_base_pane_is_never_half_renamed(fake_socket, store):
+    """A base pane with one unnamed trace withdraws instead of leaking it."""
+    pane = _plot_pane("w1", "loss")
+    pane["content"]["data"] = [
+        {"type": "scatter", "name": "loss"},
+        {"type": "scatter"},
+    ]
+    state = {"a": _env(pane), "b": _env(_plot_pane("w2", "loss"))}
+    compare_envs(state, ["a", "b"], fake_socket, store)
+    assert _by_title(fake_socket, "loss") is None
+
+
+@pytest.mark.parametrize("content", [[{"name": "x"}], None, "loss"])
+def test_a_contributor_whose_content_is_not_a_dict_is_skipped(
+    content, fake_socket, store
+):
+    """Pane content of the wrong shape is skipped, not called .get() on."""
+    pane = _plot_pane("w2", "loss")
+    pane["content"] = content
+    state = {"a": _env(_plot_pane("w1", "loss")), "b": _env(pane)}
+    compare_envs(state, ["a", "b"], fake_socket, store)
+    assert _by_title(fake_socket, "loss") is None
+
+
+@pytest.mark.parametrize("content", [[{"name": "x"}], None, "loss"])
+def test_a_base_pane_whose_content_is_not_a_dict_is_skipped(
+    content, fake_socket, store
+):
+    """The same wrong-shaped content in the base env is also survivable."""
+    pane = _plot_pane("w1", "loss")
+    pane["content"] = content
+    state = {"a": _env(pane), "b": _env(_plot_pane("w2", "loss"))}
+    compare_envs(state, ["a", "b"], fake_socket, store)
+    assert _by_title(fake_socket, "loss") is None
+
+
+def test_an_image_base_pane_with_non_dict_content_is_skipped(fake_socket, store):
+    """The image branch deep-copies base content and reads a caption from it."""
+    pane = _image_pane("w1", "shot")
+    pane["content"] = ["not", "a", "dict"]
+    state = {"a": _env(pane), "b": _env(_image_pane("w2", "shot"))}
+    compare_envs(state, ["a", "b"], fake_socket, store)
+    assert _by_title(fake_socket, "shot") is None
+
+
 def test_an_empty_title_is_never_merged(fake_socket, store):
     state = {"a": _env(_plot_pane("w1", "")), "b": _env(_plot_pane("w2", ""))}
     compare_envs(state, ["a", "b"], fake_socket, store)
