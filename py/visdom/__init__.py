@@ -3643,7 +3643,8 @@ class Visdom(object):
         - `opts.stacked` : stack multiple columns in `X`
             - `opts.legend`  : `list` containing legend labels
         """
-        X = np.squeeze(X)
+        X = np.atleast_1d(np.squeeze(np.asarray(X)))
+
         assert X.ndim == 1 or X.ndim == 2, "X should be one or two-dimensional"
         if X.ndim == 1:
             if opts is not None and opts.get("legend") is not None:
@@ -3655,7 +3656,7 @@ class Visdom(object):
             else:
                 X = X[:, None]
         if Y is not None:
-            Y = np.squeeze(Y)
+            Y = np.atleast_1d(np.squeeze(np.asarray(Y)))
             assert Y.ndim == 1, "Y should be one-dimensional"
             assert len(X) == len(Y), "sizes of X and Y should match"
         else:
@@ -3709,8 +3710,7 @@ class Visdom(object):
 
         - `opts.numbins`: number of bins (`number`; default = 30)
         """
-
-        X = np.squeeze(X)
+        X = np.atleast_1d(np.squeeze(np.asarray(X)))
         assert X.ndim == 1, "X should be one-dimensional"
 
         opts = {} if opts is None else opts
@@ -4152,7 +4152,7 @@ class Visdom(object):
                 values = np.asarray(values, dtype=np.float64)
             except (TypeError, ValueError):
                 raise AssertionError("values must be numeric")
-            values = np.squeeze(values)
+            values = np.atleast_1d(np.squeeze(values))
             assert values.ndim == 1, "values should be one-dimensional"
             assert len(values) == len(
                 labels
