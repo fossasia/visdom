@@ -83,6 +83,49 @@ class TestTagsEndpoint(VisdomHTTPTestCase):
             {"run-a": {"owner": "alice"}, "run-b": {"owner": "bob"}},
         )
 
+    def corrupt_env(self, eid, blob):
+        """Make ``eid`` a resident env whose experiment blob will not rebuild.
+
+        Put into live state rather than written to disk, because that is the
+        branch the handler parses itself: ``_experiment_from_env`` reads the
+        blob straight off a materialized env instead of going through the
+        store's guarded read.
+        """
+        self._app.state[eid] = {"jsons": {}, "reload": {}, "experiment": blob}
+
+    def test_a_corrupt_blob_does_not_500_the_tag_map(self):
+        """The tag map walks every resident env, so one bad blob must not empty it."""
+        self.post_json(
+            "/experiments/tags", {"eid": "run-a", "tags": {"owner": "alice"}}
+        )
+        self.corrupt_env("bad", {"env_id": "bad", "status": "cancelled"})
+
+        response = self.post_json("/experiments/tags", {"action": "get"})
+
+        self.assertEqual(response.code, 200)
+        self.assertEqual(json.loads(response.body), {"run-a": {"owner": "alice"}})
+
+    def test_reading_one_envs_tags_survives_a_corrupt_blob(self):
+        """A single-env read answers "no tags" rather than failing."""
+        self.corrupt_env("bad", {"env_id": "bad", "params": {"lr": 0.1}})
+
+        response = self.fetch("/experiments/tags?eid=bad")
+
+        self.assertEqual(response.code, 200)
+        self.assertEqual(json.loads(response.body), {})
+
+    def test_tagging_an_env_with_a_corrupt_blob_repairs_it(self):
+        """Tagging is a recovery path, so it must not be the thing that fails."""
+        self.corrupt_env("bad", {"name": "bad", "status": "cancelled"})
+
+        response = self.post_json(
+            "/experiments/tags", {"eid": "bad", "tags": {"owner": "alice"}}
+        )
+
+        self.assertEqual(response.code, 200)
+        self.assertEqual(json.loads(response.body), {"owner": "alice"})
+        self.assertEqual(self.read_tags("bad"), {"owner": "alice"})
+
     def test_set_broadcasts_one_transport_neutral_message(self):
         websocket = FakeSocket("websocket")
         polling = FakeSocket("polling")

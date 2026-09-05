@@ -66,10 +66,10 @@ from visdom.utils.server_utils import (
 from visdom.server.handlers.base_handlers import BaseHandler
 from visdom.experiments import (
     DEFAULT_SORT_FIELD,
-    Experiment,
     ExperimentStore,
     ExperimentFinishedError,
     QueryParseError,
+    experiment_from_blob,
     retarget_experiment,
     STATUS_FINISHED,
     tags_to_mapping,
@@ -1483,13 +1483,15 @@ class TagsHandler(BaseHandler):
 
     @staticmethod
     def _experiment_from_env(eid, env):
-        """Return an experiment from one materialized in-memory environment."""
-        blob = env.get("experiment")
-        if not isinstance(blob, Mapping):
-            return None
-        experiment = Experiment.from_dict(blob)
-        experiment.env_id = eid
-        return experiment
+        """Return an experiment from one materialized in-memory environment.
+
+        A blob the model cannot rebuild yields ``None``, like one that is not
+        metadata at all. :meth:`_experiment_map` runs this over every resident
+        environment to answer ``GET /tags``, so a single corrupt blob raising
+        here would empty the whole tag map with a 500 rather than omit the one
+        environment it belongs to.
+        """
+        return experiment_from_blob(eid, env.get("experiment"))
 
     @staticmethod
     def _read_experiment(handler, eid):
