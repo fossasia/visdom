@@ -222,6 +222,49 @@ class OptunaCallback:
         values = getattr(trial, "intermediate_values", None) or {}
         return sorted(values.items())
 
+    @staticmethod
+    def _add_timeline_markers(timeline: Any) -> None:
+        """Keep very short trials visible without changing their duration bars.
+
+        Optuna renders each trial as a horizontal bar whose width is its runtime.
+        When callback or scheduler overhead dominates a study's wall-clock span,
+        sub-millisecond trials can become substantially narrower than one browser
+        pixel. A fixed-size marker at each trial's true start time preserves the
+        timeline semantics while keeping those trials discoverable and hoverable.
+        """
+        for trace in tuple(timeline.data):
+            if trace.type != "bar" or trace.orientation != "h":
+                continue
+
+            starts = list(trace.base) if trace.base is not None else []
+            durations = list(trace.x) if trace.x is not None else []
+            trial_numbers = list(trace.y) if trace.y is not None else []
+            if not starts or not (len(starts) == len(durations) == len(trial_numbers)):
+                continue
+
+            text = list(trace.text) if trace.text is not None else None
+            color = trace.marker.color if trace.marker is not None else None
+            timeline.add_scatter(
+                x=starts,
+                y=trial_numbers,
+                mode="markers",
+                name=trace.name,
+                legendgroup=trace.name,
+                showlegend=False,
+                marker={
+                    "color": color,
+                    "size": 9,
+                    "symbol": "circle",
+                    "line": {"color": "white", "width": 1},
+                },
+                customdata=durations,
+                text=text,
+                hovertemplate=(
+                    "Start: %{x}<br>Duration: %{customdata:.3f} ms"
+                    "<br>%{text}<extra>" + html.escape(str(trace.name)) + "</extra>"
+                ),
+            )
+
     def _summary_html(self, study: Any) -> str:
         trials = study.get_trials(deepcopy=False)
         states = Counter(trial.state.name for trial in trials)
@@ -295,6 +338,7 @@ class OptunaCallback:
                 plot_intermediate_values,
                 plot_optimization_history,
                 plot_param_importances,
+                plot_pareto_front,
                 plot_timeline,
             )
 
@@ -332,6 +376,18 @@ class OptunaCallback:
                             ("optuna-importance{}".format(suffix), importance)
                         )
 
+            if complete_trials and len(objective_names) in (2, 3):
+                try:
+                    pareto = plot_pareto_front(
+                        study,
+                        target_names=list(objective_names),
+                    )
+                except ValueError:
+                    pass
+                else:
+                    pareto.update_layout(title="Optuna Pareto Front")
+                    figures.append(("optuna-pareto-front", pareto))
+
             if any(self._intermediate_values(trial) for trial in trials):
                 try:
                     intermediate = plot_intermediate_values(study)
@@ -342,6 +398,7 @@ class OptunaCallback:
                     figures.append(("optuna-intermediate-values", intermediate))
 
             timeline = plot_timeline(study)
+            self._add_timeline_markers(timeline)
             timeline.update_layout(title="Optuna Trial Timeline")
             figures.append(("optuna-timeline", timeline))
             return figures
