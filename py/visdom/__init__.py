@@ -746,6 +746,7 @@ class Visdom(object):
         session_idle_timeout=SESSION_IDLE_TIMEOUT,
         session_idle_check_interval=SESSION_IDLE_CHECK_INTERVAL,
         ssl_verify=None,
+        use_preflight_checks=True,
     ):
         parsed_url = urlparse(server)
         if not parsed_url.scheme:
@@ -790,6 +791,7 @@ class Visdom(object):
         self.raise_exceptions = raise_exceptions
         self.log_to_filename = log_to_filename
         self.offline = offline
+        self.use_preflight_checks = use_preflight_checks
         self._session = None
         self._pid = os.getpid()
         self._session_lock = threading.Lock()
@@ -2238,20 +2240,22 @@ class Visdom(object):
             }
         ]
 
+        msg = {
+            "data": data,
+            "win": win,
+            "eid": env,
+            "opts": opts,
+        }
         endpoint = "events"
-        if opts.get("store_history"):
-            if win is not None and self.win_exists(win, env):
+        if opts.get("store_history") and win is not None:
+            if self.use_preflight_checks:
+                if self.win_exists(win, env):
+                    endpoint = "update"
+            else:
+                msg["append"] = True
                 endpoint = "update"
 
-        return self._send(
-            {
-                "data": data,
-                "win": win,
-                "eid": env,
-                "opts": opts,
-            },
-            endpoint=endpoint,
-        )
+        return self._send(msg, endpoint=endpoint)
 
     def image_select(self, win, selected, env=None):
         """
@@ -2807,6 +2811,8 @@ class Visdom(object):
                 "Cannot use store_history=True together with the update parameter"
             )
 
+        send_layout_create = False
+
         if update == "remove":
             assert win is not None
             assert name is not None, "A trace must be specified for deletion"
@@ -2826,7 +2832,9 @@ class Visdom(object):
                 raise ValueError("Must define a window to update")
 
             if update == "append":
-                if not self.offline:
+                if not self.use_preflight_checks:
+                    send_layout_create = True
+                elif not self.offline:
                     exists = self.win_exists(win, env)
                     if exists is False:
                         update = None
@@ -2997,8 +3005,13 @@ class Visdom(object):
                 "opts": opts,
             }
             endpoint = "events"
-            if win is not None and self.win_exists(win, env):
-                endpoint = "update"
+            if win is not None:
+                if self.use_preflight_checks:
+                    if self.win_exists(win, env):
+                        endpoint = "update"
+                else:
+                    data_to_send["append"] = True
+                    endpoint = "update"
             return self._send(data_to_send, endpoint=endpoint)
 
         # Only send updates to the layout on the first plot, future updates
@@ -3014,6 +3027,8 @@ class Visdom(object):
         if update:
             data_to_send["name"] = name
             data_to_send["append"] = update == "append"
+            if send_layout_create:
+                data_to_send["layout_create"] = _opts2layout(opts, is3d)
             endpoint = "update"
 
         return self._send(data_to_send, endpoint=endpoint)
