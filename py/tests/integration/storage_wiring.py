@@ -52,7 +52,9 @@ from visdom.utils.server_utils import (
     ensure_env_loaded,
     load_env,
     pop_deleted,
+    purge_env,
     push_deleted,
+    push_deleted_off_loop,
     warm_env,
 )
 
@@ -376,6 +378,17 @@ def test_shutdown_drains_the_queue_before_the_final_save(app):
     app.shutdown_storage()
 
     assert order == ["queued-write", "final-save"]
+
+
+def test_a_second_shutdown_does_not_write_again(app):
+    """The graceful stop drains, then the atexit hook calls it once more."""
+    saves = []
+    app.storage.save_all = lambda state: saves.append(state)
+
+    app.shutdown_storage()
+    app.shutdown_storage()
+
+    assert len(saves) == 1
 
 
 def test_shutdown_flushes_state_through_storage(app):
@@ -832,6 +845,49 @@ def test_socket_delete_env_finishes_only_once_the_files_are_gone(
 
     assert not spy_store.env_exists("expt")
     assert count_deleted(spy_store, "expt") == 0
+
+
+def test_delete_env_outlasts_a_close_already_queued(spy_store, env_path):
+    """A pane closed a moment earlier cannot leave undo history behind.
+
+    Both jobs land on one storage worker in submission order, so the close's
+    ``push_deleted`` runs *first* and writes the stack. Clearing it on the loop
+    therefore cleared nothing: the push put the file back, ``delete_env``
+    removes the env file and nothing else, and the stack outlived the
+    environment for the next env to reuse the id and undo panes out of.
+    """
+    spy_store.save_env("expt", env_payload())
+    handler = FakeHandler(
+        state={"expt": env_payload()}, storage=spy_store, env_path=env_path
+    )
+
+    async def close_then_delete():
+        with ThreadPoolExecutor(max_workers=1) as worker:
+            handler.storage_executor = worker
+            close = push_deleted_off_loop(handler, "expt", "win_0", {"id": "win_0"})
+            removal = DeleteEnvHandler.wrap_func(handler, {"eid": "expt"})
+            await close
+            await removal
+
+    asyncio.run(close_then_delete())
+
+    assert spy_store.calls["save_undo"] == ["expt"]
+    assert count_deleted(spy_store, "expt") == 0
+    assert not spy_store.env_exists("expt")
+
+
+def test_delete_env_clears_the_undo_history_before_the_file(spy_store, env_path):
+    """Within the one task, the stack goes first, so a failed unlink of the env
+    still leaves nothing to undo it with."""
+    spy_store.save_env("expt", env_payload())
+    push_deleted(spy_store, "expt", "win_0", {"id": "win_0"})
+
+    purge_env(spy_store, "expt")
+
+    order = [method for method, _thread in spy_store.threads]
+    assert order.index("clear_undo") < order.index("delete_env")
+    assert count_deleted(spy_store, "expt") == 0
+    assert not spy_store.env_exists("expt")
 
 
 def test_socket_save_writes_the_new_env_off_the_loop(spy_store, env_path):

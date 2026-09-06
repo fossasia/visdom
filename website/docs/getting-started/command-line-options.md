@@ -34,6 +34,14 @@ reaching disk does not hold up the requests arriving while it is written.
 Setting both to 0 restores the older behaviour of saving only when asked, and once
 more at shutdown.
 
+### Stopping the server
+
+`Ctrl-C` or `docker stop` (`SIGTERM`) shuts down in order: the listening socket
+closes, queued writes finish, and every changed environment is saved before the
+process exits. Nothing you plotted is lost by stopping the server normally, so
+there is no need to call `vis.save()` first. A `SIGKILL` still cannot be caught,
+and loses whatever the last autosave did not cover.
+
 ## Authentication
 
 :::danger Security
