@@ -599,7 +599,12 @@ class Visdom(object):
                         )
             if "target" in message:
                 for handler in list(self.event_handlers.get(message["target"], [])):
-                    handler(message)
+                    try:
+                        handler(message)
+                    except Exception:
+                        logger.exception(
+                            "Visdom failed to handle event for %s", message
+                        )
 
         def on_close(ws):
             self.socket_alive = False
