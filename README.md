@@ -441,6 +441,51 @@ Tracking is opt-in: without `params`, `VisdomLogger` only ever calls `viz.line()
 
 Each unique name passed to `tracker.log()` gets its own window. The first call creates it; subsequent calls append. See `example/train_example.py` for a full working example.
 
+### PyTorch Lightning
+
+**Requirements:** `pip install visdom lightning` (or `pip install visdom pytorch-lightning`)
+
+`visdom.loggers.VisdomLightningLogger` implements Lightning's `Logger` protocol. Lightning aggregates every `self.log()` / `self.log_dict()` call in a `LightningModule` and hands the result to the logger, so nothing in the model or training loop changes — the user passes one `logger=` argument to `Trainer`.
+
+```python
+import lightning.pytorch as pl
+import visdom
+from visdom.loggers import VisdomLightningLogger
+
+viz = visdom.Visdom()
+logger = VisdomLightningLogger(viz, env="lightning_run")
+
+trainer = pl.Trainer(max_epochs=20, logger=logger, log_every_n_steps=5)
+trainer.fit(model, train_loader, val_loader)
+```
+
+Each metric key gets its own window — one key, one line chart, with no train/val name parsing. The `epoch` key Lightning mixes into the metrics dict is not plotted. How often the logger is called is controlled by Lightning (`Trainer(log_every_n_steps=...)` for step metrics, once per epoch for epoch metrics).
+
+Hyperparameters passed to `self.save_hyperparameters()` are rendered once as a properties pane via `viz.properties()`.
+
+**Gradient norms** come from Lightning, not the logger. Add to your `LightningModule` and they arrive through the logger like any other metric:
+
+```python
+from lightning.pytorch.utilities import grad_norm
+
+def on_before_optimizer_step(self, optimizer):
+    self.log_dict(grad_norm(self, norm_type=2))
+```
+
+**Parameters:**
+- `viz`: a connected `visdom.Visdom()` instance
+- `env`: environment name (default: `viz.env` if set, otherwise auto-generated from timestamp)
+
+**Note:** each call to `viz.line()` is a synchronous network request made on the thread Lightning calls from, so a very small `log_every_n_steps` with many metrics can stall training while it waits on the server.
+
+**Note:** `log_metrics` and `log_hyperparams` run on rank zero only. Use one logger instance per `Trainer` run. Not thread-safe — internal state has no locking.
+
+**Note:** when the run ends (success or failure) the logger saves the env on the server, so it can be reloaded later.
+
+**Note:** values that don't convert to a float (non-numeric strings, multi-element tensors, `None`) are skipped with a warning rather than raising.
+
+See `example/train_lightning_example.py` for a full working example.
+
 ### scikit-learn
 
 **Requirements:** `pip install visdom scikit-learn`

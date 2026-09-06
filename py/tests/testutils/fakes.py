@@ -63,8 +63,8 @@ class FakeSocket:
 class FakeHandler:
     """Duck-typed handler carrying the attributes the server functions read.
 
-    Mirrors ``_WEB_APP_ATTRIBUTES`` and ``_SOCKET_APP_ATTRIBUTES`` so the same
-    object can drive both ``web_handlers`` wrap functions and socket
+    Mirrors the fields ``StateAccessorsMixin`` exposes off ``ServerState`` so
+    the same object can drive both ``web_handlers`` wrap functions and socket
     ``on_message`` dispatch. ``write`` captures HTTP response bodies and
     ``set_status`` captures the status code.
     """
