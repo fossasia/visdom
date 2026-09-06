@@ -35,7 +35,7 @@ class TestOptunaCallbackCompatibility(unittest.TestCase):
 
     def test_tags_allow_space_for_reserved_optuna_tags(self):
         callback = OptunaCallback(
-            Mock(), tags={"tag-{}".format(index): "" for index in range(15)}
+            Mock(), tags={"tag-{}".format(index): "" for index in range(14)}
         )
         study = SimpleNamespace(
             study_name="study",
@@ -46,9 +46,9 @@ class TestOptunaCallbackCompatibility(unittest.TestCase):
         self.assertEqual(len(callback._trial_tags(study, trial)), 20)
 
     def test_tags_reject_more_than_available_non_reserved_tags(self):
-        with self.assertRaisesRegex(ValueError, "at most 15 non-reserved tags"):
+        with self.assertRaisesRegex(ValueError, "at most 14 non-reserved tags"):
             OptunaCallback(
-                Mock(), tags={"tag-{}".format(index): "" for index in range(16)}
+                Mock(), tags={"tag-{}".format(index): "" for index in range(15)}
             )
 
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import html
 import json
+import threading
 import warnings
 from collections import Counter
 from collections.abc import Mapping, Sequence
@@ -29,12 +30,14 @@ from visdom.utils.server_utils import escape_eid
 
 
 _INTERMEDIATE_METRIC_NAME = "intermediate_value"
+_DASHBOARD_TAG_NAME = "optuna_dashboard_env"
 _OPTUNA_TAG_NAMES = {
     "integration",
     "optuna_study",
     "optuna_trial",
     "optuna_state",
     "optuna_direction",
+    _DASHBOARD_TAG_NAME,
 }
 
 
@@ -53,7 +56,13 @@ class OptunaCallback:
     creates the dashboard; later trials refresh it every ``refresh_every``
     successful writes. Call :meth:`update_dashboard` after ``Study.optimize``
     to ensure the final trials are included when the total is not an exact
-    multiple of that interval.
+    multiple of that interval. Supplying ``contour_params`` adds one Optuna
+    contour pane per objective. The HParams pane selects trials through stable
+    experiment tags rather than callback-local state, so a new callback can
+    rebuild a persisted study dashboard and multiple workers share the same
+    trial selection. Dashboard refreshes are serialized within one callback
+    instance. When separate processes share a dashboard namespace, only one
+    callback should enable ``create_dashboard`` and act as its writer.
 
     Optuna is intentionally not imported here. This keeps the integration
     optional and also means importing :mod:`visdom.integrations` never requires
@@ -74,6 +83,8 @@ class OptunaCallback:
         create_dashboard: Create and periodically refresh the study dashboard.
         refresh_every: Positive integer number of newly logged trials between
             dashboard refreshes.
+        contour_params: Optional parameter names for Optuna contour panes. At
+            least two names are required when supplied.
 
     Example::
 
@@ -82,6 +93,7 @@ class OptunaCallback:
             dashboard_env="optuna_resnet",
             objective_names=["validation_accuracy"],
             create_dashboard=True,
+            contour_params=["learning_rate", "weight_decay"],
         )
         study.optimize(objective, callbacks=[callback])
         callback.update_dashboard(study)
@@ -96,6 +108,7 @@ class OptunaCallback:
         raise_on_error: bool = False,
         create_dashboard: bool = False,
         refresh_every: int = 10,
+        contour_params: Sequence[str] | None = None,
     ) -> None:
         if dashboard_env is not None and not isinstance(dashboard_env, str):
             raise TypeError("dashboard_env must be a string or None")
@@ -105,6 +118,10 @@ class OptunaCallback:
             raise TypeError("refresh_every must be an integer")
         if refresh_every < 1:
             raise ValueError("refresh_every must be at least 1")
+        if contour_params is not None and (
+            isinstance(contour_params, str) or len(contour_params) < 2
+        ):
+            raise ValueError("contour_params must contain at least two parameter names")
 
         self.viz = viz
         self.dashboard_env = dashboard_env
@@ -113,9 +130,13 @@ class OptunaCallback:
         self.raise_on_error = raise_on_error
         self.create_dashboard = create_dashboard
         self.refresh_every = refresh_every
+        self.contour_params = (
+            tuple(contour_params) if contour_params is not None else None
+        )
         self._dashboard_created = False
         self._trials_since_refresh = 0
         self._trial_envs: list[str] = []
+        self._dashboard_lock = threading.RLock()
 
     @staticmethod
     def _validate_objective_names(
@@ -212,15 +233,84 @@ class OptunaCallback:
                 "optuna_direction": ",".join(
                     direction.name.lower() for direction in study.directions
                 ),
+                _DASHBOARD_TAG_NAME: self.study_env(study),
             }
         )
         return normalize_tags(tags)
+
+    @staticmethod
+    def _query_literal(value: Any) -> str:
+        """Quote a string for Visdom's experiment query language."""
+        value = str(value)
+        escaped = (
+            value.replace("\\", "\\\\")
+            .replace('"', '\\"')
+            .replace("\n", "\\n")
+            .replace("\t", "\\t")
+        )
+        return '"{}"'.format(escaped)
+
+    def _dashboard_query(self, study: Any) -> str:
+        """Select every trial logged for this study and dashboard namespace."""
+        return " AND ".join(
+            (
+                'tag.integration = "optuna"',
+                "tag.optuna_study = {}".format(self._query_literal(study.study_name)),
+                "tag.{} = {}".format(
+                    _DASHBOARD_TAG_NAME,
+                    self._query_literal(self.study_env(study)),
+                ),
+            )
+        )
 
     @staticmethod
     def _intermediate_values(trial: Any) -> list[tuple[int, float]]:
         """Return reported intermediate values ordered by training step."""
         values = getattr(trial, "intermediate_values", None) or {}
         return sorted(values.items())
+
+    @staticmethod
+    def _add_timeline_markers(timeline: Any) -> None:
+        """Keep very short trials visible without changing their duration bars.
+
+        Optuna renders each trial as a horizontal bar whose width is its runtime.
+        When callback or scheduler overhead dominates a study's wall-clock span,
+        sub-millisecond trials can become substantially narrower than one browser
+        pixel. A fixed-size marker at each trial's true start time preserves the
+        timeline semantics while keeping those trials discoverable and hoverable.
+        """
+        for trace in tuple(timeline.data):
+            if trace.type != "bar" or trace.orientation != "h":
+                continue
+
+            starts = list(trace.base) if trace.base is not None else []
+            durations = list(trace.x) if trace.x is not None else []
+            trial_numbers = list(trace.y) if trace.y is not None else []
+            if not starts or not (len(starts) == len(durations) == len(trial_numbers)):
+                continue
+
+            text = list(trace.text) if trace.text is not None else None
+            color = trace.marker.color if trace.marker is not None else None
+            timeline.add_scatter(
+                x=starts,
+                y=trial_numbers,
+                mode="markers",
+                name=trace.name,
+                legendgroup=trace.name,
+                showlegend=False,
+                marker={
+                    "color": color,
+                    "size": 9,
+                    "symbol": "circle",
+                    "line": {"color": "white", "width": 1},
+                },
+                customdata=durations,
+                text=text,
+                hovertemplate=(
+                    "Start: %{x}<br>Duration: %{customdata:.3f} ms"
+                    "<br>%{text}<extra>" + html.escape(str(trace.name)) + "</extra>"
+                ),
+            )
 
     def _summary_html(self, study: Any) -> str:
         trials = study.get_trials(deepcopy=False)
@@ -295,8 +385,12 @@ class OptunaCallback:
                 plot_intermediate_values,
                 plot_optimization_history,
                 plot_param_importances,
+                plot_pareto_front,
                 plot_timeline,
             )
+
+            if self.contour_params is not None:
+                from optuna.visualization import plot_contour
 
             objective_names = self._metric_names(study, len(study.directions))
             figures = []
@@ -332,6 +426,33 @@ class OptunaCallback:
                             ("optuna-importance{}".format(suffix), importance)
                         )
 
+                if self.contour_params is not None and complete_trials >= 2:
+                    try:
+                        contour = plot_contour(
+                            study,
+                            params=list(self.contour_params),
+                            **kwargs,
+                        )
+                    except ValueError:
+                        pass
+                    else:
+                        contour.update_layout(
+                            title="Contour — {}".format(objective_name)
+                        )
+                        figures.append(("optuna-contour{}".format(suffix), contour))
+
+            if complete_trials and len(objective_names) in (2, 3):
+                try:
+                    pareto = plot_pareto_front(
+                        study,
+                        target_names=list(objective_names),
+                    )
+                except ValueError:
+                    pass
+                else:
+                    pareto.update_layout(title="Optuna Pareto Front")
+                    figures.append(("optuna-pareto-front", pareto))
+
             if any(self._intermediate_values(trial) for trial in trials):
                 try:
                     intermediate = plot_intermediate_values(study)
@@ -342,6 +463,7 @@ class OptunaCallback:
                     figures.append(("optuna-intermediate-values", intermediate))
 
             timeline = plot_timeline(study)
+            self._add_timeline_markers(timeline)
             timeline.update_layout(title="Optuna Trial Timeline")
             figures.append(("optuna-timeline", timeline))
             return figures
@@ -354,11 +476,9 @@ class OptunaCallback:
             return []
 
     def _build_dashboard_payload(self, study: Any) -> dict[str, Any]:
-        if not self._trial_envs:
-            raise ValueError("cannot create an Optuna dashboard before logging a trial")
         return {
             "env": self.study_env(study),
-            "env_ids": list(self._trial_envs),
+            "query": self._dashboard_query(study),
             "summary": self._summary_html(study),
             "figures": self._dashboard_figures(study),
         }
@@ -366,47 +486,52 @@ class OptunaCallback:
     def update_dashboard(self, study: Any) -> bool:
         """Create or refresh all dashboard panes for ``study``.
 
-        Returns whether the dashboard was written successfully. Only trials
-        logged by this callback instance are included in the HParams pane;
-        loading trials from a resumed study is handled by the later resume
-        integration.
+        Returns whether the dashboard was written successfully. The HParams
+        pane queries the server for every trial carrying this study's stable
+        dashboard tag. It therefore includes trials logged by earlier callback
+        instances and by other workers that share the dashboard namespace. A
+        callback-local lock prevents concurrent refreshes from overwriting a
+        newer payload. Separate processes must designate a single dashboard
+        writer because they do not share this lock.
         """
-        try:
-            payload = self._build_dashboard_payload(study)
-            self.viz.text(
-                payload["summary"],
-                win="optuna-summary",
-                env=payload["env"],
-                opts={"title": "Optuna Study"},
-            )
-            self.viz.hparams(
-                env_ids=payload["env_ids"],
-                win="optuna-trials",
-                env=payload["env"],
-                opts={"title": "Optuna Trials"},
-            )
-            for win, figure in payload["figures"]:
-                self.viz.plotlyplot(figure, win=win, env=payload["env"])
-        except Exception as error:
-            if self.raise_on_error:
-                raise
-            warnings.warn(
-                "OptunaCallback failed to update the dashboard: {}".format(error),
-                RuntimeWarning,
-                stacklevel=2,
-            )
-            return False
-        self._dashboard_created = True
-        self._trials_since_refresh = 0
-        return True
+        with self._dashboard_lock:
+            try:
+                payload = self._build_dashboard_payload(study)
+                self.viz.text(
+                    payload["summary"],
+                    win="optuna-summary",
+                    env=payload["env"],
+                    opts={"title": "Optuna Study"},
+                )
+                self.viz.hparams(
+                    query=payload["query"],
+                    win="optuna-trials",
+                    env=payload["env"],
+                    opts={"title": "Optuna Trials"},
+                )
+                for win, figure in payload["figures"]:
+                    self.viz.plotlyplot(figure, win=win, env=payload["env"])
+            except Exception as error:
+                if self.raise_on_error:
+                    raise
+                warnings.warn(
+                    "OptunaCallback failed to update the dashboard: {}".format(error),
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+                return False
+            self._dashboard_created = True
+            self._trials_since_refresh = 0
+            return True
 
     def _maybe_update_dashboard(self, study: Any) -> None:
-        self._trials_since_refresh += 1
-        if (
-            not self._dashboard_created
-            or self._trials_since_refresh >= self.refresh_every
-        ):
-            self.update_dashboard(study)
+        with self._dashboard_lock:
+            self._trials_since_refresh += 1
+            if (
+                not self._dashboard_created
+                or self._trials_since_refresh >= self.refresh_every
+            ):
+                self.update_dashboard(study)
 
     def _build_payload(self, study: Any, trial: Any) -> dict[str, Any]:
         env = self.trial_env(trial, study)
