@@ -414,10 +414,12 @@ def extract_eid(args):
 def update_window(p, args):
     """Adds new args to a window if they exist"""
     content = p["content"]
+    pdata = content.get("data") if isinstance(content, dict) else None
     layout_update = args.get("layout", {})
-    for layout_name, layout_val in layout_update.items():
-        if layout_val is not None:
-            content["layout"][layout_name] = layout_val
+    if isinstance(content, dict) and isinstance(content.get("layout"), dict):
+        for layout_name, layout_val in layout_update.items():
+            if layout_val is not None:
+                content["layout"][layout_name] = layout_val
     opts = args.get("opts", {})
     for opt_name, opt_val in opts.items():
         if opt_val is not None:
@@ -427,14 +429,13 @@ def update_window(p, args):
             else:
                 p[opt_name] = opt_val
 
-    if "legend" in opts:
+    if "legend" in opts and isinstance(pdata, list):
         legend = opts["legend"]
-        pdata = p["content"]["data"]
         name = args.get("name")
         if name is not None:
             if len(legend) > 0:
                 for d in pdata:
-                    if d.get("name") == name:
+                    if isinstance(d, dict) and d.get("name") == name:
                         d["name"] = legend[0]
         else:
             if len(legend) < len(pdata):
@@ -445,7 +446,7 @@ def update_window(p, args):
                     len(pdata),
                 )
             for i, d in enumerate(pdata):
-                if i < len(legend):
+                if i < len(legend) and isinstance(d, dict):
                     d["name"] = legend[i]
     p["version"] += 1
     return p

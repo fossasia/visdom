@@ -187,6 +187,9 @@ class UpdateHandler(BaseHandler):
     def update(
         p, args, max_text_lines, max_old_content, max_image_history, max_plot_history
     ):
+        if not args.get("data") and p["type"] != "plot":
+            return update_window(p, args)
+
         # Update text in window, separated by a line break
         if p["type"] == "text":
             p["content"] += "<br>" + args["data"][0]["content"]
@@ -250,7 +253,7 @@ class UpdateHandler(BaseHandler):
         idxs = list(range(len(pdata)))
 
         if name is not None:
-            if not delete and len(new_data) != 1:
+            if not delete and (not new_data or len(new_data) != 1):
                 raise tornado.web.HTTPError(
                     400, reason="a named trace update takes exactly one data entry"
                 )
@@ -444,29 +447,30 @@ class UpdateHandler(BaseHandler):
             handler.write("win is not image_history; was {}".format(p["type"]))
             return
 
+        content = p.get("content")
+        traces = content.get("data") if isinstance(content, dict) else None
+        first = traces[0] if isinstance(traces, list) and traces else None
+        trace_type = first.get("type") if isinstance(first, dict) else None
+        is_plot = isinstance(traces, list) and (
+            not traces
+            or trace_type in ["scatter", "scatter3d", "scattergl", "custom", "heatmap"]
+        )
+
         if not (
             p["type"] == "text"
             or p["type"] == "image_history"
             or p["type"] == "plot_history"
             or p["type"] == "embeddings"
             or p["type"] == "table"
-            or (
-                len(p["content"]["data"]) == 0
-                or p["content"]["data"][0]["type"]
-                in ["scatter", "scatter3d", "scattergl", "custom", "heatmap"]
-            )
+            or is_plot
         ):
             handler.write(
                 "win is not scatter, heatmap, custom, image_history, plot_history, embeddings, or text; "
-                "was {}".format(
-                    p["content"]["data"][0]["type"]
-                    if len(p["content"]["data"]) > 0
-                    else "empty"
-                )
+                "was {}".format(trace_type or p["type"])
             )
             return
 
-        if p["type"] == "embeddings":
+        if p["type"] == "embeddings" and args.get("data"):
             diff_packet = UpdateHandler.update_embeddings_packet(
                 p, args, handler.max_old_content
             )
