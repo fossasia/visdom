@@ -21,6 +21,7 @@ import os
 import tempfile
 import time
 import unittest
+import warnings
 from unittest.mock import patch
 
 import pytest
@@ -660,6 +661,105 @@ class TestJsonSafe(unittest.TestCase):
         with self.assertRaises(ValueError):
             run._write(payload)
         run.finish()
+
+
+class TestSafeWarn(unittest.TestCase):
+    """_safe_warn must never raise, no matter what causes warnings.warn()
+    to fail underneath it. warnings.showwarning/warnings.filters are
+    global, mutable state -- every test here saves and restores both,
+    so a failure (or even a passing test) can't leak configuration into
+    whatever test runs next in the same process."""
+
+    def setUp(self):
+        self._saved_filters = warnings.filters[:]
+        self._saved_showwarning = warnings.showwarning
+
+    def tearDown(self):
+        warnings.filters[:] = self._saved_filters
+        warnings.showwarning = self._saved_showwarning
+
+    def test_survives_warnings_as_errors_for_the_specific_category(self):
+        from visdom.tracking.core import _safe_warn
+
+        warnings.simplefilter("error", RuntimeWarning)
+        _safe_warn("msg", RuntimeWarning)  # must not raise
+
+    def test_survives_warnings_as_errors_for_every_category(self):
+        from visdom.tracking.core import _safe_warn
+
+        warnings.simplefilter("error")  # broadest possible filter
+        _safe_warn("msg", RuntimeWarning)  # must not raise
+
+    def test_survives_a_custom_showwarning_hook_that_raises(self):
+        """Regression test for a flagged issue: _safe_warn only caught
+        Warning subclasses, so a custom warnings.showwarning hook (e.g.
+        one an application installs to route warnings into an error
+        reporter) that itself raises a non-Warning exception -- a plain
+        RuntimeError, say -- was not caught, and propagated out of
+        _safe_warn despite its documented "never raises" guarantee."""
+        from visdom.tracking.core import _safe_warn
+
+        def broken_showwarning(
+            message, category, filename, lineno, file=None, line=None
+        ):
+            raise RuntimeError("custom warning hook failed")
+
+        warnings.showwarning = broken_showwarning
+        _safe_warn("msg", RuntimeWarning)  # must not raise
+
+    def test_survives_a_showwarning_hook_raising_any_exception_type(self):
+        """Not just RuntimeError specifically -- a broken hook could
+        raise anything; _safe_warn's protection isn't tied to one
+        exception type."""
+        from visdom.tracking.core import _safe_warn
+
+        def broken_showwarning(
+            message, category, filename, lineno, file=None, line=None
+        ):
+            raise ValueError("a different kind of failure")
+
+        warnings.showwarning = broken_showwarning
+        _safe_warn("msg", RuntimeWarning)  # must not raise
+
+    def test_survives_broken_showwarning_combined_with_warnings_as_errors(self):
+        from visdom.tracking.core import _safe_warn
+
+        def broken_showwarning(
+            message, category, filename, lineno, file=None, line=None
+        ):
+            raise RuntimeError("custom warning hook failed")
+
+        warnings.simplefilter("error")
+        warnings.showwarning = broken_showwarning
+        _safe_warn("msg", RuntimeWarning)  # must not raise
+
+    def test_keyboard_interrupt_from_showwarning_still_propagates(self):
+        """The broad except Exception in _safe_warn must not swallow
+        BaseException subclasses like KeyboardInterrupt/SystemExit --
+        those represent real program control flow, not a warning gone
+        wrong, and happening to originate inside a warn() call shouldn't
+        suppress them."""
+        from visdom.tracking.core import _safe_warn
+
+        def interrupting_showwarning(
+            message, category, filename, lineno, file=None, line=None
+        ):
+            raise KeyboardInterrupt()
+
+        warnings.showwarning = interrupting_showwarning
+        with self.assertRaises(KeyboardInterrupt):
+            _safe_warn("msg", RuntimeWarning)
+
+    def test_normal_operation_is_unaffected(self):
+        """The broadened except clause must not accidentally swallow a
+        warning that should actually be recorded in the normal case."""
+        from visdom.tracking.core import _safe_warn
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            _safe_warn("msg", RuntimeWarning)
+        self.assertEqual(len(caught), 1)
+        self.assertEqual(str(caught[0].message), "msg")
 
 
 if __name__ == "__main__":

@@ -33,10 +33,9 @@ same way it is for a line plot.
 
 from __future__ import annotations
 
-import warnings
 from typing import Any
 
-from visdom.tracking.core import RunAlreadyFinishedError
+from visdom.tracking.core import RunAlreadyFinishedError, _safe_warn
 
 GRAPH_METHODS = frozenset(
     {
@@ -242,7 +241,7 @@ class TrackedVisdom:
         except RunAlreadyFinishedError:
             pass
         except Exception as e:
-            warnings.warn(
+            _safe_warn(
                 "visdom.tracking: failed to record {0!r} for window {1!r} "
                 "({2}: {3}) -- the plot call itself still succeeded "
                 "normally, only the tracking record is affected.".format(
