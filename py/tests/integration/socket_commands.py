@@ -14,12 +14,17 @@ comments and the embeddings drill-down. None of it needed a WebSocket to test:
 ``testutils.socket_double`` builds the real handler classes over a real
 ``Application`` with a recording ``write_message``.
 
-Some commands hand work to ``IOLoop.current().run_in_executor``. The shared
+``on_message`` is a coroutine -- its saves and undo writes go to the storage
+executor -- so ``send`` drives it through ``asyncio.run``. Every command that
+touches disk is finished by the time it returns.
+
+Several commands hand work to ``IOLoop.current().run_in_executor``. The
 ``inline_executor`` fixture replaces that with a synchronous stand-in, so the
 side effect has happened by the time the call returns and the assertions do not
 race a thread pool.
 """
 
+import asyncio
 import json
 
 import pytest
@@ -34,7 +39,12 @@ pytestmark = pytest.mark.integration
 
 def send(sock, **msg):
     """Dispatch one command through the real ``on_message``."""
-    sock.on_message(json.dumps(msg))
+    send_raw(sock, json.dumps(msg))
+
+
+def send_raw(sock, message):
+    """Dispatch an already-encoded message, for the malformed-input cases."""
+    asyncio.run(sock.on_message(message))
 
 
 def pane(win="win_0", ptype="plot", content=None, **extra):
@@ -101,6 +111,17 @@ def test_close_of_an_unknown_pane_reports_no_pane_data(env):
 
     assert sent(source)[-1]["pane_data"] is None
     assert count_deleted(env.storage, "expt") == 0
+
+
+def test_close_of_an_unknown_pane_still_reports_the_depth(env):
+    """Nothing was pushed, so the count comes from the stack as it stands."""
+    push_deleted(env.storage, "expt", "win_9", pane("win_9"))
+    sub = open_sub(env)
+    sub.eid = "expt"
+
+    send(sub, cmd="close", eid="expt", data="ghost")
+
+    assert last(sub, "undo_state")["count"] == 1
 
 
 def test_close_broadcasts_the_undo_count(env):
@@ -425,7 +446,7 @@ def test_layout_item_update_records_the_position(env):
 def test_layout_item_update_drops_malformed_messages(env, msg):
     sub = open_sub(env)
 
-    sub.on_message(json.dumps(msg))
+    send_raw(sub, json.dumps(msg))
 
     assert env.state["expt"]["reload"] == {}
 
@@ -581,7 +602,7 @@ def test_update_comment_does_not_persist_on_its_own(env, inline_executor):
 
 
 def test_flushing_persists_the_comment(env, inline_executor):
-    """The ordinary save flow is what puts the comment on disk."""
+    """The mark is what carries it to disk, so a flush is enough to write it."""
     sub = open_sub(env)
 
     send(sub, cmd="update_comment", eid="expt", win="win_0", data="looks good")
