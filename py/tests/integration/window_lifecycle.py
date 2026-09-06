@@ -197,6 +197,9 @@ class ColdEnvTestCase(VisdomHTTPTestCase):
 
     def get_app(self):
         JSONStore(self.env_path).save_env(COLD, cold_env())
+        # The recorder has to be the store the app builds for itself:
+        # ``ServerState`` takes its own reference at construction, so one
+        # swapped onto the app afterwards would be read by nobody.
         with mock.patch("visdom.server.app.JSONStore", ThreadRecordingStore):
             app = super().get_app()
         self.recorder = app.storage
