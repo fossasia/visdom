@@ -427,13 +427,19 @@ class OptunaCallback:
                         )
 
                 if self.contour_params is not None and complete_trials >= 2:
-                    contour = plot_contour(
-                        study,
-                        params=list(self.contour_params),
-                        **kwargs,
-                    )
-                    contour.update_layout(title="Contour — {}".format(objective_name))
-                    figures.append(("optuna-contour{}".format(suffix), contour))
+                    try:
+                        contour = plot_contour(
+                            study,
+                            params=list(self.contour_params),
+                            **kwargs,
+                        )
+                    except ValueError:
+                        pass
+                    else:
+                        contour.update_layout(
+                            title="Contour — {}".format(objective_name)
+                        )
+                        figures.append(("optuna-contour{}".format(suffix), contour))
 
             if complete_trials and len(objective_names) in (2, 3):
                 try:

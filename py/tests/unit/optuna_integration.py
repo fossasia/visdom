@@ -50,12 +50,13 @@ def make_study(trials):
     )
 
 
-def fake_visualization_module(intermediate_error=None):
+def fake_visualization_module(intermediate_error=None, contour_error=None):
     visualization = types.ModuleType("optuna.visualization")
     figures = {
         "history": Mock(name="history"),
         "importance": Mock(name="importance"),
         "intermediate": Mock(name="intermediate"),
+        "contour": Mock(name="contour"),
         "pareto": Mock(name="pareto"),
         "timeline": Mock(name="timeline", data=()),
     }
@@ -63,6 +64,9 @@ def fake_visualization_module(intermediate_error=None):
     visualization.plot_param_importances = Mock(return_value=figures["importance"])
     visualization.plot_intermediate_values = Mock(
         return_value=figures["intermediate"], side_effect=intermediate_error
+    )
+    visualization.plot_contour = Mock(
+        return_value=figures["contour"], side_effect=contour_error
     )
     visualization.plot_pareto_front = Mock(return_value=figures["pareto"])
     visualization.plot_timeline = Mock(return_value=figures["timeline"])
@@ -226,6 +230,37 @@ class TestOptunaIntermediateDashboard(unittest.TestCase):
             ["optuna-history", "optuna-timeline"],
         )
         visualization.plot_intermediate_values.assert_called_once()
+
+
+class TestOptunaContourDashboard(unittest.TestCase):
+    def test_skips_contour_when_optuna_rejects_params(self):
+        trials = [make_trial(number=0), make_trial(number=1)]
+        study = make_study(trials)
+        optuna, visualization, figures = fake_visualization_module(
+            contour_error=ValueError("parameter has not been sampled")
+        )
+        callback = OptunaCallback(
+            Mock(),
+            dashboard_env="optuna_quadratic",
+            contour_params=["x", "missing"],
+        )
+
+        with patch.dict(
+            sys.modules,
+            {"optuna": optuna, "optuna.visualization": visualization},
+        ):
+            result = callback._dashboard_figures(study)
+
+        self.assertEqual(
+            [win for win, _ in result],
+            ["optuna-history", "optuna-importance", "optuna-timeline"],
+        )
+        visualization.plot_contour.assert_called_once_with(
+            study,
+            params=["x", "missing"],
+            target_name="objective",
+        )
+        figures["contour"].update_layout.assert_not_called()
 
 
 class TestOptunaMultiObjective(unittest.TestCase):
