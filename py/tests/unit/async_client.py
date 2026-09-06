@@ -217,6 +217,26 @@ class TestAsyncVisdomConstruction(tornado.testing.AsyncTestCase):
             )
 
     @gen_test
+    async def test_a_failed_construction_closes_the_transport(self):
+        """``create`` is the only one who can: the caller never sees the object.
+
+        ``Visdom.__init__`` POSTs, and that POST is what builds the private
+        ``AsyncHTTPClient``. When the announcement is refused -- a bad login, a
+        rejected env -- the half-built bridge is discarded with a live transport
+        still attached, and no wrapper exists to call ``shutdown()`` on.
+        """
+
+        class FailingTransport(RecordingTransport):
+            async def post(self, url, data=None):
+                self.calls.append((url, data))
+                raise requests.exceptions.ConnectionError("refused")
+
+        transport = FailingTransport()
+        with pytest.raises(ConnectionError):
+            await AsyncVisdom.create(transport=transport, raise_exceptions=True)
+        assert transport.closed is True
+
+    @gen_test
     async def test_no_session_reaper_thread_is_started(self):
         """There is no ``requests`` session here, so reaping one is pointless
         -- and a daemon thread per client would be a leak."""
@@ -515,6 +535,104 @@ class TestAsyncVisdomLifecycle(tornado.testing.AsyncTestCase):
         await client.shutdown()
         with pytest.raises(RuntimeError):
             await client.text("hello")
+
+    @gen_test
+    async def test_cancelling_a_call_cancels_the_request_it_is_on(self):
+        """``run_in_executor`` cannot interrupt a worker, so the cancel has to
+        reach the POST itself.
+
+        ``REQUEST_TIMEOUT`` is 0 -- deliberately, a slow upload is not a failure
+        -- so a request nobody awaits any more would hold its worker forever.
+        Once ``max_concurrency`` of them accumulate, every later call queues
+        behind them and the client is wedged.
+        """
+        started = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        class HangingTransport(RecordingTransport):
+            async def post(self, url, data=None):
+                self.calls.append((url, data))
+                if len(self.calls) == 1:  # let construction through
+                    return ""
+                started.set()
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    cancelled.set()
+                    raise
+
+        client, _ = await make_client(HangingTransport())
+        task = asyncio.ensure_future(client.text("hello"))
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await asyncio.wait_for(cancelled.wait(), timeout=5)
+
+    @gen_test
+    async def test_shutdown_waits_for_a_call_already_in_flight(self):
+        """Closing the transport first would pull it out from under the POST.
+
+        ``_AsyncTransport.close`` only drops the client and the ``transport``
+        property rebuilds it, so an unfinished call would quietly reopen the
+        HTTP client and keep talking to the server after ``shutdown`` returned.
+        """
+        release = asyncio.Event()
+        finished = []
+
+        class GatedTransport(RecordingTransport):
+            async def post(self, url, data=None):
+                self.calls.append((url, data))
+                if len(self.calls) > 1:
+                    await release.wait()
+                    finished.append(url)
+                return ""
+
+        client, transport = await make_client(GatedTransport())
+        call = asyncio.ensure_future(client.text("hello"))
+        await asyncio.sleep(0)
+        shutdown = asyncio.ensure_future(client.shutdown())
+        await asyncio.sleep(0)
+        assert transport.closed is False, "closed while a call was still running"
+        release.set()
+        await call
+        await shutdown
+        assert finished, "the in-flight call never completed"
+        assert transport.closed is True
+
+    @gen_test
+    async def test_a_call_queued_behind_shutdown_never_reaches_the_wire(self):
+        """``shutdown(wait=False)`` does not cancel what is already queued.
+
+        With one worker, a second call is still sitting in the pool's queue when
+        ``shutdown`` runs; without ``cancel_futures`` it starts afterwards and
+        POSTs through a client the caller believes is released.
+        """
+        release = asyncio.Event()
+
+        class GatedTransport(RecordingTransport):
+            async def post(self, url, data=None):
+                self.calls.append((url, data))
+                if len(self.calls) > 1:
+                    await release.wait()
+                return ""
+
+        client, transport = await make_client(GatedTransport(), max_concurrency=1)
+        running = asyncio.ensure_future(client.text("first", win="w1"))
+        await asyncio.sleep(0)
+        queued = asyncio.ensure_future(client.text("second", win="w2"))
+        await asyncio.sleep(0)
+
+        shutdown = asyncio.ensure_future(client.shutdown())
+        await asyncio.sleep(0)
+        release.set()
+        await running
+        with pytest.raises((asyncio.CancelledError, RuntimeError)):
+            await queued
+        await shutdown
+
+        # construction plus the one call that had already started
+        assert len(transport.calls) == 2
 
     @gen_test
     async def test_context_manager_shuts_down_on_exit(self):

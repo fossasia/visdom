@@ -54,6 +54,7 @@ import functools
 import json
 import logging
 import ssl
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -242,6 +243,22 @@ def _as_requests_error(error):
     return requests.exceptions.ConnectionError(str(error))
 
 
+class _Call(object):
+    """One proxied call's link to the POST it is currently parked on.
+
+    ``run_in_executor`` cannot interrupt a worker thread, so cancelling the
+    awaitable a proxy returned has to reach the request itself. The worker
+    records the ``run_coroutine_threadsafe`` future here as it makes each POST;
+    cancelling that future is what cancels the tornado fetch on the loop.
+    """
+
+    __slots__ = ("future", "cancelled")
+
+    def __init__(self):
+        self.future = None
+        self.cancelled = False
+
+
 class _BridgedVisdom(Visdom):
     """A ``Visdom`` whose only asynchronous part is the POST.
 
@@ -263,6 +280,10 @@ class _BridgedVisdom(Visdom):
         self._aloop = loop
         self._transport = transport
         self._max_clients = max_clients
+        # Which ``_Call`` the running worker thread belongs to, so the POST it
+        # is about to make can be found and cancelled from the loop.
+        self._calls = threading.local()
+        self._call_lock = threading.Lock()
         super().__init__(*args, **kwargs)
 
     @property
@@ -280,18 +301,61 @@ class _BridgedVisdom(Visdom):
             )
         return self._transport
 
+    def run_call(self, call, bound, args, kwargs):
+        """Run one proxied method on this worker under ``call``.
+
+        Binding the ``_Call`` to the thread is what lets ``_handle_post`` file
+        each POST it makes under the awaitable the caller is holding.
+        """
+        self._calls.current = call
+        try:
+            return bound(*args, **kwargs)
+        finally:
+            self._calls.current = None
+
+    def cancel_call(self, call):
+        """Cancel the POST ``call`` is on, and any it has not made yet.
+
+        Called from the loop when the caller cancels. A ``Visdom`` method can
+        POST more than once -- a preflight and then the plot -- so the flag
+        outlives the individual request: whichever POST is in flight is
+        cancelled now, and the next one is cancelled as it is created.
+        """
+        with self._call_lock:
+            call.cancelled = True
+            future = call.future
+        if future is not None:
+            future.cancel()
+
     def _handle_post(self, url, data=None):
         """Hand the POST to the event loop and block this worker thread only.
 
         ``run_coroutine_threadsafe`` is what makes the bridge work: the loop
         keeps serving other requests while ``result()`` parks the thread that
-        called a plot method.
+        called a plot method. The future is also what a cancellation travels
+        down: ``REQUEST_TIMEOUT`` is 0, so a request nobody is waiting for any
+        more would otherwise hold its worker -- and, once ``max_concurrency``
+        of them pile up, every later call -- indefinitely.
         """
         self._last_post_time = time.time()
+        call = getattr(self._calls, "current", None)
         future = asyncio.run_coroutine_threadsafe(
             self.transport.post(url, data), self._aloop
         )
-        return future.result()
+        if call is not None:
+            with self._call_lock:
+                call.future = future
+                cancelled = call.cancelled
+            # Cancelled between the check and the submit: the loop had nothing
+            # to cancel when it ran, so this POST has to cancel itself.
+            if cancelled:
+                future.cancel()
+        try:
+            return future.result()
+        finally:
+            if call is not None:
+                with self._call_lock:
+                    call.future = None
 
     def _start_session_reaper(self):
         """No-op: there is no ``requests`` session to reap."""
@@ -406,6 +470,10 @@ class AsyncVisdom(object):
         """Private -- use :meth:`create`."""
         self._inner = inner
         self._executor = executor
+        self._closed = False
+        # Calls handed to the pool and not yet settled. :meth:`shutdown` waits
+        # on these before closing the transport out from under them.
+        self._pending = set()
 
     @classmethod
     async def create(cls, *args, max_concurrency=DEFAULT_MAX_CONCURRENCY, **kwargs):
@@ -444,13 +512,28 @@ class AsyncVisdom(object):
             max_workers=max_concurrency, thread_name_prefix="visdom-async-client"
         )
         kwargs.setdefault("max_clients", max_concurrency)
+        # ``Visdom.__init__`` POSTs, so the bridge is built on a worker. That
+        # POST creates the private ``AsyncHTTPClient``, so a failure after it --
+        # a bad login, a rejected env -- leaves a live transport attached to an
+        # object the caller never receives and so can never shut down. Keeping
+        # a handle on the half-built instance is what makes it reachable here.
+        partial_inner = []
+
+        def build():
+            inner = _BridgedVisdom.__new__(_BridgedVisdom)
+            partial_inner.append(inner)
+            inner.__init__(loop, *args, **kwargs)
+            return inner
+
         try:
-            # ``Visdom.__init__`` POSTs, so it has to run off the loop that is
-            # going to serve that POST.
-            inner = await loop.run_in_executor(
-                executor, functools.partial(_BridgedVisdom, loop, *args, **kwargs)
-            )
+            inner = await loop.run_in_executor(executor, build)
         except BaseException:
+            # Back on the loop, which is the only thread allowed to close the
+            # HTTP client the transport owns.
+            for built in partial_inner:
+                transport = getattr(built, "_transport", None)
+                if transport is not None:
+                    transport.close()
             executor.shutdown(wait=False)
             raise
         return cls(inner, executor)
@@ -469,10 +552,26 @@ class AsyncVisdom(object):
 
         @functools.wraps(bound)
         async def proxy(*args, **kwargs):
+            if self._closed:
+                raise RuntimeError(
+                    "AsyncVisdom is shut down; its transport and worker pool "
+                    "are released. Create a new client with AsyncVisdom.create()."
+                )
             loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(
-                self._executor, functools.partial(bound, *args, **kwargs)
+            call = _Call()
+            future = loop.run_in_executor(
+                self._executor,
+                functools.partial(self._inner.run_call, call, bound, args, kwargs),
             )
+            self._pending.add(future)
+            future.add_done_callback(self._pending.discard)
+            try:
+                return await future
+            except asyncio.CancelledError:
+                # Cancelling ``future`` cannot stop a worker that has already
+                # started, so reach past it to the POST the worker is parked on.
+                self._inner.cancel_call(call)
+                raise
 
         return proxy
 
@@ -528,10 +627,23 @@ class AsyncVisdom(object):
         The wrapper is unusable afterwards; calls made after it raise. Safe to
         call twice, which is what makes the context manager usable around code
         that also shuts down explicitly.
+
+        Order matters. ``ThreadPoolExecutor.shutdown(wait=False)`` does not
+        cancel what is already queued, and ``_AsyncTransport.close`` only drops
+        the client -- the ``transport`` property rebuilds it on next use. Closing
+        first therefore let a call submitted a moment earlier start afterwards,
+        reopen the HTTP client and POST through a wrapper the caller believes is
+        already shut down. So: refuse new calls, drop the ones that never
+        started, let the ones that did settle, and only then close.
         """
+        if self._closed:
+            return
+        self._closed = True
+        self._executor.shutdown(wait=False, cancel_futures=True)
+        if self._pending:
+            await asyncio.gather(*tuple(self._pending), return_exceptions=True)
         if self._inner._transport is not None:
             self._inner._transport.close()
-        self._executor.shutdown(wait=False)
 
     async def __aenter__(self):
         return self
