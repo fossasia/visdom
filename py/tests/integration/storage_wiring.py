@@ -17,6 +17,8 @@ is in place so a future refactor cannot silently bypass the backend.
 Nothing here speaks HTTP -- the handlers are driven through ``wrap_func`` and
 ``on_message`` with a ``FakeHandler`` -- so these are plain functions on the
 shared fixtures, and ``SpyStore`` stands in wherever a call has to be observed.
+The wrap functions that touch disk are coroutines, so those calls go through
+``asyncio.run``: the loop is what hands their work to the storage executor.
 """
 
 import asyncio
@@ -65,7 +67,7 @@ def test_save_routes_through_storage(app, spy_store):
     """SaveHandler persists via storage.save_envs rather than writing files."""
     handler = FakeHandler(state=app.state, storage=spy_store)
 
-    SaveHandler.wrap_func(handler, {"data": ["main"]})
+    asyncio.run(SaveHandler.wrap_func(handler, {"data": ["main"]}))
 
     assert spy_store.calls["save_envs"] == [["main"]]
     assert "main" in handler.json_body()

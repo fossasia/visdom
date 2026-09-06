@@ -25,12 +25,20 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 from urllib.parse import quote
 
-from visdom.experiments.tags import normalize_tags
+from visdom.experiments.tags import MAX_TAGS_PER_ENV, normalize_tags
 from visdom.utils.server_utils import escape_eid
 
 
 _INTERMEDIATE_METRIC_NAME = "intermediate_value"
 _DASHBOARD_TAG_NAME = "optuna_dashboard_env"
+_OPTUNA_TAG_NAMES = {
+    "integration",
+    "optuna_study",
+    "optuna_trial",
+    "optuna_state",
+    "optuna_direction",
+    _DASHBOARD_TAG_NAME,
+}
 
 
 class OptunaCallback:
@@ -72,7 +80,8 @@ class OptunaCallback:
             warning is emitted so an unavailable dashboard does not stop the
             optimization.
         create_dashboard: Create and periodically refresh the study dashboard.
-        refresh_every: Number of newly logged trials between dashboard refreshes.
+        refresh_every: Positive integer number of newly logged trials between
+            dashboard refreshes.
 
     Example::
 
@@ -100,6 +109,8 @@ class OptunaCallback:
             raise TypeError("dashboard_env must be a string or None")
         if dashboard_env == "":
             raise ValueError("dashboard_env must not be empty")
+        if isinstance(refresh_every, bool) or not isinstance(refresh_every, int):
+            raise TypeError("refresh_every must be an integer")
         if refresh_every < 1:
             raise ValueError("refresh_every must be at least 1")
 
@@ -140,13 +151,22 @@ class OptunaCallback:
             return {}
         if not isinstance(tags, Mapping):
             raise TypeError("tags must be a mapping of string names to string values")
-        return normalize_tags(dict(tags))
+        normalized = normalize_tags(dict(tags))
+        if len(set(normalized) | _OPTUNA_TAG_NAMES) > MAX_TAGS_PER_ENV:
+            raise ValueError(
+                "OptunaCallback tags may contain at most {} non-reserved tags".format(
+                    MAX_TAGS_PER_ENV - len(_OPTUNA_TAG_NAMES)
+                )
+            )
+        return normalized
 
     def study_env(self, study: Any) -> str:
         """Return the environment namespace for an Optuna study."""
         if self.dashboard_env is not None:
-            return self.dashboard_env
-        return "optuna_{}".format(study.study_name)
+            env = self.dashboard_env
+        else:
+            env = "optuna_{}".format(study.study_name)
+        return escape_eid(env)
 
     def trial_env(self, trial: Any, study: Any = None) -> str:
         """Return the deterministic Visdom environment for an Optuna trial.
@@ -175,7 +195,7 @@ class OptunaCallback:
         if self.objective_names is not None:
             names = self.objective_names
         else:
-            study_names = study.metric_names
+            study_names = getattr(study, "metric_names", None)
             if study_names is not None:
                 names = tuple(study_names)
             elif value_count == 1:
@@ -296,20 +316,27 @@ class OptunaCallback:
             ("Failed", states["FAIL"]),
         ]
         if len(study.directions) == 1 and states["COMPLETE"]:
-            links.append(("Open best trial", self._trial_url(study.best_trial, study)))
-            rows.extend(
-                [
-                    ("Best value", study.best_value),
-                    (
-                        "Best parameters",
-                        json.dumps(
-                            study.best_params,
-                            ensure_ascii=False,
-                            sort_keys=True,
+            try:
+                best_trial = study.best_trial
+                best_value = study.best_value
+                best_params = study.best_params
+            except ValueError:
+                pass
+            else:
+                links.append(("Open best trial", self._trial_url(best_trial, study)))
+                rows.extend(
+                    [
+                        ("Best value", best_value),
+                        (
+                            "Best parameters",
+                            json.dumps(
+                                best_params,
+                                ensure_ascii=False,
+                                sort_keys=True,
+                            ),
                         ),
-                    ),
-                ]
-            )
+                    ]
+                )
         elif states["COMPLETE"]:
             rows.append(("Pareto trials", len(study.best_trials)))
 
@@ -438,8 +465,8 @@ class OptunaCallback:
         writer because they do not share this lock.
         """
         with self._dashboard_lock:
-            payload = self._build_dashboard_payload(study)
             try:
+                payload = self._build_dashboard_payload(study)
                 self.viz.text(
                     payload["summary"],
                     win="optuna-summary",
