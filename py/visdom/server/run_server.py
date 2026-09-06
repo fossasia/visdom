@@ -239,6 +239,11 @@ async def _serve(
         # Blocking, but nothing is being served by now: the listening sockets
         # are closed and this is the last thing the loop does.
         app.shutdown_storage()
+        # The drain has happened, so the interpreter-exit copy has nothing left
+        # to do; leaving it registered would pin this Application and its state
+        # in memory until the process ends, and add one more callback per
+        # ``serve`` call in a process that serves more than once (the tests do).
+        atexit.unregister(app.shutdown_storage)
 
 
 def main(print_func=None):
