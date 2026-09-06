@@ -430,7 +430,6 @@ def update_window(p, args):
             for i, d in enumerate(pdata):
                 if i < len(legend):
                     d["name"] = legend[i]
-    p["version"] += 1
     return p
 
 

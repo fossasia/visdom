@@ -144,6 +144,16 @@ class UpdateHandler(BaseHandler):
             max_plot_history,
         )
         p["contentID"] = get_rand_id()
+        # Bump here, not in ``update_window()``. Every pane type that carries
+        # content rather than traces -- text, image_history, plot_history and
+        # table -- returns from ``update()`` before ``update_window()`` is ever
+        # reached, so those panes stayed pinned at version 1 while the server
+        # went on broadcasting ``window_update`` for them. The frontend only
+        # applies a patch whose version is exactly one ahead of the pane it
+        # holds, so with both sides stuck at 1 every update fell through to a
+        # full environment reload. Bumping once per accepted update, ahead of
+        # the diff, puts the new version in the patch for every type.
+        p["version"] = p.get("version", 1) + 1
 
         patch = jsonpatch.make_patch(old_p, p)
         return p, patch.patch
@@ -156,11 +166,13 @@ class UpdateHandler(BaseHandler):
             selected = args["data"]["selected"]
             p["content"]["selected"] = selected
             p["contentID"] = content_id
+            p["version"] = p.get("version", 1) + 1
             # `selected` may not exist yet on the first selection, so use "add"
             # (which also overwrites when the key is already present).
             return [
                 {"op": "add", "path": "/content/selected", "value": selected},
                 {"op": "replace", "path": "/contentID", "value": content_id},
+                {"op": "replace", "path": "/version", "value": p["version"]},
             ]
         if update_type == "RegionSelected":
             old_data = p["content"]["data"]
@@ -173,11 +185,13 @@ class UpdateHandler(BaseHandler):
             p["content"]["has_previous"] = True
             p["content"]["selected"] = None
             p["contentID"] = content_id
+            p["version"] = p.get("version", 1) + 1
             return [
                 {"op": "replace", "path": "/content/data", "value": new_data},
                 {"op": "add", "path": "/content/has_previous", "value": True},
                 {"op": "add", "path": "/content/selected", "value": None},
                 {"op": "replace", "path": "/contentID", "value": content_id},
+                {"op": "replace", "path": "/version", "value": p["version"]},
             ]
         return []
 
