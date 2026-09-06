@@ -662,16 +662,58 @@ study.optimize(objective, n_trials=100, callbacks=[callback])
 callback.update_dashboard(study)
 ```
 
+For multi-objective studies, list the objective names in the same order as the
+study directions and return values:
+
+```python
+callback = OptunaCallback(
+    viz,
+    dashboard_env="optuna_accuracy_latency",
+    objective_names=["accuracy", "latency_ms"],
+    create_dashboard=True,
+)
+
+
+def multi_objective(trial):
+    width = trial.suggest_int("width", 1, 10)
+    accuracy = 0.80 + 0.01 * width
+    latency_ms = 10.0 + 2.0 * width
+    return accuracy, latency_ms
+
+
+study = optuna.create_study(
+    study_name="accuracy-latency",
+    directions=["maximize", "minimize"],
+)
+study.optimize(multi_objective, n_trials=40, callbacks=[callback])
+callback.update_dashboard(study)
+```
+
 The integration records one experiment per trial, using names such as
 `optuna_quadratic_trial_000017`. Intermediate values reported with
 `trial.report(value, step)` are stored as the `intermediate_value` metric in
-step order before the final objective value. With `create_dashboard=True`, the
-first trial creates summary, HParams, optimization history and timeline panes,
-plus intermediate-value and parameter-importance panes when Optuna can compute
-them. Later trials refresh the panes in `optuna_quadratic` every `refresh_every`
-successful writes. The explicit final `update_dashboard()` includes any trials
-left since the last scheduled refresh. Plotly is only needed for the Optuna
-visualization panes.
+step order before the final objective value. Each experiment also carries a
+stable `optuna_dashboard_env` tag. With `create_dashboard=True`, the first trial
+creates summary, HParams, optimization history and timeline panes, plus
+intermediate-value and parameter-importance panes when Optuna can compute them.
+The HParams pane selects experiments by that dashboard tag rather than by a
+callback-local list, so `update_dashboard()` on a new callback recovers trials
+logged before a process restart. Dashboard refreshes from one callback are
+serialized, so `study.optimize(..., n_jobs=N)` cannot publish them out of order.
+When multiple processes or nodes share a study and dashboard namespace, enable
+`create_dashboard=True` in exactly one process; callbacks in the other workers
+still log their trials with the default `create_dashboard=False`. The designated
+writer's tag query includes trials from every worker. After all workers finish,
+have the coordinating process call `update_dashboard()` once for the final
+refresh.
+
+Completed studies with two or three objectives also get a Pareto-front pane.
+Later trials refresh the panes in `optuna_quadratic` every `refresh_every`
+successful writes by the dashboard writer. The explicit final
+`update_dashboard()` includes any trials left since the last scheduled refresh.
+Plotly is only needed for the Optuna visualization panes. Timeline bars preserve
+each trial's true duration, and a fixed-size marker at the true start time keeps
+even sub-pixel trials visible and hoverable without exaggerating their runtime.
 
 The summary pane links directly to the best and latest terminal trial
 environments. The callback never opens a browser on its own.
@@ -685,7 +727,9 @@ pruning decision: call `trial.report()` and `trial.should_prune()` inside the
 objective and raise `optuna.TrialPruned` when requested. Because Optuna invokes
 study callbacks after a trial reaches a terminal state, `OptunaCallback`
 records these values after the trial finishes rather than streaming them while
-the trial is running.
+the trial is running. Optuna does not support `trial.report()` or
+`trial.should_prune()` for multi-objective studies, so intermediate-value and
+pruning support applies only to single-objective studies.
 
 ## Details
 <img src="https://user-images.githubusercontent.com/19650074/198747904-7a8a580f-851a-45fb-8f45-94e54a910ee2.png"/>
