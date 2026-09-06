@@ -975,6 +975,12 @@ The following `opts` are supported:
 - `opts.markerborderwidth`: marker border line width (`float`; default = 0.5)
 - `opts.legend`           : `table` containing legend names
 - `opts.textlabels`       : text label for each point (`list`: default = `None`)
+- `opts.aspectmode`       : how the three axes of a 3D plot are scaled (`string`; default = `'auto'`). One of:
+  - `auto`   : proportional to the data extents (like `data`), but Plotly switches to `cube` when one axis spans more than 4x the others -- so a plot with one dominant dimension silently renders distorted.
+  - `data`   : always proportional to the data extents, so 1 unit looks the same on every axis -- use this for point clouds, SLAM maps, trajectories, or anything where shape must be preserved.
+  - `cube`   : all three axes drawn the same length regardless of the data, deliberately distorting proportions to fill a cube.
+  - `manual` : proportions taken from `opts.aspectratio` (falls back to `1:1:1` if not set).
+- `opts.aspectratio`      : per-axis scale for `manual` mode, a dict `{'x': .., 'y': .., 'z': ..}` (`dict`; default = `None`).
 - `opts.layoutopts`       : dict of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 - `opts.traceopts`        : dict mapping trace names or indices to dicts of additional options that the graph backend accepts. For example `traceopts = {'plotly': {'myTrace': {'mode': 'markers'}}}`.
 - `opts.webgl`            : use WebGL for plotting (`boolean`; default = `false`). It is faster if a plot contains too many points. Use sparingly as browsers won't allow more than a couple of WebGL contexts on a single page.
@@ -1021,6 +1027,8 @@ The following `opts` are supported:
 - `opts.linecolor`   : line colors (`np.array`; default = None)
 - `opts.dash`        : line dash type for each line (`np.array`; default = 'solid'), one of `solid`, `dash`, `dashdot` or `dash`, size should match number of lines being drawn
 - `opts.legend`      : `table` containing legend names
+- `opts.aspectmode`  : axis scaling for 3D line plots (`string`; default = `'auto'`); `auto` is proportional to the data but flips to `cube` when one axis is over 4x the others, `data` stays proportional so shape is preserved, `cube` forces all axes to equal length, `manual` uses `opts.aspectratio`.
+- `opts.aspectratio` : per-axis scale `{'x': .., 'y': .., 'z': ..}` for `manual` mode (`dict`; default = `None`).
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 - `opts.traceopts`   : `dict` mapping trace names or indices to `dict`s of additional options that plot.ly accepts for a trace.
 - `opts.webgl`       : use WebGL for plotting (`boolean`; default = `false`). It is faster if a plot contains too many points. Use sparingly as browsers won't allow more than a couple of WebGL contexts on a single page.
@@ -1214,6 +1222,8 @@ The following `opts` are supported:
 - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
 - `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
 - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
+- `opts.aspectmode`  : axis scaling for the 3D surface (`string`; default = `'auto'`); `auto` is proportional to the data but flips to `cube` when one axis is over 4x the others, `data` stays proportional so shape is preserved, `cube` forces all axes to equal length, `manual` uses `opts.aspectratio`.
+- `opts.aspectratio` : per-axis scale `{'x': .., 'y': .., 'z': ..}` for `manual` mode (`dict`; default = `None`).
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 
 #### vis.contour
@@ -1248,6 +1258,8 @@ The following `opts` are supported:
 
 - `opts.color`: color (`string`)
 - `opts.opacity`: opacity of polygons (`number` between 0 and 1)
+- `opts.aspectmode`: axis scaling for a 3D (`Nx3`) mesh (`string`; default = `'auto'`); `auto` is proportional to the data but flips to `cube` when one axis is over 4x the others, `data` stays proportional so shape is preserved, `cube` forces all axes to equal length, `manual` uses `opts.aspectratio`.
+- `opts.aspectratio`: per-axis scale `{'x': .., 'y': .., 'z': ..}` for `manual` mode (`dict`; default = `None`).
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 
 #### vis.sankey
