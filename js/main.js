@@ -542,45 +542,55 @@ const App = () => {
     localStorage.setItem('envIDs', JSON.stringify(selectedNodes));
     sendEnvQuery(selectedNodes, showAllEnvWindows);
   };
-  const onEnvDelete = (env2delete, previousEnv) => {
-    if (env2delete === previousEnv) {
-      previousEnv = 'main';
-    }
+  const onEnvDelete = (envsToDelete, previousEnv) => {
+    const deletedEnvs = new Set(envsToDelete);
+    const remainingEnvIDs = selection.envIDs.filter(
+      (env) => !deletedEnvs.has(env)
+    );
+    const nextEnvIDs = remainingEnvIDs.length > 0 ? remainingEnvIDs : ['main'];
+    const selectionChanged = remainingEnvIDs.length !== selection.envIDs.length;
 
-    setSelection((prev) => {
-      let EnvIds = prev.envIDs.filter((env) => env !== env2delete);
-      return {
+    if (selectionChanged) {
+      setSelection((prev) => ({
         ...prev,
-        envIDs: EnvIds,
-      };
-    });
+        envIDs: nextEnvIDs,
+        layoutID: deletedEnvs.has(prev.envIDs[0])
+          ? DEFAULT_LAYOUT
+          : prev.layoutID,
+      }));
+      localStorage.setItem('envIDs', JSON.stringify(nextEnvIDs));
+    }
 
     setStoreMeta((prev) => {
       const layoutLists = new Map(prev.layoutLists);
-      layoutLists.delete(env2delete);
       const tagsByEnv = { ...prev.tagsByEnv };
-      delete tagsByEnv[env2delete];
-      let EnvIds = prev.envList.filter((env) => env !== env2delete);
+      deletedEnvs.forEach((env) => {
+        layoutLists.delete(env);
+        delete tagsByEnv[env];
+      });
       return {
         ...prev,
-        envList: EnvIds,
+        envList: prev.envList.filter((env) => !deletedEnvs.has(env)),
         layoutLists: layoutLists,
         tagsByEnv: tagsByEnv,
       };
     });
 
-    setStoreData((prev) => {
-      if (selection.envIDs.includes(env2delete)) {
-        return {
-          ...prev,
-          panes: {},
-          layout: [],
-        };
-      }
-      return prev;
-    });
+    if (selectionChanged) {
+      setStoreData((prev) => ({
+        ...prev,
+        panes: {},
+        layout: [],
+      }));
+      setFocusedPaneID(null);
+    }
 
-    sendEnvDelete(env2delete, previousEnv);
+    envsToDelete.forEach((env) => {
+      sendEnvDelete(env, env === previousEnv ? nextEnvIDs[0] : previousEnv);
+    });
+    if (selectionChanged) {
+      sendEnvQuery(nextEnvIDs, showAllEnvWindows);
+    }
   };
 
   const onTagsSave = (env, tags) => {
