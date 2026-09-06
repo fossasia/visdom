@@ -69,6 +69,10 @@ from visdom.server.defaults import (
     DEFAULT_SAVE_THRESHOLD,
 )
 
+# Template only -- never mutate it. ``__init__`` copies it per instance because
+# several of these values are derived from constructor arguments, and writing
+# them back here leaked one server's base_url and cookie secret into the next
+# ``Application`` built in the same process.
 tornado_settings = {
     "autoescape": None,
     "debug": "/dbg/" in __file__,
@@ -110,10 +114,12 @@ class Application(tornado.web.Application):
         self.last_access = time.time()
         self.wrap_socket = use_frontend_client_polling
 
+        settings = dict(tornado_settings)
+
         if user_credential:
             self.login_enabled = True
             with open(DEFAULT_ENV_PATH + "COOKIE_SECRET", "r") as fn:
-                tornado_settings["cookie_secret"] = fn.read()
+                settings["cookie_secret"] = fn.read()
 
         self.server_state = ServerState(
             state=self.state,
@@ -137,15 +143,13 @@ class Application(tornado.web.Application):
         )
         self.server_state.live_updates = make_live_queue(self.server_state)
 
-        tornado_settings["static_url_prefix"] = self.base_url + "/static/"
+        settings["static_url_prefix"] = self.base_url + "/static/"
         # A traceback and the raw request are debugging aids, not something to
         # hand to whoever provoked the error. `debug` was forced on for every
         # server, which put both on the 500 page -- and, being tornado's debug
         # flag, also turned on autoreload. Follow the operator's logging level
         # instead, and keep the two concerns separate.
-        tornado_settings["show_error_details"] = logging.getLogger().isEnabledFor(
-            logging.DEBUG
-        )
+        settings["show_error_details"] = logging.getLogger().isEnabledFor(logging.DEBUG)
         experiments_url = "%s/experiments" % self.base_url
         server_state_args = {"server_state": self.server_state}
         handlers = [
@@ -205,7 +209,7 @@ class Application(tornado.web.Application):
             (r"%s/health" % self.base_url, HealthHandler),
             (r"%s(.*)" % self.base_url, IndexHandler, server_state_args),
         ]
-        super(Application, self).__init__(handlers, **tornado_settings)
+        super(Application, self).__init__(handlers, **settings)
 
     def get_last_access(self):
         if len(self.subs) > 0 or len(self.sources) > 0:
@@ -237,11 +241,6 @@ class Application(tornado.web.Application):
     def dirty_envs(self):
         """Compatibility view of environments pending persistence."""
         return self.server_state.dirty_envs
-
-    @property
-    def saving_envs(self):
-        """Compatibility view of environments with a write in flight."""
-        return self.server_state.saving_envs
 
     @property
     def autosave(self):
