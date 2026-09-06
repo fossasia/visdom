@@ -149,7 +149,7 @@ def _rank(entries, descending, keep=None):
 class ExperimentStore:
     """Read/write experiment metadata attached to environments via a DataStore."""
 
-    def __init__(self, datastore, env_provider=None):
+    def __init__(self, datastore, env_provider=None, persist=None):
         """Create a store backed by ``datastore`` (a :class:`DataStore`).
 
         ``env_provider`` is an optional callable ``env_id -> env | None`` that
@@ -158,6 +158,14 @@ class ExperimentStore:
         fresh copy off disk, so persisting an experiment cannot overwrite the
         env file with a snapshot that is missing windows created — or reviving
         windows closed — since the file was last written.
+
+        ``persist`` is an optional callable ``(env_id, env) -> None`` that
+        stands in for the store's own ``datastore.save_env``. A caller that
+        passes one owns the write: the store applies the change to the env and
+        hands it over, but touches no storage itself. The server passes one so
+        that the change lands on the environment it is serving, on the IOLoop
+        where every other writer of that environment is serialised, while the
+        file write it implies is queued onto the storage worker afterwards.
         """
         if not isinstance(datastore, DataStore):
             raise TypeError(
@@ -165,6 +173,7 @@ class ExperimentStore:
             )
         self.datastore = datastore
         self.env_provider = env_provider
+        self.persist = persist
 
     def _read(self, env_id):
         """Return ``(env, Experiment|None)`` for ``env_id``.
@@ -233,7 +242,10 @@ class ExperimentStore:
     def _write(self, env_id, env, experiment):
         """Attach ``experiment`` to ``env`` and persist it; return the experiment."""
         env[METADATA_KEY] = experiment.to_dict()
-        self.datastore.save_env(env_id, env)
+        if self.persist is None:
+            self.datastore.save_env(env_id, env)
+        else:
+            self.persist(env_id, env)
         return experiment
 
     @staticmethod
