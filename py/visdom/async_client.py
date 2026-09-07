@@ -692,6 +692,10 @@ class AsyncVisdom(object):
         # Calls handed to the pool and not yet settled. :meth:`shutdown` waits
         # on these before closing the transport out from under them.
         self._pending = set()
+        # The single release of the transport, once :meth:`shutdown` has begun.
+        # Held on the instance so that a caller who cancels its ``shutdown``
+        # does not take the cleanup down with it.
+        self._finalizer = None
 
     @classmethod
     async def create(cls, *args, max_concurrency=DEFAULT_MAX_CONCURRENCY, **kwargs):
@@ -890,17 +894,34 @@ class AsyncVisdom(object):
         reopen the HTTP client and POST through a wrapper the caller believes is
         already shut down. So: refuse new calls, drop the ones that never
         started, let the ones that did settle, and only then close.
+
+        Waiting for those calls is a suspension point, which makes this
+        cancellable at exactly the wrong moment. The release therefore runs as
+        its own task and is awaited through :func:`asyncio.shield`: a caller who
+        gives up -- or is cancelled by the ``wait_for`` or task group it sits in
+        -- stops waiting without stopping the cleanup, and a later ``shutdown``
+        awaits that same task rather than returning early on a ``_closed`` flag
+        whose work never finished.
         """
-        if self._closed:
-            return
-        self._closed = True
-        # Nothing new is accepted from here, in either direction: the
-        # backchannel stops delivering events, the pool stops taking calls.
-        self._executor.shutdown(wait=False, cancel_futures=True)
-        task = self._inner.close_backchannel()
-        if task is not None:
+        if self._finalizer is None:
+            # Set before the first await, so no call slips in behind it.
+            self._closed = True
+            # Nothing new is accepted from here, in either direction: the
+            # backchannel stops delivering events, the pool stops taking calls.
+            self._executor.shutdown(wait=False, cancel_futures=True)
+            # Closed here rather than in ``_release`` so that the backchannel is
+            # already shut before the loop is given back, leaving no turn in
+            # which one more event could still be delivered.
+            self._finalizer = asyncio.ensure_future(
+                self._release(self._inner.close_backchannel())
+            )
+        await asyncio.shield(self._finalizer)
+
+    async def _release(self, backchannel):
+        """Let the backchannel and the started calls settle, then close."""
+        if backchannel is not None:
             # Let the cancellation land, so no task is pending at loop close.
-            await asyncio.wait({task})
+            await asyncio.wait({backchannel})
         if self._pending:
             await asyncio.gather(*tuple(self._pending), return_exceptions=True)
         if self._inner._transport is not None:

@@ -584,6 +584,7 @@ class TestAsyncVisdomLifecycle(tornado.testing.AsyncTestCase):
         property rebuilds it, so an unfinished call would quietly reopen the
         HTTP client and keep talking to the server after ``shutdown`` returned.
         """
+        started = asyncio.Event()
         release = asyncio.Event()
         finished = []
 
@@ -591,14 +592,22 @@ class TestAsyncVisdomLifecycle(tornado.testing.AsyncTestCase):
             async def post(self, url, data=None):
                 self.calls.append((url, data))
                 if len(self.calls) > 1:
+                    started.set()
                     await release.wait()
                     finished.append(url)
                 return ""
 
         client, transport = await make_client(GatedTransport())
         call = asyncio.ensure_future(client.text("hello"))
-        await asyncio.sleep(0)
+        # Not ``sleep(0)``: the POST only reaches the transport once a worker
+        # thread has picked the call up and handed the coroutine back to the
+        # loop, which is wall-clock work no number of loop turns can force.
+        # Staging on the event is what makes "already in flight" true here
+        # rather than usually-true.
+        await started.wait()
         shutdown = asyncio.ensure_future(client.shutdown())
+        # This one is safe: ``shutdown`` runs to its ``gather`` without
+        # suspending, so a single turn lands it there.
         await asyncio.sleep(0)
         assert transport.closed is False, "closed while a call was still running"
         release.set()
@@ -615,19 +624,26 @@ class TestAsyncVisdomLifecycle(tornado.testing.AsyncTestCase):
         ``shutdown`` runs; without ``cancel_futures`` it starts afterwards and
         POSTs through a client the caller believes is released.
         """
+        started = asyncio.Event()
         release = asyncio.Event()
 
         class GatedTransport(RecordingTransport):
             async def post(self, url, data=None):
                 self.calls.append((url, data))
                 if len(self.calls) > 1:
+                    started.set()
                     await release.wait()
                 return ""
 
         client, transport = await make_client(GatedTransport(), max_concurrency=1)
         running = asyncio.ensure_future(client.text("first", win="w1"))
-        await asyncio.sleep(0)
+        # The single worker has to be genuinely parked on this POST before the
+        # second call can be "queued behind" it. A ``sleep(0)`` only turns the
+        # loop; it does not wait for the thread.
+        await started.wait()
         queued = asyncio.ensure_future(client.text("second", win="w2"))
+        # Safe: the proxy submits to the pool without suspending, and the one
+        # worker is parked, so this call cannot leave the queue.
         await asyncio.sleep(0)
 
         shutdown = asyncio.ensure_future(client.shutdown())
@@ -640,6 +656,81 @@ class TestAsyncVisdomLifecycle(tornado.testing.AsyncTestCase):
 
         # construction plus the one call that had already started
         assert len(transport.calls) == 2
+
+    @gen_test
+    async def test_a_cancelled_shutdown_still_releases_the_transport(self):
+        """Giving up on ``shutdown`` must not strand the HTTP client.
+
+        Waiting for the in-flight calls is the only await in ``shutdown``, so a
+        caller cancelled there -- by ``wait_for``, by a task group unwinding on
+        someone else's error -- used to leave ``_closed`` set with the transport
+        still open, and every later ``shutdown`` returned on that flag without
+        ever closing it.
+        """
+        started = asyncio.Event()
+        release = asyncio.Event()
+        closed = asyncio.Event()
+
+        class GatedTransport(RecordingTransport):
+            async def post(self, url, data=None):
+                self.calls.append((url, data))
+                if len(self.calls) > 1:
+                    started.set()
+                    await release.wait()
+                return ""
+
+            def close(self):
+                super().close()
+                closed.set()
+
+        client, transport = await make_client(GatedTransport())
+        call = asyncio.ensure_future(client.text("hello"))
+        await started.wait()
+
+        shutdown = asyncio.ensure_future(client.shutdown())
+        await asyncio.sleep(0)
+        shutdown.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await shutdown
+
+        release.set()
+        await call
+        # Nobody is awaiting the shutdown any more; the release still has to run.
+        await asyncio.wait_for(closed.wait(), timeout=1)
+        assert transport.closed is True, "the cancelled shutdown stranded the client"
+
+    @gen_test
+    async def test_a_shutdown_after_a_cancelled_one_waits_for_the_same_release(self):
+        """The retry has to finish the job, not return on a stale flag."""
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        class GatedTransport(RecordingTransport):
+            async def post(self, url, data=None):
+                self.calls.append((url, data))
+                if len(self.calls) > 1:
+                    started.set()
+                    await release.wait()
+                return ""
+
+        client, transport = await make_client(GatedTransport())
+        call = asyncio.ensure_future(client.text("hello"))
+        await started.wait()
+
+        first = asyncio.ensure_future(client.shutdown())
+        await asyncio.sleep(0)
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+
+        second = asyncio.ensure_future(client.shutdown())
+        await asyncio.sleep(0)
+        assert transport.closed is False, "returned before the call had settled"
+
+        release.set()
+        await call
+        await second
+        assert transport.closed is True
 
     @gen_test
     async def test_context_manager_shuts_down_on_exit(self):
