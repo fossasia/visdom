@@ -18,6 +18,7 @@ There is no HTTP here, but there is a real ``Application`` and real handler
 dispatch, which is what ``integration`` means in this suite.
 """
 
+import asyncio
 import json
 
 import pytest
@@ -257,7 +258,7 @@ def test_readonly_socket_ignores_commands(readonly_app):
     readonly_app.state["expt"] = {"jsons": {}, "reload": {}}
     sub = open_sub(readonly_app)
 
-    sub.on_message(json.dumps({"cmd": "delete_env", "eid": "expt"}))
+    asyncio.run(sub.on_message(json.dumps({"cmd": "delete_env", "eid": "expt"})))
 
     assert "expt" in readonly_app.state
 
@@ -267,7 +268,7 @@ def test_readonly_socket_ignores_an_unknown_command(readonly_app):
     sub = open_sub(readonly_app)
     before = len(sub.messages)
 
-    sub.on_message(json.dumps({"cmd": "not_a_command"}))
+    asyncio.run(sub.on_message(json.dumps({"cmd": "not_a_command"})))
 
     assert len(sub.messages) == before
 

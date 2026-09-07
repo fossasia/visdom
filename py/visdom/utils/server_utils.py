@@ -291,28 +291,92 @@ def load_env_off_loop(handler, eid):
     return run_on_storage_executor(handler, handler.storage.load_env, eid)
 
 
+def purge_env(store, eid):
+    """Remove everything an env owns on disk: its undo stack, then the env.
+
+    Both files go in the one visit to the worker, so nothing the loop schedules
+    in between can land between them.
+    """
+    clear_deleted(store, eid)
+    store.delete_env(eid)
+
+
+def _note_env_deleting(handler, eid):
+    """Record that a delete of ``eid`` is on its way to disk."""
+    handler.deleting_envs[eid] = handler.deleting_envs.get(eid, 0) + 1
+
+
+def _note_env_deleted(handler, eid):
+    """Drop that record once the delete has landed.
+
+    A second delete of the same env keeps its own record: the env stays spoken
+    for until the last of them is done with it.
+    """
+    remaining = handler.deleting_envs.get(eid, 0) - 1
+    if remaining > 0:
+        handler.deleting_envs[eid] = remaining
+    else:
+        handler.deleting_envs.pop(eid, None)
+
+
+def env_is_deleting(handler, eid):
+    """True while a delete of ``eid`` is queued or running.
+
+    A read that started before the delete resolves after it, and filing what it
+    read back under ``state`` would put the env the user just deleted back in
+    the environment list. Readers that resume after yielding the loop ask this
+    before storing anything.
+    """
+    return eid in handler.deleting_envs
+
+
 def delete_env_off_loop(handler, eid):
-    """Remove one env from disk off the loop, behind any save already queued.
+    """Remove one env from disk off the loop, behind any write already queued.
 
     Deleting here on the loop is what let a deleted environment come back: an
     autosave hands the worker a snapshot taken while the env still existed, the
     delete then removes the file, and the write lands afterwards and recreates
     it. The worker runs one task at a time, so submitting the delete rather
-    than running it orders it after every save queued before it, and a save
+    than running it orders it after every write queued before it, and a write
     queued after it cannot see the env at all -- the loop dropped it from
     ``state`` before this was called.
+
+    The undo stack goes with it, on the worker rather than on the loop, for the
+    same reason: a close or an undo already on its way to disk would otherwise
+    save the stack back after a clear that ran here, leaving a deleted env's
+    undo history behind for whoever next takes its name.
     """
-    future = run_on_storage_executor(handler, handler.storage.delete_env, eid)
-    future.add_done_callback(_log_storage_failure)
+    _note_env_deleting(handler, eid)
+    future = run_on_storage_executor(handler, purge_env, handler.storage, eid)
+
+    def _settle(done):
+        _note_env_deleted(handler, eid)
+        _log_storage_failure(done)
+
+    future.add_done_callback(_settle)
     return future
 
 
 async def ensure_env_loaded(handler, eid):
-    """Materialise a cold lazy env without blocking the loop on the read."""
+    """Materialise a cold lazy env without blocking the loop on the read.
+
+    A delete that lands while the read is on the worker takes the env out of
+    ``state`` and its file off disk, so the read answers with nothing at all.
+    Priming that would report a deleted env as a malformed one -- a 500 out of
+    ``prime`` rather than whatever the caller means a missing env to be -- so
+    the env is only primed if it is still the one this started reading. Every
+    caller already decides for itself what an absent env means, and each of
+    them is reached by returning here: the fork handlers answer 400, the
+    experiment mirror treats it as a new env, and the window handlers recreate
+    it.
+    """
     env = handler.state.get(eid)
     if not isinstance(env, LazyEnvData) or env.is_loaded:
         return
-    env.prime(await load_env_off_loop(handler, eid))
+    raw = await load_env_off_loop(handler, eid)
+    if handler.state.get(eid) is not env:
+        return
+    env.prime(raw)
 
 
 async def ensure_env_present(handler, eid):
@@ -328,7 +392,7 @@ async def ensure_env_present(handler, eid):
         await ensure_env_loaded(handler, eid)
         return
     raw = await load_env_off_loop(handler, eid)
-    if raw:
+    if raw and not env_is_deleting(handler, eid):
         handler.state[eid] = raw
 
 
@@ -357,11 +421,41 @@ async def warm_env(handler, eid):
     if not cold:
         return undo_count
     if env is None:
-        if raw:
+        if raw and not env_is_deleting(handler, eid):
             handler.state[eid] = raw
     else:
         env.prime(raw)
     return undo_count
+
+
+def push_deleted_off_loop(handler, eid, win_id, p_data):
+    """Record a closed pane off the loop; resolves to the new undo depth."""
+    return run_on_storage_executor(
+        handler, push_deleted, handler.storage, eid, win_id, p_data
+    )
+
+
+def pop_deleted_off_loop(handler, eid):
+    """Undo the newest close off the loop; resolves to ``(popped, depth)``."""
+    return run_on_storage_executor(
+        handler, pop_deleted_with_depth, handler.storage, eid
+    )
+
+
+def count_deleted_off_loop(handler, eid):
+    """Read an env's undo depth off the loop."""
+    return run_on_storage_executor(handler, count_deleted, handler.storage, eid)
+
+
+def save_layouts_off_loop(handler):
+    """Persist the app's layouts off the loop, snapshotting them first.
+
+    The blob is read here, on the loop, and travels to the worker as an
+    argument: a later edit then cannot overtake this write and leave the two
+    saves landing in the order the disk happened to finish them.
+    """
+    state = handler.server_state
+    return run_on_storage_executor(handler, state.save_layouts, state.get_layouts())
 
 
 def _log_storage_failure(future):
@@ -527,7 +621,14 @@ def gather_envs(state, store):
     return sorted(set(store.list_envs() + list(state.keys())))
 
 
-def compare_envs(state, eids, socket, store, show_all=False):
+def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
+    """Send a comparison of the named envs to one subscriber.
+
+    ``warmed`` says the caller already read every env named here off the loop,
+    so one still missing from ``state`` has nothing on disk -- or is on its way
+    off it -- and reading it again here would only put the read, and an env the
+    user just deleted, back on the loop.
+    """
     logging.info("comparing envs")
     use_env_names = all(len(str(eid)) <= MAX_ENV_NAME_LEN for eid in eids)
     eidNums = {e: e if use_env_names else str(i) for i, e in enumerate(eids)}
@@ -535,7 +636,7 @@ def compare_envs(state, eids, socket, store, show_all=False):
     for eid in eids:
         if eid in state:
             envs[eid] = state.get(eid)
-        else:
+        elif not warmed:
             env = store.load_env(eid)
             if env:
                 state[eid] = env
@@ -751,17 +852,20 @@ def send_to_sources(handler, msg):
         source.write_message(json.dumps(msg, cls=NanSafeEncoder))
 
 
-def load_env(state, eid, socket, store, undo_count=None):
+def load_env(state, eid, socket, store, undo_count=None, warmed=False):
     """load an environment to a client by socket
 
     A caller that already warmed the env off the loop passes its ``undo_count``
     in rather than have the undo stack read here, where the read would land on
-    the loop.
+    the loop, and says so with ``warmed``: the env is either in ``state`` by
+    now or has nothing on disk to read, so the fallback below would only repeat
+    that read on the loop -- and would file the result away past the guard that
+    keeps an env being deleted from coming back.
     """
     env = {}
     if eid in state:
         env = state.get(eid)
-    else:
+    elif not warmed:
         loaded = store.load_env(eid)
         if loaded:
             env = loaded
@@ -808,26 +912,42 @@ def broadcast(self, msg, eid):
 def push_deleted(store, eid, win_id, p_data):
     """Append a closed pane to the environment's undo stack (LIFO), keeping at
     most DEFAULT_MAX_UNDO_HISTORY entries. Persistence is delegated to ``store``
-    (a DataStore), which no-ops when running without an env_path."""
+    (a DataStore), which no-ops when running without an env_path.
+
+    Returns the depth the stack was left at, so a caller that has to announce
+    it does not pay for a second read of the file just written.
+    """
     stack = store.load_undo(eid)
     stack.append([win_id, p_data])
     if len(stack) > DEFAULT_MAX_UNDO_HISTORY:
         stack = stack[-DEFAULT_MAX_UNDO_HISTORY:]
     store.save_undo(eid, stack)
+    return len(stack)
 
 
-def pop_deleted(store, eid):
-    """Pop and return the most recently closed pane as (win_id, p_data),
-    or None if the environment has no undo history."""
+def pop_deleted_with_depth(store, eid):
+    """Pop the newest closed pane and report what is left behind it.
+
+    Returns ``(popped, depth)`` where ``popped`` is ``(win_id, p_data)`` or
+    ``None``. Undoing is always followed by telling subscribers how many panes
+    remain, and both numbers come off the one stack this already read.
+    """
     stack = store.load_undo(eid)
     if not stack:
-        return None
+        return None, 0
     win_id, p_data = stack.pop()
     if stack:
         store.save_undo(eid, stack)
     else:
         store.clear_undo(eid)
-    return win_id, p_data
+    return (win_id, p_data), len(stack)
+
+
+def pop_deleted(store, eid):
+    """Pop and return the most recently closed pane as (win_id, p_data),
+    or None if the environment has no undo history."""
+    popped, _depth = pop_deleted_with_depth(store, eid)
+    return popped
 
 
 def clear_deleted(store, eid):
@@ -840,13 +960,18 @@ def count_deleted(store, eid):
     return len(store.load_undo(eid))
 
 
-def broadcast_undo_state(handler, eid, store):
-    """Tell subscribers of an env how many closed panes remain to undo."""
+def broadcast_undo_state(handler, eid, store, count=None):
+    """Tell subscribers of an env how many closed panes remain to undo.
+
+    A caller that already knows the depth -- because the push or pop it just
+    made off the loop reported it -- passes ``count`` in rather than have the
+    stack read here, where the read would land on the loop.
+    """
     msg = json.dumps(
         {
             "command": "undo_state",
             "eid": eid,
-            "count": count_deleted(store, eid),
+            "count": count_deleted(store, eid) if count is None else count,
         },
         cls=NanSafeEncoder,
     )

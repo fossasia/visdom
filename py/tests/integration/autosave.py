@@ -21,6 +21,7 @@ instead (see ``_run_storage_inline``) and read the result off that future, which
 keeps the assertions from racing a thread pool.
 """
 
+import asyncio
 import json
 import tempfile
 import types
@@ -38,7 +39,12 @@ from visdom.server.handlers.web_handlers import (
     DeleteEnvHandler,
     UpdateHandler,
 )
-from visdom.utils.server_utils import LazyEnvData, register_window, window
+from visdom.utils.server_utils import (
+    LazyEnvData,
+    purge_env,
+    register_window,
+    window,
+)
 
 from testutils.fakes import FakeHandler
 from testutils.payloads import embeddings_pane, table_pane, window_args
@@ -365,7 +371,7 @@ class TestDeleteOutlastsAQueuedSave(unittest.TestCase):
         queued = []
 
         def run_in_executor(_executor, func, *args):
-            future = Future()
+            future = self._pending_future()
             queued.append((func, args, future))
             return future
 
@@ -376,6 +382,19 @@ class TestDeleteOutlastsAQueuedSave(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         return queued
+
+    @staticmethod
+    def _pending_future():
+        """An unresolved future the caller can wait on however it waits.
+
+        The delete path is awaited by the socket command, so inside a running
+        loop the future has to be that loop's own; the handlers called directly
+        from a test method read their result off a plain ``Future`` instead.
+        """
+        try:
+            return asyncio.get_running_loop().create_future()
+        except RuntimeError:
+            return Future()
 
     def run_queued(self):
         """Run the queued work in submission order, as one worker would."""
@@ -401,12 +420,25 @@ class TestDeleteOutlastsAQueuedSave(unittest.TestCase):
         self.assertNotIn("expt", self.app.state)
 
     def test_a_socket_delete_survives_the_save_queued_before_it(self):
+        """The command waits for the removal, so the worker runs mid-dispatch.
+
+        Unlike the web handler, the socket command awaits what it queued; the
+        queue has to be drained while it is waiting rather than after it
+        returns, or nothing would ever resolve the future it is parked on.
+        """
         self.queue_autosave()
 
-        AnySocketHandlerOrWrapper.on_message(
-            self.handler, json.dumps({"cmd": "delete_env", "eid": "expt"})
-        )
-        self.run_queued()
+        async def dispatch():
+            command = asyncio.ensure_future(
+                AnySocketHandlerOrWrapper.on_message(
+                    self.handler, json.dumps({"cmd": "delete_env", "eid": "expt"})
+                )
+            )
+            await asyncio.sleep(0)
+            self.run_queued()
+            await command
+
+        asyncio.run(dispatch())
 
         self.assertFalse(self.app.storage.env_exists("expt"))
         self.assertNotIn("expt", self.app.state)
@@ -418,9 +450,7 @@ class TestDeleteOutlastsAQueuedSave(unittest.TestCase):
         DeleteEnvHandler.wrap_func(self.handler, {"eid": "expt"})
 
         submitted = [func for func, _args, _future in self.queued]
-        self.assertEqual(
-            submitted, [self.app.storage.save_envs, self.app.storage.delete_env]
-        )
+        self.assertEqual(submitted, [self.app.storage.save_envs, purge_env])
         self.assertTrue(self.app.storage.env_exists("expt"))
 
     def test_the_environment_is_still_removed_with_nothing_queued(self):
@@ -506,7 +536,9 @@ class TestSocketCommandsMarkTheirWrites(unittest.TestCase):
         self._tmp.cleanup()
 
     def send(self, **msg):
-        AnySocketHandlerOrWrapper.on_message(self.handler, json.dumps(msg))
+        # ``on_message`` is a coroutine now that the commands hand their disk
+        # work to the storage worker, so a loop has to drive it to completion.
+        asyncio.run(AnySocketHandlerOrWrapper.on_message(self.handler, json.dumps(msg)))
 
     def register(self, win="win_0"):
         register_window(self.handler, window(window_args(win=win)), "main")

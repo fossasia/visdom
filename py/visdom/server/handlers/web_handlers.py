@@ -59,7 +59,6 @@ from visdom.utils.server_utils import (
     hash_password_off_loop,
     stringify,
     push_deleted,
-    clear_deleted,
     notify,
     LazyEnvData,
 )
@@ -542,10 +541,11 @@ class DeleteEnvHandler(BaseHandler):
     def wrap_func(handler, args):
         """Drop an env, answering with the future for its removal from disk.
 
-        The env leaves memory and the subscribers hear about it here; only the
-        file removal is handed to the storage worker, so callers that need the
-        disk to be settled -- the request handler below, and tests -- await
-        what comes back. ``None`` means there was nothing to delete.
+        The env leaves memory and the subscribers hear about it here; the files
+        it owns -- its undo stack as well as the env itself -- are handed to
+        the storage worker, so callers that need the disk to be settled -- the
+        request handler below, and tests -- await what comes back. ``None``
+        means there was nothing to delete.
         """
         eid = args.get("eid")
         if eid is None:
@@ -554,7 +554,6 @@ class DeleteEnvHandler(BaseHandler):
         if eid == "main":
             return None
         handler.state.pop(eid, None)
-        clear_deleted(handler.storage, eid)
         removal = delete_env_off_loop(handler, eid)
         broadcast_envs(handler)
         return removal
@@ -613,10 +612,15 @@ class ForkEnvHandler(BaseHandler):
         # env it was forked from held. The copy also carries the source env's
         # experiment metadata, whose env_id still names the env it was forked
         # from; retarget it so the fork does not answer to its parent's id.
+        source = handler.state[prev_eid]
         await ensure_env_loaded(handler, prev_eid)
-        handler.state[eid] = retarget_experiment(
-            snapshot_env(handler.state[prev_eid]), eid
-        )
+        if handler.state.get(prev_eid) is not source:
+            # the source was deleted while it was being read off the worker,
+            # so answer as though it had never been there -- indexing it here
+            # would raise, and forking whatever replaced it is not what was
+            # asked for.
+            raise tornado.web.HTTPError(400, reason="env to be forked doesn't exist")
+        handler.state[eid] = retarget_experiment(snapshot_env(source), eid)
         await save_env_off_loop(handler, eid)
         broadcast_envs(handler)
 
@@ -658,6 +662,7 @@ class EnvHandler(BaseHandler):
                         self.subs[sid],
                         self.storage,
                         undo_count,
+                        warmed=True,
                     )
                 except ValueError:
                     notify(
@@ -708,6 +713,7 @@ class CompareHandler(BaseHandler):
                     self.subs[sid],
                     self.storage,
                     show_all=show_all,
+                    warmed=True,
                 )
             except ValueError:
                 notify(
