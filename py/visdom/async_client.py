@@ -474,6 +474,10 @@ class AsyncVisdom(object):
         # Calls handed to the pool and not yet settled. :meth:`shutdown` waits
         # on these before closing the transport out from under them.
         self._pending = set()
+        # The single release of the transport, once :meth:`shutdown` has begun.
+        # Held on the instance so that a caller who cancels its ``shutdown``
+        # does not take the cleanup down with it.
+        self._finalizer = None
 
     @classmethod
     async def create(cls, *args, max_concurrency=DEFAULT_MAX_CONCURRENCY, **kwargs):
@@ -635,11 +639,24 @@ class AsyncVisdom(object):
         reopen the HTTP client and POST through a wrapper the caller believes is
         already shut down. So: refuse new calls, drop the ones that never
         started, let the ones that did settle, and only then close.
+
+        Waiting for those calls is the one suspension point here, which makes
+        this cancellable at exactly the wrong moment. The release therefore runs
+        as its own task and is awaited through :func:`asyncio.shield`: a caller
+        who gives up -- or is cancelled by the ``wait_for`` or task group it sits
+        in -- stops waiting without stopping the cleanup, and a later
+        ``shutdown`` awaits that same task rather than returning early on a
+        ``_closed`` flag whose work never finished.
         """
-        if self._closed:
-            return
-        self._closed = True
-        self._executor.shutdown(wait=False, cancel_futures=True)
+        if self._finalizer is None:
+            # Set before the first await, so no call slips in behind it.
+            self._closed = True
+            self._executor.shutdown(wait=False, cancel_futures=True)
+            self._finalizer = asyncio.ensure_future(self._release())
+        await asyncio.shield(self._finalizer)
+
+    async def _release(self):
+        """Let the calls that already started settle, then drop the transport."""
         if self._pending:
             await asyncio.gather(*tuple(self._pending), return_exceptions=True)
         if self._inner._transport is not None:
