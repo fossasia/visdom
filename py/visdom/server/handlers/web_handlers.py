@@ -123,11 +123,202 @@ class ExistsHandler(BaseHandler):
         self.wrap_func(self, args)
 
 
+# ---- Fast path for append updates ---- #
+#
+# update_packet() normally deep-copies the pane and diffs the copy to get its
+# JSON Patch, which costs the whole pane on every call. An append is the one
+# update where the patch is known up front (new samples go on the end of the
+# arrays), so we build it directly and skip the copy and the diff.
+#
+# Anything that isn't a plain append returns None and falls back to the diff.
+# Worth keeping that net wide: a bad patch doesn't raise, the frontend just
+# applies it and the pane silently goes out of sync with the data.
+
+# Panes whose content isn't a list of traces.
+_NON_TRACE_PANE_TYPES = frozenset(
+    {"text", "image_history", "plot_history", "embeddings", "table"}
+)
+
+
+def _pane_head(p):
+    """Copy of the pane without `content`, which is the only part that grows."""
+    return {key: copy.deepcopy(value) for key, value in p.items() if key != "content"}
+
+
+def _content_head(content):
+    """Copy of `content` without `data`, same idea."""
+    return {
+        key: copy.deepcopy(value) for key, value in content.items() if key != "data"
+    }
+
+
+def _reroot(ops, prefix):
+    """Move ops built against a sub-document to `prefix`."""
+    for op in ops:
+        op["path"] = prefix + op["path"]
+    return ops
+
+
+def _planned_extensions(p, args):
+    """Arrays this append will extend, or None if it isn't a plain append.
+
+    Runs before anything is mutated, so a rejected update reaches the diff path
+    with the pane untouched. Each entry is (json pointer, the live list, values).
+    """
+    if not args.get("append") or args.get("delete"):
+        return None
+    if p.get("type") in _NON_TRACE_PANE_TYPES or "old_content" in p:
+        return None
+
+    content = p.get("content")
+    if not isinstance(content, dict):
+        return None
+    pdata = content.get("data")
+    if not isinstance(pdata, list) or not pdata:
+        return None
+
+    new_data = args.get("data")
+    if not isinstance(new_data, list) or not new_data:
+        return None
+    # legend renames traces rather than extending them
+    if "legend" in (args.get("opts") or {}):
+        return None
+
+    name = args.get("name")
+    if name is None:
+        idxs = range(len(pdata))
+    else:
+        idxs = [
+            i
+            for i, trace in enumerate(pdata)
+            if isinstance(trace, dict) and trace.get("name") == name
+        ]
+        # a missing named trace gets injected by update(), and a named update
+        # carrying more than one entry is rejected there
+        if len(idxs) != 1 or len(new_data) != 1:
+            return None
+
+    extensions = []
+    for idx, new_trace in zip(idxs, new_data):
+        trace = pdata[idx]
+        if not isinstance(trace, dict) or not isinstance(new_trace, dict):
+            return None
+        # heatmaps rewrite the z grid by direction instead of appending
+        if "heatmap" in (trace.get("type"), new_trace.get("type")):
+            return None
+
+        xs = new_trace.get("x")
+        if not isinstance(xs, list):
+            return None
+        # all-missing x is a masked update, which update() skips
+        if all(_is_missing_value(value) for value in xs):
+            continue
+
+        axes = ["x", "y"]
+        if trace.get("type") == "scatter3d":
+            axes.append("z")
+        for axis in axes:
+            current, added = trace.get(axis), new_trace.get(axis)
+            if not isinstance(current, list) or not isinstance(added, list):
+                return None
+            extensions.append(
+                ("/content/data/{0}/{1}".format(idx, axis), current, added)
+            )
+
+        marker = new_trace.get("marker")
+        if isinstance(marker, dict) and "color" in marker:
+            current_marker = trace.get("marker")
+            if not isinstance(current_marker, dict):
+                return None
+            current, added = current_marker.get("color"), marker["color"]
+            if not isinstance(current, list) or not isinstance(added, list):
+                return None
+            extensions.append(
+                ("/content/data/{0}/marker/color".format(idx), current, added)
+            )
+
+    return extensions
+
+
+def append_patch(p, args):
+    """Apply an append to `p` in place and return (p, ops), or None.
+
+    None means it wasn't a plain append; the caller should fall back to
+    update() plus a diff.
+
+    Only the sample arrays are handled by hand. The opts/layout/caption that
+    update_window() touches are still diffed, just against copies with the
+    sample data left out, so this can't drift from what the slow path reports.
+    """
+    extensions = _planned_extensions(p, args)
+    if extensions is None:
+        return None
+
+    content = p["content"]
+    old_pane_head = _pane_head(p)
+    old_content_head = _content_head(content)
+
+    ops = []
+    for path, current, added in extensions:
+        # update() does `trace[axis] + new[axis]`, rebuilding the array every
+        # time; extending in place is what keeps this O(samples added)
+        start = len(current)
+        current.extend(added)
+        for offset, value in enumerate(added):
+            ops.append(
+                {
+                    "op": "add",
+                    "path": "{0}/{1}".format(path, start + offset),
+                    "value": value,
+                }
+            )
+
+    # opts have to be applied before we diff for them. Op order doesn't matter
+    # to the client, every path here is distinct.
+    p = update_window(p, args)
+    p["contentID"] = get_rand_id()
+
+    head_ops = jsonpatch.make_patch(old_pane_head, _pane_head(p)).patch
+    content_ops = _reroot(
+        jsonpatch.make_patch(old_content_head, _content_head(content)).patch,
+        "/content",
+    )
+    return p, head_ops + content_ops + ops
+
+
+_COMPACT_ENCODER = json.JSONEncoder(separators=(",", ":"))
+
+
+def pane_fits_in(p, limit):
+    """Whether the serialized pane is at most `limit` bytes.
+
+    Encodes incrementally and bails at the first chunk past `limit`, so we stop
+    paying for a full serialization we only wanted a length from.
+
+    Measures the pane raw rather than through stringify(), which would have to
+    build the ordered structure first. That ordering only ever shortens things
+    (integral floats render as ints, sorting keys doesn't change length), so
+    anything that fits here fits there too. The reverse can miss by a few bytes
+    and we send the patch instead of the pane, which is fine.
+    """
+    total = 0
+    for chunk in _COMPACT_ENCODER.iterencode(p):
+        total += len(chunk)
+        if total > limit:
+            return False
+    return True
+
+
 class UpdateHandler(BaseHandler):
     @staticmethod
     def update_packet(
         p, args, max_text_lines, max_old_content, max_image_history, max_plot_history
     ):
+        # appends build their own patch; everything else falls through
+        appended = append_patch(p, args)
+        if appended is not None:
+            return appended
+
         # Shallow copy the packet to dynamically capture changes to top-level keys.
         old_p = p.copy()
 
@@ -491,7 +682,7 @@ class UpdateHandler(BaseHandler):
                 return
             raise
         # send the smaller of the patch and the updated pane
-        if len(stringify(p)) <= len(stringify(diff_packet)):
+        if pane_fits_in(p, len(stringify(diff_packet))):
             broadcast_msg = dict(p)
             broadcast_msg["eid"] = eid
             broadcast(handler, json.dumps(broadcast_msg, cls=NanSafeEncoder), eid)
