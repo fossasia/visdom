@@ -112,7 +112,7 @@ class OptunaCallback:
     ) -> None:
         if dashboard_env is not None and not isinstance(dashboard_env, str):
             raise TypeError("dashboard_env must be a string or None")
-        if dashboard_env == "":
+        if dashboard_env is not None and not dashboard_env.strip():
             raise ValueError("dashboard_env must not be empty")
         if isinstance(refresh_every, bool) or not isinstance(refresh_every, int):
             raise TypeError("refresh_every must be an integer")
@@ -155,6 +155,12 @@ class OptunaCallback:
             raise ValueError("objective_names must contain non-empty strings")
         if len(set(names)) != len(names):
             raise ValueError("objective_names must be unique")
+        if _INTERMEDIATE_METRIC_NAME in names:
+            raise ValueError(
+                "objective_names must not contain reserved name {!r}".format(
+                    _INTERMEDIATE_METRIC_NAME
+                )
+            )
         return names
 
     @staticmethod
@@ -219,6 +225,12 @@ class OptunaCallback:
         if len(names) != value_count:
             raise ValueError(
                 "expected {} objective name(s), got {}".format(value_count, len(names))
+            )
+        if _INTERMEDIATE_METRIC_NAME in names:
+            raise ValueError(
+                "objective names must not contain reserved name {!r}".format(
+                    _INTERMEDIATE_METRIC_NAME
+                )
             )
         return names
 
@@ -416,8 +428,14 @@ class OptunaCallback:
                 if complete_trials >= 2:
                     try:
                         importance = plot_param_importances(study, **kwargs)
-                    except ValueError:
-                        pass
+                    except (ImportError, ValueError) as error:
+                        warnings.warn(
+                            "Skipping Optuna parameter importance plot: {}".format(
+                                error
+                            ),
+                            RuntimeWarning,
+                            stacklevel=2,
+                        )
                     else:
                         importance.update_layout(
                             title="Parameter Importance — {}".format(objective_name)
@@ -433,8 +451,12 @@ class OptunaCallback:
                             params=list(self.contour_params),
                             **kwargs,
                         )
-                    except ValueError:
-                        pass
+                    except ValueError as error:
+                        warnings.warn(
+                            "Skipping Optuna contour plot: {}".format(error),
+                            RuntimeWarning,
+                            stacklevel=2,
+                        )
                     else:
                         contour.update_layout(
                             title="Contour — {}".format(objective_name)
@@ -447,8 +469,12 @@ class OptunaCallback:
                         study,
                         target_names=list(objective_names),
                     )
-                except ValueError:
-                    pass
+                except ValueError as error:
+                    warnings.warn(
+                        "Skipping Optuna Pareto front plot: {}".format(error),
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
                 else:
                     pareto.update_layout(title="Optuna Pareto Front")
                     figures.append(("optuna-pareto-front", pareto))
@@ -456,14 +482,25 @@ class OptunaCallback:
             if any(self._intermediate_values(trial) for trial in trials):
                 try:
                     intermediate = plot_intermediate_values(study)
-                except ValueError:
-                    pass
+                except ValueError as error:
+                    warnings.warn(
+                        "Skipping Optuna intermediate values plot: {}".format(error),
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
                 else:
                     intermediate.update_layout(title="Optuna Intermediate Values")
                     figures.append(("optuna-intermediate-values", intermediate))
 
             timeline = plot_timeline(study)
-            self._add_timeline_markers(timeline)
+            try:
+                self._add_timeline_markers(timeline)
+            except (AttributeError, TypeError, ValueError) as error:
+                warnings.warn(
+                    "Skipping Optuna timeline markers: {}".format(error),
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
             timeline.update_layout(title="Optuna Trial Timeline")
             figures.append(("optuna-timeline", timeline))
             return figures
@@ -589,6 +626,7 @@ class OptunaCallback:
             )
             return
 
-        self._trial_envs.append(payload["env"])
-        if self.create_dashboard:
-            self._maybe_update_dashboard(study)
+        with self._dashboard_lock:
+            self._trial_envs.append(payload["env"])
+            if self.create_dashboard:
+                self._maybe_update_dashboard(study)
