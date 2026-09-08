@@ -451,8 +451,12 @@ class UpdateHandler(BaseHandler):
         traces = content.get("data") if isinstance(content, dict) else None
         first = traces[0] if isinstance(traces, list) and traces else None
         trace_type = first.get("type") if isinstance(first, dict) else None
+        # opts and layout apply to every plot pane. Only a data update cares
+        # about the trace type, because update() reads x/y straight off it.
+        opts_only = not args.get("data")
         is_plot = isinstance(traces, list) and (
             not traces
+            or opts_only
             or trace_type in ["scatter", "scatter3d", "scattergl", "custom", "heatmap"]
         )
 

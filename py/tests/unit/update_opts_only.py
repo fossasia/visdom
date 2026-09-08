@@ -168,13 +168,54 @@ def test_a_pane_type_that_cannot_be_updated_is_reported():
     assert handler.dirtied == []
 
 
-def test_a_bar_pane_still_reports_its_trace_type():
+OTHER_TRACE_TYPES = [
+    ("bar", {"type": "bar", "x": ["a"], "y": [1]}),
+    ("boxplot", {"type": "box", "y": [1, 2, 3]}),
+    ("pie", {"type": "pie", "values": [1, 2], "labels": ["a", "b"]}),
+    ("histogram", {"type": "histogram", "x": [1, 2, 3]}),
+]
+
+OTHER_TRACE_IDS = [case[0] for case in OTHER_TRACE_TYPES]
+
+
+def _trace_pane(trace):
+    return _pane("plot", content={"data": [dict(trace)], "layout": {}})
+
+
+@pytest.mark.parametrize("name, trace", OTHER_TRACE_TYPES, ids=OTHER_TRACE_IDS)
+def test_opts_reach_a_pane_whose_traces_are_not_scatter(name, trace):
+    pane = _trace_pane(trace)
+    handler, sub = _opts_only(pane, layout=copy.deepcopy(LAYOUT), opts=dict(OPTS))
+    assert "win is not" not in handler.body
+    assert pane["title"] == "renamed"
+    assert pane["content"]["layout"]["title"] == {"text": "renamed"}
+    assert [msg["version"] for msg in sub.sent] == [2]
+
+
+@pytest.mark.parametrize("name, trace", OTHER_TRACE_TYPES, ids=OTHER_TRACE_IDS)
+def test_a_data_update_on_those_panes_is_still_refused(name, trace):
+    # only the opts path is opened up. update() reads x and y straight off a
+    # trace, which a pie or a y-only boxplot has not got.
+    pane = _trace_pane(trace)
+    handler, sub = _opts_only(pane, data=[dict(trace)], append=True, opts=dict(OPTS))
+    assert "win is not scatter" in handler.body
+    assert sub.sent == []
+    assert handler.dirtied == []
+
+
+def test_a_plot_built_without_a_layout_still_takes_one():
+    pane = _pane("plot", content={"data": [{"type": "scatter", "x": [1], "y": [1]}]})
+    _opts_only(pane, layout=copy.deepcopy(LAYOUT), opts=dict(OPTS))
+    assert pane["content"]["layout"] == copy.deepcopy(LAYOUT)
+
+
+def test_a_layout_that_is_not_a_dict_is_replaced_on_a_plot():
     pane = _pane(
         "plot",
-        content={"data": [{"type": "bar", "x": ["a"], "y": [1]}], "layout": {}},
+        content={"data": [{"type": "scatter", "x": [1], "y": [1]}], "layout": None},
     )
-    handler, _ = _opts_only(pane, opts=dict(OPTS))
-    assert "was bar" in handler.body
+    _opts_only(pane, layout={"showlegend": True}, opts=dict(OPTS))
+    assert pane["content"]["layout"] == {"showlegend": True}
 
 
 def test_a_named_update_without_data_is_a_client_error():

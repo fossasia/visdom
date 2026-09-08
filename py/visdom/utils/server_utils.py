@@ -415,11 +415,17 @@ def update_window(p, args):
     """Adds new args to a window if they exist"""
     content = p["content"]
     pdata = content.get("data") if isinstance(content, dict) else None
-    layout_update = args.get("layout", {})
-    if isinstance(content, dict) and isinstance(content.get("layout"), dict):
-        for layout_name, layout_val in layout_update.items():
-            if layout_val is not None:
-                content["layout"][layout_name] = layout_val
+    layout_update = args.get("layout") or {}
+    if layout_update and isinstance(content, dict):
+        layout = content.get("layout")
+        if not isinstance(layout, dict) and p.get("type") == "plot":
+            # a plot built without a layout still has to accept one; the other
+            # pane types have no layout and must not grow one
+            layout = content["layout"] = {}
+        if isinstance(layout, dict):
+            for layout_name, layout_val in layout_update.items():
+                if layout_val is not None:
+                    layout[layout_name] = layout_val
     opts = args.get("opts", {})
     for opt_name, opt_val in opts.items():
         if opt_val is not None:
