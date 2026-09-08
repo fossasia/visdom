@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import html
 import json
+import threading
 import warnings
 from collections import Counter
 from collections.abc import Mapping, Sequence
@@ -99,7 +100,7 @@ class OptunaCallback:
     ) -> None:
         if dashboard_env is not None and not isinstance(dashboard_env, str):
             raise TypeError("dashboard_env must be a string or None")
-        if dashboard_env == "":
+        if dashboard_env is not None and not dashboard_env.strip():
             raise ValueError("dashboard_env must not be empty")
         if isinstance(refresh_every, bool) or not isinstance(refresh_every, int):
             raise TypeError("refresh_every must be an integer")
@@ -116,6 +117,7 @@ class OptunaCallback:
         self._dashboard_created = False
         self._trials_since_refresh = 0
         self._trial_envs: list[str] = []
+        self._dashboard_lock = threading.RLock()
 
     @staticmethod
     def _validate_objective_names(
@@ -134,6 +136,12 @@ class OptunaCallback:
             raise ValueError("objective_names must contain non-empty strings")
         if len(set(names)) != len(names):
             raise ValueError("objective_names must be unique")
+        if _INTERMEDIATE_METRIC_NAME in names:
+            raise ValueError(
+                "objective_names must not contain reserved name {!r}".format(
+                    _INTERMEDIATE_METRIC_NAME
+                )
+            )
         return names
 
     @staticmethod
@@ -199,6 +207,12 @@ class OptunaCallback:
             raise ValueError(
                 "expected {} objective name(s), got {}".format(value_count, len(names))
             )
+        if _INTERMEDIATE_METRIC_NAME in names:
+            raise ValueError(
+                "objective names must not contain reserved name {!r}".format(
+                    _INTERMEDIATE_METRIC_NAME
+                )
+            )
         return names
 
     def _trial_tags(self, study: Any, trial: Any) -> dict[str, str]:
@@ -221,6 +235,49 @@ class OptunaCallback:
         """Return reported intermediate values ordered by training step."""
         values = getattr(trial, "intermediate_values", None) or {}
         return sorted(values.items())
+
+    @staticmethod
+    def _add_timeline_markers(timeline: Any) -> None:
+        """Keep very short trials visible without changing their duration bars.
+
+        Optuna renders each trial as a horizontal bar whose width is its runtime.
+        When callback or scheduler overhead dominates a study's wall-clock span,
+        sub-millisecond trials can become substantially narrower than one browser
+        pixel. A fixed-size marker at each trial's true start time preserves the
+        timeline semantics while keeping those trials discoverable and hoverable.
+        """
+        for trace in tuple(timeline.data):
+            if trace.type != "bar" or trace.orientation != "h":
+                continue
+
+            starts = list(trace.base) if trace.base is not None else []
+            durations = list(trace.x) if trace.x is not None else []
+            trial_numbers = list(trace.y) if trace.y is not None else []
+            if not starts or not (len(starts) == len(durations) == len(trial_numbers)):
+                continue
+
+            text = list(trace.text) if trace.text is not None else None
+            color = trace.marker.color if trace.marker is not None else None
+            timeline.add_scatter(
+                x=starts,
+                y=trial_numbers,
+                mode="markers",
+                name=trace.name,
+                legendgroup=trace.name,
+                showlegend=False,
+                marker={
+                    "color": color,
+                    "size": 9,
+                    "symbol": "circle",
+                    "line": {"color": "white", "width": 1},
+                },
+                customdata=durations,
+                text=text,
+                hovertemplate=(
+                    "Start: %{x}<br>Duration: %{customdata:.3f} ms"
+                    "<br>%{text}<extra>" + html.escape(str(trace.name)) + "</extra>"
+                ),
+            )
 
     def _summary_html(self, study: Any) -> str:
         trials = study.get_trials(deepcopy=False)
@@ -295,6 +352,7 @@ class OptunaCallback:
                 plot_intermediate_values,
                 plot_optimization_history,
                 plot_param_importances,
+                plot_pareto_front,
                 plot_timeline,
             )
 
@@ -322,8 +380,14 @@ class OptunaCallback:
                 if complete_trials >= 2:
                     try:
                         importance = plot_param_importances(study, **kwargs)
-                    except ValueError:
-                        pass
+                    except (ImportError, ValueError) as error:
+                        warnings.warn(
+                            "Skipping Optuna parameter importance plot: {}".format(
+                                error
+                            ),
+                            RuntimeWarning,
+                            stacklevel=2,
+                        )
                     else:
                         importance.update_layout(
                             title="Parameter Importance — {}".format(objective_name)
@@ -332,16 +396,44 @@ class OptunaCallback:
                             ("optuna-importance{}".format(suffix), importance)
                         )
 
+            if complete_trials and len(objective_names) in (2, 3):
+                try:
+                    pareto = plot_pareto_front(
+                        study,
+                        target_names=list(objective_names),
+                    )
+                except ValueError as error:
+                    warnings.warn(
+                        "Skipping Optuna Pareto front plot: {}".format(error),
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+                else:
+                    pareto.update_layout(title="Optuna Pareto Front")
+                    figures.append(("optuna-pareto-front", pareto))
+
             if any(self._intermediate_values(trial) for trial in trials):
                 try:
                     intermediate = plot_intermediate_values(study)
-                except ValueError:
-                    pass
+                except ValueError as error:
+                    warnings.warn(
+                        "Skipping Optuna intermediate values plot: {}".format(error),
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
                 else:
                     intermediate.update_layout(title="Optuna Intermediate Values")
                     figures.append(("optuna-intermediate-values", intermediate))
 
             timeline = plot_timeline(study)
+            try:
+                self._add_timeline_markers(timeline)
+            except (AttributeError, TypeError, ValueError) as error:
+                warnings.warn(
+                    "Skipping Optuna timeline markers: {}".format(error),
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
             timeline.update_layout(title="Optuna Trial Timeline")
             figures.append(("optuna-timeline", timeline))
             return figures
@@ -371,42 +463,44 @@ class OptunaCallback:
         loading trials from a resumed study is handled by the later resume
         integration.
         """
-        try:
-            payload = self._build_dashboard_payload(study)
-            self.viz.text(
-                payload["summary"],
-                win="optuna-summary",
-                env=payload["env"],
-                opts={"title": "Optuna Study"},
-            )
-            self.viz.hparams(
-                env_ids=payload["env_ids"],
-                win="optuna-trials",
-                env=payload["env"],
-                opts={"title": "Optuna Trials"},
-            )
-            for win, figure in payload["figures"]:
-                self.viz.plotlyplot(figure, win=win, env=payload["env"])
-        except Exception as error:
-            if self.raise_on_error:
-                raise
-            warnings.warn(
-                "OptunaCallback failed to update the dashboard: {}".format(error),
-                RuntimeWarning,
-                stacklevel=2,
-            )
-            return False
-        self._dashboard_created = True
-        self._trials_since_refresh = 0
-        return True
+        with self._dashboard_lock:
+            try:
+                payload = self._build_dashboard_payload(study)
+                self.viz.text(
+                    payload["summary"],
+                    win="optuna-summary",
+                    env=payload["env"],
+                    opts={"title": "Optuna Study"},
+                )
+                self.viz.hparams(
+                    env_ids=payload["env_ids"],
+                    win="optuna-trials",
+                    env=payload["env"],
+                    opts={"title": "Optuna Trials"},
+                )
+                for win, figure in payload["figures"]:
+                    self.viz.plotlyplot(figure, win=win, env=payload["env"])
+            except Exception as error:
+                if self.raise_on_error:
+                    raise
+                warnings.warn(
+                    "OptunaCallback failed to update the dashboard: {}".format(error),
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+                return False
+            self._dashboard_created = True
+            self._trials_since_refresh = 0
+            return True
 
     def _maybe_update_dashboard(self, study: Any) -> None:
-        self._trials_since_refresh += 1
-        if (
-            not self._dashboard_created
-            or self._trials_since_refresh >= self.refresh_every
-        ):
-            self.update_dashboard(study)
+        with self._dashboard_lock:
+            self._trials_since_refresh += 1
+            if (
+                not self._dashboard_created
+                or self._trials_since_refresh >= self.refresh_every
+            ):
+                self.update_dashboard(study)
 
     def _build_payload(self, study: Any, trial: Any) -> dict[str, Any]:
         env = self.trial_env(trial, study)
@@ -464,6 +558,7 @@ class OptunaCallback:
             )
             return
 
-        self._trial_envs.append(payload["env"])
-        if self.create_dashboard:
-            self._maybe_update_dashboard(study)
+        with self._dashboard_lock:
+            self._trial_envs.append(payload["env"])
+            if self.create_dashboard:
+                self._maybe_update_dashboard(study)
