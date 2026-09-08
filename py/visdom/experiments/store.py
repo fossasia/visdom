@@ -124,9 +124,17 @@ def _rank_key(entry, descending):
     scoring the same keep the order they were scanned in, whichever direction
     the sort runs — the property a stable ``list.sort`` used to provide, which
     selecting through a heap does not.
+
+    The type tag from :func:`_order_key` is negated for the same reason: it
+    groups numbers ahead of everything else, and reversing the comparison would
+    otherwise reverse that grouping too, ranking a run whose value is a string
+    above the run holding the highest number.
     """
     seq, value, _ = entry
-    return (_order_key(value), -seq if descending else seq)
+    kind, number, text = _order_key(value)
+    if descending:
+        return (-kind, number, text, -seq)
+    return (kind, number, text, seq)
 
 
 def _rank(entries, descending, keep=None):

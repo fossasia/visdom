@@ -473,3 +473,36 @@ def test_log_returns_experiment_but_read_is_empty():
     assert isinstance(store.log_experiment("main", params={"lr": 0.01}), Experiment)
     assert store.get_experiment("main") is None
     assert store.list_experiments() == []
+
+
+# -- ranking a field that holds mixed types -----------------------------------
+
+
+def _ranked(experiments, descending):
+    result = experiments.search(sort_by="acc", descending=descending)
+    found = result["experiments"] if isinstance(result, dict) else result
+    return [experiment.env_id for experiment in found]
+
+
+def test_a_string_never_outranks_the_highest_number(experiments):
+    """Numbers lead in both directions, so a string cannot top the ranking.
+
+    ``_order_key`` tags numbers ahead of everything else; reversing the whole
+    key for a descending sort used to reverse that tag too, putting the run
+    whose value is a string above the run holding the largest number.
+    """
+    experiments.log_experiment("run_five", params={"acc": 5})
+    experiments.log_experiment("run_ten", params={"acc": 10})
+    experiments.log_experiment("run_str", params={"acc": "pending"})
+
+    assert _ranked(experiments, descending=True) == ["run_ten", "run_five", "run_str"]
+    assert _ranked(experiments, descending=False) == ["run_five", "run_ten", "run_str"]
+
+
+def test_equal_values_keep_their_scan_order_in_both_directions(experiments):
+    """Reversing the comparison must not reverse ties."""
+    for env_id in ("first", "second", "third"):
+        experiments.log_experiment(env_id, params={"acc": 7})
+
+    assert _ranked(experiments, descending=True) == ["first", "second", "third"]
+    assert _ranked(experiments, descending=False) == ["first", "second", "third"]
