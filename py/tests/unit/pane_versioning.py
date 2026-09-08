@@ -23,6 +23,14 @@ sits in ``update_packet``, and what needs pinning is that no dispatch arm can
 skip it. Each type is also checked for the ``/version`` op in the patch it
 broadcasts, since a server-side bump the patch does not carry desynchronises
 the frontend exactly as badly as no bump at all.
+
+The other half of the rule is that a version is only spent on an update that
+was actually applied. ``update()`` declines several of them -- a ``/update``
+aimed at a table pane, a slider move on a pane holding no frames, a heatmap
+append whose shape or column names do not fit the plot -- and an unrecognised
+embeddings ``update_type`` applies nothing either. Bumping for one of those
+announces a revision that carries no change, so the second half of this file
+pins the refusals: no bump, no patch, and nothing put on the wire.
 """
 
 import copy
@@ -138,7 +146,13 @@ def _scatter():
     return pane, args
 
 
-def _heatmap():
+def _heatmap(labels=False):
+    """An unlabelled heatmap appends rows indefinitely.
+
+    Passing ``labels`` gives the plot column names, which puts ``update()``
+    into the branch that checks an append's names against the plot's -- the
+    one that turns duplicates and mismatches away.
+    """
     pane = _pane(
         "plot",
         content={
@@ -146,8 +160,8 @@ def _heatmap():
                 {
                     "type": "heatmap",
                     "z": [[1, 2]],
-                    "x": ["a", "b"],
-                    "y": ["c"],
+                    "x": ["a", "b"] if labels else None,
+                    "y": ["c"] if labels else None,
                     "name": "hm",
                 }
             ],
@@ -155,21 +169,29 @@ def _heatmap():
         },
     )
     args = {
-        "data": [{"type": "heatmap", "z": [[3, 4]], "x": None, "y": ["d"]}],
+        "data": [
+            {
+                "type": "heatmap",
+                "z": [[3, 4]],
+                "x": None,
+                "y": ["d"] if labels else None,
+            }
+        ],
         "updateDir": "appendRow",
         "append": True,
     }
     return pane, args
 
 
-# The types ``UpdateHandler.wrap_func`` accepts, one builder each. Embeddings
-# are absent on purpose: they take the ``update_embeddings_packet`` route and
-# are covered separately below.
+# The types ``UpdateHandler.wrap_func`` accepts and applies, one builder each.
+# Embeddings are absent on purpose: they take the ``update_embeddings_packet``
+# route and are covered separately below. So is ``table``, whose builder feeds
+# the rejected-update cases instead -- ``update()`` refuses a ``/update`` on a
+# table outright, so there is never a revision for it to announce.
 BUILDERS = {
     "text": _text,
     "image_history": _image_history,
     "plot_history": _plot_history,
-    "table": _table,
     "scatter": _scatter,
     "heatmap": _heatmap,
 }
@@ -277,3 +299,157 @@ def test_an_unknown_embeddings_update_leaves_the_version_alone():
     )
     assert patch == []
     assert pane["version"] == 1
+
+
+# -- Rejected updates --------------------------------------------------------
+
+
+def _table_update():
+    """``/update`` on a table: ``update()`` logs it and applies nothing."""
+    return _table()
+
+
+def _empty_image_slider():
+    """A slider move on a pane holding no frames -- nothing to select."""
+    pane = _pane("image_history", content=[], selected=0, show_slider=True)
+    return pane, {"data": [{"type": "image_update_selected", "selected": 2}]}
+
+
+def _duplicate_heatmap_labels():
+    """An append carrying a column name the plot already has."""
+    pane, args = _heatmap(labels=True)
+    args["data"][0]["y"] = ["c"]
+    return pane, args
+
+
+def _mismatched_heatmap_row():
+    """An append whose rows are wider than the plot's."""
+    pane, args = _heatmap(labels=True)
+    args["data"][0]["z"] = [[3, 4, 5]]
+    return pane, args
+
+
+def _unnamed_heatmap_append():
+    """An append with no column names for a plot that has them."""
+    pane, args = _heatmap(labels=True)
+    args["data"][0]["y"] = None
+    return pane, args
+
+
+REJECTED = {
+    "table": _table_update,
+    "empty_image_slider": _empty_image_slider,
+    "duplicate_heatmap_labels": _duplicate_heatmap_labels,
+    "mismatched_heatmap_row": _mismatched_heatmap_row,
+    "unnamed_heatmap_append": _unnamed_heatmap_append,
+}
+
+
+@pytest.mark.parametrize("case", sorted(REJECTED))
+def test_a_rejected_update_is_not_a_revision(case):
+    """Nothing was applied, so there is no new state to number or to send."""
+    pane, args = REJECTED[case]()
+    before = copy.deepcopy(pane)
+    pane, patch = _update_packet(pane, args)
+    assert patch == []
+    assert pane == before
+
+
+@pytest.mark.parametrize("case", sorted(REJECTED))
+def test_repeated_rejections_never_advance_the_version(case):
+    pane, args = REJECTED[case]()
+    for _ in range(4):
+        pane, _ = _update_packet(pane, args)
+    assert pane["version"] == 1
+
+
+def test_a_rejection_leaves_no_gap_in_the_sequence():
+    """The accepted update after a refusal is the client's next number.
+
+    A refusal that bumped would put the pane two ahead of the browser, and the
+    frontend takes a patch only when it is exactly one ahead -- so the next
+    real update would be dropped and the whole environment re-queried, which is
+    the reload the bump exists to prevent.
+    """
+    pane, accepted = _heatmap()
+    pane, _ = _update_packet(pane, accepted)
+    assert pane["version"] == 2
+
+    too_wide = copy.deepcopy(accepted)
+    too_wide["data"][0]["z"] = [[1, 2, 3]]
+    pane, patch = _update_packet(pane, too_wide)
+    assert patch == []
+
+    pane, patch = _update_packet(pane, accepted)
+    assert pane["version"] == 3
+    assert _versions_in(patch) == [3]
+
+
+# -- What the subscriber is sent ---------------------------------------------
+#
+# ``wrap_func`` is driven directly here rather than ``update_packet``, because
+# the empty patch is only half the fix: the handler also has to decline to
+# broadcast it. A ``window_update`` carrying the version the client already
+# holds fails the frontend's check just as a stale one does.
+
+
+def _serve(handler, pane, win="win_0", eid="main"):
+    """Put ``pane`` in the handler's state and return its window id."""
+    pane["id"] = win
+    handler.state[eid] = {"jsons": {win: pane}, "reload": {}}
+    return win
+
+
+def _update(handler, win, data, eid="main"):
+    UpdateHandler.wrap_func(handler, {"win": win, "eid": eid, "data": data})
+
+
+def test_a_rejected_update_is_not_broadcast(handler):
+    sub = handler.add_sub()
+    pane, args = _table()
+    win = _serve(handler, pane)
+
+    _update(handler, win, args["data"])
+
+    assert sub.sent == []
+    assert handler.dirtied == []
+    assert handler.written == [win]
+
+
+def test_an_unknown_embeddings_update_is_not_broadcast(handler):
+    """The empty patch used to go out anyway, announcing an unmoved version."""
+    sub = handler.add_sub()
+    win = _serve(handler, _embeddings_pane())
+
+    _update(handler, win, {"update_type": "Nonsense"})
+
+    assert sub.sent == []
+    assert handler.dirtied == []
+    assert handler.written == [win]
+
+
+def test_an_applied_embeddings_update_is_still_broadcast(handler):
+    sub = handler.add_sub()
+    win = _serve(handler, _embeddings_pane())
+
+    _update(handler, win, {"update_type": "EntitySelected", "selected": 1})
+
+    packet = sub.last("window_update")
+    assert packet["version"] == 2
+    assert {"op": "add", "path": "/version", "value": 2} in packet["content"]
+    assert handler.dirtied == ["main"]
+
+
+def test_a_refused_embeddings_update_leaves_no_gap(handler):
+    """The versions a subscriber sees stay dense across a refusal."""
+    sub = handler.add_sub()
+    win = _serve(handler, _embeddings_pane())
+
+    _update(handler, win, {"update_type": "EntitySelected", "selected": 1})
+    _update(handler, win, {"update_type": "Nonsense"})
+    _update(handler, win, {"update_type": "RegionSelected", "points": [[5, 6]]})
+
+    versions = [
+        msg["version"] for msg in sub.sent if msg.get("command") == "window_update"
+    ]
+    assert versions == [2, 3]

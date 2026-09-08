@@ -147,8 +147,12 @@ class TestEmbeddingsBroadcasts(BroadcastTestCase):
             for msg in sent(sub)
             if isinstance(msg, dict) and msg.get("command") == "window_update"
         ][-1]
+        # "add" rather than "replace": a pane the browser loaded from an env
+        # saved before panes carried a version has no ``/version`` member for
+        # "replace" to land on, and a patch that fails to apply reloads the
+        # whole environment. "add" overwrites when the member is there.
         self.assertIn(
-            {"op": "replace", "path": "/version", "value": packet["version"]},
+            {"op": "add", "path": "/version", "value": packet["version"]},
             packet["content"],
         )
 
@@ -169,6 +173,63 @@ class TestPlotBroadcasts(BroadcastTestCase):
                 append=True,
             )
         self.assert_updates_are_consecutive(sub, win)
+
+
+class TestRejectedUpdates(BroadcastTestCase):
+    """An update the server declines announces nothing.
+
+    A ``window_update`` whose version the client already holds fails the same
+    "exactly one ahead" check a stale one does, so a refusal that broadcast --
+    or that bumped without having changed anything -- sent the browser back for
+    the entire environment.
+    """
+
+    def update_packets(self, sub, win):
+        return [
+            msg
+            for msg in sent(sub)
+            if isinstance(msg, dict)
+            and msg.get("command") == "window_update"
+            and msg.get("win") == win
+        ]
+
+    def test_a_table_update_is_not_broadcast(self):
+        """``/update`` on a table is ignored; ``vis.table()`` replaces it."""
+        sub = self.subscribe()
+        args = content_args("table", [["a"]])
+        win = self.create_window(args["data"], layout=args["layout"])
+
+        self.update(win, [{"type": "table", "content": [["b"]]}])
+
+        self.assertEqual(self.update_packets(sub, win), [])
+        self.assertEqual(self.panes()[win]["version"], 1)
+
+    def test_an_unknown_embeddings_update_is_not_broadcast(self):
+        sub = self.subscribe()
+        args = content_args(
+            "embeddings",
+            {"data": [[1, 2], [3, 4]], "labels": ["a", "b"], "selected": None},
+        )
+        win = self.create_window(args["data"], layout=args["layout"])
+
+        self.update(win, {"update_type": "Nonsense"})
+
+        self.assertEqual(self.update_packets(sub, win), [])
+        self.assertEqual(self.panes()[win]["version"], 1)
+
+    def test_a_refusal_leaves_no_gap_in_the_announced_versions(self):
+        sub = self.subscribe()
+        args = content_args(
+            "embeddings",
+            {"data": [[1, 2], [3, 4]], "labels": ["a", "b"], "selected": None},
+        )
+        win = self.create_window(args["data"], layout=args["layout"])
+
+        self.update(win, {"update_type": "EntitySelected", "selected": 1})
+        self.update(win, {"update_type": "Nonsense"})
+        self.update(win, {"update_type": "RegionSelected", "points": [[5, 6]]})
+
+        self.assertEqual(self.update_versions(sub, win), [2, 3], self.panes())
 
 
 if __name__ == "__main__":
