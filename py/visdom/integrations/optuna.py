@@ -303,12 +303,14 @@ class OptunaCallback:
 
             text = list(trace.text) if trace.text is not None else None
             color = trace.marker.color if trace.marker is not None else None
+            legendgroup = trace.legendgroup or trace.name
+            trace.legendgroup = legendgroup
             timeline.add_scatter(
                 x=starts,
                 y=trial_numbers,
                 mode="markers",
                 name=trace.name,
-                legendgroup=trace.name,
+                legendgroup=legendgroup,
                 showlegend=False,
                 marker={
                     "color": color,
