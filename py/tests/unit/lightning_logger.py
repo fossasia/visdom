@@ -15,7 +15,6 @@ Trainer or training loop. viz.line / viz.properties return a fresh handle
 per call so window bookkeeping can be asserted.
 """
 
-import importlib.util
 import unittest
 import warnings
 from types import SimpleNamespace
@@ -23,13 +22,13 @@ from unittest.mock import Mock
 
 import pytest
 
-if not (
-    importlib.util.find_spec("lightning")
-    or importlib.util.find_spec("pytorch_lightning")
-):
-    pytest.skip("lightning is not installed", allow_module_level=True)
-
-from visdom.loggers.lightning import VisdomLightningLogger
+try:
+    from visdom.loggers.lightning import VisdomLightningLogger
+except ImportError:
+    pytest.skip(
+        "lightning (or pytorch-lightning) is not installed",
+        allow_module_level=True,
+    )
 
 pytestmark = pytest.mark.unit
 
