@@ -375,3 +375,24 @@ class ServerState:
     def stop_socket_monitor(self):
         if self._socket_wrap_monitor is not None:
             self._socket_wrap_monitor.stop()
+
+    # ----- shutdown ----- #
+
+    def close_connections(self):
+        """Close every open client connection and forget it.
+
+        Shutdown used to rebind ``Application.subs``/``sources`` to empty
+        lists, which left the sockets themselves open and this state -- the
+        holder of the real dictionaries every handler registers into --
+        untouched. Closing a connection lets its handler unregister itself;
+        clearing the containers afterwards covers a connection whose close
+        path never ran, and a handler that closes twice is harmless.
+        """
+        self.stop_socket_monitor()
+        for connections in (self.subs, self.sources):
+            for connection in list(connections.values()):
+                try:
+                    connection.close()
+                except Exception:
+                    logging.exception("Failed to close a client connection")
+            connections.clear()
