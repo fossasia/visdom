@@ -543,19 +543,21 @@ const App = () => {
     sendEnvQuery(selectedNodes, showAllEnvWindows);
   };
   const onEnvDelete = (envsToDelete, previousEnv) => {
-    const deletedEnvs = new Set(envsToDelete);
+    const fallbackEnv =
+      selection.envIDs.find((env) => !envsToDelete.includes(env)) || 'main';
+    const sentEnvs = envsToDelete.filter((env) =>
+      sendEnvDelete(env, env === previousEnv ? fallbackEnv : previousEnv)
+    );
+    if (sentEnvs.length === 0) {
+      return [];
+    }
+
+    const deletedEnvs = new Set(sentEnvs);
     const remainingEnvIDs = selection.envIDs.filter(
       (env) => !deletedEnvs.has(env)
     );
     const nextEnvIDs = remainingEnvIDs.length > 0 ? remainingEnvIDs : ['main'];
     const selectionChanged = remainingEnvIDs.length !== selection.envIDs.length;
-
-    const deleteMessagesSent = envsToDelete.every((env) =>
-      sendEnvDelete(env, env === previousEnv ? nextEnvIDs[0] : previousEnv)
-    );
-    if (!deleteMessagesSent) {
-      return false;
-    }
 
     if (selectionChanged) {
       setSelection((prev) => ({
@@ -595,7 +597,7 @@ const App = () => {
     if (selectionChanged) {
       sendEnvQuery(nextEnvIDs, showAllEnvWindows);
     }
-    return true;
+    return sentEnvs;
   };
 
   const onTagsSave = (env, tags) => {

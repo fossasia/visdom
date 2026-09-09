@@ -66,9 +66,12 @@ function EnvModal(props) {
     setTagEnv(activeEnv || envList[0] || '');
     setTagSaveStatus('idle');
     setTagSaveError('');
+  }, [activeEnv, show]);
+
+  useEffect(() => {
     setEnvFilter('');
     setSelectedEnvs([]);
-  }, [activeEnv, show]);
+  }, [show]);
 
   useEffect(() => {
     setTagRows(rowsFromTags(tags[tagEnv]));
@@ -184,7 +187,6 @@ function EnvModal(props) {
         value={envFilter}
         onChange={(ev) => {
           setEnvFilter(ev.target.value);
-          setSelectedEnvs([]);
         }}
         style={{ marginBottom: '10px', width: '100%' }}
       />
@@ -270,23 +272,34 @@ function EnvModal(props) {
             if (selectedEnvsSet.has(activeEnv)) {
               sortedEnvs.push(activeEnv);
             }
-            const deletionRequested = onEnvDelete(sortedEnvs, activeEnv);
-            if (!deletionRequested) {
+            const requestedDeletions = onEnvDelete(sortedEnvs, activeEnv);
+            if (requestedDeletions.length === 0) {
               showToast(
                 'Unable to delete environments because the server connection is unavailable.',
                 'error'
               );
               return;
             }
+            const requestedDeletionSet = new Set(requestedDeletions);
+            const failedDeletions = deletedEnvs.filter(
+              (env) => !requestedDeletionSet.has(env)
+            );
             if (
-              deletedEnvs.includes(tagEnv) &&
-              !deletedEnvs.includes(activeEnv)
+              requestedDeletionSet.has(tagEnv) &&
+              !requestedDeletionSet.has(activeEnv)
             ) {
               setTagEnv(activeEnv || 'main');
               setTagSaveStatus('idle');
               setTagSaveError('');
             }
-            setSelectedEnvs([]);
+            setSelectedEnvs(failedDeletions);
+            if (failedDeletions.length > 0) {
+              showToast(
+                'Some environment deletion requests could not be sent.',
+                'error'
+              );
+              return;
+            }
             showToast(
               deletedEnvs.length === 1
                 ? `Successfully deleted environment "${deletedEnvs[0]}".`
