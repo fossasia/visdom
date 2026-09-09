@@ -386,16 +386,35 @@ def _lookup(record: dict, key: str) -> Any:
     return cursor
 
 
-def _to_number(value: Any) -> Optional[float]:
-    """Coerce ``value`` to a float for numeric comparison, or ``None``.
+def _to_number(value: Any) -> Optional[int | float]:
+    """Coerce ``value`` to a number for comparison, or ``None``.
 
     ``bool`` is intentionally not treated as a number so that ``amp = 1`` does
     not silently match a boolean ``True``; booleans compare via :func:`_to_bool`.
+
+    A value that is already a number is returned unchanged rather than cast to
+    ``float``. JSON puts no bound on integer length, so a param can hold an
+    integer far too wide for a float — and ``float()`` does not saturate on one
+    of those, it raises ``OverflowError``. Since nothing between here and the
+    request catches it, that turns a comparison against such a value into a 500
+    for the whole search. :func:`~visdom.experiments.store._is_number` already
+    guards the sort path against exactly this; the filter path is the other
+    half of it.
+
+    Keeping the integer also keeps the comparison exact. Casting to ``float``
+    rounds anything past 53 bits of mantissa, which made two genuinely
+    different values compare equal — ``steps = 100000000000000000001`` matched
+    a run that logged ``100000000000000000000``. Python compares ``int``
+    against ``float`` without routing either through the other's precision, so
+    the values now answer for themselves.
+
+    Only a string still needs converting, and that conversion cannot raise the
+    same way: ``float`` of an over-large *string* saturates to ``inf``.
     """
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
-        return float(value)
+        return value
     if isinstance(value, str):
         try:
             return float(value)
@@ -424,17 +443,23 @@ def _equals(actual: Any, expected: Any) -> bool:
         return actual_bool is not None and actual_bool == expected
     if isinstance(expected, (int, float)):
         actual_number = _to_number(actual)
-        return actual_number is not None and actual_number == float(expected)
+        return actual_number is not None and actual_number == expected
     return str(actual) == str(expected)
 
 
 def _order(actual: Any, op: str, expected: Any) -> bool:
-    """Apply an ordering operator, numerically when the literal is numeric."""
+    """Apply an ordering operator, numerically when the literal is numeric.
+
+    The literal is used as parsed, for the reason :func:`_to_number` gives: a
+    query may carry an integer wider than a float, and casting it would raise
+    ``OverflowError`` rather than saturate. ``MAX_QUERY_LENGTH`` bounds how wide
+    that is, so the comparison stays cheap.
+    """
     if isinstance(expected, (int, float)) and not isinstance(expected, bool):
         left = _to_number(actual)
         if left is None:
             return False
-        right: Any = float(expected)
+        right: Any = expected
     else:
         left = str(actual)
         right = str(expected)
