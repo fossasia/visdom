@@ -614,10 +614,24 @@ model.fit(x_train, y_train, epochs=20, callbacks=[logger])
 
 Each metric gets its own window titled `"<name> (step)"`, throttled to one send every `log_every` batches. The optimizer's current learning rate is read (not computed) and plotted alongside as `lr`.
 
+**Experiment tracking with `params`** — records the run in the ExperimentStore alongside the charts, so it becomes queryable through [`vis.search_experiments`](#vissearch_experiments) / [`vis.compare_experiments`](#viscompare_experiments). Off by default. Without `params` the logger only ever calls `viz.line()`:
+
+```python
+logger = VisdomKerasLogger(viz, env="keras_run", params={"lr": 0.01})
+model.fit(x_train, y_train, epochs=20, callbacks=[logger])
+
+viz.search_experiments("status = finished")
+```
+
+Hyper-parameters are recorded when training begins, each epoch's metrics as they are plotted, and the run is marked `finished` when `fit()` returns. Only epoch metrics are recorded — per-batch values from `log_every` stay visualization-only so a run's metric history keeps the granularity the search and compare views read it at.
+
+**Note:** a finished experiment rejects further writes, so an env records one tracked run. Give every run its own env, including a repeat run of the same script. Keras reports no exception to `on_train_end`, so a tracked run is always recorded as `finished`. Call `viz.finish_experiment(status="failed", env=...)` directly to record a run that did not.
+
 **Parameters:**
 - `viz`: a connected `visdom.Visdom()` instance
 - `env`: environment name (default: `viz.env` if set, otherwise auto-generated from timestamp)
 - `log_every`: also plot metrics at batch granularity, one send every N batches (default: `None`, disabled)
+- `params`: hyper-parameters to record, opting the run into experiment tracking (default: `None`, disabled)
 
 **Note:** each call to `viz.line()` is a synchronous network request made on the training thread. Pick a `log_every` large enough that it doesn't stall training waiting on the server — 50+ is a reasonable default on GPU.
 
@@ -1024,6 +1038,12 @@ The following `opts` are supported:
 - `opts.markerborderwidth`: marker border line width (`float`; default = 0.5)
 - `opts.legend`           : `table` containing legend names
 - `opts.textlabels`       : text label for each point (`list`: default = `None`)
+- `opts.aspectmode`       : how the three axes of a 3D plot are scaled (`string`; default = `'auto'`). One of:
+  - `auto`   : proportional to the data extents (like `data`), but Plotly switches to `cube` when one axis spans more than 4x the others -- so a plot with one dominant dimension silently renders distorted.
+  - `data`   : always proportional to the data extents, so 1 unit looks the same on every axis -- use this for point clouds, SLAM maps, trajectories, or anything where shape must be preserved.
+  - `cube`   : all three axes drawn the same length regardless of the data, deliberately distorting proportions to fill a cube.
+  - `manual` : proportions taken from `opts.aspectratio` (falls back to `1:1:1` if not set).
+- `opts.aspectratio`      : per-axis scale for `manual` mode, a dict `{'x': .., 'y': .., 'z': ..}` (`dict`; default = `None`).
 - `opts.layoutopts`       : dict of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 - `opts.traceopts`        : dict mapping trace names or indices to dicts of additional options that the graph backend accepts. For example `traceopts = {'plotly': {'myTrace': {'mode': 'markers'}}}`.
 - `opts.webgl`            : use WebGL for plotting (`boolean`; default = `false`). It is faster if a plot contains too many points. Use sparingly as browsers won't allow more than a couple of WebGL contexts on a single page.
@@ -1070,6 +1090,8 @@ The following `opts` are supported:
 - `opts.linecolor`   : line colors (`np.array`; default = None)
 - `opts.dash`        : line dash type for each line (`np.array`; default = 'solid'), one of `solid`, `dash`, `dashdot` or `dash`, size should match number of lines being drawn
 - `opts.legend`      : `table` containing legend names
+- `opts.aspectmode`  : axis scaling for 3D line plots (`string`; default = `'auto'`); `auto` is proportional to the data but flips to `cube` when one axis is over 4x the others, `data` stays proportional so shape is preserved, `cube` forces all axes to equal length, `manual` uses `opts.aspectratio`.
+- `opts.aspectratio` : per-axis scale `{'x': .., 'y': .., 'z': ..}` for `manual` mode (`dict`; default = `None`).
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 - `opts.traceopts`   : `dict` mapping trace names or indices to `dict`s of additional options that plot.ly accepts for a trace.
 - `opts.webgl`       : use WebGL for plotting (`boolean`; default = `false`). It is faster if a plot contains too many points. Use sparingly as browsers won't allow more than a couple of WebGL contexts on a single page.
@@ -1263,6 +1285,8 @@ The following `opts` are supported:
 - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
 - `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
 - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
+- `opts.aspectmode`  : axis scaling for the 3D surface (`string`; default = `'auto'`); `auto` is proportional to the data but flips to `cube` when one axis is over 4x the others, `data` stays proportional so shape is preserved, `cube` forces all axes to equal length, `manual` uses `opts.aspectratio`.
+- `opts.aspectratio` : per-axis scale `{'x': .., 'y': .., 'z': ..}` for `manual` mode (`dict`; default = `None`).
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 
 #### vis.contour
@@ -1297,6 +1321,8 @@ The following `opts` are supported:
 
 - `opts.color`: color (`string`)
 - `opts.opacity`: opacity of polygons (`number` between 0 and 1)
+- `opts.aspectmode`: axis scaling for a 3D (`Nx3`) mesh (`string`; default = `'auto'`); `auto` is proportional to the data but flips to `cube` when one axis is over 4x the others, `data` stays proportional so shape is preserved, `cube` forces all axes to equal length, `manual` uses `opts.aspectratio`.
+- `opts.aspectratio`: per-axis scale `{'x': .., 'y': .., 'z': ..}` for `manual` mode (`dict`; default = `None`).
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 
 #### vis.sankey
