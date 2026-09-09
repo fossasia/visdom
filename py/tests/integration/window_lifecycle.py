@@ -129,6 +129,41 @@ class TestUpdateMissingWindow(VisdomHTTPTestCase):
         self.assertTrue(self.win_exists("auto_created"))
 
 
+class TestCreateOnAppendLayout(VisdomHTTPTestCase):
+    """``layout_create`` styles the window an append had to create.
+
+    An append sends ``layout: {}`` on purpose -- it must never restyle a window
+    that already exists -- so the window this branch creates used to come out
+    with no layout at all, which is the only reason a client asks
+    ``/win_exists`` before every append. ``layout_create`` carries the layout
+    the client would have created with, and is read on this branch alone.
+    """
+
+    SCATTER = [{"type": "scatter", "x": [1, 2], "y": [3, 4], "name": "t1"}]
+
+    def append_scatter(self, win, **extra):
+        return self.update(win, self.SCATTER, append=True, **extra)
+
+    def layout_of(self, win):
+        return self.get_win_data(win)["content"]["layout"]
+
+    def test_layout_create_lays_out_the_window_the_append_created(self):
+        self.append_scatter("made", layout={}, layout_create={"title": "from create"})
+        self.assertEqual(self.layout_of("made"), {"title": "from create"})
+
+    def test_layout_create_leaves_an_existing_window_alone(self):
+        """The append contract: a window that is already there is never restyled."""
+        win = self.create_window(self.SCATTER, layout={"title": "original"})
+        resp = self.append_scatter(win, layout={}, layout_create={"title": "ignored"})
+        self.assertEqual(resp.code, 200, resp.body)
+        self.assertEqual(self.layout_of(win), {"title": "original"})
+
+    def test_a_non_object_layout_create_is_rejected(self):
+        resp = self.append_scatter("made", layout={}, layout_create="title")
+        self.assertEqual(resp.code, 400)
+        self.assertFalse(self.win_exists("made"))
+
+
 class TestWindowOrdering(VisdomHTTPTestCase):
     def test_windows_are_indexed_in_creation_order(self):
         wins = [self.create_text_window(content=str(n)) for n in range(3)]

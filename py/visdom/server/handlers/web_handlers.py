@@ -35,6 +35,7 @@ from visdom.utils.shared_utils import (
 from visdom.utils.server_utils import (
     check_auth,
     check_readonly,
+    create_args_for_append,
     delete_env_off_loop,
     ensure_env_loaded,
     ensure_env_present,
@@ -415,6 +416,8 @@ class UpdateHandler(BaseHandler):
             raise tornado.web.HTTPError(
                 400, reason="request must include one of: data, layout, or opts"
             )
+        if not isinstance(args.get("layout_create", {}), dict):
+            raise tornado.web.HTTPError(400, reason="layout_create must be an object")
         eid = extract_eid(args)
 
         if eid not in handler.state:
@@ -425,7 +428,7 @@ class UpdateHandler(BaseHandler):
             # that window
             append = args.get("append")
             if append:
-                p = window(args)
+                p = window(create_args_for_append(args))
                 register_window(handler, p, eid)
             else:
                 handler.write("win does not exist")
