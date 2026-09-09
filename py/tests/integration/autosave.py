@@ -444,7 +444,12 @@ class TestDeleteOutlastsAQueuedSave(unittest.TestCase):
         self.assertNotIn("expt", self.app.state)
 
     def test_the_removal_is_queued_behind_the_save_rather_than_run_at_once(self):
-        """Running it on the loop is what let the save overtake it."""
+        """Running it on the loop is what let the save overtake it.
+
+        ``purge_env`` is what goes to the worker rather than ``delete_env``
+        itself: erasing the undo stack belongs in the same task, behind the
+        same queue, as the removal of the env file.
+        """
         self.queue_autosave()
 
         DeleteEnvHandler.wrap_func(self.handler, {"eid": "expt"})

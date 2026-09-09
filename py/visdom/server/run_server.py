@@ -261,8 +261,9 @@ async def _serve(
     finally:
         logging.info("Shutting down")
         server.stop()
-        app.subs = []
-        app.sources = []
+        # Through the state that owns them: rebinding ``app.subs`` left both
+        # the live sockets and the dictionaries the handlers share untouched.
+        app.server_state.close_connections()
         # Blocking, but nothing is being served by now: the listening sockets
         # are closed and this is the last thing the loop does.
         app.shutdown_storage()
