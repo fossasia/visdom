@@ -993,13 +993,13 @@ async def _write_experiment_metadata(handler, eid, mutate):
 
 # ---- Experiment reads, as they run on the storage worker ---- #
 #
-# Both of these read every environment file the store knows, which is the whole
-# of what the endpoints below cost. They take the DataStore rather than a live
-# ``ExperimentStore`` because the executor is handed plain positional
-# arguments, and they touch no server state, so the worker is never looking at
-# anything the loop may be editing underneath it. Reading metadata from the
-# files alone is still current: every endpoint that changes an experiment
-# persists it before it answers.
+# Each of these reads environment files -- every one the store knows, but for
+# the single-id read -- which is the whole of what the endpoints below cost.
+# They take the DataStore rather than a live ``ExperimentStore`` because the
+# executor is handed plain positional arguments, and they touch no server
+# state, so the worker is never looking at anything the loop may be editing
+# underneath it. Reading metadata from the files alone is still current: every
+# endpoint that changes an experiment persists it before it answers.
 
 
 def _search_experiments(store, query, sort_by, descending, offset, limit):
@@ -1020,6 +1020,26 @@ def _search_experiments(store, query, sort_by, descending, offset, limit):
 
 def _compare_experiments(store, env_ids):
     return ExperimentStore(store).compare(env_ids)
+
+
+def _read_stored_experiment(store, eid):
+    """Return one environment's stored experiment, or ``None`` if it has none.
+
+    One file rather than all of them, but a file all the same: a large
+    environment is megabytes of window data in front of the few hundred bytes
+    of metadata being asked for, and parsing it is exactly the work the loop
+    must not be doing.
+    """
+    return ExperimentStore(store).get_experiment(eid)
+
+
+def _stored_experiment_map(store):
+    """Return every stored experiment, keyed by the environment it belongs to.
+
+    Keyed here rather than by the caller so that what crosses back from the
+    worker is already in the shape the overlay on the loop needs.
+    """
+    return {exp.env_id: exp for exp in ExperimentStore(store).list_experiments()}
 
 
 def _decode_json_body(body):
@@ -1501,21 +1521,35 @@ class TagsHandler(BaseHandler):
         return experiment
 
     @staticmethod
-    def _read_experiment(handler, eid):
-        """Read one experiment without materializing unrelated environments."""
+    async def _read_experiment(handler, eid):
+        """Read one experiment without materializing unrelated environments.
+
+        An env the server is already holding answers from memory, on the loop,
+        for nothing. Only the fall-through goes to disk, and it goes there on
+        the storage worker: reading it here would park the loop behind a file
+        read for the whole of every other request the server has in flight.
+        """
         env = handler.state.get(eid)
-        if env is None or (isinstance(env, LazyEnvData) and not env.is_loaded):
-            return ExperimentStore(handler.storage).get_experiment(eid)
-        experiment = TagsHandler._experiment_from_env(eid, env)
-        if experiment is not None:
-            return experiment
-        return ExperimentStore(handler.storage).get_experiment(eid)
+        if env is not None and not (isinstance(env, LazyEnvData) and not env.is_loaded):
+            experiment = TagsHandler._experiment_from_env(eid, env)
+            if experiment is not None:
+                return experiment
+        return await run_on_storage_executor(
+            handler, _read_stored_experiment, handler.storage, eid
+        )
 
     @staticmethod
-    def _experiment_map(handler):
-        """Return stored experiments overlaid with materialized state only."""
-        store = ExperimentStore(handler.storage)
-        experiments = {exp.env_id: exp for exp in store.list_experiments()}
+    async def _experiment_map(handler):
+        """Return stored experiments overlaid with materialized state only.
+
+        The overlay is applied after the read rather than before it, so an env
+        the loop tagged while the worker was reading is the version that
+        answers: the worker's copy is a snapshot of the files as they were when
+        it started, and the live env is what the server is serving now.
+        """
+        experiments = await run_on_storage_executor(
+            handler, _stored_experiment_map, handler.storage
+        )
         for eid, env in handler.state.items():
             if isinstance(env, LazyEnvData) and not env.is_loaded:
                 continue
@@ -1525,13 +1559,13 @@ class TagsHandler(BaseHandler):
         return experiments
 
     @staticmethod
-    def _write_tags(handler, eid=None):
+    async def _write_tags(handler, eid=None):
         if eid is not None:
-            experiment = TagsHandler._read_experiment(handler, eid)
+            experiment = await TagsHandler._read_experiment(handler, eid)
             tags = tags_to_mapping(experiment.tags) if experiment else {}
             handler.write_json(tags)
             return
-        experiments = TagsHandler._experiment_map(handler)
+        experiments = await TagsHandler._experiment_map(handler)
         tag_map = {
             env_id: tags_to_mapping(experiment.tags)
             for env_id, experiment in experiments.items()
@@ -1549,7 +1583,7 @@ class TagsHandler(BaseHandler):
 
         if action == "get":
             eid = extract_eid(args) if args.get("eid") is not None else None
-            TagsHandler._write_tags(handler, eid)
+            await TagsHandler._write_tags(handler, eid)
             return
 
         if handler.readonly:
