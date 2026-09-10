@@ -3774,8 +3774,8 @@ class Visdom(object):
                            `'probability density'`
         """
 
-        X = np.squeeze(np.asarray(X))
-        Y = np.squeeze(np.asarray(Y))
+        X = np.atleast_1d(np.squeeze(np.asarray(X)))
+        Y = np.atleast_1d(np.squeeze(np.asarray(Y)))
         assert X.ndim == 1 and Y.ndim == 1, "X and Y should be one-dimensional"
         assert len(X) == len(Y), "X and Y should have the same length"
 
@@ -3819,7 +3819,7 @@ class Visdom(object):
         - `opts.legend`: labels for each of the columns in `X`
         """
 
-        X = np.squeeze(X)
+        X = np.atleast_1d(np.squeeze(X))
         assert X.ndim == 1 or X.ndim == 2, "X should be one or two-dimensional"
         if X.ndim == 1:
             X = X[:, None]
@@ -3870,7 +3870,8 @@ class Visdom(object):
         - `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
         - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
         """
-        X = np.squeeze(X)
+        if X.ndim > 2:
+            X = np.squeeze(X)
         assert X.ndim == 2, "X should be two-dimensional"
 
         opts = {} if opts is None else opts
@@ -4058,7 +4059,7 @@ class Visdom(object):
         - `opts.legend`  : `list` containing legend names
         """
 
-        X = np.squeeze(X)
+        X = np.atleast_1d(np.squeeze(X))
         assert X.ndim == 1 or X.ndim == 2, "X should be one or two-dimensional"
         if X.ndim == 1:
             X = X[:, None]
@@ -4212,7 +4213,7 @@ class Visdom(object):
         - `opts.legend`: `list` containing legend names
         """
 
-        X = np.squeeze(X)
+        X = np.atleast_1d(np.squeeze(X))
         assert X.ndim == 1, "X should be one-dimensional"
         assert np.all(np.greater_equal(X, 0)), "X cannot contain negative values"
 
