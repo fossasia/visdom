@@ -117,6 +117,8 @@ vis.line(Y=[loss], X=[1], win='auto_plot',
          opts=dict(title='Auto-created'), update='append')
 ```
 
+A training loop that plots from inside an event loop, or that wants several of these calls in flight at once, can use the coroutine version of the same API — see the [Async Client](../api/async-client.md).
+
 ## Checking if a window exists
 
 Before updating, you can check whether a window already exists:
