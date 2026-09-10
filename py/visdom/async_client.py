@@ -66,10 +66,12 @@ from visdom import Visdom
 
 logger = logging.getLogger(__name__)
 
-# Mirrors the synchronous client's `timeout=(20, None)`: bound the connect,
-# never the read, because a slow plot upload is not a failure.
+# Bound the connect and the request alike. This is deliberately stricter than
+# the synchronous client's `timeout=(20, None)`: a read that never returns here
+# holds one of only ``max_concurrency`` worker threads, so a wedged server
+# costs the whole client rather than the single call that hit it.
 CONNECT_TIMEOUT = 20.0
-REQUEST_TIMEOUT = 0  # tornado reads 0 as "no timeout"
+REQUEST_TIMEOUT = 20.0
 
 # How many plot calls may be in flight at once. It sizes the client's own
 # thread pool and tornado's ``max_clients`` together, so a worker thread only
@@ -333,9 +335,9 @@ class _BridgedVisdom(Visdom):
         ``run_coroutine_threadsafe`` is what makes the bridge work: the loop
         keeps serving other requests while ``result()`` parks the thread that
         called a plot method. The future is also what a cancellation travels
-        down: ``REQUEST_TIMEOUT`` is 0, so a request nobody is waiting for any
-        more would otherwise hold its worker -- and, once ``max_concurrency``
-        of them pile up, every later call -- indefinitely.
+        down: a request nobody is waiting for any more would otherwise hold its
+        worker -- and, once ``max_concurrency`` of them pile up, every later
+        call -- until ``REQUEST_TIMEOUT`` finally expires.
         """
         self._last_post_time = time.time()
         call = getattr(self._calls, "current", None)

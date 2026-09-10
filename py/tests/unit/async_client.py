@@ -114,14 +114,16 @@ def test_other_transport_failures_translate_to_a_connection_error():
     )
 
 
-def test_request_mirrors_the_sync_client_timeouts():
-    """``timeout=(20, None)`` in the sync client: bound connect, not read."""
+def test_request_bounds_both_the_connect_and_the_request():
+    """20s each way: a hung read holds one of only ``max_concurrency`` workers,
+    so unlike the sync client's ``timeout=(20, None)`` the read is bounded too.
+    """
     transport = _AsyncTransport("http://localhost", 8097)
     request = transport._request("http://localhost:8097/events", "{}")
     assert request.method == "POST"
     assert request.body == b"{}"
     assert request.connect_timeout == 20.0
-    assert request.request_timeout == 0
+    assert request.request_timeout == 20.0
 
 
 def test_request_carries_the_login_cookie_once_set():
@@ -541,10 +543,10 @@ class TestAsyncVisdomLifecycle(tornado.testing.AsyncTestCase):
         """``run_in_executor`` cannot interrupt a worker, so the cancel has to
         reach the POST itself.
 
-        ``REQUEST_TIMEOUT`` is 0 -- deliberately, a slow upload is not a failure
-        -- so a request nobody awaits any more would hold its worker forever.
-        Once ``max_concurrency`` of them accumulate, every later call queues
-        behind them and the client is wedged.
+        ``REQUEST_TIMEOUT`` only expires after 20s, so a request nobody awaits
+        any more would hold its worker for that whole time. Once
+        ``max_concurrency`` of them accumulate, every later call queues behind
+        them and the client is wedged.
         """
         started = asyncio.Event()
         cancelled = asyncio.Event()
