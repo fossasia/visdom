@@ -56,7 +56,8 @@ class OptunaCallback:
     creates the dashboard; later trials refresh it every ``refresh_every``
     successful writes. Call :meth:`update_dashboard` after ``Study.optimize``
     to ensure the final trials are included when the total is not an exact
-    multiple of that interval. The HParams pane selects trials through stable
+    multiple of that interval. Supplying ``contour_params`` adds one Optuna
+    contour pane per objective. The HParams pane selects trials through stable
     experiment tags rather than callback-local state, so a new callback can
     rebuild a persisted study dashboard and multiple workers share the same
     trial selection. Dashboard refreshes are serialized within one callback
@@ -82,6 +83,8 @@ class OptunaCallback:
         create_dashboard: Create and periodically refresh the study dashboard.
         refresh_every: Positive integer number of newly logged trials between
             dashboard refreshes.
+        contour_params: Optional parameter names for Optuna contour panes. At
+            least two names are required when supplied.
 
     Example::
 
@@ -90,6 +93,7 @@ class OptunaCallback:
             dashboard_env="optuna_resnet",
             objective_names=["validation_accuracy"],
             create_dashboard=True,
+            contour_params=["learning_rate", "weight_decay"],
         )
         study.optimize(objective, callbacks=[callback])
         callback.update_dashboard(study)
@@ -104,6 +108,7 @@ class OptunaCallback:
         raise_on_error: bool = False,
         create_dashboard: bool = False,
         refresh_every: int = 10,
+        contour_params: Sequence[str] | None = None,
     ) -> None:
         if dashboard_env is not None and not isinstance(dashboard_env, str):
             raise TypeError("dashboard_env must be a string or None")
@@ -113,6 +118,10 @@ class OptunaCallback:
             raise TypeError("refresh_every must be an integer")
         if refresh_every < 1:
             raise ValueError("refresh_every must be at least 1")
+        if contour_params is not None and (
+            isinstance(contour_params, str) or len(contour_params) < 2
+        ):
+            raise ValueError("contour_params must contain at least two parameter names")
 
         self.viz = viz
         self.dashboard_env = dashboard_env
@@ -121,6 +130,9 @@ class OptunaCallback:
         self.raise_on_error = raise_on_error
         self.create_dashboard = create_dashboard
         self.refresh_every = refresh_every
+        self.contour_params = (
+            tuple(contour_params) if contour_params is not None else None
+        )
         self._dashboard_created = False
         self._trials_since_refresh = 0
         self._trial_envs: list[str] = []
@@ -391,6 +403,9 @@ class OptunaCallback:
                 plot_timeline,
             )
 
+            if self.contour_params is not None:
+                from optuna.visualization import plot_contour
+
             objective_names = self._metric_names(study, len(study.directions))
             figures = []
             multi_objective = len(objective_names) > 1
@@ -430,6 +445,25 @@ class OptunaCallback:
                         figures.append(
                             ("optuna-importance{}".format(suffix), importance)
                         )
+
+                if self.contour_params is not None and complete_trials >= 2:
+                    try:
+                        contour = plot_contour(
+                            study,
+                            params=list(self.contour_params),
+                            **kwargs,
+                        )
+                    except ValueError as error:
+                        warnings.warn(
+                            "Skipping Optuna contour plot: {}".format(error),
+                            RuntimeWarning,
+                            stacklevel=2,
+                        )
+                    else:
+                        contour.update_layout(
+                            title="Contour — {}".format(objective_name)
+                        )
+                        figures.append(("optuna-contour{}".format(suffix), contour))
 
             if complete_trials and len(objective_names) in (2, 3):
                 try:
