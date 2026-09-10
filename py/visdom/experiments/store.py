@@ -17,7 +17,9 @@ today — the feature is fully opt-in.
 """
 
 import heapq
+import logging
 import math
+from collections.abc import Mapping
 
 from visdom.data_model.base import DataStore
 from visdom.experiments.compare import build_comparison
@@ -54,6 +56,45 @@ def retarget_experiment(env, env_id):
     if isinstance(blob, dict):
         blob["env_id"] = env_id
     return env
+
+
+def experiment_from_blob(env_id, blob):
+    """Rebuild ``blob`` into ``env_id``'s :class:`Experiment`, or ``None``.
+
+    The one place a stored metadata blob becomes a model, and so the one place
+    that can fail on a bad one: :meth:`Experiment.from_dict` indexes
+    ``data["env_id"]`` and each entry's ``data["key"]`` directly, and
+    :meth:`Experiment.__post_init__` rejects a status outside
+    ``VALID_STATUSES``. A blob that was hand-edited, or left half-written by an
+    interrupted save, therefore raises ``KeyError``/``TypeError``/``ValueError``
+    instead of returning something usable.
+
+    Every caller reaches this while walking or mutating environments on behalf
+    of a request, so letting that exception through is never proportionate: it
+    fails the whole operation over one environment, and search — which visits
+    every environment — stays broken for every query until somebody finds the
+    offending file. Skipping the blob and logging its ``env_id`` matches how
+    ``JSONStore.load_env`` and ``JSONStore.list_envs`` already treat a file they
+    cannot parse, and keeps the bad env findable.
+
+    ``blob`` is accepted as any mapping, since a live environment holds one; a
+    blob that is not a mapping at all is not metadata and reads as absent. The
+    rebuilt experiment answers to ``env_id`` rather than to the id its blob
+    records, because the env it is stored under is the authoritative one: a
+    forked env deep-copies the blob, and a comparison keyed by experiment
+    env_id would otherwise fold the fork and its parent into one column.
+    """
+    if not isinstance(blob, Mapping):
+        return None
+    try:
+        experiment = Experiment.from_dict(blob)
+    except (KeyError, TypeError, ValueError) as e:
+        logging.warning(
+            f"Could not read experiment metadata for env {env_id}; skipping it: {e}"
+        )
+        return None
+    experiment.env_id = env_id
+    return experiment
 
 
 def _is_number(value):
@@ -192,6 +233,16 @@ class ExperimentStore:
         whole env dict, metadata included, which leaves the copy's blob naming
         the env it was forked from; a comparison keyed by experiment env_id
         would then fold the fork and its parent into one column.
+
+        A blob :func:`experiment_from_blob` cannot rebuild reads as no
+        experiment, exactly as it does on the pure-read path. That is what
+        makes an unreadable blob recoverable rather than permanent: the callers
+        that write treat "no experiment" as "start one", so logging a param, a
+        metric or a tag to the env replaces the corrupt blob with a valid one
+        instead of failing on it forever. The callers that require an existing
+        run — :meth:`finish_experiment`, :meth:`compare` — still refuse, but
+        they refuse with the ``KeyError`` they already raise for an env that
+        never had metadata, not with a parse error out of the model.
         """
         env = self.env_provider(env_id) if self.env_provider is not None else None
         if env is None:
@@ -202,11 +253,7 @@ class ExperimentStore:
             env["jsons"] = {}
         if "reload" not in env:
             env["reload"] = {}
-        blob = env.get(METADATA_KEY)
-        experiment = Experiment.from_dict(blob) if isinstance(blob, dict) else None
-        if experiment is not None:
-            experiment.env_id = env_id
-        return env, experiment
+        return env, experiment_from_blob(env_id, env.get(METADATA_KEY))
 
     def _read_metadata(self, env_id):
         """Return ``env_id``'s :class:`Experiment` without materialising its env.
@@ -225,6 +272,12 @@ class ExperimentStore:
         As in :meth:`_read`, the experiment answers to the env it was read from
         rather than to the ``env_id`` its blob records, so a forked env does not
         report its parent's id.
+
+        A blob that cannot be rebuilt is skipped rather than raised, per
+        :func:`experiment_from_blob`. This is the read every bulk walk goes
+        through, one environment at a time, so it is the one where an escaping
+        exception costs the most: it would fail *every* search for *every*
+        query rather than hide the single run it describes.
         """
         env = self.env_provider(env_id) if self.env_provider is not None else None
         if env is not None and not getattr(env, "is_loaded", True):
@@ -233,11 +286,7 @@ class ExperimentStore:
             blob = env.get(METADATA_KEY)
         else:
             blob = self.datastore.load_experiment(env_id)
-        if not isinstance(blob, dict):
-            return None
-        experiment = Experiment.from_dict(blob)
-        experiment.env_id = env_id
-        return experiment
+        return experiment_from_blob(env_id, blob)
 
     def _write(self, env_id, env, experiment):
         """Attach ``experiment`` to ``env`` and persist it; return the experiment."""
@@ -324,10 +373,7 @@ class ExperimentStore:
             env, experiment = self._read(env_id)
         else:
             env = env_data
-            blob = env.get(METADATA_KEY)
-            experiment = Experiment.from_dict(blob) if isinstance(blob, dict) else None
-            if experiment is not None:
-                experiment.env_id = env_id
+            experiment = experiment_from_blob(env_id, env.get(METADATA_KEY))
         if experiment is None:
             experiment = Experiment(env_id=env_id, name=env_id)
         if append:
@@ -556,9 +602,16 @@ class ExperimentStore:
 
         Returns ``True`` if an experiment was removed, ``False`` if ``env_id``
         had none.
+
+        Removal keys off the blob being *present*, not off its being readable.
+        A blob the model cannot rebuild is precisely the one an operator most
+        needs to remove, so deciding on the rebuilt experiment would refuse to
+        delete the only thing worth deleting — and leave the environment
+        unfixable through the API, which is the state this whole guard exists
+        to avoid.
         """
-        env, experiment = self._read(env_id)
-        if experiment is None:
+        env, _ = self._read(env_id)
+        if METADATA_KEY not in env:
             return False
         del env[METADATA_KEY]
         self.datastore.save_env(env_id, env)
