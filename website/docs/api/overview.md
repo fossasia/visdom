@@ -60,6 +60,7 @@ The python Visdom client takes the following options:
 | `password` | `None` | Password for authentication, if server started with `-enable_login` |
 | `proxies` | `None` | Dictionary mapping protocol to the URL of the proxy (e.g. `{'http': 'foo.bar:3128'}`) |
 | `offline` | `False` | Run visdom in offline mode, where all requests are logged to file rather than to the server. Requires `log_to_filename` is set |
+| `use_preflight_checks` | `True` | Ask the server whether a window exists before an `update='append'` or a `store_history=True` frame. `False` sends one request instead of two and lets the server create the window if it isn't there; needs a server new enough to lay that window out |
 
 ## Basics
 
