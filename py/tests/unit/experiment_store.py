@@ -499,6 +499,26 @@ def test_a_string_never_outranks_the_highest_number(experiments):
     assert _ranked(experiments, descending=False) == ["run_five", "run_ten", "run_str"]
 
 
+def test_a_bounded_page_is_not_filled_by_a_string(experiments):
+    """The heap path ranks like the sort path, so a page keeps the numbers.
+
+    ``search_page`` selects through ``heapq`` rather than sorting, on the same
+    key. Ranking a string first there does not merely misorder the page: it
+    takes a slot, evicting a run that belongs on it.
+    """
+    experiments.log_experiment("run_five", params={"acc": 5})
+    experiments.log_experiment("run_ten", params={"acc": 10})
+    experiments.log_experiment("run_str", params={"acc": "pending"})
+
+    page, total = experiments.search_page(sort_by="acc", descending=True, limit=2)
+    assert [experiment.env_id for experiment in page] == ["run_ten", "run_five"]
+    assert total == 3
+
+    page, total = experiments.search_page(sort_by="acc", descending=False, limit=2)
+    assert [experiment.env_id for experiment in page] == ["run_five", "run_ten"]
+    assert total == 3
+
+
 def test_equal_values_keep_their_scan_order_in_both_directions(experiments):
     """Reversing the comparison must not reverse ties."""
     for env_id in ("first", "second", "third"):
