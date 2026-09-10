@@ -21,8 +21,8 @@
     "less-loader": "^13.0.0",
     "prettier": "^3.9.6",
     "react-devtools": "^7.0.1",
-    "webpack": "^5.109.2",
-    "webpack-cli": "^7.2.2",
+    "webpack": "^5.110.2",
+    "webpack-cli": "^7.2.3",
     "webpack-merge": "^6.0.1"
   },
   "scripts": {
@@ -40,7 +40,7 @@
     "assert": "^2.1.0",
     "browserify-zlib": "^0.2.0",
     "buffer": "^6.0.3",
-    "css-loader": "^7.1.4",
+    "css-loader": "^7.1.5",
     "d3-dispatch": "^3.0.1",
     "d3-drag": "^3.0.0",
     "d3-polygon": "^3.0.1",
@@ -51,7 +51,7 @@
     "fast-json-patch": "^3.1.1",
     "https-browserify": "^1.0.0",
     "jquery": "^4.0.0",
-    "lucide-react": "^1.34.0",
+    "lucide-react": "^1.38.0",
     "ml-savitzky-golay-generalized": "^5.0.0",
     "rc-slider": "^11.1.9",
     "rc-tree-select": "^5.27.0",

@@ -614,10 +614,24 @@ model.fit(x_train, y_train, epochs=20, callbacks=[logger])
 
 Each metric gets its own window titled `"<name> (step)"`, throttled to one send every `log_every` batches. The optimizer's current learning rate is read (not computed) and plotted alongside as `lr`.
 
+**Experiment tracking with `params`** — records the run in the ExperimentStore alongside the charts, so it becomes queryable through [`vis.search_experiments`](#vissearch_experiments) / [`vis.compare_experiments`](#viscompare_experiments). Off by default. Without `params` the logger only ever calls `viz.line()`:
+
+```python
+logger = VisdomKerasLogger(viz, env="keras_run", params={"lr": 0.01})
+model.fit(x_train, y_train, epochs=20, callbacks=[logger])
+
+viz.search_experiments("status = finished")
+```
+
+Hyper-parameters are recorded when training begins, each epoch's metrics as they are plotted, and the run is marked `finished` when `fit()` returns. Only epoch metrics are recorded — per-batch values from `log_every` stay visualization-only so a run's metric history keeps the granularity the search and compare views read it at.
+
+**Note:** a finished experiment rejects further writes, so an env records one tracked run. Give every run its own env, including a repeat run of the same script. Keras reports no exception to `on_train_end`, so a tracked run is always recorded as `finished`. Call `viz.finish_experiment(status="failed", env=...)` directly to record a run that did not.
+
 **Parameters:**
 - `viz`: a connected `visdom.Visdom()` instance
 - `env`: environment name (default: `viz.env` if set, otherwise auto-generated from timestamp)
 - `log_every`: also plot metrics at batch granularity, one send every N batches (default: `None`, disabled)
+- `params`: hyper-parameters to record, opting the run into experiment tracking (default: `None`, disabled)
 
 **Note:** each call to `viz.line()` is a synchronous network request made on the training thread. Pick a `log_every` large enough that it doesn't stall training waiting on the server — 50+ is a reasonable default on GPU.
 
@@ -628,6 +642,8 @@ See `example/train_keras_example.py` for a full working example.
 ### Optuna
 
 **Requirements:** `pip install visdom optuna`
+
+**Dashboard visualizations:** `pip install plotly`
 
 `visdom.integrations.OptunaCallback` implements Optuna's study callback
 protocol. After each trial finishes it records the trial's parameters, objective
@@ -645,24 +661,94 @@ callback = OptunaCallback(
     viz,
     dashboard_env="optuna_quadratic",
     objective_names=["loss"],
+    create_dashboard=True,
+    refresh_every=10,
+    contour_params=["x", "y"],
 )
 
 
 def objective(trial):
     x = trial.suggest_float("x", -10, 10)
-    return (x - 2) ** 2
+    y = trial.suggest_float("y", -10, 10)
+    return (x - 2) ** 2 + (y + 1) ** 2
 
 
 study = optuna.create_study(study_name="quadratic", direction="minimize")
 study.optimize(objective, n_trials=100, callbacks=[callback])
+callback.update_dashboard(study)
 ```
 
-This first-stage integration records one experiment per trial, using names such
-as `optuna_quadratic_trial_000017`. Pass `raise_on_error=True` if a Visdom
-logging failure should stop optimization; by default it emits a warning and
-allows the study to continue. Single- and multi-objective studies are supported,
-and `COMPLETE`, `PRUNED` and `FAIL` states are preserved in the
-`optuna_state` tag.
+For multi-objective studies, list the objective names in the same order as the
+study directions and return values:
+
+```python
+callback = OptunaCallback(
+    viz,
+    dashboard_env="optuna_accuracy_latency",
+    objective_names=["accuracy", "latency_ms"],
+    create_dashboard=True,
+)
+
+
+def multi_objective(trial):
+    width = trial.suggest_int("width", 1, 10)
+    accuracy = 0.80 + 0.01 * width
+    latency_ms = 10.0 + 2.0 * width
+    return accuracy, latency_ms
+
+
+study = optuna.create_study(
+    study_name="accuracy-latency",
+    directions=["maximize", "minimize"],
+)
+study.optimize(multi_objective, n_trials=40, callbacks=[callback])
+callback.update_dashboard(study)
+```
+
+The integration records one experiment per trial, using names such as
+`optuna_quadratic_trial_000017`. Intermediate values reported with
+`trial.report(value, step)` are stored as the `intermediate_value` metric in
+step order before the final objective value. Each experiment also carries a
+stable `optuna_dashboard_env` tag. With `create_dashboard=True`, the first trial
+creates summary, HParams, optimization history and timeline panes, plus
+intermediate-value and parameter-importance panes when Optuna can compute them.
+Supplying at least two parameter names through `contour_params` adds a contour
+pane for each objective; Optuna handles numerical, categorical and log-scaled
+parameters when it builds those Plotly figures.
+The HParams pane selects experiments by that dashboard tag rather than by a
+callback-local list, so `update_dashboard()` on a new callback recovers trials
+logged before a process restart. Dashboard refreshes from one callback are
+serialized, so `study.optimize(..., n_jobs=N)` cannot publish them out of order.
+When multiple processes or nodes share a study and dashboard namespace, enable
+`create_dashboard=True` in exactly one process; callbacks in the other workers
+still log their trials with the default `create_dashboard=False`. The designated
+writer's tag query includes trials from every worker. After all workers finish,
+have the coordinating process call `update_dashboard()` once for the final
+refresh.
+
+Completed studies with two or three objectives also get a Pareto-front pane.
+Later trials refresh the panes in `optuna_quadratic` every `refresh_every`
+successful writes by the dashboard writer. The explicit final
+`update_dashboard()` includes any trials left since the last scheduled refresh.
+Plotly is only needed for the Optuna visualization panes. Timeline bars preserve
+each trial's true duration, and a fixed-size marker at the true start time keeps
+even sub-pixel trials visible and hoverable without exaggerating their runtime.
+
+The summary pane links directly to the best and latest terminal trial
+environments. The callback never opens a browser on its own.
+
+Pass `raise_on_error=True` if a Visdom logging failure should stop optimization;
+by default it emits a warning and allows the study to continue. Single- and
+multi-objective studies are supported, and `COMPLETE`, `PRUNED` and `FAIL`
+states are preserved in the `optuna_state` tag. A pruned trial retains every
+intermediate value reported before pruning. Optuna remains responsible for the
+pruning decision: call `trial.report()` and `trial.should_prune()` inside the
+objective and raise `optuna.TrialPruned` when requested. Because Optuna invokes
+study callbacks after a trial reaches a terminal state, `OptunaCallback`
+records these values after the trial finishes rather than streaming them while
+the trial is running. Optuna does not support `trial.report()` or
+`trial.should_prune()` for multi-objective studies, so intermediate-value and
+pruning support applies only to single-objective studies.
 
 ## Details
 <img src="https://user-images.githubusercontent.com/19650074/198747904-7a8a580f-851a-45fb-8f45-94e54a910ee2.png"/>
@@ -952,6 +1038,12 @@ The following `opts` are supported:
 - `opts.markerborderwidth`: marker border line width (`float`; default = 0.5)
 - `opts.legend`           : `table` containing legend names
 - `opts.textlabels`       : text label for each point (`list`: default = `None`)
+- `opts.aspectmode`       : how the three axes of a 3D plot are scaled (`string`; default = `'auto'`). One of:
+  - `auto`   : proportional to the data extents (like `data`), but Plotly switches to `cube` when one axis spans more than 4x the others -- so a plot with one dominant dimension silently renders distorted.
+  - `data`   : always proportional to the data extents, so 1 unit looks the same on every axis -- use this for point clouds, SLAM maps, trajectories, or anything where shape must be preserved.
+  - `cube`   : all three axes drawn the same length regardless of the data, deliberately distorting proportions to fill a cube.
+  - `manual` : proportions taken from `opts.aspectratio` (falls back to `1:1:1` if not set).
+- `opts.aspectratio`      : per-axis scale for `manual` mode, a dict `{'x': .., 'y': .., 'z': ..}` (`dict`; default = `None`).
 - `opts.layoutopts`       : dict of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 - `opts.traceopts`        : dict mapping trace names or indices to dicts of additional options that the graph backend accepts. For example `traceopts = {'plotly': {'myTrace': {'mode': 'markers'}}}`.
 - `opts.webgl`            : use WebGL for plotting (`boolean`; default = `false`). It is faster if a plot contains too many points. Use sparingly as browsers won't allow more than a couple of WebGL contexts on a single page.
@@ -998,6 +1090,8 @@ The following `opts` are supported:
 - `opts.linecolor`   : line colors (`np.array`; default = None)
 - `opts.dash`        : line dash type for each line (`np.array`; default = 'solid'), one of `solid`, `dash`, `dashdot` or `dash`, size should match number of lines being drawn
 - `opts.legend`      : `table` containing legend names
+- `opts.aspectmode`  : axis scaling for 3D line plots (`string`; default = `'auto'`); `auto` is proportional to the data but flips to `cube` when one axis is over 4x the others, `data` stays proportional so shape is preserved, `cube` forces all axes to equal length, `manual` uses `opts.aspectratio`.
+- `opts.aspectratio` : per-axis scale `{'x': .., 'y': .., 'z': ..}` for `manual` mode (`dict`; default = `None`).
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 - `opts.traceopts`   : `dict` mapping trace names or indices to `dict`s of additional options that plot.ly accepts for a trace.
 - `opts.webgl`       : use WebGL for plotting (`boolean`; default = `false`). It is faster if a plot contains too many points. Use sparingly as browsers won't allow more than a couple of WebGL contexts on a single page.
@@ -1191,6 +1285,8 @@ The following `opts` are supported:
 - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
 - `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
 - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
+- `opts.aspectmode`  : axis scaling for the 3D surface (`string`; default = `'auto'`); `auto` is proportional to the data but flips to `cube` when one axis is over 4x the others, `data` stays proportional so shape is preserved, `cube` forces all axes to equal length, `manual` uses `opts.aspectratio`.
+- `opts.aspectratio` : per-axis scale `{'x': .., 'y': .., 'z': ..}` for `manual` mode (`dict`; default = `None`).
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 
 #### vis.contour
@@ -1225,6 +1321,8 @@ The following `opts` are supported:
 
 - `opts.color`: color (`string`)
 - `opts.opacity`: opacity of polygons (`number` between 0 and 1)
+- `opts.aspectmode`: axis scaling for a 3D (`Nx3`) mesh (`string`; default = `'auto'`); `auto` is proportional to the data but flips to `cube` when one axis is over 4x the others, `data` stays proportional so shape is preserved, `cube` forces all axes to equal length, `manual` uses `opts.aspectratio`.
+- `opts.aspectratio`: per-axis scale `{'x': .., 'y': .., 'z': ..}` for `manual` mode (`dict`; default = `None`).
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 
 #### vis.sankey

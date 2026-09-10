@@ -4,6 +4,9 @@ playwright/screenshots_init
 playwright/screenshots_diff
 playwright/playwright-report-polling/
 playwright/test-results-polling/
+playwright/playwright-report/
+playwright/test-results/
+playwright/tmp/
 playwright-report/
 test-results/
 tmp/

@@ -32,6 +32,7 @@ Use this skill for persistence format changes and env reload/view layout behavio
 - `py/visdom/data_model/base.py`, `py/visdom/data_model/json_store.py`
 - `py/visdom/utils/server_utils.py`
 - `py/visdom/server/handlers/web_handlers.py`
+- `py/visdom/server/server_state.py` — the `ServerState` facade that owns the dirty-env tracking and the off-loop writes
 - `py/visdom/server/app.py`
 - `AGENTS.md`
 - `CONTRIBUTING.md`
