@@ -59,7 +59,6 @@ jobs:
       - name: "Build Project (PR version)"
         run: |
           npm run build
-        if: steps.checkout.outputs.jsfileschanged > 0
 
       - name: "Save built js-files"
         uses: actions/upload-artifact@v7
@@ -99,6 +98,10 @@ jobs:
 
       - name: "Install PR npm dependencies"
         run: CYPRESS_INSTALL_BINARY=0 ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm install
+
+      - name: "Build Project (base version)"
+        run: |
+          npm run build
 
       - name: "Install Playwright Chromium"
         run: npx playwright install --with-deps chromium
