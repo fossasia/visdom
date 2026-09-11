@@ -44,7 +44,7 @@ vis = await AsyncVisdom.create(server="http://localhost", port=8097, env="main")
 
 | Argument | Default | Description |
 | --- | --- | --- |
-| `max_concurrency` | `10` | How many calls may be in flight at once. Sizes the client's own thread pool and tornado's `max_clients` together, so a worker thread only exists for a request tornado is willing to start immediately |
+| `max_concurrency` | `10` | How many calls may be in flight at once. Sizes the client's own thread pool and supplies the default for tornado's `max_clients`, so a worker thread only exists for a request tornado is willing to start immediately. An explicit `max_clients` takes precedence, and the two limits then differ |
 
 :::note `shutdown` closes the client, `close` closes a window
 `close` is `Visdom.close` and keeps its usual meaning, so the method that releases the HTTP client and the worker pool is `shutdown()`. Using the client as an async context manager — `async with vis:` — calls it for you. Calling it twice is safe.
@@ -88,7 +88,12 @@ async def on_event(event):
 vis.register_event_handler(on_event, win)
 ```
 
-`register_event_handler` is not a coroutine: registration is bookkeeping and never reaches the server. The handler may be a plain function or a coroutine function; a coroutine runs on your loop, so it can await further calls on the same client. Handlers run one at a time, in arrival order, on a thread of the client's own — a slow one delays later events but nothing else.
+`register_event_handler` is not a coroutine: registration is bookkeeping and never reaches the server. The handler may be a plain function or a coroutine function, and where its body runs differs:
+
+- **A plain function** runs on the client's own single dispatch thread (`visdom-async-events`), off your loop. It must not block for long, and it cannot await.
+- **A coroutine function** is wrapped: only the wrapper occupies the dispatch thread, blocking it while the coroutine body runs on your loop. That is why the body can await further calls on the same client.
+
+Either way one dispatch thread serves every handler, so handlers run one at a time, in arrival order — a slow one delays later events but nothing else.
 
 ## Limitations
 

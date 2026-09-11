@@ -18,7 +18,10 @@ same way; the point of each is what the event loop is free to do meanwhile.
 
 import argparse
 import asyncio
+import getpass
+import ipaddress
 import time
+from urllib.parse import urlparse
 
 import numpy as np
 
@@ -183,6 +186,36 @@ DEMOS = {
 }
 
 
+def is_loopback(server):
+    """Whether ``server`` names this machine, and so never leaves it."""
+    host = urlparse(server).hostname
+    if host in (None, "", "localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def read_password(flags):
+    """Prompt for the password, rather than take it from the command line.
+
+    An argument would sit in shell history and in every process listing. The
+    login POST also sends it to whatever ``-server`` names, so a remote server
+    has to be ``https``: over plain ``http`` the credentials cross the network
+    in the clear.
+    """
+    if not flags.username:
+        return None
+    scheme = urlparse(flags.server).scheme
+    if scheme != "https" and not is_loopback(flags.server):
+        raise SystemExit(
+            "refusing to send credentials to {0} over {1}; use an https "
+            "server address".format(flags.server, scheme or "an unknown scheme")
+        )
+    return getpass.getpass("visdom password for {0}: ".format(flags.username))
+
+
 async def main(flags):
     # ``create`` is a coroutine because connecting means a POST, and
     # ``__init__`` cannot await. It takes every ``Visdom`` argument.
@@ -191,7 +224,7 @@ async def main(flags):
         server=flags.server,
         base_url=flags.base_url,
         username=flags.username or None,
-        password=flags.password or None,
+        password=read_password(flags),
         use_incoming_socket=flags.use_incoming_socket,
     )
     # The context manager calls ``shutdown``, which releases the HTTP client
@@ -218,8 +251,12 @@ if __name__ == "__main__":
         "-server", type=str, default="http://localhost", help="Server address."
     )
     parser.add_argument("-base_url", type=str, default="/", help="Base Url.")
-    parser.add_argument("-username", type=str, default="", help="username.")
-    parser.add_argument("-password", type=str, default="", help="password.")
+    parser.add_argument(
+        "-username",
+        type=str,
+        default="",
+        help="username. The password is prompted for.",
+    )
     parser.add_argument(
         "-use_incoming_socket",
         action="store_true",

@@ -160,7 +160,9 @@ def test_plain_methods_are_not_awaited(label, source):
 
 def test_demo_imports_and_exposes_its_demos():
     namespace = {"__name__": "async_demo_under_test", "__file__": DEMO}
-    exec(compile(read(DEMO), DEMO, "exec"), namespace)
+    # Executing the demo is the assertion: it has to import and define its
+    # sections without a server.
+    exec(compile(read(DEMO), DEMO, "exec"), namespace)  # noqa: S102
     demos = namespace["DEMOS"]
     assert demos, "the demo exposes no sections"
     for name, section in demos.items():
