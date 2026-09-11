@@ -594,7 +594,7 @@ def test_boxplot_legend_length_mismatch_raises(offline_client):
 
 
 def test_boxplot_size_one_x_renders(capture_send):
-    """Regression test for #1787/#XXXX: a single-value X used to collapse to a
+    """Regression test: a single-value X used to collapse to a
     0-d array via an unconditional np.squeeze() and fail the ndim assert."""
     sent = capture_send(lambda v: v.boxplot(np.array([10.5])))
     assert sent["payload"]["data"][0]["type"] == "box"
@@ -666,7 +666,7 @@ def test_surf_layout_is_3d(capture_send):
 
 
 def test_surf_single_row_matrix_renders(capture_send):
-    """Regression test for #1787/#XXXX: a single-row (1xN) matrix used to
+    """Regression test: a single-row (1xN) matrix used to
     collapse via np.squeeze() to 1D and fail the ndim==2 assert.
     The fix guards with 'if X.ndim > 2' so valid 2D matrices are preserved."""
     sent = capture_send(lambda v: v.surf(np.ones((1, 5))))
@@ -787,7 +787,7 @@ class TestMatplotResizable(unittest.TestCase):
 
 
 def test_pie_size_one_x_renders(capture_send):
-    """Regression test for #1787/#XXXX: a single-value X used to collapse to a
+    """Regression test: a single-value X used to collapse to a
     0-d array via an unconditional np.squeeze() and fail the ndim assert."""
     sent = capture_send(lambda v: v.pie(np.array([100.0])))
     assert sent["payload"]["data"][0]["type"] == "pie"
@@ -805,7 +805,7 @@ def test_pie_multi_value_x_renders(capture_send):
 
 
 def test_stem_size_one_x_renders(capture_send):
-    """Regression test for #1787/#XXXX: a single-value X used to collapse to a
+    """Regression test: a single-value X used to collapse to a
     0-d array via an unconditional np.squeeze() and fail the ndim assert."""
     sent = capture_send(lambda v: v.stem(np.array([5.0])))
     assert sent["payload"]["data"] is not None
@@ -821,7 +821,7 @@ def test_stem_multi_value_x_renders(capture_send):
 
 
 def test_histogram2d_size_one_xy_renders(capture_send):
-    """Regression test for #1787/#XXXX: single-value X and Y both collapsed to
+    """Regression test: single-value X and Y both collapsed to
     0-d arrays via unconditional np.squeeze() and failed the ndim assert."""
     sent = capture_send(lambda v: v.histogram2d(np.array([1.0]), np.array([2.0])))
     assert sent["payload"]["data"][0]["type"] == "histogram2d"
