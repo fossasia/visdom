@@ -593,6 +593,14 @@ def test_boxplot_legend_length_mismatch_raises(offline_client):
         offline_client.boxplot(X, opts={"legend": ["only_one"]})
 
 
+def test_boxplot_size_one_x_renders(capture_send):
+    """Regression test for #1787/#XXXX: a single-value X used to collapse to a
+    0-d array via an unconditional np.squeeze() and fail the ndim assert."""
+    sent = capture_send(lambda v: v.boxplot(np.array([10.5])))
+    assert sent["payload"]["data"][0]["type"] == "box"
+    assert sent["payload"]["data"][0]["y"] == [10.5]
+
+
 # ---------------------------------------------------------------------- surf ----
 
 
@@ -655,6 +663,22 @@ def test_surf_layout_is_3d(capture_send):
     """surf builds a 3D scene layout."""
     sent = capture_send(lambda v: v.surf(np.ones((2, 2))))
     assert "scene" in sent["payload"]["layout"]
+
+
+def test_surf_single_row_matrix_renders(capture_send):
+    """Regression test for #1787/#XXXX: a single-row (1xN) matrix used to
+    collapse via np.squeeze() to 1D and fail the ndim==2 assert.
+    The fix guards with 'if X.ndim > 2' so valid 2D matrices are preserved."""
+    sent = capture_send(lambda v: v.surf(np.ones((1, 5))))
+    assert sent["payload"]["data"][0]["type"] == "surface"
+    assert sent["payload"]["data"][0]["z"] == [[1.0, 1.0, 1.0, 1.0, 1.0]]
+
+
+def test_surf_single_col_matrix_renders(capture_send):
+    """Regression test: single-column (Nx1) matrix also collapsed to 1D."""
+    sent = capture_send(lambda v: v.surf(np.ones((5, 1))))
+    assert sent["payload"]["data"][0]["type"] == "surface"
+    assert sent["payload"]["data"][0]["z"] == [[1.0], [1.0], [1.0], [1.0], [1.0]]
 
 
 def test_surf_aspectmode_forwarded_to_scene(capture_send):
@@ -756,3 +780,56 @@ class TestMatplotResizable(unittest.TestCase):
         opts = self._matplot(_FakePlot(width_pt="100.5", height_pt="200.5"))
         self.assertEqual(opts["height"], 1.4 * math.ceil(200.5))  # 1.4 * 201
         self.assertEqual(opts["width"], 1.35 * math.ceil(100.5))  # 1.35 * 101
+
+
+
+# -------------------------------------------------------------------- pie ----
+
+
+def test_pie_size_one_x_renders(capture_send):
+    """Regression test for #1787/#XXXX: a single-value X used to collapse to a
+    0-d array via an unconditional np.squeeze() and fail the ndim assert."""
+    sent = capture_send(lambda v: v.pie(np.array([100.0])))
+    assert sent["payload"]["data"][0]["type"] == "pie"
+    assert sent["payload"]["data"][0]["values"] == [100.0]
+
+
+def test_pie_multi_value_x_renders(capture_send):
+    """Normal multi-slice pie chart still works after the fix."""
+    sent = capture_send(lambda v: v.pie(np.array([30.0, 70.0])))
+    assert sent["payload"]["data"][0]["values"] == [30.0, 70.0]
+
+
+
+# ------------------------------------------------------------------- stem ----
+
+
+def test_stem_size_one_x_renders(capture_send):
+    """Regression test for #1787/#XXXX: a single-value X used to collapse to a
+    0-d array via an unconditional np.squeeze() and fail the ndim assert."""
+    sent = capture_send(lambda v: v.stem(np.array([5.0])))
+    assert sent["payload"]["data"] is not None
+
+
+def test_stem_multi_value_x_renders(capture_send):
+    """Normal multi-value stem plot still works after the fix."""
+    sent = capture_send(lambda v: v.stem(np.array([1.0, 2.0, 3.0])))
+    assert sent["payload"]["data"] is not None
+
+
+# --------------------------------------------------------------- histogram2d ----
+
+
+def test_histogram2d_size_one_xy_renders(capture_send):
+    """Regression test for #1787/#XXXX: single-value X and Y both collapsed to
+    0-d arrays via unconditional np.squeeze() and failed the ndim assert."""
+    sent = capture_send(lambda v: v.histogram2d(np.array([1.0]), np.array([2.0])))
+    assert sent["payload"]["data"][0]["type"] == "histogram2d"
+
+
+def test_histogram2d_multi_value_xy_renders(capture_send):
+    """Normal multi-value histogram2d still works after the fix."""
+    sent = capture_send(
+        lambda v: v.histogram2d(np.array([1.0, 2.0, 3.0]), np.array([4.0, 5.0, 6.0]))
+    )
+    assert sent["payload"]["data"][0]["type"] == "histogram2d"
