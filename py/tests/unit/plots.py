@@ -681,6 +681,13 @@ def test_surf_single_col_matrix_renders(capture_send):
     assert sent["payload"]["data"][0]["z"] == [[1.0], [1.0], [1.0], [1.0], [1.0]]
 
 
+def test_surf_tuple_input_renders(capture_send):
+    """Regression test: tuple input should be accepted."""
+    sent = capture_send(lambda v: v.surf(((1, 2), (3, 4))))
+    assert sent["payload"]["data"][0]["type"] == "surface"
+    assert sent["payload"]["data"][0]["z"] == [[1, 2], [3, 4]]
+
+
 def test_surf_aspectmode_forwarded_to_scene(capture_send):
     """aspectmode opt reaches layout.scene for surf."""
     sent = capture_send(lambda v: v.surf(np.ones((2, 2)), opts={"aspectmode": "data"}))

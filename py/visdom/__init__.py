@@ -3870,6 +3870,8 @@ class Visdom(object):
         - `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
         - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
         """
+
+        X = np.asarray(X)
         if X.ndim > 2:
             X = np.squeeze(X)
         assert X.ndim == 2, "X should be two-dimensional"
