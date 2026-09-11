@@ -20,8 +20,10 @@ pattern used by the handler tests.
 """
 
 import asyncio
+import contextlib
 import ssl
 import threading
+import time
 
 import pytest
 import requests
@@ -30,12 +32,15 @@ from tornado.httpclient import AsyncHTTPClient, HTTPClientError
 from tornado.simple_httpclient import HTTPTimeoutError
 from tornado.testing import gen_test
 
+from visdom import async_client
 from visdom.async_client import (
     AsyncVisdom,
     DEFAULT_MAX_CONCURRENCY,
     _AsyncTransport,
     _as_requests_error,
     _BridgedVisdom,
+    _Call,
+    _Construction,
     _extract_cookie,
     _PROXIED,
 )
@@ -66,12 +71,111 @@ class RecordingTransport(object):
         return [url.split("8097", 1)[-1] for url, _ in self.calls]
 
 
+@contextlib.contextmanager
+def _pool_spy(occupy=None):
+    """Hand out the pools ``create`` builds, which a cancelled one never returns.
+
+    With ``occupy`` set the pool has a single worker and that worker is already
+    busy, so the queued build stays queued: that is how the not-yet-started
+    branch is reached without racing the pool.
+    """
+    pools = []
+    original = async_client.ThreadPoolExecutor
+
+    def spy(*args, **kwargs):
+        if occupy is None:
+            pool = original(*args, **kwargs)
+        else:
+            pool = original(max_workers=1)
+            pool.submit(occupy.wait)
+        pools.append(pool)
+        return pool
+
+    async_client.ThreadPoolExecutor = spy
+    try:
+        yield pools
+    finally:
+        async_client.ThreadPoolExecutor = original
+
+
+async def wait_until(predicate, message, timeout=5):
+    """Poll ``predicate`` -- for work a worker thread hands back to the loop."""
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        assert time.monotonic() < deadline, message
+        await asyncio.sleep(0.01)
+
+
 async def make_client(transport=None, **kwargs):
     """An ``AsyncVisdom`` wired to a recording transport instead of a server."""
     transport = RecordingTransport() if transport is None else transport
     kwargs.setdefault("raise_exceptions", False)
     client = await AsyncVisdom.create(transport=transport, **kwargs)
     return client, transport
+
+
+# ----------------------------------------------------------------- cancelling --
+
+
+def test_a_call_cancels_the_post_it_is_attached_to():
+    call = _Call()
+    future = _FakeFuture()
+    assert call.attach(future) is False
+    call.cancel()
+    assert future.cancelled is True
+
+
+def test_a_call_cancelled_first_cancels_the_post_that_arrives_after():
+    """The cancel can land between the worker's check and its submit, so the
+    flag has to outlive the request that was not there to receive it."""
+    call = _Call()
+    call.cancel()
+    assert call.attach(_FakeFuture()) is True
+
+
+def test_a_settled_post_is_not_cancelled_by_a_later_cancel():
+    """``detach`` runs when a POST returns; the next one has not been made yet,
+    so there is nothing for the cancel to reach until it is."""
+    call = _Call()
+    future = _FakeFuture()
+    call.attach(future)
+    call.detach()
+    call.cancel()
+    assert future.cancelled is False
+
+
+def test_construction_leaves_the_release_to_a_worker_still_running():
+    """``run_in_executor`` cannot interrupt it, so a ``create`` cancelled now
+    would release a transport the worker has not built yet."""
+    state = _Construction()
+    inner = object()
+    state.publish(inner)
+    assert state.abandon() is None
+    assert state.finish() is True
+
+
+def test_construction_leaves_the_release_to_the_canceller_when_the_worker_won():
+    """The other order: the client was fully built a moment before the cancel,
+    and the worker is gone by the time anyone knows it is unwanted."""
+    state = _Construction()
+    inner = object()
+    state.publish(inner)
+    assert state.finish() is False
+    assert state.abandon() is inner
+
+
+def test_construction_releases_nothing_when_nobody_cancels():
+    state = _Construction()
+    state.publish(object())
+    assert state.finish() is False
+
+
+class _FakeFuture(object):
+    def __init__(self):
+        self.cancelled = False
+
+    def cancel(self):
+        self.cancelled = True
 
 
 # ------------------------------------------------------------------ transport --
@@ -237,6 +341,91 @@ class TestAsyncVisdomConstruction(tornado.testing.AsyncTestCase):
         with pytest.raises(ConnectionError):
             await AsyncVisdom.create(transport=transport, raise_exceptions=True)
         assert transport.closed is True
+
+    @gen_test
+    async def test_a_cancelled_construction_cancels_the_opening_post(self):
+        """A cancel arrives while the worker is still inside the POST.
+
+        ``wait_for``, a task group unwinding, a plain ``task.cancel()``: they
+        all resume ``create`` while ``Visdom.__init__`` is parked on the
+        announcement of the env, and ``run_in_executor`` cannot interrupt that
+        worker. Without the cancel reaching the request, the thread stays there
+        until ``REQUEST_TIMEOUT`` -- 20s of a pool the caller has already given
+        up on.
+        """
+        started = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        class HangingTransport(RecordingTransport):
+            async def post(self, url, data=None):
+                self.calls.append((url, data))
+                started.set()
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    cancelled.set()
+                    raise
+
+        task = asyncio.ensure_future(AsyncVisdom.create(transport=HangingTransport()))
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await asyncio.wait_for(cancelled.wait(), timeout=5)
+
+    @gen_test
+    async def test_a_cancelled_construction_releases_what_it_built(self):
+        """The cancelled ``create`` returns no object, so nobody else can.
+
+        The worker is still building when the cancel lands, and what it goes on
+        to build -- the transport, its ``AsyncHTTPClient``, the pool it all runs
+        on -- reaches no caller: there is no wrapper to call ``shutdown`` on.
+        Whichever side finishes last has to release it.
+        """
+        started = asyncio.Event()
+
+        class HangingTransport(RecordingTransport):
+            async def post(self, url, data=None):
+                self.calls.append((url, data))
+                started.set()
+                await asyncio.Event().wait()
+
+        transport = HangingTransport()
+        with _pool_spy() as pools:
+            task = asyncio.ensure_future(AsyncVisdom.create(transport=transport))
+            await started.wait()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        await wait_until(
+            lambda: transport.closed,
+            "the cancelled construction stranded its transport",
+        )
+        await wait_until(
+            lambda: pools[0]._shutdown,
+            "the cancelled construction stranded its worker pool",
+        )
+
+    @gen_test
+    async def test_a_construction_cancelled_before_its_worker_starts_is_released(self):
+        """The other branch: the cancel beats the worker to the build.
+
+        Nothing was constructed and nothing ever will be, so there is no worker
+        to hand the release to -- and the pool ``create`` made for it is
+        visible to nobody else. This is the one case the loop has to clean up
+        on the spot.
+        """
+        blocked = threading.Event()
+        transport = RecordingTransport()
+        with _pool_spy(occupy=blocked) as pools:
+            task = asyncio.ensure_future(AsyncVisdom.create(transport=transport))
+            await asyncio.sleep(0)  # let ``create`` queue its build
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            blocked.set()
+        assert transport.calls == [], "the build ran after being cancelled"
+        assert pools[0]._shutdown is True, "the cancelled create stranded its pool"
 
     @gen_test
     async def test_no_session_reaper_thread_is_started(self):

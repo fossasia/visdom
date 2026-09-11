@@ -246,19 +246,100 @@ def _as_requests_error(error):
 
 
 class _Call(object):
-    """One proxied call's link to the POST it is currently parked on.
+    """One call's link to the POST it is currently parked on.
 
     ``run_in_executor`` cannot interrupt a worker thread, so cancelling the
     awaitable a proxy returned has to reach the request itself. The worker
     records the ``run_coroutine_threadsafe`` future here as it makes each POST;
     cancelling that future is what cancels the tornado fetch on the loop.
+
+    The lock pairing the two sides lives here rather than on the client because
+    the client is not always there to hold it: the opening POST belongs to a
+    ``Visdom.__init__`` that has not returned yet, so a caller who cancels
+    :meth:`AsyncVisdom.create` has nothing but this object to cancel through.
     """
 
-    __slots__ = ("future", "cancelled")
+    __slots__ = ("_lock", "_future", "_cancelled")
 
     def __init__(self):
-        self.future = None
-        self.cancelled = False
+        self._lock = threading.Lock()
+        self._future = None
+        self._cancelled = False
+
+    def attach(self, future):
+        """Worker: record the POST this call is now on.
+
+        Returns True when the call was already cancelled, which means the
+        cancel landed between the check and the submit: the loop had nothing to
+        cancel when it ran, so this POST has to cancel itself.
+        """
+        with self._lock:
+            self._future = future
+            return self._cancelled
+
+    def detach(self):
+        """Worker: the POST settled, so there is nothing left to cancel."""
+        with self._lock:
+            self._future = None
+
+    def cancel(self):
+        """Loop: cancel the POST in flight, and any this call has not made yet.
+
+        A ``Visdom`` method can POST more than once -- a preflight and then the
+        plot -- so the flag outlives the individual request: whichever POST is
+        in flight is cancelled now, and the next one is cancelled as it is
+        created.
+        """
+        with self._lock:
+            self._cancelled = True
+            future = self._future
+        if future is not None:
+            future.cancel()
+
+
+class _Construction(object):
+    """Ownership of a half-built client while ``create`` can still be cancelled.
+
+    ``create`` runs ``Visdom.__init__`` on a worker thread, and a cancelled
+    ``create`` returns no object -- so the ``AsyncHTTPClient`` that the opening
+    POST builds can end up owned by nobody: the caller has no wrapper to
+    ``shutdown``, and the coroutine that would have released it is already
+    unwinding. Releasing it at the moment of the cancel does not work either,
+    because ``run_in_executor`` cannot interrupt the worker: the transport
+    usually does not exist yet, and the worker goes on to build it afterwards.
+
+    So both sides report in here, and whichever finds the other already
+    finished does the releasing. Exactly one of them ever does.
+    """
+
+    __slots__ = ("_lock", "_inner", "_done", "_abandoned")
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._inner = None
+        self._done = False
+        self._abandoned = False
+
+    def publish(self, inner):
+        """Worker: the instance exists, even though it is not initialized yet."""
+        with self._lock:
+            self._inner = inner
+
+    def finish(self):
+        """Worker: construction is over. True when the release is the worker's."""
+        with self._lock:
+            self._done = True
+            return self._abandoned
+
+    def abandon(self):
+        """Loop: ``create`` gave up.
+
+        Returns the instance to release when the worker has already finished,
+        and ``None`` when it has not -- the worker releases it in that case.
+        """
+        with self._lock:
+            self._abandoned = True
+            return self._inner if self._done else None
 
 
 class _BridgedVisdom(Visdom):
@@ -275,6 +356,7 @@ class _BridgedVisdom(Visdom):
         *args,
         transport=None,
         max_clients=DEFAULT_MAX_CONCURRENCY,
+        call=None,
         **kwargs,
     ):
         # Both are read by ``_handle_post``, which ``super().__init__`` reaches
@@ -285,8 +367,15 @@ class _BridgedVisdom(Visdom):
         # Which ``_Call`` the running worker thread belongs to, so the POST it
         # is about to make can be found and cancelled from the loop.
         self._calls = threading.local()
-        self._call_lock = threading.Lock()
-        super().__init__(*args, **kwargs)
+        # ``super().__init__`` POSTs, and ``create`` can be cancelled while it
+        # is in flight. Binding that call first is what lets the cancel reach
+        # the opening request, rather than leaving this worker parked on it
+        # until ``REQUEST_TIMEOUT``.
+        self._calls.current = call
+        try:
+            super().__init__(*args, **kwargs)
+        finally:
+            self._calls.current = None
 
     @property
     def transport(self):
@@ -315,20 +404,6 @@ class _BridgedVisdom(Visdom):
         finally:
             self._calls.current = None
 
-    def cancel_call(self, call):
-        """Cancel the POST ``call`` is on, and any it has not made yet.
-
-        Called from the loop when the caller cancels. A ``Visdom`` method can
-        POST more than once -- a preflight and then the plot -- so the flag
-        outlives the individual request: whichever POST is in flight is
-        cancelled now, and the next one is cancelled as it is created.
-        """
-        with self._call_lock:
-            call.cancelled = True
-            future = call.future
-        if future is not None:
-            future.cancel()
-
     def _handle_post(self, url, data=None):
         """Hand the POST to the event loop and block this worker thread only.
 
@@ -344,20 +419,13 @@ class _BridgedVisdom(Visdom):
         future = asyncio.run_coroutine_threadsafe(
             self.transport.post(url, data), self._aloop
         )
-        if call is not None:
-            with self._call_lock:
-                call.future = future
-                cancelled = call.cancelled
-            # Cancelled between the check and the submit: the loop had nothing
-            # to cancel when it ran, so this POST has to cancel itself.
-            if cancelled:
-                future.cancel()
+        if call is not None and call.attach(future):
+            future.cancel()
         try:
             return future.result()
         finally:
             if call is not None:
-                with self._call_lock:
-                    call.future = None
+                call.detach()
 
     def _start_session_reaper(self):
         """No-op: there is no ``requests`` session to reap."""
@@ -489,6 +557,10 @@ class AsyncVisdom(object):
         defaults to ``False`` here (the synchronous client defaults it to
         ``True``) because the backchannel is not implemented yet; asking for it
         explicitly raises rather than quietly dropping server events.
+
+        Cancelling the ``create`` itself is safe: the opening POST is cancelled
+        with it, and whatever it managed to build is released rather than left
+        holding a connection no caller can ever reach.
         """
         kwargs.setdefault("use_incoming_socket", False)
         if kwargs.get("use_incoming_socket") or kwargs.get("use_polling"):
@@ -521,26 +593,60 @@ class AsyncVisdom(object):
         # ``Visdom.__init__`` POSTs, so the bridge is built on a worker. That
         # POST creates the private ``AsyncHTTPClient``, so a failure after it --
         # a bad login, a rejected env -- leaves a live transport attached to an
-        # object the caller never receives and so can never shut down. Keeping
-        # a handle on the half-built instance is what makes it reachable here.
-        partial_inner = []
+        # object the caller never receives and so can never shut down. Publishing
+        # the half-built instance is what makes it reachable here.
+        #
+        # A cancel is the same leak arriving early. ``wait_for``, a task group
+        # unwinding, a plain ``task.cancel()``: all of them resume this
+        # coroutine while ``build`` is still inside the opening POST, and
+        # ``run_in_executor`` cannot interrupt a worker that has started.
+        # Releasing here and walking away would release nothing -- the
+        # transport usually does not exist yet -- and the worker would go on to
+        # build one for an object nobody holds. So ``_Construction`` hands the
+        # release to whichever side finishes last, and ``call`` carries the
+        # cancel down to the POST itself so the worker stops on the next loop
+        # tick rather than at ``REQUEST_TIMEOUT``.
+        call = _Call()
+        state = _Construction()
+
+        def release(inner):
+            """Release a client the caller will never see. Runs on the loop."""
+            transport = None if inner is None else getattr(inner, "_transport", None)
+            if transport is not None:
+                transport.close()
+            executor.shutdown(wait=False)
 
         def build():
             inner = _BridgedVisdom.__new__(_BridgedVisdom)
-            partial_inner.append(inner)
-            inner.__init__(loop, *args, **kwargs)
+            state.publish(inner)
+            try:
+                inner.__init__(loop, *args, call=call, **kwargs)
+            finally:
+                if state.finish():
+                    # Nobody is waiting for this any more, so releasing it is
+                    # this thread's job -- on the loop, which is the only
+                    # thread allowed to close the HTTP client.
+                    try:
+                        loop.call_soon_threadsafe(release, inner)
+                    except RuntimeError:
+                        # The loop is closed, and its HTTP client with it.
+                        executor.shutdown(wait=False)
             return inner
 
+        work = executor.submit(build)
         try:
-            inner = await loop.run_in_executor(executor, build)
+            inner = await asyncio.wrap_future(work, loop=loop)
         except BaseException:
-            # Back on the loop, which is the only thread allowed to close the
-            # HTTP client the transport owns.
-            for built in partial_inner:
-                transport = getattr(built, "_transport", None)
-                if transport is not None:
-                    transport.close()
-            executor.shutdown(wait=False)
+            call.cancel()
+            if work.cancel():
+                # ``build`` never started and never will, so there is no worker
+                # to hand the release to and nothing was built.
+                release(None)
+            else:
+                abandoned = state.abandon()
+                if abandoned is not None:
+                    # The worker finished first; it left the release to us.
+                    release(abandoned)
             raise
         return cls(inner, executor)
 
@@ -576,7 +682,7 @@ class AsyncVisdom(object):
             except asyncio.CancelledError:
                 # Cancelling ``future`` cannot stop a worker that has already
                 # started, so reach past it to the POST the worker is parked on.
-                self._inner.cancel_call(call)
+                call.cancel()
                 raise
 
         return proxy
