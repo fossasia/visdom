@@ -605,14 +605,15 @@ def test_pr_curve_auc_matches_sklearn_when_recall_ties(capture_send):
     "dtype", [np.uint8, np.int16, np.float32], ids=["uint8", "int16", "float32"]
 )
 def test_pr_curve_breaks_recall_ties_whatever_the_precision_dtype(dtype):
-    """An unsigned precision array must not invert the tie-break.
+    """The tie-break must reorder the group, for signed and unsigned alike.
 
-    Negating an unsigned array wraps rather than changing sign, so ``0`` and
-    ``1`` would come back as ``0`` and ``255`` and order the tied group the
-    wrong way round.
+    The tied pair is given in ascending precision so that leaving it alone
+    fails: a sort on recall with no tie-break would keep it, and negating an
+    unsigned array wraps rather than changing sign, turning ``0``/``1`` into
+    ``0``/``255`` and keeping it just the same.
     """
     recall = np.array([0.0, 0.5, 0.5, 1.0])
-    precision = np.array([1, 1, 0, 0], dtype=dtype)
+    precision = np.array([1, 0, 1, 0], dtype=dtype)
 
     _, ordered = _coerce_curve_xy(
         recall, precision, "recall", "precision", y_tiebreak_descending=True
