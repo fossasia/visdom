@@ -78,6 +78,12 @@ test.describe.serial('Test Env Modal', () => {
     await page.locator('button', { hasText: 'fork' }).click();
     await page.locator(envmodal).press('Escape');
 
+    // create a third fork for filtered Select All testing
+    await page.locator(envbutton).click();
+    await page.locator(envmodal + 'input[type="text"]').fill(env + '_fork3');
+    await page.locator('button', { hasText: 'fork' }).click();
+    await page.locator(envmodal).press('Escape');
+
     // check if fork is still the old one
     await closeEnvs(page);
     await openEnv(page, env + '_fork');
@@ -94,27 +100,82 @@ test.describe.serial('Test Env Modal', () => {
   });
 
   test('Remove Env', async ({ page }) => {
-    // batch delete both forks at once
+    // filter to one environment and delete it individually
     await page.locator(envbutton).click();
-    await page
-      .locator(envmodal + `input[type="checkbox"][value="${env}_fork"]`)
-      .check();
+    const filterInput = page.getByLabel('Filter environments');
+    await filterInput.fill(env + '_fork2');
+    await expect(
+      page.locator(envmodal + `input[type="checkbox"][value="${env}_fork2"]`)
+    ).toBeVisible();
+    await expect(
+      page.locator(envmodal + `input[type="checkbox"][value="${env}_fork"]`)
+    ).toHaveCount(0);
     await page
       .locator(envmodal + `input[type="checkbox"][value="${env}_fork2"]`)
       .check();
     await page.locator('button', { hasText: 'Delete Selected' }).click();
+    await expect(page.locator(envmodal)).toBeVisible();
+    await expect(
+      page.locator('.visdom-toast-success', {
+        hasText: `Successfully deleted environment "${env}_fork2".`,
+      })
+    ).toBeVisible();
+
+    // Select All applies only to the remaining filtered environments
+    await filterInput.fill(env + '_fork');
+    await page.getByLabel('Select All').check();
+    await expect(
+      page.locator(envmodal + `input[type="checkbox"][value="${env}_fork"]`)
+    ).toBeChecked();
+    await expect(
+      page.locator(envmodal + `input[type="checkbox"][value="${env}_fork3"]`)
+    ).toBeChecked();
+    await expect(
+      page.locator(envmodal + `input[type="checkbox"][value="${env}"]`)
+    ).toHaveCount(0);
+    await page.locator('button', { hasText: 'Delete Selected' }).click();
+    await expect(page.locator(envmodal)).toBeVisible();
+    await expect(
+      page.locator('.visdom-toast-success', {
+        hasText: 'Successfully deleted 2 environments.',
+      })
+    ).toBeVisible();
+
+    // deleting the active environment falls back to main without closing
+    await filterInput.fill(env);
+    const activeEnvCheckbox = page.locator(
+      envmodal + `input[type="checkbox"][value="${env}"]`
+    );
+    await expect(activeEnvCheckbox).toBeVisible();
+    await activeEnvCheckbox.check();
+    await page.locator('button', { hasText: 'Delete Selected' }).click();
+    await expect(page.locator(envmodal)).toBeVisible();
+    await expect(page.getByLabel('Environment name')).toHaveValue('main');
+    await expect(
+      page.locator('.visdom-toast-success', {
+        hasText: `Successfully deleted environment "${env}".`,
+      })
+    ).toBeVisible();
+
+    await page.locator(envmodal).press('Escape');
     await expect(page.locator(envmodal)).toHaveCount(0);
 
     await page.locator('.rc-tree-select').click();
     await expandAllEnvGroups(page);
     const tree = page.locator('.rc-tree-select-tree');
-    await expect(tree.locator(`span[title="${env}"]`)).toBeVisible({
+    await expect(tree.locator('span[title="main"]')).toBeVisible({
+      timeout: 5000,
+    });
+    await expect(tree.locator(`span[title="${env}"]`)).toHaveCount(0, {
       timeout: 5000,
     });
     await expect(tree.locator(`span[title="${env}_fork"]`)).toHaveCount(0, {
       timeout: 5000,
     });
     await expect(tree.locator(`span[title="${env}_fork2"]`)).toHaveCount(0, {
+      timeout: 5000,
+    });
+    await expect(tree.locator(`span[title="${env}_fork3"]`)).toHaveCount(0, {
       timeout: 5000,
     });
     await closeEnvDropdown(page);
