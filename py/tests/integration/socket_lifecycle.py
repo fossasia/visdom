@@ -18,7 +18,9 @@ There is no HTTP here, but there is a real ``Application`` and real handler
 dispatch, which is what ``integration`` means in this suite.
 """
 
+import asyncio
 import json
+import types
 
 import pytest
 
@@ -226,6 +228,79 @@ def test_reopening_keeps_the_socket_under_its_first_sid(app):
     assert list(app.subs) == [first_sid]
 
 
+# -- Shutdown ----------------------------------------------------------------
+
+
+def test_shutdown_closes_every_open_connection(app):
+    """``close_connections`` hangs up on subscribers and sources alike."""
+    first = open_sub(app)
+    second = open_sub(app)
+    source = open_source(app)
+
+    app.server_state.close_connections()
+
+    assert app.subs == {}
+    assert app.sources == {}
+    assert first.sid not in app.subs
+    assert second.sid not in app.subs
+    assert source.sid not in app.sources
+
+
+def test_shutdown_clears_the_registries_the_handlers_share(app):
+    """The state's own containers are emptied, not replaced.
+
+    Shutdown used to rebind ``app.subs`` to a fresh list, which left the
+    dictionary that ``ServerState`` and every handler hold still full.
+    """
+    subs = app.server_state.subs
+    sources = app.server_state.sources
+    open_sub(app)
+    open_source(app)
+
+    app.server_state.close_connections()
+
+    assert app.server_state.subs is subs
+    assert app.server_state.sources is sources
+    assert subs == {}
+    assert sources == {}
+
+
+def test_shutdown_forgets_a_connection_that_fails_to_close(app):
+    """One socket raising on close does not strand the others."""
+
+    class Unclosable:
+        def close(self):
+            raise RuntimeError("socket already gone")
+
+    app.subs["broken"] = Unclosable()
+    sub = open_sub(app)
+
+    app.server_state.close_connections()
+
+    assert app.subs == {}
+    assert sub.sid not in app.subs
+
+
+def test_shutdown_stops_the_polling_reaper(app):
+    """The monitor that reaps idle polling sockets is stopped too."""
+    stopped = []
+    app.server_state._socket_wrap_monitor = types.SimpleNamespace(
+        stop=lambda: stopped.append(True)
+    )
+
+    app.server_state.close_connections()
+
+    assert stopped == [True]
+
+
+def test_shutdown_without_connections_is_a_noop(app):
+    """Stopping a server nobody connected to is harmless."""
+    app.server_state.close_connections()
+
+    assert app.subs == {}
+    assert app.sources == {}
+
+
 # -- Message queue -----------------------------------------------------------
 
 
@@ -257,7 +332,7 @@ def test_readonly_socket_ignores_commands(readonly_app):
     readonly_app.state["expt"] = {"jsons": {}, "reload": {}}
     sub = open_sub(readonly_app)
 
-    sub.on_message(json.dumps({"cmd": "delete_env", "eid": "expt"}))
+    asyncio.run(sub.on_message(json.dumps({"cmd": "delete_env", "eid": "expt"})))
 
     assert "expt" in readonly_app.state
 
@@ -267,7 +342,7 @@ def test_readonly_socket_ignores_an_unknown_command(readonly_app):
     sub = open_sub(readonly_app)
     before = len(sub.messages)
 
-    sub.on_message(json.dumps({"cmd": "not_a_command"}))
+    asyncio.run(sub.on_message(json.dumps({"cmd": "not_a_command"})))
 
     assert len(sub.messages) == before
 
