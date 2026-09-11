@@ -589,12 +589,36 @@ def test_pr_curve_auc_matches_sklearn_when_recall_ties(capture_send):
         )
         precision, recall, _ = sklearn_metrics.precision_recall_curve(y_true, y_score)
 
-        sent = capture_send(lambda v: v.pr_curve(precision=precision, recall=recall))
+        sent = capture_send(
+            lambda v, precision=precision, recall=recall: v.pr_curve(
+                precision=precision, recall=recall
+            )
+        )
 
         title = sent["payload"]["opts"]["title"]
         auc = float(title.rsplit("AUC=", 1)[1].rstrip(")"))
         expected = sklearn_metrics.average_precision_score(y_true, y_score)
         assert auc == pytest.approx(expected, abs=5e-5)
+
+
+@pytest.mark.parametrize(
+    "dtype", [np.uint8, np.int16, np.float32], ids=["uint8", "int16", "float32"]
+)
+def test_pr_curve_breaks_recall_ties_whatever_the_precision_dtype(dtype):
+    """An unsigned precision array must not invert the tie-break.
+
+    Negating an unsigned array wraps rather than changing sign, so ``0`` and
+    ``1`` would come back as ``0`` and ``255`` and order the tied group the
+    wrong way round.
+    """
+    recall = np.array([0.0, 0.5, 0.5, 1.0])
+    precision = np.array([1, 1, 0, 0], dtype=dtype)
+
+    _, ordered = _coerce_curve_xy(
+        recall, precision, "recall", "precision", y_tiebreak_descending=True
+    )
+
+    assert list(ordered) == [1, 1, 0, 0]
 
 
 def test_roc_curve_auc_is_unaffected_by_the_pr_tiebreak(capture_send):
@@ -612,7 +636,7 @@ def test_roc_curve_auc_is_unaffected_by_the_pr_tiebreak(capture_send):
         )
         fpr, tpr, _ = sklearn_metrics.roc_curve(y_true, y_score)
 
-        sent = capture_send(lambda v: v.roc_curve(fpr=fpr, tpr=tpr))
+        sent = capture_send(lambda v, fpr=fpr, tpr=tpr: v.roc_curve(fpr=fpr, tpr=tpr))
 
         title = sent["payload"]["opts"]["title"]
         auc = float(title.rsplit("AUC=", 1)[1].rstrip(")"))

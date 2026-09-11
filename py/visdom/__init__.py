@@ -644,7 +644,9 @@ def _coerce_curve_xy(x, y, x_name, y_name, y_tiebreak_descending=False):
             "{} and {} should have at least 2 points".format(x_name, y_name)
         )
 
-    tiebreak = -y if y_tiebreak_descending else y
+    # Negating an unsigned array wraps instead of changing sign, which would
+    # order a tied group by ascending y, so widen before negating.
+    tiebreak = -y.astype(np.float64) if y_tiebreak_descending else y
     order = np.lexsort((tiebreak, x))
     return x[order], y[order]
 
