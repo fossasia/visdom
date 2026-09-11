@@ -75,6 +75,11 @@ jobs:
     name: "Initialize Visual Regression Test"
     runs-on: ubuntu-latest
     needs: install-and-build
+    # Baselines are rendered from the base branch. For a release PR into main that
+    # branch is hundreds of commits behind the tests, so they cannot run against it
+    # and a pixel diff with it would mean nothing. Each change in a release has
+    # already passed this job on its own PR into dev.
+    if: github.base_ref != 'main'
     steps:
 
       - name: "Checkout Repository"
@@ -152,6 +157,8 @@ jobs:
     name: "Initialize Playwright Visual Regression Test"
     runs-on: ubuntu-latest
     needs: install-and-build
+    # Skipped for PRs into main, for the same reason as visual-regression-test-init.
+    if: github.base_ref != 'main'
     steps:
       - name: "Checkout Repository"
         uses: actions/checkout@v7.0.1
