@@ -37,24 +37,12 @@ jobs:
   install-and-build:
     name: "Install and Build"
     runs-on: ubuntu-latest
-    outputs:
-      jsfileschanged: ${{ steps.checkout.outputs.jsfileschanged }}
     steps:
       - name: "Checkout Repository"
         uses: actions/checkout@v7.0.1
       - uses: ./.github/actions/prepare
         with:
           loadprbuild: false
-
-      # count changed js files (diff to base branch)
-      - name: "Count changed JS-Files"
-        id: checkout
-        run: |
-          git fetch origin $GITHUB_BASE_REF
-          echo "Target branch : $GITHUB_BASE_REF"
-          git diff --name-only origin/$GITHUB_BASE_REF --
-          echo 'jsfileschanged='$(git diff --name-only origin/$GITHUB_BASE_REF -- | grep '^js/*' | wc -l) >> $GITHUB_OUTPUT
-          echo 'Num js files changed='$(git diff --name-only origin/$GITHUB_BASE_REF -- | grep '^js/*' | wc -l)
 
       - name: "Build Project (PR version)"
         run: |
@@ -86,6 +74,10 @@ jobs:
           usebasebranch: true
           loadprbuild: false
 
+      - name: "Build Project (base version)"
+        run: |
+          npm run build
+
       - name: "Checkout Playwright tests from Head-Ref"
         shell: bash
         run: |
@@ -98,10 +90,6 @@ jobs:
 
       - name: "Install PR npm dependencies"
         run: CYPRESS_INSTALL_BINARY=0 ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm install
-
-      - name: "Build Project (base version)"
-        run: |
-          npm run build
 
       - name: "Install Playwright Chromium"
         run: npx playwright install --with-deps chromium
