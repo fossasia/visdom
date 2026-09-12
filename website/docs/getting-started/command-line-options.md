@@ -42,6 +42,11 @@ process exits. Nothing you plotted is lost by stopping the server normally, so
 there is no need to call `vis.save()` first. A `SIGKILL` still cannot be caught,
 and loses whatever the last autosave did not cover.
 
+Under `docker stop` that guarantee lasts only as long as the stop timeout:
+Docker sends `SIGKILL` once it expires, which can interrupt the final save if
+the queued writes have not finished. Give deployments holding large environments
+a grace period to match, with `docker stop -t` or `stop_grace_period` in Compose.
+
 ## Authentication
 
 :::danger Security
