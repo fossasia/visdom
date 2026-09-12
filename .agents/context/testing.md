@@ -145,8 +145,8 @@ as a gate, so an unmarked file is in neither job and is effectively only covered
 The invariant to preserve: **`-m unit` and `-m integration` must sum to the whole suite.**
 
 ```bash
-pytest py/tests --collect-only -q -o addopts="" | tail -1   # 2461
-pytest -m unit --collect-only -q -o addopts="" | tail -1    # 1701
+pytest py/tests --collect-only -q -o addopts="" | tail -1   # 2533
+pytest -m unit --collect-only -q -o addopts="" | tail -1    # 1773
 pytest -m integration --collect-only -q -o addopts="" | tail -1  # 760
 ```
 

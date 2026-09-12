@@ -105,35 +105,149 @@ py/visdom/server/
 
 ---
 
-## Phase 4: Async I/O Modernization
-**Effort: Medium-Large | Risk: Medium | PRs: 2 | Dependencies: Phase 3**
+## Phase 4: Async I/O Modernization — **delivered**
+**Effort: Medium-Large | Risk: Medium | PRs: 11 | Dependencies: none in the end**
 
-### 4a. Wrap blocking file I/O with `run_in_executor`
-Currently only **ONE** place uses async I/O (`socket_handlers.py:123` for `storage.save_all`). All others block the Tornado event loop:
+Tracked as [issue #771](https://github.com/fossasia/visdom/issues/771). The
+phase was planned to wait on Phase 3, on the assumption that the file I/O had to
+be concentrated in a `StateManager` before it could be moved off the loop. It
+did not: `ServerState` (`py/visdom/server/server_state.py`) plus the `DataStore`
+abstraction already gave every disk touch a single owner, so the async work went
+ahead of the data model rather than behind it. Phase 3 is still open, and the
+handlers it will rewrite are now `async def` — that changes where it lands, not
+whether it can.
 
-| File | Lines | Blocking Operation |
-|------|-------|-------------------|
-| `server_utils.py` | 72 | Cookie file write |
-| `data_model/json_store.py` | `save_envs()` | `JSONStore` — JSON file write |
-| `server_utils.py` | 273-303 | `compare_envs()` — env file read |
-| `app.py` | 141 | Layout save (file write) |
-| `app.py` | 155 | Layout load (file read) |
-| `app.py` | 183 | State load (JSON file reads) |
-| `app.py` | 238, 242 | CSS file reads |
+| Landed | What |
+|--------|------|
+| [#1703](https://github.com/fossasia/visdom/pull/1703) | Storage executor + off-loop save/load helpers; `check_auth` returns the wrapped result |
+| [#1711](https://github.com/fossasia/visdom/pull/1711) | `/events`, `/update`, `/win_exists`, `/close`, `/win_data` off the loop |
+| [#1713](https://github.com/fossasia/visdom/pull/1713) | Environment routes off the loop; PBKDF2 login off the loop |
+| [#1717](https://github.com/fossasia/visdom/pull/1717) | Experiment and compare routes off the loop |
+| [#1721](https://github.com/fossasia/visdom/pull/1721) | Socket commands off the loop (`async def on_message`) |
+| [#1780](https://github.com/fossasia/visdom/pull/1780) | `asyncio.run` startup, graceful stop, `layout_create` on create-on-append |
+| [#1784](https://github.com/fossasia/visdom/pull/1784) | `visdom.async_client.AsyncVisdom` — bridged async client |
+| [#1794](https://github.com/fossasia/visdom/pull/1794) | `use_preflight_checks`: one POST per append instead of two |
+| [#1800](https://github.com/fossasia/visdom/pull/1800) | Async backchannel — websocket and polling |
+| [#1808](https://github.com/fossasia/visdom/pull/1808) | `async_client.pyi`, and `__init__.pyi` brought back in step |
+| [#1816](https://github.com/fossasia/visdom/pull/1816) | README + website docs, `example/async_demo.py` |
 
-With Phase 3's `StateManager`, all file I/O concentrates in one place — easy to wrap.
+### 4a. Blocking file I/O — where it went
 
-### 4b. Convert handlers to `async def` / `await`
-Tornado 6+ supports native coroutines. Convert all handler `get()`/`post()`/`on_message()` to `async def`. Update `check_auth` decorator in `server_utils.py:49`.
+Every row of the original table now runs on the storage worker, reached through
+`run_on_storage_executor` in `server_utils.py`:
 
-### 4c. Remove legacy compatibility shims
-- `collections.abc.Sequence` fallback in 3 files (`__init__.py:19-24`, `server_utils.py:30-35`, `web_handlers.py:26-31`)
-- Python 2 assert at `__init__.py:51`
-- PyTorch < 0.4 deprecation warnings (`__init__.py:407-410`)
-- Lua Torch deprecation notice (`web_handlers.py:76-81`)
+| Was blocking | Now |
+|--------------|-----|
+| `JSONStore.save_envs()` / `save_env()` | `save_env_off_loop`, `save_envs_off_loop`, `save_all_off_loop` |
+| `compare_envs()` env reads | `CompareHandler` awaits the comparison on the worker |
+| Experiment search's full-disk scan | `ensure_env_loaded` per eid, then the unchanged sync search over warm state |
+| Layout save / load (`app.py`) | `ServerState.save_layouts`, awaited off the loop |
+| State load at startup | `ServerState`, before the loop starts serving |
+| PBKDF2 login hash (~50-100 ms) | The **default** executor, not the storage one — logins must not queue behind env saves |
 
-### 4d. Standardize string formatting
-Mixed `%`, `.format()`, and f-strings throughout. Standardize on f-strings.
+CSS reads at import time are the deliberate exception: they happen once, before
+the server accepts a connection.
+
+### 4b. Handlers
+
+The handler entrypoints that touch storage are `async def` (`get`, `post`,
+`on_message`); the ones that only read memory or serve a static asset were left
+synchronous. The `wrap_func` staticmethods stayed synchronous too — they are
+pure state manipulation, and keeping them sync is what let the polling bridge
+and the websocket path share one body.
+
+Two endpoints do not hold that line yet; see follow-up 4j.
+
+`check_auth` was the blocker, and its fix is the reason no handler needed a
+per-handler edit: it discarded the wrapped call's return value, so an
+`async def post` under it produced a coroutine that nothing awaited and a silent
+empty 200. It now returns the result untouched and carries `functools.wraps`.
+
+### Invariants a later change can break silently
+
+1. **Disk work belongs to one worker.** `ServerState.storage_executor` is
+   `ThreadPoolExecutor(max_workers=1)`. The single worker is what serializes
+   writes: with two, two saves of the same env interleave and leave a
+   half-written file. Widening it is a data-loss change, not a tuning knob.
+2. **Snapshot on the loop, hand the copy to the worker.** `snapshot_env` /
+   `snapshot_envs` deep-copy on the IOLoop thread before the executor call.
+   Passing live state to a worker means the loop can mutate an env mid-write.
+   This also fixes the two pre-existing fire-and-forget `run_in_executor` races
+   in `socket_handlers.py`.
+3. **Re-check identity after every await.** An env can be deleted while a read
+   of it is parked. `ServerState.deleting_envs` exists so a resumed read does
+   not file what it read back into `state` and resurrect a deleted env.
+4. **Shutdown order is: stop autosave, drain the executor, then save.** See
+   `ServerState.shutdown_storage`. Draining after the final save lets a queued
+   write land on top of it and put stale state back on disk. The method is
+   idempotent because both the graceful stop and the `atexit` fallback call it.
+
+### 4c / 4d — legacy shims and string formatting
+
+Done in passing over the phase; the `collections.abc` fallbacks, the Python 2
+assertion and the PyTorch < 0.4 warnings are gone. The Lua Torch notice in
+`web_handlers.py` stays: it is a live error message for old clients, not a shim.
+
+### The async client is a bridge, not a second client
+
+`py/visdom/async_client.py` adds `AsyncVisdom` without duplicating any of the
+40+ plotting methods. `_BridgedVisdom` subclasses `Visdom` and overrides not one
+of them: the substantive override is `_handle_post`, the documented transport
+seam, which hands the request to the caller's loop with
+`asyncio.run_coroutine_threadsafe`. (`_start_session_reaper` and `setup_socket`
+are overridden too, as lifecycle stubs — the loop owns both.) Method bodies run
+on a worker thread; only the wire hop is async.
+
+That shape is forced by the client, not chosen for convenience: `scatter` and
+`image` need the result of a mid-method `win_exists` synchronously, and a
+synchronous body cannot await. Rewriting those bodies as coroutines would have
+meant maintaining two copies of every plotting method. As a side effect the
+CPU-heavy encodes (PNG/base64, `savefig`, t-SNE) also land off the loop.
+
+Two details are load-bearing:
+
+- **The client owns its thread pool.** Not `asyncio.to_thread`: asyncio resolves
+  hostnames on the default executor, so plot calls parked there waiting on their
+  POST starve the `getaddrinfo` those same POSTs need, and a `gather` wider than
+  the default pool deadlocks until every request hits its connect timeout.
+- **`create()` flips two defaults.** `use_incoming_socket` and
+  `use_preflight_checks` both default to `False` on `AsyncVisdom` and stay
+  `True` on `Visdom`. The synchronous client's wire traffic is unchanged
+  byte-for-byte; opting in is a caller's decision.
+
+`AsyncVisdom` proxies 62 names through `__getattr__` against an explicit
+`_PROXIED` allowlist. Because the methods are manufactured, neither an import
+nor a type check catches a typo or a missing `await` — `py/tests/unit/async_docs.py`
+and `py/tests/unit/client_stubs.py` are what do.
+
+### Benchmarks (loopback, `line(update='append')` x 300)
+
+The numbers issue #771 asked for. Also quoted in the README and on the website
+page, and cross-checked by `py/tests/unit/async_docs.py`.
+
+| Client | plots/s | p50 | p95 |
+|---|---|---|---|
+| `Visdom`, preflight on (unchanged default) | 198 | 5.00 ms | 5.73 ms |
+| `Visdom`, `use_preflight_checks=False` | **304** | 3.32 ms | 4.09 ms |
+| `AsyncVisdom`, awaited serially | 235 | 4.24 ms | 4.87 ms |
+| `AsyncVisdom`, 8 concurrent | **410** | 13.19 ms | 18.33 ms |
+
+Requests halve exactly — 12 POSTs become 6 over a mixed append/image-history
+script, and 6 `/win_exists` become 0 — and the resulting server state is
+byte-identical between the two preflight modes. Throughput is +53% rather than
++100% because on loopback the preflight is the cheaper of the two round trips;
+over a real network the two cost the same and the ratio approaches 2x.
+
+### Follow-ups not taken
+
+| # | Item | Why it was left |
+|---|------|-----------------|
+| 4e | Bound the storage queue | An unbounded backlog of queued saves is memory the server cannot reclaim. Needs a policy for what to drop, which is a product decision |
+| 4f | Per-env write locks instead of one global worker | Would let independent envs save in parallel. Only worth it once a profile shows the single worker is the bottleneck; today it is not |
+| 4g | `AsyncVisdom` HTTP proxy support | `create()` raises `NotImplementedError` for `proxies` / `http_proxy_host`: tornado's `AsyncHTTPClient` has no proxy support without pycurl, which would be a new dependency |
+| 4h | Native async plotting bodies | Only worth doing if the bridge's thread pool ever shows up in a profile. It would fork every plotting method, so the bar is high |
+| 4i | Retire the polling backchannel | Both clients carry a websocket path and an HTTP polling fallback, and every socket change has to be made twice. Phase 6 is where that gets decided |
+| 4j | `/experiments/hparams` and `/experiments/hparams/update` still write on the loop | Both handlers are synchronous and their `wrap_func` calls `handler.storage.save_env` inline, and the selection they build reads through `ExperimentStore` on the loop. They arrived with the hparams track after this phase's server PRs were scoped, so nothing converted them. Small and mechanical — `async def post` plus `save_env_off_loop` — but it is a live write path and belongs in its own PR. `py/tests/unit/refactoring_docs.py` records both sites, so a third one fails the suite |
 
 ---
 
@@ -170,7 +284,8 @@ The TODO at `socket_handlers.py:238` notes inconsistent message JSON formatting 
 
 | Issue | Related Phase | How Addressed |
 |-------|---------------|---------------|
-| [#989](https://github.com/fossasia/visdom/issues/989) (async race condition in env switching) | Phases 3 + 4 | StateManager with proper locking + async I/O |
+| [#771](https://github.com/fossasia/visdom/issues/771) (client 10x slower than the caller's script) | Phase 4 | **Delivered** — preflight removed, `AsyncVisdom` added; numbers above |
+| [#989](https://github.com/fossasia/visdom/issues/989) (async race condition in env switching) | Phases 3 + 4 | Partly addressed — Phase 4 put the snapshot-before-offload and `deleting_envs` guards in place. The switching race itself still wants StateManager |
 | [#1324](https://github.com/fossasia/visdom/issues/1324) (refactor image rendering logic) | Phases 3 + 5 | Typed window models + plotting extraction |
 | [#1310](https://github.com/fossasia/visdom/issues/1310) (multi-tenant architecture) | Phase 3 | StateManager provides isolation foundation |
 
@@ -200,19 +315,27 @@ The TODO at `socket_handlers.py:238` notes inconsistent message JSON formatting 
 
 ```
 Phase 1 (bugs) ──────────────────────────→ Phase 5 (client split) ──→
-Phase 2 (dedup) ──→ Phase 3 (data model) ──→ Phase 4 (async) ──→ Phase 6 (protocol)
+Phase 2 (dedup) ──→ Phase 3 (data model) ──────────────────────────→ Phase 6 (protocol)
+Phase 4 (async) ✔ done, ahead of Phase 3
 ```
 
-Phases 1 & 2 can start immediately in parallel. Phase 5 can proceed independently after Phase 1. Phases 3 -> 4 -> 6 are sequential.
+Phases 1 & 2 can start immediately in parallel. Phase 5 can proceed independently after Phase 1.
 
-**Estimated total: 10-13 PRs across all phases.**
+Phase 4 was planned as a dependant of Phase 3 and did not turn out to be one — the
+disk I/O already had a single owner. Phase 6 keeps its Phase 3 dependency, and it
+inherits one thing from Phase 4: the protocol it standardizes is now spoken by two
+clients, `Visdom` and `AsyncVisdom`, over two transports each.
+
+**Estimated total: 10-13 PRs across the remaining phases; Phase 4 took 13 of its own.**
 
 ---
 
 ## Verification Plan
 
 For each phase:
-1. Run existing tests: `python -m pytest` (config in `pyproject.toml`; suite lives in `py/tests/`)
+1. Run existing tests: `python -m pytest` (config in `pyproject.toml`; suite lives in `py/tests/`).
+   Every new file needs `pytestmark = pytest.mark.unit` or `pytest.mark.integration` —
+   CI runs the two as separate jobs, so an unmarked file runs in neither
 2. Run Playwright E2E: `npm test` and `npm run test:polling`
 3. Manual smoke test: `python -m visdom.server -port 8098` then run `example/demo.py`
 4. Verify no regressions in visual regression screenshots
@@ -224,10 +347,15 @@ For each phase:
 
 | File | Lines | Touched By |
 |------|-------|------------|
-| `py/visdom/__init__.py` | 2,712 | Phases 1, 5 |
-| `py/visdom/server/handlers/web_handlers.py` | 708 | Phases 2, 3, 4 |
-| `py/visdom/server/handlers/socket_handlers.py` | 409 | Phases 2, 3, 4, 6 |
-| `py/visdom/server/handlers/base_handlers.py` | 84 | Phase 2 |
-| `py/visdom/utils/server_utils.py` | 568 | Phases 2, 3, 4 |
-| `py/visdom/server/app.py` | 248 | Phases 3, 4 |
-| `py/visdom/utils/shared_utils.py` | 62 | Phase 1 |
+| `py/visdom/__init__.py` | 4,974 | Phases 1, 5 |
+| `py/visdom/async_client.py` | 940 | Phase 4 (new) |
+| `py/visdom/server/server_state.py` | 398 | Phase 4 (new); future home for Phase 3 |
+| `py/visdom/server/handlers/web_handlers.py` | 1,602 | Phases 2, 3, 4 |
+| `py/visdom/server/handlers/socket_handlers.py` | 908 | Phases 2, 3, 4, 6 |
+| `py/visdom/server/handlers/base_handlers.py` | 149 | Phase 2 |
+| `py/visdom/utils/server_utils.py` | 1,081 | Phases 2, 3, 4 |
+| `py/visdom/server/app.py` | 381 | Phases 3, 4 |
+| `py/visdom/server/run_server.py` | 486 | Phase 4 |
+| `py/visdom/utils/shared_utils.py` | 219 | Phase 1 |
+
+Line counts drift; they are here for relative size, not as an assertion.
