@@ -812,10 +812,15 @@ def test_pie_multi_value_x_renders(capture_send):
 
 
 def test_stem_size_one_x_renders(capture_send):
-    """Regression test: a single-value X used to collapse to a
-    0-d array via an unconditional np.squeeze() and fail the ndim assert."""
+    """Regression test for #1787/#1821: a single-value X used to collapse to a
+    0-d array via an unconditional np.squeeze() and fail the ndim assert.
+    stem() delegates to scatter(); y column carries the original values."""
     sent = capture_send(lambda v: v.stem(np.array([5.0])))
-    assert sent["payload"]["data"] is not None
+    data = sent["payload"]["data"][0]
+    assert data["type"] == "scatter"
+    # y column: [0.0 (zero baseline), 5.0 (the value), nan] — value must appear
+    y_vals = [v for v in data["y"] if not np.isnan(v)]
+    assert 5.0 in y_vals
 
 
 def test_stem_multi_value_x_renders(capture_send):
@@ -828,10 +833,13 @@ def test_stem_multi_value_x_renders(capture_send):
 
 
 def test_histogram2d_size_one_xy_renders(capture_send):
-    """Regression test: single-value X and Y both collapsed to
+    """Regression test for #1787/#1821: single-value X and Y both collapsed to
     0-d arrays via unconditional np.squeeze() and failed the ndim assert."""
     sent = capture_send(lambda v: v.histogram2d(np.array([1.0]), np.array([2.0])))
-    assert sent["payload"]["data"][0]["type"] == "histogram2d"
+    data = sent["payload"]["data"][0]
+    assert data["type"] == "histogram2d"
+    assert data["x"] == [1.0]
+    assert data["y"] == [2.0]
 
 
 def test_histogram2d_multi_value_xy_renders(capture_send):
