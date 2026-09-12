@@ -4071,6 +4071,7 @@ class Visdom(object):
 
         if Y is None:
             Y = np.arange(1, X.shape[0] + 1)
+        Y = np.atleast_1d(np.squeeze(np.asarray(Y)))
         if Y.ndim == 1:
             Y = Y[:, None]
         assert Y.shape[0] == X.shape[0], "number of rows in X and Y must match"
