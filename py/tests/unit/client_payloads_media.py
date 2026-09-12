@@ -226,6 +226,38 @@ def test_image_store_history_appends_to_an_existing_window(capture_send):
     assert sent["endpoint"] == "update"
 
 
+def test_image_store_history_without_preflight_always_updates(
+    capture_send, offline_client
+):
+    """The server decides: /update appends the frame, or creates the pane."""
+    offline_client.use_preflight_checks = False
+    with patch.object(offline_client, "win_exists") as probe:
+        sent = capture_send(
+            lambda v: v.image(
+                np.zeros((4, 4), dtype=np.uint8),
+                win="w1",
+                opts=dict(store_history=True),
+            )
+        )
+    assert not probe.called
+    assert sent["endpoint"] == "update"
+    assert sent["payload"]["append"]
+
+
+def test_image_store_history_without_preflight_still_needs_a_window_id(
+    capture_send, offline_client
+):
+    """There is nothing to update without a window, so it stays an event."""
+    offline_client.use_preflight_checks = False
+    sent = capture_send(
+        lambda v: v.image(
+            np.zeros((4, 4), dtype=np.uint8), opts=dict(store_history=True)
+        )
+    )
+    assert sent["endpoint"] == "events"
+    assert "append" not in sent["payload"]
+
+
 def test_image_store_history_without_a_window_id_stays_an_event(capture_send):
     sent = capture_send(
         lambda v: v.image(
