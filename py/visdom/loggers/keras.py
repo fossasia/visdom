@@ -161,7 +161,7 @@ class VisdomKerasLogger(Callback):
                     win_name = key
                     trace_name = "train"
                 if win_name not in self._wins:
-                    self._wins[win_name] = self.viz.line(
+                    win = self.viz.line(
                         X=[epoch],
                         Y=[value],
                         env=self.env,
@@ -173,6 +173,8 @@ class VisdomKerasLogger(Callback):
                             "showlegend": True,
                         },
                     )
+                    if win:
+                        self._wins[win_name] = win
                 elif epoch == 0:
                     # New run reusing an old window, or a val_ trace
                     # appearing on a window its train_ counterpart just
@@ -223,7 +225,7 @@ class VisdomKerasLogger(Callback):
 
     def _plot_step(self, win_name, value, replace):
         if win_name not in self._step_wins:
-            self._step_wins[win_name] = self.viz.line(
+            win = self.viz.line(
                 X=[self._step],
                 Y=[value],
                 env=self.env,
@@ -233,6 +235,8 @@ class VisdomKerasLogger(Callback):
                     "ylabel": win_name,
                 },
             )
+            if win:
+                self._step_wins[win_name] = win
         elif replace:
             self.viz.line(
                 X=[self._step],

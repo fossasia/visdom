@@ -125,6 +125,21 @@ class TestPlotting(unittest.TestCase):
         kwargs = self.logger.viz.line.call_args.kwargs
         self.assertEqual(kwargs["opts"]["xlabel"], "step")
 
+    def test_failed_window_creation_is_not_tracked(self):
+        """A send that fails returns False instead of raising."""
+        self.logger.viz.line.side_effect = lambda *a, **kw: False
+        self.logger.log("loss", 0.9)
+        self.assertNotIn("loss", self.logger._wins)
+
+    def test_window_is_created_again_once_the_server_recovers(self):
+        self.logger.viz.line.side_effect = lambda *a, **kw: False
+        self.logger.log("loss", 0.9)
+        self.logger.viz.line.side_effect = lambda *a, **kw: Mock()
+        self.logger.log("loss", 0.8)
+        kwargs = self.logger.viz.line.call_args.kwargs
+        self.assertNotIn("win", kwargs)
+        self.assertIn("loss", self.logger._wins)
+
     def test_distinct_metrics_get_distinct_windows(self):
         self.logger.log("loss", 0.9)
         self.logger.log("acc", 0.1)

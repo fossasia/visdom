@@ -117,7 +117,8 @@ class VisdomLogger:
                     env=self.env,
                     opts={"title": name, "xlabel": xlabel, "ylabel": name},
                 )
-                self._wins[name] = win
+                if win:
+                    self._wins[name] = win
             else:
                 self.viz.line(
                     X=[x_val],
