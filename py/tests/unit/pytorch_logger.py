@@ -202,6 +202,18 @@ class TestLogEvery(unittest.TestCase):
         logger.viz.line.assert_called_once()
         self.assertNotIn("loss", logger._pending)
 
+    def test_throttling_holds_when_the_window_was_never_created(self):
+        """A failed send leaves the metric out of _wins, which must not
+        turn every later call into a send attempt."""
+        logger = _logger(log_every=5)
+        logger.viz.line.side_effect = lambda *a, **kw: False
+        logger.log("loss", 1.0)
+        logger.viz.line.reset_mock()
+        logger.log("loss", 2.0)
+        logger.log("loss", 3.0)
+        logger.viz.line.assert_not_called()
+        self.assertIn("loss", logger._pending)
+
     def test_plotted_value_after_buffered_one_drops_the_buffer(self):
         logger = _logger(log_every=2)
         logger.log("loss", 1.0)  # plotted

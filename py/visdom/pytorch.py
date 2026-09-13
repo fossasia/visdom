@@ -171,7 +171,7 @@ class VisdomLogger:
 
         x_val = x if x is not None else self._step.get(name, 1) - 1
 
-        if name in self._wins and self._counter[name] % self.log_every != 0:
+        if self._counter[name] > 1 and self._counter[name] % self.log_every != 0:
             self._pending[name] = (x_val, value, xlabel)
             return
 
