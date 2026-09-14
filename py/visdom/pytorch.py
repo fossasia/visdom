@@ -109,6 +109,7 @@ class VisdomLogger:
         return False
 
     def _plot(self, name, x_val, value, xlabel):
+        win = None
         try:
             if name not in self._wins:
                 win = self.viz.line(
@@ -120,7 +121,7 @@ class VisdomLogger:
                 if win:
                     self._wins[name] = win
             else:
-                self.viz.line(
+                win = self.viz.line(
                     X=[x_val],
                     Y=[value],
                     win=self._wins[name],
@@ -132,6 +133,7 @@ class VisdomLogger:
                 self._check_experiment_reply(reply, "log metric {!r}".format(name))
         except Exception as e:
             warnings.warn("VisdomLogger failed to log {!r}: {}".format(name, e))
+        return bool(win)
 
     def log(self, name, value, x=None, xlabel="epoch"):
         """Log a scalar value under the given metric name.
@@ -175,5 +177,7 @@ class VisdomLogger:
             self._pending[name] = (x_val, value, xlabel)
             return
 
-        self._plot(name, x_val, value, xlabel)
-        self._pending.pop(name, None)
+        if self._plot(name, x_val, value, xlabel):
+            self._pending.pop(name, None)
+        else:
+            self._pending[name] = (x_val, value, xlabel)
