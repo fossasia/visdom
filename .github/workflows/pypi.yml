@@ -18,11 +18,13 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     name: "Deploy to PyPI"
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ inputs.tag || github.event.release.tag_name || github.sha }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.event_name == 'release' && format('refs/tags/{0}', github.event.release.tag_name) || github.sha }}
       - name: Get git-tags
         run: |
           git fetch --prune --unshallow --tags
@@ -30,7 +32,7 @@ jobs:
       - name: Retrieve version
         run: |
           echo "TAG_NAME=$(cat py/visdom/VERSION)" >> $GITHUB_OUTPUT
-          echo "TAG_EXISTS=$(git tag | grep -cx "v$(cat py/visdom/VERSION)")" >> $GITHUB_OUTPUT
+          echo "TAG_EXISTS=$(git tag | grep -Fxc "v$(cat py/visdom/VERSION)")" >> $GITHUB_OUTPUT
         id: version
       - name: Decide whether to publish
         id: gate
@@ -38,7 +40,12 @@ jobs:
           if [ "${{ github.event_name }}" = "push" ]; then
             [ "${{ steps.version.outputs.TAG_EXISTS }}" = "0" ] && echo "publish=true" >> $GITHUB_OUTPUT || echo "publish=false" >> $GITHUB_OUTPUT
           else
-            echo "publish=true" >> $GITHUB_OUTPUT
+            SELECTED_TAG="${{ inputs.tag || github.event.release.tag_name }}"
+            if [ "$SELECTED_TAG" = "v${{ steps.version.outputs.TAG_NAME }}" ] && git show-ref --verify --quiet "refs/tags/$SELECTED_TAG"; then
+              echo "publish=true" >> $GITHUB_OUTPUT
+            else
+              echo "publish=false" >> $GITHUB_OUTPUT
+            fi
           fi
       - name: Show version
         run: |
