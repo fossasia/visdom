@@ -3,33 +3,61 @@ name: Deploy to PyPI
 on:
   push:
     branches:
-      - master
+      - main
       - dev
     paths:
         - 'py/visdom/VERSION'
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and upload, e.g. v0.3.0'
+        required: true
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     name: "Deploy to PyPI"
     steps:
+      # On a push we build the pushed commit. On a release or a manual run we
+      # build the tag itself, so the upload matches the code that was released
+      # rather than whatever the branch has moved on to since.
       - name: Checkout
         uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.event.release.tag_name || github.sha }}
       - name: Get git-tags
         run: |
           git fetch --prune --unshallow --tags
           git tag --list
       - name: Retrieve version
         run: |
-          echo "::set-output name=TAG_NAME::$(cat py/visdom/VERSION)"
-          echo "::set-output name=TAG_EXISTS::$(git tag | grep v$(cat py/visdom/VERSION) | wc -l)"
+          echo "TAG_NAME=$(cat py/visdom/VERSION)" >> $GITHUB_OUTPUT
+          echo "TAG_EXISTS=$(git tag | grep -cx "v$(cat py/visdom/VERSION)")" >> $GITHUB_OUTPUT
         id: version
+      # A push is only a release if the version has been bumped to something not
+      # yet tagged. Release and manual runs target a tag that exists by
+      # definition, so they skip this check.
+      - name: Decide whether to publish
+        id: gate
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            [ "${{ steps.version.outputs.TAG_EXISTS }}" = "0" ] && echo "publish=true" >> $GITHUB_OUTPUT || echo "publish=false" >> $GITHUB_OUTPUT
+          else
+            echo "publish=true" >> $GITHUB_OUTPUT
+          fi
       - name: Show version
         run: |
+          echo "Event: ${{ github.event_name }}"
           echo "Version name: ${{ steps.version.outputs.TAG_NAME }}"
           echo "Existing Matching Tags: ${{ steps.version.outputs.TAG_EXISTS }}"
+          echo "Publishing: ${{ steps.gate.outputs.publish }}"
+      # Only a version-bump push creates the tag and the release. Release and
+      # manual runs leave both alone, so hand-written release notes are never
+      # replaced by generated ones.
       - name: Create Release
-        if: ${{ steps.version.outputs.TAG_EXISTS == '0' }}
+        if: ${{ github.event_name == 'push' && steps.gate.outputs.publish == 'true' }}
         id: create_release
         uses: softprops/action-gh-release@v3
         with:
@@ -37,15 +65,15 @@ jobs:
           name: "Visdom v${{ steps.version.outputs.TAG_NAME }}"
           generate_release_notes: true
       - name: Set up Python
-        if: ${{ steps.version.outputs.TAG_EXISTS == '0' }}
+        if: ${{ steps.gate.outputs.publish == 'true' }}
         uses: actions/setup-python@v7
         with:
             python-version: '3.x'
       - name: Install dependencies
-        if: ${{ steps.version.outputs.TAG_EXISTS == '0' }}
+        if: ${{ steps.gate.outputs.publish == 'true' }}
         run: python setup.py sdist
       - name: Publish a Python distribution to PyPI
-        if: ${{ steps.version.outputs.TAG_EXISTS == '0' }}
+        if: ${{ steps.gate.outputs.publish == 'true' }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
             user: __token__
