@@ -1,10 +1,11 @@
 name: Deploy to PyPI
 
 on:
+  # Only main. A version bump reaching dev through a merge is not a release,
+  # and must not create a tag or a GitHub release.
   push:
     branches:
       - main
-      - dev
     paths:
         - 'py/visdom/VERSION'
   release:
