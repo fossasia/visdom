@@ -47,6 +47,14 @@ jobs:
               echo "publish=false" >> $GITHUB_OUTPUT
             fi
           fi
+      - name: Verify the selected tag
+        if: ${{ github.event_name != 'push' && steps.gate.outputs.publish != 'true' }}
+        run: |
+          echo "Refusing to publish." >&2
+          echo "Selected tag: ${{ inputs.tag || github.event.release.tag_name }}" >&2
+          echo "Version at that ref: v${{ steps.version.outputs.TAG_NAME }}" >&2
+          echo "The tag must exist and match the version in py/visdom/VERSION." >&2
+          exit 1
       - name: Show version
         run: |
           echo "Event: ${{ github.event_name }}"
