@@ -82,6 +82,13 @@ class TestWindowRead(VisdomHTTPTestCase):
         second = self.create_text_window(content="second")
         self.assertEqual(set(self.get_win_data()), {first, second})
 
+    def test_read_all_windows_nonexistent_env_returns_empty_dict(self):
+        self.assertEqual(self.get_win_data(eid="nonexistent_env"), {})
+
+    def test_read_specific_window_nonexistent_env_returns_404(self):
+        resp = self.post_json("/win_data", {"eid": "nonexistent_env", "win": "w1"})
+        self.assertEqual(resp.code, 404)
+
 
 class TestWindowWrite(VisdomHTTPTestCase):
     def test_window_data_can_be_replaced(self):
@@ -112,6 +119,14 @@ class TestWindowClose(VisdomHTTPTestCase):
         self.create_text_window(content="b")
         self.close_window(None)
         self.assertEqual(self.get_win_data(), {})
+
+    def test_close_nonexistent_env_is_noop(self):
+        resp = self.close_window(win="w1", eid="nonexistent_env")
+        self.assertEqual(resp.code, 200)
+
+    def test_close_all_windows_nonexistent_env_is_noop(self):
+        resp = self.close_window(win=None, eid="nonexistent_env")
+        self.assertEqual(resp.code, 200)
 
 
 class TestUpdateMissingWindow(VisdomHTTPTestCase):
