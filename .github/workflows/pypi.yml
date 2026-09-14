@@ -1,8 +1,6 @@
 name: Deploy to PyPI
 
 on:
-  # Only main. A version bump reaching dev through a merge is not a release,
-  # and must not create a tag or a GitHub release.
   push:
     branches:
       - main
@@ -21,9 +19,6 @@ jobs:
     runs-on: ubuntu-latest
     name: "Deploy to PyPI"
     steps:
-      # On a push we build the pushed commit. On a release or a manual run we
-      # build the tag itself, so the upload matches the code that was released
-      # rather than whatever the branch has moved on to since.
       - name: Checkout
         uses: actions/checkout@v7.0.1
         with:
@@ -37,9 +32,6 @@ jobs:
           echo "TAG_NAME=$(cat py/visdom/VERSION)" >> $GITHUB_OUTPUT
           echo "TAG_EXISTS=$(git tag | grep -cx "v$(cat py/visdom/VERSION)")" >> $GITHUB_OUTPUT
         id: version
-      # A push is only a release if the version has been bumped to something not
-      # yet tagged. Release and manual runs target a tag that exists by
-      # definition, so they skip this check.
       - name: Decide whether to publish
         id: gate
         run: |
@@ -54,9 +46,6 @@ jobs:
           echo "Version name: ${{ steps.version.outputs.TAG_NAME }}"
           echo "Existing Matching Tags: ${{ steps.version.outputs.TAG_EXISTS }}"
           echo "Publishing: ${{ steps.gate.outputs.publish }}"
-      # Only a version-bump push creates the tag and the release. Release and
-      # manual runs leave both alone, so hand-written release notes are never
-      # replaced by generated ones.
       - name: Create Release
         if: ${{ github.event_name == 'push' && steps.gate.outputs.publish == 'true' }}
         id: create_release
@@ -79,5 +68,3 @@ jobs:
         with:
             user: __token__
             password: ${{ secrets.pypi_password }}
-
-# Guide: https://help.github.com/en/actions/language-and-framework-guides/using-python-with-github-actions
