@@ -19,8 +19,11 @@ the network, so both the urllib opener and ``requests.get`` are replaced.
 """
 
 import argparse
+import asyncio
 import logging
 import os
+import signal
+from unittest import mock
 from urllib.error import HTTPError, URLError
 
 import pytest
@@ -264,6 +267,107 @@ def test_a_missing_key_is_reported_too(tmp_path):
             ssl_keyfile=str(tmp_path / "absent.pem"),
         )
     assert "key" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("present", ["ssl_certfile", "ssl_keyfile"])
+def test_half_an_ssl_pair_is_refused_rather_than_served_in_the_clear(tmp_path, present):
+    """``main`` rejects this at the command line; ``start_server`` is also a
+    public entry point, and there half a pair used to mean "no TLS" -- so the
+    server bound the port and quietly listened on plain HTTP where the caller
+    had asked for HTTPS.
+
+    Asserted against ``_build_ssl_context`` rather than ``start_server``: it is
+    the function that has to refuse, and without the guard ``start_server``
+    would not raise at all, it would serve.
+    """
+    pem = tmp_path / "material.pem"
+    pem.write_text("material")
+    paths = {"ssl_certfile": None, "ssl_keyfile": None}
+    paths[present] = str(pem)
+    with pytest.raises(ValueError) as excinfo:
+        run_server._build_ssl_context(**paths)
+    assert "together" in str(excinfo.value)
+
+
+def test_no_ssl_material_at_all_is_still_plain_http():
+    """Neither path set is the ordinary no-TLS case, not a misconfiguration."""
+    assert run_server._build_ssl_context(None, None) is None
+
+
+# -- _install_stop_handlers() -------------------------------------------------
+
+
+def test_the_loop_handles_both_signals_on_the_main_thread():
+    """The graceful path: the callback runs on the loop, so the drain is an
+    ordinary awaited shutdown rather than something racing interpreter exit."""
+    installed = {}
+
+    class FakeLoop:
+        def add_signal_handler(self, sig, cb):
+            installed[sig] = cb
+
+    async def go():
+        stop = asyncio.Event()
+        run_server._install_stop_handlers(stop)
+        return stop
+
+    with mock.patch("asyncio.get_running_loop", return_value=FakeLoop()):
+        stop = asyncio.run(go())
+
+    assert set(installed) == {signal.SIGINT, signal.SIGTERM}
+    installed[signal.SIGTERM]()
+    assert stop.is_set()
+
+
+def test_sigterm_falls_back_to_the_exit_handler_when_the_loop_cannot_take_it():
+    """Windows has no ``add_signal_handler``; SystemExit still lets ``atexit``
+    save."""
+    handlers = {}
+
+    class FakeLoop:
+        def add_signal_handler(self, sig, cb):
+            raise NotImplementedError
+
+    async def go():
+        run_server._install_stop_handlers(asyncio.Event())
+
+    with mock.patch("asyncio.get_running_loop", return_value=FakeLoop()):
+        with mock.patch("signal.signal", handlers.__setitem__):
+            asyncio.run(go())
+
+    # ``asyncio.run`` installs its own SIGINT handler, so only SIGTERM is ours.
+    assert handlers[signal.SIGTERM] is run_server._exit_cleanly
+
+
+def test_a_server_on_a_worker_thread_warns_that_sigterm_will_not_drain(caplog):
+    """Neither API works off the main thread -- CPython only delivers signals to
+    the main thread -- so SIGTERM keeps its default disposition and kills the
+    process before the storage drain. Swallowing that left the operator with a
+    silent data-loss window; the warning is the whole fix."""
+
+    class FakeLoop:
+        def add_signal_handler(self, sig, cb):
+            raise RuntimeError("not the main thread")
+
+    def refuse(sig, handler):
+        raise ValueError("signal only works in main thread")
+
+    async def go():
+        run_server._install_stop_handlers(asyncio.Event())
+
+    with mock.patch("asyncio.get_running_loop", return_value=FakeLoop()):
+        with mock.patch("signal.signal", refuse):
+            with caplog.at_level(logging.WARNING):
+                asyncio.run(go())
+
+    assert "main thread" in caplog.text
+    assert "SIGTERM" in caplog.text
+
+
+def test_exit_cleanly_raises_system_exit_so_atexit_runs():
+    with pytest.raises(SystemExit) as excinfo:
+        run_server._exit_cleanly(signal.SIGTERM, None)
+    assert excinfo.value.code == 0
 
 
 # -- build.download_scripts() --------------------------------------------------
