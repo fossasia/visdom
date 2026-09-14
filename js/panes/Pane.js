@@ -171,7 +171,7 @@ var Pane = forwardRef((props, ref) => {
       ref={ref}
     >
       <div className={barClassNames} ref={barRef}>
-        <button title="close" onClick={handleClose}>
+        <button className="pane-close" title="close" onClick={handleClose}>
           {' '}
           X{' '}
         </button>

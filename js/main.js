@@ -98,7 +98,7 @@ const PaneWrapper = React.memo(
     defaultHeight,
   }) {
     const { width, height, ref } = useResizeDetector();
-    const PANE_TITLE_BAR_HEIGHT = 14;
+    const PANE_TITLE_BAR_HEIGHT = 15;
 
     const finalWidth =
       width !== undefined && width > 0 ? width - 2 : defaultWidth;
