@@ -68,3 +68,5 @@ jobs:
         with:
             user: __token__
             password: ${{ secrets.pypi_password }}
+
+# Guide: https://help.github.com/en/actions/language-and-framework-guides/using-python-with-github-actions
