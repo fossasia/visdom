@@ -725,12 +725,16 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
             # long environment id string), to make combined plot lines readable.
             if ptype == "image":
                 if ix == 0 and destWid not in seen_dest_wids:
+                    if not isinstance(destWidJson["content"], dict):
+                        # Bail before marking the pane initialised, so a later
+                        # env cannot treat a base we never converted to a list
+                        # as one that is ready to be appended to.
+                        continue  # base image content is not in the expected shape
+
                     seen_dest_wids.add(destWid)
                     destWidJson["has_compare"] = False
                     destWidJson["contentID"] = get_rand_id()
 
-                    if not isinstance(destWidJson["content"], dict):
-                        continue  # base image content is not in the expected shape
                     first_img = copy.deepcopy(destWidJson["content"])
                     caption = first_img.get("caption")
                     first_img["caption"] = "{}_{}".format(

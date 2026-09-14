@@ -422,6 +422,21 @@ def test_an_image_base_pane_with_non_dict_content_is_skipped(fake_socket, store)
     assert _by_title(fake_socket, "shot") is None
 
 
+def test_a_malformed_base_image_is_never_marked_initialised(fake_socket, store):
+    """A base image we bail on must not look initialised to later envs."""
+    pane = _image_pane("w1", "shot")
+    pane["content"] = ["not", "a", "dict"]
+    state = {
+        "a": _env(pane),
+        "b": _env(_image_pane("w2", "shot")),
+        "c": _env(_image_pane("w3", "shot")),
+    }
+    compare_envs(state, ["a", "b", "c"], fake_socket, store)
+    win = _by_title(fake_socket, "shot")
+    assert win is None
+    assert pane["content"] == ["not", "a", "dict"]
+
+
 def test_an_empty_title_is_never_merged(fake_socket, store):
     state = {"a": _env(_plot_pane("w1", "")), "b": _env(_plot_pane("w2", ""))}
     compare_envs(state, ["a", "b"], fake_socket, store)
