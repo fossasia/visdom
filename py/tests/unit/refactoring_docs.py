@@ -215,21 +215,81 @@ def test_the_single_worker_invariant_is_still_documented():
 
 # --- invariant 2: snapshot on the loop -------------------------------------
 
+SNAPSHOT_CALLS = {"snapshot_env", "snapshot_envs", "snapshot_state"}
+OFF_LOOP_SAVES = ["save_env_off_loop", "save_envs_off_loop", "save_all_off_loop"]
 
-@pytest.mark.parametrize(
-    "helper", ["save_env_off_loop", "save_envs_off_loop", "save_all_off_loop"]
-)
+
+def call_name(node):
+    """The called name of an ``ast.Call``, or ``None`` for anything else."""
+    if not isinstance(node, ast.Call):
+        return None
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
+def snapshot_bound_before(function, name, lineno):
+    """Whether ``name``'s last assignment before ``lineno`` is a snapshot call."""
+    assignments = sorted(
+        (node.lineno, call_name(node.value) in SNAPSHOT_CALLS)
+        for node in ast.walk(function)
+        if isinstance(node, ast.Assign)
+        and node.lineno < lineno
+        and any(isinstance(t, ast.Name) and t.id == name for t in node.targets)
+    )
+    return bool(assignments) and assignments[-1][1]
+
+
+def reads_live_state(node):
+    """Whether ``node`` reaches ``.state`` other than through a snapshot call."""
+    if call_name(node) in SNAPSHOT_CALLS:
+        return False
+    if isinstance(node, ast.Attribute) and node.attr == "state":
+        return True
+    return any(reads_live_state(child) for child in ast.iter_child_nodes(node))
+
+
+@pytest.mark.parametrize("helper", OFF_LOOP_SAVES)
 def test_off_loop_saves_snapshot_before_handing_over(helper):
     """A save must copy on the loop; passing live state lets the loop mutate
-    an env mid-write."""
-    tree = parse(SERVER_UTILS)
-    called = called_names(find_function(tree, helper))
-    assert called & {
-        "snapshot_env",
-        "snapshot_envs",
-        "snapshot_state",
-    }, f"{helper} no longer snapshots before the executor call"
-    assert "run_on_storage_executor" in called
+    an env mid-write.
+
+    Calling a snapshot helper somewhere in the function is not enough: it has
+    to run before the executor call, and what it returns has to be what the
+    executor is handed. So the arguments after ``(handler, func)`` are checked
+    one by one -- each is a snapshot call, a name last bound from one earlier
+    in the function, or something that never touches ``.state``.
+    """
+    function = find_function(parse(SERVER_UTILS), helper)
+    submits = [
+        node
+        for node in ast.walk(function)
+        if call_name(node) == "run_on_storage_executor"
+    ]
+    assert len(submits) == 1, f"{helper} should submit exactly one write"
+    submit = submits[0]
+    handed = submit.args[2:]
+    assert handed, f"{helper} hands the executor nothing to write"
+
+    from_snapshot = []
+    for argument in handed:
+        if call_name(argument) in SNAPSHOT_CALLS:
+            from_snapshot.append(argument)
+        elif isinstance(argument, ast.Name) and snapshot_bound_before(
+            function, argument.id, submit.lineno
+        ):
+            from_snapshot.append(argument)
+        else:
+            assert not reads_live_state(
+                argument
+            ), f"{helper} hands the executor live state: {ast.unparse(argument)}"
+    assert from_snapshot, (
+        f"{helper} no longer hands the executor a snapshot taken before the "
+        f"call: {[ast.unparse(argument) for argument in handed]}"
+    )
 
 
 def test_run_on_storage_executor_targets_the_storage_pool():
@@ -383,15 +443,28 @@ def test_architecture_points_back_at_the_roadmap():
 # --- the tables themselves --------------------------------------------------
 
 
+LANDED_PR_COUNT = 11
+
+
 def test_landed_pull_requests_are_unique_and_well_formed():
     links = re.findall(
         r"\[#(\d+)\]\(https://github\.com/fossasia/visdom/pull/(\d+)\)", PHASE_4
     )
-    assert len(links) >= 11, links
+    assert len(links) == LANDED_PR_COUNT, links
     for label, target in links:
         assert label == target, f"#{label} links to pull/{target}"
     numbers = [int(label) for label, _ in links]
     assert len(numbers) == len(set(numbers)), "a pull request is listed twice"
+
+
+def test_every_statement_of_the_pr_count_agrees_with_the_table():
+    """The header and the closing estimate both restate the table's length."""
+    header = re.search(r"\| PRs: (\d+) \|", PHASE_4)
+    assert header, "the Phase 4 header no longer states a PR count"
+    assert int(header.group(1)) == LANDED_PR_COUNT
+    closing = re.search(r"Phase 4 took (\d+) of its own", read(REFACTORING))
+    assert closing, "the closing estimate no longer states Phase 4's PR count"
+    assert int(closing.group(1)) == LANDED_PR_COUNT
 
 
 def test_followups_are_uniquely_numbered_and_in_order():

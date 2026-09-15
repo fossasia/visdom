@@ -323,6 +323,9 @@ class _AsyncBackchannel(object):
         self._dispatch_executor = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="visdom-async-events"
         )
+        # Handler runs submitted and not yet finished. Cancelling the reader
+        # does not stop one that has started, so ``wait_closed`` waits on these.
+        self._dispatching = set()
 
     def start(self):
         """Spawn the reader task. Must run on the event loop thread."""
@@ -339,17 +342,26 @@ class _AsyncBackchannel(object):
                 self._client.socket_alive = False
             if self._closing or not self._client.use_socket:
                 break
+            # Whatever ended the session -- a handshake error, a rejected or
+            # malformed polling ``init`` -- a backchannel that never once got
+            # the server's ``alive`` is not coming up by retrying, so stop
+            # rather than keep generating traffic every ``RECONNECT_DELAY``.
+            if self._give_up_if_never_connected(
+                "{0} ended before the server's handshake".format(self.name)
+            ):
+                break
             await asyncio.sleep(RECONNECT_DELAY)
 
     async def _session(self):
         raise NotImplementedError
 
     async def _dispatch(self, raw_message):
-        await self._loop.run_in_executor(
-            self._dispatch_executor,
-            self._client._handle_incoming_message,
-            raw_message,
+        future = self._dispatch_executor.submit(
+            self._client._handle_incoming_message, raw_message
         )
+        self._dispatching.add(future)
+        future.add_done_callback(self._dispatching.discard)
+        await asyncio.wrap_future(future, loop=self._loop)
 
     def _give_up_if_never_connected(self, reason):
         """Stop retrying a socket that never worked once, as the synchronous
@@ -362,19 +374,37 @@ class _AsyncBackchannel(object):
         return True
 
     def close(self):
-        """Stop the backchannel and return its task, if it had started.
+        """Stop the backchannel. Idempotent; await :meth:`wait_closed` after.
 
-        Idempotent. The task comes back so the caller can await the
-        cancellation instead of leaving a pending task at loop shutdown.
+        A handler already running cannot be interrupted, which is what
+        :meth:`wait_closed` is for. Never ``shutdown(wait=True)`` here: this
+        runs on the loop.
         """
         self._closing = True
         self._client.use_socket = False
         self._client.socket_alive = False
-        task, self._task = self._task, None
-        if task is not None:
-            task.cancel()
+        if self._task is not None:
+            self._task.cancel()
         self._dispatch_executor.shutdown(wait=False)
-        return task
+
+    async def wait_closed(self):
+        """Wait out the reader task and any handler still running."""
+        if self._task is not None:
+            # Let the cancellation land, so no task is pending at loop close.
+            await asyncio.wait({self._task})
+            self._task = None
+        running = [
+            asyncio.wrap_future(future, loop=self._loop)
+            for future in tuple(self._dispatching)
+        ]
+        if running:
+            await asyncio.wait(running)
+            for future in running:
+                # A handler cancelled by ``AsyncVisdom.shutdown`` ends its
+                # dispatch with ``CancelledError``; that is the expected end,
+                # and reading it keeps asyncio from logging it as unretrieved.
+                if not future.cancelled():
+                    future.exception()
 
 
 class _AsyncWebSocket(_AsyncBackchannel):
@@ -421,7 +451,7 @@ class _AsyncWebSocket(_AsyncBackchannel):
         if self._connection is not None:
             self._connection.close()
             self._connection = None
-        return super().close()
+        super().close()
 
 
 class _AsyncPolling(_AsyncBackchannel):
@@ -662,12 +692,11 @@ class _BridgedVisdom(Visdom):
         self._aloop.call_soon_threadsafe(self._backchannel.start)
 
     def close_backchannel(self):
-        """Stop the backchannel, returning its task for the caller to await."""
-        if self._backchannel is None:
-            return None
-        task = self._backchannel.close()
-        self._backchannel = None
-        return task
+        """Stop the backchannel, returning it for the caller to ``wait_closed``."""
+        backchannel, self._backchannel = self._backchannel, None
+        if backchannel is not None:
+            backchannel.close()
+        return backchannel
 
 
 # Every public ``Visdom`` method that reaches the wire or is otherwise safe to
@@ -777,6 +806,9 @@ class AsyncVisdom(object):
         # Held on the instance so that a caller who cancels its ``shutdown``
         # does not take the cleanup down with it.
         self._finalizer = None
+        # Loop tasks running a coroutine event handler right now. Each one has
+        # the dispatch thread parked on it, which :meth:`shutdown` has to know.
+        self._handler_tasks = set()
 
     @classmethod
     async def create(cls, *args, max_concurrency=DEFAULT_MAX_CONCURRENCY, **kwargs):
@@ -992,9 +1024,17 @@ class AsyncVisdom(object):
         """
         loop = self._inner._aloop
 
+        async def tracked(message):
+            task = asyncio.current_task()
+            self._handler_tasks.add(task)
+            try:
+                return await handler(message)
+            finally:
+                self._handler_tasks.discard(task)
+
         @functools.wraps(handler)
         def run(message):
-            return asyncio.run_coroutine_threadsafe(handler(message), loop).result()
+            return asyncio.run_coroutine_threadsafe(tracked(message), loop).result()
 
         return run
 
@@ -1022,7 +1062,15 @@ class AsyncVisdom(object):
         -- stops waiting without stopping the cleanup, and a later ``shutdown``
         awaits that same task rather than returning early on a ``_closed`` flag
         whose work never finished.
+
+        The release waits for any event handler still running, so a coroutine
+        handler that shuts its own client down would be waiting on itself: the
+        dispatch thread cannot finish until the handler returns, and the
+        handler is awaiting the release. So that handler is cancelled instead
+        -- ``shutdown`` raises ``CancelledError`` inside it, its ``finally``
+        blocks still run, and the release completes behind it.
         """
+        caller = asyncio.current_task()
         if self._finalizer is None:
             # Set before the first await, so no call slips in behind it.
             self._closed = True
@@ -1035,13 +1083,15 @@ class AsyncVisdom(object):
             self._finalizer = asyncio.ensure_future(
                 self._release(self._inner.close_backchannel())
             )
+        if caller is not None and caller in self._handler_tasks:
+            caller.cancel()
         await asyncio.shield(self._finalizer)
 
     async def _release(self, backchannel):
-        """Let the backchannel and the started calls settle, then close."""
+        """Let the backchannel, its handlers and the started calls settle, then
+        close."""
         if backchannel is not None:
-            # Let the cancellation land, so no task is pending at loop close.
-            await asyncio.wait({backchannel})
+            await backchannel.wait_closed()
         if self._pending:
             await asyncio.gather(*tuple(self._pending), return_exceptions=True)
         if self._inner._transport is not None:

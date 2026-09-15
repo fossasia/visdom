@@ -84,8 +84,11 @@ def is_consumed(node, parents):
 
     ``asyncio.gather(...)`` is the documented way to run several calls at once,
     and the coroutines it is handed are awaited by it rather than by the
-    caller -- including the ones built inside a generator expression.
+    caller -- but only the ones it is handed as positional arguments, directly
+    or unpacked with ``*`` from a generator or list. A list passed as-is is one
+    argument that is not awaitable, so the coroutines inside it never run.
     """
+    origin = node
     current = node
     while current in parents:
         parent = parents[current]
@@ -94,7 +97,9 @@ def is_consumed(node, parents):
         if isinstance(parent, ast.Call):
             func = parent.func
             if isinstance(func, ast.Attribute) and func.attr == "gather":
-                return True
+                return any(argument is current for argument in parent.args) and (
+                    current is origin or isinstance(current, ast.Starred)
+                )
         current = parent
     return False
 
@@ -311,6 +316,33 @@ def test_gather_counts_as_awaiting():
         "    await asyncio.gather(*(vis.line(Y=[i], win=str(i)) for i in range(2)))\n"
     )
     assert list(client_uses(source)) == [("line", True, True)]
+
+
+def test_gather_of_direct_arguments_counts_as_awaiting():
+    source = (
+        "async def f(vis):\n"
+        "    await asyncio.gather(vis.line(Y=[1]), vis.line(Y=[2]))\n"
+    )
+    assert list(client_uses(source)) == [("line", True, True)] * 2
+
+
+def test_gather_of_an_unpacked_list_counts_as_awaiting():
+    source = "async def f(vis):\n    await asyncio.gather(*[vis.line(Y=[1])])\n"
+    assert list(client_uses(source)) == [("line", True, True)]
+
+
+def test_gather_of_a_list_left_packed_is_not_awaiting():
+    """``gather`` sees one list, not a coroutine, and never runs the call."""
+    source = "async def f(vis):\n    await asyncio.gather([vis.line(Y=[1])])\n"
+    assert list(client_uses(source)) == [("line", True, False)]
+
+
+def test_gather_of_a_bare_generator_is_not_awaiting():
+    source = (
+        "async def f(vis):\n"
+        "    await asyncio.gather(vis.line(Y=[i]) for i in range(2))\n"
+    )
+    assert list(client_uses(source)) == [("line", True, False)]
 
 
 def test_awaited_plain_method_is_detected():

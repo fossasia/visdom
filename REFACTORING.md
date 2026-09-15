@@ -326,7 +326,7 @@ disk I/O already had a single owner. Phase 6 keeps its Phase 3 dependency, and i
 inherits one thing from Phase 4: the protocol it standardizes is now spoken by two
 clients, `Visdom` and `AsyncVisdom`, over two transports each.
 
-**Estimated total: 10-13 PRs across the remaining phases; Phase 4 took 13 of its own.**
+**Estimated total: 10-13 PRs across the remaining phases; Phase 4 took 11 of its own.**
 
 ---
 

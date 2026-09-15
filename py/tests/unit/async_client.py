@@ -1009,6 +1009,18 @@ class FakeConnector(object):
         return self.connections.pop(0)
 
 
+class FailingConnector(FakeConnector):
+    """A ``websocket_connect`` that fails every attempt with ``error``."""
+
+    def __init__(self, error):
+        super().__init__()
+        self.error = error
+
+    async def __call__(self, request, **kwargs):
+        self.requests.append(request)
+        raise self.error
+
+
 @asynccontextmanager
 async def socket_client(connector, **kwargs):
     """A client whose websocket is ``connector`` rather than a real socket."""
@@ -1122,6 +1134,71 @@ class TestWebSocketBackchannel(tornado.testing.AsyncTestCase):
                 assert client.use_socket is True
 
     @gen_test
+    async def test_a_socket_that_fails_its_handshake_stops_retrying(self):
+        """Not only a refusal: any first session that ends before ``alive`` --
+        here an unreachable host -- gives up instead of retrying forever."""
+        connector = FailingConnector(OSError(errno.EHOSTUNREACH, "unreachable"))
+        with patch("visdom.async_client.RECONNECT_DELAY", 0):
+            async with socket_client(connector) as (client, _):
+                await asyncio.sleep(0.05)
+
+                assert client.use_socket is False
+                assert len(connector.requests) == 1
+
+    @gen_test
+    async def test_shutdown_waits_for_a_handler_already_running(self):
+        """A started handler cannot be interrupted, so ``shutdown`` must not
+        return while it can still touch the client."""
+        connection = FakeConnection(ALIVE)
+        started, release, finished = threading.Event(), threading.Event(), []
+
+        def handler(message):
+            started.set()
+            release.wait(5)
+            finished.append(message["target"])
+
+        async with socket_client(FakeConnector(connection)) as (client, transport):
+            client.register_event_handler(handler, "win")
+            connection.push(json.dumps({"target": "win"}))
+            await wait_for(started.is_set)
+
+            shutdown = asyncio.ensure_future(client.shutdown())
+            await asyncio.sleep(0.05)
+            assert not shutdown.done()
+            assert transport.closed is False
+
+            release.set()
+            await asyncio.wait_for(shutdown, 5)
+            assert finished == ["win"]
+            assert transport.closed is True
+
+    @gen_test
+    async def test_a_coroutine_handler_can_shut_its_own_client_down(self):
+        """The release waits on running handlers, and this one is waiting on
+        the release -- so it is cancelled rather than left to deadlock."""
+        connection = FakeConnection(ALIVE)
+        outcome = []
+
+        async with socket_client(FakeConnector(connection)) as (client, transport):
+
+            async def handler(message):
+                try:
+                    await client.shutdown()
+                except asyncio.CancelledError:
+                    outcome.append("cancelled")
+                    raise
+                outcome.append("returned")
+
+            client.register_event_handler(handler, "win")
+            connection.push(json.dumps({"target": "win"}))
+            await wait_for(lambda: client._finalizer is not None)
+            await asyncio.wait_for(asyncio.shield(client._finalizer), 5)
+
+            assert outcome == ["cancelled"]
+            assert transport.closed is True
+            assert client._handler_tasks == set()
+
+    @gen_test
     async def test_shutdown_closes_the_socket(self):
         connection = FakeConnection(ALIVE)
         async with socket_client(FakeConnector(connection)) as (client, _):
@@ -1165,3 +1242,25 @@ class TestPollingBackchannel(tornado.testing.AsyncTestCase):
             assert "/vis_socket_wrap" in transport.endpoints
         finally:
             await client.shutdown()
+
+    @gen_test
+    async def test_a_rejected_init_stops_polling(self):
+        """A polling ``init`` the server turns down is not retried every
+        ``RECONNECT_DELAY`` for the life of the client."""
+
+        def respond(url, data):
+            if not url.endswith("/vis_socket_wrap"):
+                return ""
+            return json.dumps({"success": False, "detail": "no sessions"})
+
+        with patch("visdom.async_client.RECONNECT_DELAY", 0):
+            client, transport = await make_client(
+                transport=RecordingTransport(response=respond), use_polling=True
+            )
+            try:
+                await asyncio.sleep(0.05)
+
+                assert client.use_socket is False
+                assert transport.endpoints.count("/vis_socket_wrap") == 1
+            finally:
+                await client.shutdown()
