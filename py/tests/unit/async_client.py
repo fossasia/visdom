@@ -1148,6 +1148,41 @@ class TestWebSocketBackchannel(tornado.testing.AsyncTestCase):
                 assert len(connector.requests) == 1
 
     @gen_test
+    async def test_an_open_socket_without_the_handshake_runs_socketless(self):
+        """The upgrade succeeding is not the handshake. A server that accepts
+        the socket and never sends ``vis_alive`` used to park the read forever:
+        no timeout, no retry, no socketless fallback."""
+        connection = FakeConnection()
+        connector = FakeConnector(connection)
+        with patch("visdom.async_client.HANDSHAKE_TIMEOUT", 0.05), patch(
+            "visdom.async_client.RECONNECT_DELAY", 0
+        ):
+            async with socket_client(connector) as (client, _):
+                await wait_for(lambda: not client.use_socket)
+                await asyncio.sleep(0.05)
+
+                assert client.socket_alive is False
+                assert connection.closed is True
+                assert len(connector.requests) == 1
+
+    @gen_test
+    async def test_a_healthy_socket_outlives_the_handshake_deadline(self):
+        """The deadline covers the handshake only; the socket is meant to last."""
+        connection = FakeConnection(ALIVE)
+        connector = FakeConnector(connection)
+        with patch("visdom.async_client.HANDSHAKE_TIMEOUT", 0.05):
+            async with socket_client(connector) as (client, _):
+                seen = []
+                client.register_event_handler(seen.append, "win")
+                await asyncio.sleep(0.2)
+                connection.push(json.dumps({"target": "win"}))
+                await wait_for(lambda: seen)
+
+                assert client.socket_alive is True
+                assert connection.closed is False
+                assert len(connector.requests) == 1
+
+    @gen_test
     async def test_a_socket_that_worked_once_reconnects(self):
         """The other side of that rule: a dropped connection is retried."""
         first, second = FakeConnection(ALIVE), FakeConnection(ALIVE)
@@ -1227,6 +1262,67 @@ class TestPollingBackchannel(tornado.testing.AsyncTestCase):
                 assert client.use_socket is False
                 assert client.socket_alive is False
                 assert inits == ["init"]
+            finally:
+                await client.shutdown()
+
+    @gen_test
+    async def test_polling_without_the_handshake_runs_socketless(self):
+        """A wrapper that answers every query but never queues ``vis_alive``
+        must not be polled forever as though it were connected."""
+        queries = []
+
+        def respond(url, data):
+            if not url.endswith("/vis_socket_wrap"):
+                return ""
+            payload = json.loads(data)
+            if payload["message_type"] == "init":
+                return json.dumps({"success": True, "sid": "sid-1"})
+            queries.append(payload["sid"])
+            return json.dumps({"success": True, "messages": []})
+
+        with patch("visdom.async_client.HANDSHAKE_TIMEOUT", 0.05), patch(
+            "visdom.async_client.RECONNECT_DELAY", 0
+        ):
+            client, _ = await make_client(
+                transport=RecordingTransport(response=respond), use_polling=True
+            )
+            try:
+                await wait_for(lambda: not client.use_socket)
+                polled = len(queries)
+                await asyncio.sleep(0.3)
+
+                assert client.socket_alive is False
+                assert len(queries) == polled, "still polling after giving up"
+            finally:
+                await client.shutdown()
+
+    @gen_test
+    async def test_polling_outlives_the_handshake_deadline(self):
+        def respond(url, data):
+            if not url.endswith("/vis_socket_wrap"):
+                return ""
+            payload = json.loads(data)
+            if payload["message_type"] == "init":
+                return json.dumps({"success": True, "sid": "sid-1"})
+            messages, outbox[:] = list(outbox), []
+            return json.dumps({"success": True, "messages": messages})
+
+        outbox = [ALIVE]
+        with patch("visdom.async_client.HANDSHAKE_TIMEOUT", 0.05):
+            client, transport = await make_client(
+                transport=RecordingTransport(response=respond), use_polling=True
+            )
+            try:
+                seen = []
+                client.register_event_handler(seen.append, "win")
+                await asyncio.sleep(0.3)
+                outbox.append(json.dumps({"target": "win"}))
+                await wait_for(lambda: seen)
+
+                assert client.socket_alive is True
+                assert client.use_socket is True
+                inits = [data for _, data in transport.calls if data and "init" in data]
+                assert len(inits) == 1
             finally:
                 await client.shutdown()
 

@@ -370,6 +370,18 @@ class _AsyncBackchannel(object):
             raw_message,
         )
 
+    def _lift_handshake_deadline(self, handshake):
+        """Clear the handshake budget once ``vis_alive`` has arrived.
+
+        Until then the session runs under ``HANDSHAKE_TIMEOUT``: an open
+        connection is not a handshake, and a server that accepts one without
+        ever sending ``vis_alive`` would otherwise hold the session forever,
+        out of reach of both the retry loop and the socketless fallback. After
+        it, the connection is meant to last, so the deadline goes.
+        """
+        if self._client.socket_alive and handshake.when() is not None:
+            handshake.reschedule(None)
+
     def _give_up_if_never_connected(self, reason):
         """Stop retrying a backchannel that never worked once: a server
         without the route, a proxy that refuses the upgrade, or a login this
@@ -406,23 +418,26 @@ class _AsyncWebSocket(_AsyncBackchannel):
 
     async def _session(self):
         await self._transport._ensure_login()
-        # Bounded here rather than by tornado's connect timeout, which a server
-        # that accepts the connection and never upgrades never trips.
-        async with asyncio.timeout(HANDSHAKE_TIMEOUT):
+        # One budget for the connect and the ``vis_alive`` after it. Bounded
+        # here rather than by tornado's connect timeout, which a server that
+        # accepts the connection and never upgrades never trips -- and which
+        # stops counting at the upgrade, long before the handshake.
+        async with asyncio.timeout(HANDSHAKE_TIMEOUT) as handshake:
             connection = await websocket_connect(
                 self._transport.websocket_request(),
                 ping_interval=PING_INTERVAL,
             )
-        self._connection = connection
-        try:
-            while True:
-                message = await connection.read_message()
-                if message is None:
-                    break
-                await self._dispatch(message)
-        finally:
-            self._connection = None
-            connection.close()
+            self._connection = connection
+            try:
+                while True:
+                    message = await connection.read_message()
+                    if message is None:
+                        break
+                    await self._dispatch(message)
+                    self._lift_handshake_deadline(handshake)
+            finally:
+                self._connection = None
+                connection.close()
 
     def close(self):
         # Before the cancel, so the read loop wakes with a ``None`` message
@@ -451,18 +466,22 @@ class _AsyncPolling(_AsyncBackchannel):
         return json.loads(await self._transport.post(self._url, json.dumps(payload)))
 
     async def _session(self):
-        response = await self._post({"message_type": "init"})
-        sid = response["sid"]
-        self._client.vis_sid = sid
-        while self._client.use_socket and not self._closing:
-            response = await self._post({"message_type": "query", "sid": sid})
-            if not response.get("success"):
-                raise RuntimeError(
-                    "polling query rejected: {0}".format(response.get("detail"))
-                )
-            for message in response["messages"]:
-                await self._dispatch(message)
-            await asyncio.sleep(POLL_INTERVAL)
+        # The same handshake budget as the websocket: a wrapper that answers
+        # every query without ever queueing ``vis_alive`` is not connected.
+        async with asyncio.timeout(HANDSHAKE_TIMEOUT) as handshake:
+            response = await self._post({"message_type": "init"})
+            sid = response["sid"]
+            self._client.vis_sid = sid
+            while self._client.use_socket and not self._closing:
+                response = await self._post({"message_type": "query", "sid": sid})
+                if not response.get("success"):
+                    raise RuntimeError(
+                        "polling query rejected: {0}".format(response.get("detail"))
+                    )
+                for message in response["messages"]:
+                    await self._dispatch(message)
+                self._lift_handshake_deadline(handshake)
+                await asyncio.sleep(POLL_INTERVAL)
 
 
 class _Call(object):
