@@ -10,8 +10,8 @@
 
 Logging a run marks its environment on a queue
 (:class:`~visdom.experiments.live.LiveUpdateQueue`); a drain asks
-:func:`~visdom.experiments.live.resolve_targets` which panes that could affect
-and refreshes each through the ``experiments/hparams/update`` handler.
+:func:`~visdom.experiments.live.resolve_targets` which explicit-id panes it
+affects and refreshes each through the ``experiments/hparams/update`` handler.
 
 The two decisions are tested on their own — which panes a change reaches, and
 when a burst of marks turns into a rebuild — and then end to end through a real
@@ -47,10 +47,10 @@ def hparams_window(mode, query=None, env_ids=None):
 class TestResolveTargets(unittest.TestCase):
     """resolve_targets names the panes a set of changed envs could affect."""
 
-    def test_query_pane_is_affected_by_any_change(self):
-        """A query can start matching a run it did not match before."""
+    def test_query_pane_is_not_refreshed_automatically(self):
+        """Refreshing a query would turn every log write into a store scan."""
         state = {"main": {"jsons": {"hp1": hparams_window("query", query="lr < 1")}}}
-        self.assertEqual(resolve_targets(state, {"unrelated"}), [("main", "hp1")])
+        self.assertEqual(resolve_targets(state, {"unrelated"}), [])
 
     def test_env_ids_pane_only_follows_the_runs_it_names(self):
         """An explicit selection cannot grow, so unnamed runs leave it alone."""
@@ -81,8 +81,8 @@ class TestResolveTargets(unittest.TestCase):
         }
         self.assertEqual(resolve_targets(state, {"run-a"}), [])
 
-    def test_both_pane_is_affected_by_any_change(self):
-        """``both`` still holds a query, so it is re-run like any other query."""
+    def test_both_pane_is_not_refreshed_automatically(self):
+        """Even a bounded query is left to an explicit refresh."""
         state = {
             "main": {
                 "jsons": {
@@ -90,7 +90,7 @@ class TestResolveTargets(unittest.TestCase):
                 }
             }
         }
-        self.assertEqual(resolve_targets(state, {"run-b"}), [("main", "hp1")])
+        self.assertEqual(resolve_targets(state, {"run-b"}), [])
 
     def test_other_window_types_are_left_alone(self):
         """Only hparams panes are rebuilt from a selection."""
@@ -99,7 +99,7 @@ class TestResolveTargets(unittest.TestCase):
                 "jsons": {
                     "plot": {"type": "plot", "content": {}},
                     "text": {"type": "text", "content": ""},
-                    "hp1": hparams_window("query", query="lr < 1"),
+                    "hp1": hparams_window("env_ids", env_ids=["run-a"]),
                 }
             }
         }
@@ -118,8 +118,8 @@ class TestResolveTargets(unittest.TestCase):
     def test_panes_across_envs_are_all_named(self):
         """A run can be shown by panes living in several environments."""
         state = {
-            "main": {"jsons": {"hp1": hparams_window("query", query="lr < 1")}},
-            "other": {"jsons": {"hp2": hparams_window("query", query="acc > 0")}},
+            "main": {"jsons": {"hp1": hparams_window("env_ids", env_ids=["run-a"])}},
+            "other": {"jsons": {"hp2": hparams_window("env_ids", env_ids=["run-a"])}},
         }
         self.assertEqual(
             sorted(resolve_targets(state, {"run-a"})),
@@ -350,34 +350,32 @@ class TestLiveHparamsPanes(tornado.testing.AsyncHTTPTestCase):
         with open(os.path.join(self._tmp_dir, eid + ".json")) as fn:
             return json.load(fn)
 
-    def test_a_newly_logged_run_joins_a_matching_pane(self):
-        """The pane picks up a run that did not exist when it was built."""
+    def test_a_query_pane_waits_for_an_explicit_refresh(self):
+        """A log write must not trigger the query's whole-store scan."""
         self.create({"query": "lr < 0.01", "win": "hp1"})
         self.assertEqual(self._env_ids("hp1"), ["run-a"])
 
         self.log({"eid": "run-b", "params": {"lr": 0.001}})
         self.settle()
 
-        self.assertEqual(self._env_ids("hp1"), ["run-a", "run-b"])
+        self.assertEqual(self._env_ids("hp1"), ["run-a"])
 
     def test_the_refresh_reaches_disk(self):
         """A live rebuild saves the env, as a requested update does."""
-        self.create({"query": "lr < 0.01", "win": "hp1"})
-        self.log({"eid": "run-b", "params": {"lr": 0.001}})
+        self.create({"env_ids": ["run-a"], "win": "hp1"})
+        self.log({"eid": "run-a", "action": "metrics", "metrics": {"acc": 0.99}})
         self.settle()
 
         records = self._disk_env()["jsons"]["hp1"]["content"]["records"]
-        self.assertEqual(
-            sorted(record["env_id"] for record in records), ["run-a", "run-b"]
-        )
+        self.assertEqual(records[0]["metrics"]["acc"], 0.99)
 
     def test_the_pane_keeps_its_id_and_gets_a_new_contentID(self):
         """The client re-renders on contentID, and the pane keeps its place."""
-        self.create({"query": "lr < 0.01", "win": "hp1"})
+        self.create({"env_ids": ["run-a"], "win": "hp1"})
         before = self._window("hp1")
         content_id, position = before["contentID"], before["i"]
 
-        self.log({"eid": "run-b", "params": {"lr": 0.001}})
+        self.log({"eid": "run-a", "action": "metrics", "metrics": {"acc": 0.99}})
         self.settle()
 
         after = self._window("hp1")
@@ -387,7 +385,7 @@ class TestLiveHparamsPanes(tornado.testing.AsyncHTTPTestCase):
 
     def test_logged_metrics_reach_the_pane(self):
         """The metric values shown are the latest ones logged, not the first."""
-        self.create({"query": "lr < 0.01", "win": "hp1"})
+        self.create({"env_ids": ["run-a"], "win": "hp1"})
         self.log({"eid": "run-a", "action": "metrics", "metrics": {"acc": 0.99}})
         self.settle()
 
@@ -397,7 +395,7 @@ class TestLiveHparamsPanes(tornado.testing.AsyncHTTPTestCase):
 
     def test_finishing_a_run_refreshes_the_pane(self):
         """``finish`` changes the status a pane displays, so it counts as a change."""
-        self.create({"query": "lr < 0.01", "win": "hp1"})
+        self.create({"env_ids": ["run-a"], "win": "hp1"})
         self.log({"eid": "run-a", "action": "finish", "status": "finished"})
         self.settle()
 
@@ -427,7 +425,7 @@ class TestLiveHparamsPanes(tornado.testing.AsyncHTTPTestCase):
         callback instead of arming the loop leaves the queue to say it itself:
         five marks arrange exactly one drain.
         """
-        self.create({"query": "lr < 0.01", "win": "hp1"})
+        self.create({"env_ids": ["run-a"], "win": "hp1"})
         queue = self._app.live_updates
         drains = []
         queue._schedule = lambda delay, callback: drains.append(callback)
@@ -452,28 +450,29 @@ class TestLiveHparamsPanes(tornado.testing.AsyncHTTPTestCase):
 
     def test_a_pane_closed_before_the_drain_is_skipped(self):
         """Closing a pane mid-flight is a race, not a failure."""
-        self.create({"query": "lr < 0.01", "win": "hp1"})
-        self.create({"query": "lr < 0.01", "win": "hp2"})
+        self.create({"env_ids": ["run-a"], "win": "hp1"})
+        self.create({"env_ids": ["run-a"], "win": "hp2"})
 
-        self.log({"eid": "run-b", "params": {"lr": 0.001}})
+        self.log({"eid": "run-a", "action": "metrics", "metrics": {"acc": 0.99}})
         del self._app.state["main"]["jsons"]["hp1"]
         self.settle()
 
-        self.assertEqual(self._env_ids("hp2"), ["run-a", "run-b"])
+        self.assertEqual(self._env_ids("hp2"), ["run-a"])
         self.assertNotIn("hp1", self._app.state["main"]["jsons"])
 
     def test_panes_in_other_envs_are_refreshed_too(self):
         """A pane is refreshed wherever it lives, not only in the logged env."""
-        self.create({"query": "lr < 0.01", "win": "hp1", "eid": "dashboard"})
+        self.create({"env_ids": ["run-a"], "win": "hp1", "eid": "dashboard"})
 
-        self.log({"eid": "run-b", "params": {"lr": 0.001}})
+        self.log({"eid": "run-a", "action": "metrics", "metrics": {"acc": 0.99}})
         self.settle()
 
-        self.assertEqual(self._env_ids("hp1", eid="dashboard"), ["run-a", "run-b"])
+        records = self._window("hp1", eid="dashboard")["content"]["records"]
+        self.assertEqual(records[0]["metrics"]["acc"], 0.99)
 
     def test_readonly_servers_never_mark(self):
         """Logging is refused in readonly mode, so no rebuild can follow it."""
-        self.create({"query": "lr < 0.01", "win": "hp1"})
+        self.create({"env_ids": ["run-a"], "win": "hp1"})
         content_id = self._window("hp1")["contentID"]
 
         self._app.server_state.readonly = True

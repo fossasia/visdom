@@ -37,8 +37,6 @@ jobs:
   install-and-build:
     name: "Install and Build"
     runs-on: ubuntu-latest
-    outputs:
-      jsfileschanged: ${{ steps.checkout.outputs.jsfileschanged }}
     steps:
       - name: "Checkout Repository"
         uses: actions/checkout@v7.0.1
@@ -46,20 +44,9 @@ jobs:
         with:
           loadprbuild: false
 
-      # count changed js files (diff to base branch)
-      - name: "Count changed JS-Files"
-        id: checkout
-        run: |
-          git fetch origin $GITHUB_BASE_REF
-          echo "Target branch : $GITHUB_BASE_REF"
-          git diff --name-only origin/$GITHUB_BASE_REF --
-          echo 'jsfileschanged='$(git diff --name-only origin/$GITHUB_BASE_REF -- | grep '^js/*' | wc -l) >> $GITHUB_OUTPUT
-          echo 'Num js files changed='$(git diff --name-only origin/$GITHUB_BASE_REF -- | grep '^js/*' | wc -l)
-
       - name: "Build Project (PR version)"
         run: |
           npm run build
-        if: steps.checkout.outputs.jsfileschanged > 0
 
       - name: "Save built js-files"
         uses: actions/upload-artifact@v7
@@ -86,6 +73,10 @@ jobs:
         with:
           usebasebranch: true
           loadprbuild: false
+
+      - name: "Build Project (base version)"
+        run: |
+          npm run build
 
       - name: "Checkout Playwright tests from Head-Ref"
         shell: bash

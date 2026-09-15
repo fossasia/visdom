@@ -291,7 +291,11 @@ def test_opts2layout_omits_barmode_when_not_stacked(stacked):
 
 
 def test_opts2layout_merges_plotly_layoutopts():
-    """layoutopts['plotly'] is the escape hatch for raw Plotly settings."""
+    """layoutopts['plotly'] is the escape hatch for raw Plotly settings.
+
+    What comes through it is still normalized: Plotly 3 rejects a bare string
+    title, so a hand-written one is wrapped like the rest.
+    """
     layout = _opts2layout(
         {"layoutopts": {"plotly": {"hovermode": "x", "title": "raw"}}}
     )
