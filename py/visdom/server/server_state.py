@@ -332,13 +332,18 @@ class ServerState:
         pass must not re-run ``save_all`` -- the executor is already gone, so
         anything written after the first pass could only be state the process
         never served.
+
+        Only a final save that succeeded counts as shut down. If ``save_all``
+        raises, the ``atexit`` call tries it again instead of returning early
+        and leaving the changed environments in memory only. Stopping the timer
+        and the executor again on that retry is harmless.
         """
         if self._storage_shut_down:
             return
-        self._storage_shut_down = True
         self.stop_autosave()
         self.storage_executor.shutdown(wait=True)
         self.storage.save_all(self.state)
+        self._storage_shut_down = True
         self.dirty_envs.clear()
         self.saving_envs.clear()
 
