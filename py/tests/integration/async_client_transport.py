@@ -38,30 +38,14 @@ async def wait_for(predicate, timeout=5.0):
 
 
 class AsyncClientTestCase(VisdomHTTPTestCase):
-    """Adds a client factory bound to this test's server.
-
-    Every client it hands out is shut down in ``tearDown`` -- the whole client,
-    so the backchannel task is awaited and the pool released along with the
-    transport, whether or not the test got as far as its own ``shutdown``. It
-    has to happen before the base ``tearDown``, which closes the loop that
-    ``shutdown`` runs on; an ``addCleanup`` would run after that.
-    """
-
-    def setUp(self):
-        super().setUp()
-        self.clients = []
-
-    def tearDown(self):
-        for client in self.clients:
-            self.io_loop.run_sync(client.shutdown)
-        super().tearDown()
+    """Adds a client factory bound to this test's server."""
 
     async def connect(self, **kwargs):
         kwargs.setdefault("raise_exceptions", True)
         client = await AsyncVisdom.create(
             server="http://localhost", port=self.get_http_port(), **kwargs
         )
-        self.clients.append(client)
+        self.addCleanup(lambda: client.client.transport.close())
         return client
 
 
@@ -174,6 +158,11 @@ class TestAsyncVisdomAgainstServer(AsyncClientTestCase):
 class TestAsyncVisdomBackchannel(AsyncClientTestCase):
     """The real handshake, over a real socket, against the real routes."""
 
+    async def connect_with_events(self, **kwargs):
+        client = await self.connect(**kwargs)
+        self.addCleanup(client.client.close_backchannel)
+        return client
+
     async def push(self, message):
         """What ``forward_to_vis`` does when the browser reports an event."""
         await wait_for(lambda: self._app.sources)
@@ -182,14 +171,15 @@ class TestAsyncVisdomBackchannel(AsyncClientTestCase):
 
     @gen_test
     async def test_the_websocket_handshake_completes(self):
-        client = await self.connect(use_incoming_socket=True)
+        client = await self.connect_with_events(use_incoming_socket=True)
 
         assert client.socket_alive is True
         assert len(self._app.sources) == 1
+        await client.shutdown()
 
     @gen_test
     async def test_an_event_reaches_a_handler(self):
-        client = await self.connect(use_incoming_socket=True)
+        client = await self.connect_with_events(use_incoming_socket=True)
         seen = []
         client.register_event_handler(seen.append, "w1")
 
@@ -198,11 +188,12 @@ class TestAsyncVisdomBackchannel(AsyncClientTestCase):
         await wait_for(lambda: seen)
 
         assert seen[0]["event_type"] == "Click"
+        await client.shutdown()
 
     @gen_test
     async def test_polling_delivers_the_same_events(self):
         """The fallback for deployments that cannot hold a websocket open."""
-        client = await self.connect(use_polling=True)
+        client = await self.connect_with_events(use_polling=True)
         seen = []
         client.register_event_handler(seen.append, "w1")
 
@@ -211,10 +202,11 @@ class TestAsyncVisdomBackchannel(AsyncClientTestCase):
 
         assert client.socket_alive is True
         assert seen[0]["event_type"] == "Click"
+        await client.shutdown()
 
     @gen_test
     async def test_shutdown_drops_the_connection_server_side(self):
-        client = await self.connect(use_incoming_socket=True)
+        client = await self.connect_with_events(use_incoming_socket=True)
         await client.shutdown()
         await wait_for(lambda: not self._app.sources)
 
