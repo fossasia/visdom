@@ -52,7 +52,6 @@ synchronous client feeds. It is opt-in here: ``create()`` defaults
 """
 
 import asyncio
-import errno
 import functools
 import inspect
 import json
@@ -301,8 +300,11 @@ class _AsyncBackchannel(object):
     """Base for the two ways a client hears back from the server.
 
     Owns a task on the caller's loop that keeps one session alive and restarts
-    it after a failure, as the synchronous client's socket thread does.
-    Subclasses provide ``_session``, which returns when the connection is gone.
+    it after a failure, as the synchronous client's socket thread does -- but
+    only once a handshake has arrived: a session that ends before one did, for
+    whatever reason, drops the client to socketless instead.
+    Subclasses provide ``_session``, which returns when the connection is gone
+    and raises when it could not be made.
 
     Messages go to ``_handle_incoming_message`` on a private single-thread
     executor: handlers are blocking functions written against the synchronous
@@ -331,14 +333,31 @@ class _AsyncBackchannel(object):
 
     async def _run(self):
         while self._client.use_socket and not self._closing:
+            error = None
             try:
                 await self._session()
             except Exception as e:
-                logger.error("%s had error %s, attempting restart", self.name, e)
+                error = e
             finally:
                 self._client.socket_alive = False
             if self._closing or not self._client.use_socket:
                 break
+            # Checked here, after every kind of ending, rather than in each
+            # session: a rejected upgrade, a timed-out handshake or a failed
+            # polling ``init`` would otherwise retry forever.
+            if error is None:
+                reason = (
+                    "{0} closed before the handshake arrived (if login is "
+                    "enabled, pass username/password to AsyncVisdom.create)"
+                ).format(self.name)
+            else:
+                reason = "{0} failed before the handshake arrived: {1}".format(
+                    self.name, error
+                )
+            if self._give_up_if_never_connected(reason):
+                break
+            if error is not None:
+                logger.error("%s had error %s, attempting restart", self.name, error)
             await asyncio.sleep(RECONNECT_DELAY)
 
     async def _session(self):
@@ -352,12 +371,13 @@ class _AsyncBackchannel(object):
         )
 
     def _give_up_if_never_connected(self, reason):
-        """Stop retrying a socket that never worked once, as the synchronous
-        client does: a server without a backchannel, or a login this client
-        cannot pass, degrades to socketless instead of looping forever."""
+        """Stop retrying a backchannel that never worked once: a server
+        without the route, a proxy that refuses the upgrade, or a login this
+        client cannot pass degrades to socketless instead of looping forever.
+        One that did connect keeps retrying, so a server restart is survived."""
         if self._client.socket_connection_achieved:
             return False
-        logger.info("%s; running socketless", reason)
+        logger.warning("%s; running socketless", reason)
         self._client.use_socket = False
         return True
 
@@ -386,20 +406,13 @@ class _AsyncWebSocket(_AsyncBackchannel):
 
     async def _session(self):
         await self._transport._ensure_login()
-        try:
-            # Bounded here rather than by tornado's connect timeout, which a
-            # server that accepts the connection and never upgrades never trips.
-            async with asyncio.timeout(HANDSHAKE_TIMEOUT):
-                connection = await websocket_connect(
-                    self._transport.websocket_request(),
-                    ping_interval=PING_INTERVAL,
-                )
-        except (OSError, HTTPClientError, TimeoutError) as e:
-            if getattr(e, "errno", None) == errno.ECONNREFUSED:
-                if self._give_up_if_never_connected("Socket refused connection"):
-                    return
-            logger.error("Socket failed to connect: %s", e)
-            return
+        # Bounded here rather than by tornado's connect timeout, which a server
+        # that accepts the connection and never upgrades never trips.
+        async with asyncio.timeout(HANDSHAKE_TIMEOUT):
+            connection = await websocket_connect(
+                self._transport.websocket_request(),
+                ping_interval=PING_INTERVAL,
+            )
         self._connection = connection
         try:
             while True:
@@ -410,10 +423,6 @@ class _AsyncWebSocket(_AsyncBackchannel):
         finally:
             self._connection = None
             connection.close()
-        self._give_up_if_never_connected(
-            "WebSocket closed before the handshake arrived (if login is "
-            "enabled, pass username/password to AsyncVisdom.create)"
-        )
 
     def close(self):
         # Before the cancel, so the read loop wakes with a ``None`` message
