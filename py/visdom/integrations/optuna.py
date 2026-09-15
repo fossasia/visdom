@@ -30,12 +30,14 @@ from visdom.utils.server_utils import escape_eid
 
 
 _INTERMEDIATE_METRIC_NAME = "intermediate_value"
+_DASHBOARD_TAG_NAME = "optuna_dashboard_env"
 _OPTUNA_TAG_NAMES = {
     "integration",
     "optuna_study",
     "optuna_trial",
     "optuna_state",
     "optuna_direction",
+    _DASHBOARD_TAG_NAME,
 }
 
 
@@ -54,7 +56,13 @@ class OptunaCallback:
     creates the dashboard; later trials refresh it every ``refresh_every``
     successful writes. Call :meth:`update_dashboard` after ``Study.optimize``
     to ensure the final trials are included when the total is not an exact
-    multiple of that interval.
+    multiple of that interval. Supplying ``contour_params`` adds one Optuna
+    contour pane per objective. The HParams pane selects trials through stable
+    experiment tags rather than callback-local state, so a new callback can
+    rebuild a persisted study dashboard and multiple workers share the same
+    trial selection. Dashboard refreshes are serialized within one callback
+    instance. When separate processes share a dashboard namespace, only one
+    callback should enable ``create_dashboard`` and act as its writer.
 
     Optuna is intentionally not imported here. This keeps the integration
     optional and also means importing :mod:`visdom.integrations` never requires
@@ -75,6 +83,8 @@ class OptunaCallback:
         create_dashboard: Create and periodically refresh the study dashboard.
         refresh_every: Positive integer number of newly logged trials between
             dashboard refreshes.
+        contour_params: Optional parameter names for Optuna contour panes. At
+            least two names are required when supplied.
 
     Example::
 
@@ -83,6 +93,7 @@ class OptunaCallback:
             dashboard_env="optuna_resnet",
             objective_names=["validation_accuracy"],
             create_dashboard=True,
+            contour_params=["learning_rate", "weight_decay"],
         )
         study.optimize(objective, callbacks=[callback])
         callback.update_dashboard(study)
@@ -97,6 +108,7 @@ class OptunaCallback:
         raise_on_error: bool = False,
         create_dashboard: bool = False,
         refresh_every: int = 10,
+        contour_params: Sequence[str] | None = None,
     ) -> None:
         if dashboard_env is not None and not isinstance(dashboard_env, str):
             raise TypeError("dashboard_env must be a string or None")
@@ -106,6 +118,10 @@ class OptunaCallback:
             raise TypeError("refresh_every must be an integer")
         if refresh_every < 1:
             raise ValueError("refresh_every must be at least 1")
+        if contour_params is not None and (
+            isinstance(contour_params, str) or len(contour_params) < 2
+        ):
+            raise ValueError("contour_params must contain at least two parameter names")
 
         self.viz = viz
         self.dashboard_env = dashboard_env
@@ -114,6 +130,9 @@ class OptunaCallback:
         self.raise_on_error = raise_on_error
         self.create_dashboard = create_dashboard
         self.refresh_every = refresh_every
+        self.contour_params = (
+            tuple(contour_params) if contour_params is not None else None
+        )
         self._dashboard_created = False
         self._trials_since_refresh = 0
         self._trial_envs: list[str] = []
@@ -226,9 +245,35 @@ class OptunaCallback:
                 "optuna_direction": ",".join(
                     direction.name.lower() for direction in study.directions
                 ),
+                _DASHBOARD_TAG_NAME: self.study_env(study),
             }
         )
         return normalize_tags(tags)
+
+    @staticmethod
+    def _query_literal(value: Any) -> str:
+        """Quote a string for Visdom's experiment query language."""
+        value = str(value)
+        escaped = (
+            value.replace("\\", "\\\\")
+            .replace('"', '\\"')
+            .replace("\n", "\\n")
+            .replace("\t", "\\t")
+        )
+        return '"{}"'.format(escaped)
+
+    def _dashboard_query(self, study: Any) -> str:
+        """Select every trial logged for this study and dashboard namespace."""
+        return " AND ".join(
+            (
+                'tag.integration = "optuna"',
+                "tag.optuna_study = {}".format(self._query_literal(study.study_name)),
+                "tag.{} = {}".format(
+                    _DASHBOARD_TAG_NAME,
+                    self._query_literal(self.study_env(study)),
+                ),
+            )
+        )
 
     @staticmethod
     def _intermediate_values(trial: Any) -> list[tuple[int, float]]:
@@ -358,6 +403,9 @@ class OptunaCallback:
                 plot_timeline,
             )
 
+            if self.contour_params is not None:
+                from optuna.visualization import plot_contour
+
             objective_names = self._metric_names(study, len(study.directions))
             figures = []
             multi_objective = len(objective_names) > 1
@@ -397,6 +445,25 @@ class OptunaCallback:
                         figures.append(
                             ("optuna-importance{}".format(suffix), importance)
                         )
+
+                if self.contour_params is not None and complete_trials >= 2:
+                    try:
+                        contour = plot_contour(
+                            study,
+                            params=list(self.contour_params),
+                            **kwargs,
+                        )
+                    except ValueError as error:
+                        warnings.warn(
+                            "Skipping Optuna contour plot: {}".format(error),
+                            RuntimeWarning,
+                            stacklevel=2,
+                        )
+                    else:
+                        contour.update_layout(
+                            title="Contour — {}".format(objective_name)
+                        )
+                        figures.append(("optuna-contour{}".format(suffix), contour))
 
             if complete_trials and len(objective_names) in (2, 3):
                 try:
@@ -448,11 +515,9 @@ class OptunaCallback:
             return []
 
     def _build_dashboard_payload(self, study: Any) -> dict[str, Any]:
-        if not self._trial_envs:
-            raise ValueError("cannot create an Optuna dashboard before logging a trial")
         return {
             "env": self.study_env(study),
-            "env_ids": list(self._trial_envs),
+            "query": self._dashboard_query(study),
             "summary": self._summary_html(study),
             "figures": self._dashboard_figures(study),
         }
@@ -460,10 +525,13 @@ class OptunaCallback:
     def update_dashboard(self, study: Any) -> bool:
         """Create or refresh all dashboard panes for ``study``.
 
-        Returns whether the dashboard was written successfully. Only trials
-        logged by this callback instance are included in the HParams pane;
-        loading trials from a resumed study is handled by the later resume
-        integration.
+        Returns whether the dashboard was written successfully. The HParams
+        pane queries the server for every trial carrying this study's stable
+        dashboard tag. It therefore includes trials logged by earlier callback
+        instances and by other workers that share the dashboard namespace. A
+        callback-local lock prevents concurrent refreshes from overwriting a
+        newer payload. Separate processes must designate a single dashboard
+        writer because they do not share this lock.
         """
         with self._dashboard_lock:
             try:
@@ -475,7 +543,7 @@ class OptunaCallback:
                     opts={"title": "Optuna Study"},
                 )
                 self.viz.hparams(
-                    env_ids=payload["env_ids"],
+                    query=payload["query"],
                     win="optuna-trials",
                     env=payload["env"],
                     opts={"title": "Optuna Trials"},
