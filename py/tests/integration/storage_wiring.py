@@ -55,6 +55,7 @@ from visdom.utils.server_utils import (
     purge_env,
     push_deleted,
     push_deleted_off_loop,
+    save_env_off_loop,
     warm_env,
 )
 
@@ -898,6 +899,38 @@ def test_socket_save_writes_the_new_env_off_the_loop(spy_store, env_path):
 
     assert spy_store.calls["save_env"] == ["copy"]
     assert_off_loop(spy_store, loop_thread, {"save_env"})
+
+
+def test_save_env_off_loop_hands_the_worker_a_snapshot(inline_executor):
+    """The worker is given a copy, never the env the loop keeps mutating."""
+    storage = mock.Mock()
+    handler = FakeHandler(state={"expt": env_payload()}, storage=storage)
+    live = handler.state["expt"]
+
+    save_env_off_loop(handler, "expt")
+
+    func, (eid, handed) = inline_executor[0]
+    assert func == storage.save_env
+    assert eid == "expt"
+    assert handed is not live
+    assert handed["jsons"] is not live["jsons"]
+    assert handed == dict(live)
+
+
+def test_save_env_off_loop_snapshot_ignores_later_mutations(inline_executor):
+    """What reaches disk is the env as it was when the save was asked for."""
+    captured = {}
+    handler = FakeHandler(state={"expt": env_payload()}, storage=mock.Mock())
+
+    def capture(eid, env):
+        captured["panes"] = sorted(env["jsons"])
+        handler.state["expt"]["jsons"]["win_late"] = {"id": "win_late"}
+
+    handler.storage.save_env = capture
+    save_env_off_loop(handler, "expt")
+
+    assert captured["panes"] == sorted(env_payload()["jsons"])
+    assert "win_late" in handler.state["expt"]["jsons"]
 
 
 def test_socket_save_reads_a_cold_source_env_off_the_loop(spy_store, env_path):
