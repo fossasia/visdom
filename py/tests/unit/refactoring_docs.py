@@ -19,7 +19,7 @@ red.
 So these tests read the prose and then check the code against it: the paths and
 symbols it names resolve, ``max_workers`` really is 1, the off-loop helpers
 really snapshot first, ``shutdown_storage`` really orders its three steps that
-way, and the handlers hold the no-disk-on-the-loop line except at the two sites
+way, and the handlers hold the no-disk-on-the-loop line except at the one site
 the doc records as follow-up 4j. The cross-document claims -- the benchmark
 table, the proxied-name count, the invariants restated in
 ``.agents/context/architecture.md`` -- are compared against their sources
@@ -328,17 +328,12 @@ def test_shutdown_storage_orders_its_three_steps():
 
 BLOCKING_STORE_CALLS = ("save_env", "save_envs", "save_all", "load_env")
 
-# Recorded, not condoned: follow-up 4j in REFACTORING.md. These two predate the
-# async series -- they arrived with the hparams track -- and converting them is
-# a change to a live write path, so it gets its own PR. Anything not on this
-# list is a new violation.
+# Recorded, not condoned: follow-up 4j in REFACTORING.md. The update endpoint
+# predates the async series -- it arrived with the hparams track, and the live
+# refresh drives it from a timer -- so converting it is a change to a live write
+# path and gets its own PR. Anything not on this list is a new violation.
 KNOWN_ON_LOOP_WRITES = {
-    ("experiments_handler.py", "ExperimentHparamsHandler.wrap_func", "save_env"),
-    (
-        "experiments_handler.py",
-        "ExperimentHparamsUpdateHandler.wrap_func",
-        "save_env",
-    ),
+    ("experiments_handler.py", "ExperimentHparamsUpdateHandler.wrap_func", "save_env"),
 }
 
 

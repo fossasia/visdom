@@ -158,6 +158,7 @@ class SpyStore(JSONStore):
         self.calls = {
             "list_envs": 0,
             "load_env": [],
+            "load_experiment": [],
             "save_env": [],
             "save_envs": [],
             "save_layouts": [],
@@ -183,6 +184,10 @@ class SpyStore(JSONStore):
     def load_env(self, eid):
         self._record("load_env", eid)
         return super().load_env(eid)
+
+    def load_experiment(self, eid):
+        self._record("load_experiment", eid)
+        return super().load_experiment(eid)
 
     def save_env(self, eid, env_data):
         self._record("save_env", eid)
