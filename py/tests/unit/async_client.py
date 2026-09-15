@@ -304,6 +304,15 @@ class TestAsyncVisdomConstruction(tornado.testing.AsyncTestCase):
         assert transport.endpoints == ["/env/demo"]
 
     @gen_test
+    async def test_create_defaults_the_preflight_off(self):
+        """New code against a server that understands ``layout_create``, so an
+        append costs one POST rather than two. Opt back in for an old server."""
+        client, _ = await make_client()
+        assert client.client.use_preflight_checks is False
+        opted_in, _ = await make_client(use_preflight_checks=True)
+        assert opted_in.client.use_preflight_checks is True
+
+    @gen_test
     async def test_create_rejects_the_incoming_socket(self):
         with pytest.raises(NotImplementedError, match="events"):
             await AsyncVisdom.create(
