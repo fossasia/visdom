@@ -391,6 +391,25 @@ def test_a_second_shutdown_does_not_write_again(app):
     assert len(saves) == 1
 
 
+def test_a_failed_final_save_is_retried_by_the_next_shutdown(app):
+    """A save that raised must not mark storage shut down, or atexit skips it."""
+    saves = []
+
+    def flaky_save_all(state):
+        saves.append(state)
+        if len(saves) == 1:
+            raise OSError("disk full")
+
+    app.storage.save_all = flaky_save_all
+
+    with pytest.raises(OSError):
+        app.shutdown_storage()
+    app.shutdown_storage()
+    app.shutdown_storage()
+
+    assert len(saves) == 2
+
+
 def test_shutdown_flushes_state_through_storage(app):
     app.state["expt"] = env_payload()
 
