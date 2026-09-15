@@ -20,7 +20,7 @@ info:
     The server also supports WebSocket connections at `/socket` (read-only
     subscriber) and `/vis_socket` (write-capable visualization source), as
     well as HTTP polling fallbacks at `/socket_wrap` and `/vis_socket_wrap`.
-  version: 0.2.4
+  version: 0.3.0
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0

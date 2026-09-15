@@ -113,7 +113,16 @@ def start_server(
 
 
 def _build_ssl_context(ssl_certfile, ssl_keyfile):
-    """Load the certificate pair, or return ``None`` when TLS is not configured."""
+    """Load the certificate pair, or return ``None`` when TLS is not configured.
+
+    Half a pair is a configuration error, not "TLS off". ``main`` already
+    rejects it at the command line, but ``start_server`` takes the two paths as
+    independent arguments, so a direct caller that sets only one would otherwise
+    get a plain ``HTTPServer`` advertising ``http`` -- serving in the clear
+    exactly where it asked for TLS.
+    """
+    if bool(ssl_certfile) != bool(ssl_keyfile):
+        raise ValueError("ssl_certfile and ssl_keyfile must be provided together")
     if not (ssl_certfile and ssl_keyfile):
         return None
     if not os.path.isfile(ssl_certfile):
@@ -134,6 +143,15 @@ def _install_stop_handlers(stop):
     interpreter teardown. It is POSIX-and-main-thread only, hence the fallback
     to the old ``signal.signal`` behaviour everywhere else -- Windows, and any
     caller running the server from a worker thread.
+
+    Off the main thread neither API is available: ``signal.signal`` is itself
+    main-thread-only and raises ``ValueError``. Nothing here can install a
+    handler in that case -- CPython only delivers signals to the main thread --
+    so the remaining job is to say so. SIGTERM keeps its default disposition,
+    which ends the process without unwinding, so the ``atexit`` drain never runs
+    and whatever the storage worker still had queued is lost. A caller that
+    embeds the server in a thread has to install ``_exit_cleanly`` (or its own
+    handler) from the main thread *before* starting that thread.
     """
     loop = asyncio.get_running_loop()
     for signame in ("SIGINT", "SIGTERM"):
@@ -142,12 +160,21 @@ def _install_stop_handlers(stop):
             continue
         try:
             loop.add_signal_handler(sig, stop.set)
+            continue
         except (NotImplementedError, RuntimeError, ValueError):
-            if sig == getattr(signal, "SIGTERM", None):
-                try:
-                    signal.signal(sig, _exit_cleanly)
-                except ValueError:
-                    pass
+            pass
+        if sig != getattr(signal, "SIGTERM", None):
+            continue
+        try:
+            signal.signal(sig, _exit_cleanly)
+        except ValueError:
+            logging.warning(
+                "Could not install a SIGTERM handler: the server is not running "
+                "on the main thread. SIGTERM will terminate the process without "
+                "saving queued environment writes. Install a handler from the "
+                "main thread before starting the server thread, or stop the "
+                "server from the main thread instead of signalling it."
+            )
 
 
 async def _serve(
@@ -240,6 +267,11 @@ async def _serve(
         # Blocking, but nothing is being served by now: the listening sockets
         # are closed and this is the last thing the loop does.
         app.shutdown_storage()
+        # The drain has happened, so the interpreter-exit copy has nothing left
+        # to do; leaving it registered would pin this Application and its state
+        # in memory until the process ends, and add one more callback per
+        # ``serve`` call in a process that serves more than once (the tests do).
+        atexit.unregister(app.shutdown_storage)
 
 
 def main(print_func=None):
