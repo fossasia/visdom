@@ -558,11 +558,19 @@ class AsyncVisdom(object):
         ``True``) because the backchannel is not implemented yet; asking for it
         explicitly raises rather than quietly dropping server events.
 
+        ``use_preflight_checks`` defaults to ``False`` here as well. The
+        synchronous client keeps it on so that nobody's wire traffic changes
+        under them, but an async client is new code talking to a server that
+        understands ``layout_create``, and halving the round trips per append
+        is the point of using it. Pass ``use_preflight_checks=True`` to get the
+        old two-POST behavior back against an older server.
+
         Cancelling the ``create`` itself is safe: the opening POST is cancelled
         with it, and whatever it managed to build is released rather than left
         holding a connection no caller can ever reach.
         """
         kwargs.setdefault("use_incoming_socket", False)
+        kwargs.setdefault("use_preflight_checks", False)
         if kwargs.get("use_incoming_socket") or kwargs.get("use_polling"):
             raise NotImplementedError(
                 "AsyncVisdom cannot receive server events yet. Pass "
