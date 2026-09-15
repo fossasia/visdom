@@ -287,6 +287,7 @@ The python visdom client takes a few options:
 - `password`: password to use for authentication, if server started with `-enable_login` (default: `None`)
 - `proxies`: Dictionary mapping protocol to the URL of the proxy (e.g. {`http`: `foo.bar:3128`}) to be used on each Request. (default: `None`)
 - `offline`: Flag to run visdom in offline mode, where all requests are logged to file rather than to the server. Requires `log_to_filename` is set. In offline mode, all visdom commands that don't create or update plots will simply return `True`. (default: `False`)
+- `use_preflight_checks`: Ask the server whether a window exists before an `update='append'` or a `store_history=True` frame, which costs a second round trip per call. Set it to `False` to send one request and let the server create the window if it isn't there -- roughly halving the requests of an append loop. Requires a server new enough to lay out a window it creates from an append; against an older one such a window comes out unstyled. (default: `True`)
 
 Other options are either currently unused (endpoint, ipv6) or used for internal functionality.
 
