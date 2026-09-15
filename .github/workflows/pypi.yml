@@ -73,10 +73,12 @@ jobs:
         if: ${{ steps.gate.outputs.publish == 'true' }}
         uses: actions/setup-python@v7
         with:
-            python-version: '3.x'
+            python-version: '3.12'
       - name: Install dependencies
         if: ${{ steps.gate.outputs.publish == 'true' }}
-        run: python setup.py sdist
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --sdist
       - name: Publish a Python distribution to PyPI
         if: ${{ steps.gate.outputs.publish == 'true' }}
         uses: pypa/gh-action-pypi-publish@release/v1
