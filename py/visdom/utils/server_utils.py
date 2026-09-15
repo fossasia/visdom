@@ -545,6 +545,30 @@ def update_window(p, args):
     return p
 
 
+def create_args_for_append(args):
+    """Args to build a window with, for an append to a window that isn't there.
+
+    A client that appends deliberately sends an empty ``layout``: the layout is
+    derived from ``opts`` only on the call that creates a window, because an
+    append to an existing window must never restyle it. That leaves the
+    create-on-append branch of ``/update`` with nothing to lay the new window
+    out with, which is the whole reason a client has to ask ``/win_exists``
+    before every append.
+
+    ``layout_create`` closes that gap: a client sends the layout it *would*
+    have used to create the window alongside the append, and it is read only
+    here, on the branch that really does create one. An append that lands on an
+    existing window never reaches this function, so the key changes nothing for
+    it. Clients that don't send the key are unaffected -- the layout stays
+    whatever ``layout`` held, defaulting to ``{}`` rather than raising when the
+    request omits it entirely.
+    """
+    layout = args.get("layout")
+    if not layout:
+        layout = args.get("layout_create")
+    return dict(args, layout=layout if isinstance(layout, dict) else {})
+
+
 def window(args):
     """Build a window dict structure for sending to client"""
     uid = args.get("win", get_new_window_id())
