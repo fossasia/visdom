@@ -131,6 +131,42 @@ def test_line_update_append_new_window_no_append_key(capture_send):
     assert "append" not in sent["payload"]
 
 
+def test_line_update_append_without_preflight_skips_the_probe(
+    capture_send, offline_client
+):
+    """With the preflight off the append is one POST, not two.
+
+    The layout an append deliberately leaves empty rides along as
+    ``layout_create``, which the server reads only if it has to create the
+    window this append landed on.
+    """
+    offline_client.use_preflight_checks = False
+    Y = np.array([1.0, 2.0])
+    X = np.array([0.0, 1.0])
+    with patch.object(offline_client, "win_exists") as probe:
+        sent = capture_send(
+            lambda v: v.line(Y, X=X, win="w", update="append", opts=dict(title="t"))
+        )
+    assert not probe.called
+    assert sent["endpoint"] == "update"
+    assert sent["payload"]["append"]
+    assert sent["payload"]["layout"] == {}
+    assert sent["payload"]["layout_create"]["title"] == {"text": "t"}
+
+
+def test_line_update_replace_without_preflight_sends_no_layout_create(
+    capture_send, offline_client
+):
+    """Only an append can create a window, so only an append carries the key."""
+    offline_client.use_preflight_checks = False
+    sent = capture_send(
+        lambda v: v.line(
+            np.array([1.0, 2.0]), X=np.array([0.0, 1.0]), win="w", update="replace"
+        )
+    )
+    assert "layout_create" not in sent["payload"]
+
+
 def test_line_update_remove_sends_delete(capture_send):
     """update='remove' sends delete=True without touching Y."""
     sent = capture_send(lambda v: v.line(None, win="w", name="trace1", update="remove"))
@@ -215,6 +251,22 @@ def test_scatter_name_with_multiple_labels_raises(offline_client):
         offline_client.scatter(X, Y=np.array([1, 2]), name="trace1")
 
 
+def test_scatter_store_history_without_preflight_always_updates(
+    capture_send, offline_client
+):
+    """One POST either way: /update appends the frame, or builds the pane."""
+    offline_client.use_preflight_checks = False
+    with patch.object(offline_client, "win_exists") as probe:
+        sent = capture_send(
+            lambda v: v.scatter(
+                np.array([[1.0, 2.0]]), win="w", opts=dict(store_history=True)
+            )
+        )
+    assert not probe.called
+    assert sent["endpoint"] == "update"
+    assert sent["payload"]["append"]
+
+
 def test_scatter_store_history_with_update_raises(offline_client):
     """store_history=True combined with update raises ValueError."""
     X = np.array([[1.0, 2.0], [3.0, 4.0]])
@@ -272,6 +324,69 @@ def test_scatter_name_based_update_1d_x_1d_y(capture_send):
     data = sent["payload"]["data"][0]
     assert data["x"] == [1.0, 2.0, 3.0]
     assert data["y"] == [4.0, 5.0, 6.0]
+
+
+def test_scatter_3d_aspectmode_forwarded_to_scene(capture_send):
+    """aspectmode opt reaches layout.scene for a 3D scatter."""
+    X = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    sent = capture_send(lambda v: v.scatter(X, opts={"aspectmode": "data"}))
+    assert sent["payload"]["layout"]["scene"]["aspectmode"] == "data"
+
+
+def test_scatter_3d_aspectmode_absent_by_default(capture_send):
+    """No aspectmode key is emitted when the opt is not set."""
+    X = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    sent = capture_send(lambda v: v.scatter(X))
+    assert "aspectmode" not in sent["payload"]["layout"]["scene"]
+
+
+def test_scatter_2d_ignores_aspectmode(capture_send):
+    """A 2D scatter builds no scene, so aspectmode has nowhere to land."""
+    X = np.array([[1.0, 2.0], [3.0, 4.0]])
+    sent = capture_send(lambda v: v.scatter(X, opts={"aspectmode": "data"}))
+    assert "scene" not in sent["payload"]["layout"]
+
+
+@pytest.mark.parametrize("bad", ["bogus", ""], ids=["unknown", "empty"])
+def test_scatter_invalid_aspectmode_raises(offline_client, bad):
+    """A non-enum aspectmode value raises in _assert_opts, falsy included."""
+    X = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    with pytest.raises(AssertionError):
+        offline_client.scatter(X, opts={"aspectmode": bad})
+
+
+def test_scatter_3d_aspectratio_forwarded_to_scene(capture_send):
+    """aspectratio opt reaches layout.scene for manual mode."""
+    X = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    ratio = {"x": 1, "y": 1, "z": 0.5}
+    sent = capture_send(
+        lambda v: v.scatter(X, opts={"aspectmode": "manual", "aspectratio": ratio})
+    )
+    scene = sent["payload"]["layout"]["scene"]
+    assert scene["aspectmode"] == "manual"
+    assert scene["aspectratio"] == ratio
+
+
+def test_scatter_aspectratio_missing_axis_raises(offline_client):
+    """An aspectratio dict without all of x, y, z raises."""
+    X = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    with pytest.raises(AssertionError):
+        offline_client.scatter(X, opts={"aspectratio": {"x": 1, "y": 1}})
+
+
+def test_line_3d_aspectmode_forwarded_to_scene(capture_send):
+    """aspectmode reaches layout.scene and x/y/z stay on their own axes."""
+    Y = np.array([1.0, 2.0, 3.0])
+    X = np.array([10.0, 20.0, 30.0])
+    Z = np.array([100.0, 200.0, 300.0])
+    sent = capture_send(
+        lambda v: v.line(Y, X=X, Z=Z, is3d=True, opts={"aspectmode": "cube"})
+    )
+    trace = sent["payload"]["data"][0]
+    assert trace["x"] == [10.0, 20.0, 30.0]
+    assert trace["y"] == [1.0, 2.0, 3.0]
+    assert trace["z"] == [100.0, 200.0, 300.0]
+    assert sent["payload"]["layout"]["scene"]["aspectmode"] == "cube"
 
 
 # ------------------------------------------------------------------- heatmap ----
@@ -624,6 +739,12 @@ def test_surf_layout_is_3d(capture_send):
     assert "scene" in sent["payload"]["layout"]
 
 
+def test_surf_aspectmode_forwarded_to_scene(capture_send):
+    """aspectmode opt reaches layout.scene for surf."""
+    sent = capture_send(lambda v: v.surf(np.ones((2, 2)), opts={"aspectmode": "data"}))
+    assert sent["payload"]["layout"]["scene"]["aspectmode"] == "data"
+
+
 # ------------------------------------------------------------------- contour ----
 
 
@@ -636,6 +757,31 @@ def test_contour_type_is_contour(capture_send):
 def test_contour_layout_is_flat(capture_send):
     """contour renders flat, without the 3D scene surf builds."""
     sent = capture_send(lambda v: v.contour(np.ones((2, 2))))
+    assert "scene" not in sent["payload"]["layout"]
+
+
+# ---------------------------------------------------------------------- mesh ----
+
+
+def test_mesh_3d_builds_scene_layout(capture_send):
+    """An Nx3 mesh renders as mesh3d with a 3D scene layout."""
+    X = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    sent = capture_send(lambda v: v.mesh(X))
+    assert sent["payload"]["data"][0]["type"] == "mesh3d"
+    assert "scene" in sent["payload"]["layout"]
+
+
+def test_mesh_3d_aspectmode_forwarded_to_scene(capture_send):
+    """aspectmode opt reaches layout.scene for a 3D mesh."""
+    X = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    sent = capture_send(lambda v: v.mesh(X, opts={"aspectmode": "data"}))
+    assert sent["payload"]["layout"]["scene"]["aspectmode"] == "data"
+
+
+def test_mesh_2d_layout_is_flat(capture_send):
+    """An Nx2 mesh builds no 3D scene."""
+    X = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
+    sent = capture_send(lambda v: v.mesh(X))
     assert "scene" not in sent["payload"]["layout"]
 
 
