@@ -105,6 +105,10 @@ class StateAccessorsMixin:
     def live_updates(self):
         return self.server_state.live_updates
 
+    @property
+    def deleting_envs(self):
+        return self.server_state.deleting_envs
+
     def mark_dirty(self, eid):
         """Mark an environment for persistence through the shared state."""
         return self.server_state.mark_dirty(eid)
@@ -143,12 +147,6 @@ class ServerState:
         self.sources = sources
         self.storage = storage
 
-        # Disk work runs on a single worker, so writes stay ordered with
-        # respect to each other and to the deletes queued behind them.
-        self.storage_executor = ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="visdom-storage"
-        )
-
         # Startup configuration (effectively immutable after construction).
         self.env_path = env_path
         self.port = port
@@ -172,7 +170,19 @@ class ServerState:
         self._socket_wrap_monitor = None
         self.dirty_envs = Counter()
         self.saving_envs = set()
+        # Environments whose removal is queued or running on the worker. A read
+        # that started before one of those deletes must not file what it read
+        # back into ``state`` when it resumes, or the deleted env is listed
+        # again for as long as the server runs.
+        self.deleting_envs = {}
         self.autosave = None
+        # Disk work is handed to one worker thread rather than run on the loop.
+        # A single worker keeps the writes serialized, so two saves of the same
+        # environment cannot interleave and leave a half-written file behind.
+        self.storage_executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="visdom-storage"
+        )
+        self._storage_shut_down = False
         # Set by the application once the handlers it drives can be imported;
         # a queue built here would need experiments_handler, which needs the
         # handlers that need this module.
@@ -186,7 +196,13 @@ class ServerState:
     def set_layouts(self, layouts):
         self._layouts = layouts
 
-    def save_layouts(self):
+    def save_layouts(self, layouts=None):
+        """Persist the layout blob, defaulting to the one held in memory.
+
+        A caller writing from the storage worker passes the snapshot it took on
+        the loop, so the write records the layouts as they were when it was
+        scheduled rather than whatever a later edit has since installed.
+        """
         if self.env_path is None:
             warn_once(
                 "Saving and loading to disk has no effect when running with "
@@ -194,7 +210,7 @@ class ServerState:
                 RuntimeWarning,
             )
             return
-        self.storage.save_layouts(self._layouts)
+        self.storage.save_layouts(self._layouts if layouts is None else layouts)
 
     def _load_layouts(self):
         if self.env_path is None:
@@ -310,7 +326,16 @@ class ServerState:
         Draining next stops an already-queued write from landing after the
         final save and putting a stale env back on disk. The final save covers
         whatever was still marked dirty, so the marks are cleared with it.
+
+        Idempotent: the graceful shutdown calls this, and the ``atexit`` hook
+        that covers a teardown which never reaches it calls it again. A second
+        pass must not re-run ``save_all`` -- the executor is already gone, so
+        anything written after the first pass could only be state the process
+        never served.
         """
+        if self._storage_shut_down:
+            return
+        self._storage_shut_down = True
         self.stop_autosave()
         self.storage_executor.shutdown(wait=True)
         self.storage.save_all(self.state)
@@ -350,3 +375,24 @@ class ServerState:
     def stop_socket_monitor(self):
         if self._socket_wrap_monitor is not None:
             self._socket_wrap_monitor.stop()
+
+    # ----- shutdown ----- #
+
+    def close_connections(self):
+        """Close every open client connection and forget it.
+
+        Shutdown used to rebind ``Application.subs``/``sources`` to empty
+        lists, which left the sockets themselves open and this state -- the
+        holder of the real dictionaries every handler registers into --
+        untouched. Closing a connection lets its handler unregister itself;
+        clearing the containers afterwards covers a connection whose close
+        path never ran, and a handler that closes twice is harmless.
+        """
+        self.stop_socket_monitor()
+        for connections in (self.subs, self.sources):
+            for connection in list(connections.values()):
+                try:
+                    connection.close()
+                except Exception:
+                    logging.exception("Failed to close a client connection")
+            connections.clear()
