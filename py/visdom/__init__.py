@@ -273,6 +273,8 @@ def _opts2layout(opts, is3d=False):
             "xaxis": _axisformat3d("x", opts),
             "yaxis": _axisformat3d("y", opts),
             "zaxis": _axisformat3d("z", opts),
+            "aspectmode": opts.get("aspectmode"),
+            "aspectratio": opts.get("aspectratio"),
         }
     else:
         layout["xaxis"] = _axisformat("x", opts)
@@ -423,6 +425,23 @@ def _assert_opts(opts):
 
     if opts.get("mode"):
         assert isstr(opts.get("mode")), "mode should be a string"
+
+    if opts.get("aspectmode") is not None:
+        assert opts.get("aspectmode") in (
+            "auto",
+            "cube",
+            "data",
+            "manual",
+        ), "aspectmode should be one of 'auto', 'cube', 'data', 'manual'"
+
+    if opts.get("aspectratio") is not None:
+        ar = opts.get("aspectratio")
+        assert isinstance(ar, dict) and all(
+            k in ar for k in ("x", "y", "z")
+        ), "aspectratio should be a dict with 'x', 'y' and 'z' keys"
+        assert all(
+            isnum(ar[k]) and math.isfinite(ar[k]) and ar[k] > 0 for k in ("x", "y", "z")
+        ), "aspectratio values should be finite positive numbers"
 
     if opts.get("markersymbol"):
         assert isstr(opts.get("markersymbol")), "marker symbol should be string"
@@ -753,6 +772,7 @@ class Visdom(object):
         session_idle_timeout=SESSION_IDLE_TIMEOUT,
         session_idle_check_interval=SESSION_IDLE_CHECK_INTERVAL,
         ssl_verify=None,
+        use_preflight_checks=True,
     ):
         parsed_url = urlparse(server)
         if not parsed_url.scheme:
@@ -797,6 +817,7 @@ class Visdom(object):
         self.raise_exceptions = raise_exceptions
         self.log_to_filename = log_to_filename
         self.offline = offline
+        self.use_preflight_checks = use_preflight_checks
         self._session = None
         self._pid = os.getpid()
         self._session_lock = threading.Lock()
@@ -2245,20 +2266,22 @@ class Visdom(object):
             }
         ]
 
+        msg = {
+            "data": data,
+            "win": win,
+            "eid": env,
+            "opts": opts,
+        }
         endpoint = "events"
-        if opts.get("store_history"):
-            if win is not None and self.win_exists(win, env):
+        if opts.get("store_history") and win is not None:
+            if self.use_preflight_checks:
+                if self.win_exists(win, env):
+                    endpoint = "update"
+            else:
+                msg["append"] = True
                 endpoint = "update"
 
-        return self._send(
-            {
-                "data": data,
-                "win": win,
-                "eid": env,
-                "opts": opts,
-            },
-            endpoint=endpoint,
-        )
+        return self._send(msg, endpoint=endpoint)
 
     def image_select(self, win, selected, env=None):
         """
@@ -2808,11 +2831,17 @@ class Visdom(object):
         - `opts.dash`             : dash type (`np.array`; default = 'solid'`)
         - `opts.textlabels`       : text label for each point (`list`: default = `None`)
         - `opts.legend`           : `list` or `tuple` containing legend names
+        - `opts.aspectmode`       : 3D axis scaling: `'auto'`, `'cube'`, `'data'`
+                                    or `'manual'` (`string`; default = `'auto'`)
+        - `opts.aspectratio`      : `{'x', 'y', 'z'}` scale dict, applied when
+                                    `aspectmode` is `'manual'`
         """
         if opts and opts.get("store_history") and update is not None:
             raise ValueError(
                 "Cannot use store_history=True together with the update parameter"
             )
+
+        send_layout_create = False
 
         if update == "remove":
             assert win is not None
@@ -2833,7 +2862,9 @@ class Visdom(object):
                 raise ValueError("Must define a window to update")
 
             if update == "append":
-                if not self.offline:
+                if not self.use_preflight_checks:
+                    send_layout_create = True
+                elif not self.offline:
                     exists = self.win_exists(win, env)
                     if exists is False:
                         update = None
@@ -3004,8 +3035,13 @@ class Visdom(object):
                 "opts": opts,
             }
             endpoint = "events"
-            if win is not None and self.win_exists(win, env):
-                endpoint = "update"
+            if win is not None:
+                if self.use_preflight_checks:
+                    if self.win_exists(win, env):
+                        endpoint = "update"
+                else:
+                    data_to_send["append"] = True
+                    endpoint = "update"
             return self._send(data_to_send, endpoint=endpoint)
 
         # Only send updates to the layout on the first plot, future updates
@@ -3021,6 +3057,8 @@ class Visdom(object):
         if update:
             data_to_send["name"] = name
             data_to_send["append"] = update == "append"
+            if send_layout_create:
+                data_to_send["layout_create"] = _opts2layout(opts, is3d)
             endpoint = "update"
 
         return self._send(data_to_send, endpoint=endpoint)
@@ -3066,6 +3104,9 @@ class Visdom(object):
         - `opts.linecolor`   : line colors (`np.array`; default = None)
         - `opts.dash`        : line dash type (`np.array`; default = None)
         - `opts.legend`      : `list` or `tuple` containing legend names
+        - `opts.aspectmode`  : 3D axis scaling: `'auto'`, `'cube'`, `'data'` or
+                               `'manual'` (`string`; default = `'auto'`)
+        - `opts.aspectratio` : `{'x', 'y', 'z'}` scale dict for `'manual'` mode
 
         If `update` is specified, the figure will be updated without
         creating a new plot -- this can be used for efficient updating.
@@ -3901,9 +3942,12 @@ class Visdom(object):
 
         The following `opts` are supported:
 
-        - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
-        - `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
-        - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
+        - `opts.colormap`  : colormap (`string`; default = `'Viridis'`)
+        - `opts.xmin`      : clip minimum value (`number`; default = `X:min()`)
+        - `opts.xmax`      : clip maximum value (`number`; default = `X:max()`)
+        - `opts.aspectmode`: 3D axis scaling: `'auto'`, `'cube'`, `'data'` or
+                             `'manual'` (`string`; default = `'auto'`)
+        - `opts.aspectratio`: `{'x', 'y', 'z'}` scale dict for `'manual'` mode
         """
 
         return self._surface(X=X, stype="surface", opts=opts, win=win, env=env)
@@ -4236,6 +4280,9 @@ class Visdom(object):
 
         - `opts.color`: color (`string`)
         - `opts.opacity`: opacity of polygons (`number` between 0 and 1)
+        - `opts.aspectmode`: 3D axis scaling: `'auto'`, `'cube'`, `'data'` or
+          `'manual'` (`string`; default = `'auto'`; 3D mesh only)
+        - `opts.aspectratio`: `{'x', 'y', 'z'}` scale dict for `'manual'` mode
         """
         opts = {} if opts is None else opts
         _title2str(opts)
@@ -4270,7 +4317,7 @@ class Visdom(object):
                 "data": data,
                 "win": win,
                 "eid": env,
-                "layout": _opts2layout(opts),
+                "layout": _opts2layout(opts, is3d),
                 "opts": opts,
             }
         )
