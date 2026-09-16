@@ -614,8 +614,23 @@ def _compute_pr_curve(y_true, y_score, pos_label=1):
     return precision, recall
 
 
-def _coerce_curve_xy(x, y, x_name, y_name):
-    """Validate and sort precomputed curve arrays by x."""
+def _coerce_curve_xy(x, y, x_name, y_name, y_tiebreak_descending=False):
+    """Validate and sort precomputed curve arrays by x, breaking ties in y.
+
+    A tied-``x`` group must be ordered to match how the curve was
+    actually traversed, or downstream area calculations that are
+    sensitive to point order (e.g. :func:`_average_precision`'s
+    precision-weighted sum) can silently compute the wrong value even
+    though a trapezoidal area (:func:`_trapz_area`, used for ROC) would
+    be unaffected either way.
+
+    For a precision-recall curve, precision only decreases as more
+    points are accepted at a fixed recall, so pass
+    ``y_tiebreak_descending=True`` to put the higher-precision point
+    first within each tied-recall group. ROC's fpr/tpr pairs need no
+    such tiebreak (tpr ascends within a tied-fpr group, matching a plain
+    ascending sort), so the default preserves that.
+    """
     x = np.asarray(x)
     y = np.asarray(y)
     if x.ndim != 1:
@@ -629,7 +644,10 @@ def _coerce_curve_xy(x, y, x_name, y_name):
             "{} and {} should have at least 2 points".format(x_name, y_name)
         )
 
-    order = np.argsort(x, kind="mergesort")
+    # Negating an unsigned array wraps instead of changing sign, which would
+    # order a tied group by ascending y, so widen before negating.
+    tiebreak = -y.astype(np.float64) if y_tiebreak_descending else y
+    order = np.lexsort((tiebreak, x))
     return x[order], y[order]
 
 
@@ -765,6 +783,7 @@ class Visdom(object):
         session_idle_timeout=SESSION_IDLE_TIMEOUT,
         session_idle_check_interval=SESSION_IDLE_CHECK_INTERVAL,
         ssl_verify=None,
+        use_preflight_checks=True,
     ):
         parsed_url = urlparse(server)
         if not parsed_url.scheme:
@@ -809,6 +828,7 @@ class Visdom(object):
         self.raise_exceptions = raise_exceptions
         self.log_to_filename = log_to_filename
         self.offline = offline
+        self.use_preflight_checks = use_preflight_checks
         self._session = None
         self._pid = os.getpid()
         self._session_lock = threading.Lock()
@@ -2257,20 +2277,22 @@ class Visdom(object):
             }
         ]
 
+        msg = {
+            "data": data,
+            "win": win,
+            "eid": env,
+            "opts": opts,
+        }
         endpoint = "events"
-        if opts.get("store_history"):
-            if win is not None and self.win_exists(win, env):
+        if opts.get("store_history") and win is not None:
+            if self.use_preflight_checks:
+                if self.win_exists(win, env):
+                    endpoint = "update"
+            else:
+                msg["append"] = True
                 endpoint = "update"
 
-        return self._send(
-            {
-                "data": data,
-                "win": win,
-                "eid": env,
-                "opts": opts,
-            },
-            endpoint=endpoint,
-        )
+        return self._send(msg, endpoint=endpoint)
 
     def image_select(self, win, selected, env=None):
         """
@@ -2830,6 +2852,8 @@ class Visdom(object):
                 "Cannot use store_history=True together with the update parameter"
             )
 
+        send_layout_create = False
+
         if update == "remove":
             assert win is not None
             assert name is not None, "A trace must be specified for deletion"
@@ -2849,7 +2873,9 @@ class Visdom(object):
                 raise ValueError("Must define a window to update")
 
             if update == "append":
-                if not self.offline:
+                if not self.use_preflight_checks:
+                    send_layout_create = True
+                elif not self.offline:
                     exists = self.win_exists(win, env)
                     if exists is False:
                         update = None
@@ -3020,8 +3046,13 @@ class Visdom(object):
                 "opts": opts,
             }
             endpoint = "events"
-            if win is not None and self.win_exists(win, env):
-                endpoint = "update"
+            if win is not None:
+                if self.use_preflight_checks:
+                    if self.win_exists(win, env):
+                        endpoint = "update"
+                else:
+                    data_to_send["append"] = True
+                    endpoint = "update"
             return self._send(data_to_send, endpoint=endpoint)
 
         # Only send updates to the layout on the first plot, future updates
@@ -3037,6 +3068,8 @@ class Visdom(object):
         if update:
             data_to_send["name"] = name
             data_to_send["append"] = update == "append"
+            if send_layout_create:
+                data_to_send["layout_create"] = _opts2layout(opts, is3d)
             endpoint = "update"
 
         return self._send(data_to_send, endpoint=endpoint)
@@ -3309,7 +3342,7 @@ class Visdom(object):
             if precision is None or recall is None:
                 raise ValueError("both precision and recall are required")
             recall, precision = _coerce_curve_xy(
-                recall, precision, "recall", "precision"
+                recall, precision, "recall", "precision", y_tiebreak_descending=True
             )
 
         _validate_curve_range(recall, "recall")
