@@ -1134,15 +1134,29 @@ class TestWebSocketBackchannel(tornado.testing.AsyncTestCase):
                 assert client.use_socket is True
 
     @gen_test
-    async def test_a_socket_that_fails_its_handshake_stops_retrying(self):
-        """Not only a refusal: any first session that ends before ``alive`` --
-        here an unreachable host -- gives up instead of retrying forever."""
+    async def test_an_unreachable_socket_stops_retrying(self):
+        """Not only a refusal: any connect error on a socket that never worked
+        -- here an unreachable host -- gives up instead of retrying forever."""
         connector = FailingConnector(OSError(errno.EHOSTUNREACH, "unreachable"))
         with patch("visdom.async_client.RECONNECT_DELAY", 0):
             async with socket_client(connector) as (client, _):
                 await asyncio.sleep(0.05)
 
                 assert client.use_socket is False
+                assert len(connector.requests) == 1
+
+    @gen_test
+    async def test_a_socket_that_closes_before_alive_stops_retrying(self):
+        """The websocket connects but the session ends before the server's
+        ``alive``. A healthy second connection is on offer, so a retry would
+        show up as a live socket."""
+        connector = FakeConnector(FakeConnection(None), FakeConnection(ALIVE))
+        with patch("visdom.async_client.RECONNECT_DELAY", 0):
+            async with socket_client(connector) as (client, _):
+                await asyncio.sleep(0.05)
+
+                assert client.use_socket is False
+                assert client.socket_alive is False
                 assert len(connector.requests) == 1
 
     @gen_test
