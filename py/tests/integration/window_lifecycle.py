@@ -31,8 +31,10 @@ import threading
 import unittest
 from unittest import mock
 
+import numpy as np
 import pytest
 
+import visdom
 from visdom.data_model.json_store import JSONStore
 from visdom.server.handlers.web_handlers import (
     CloseHandler,
@@ -162,6 +164,126 @@ class TestCreateOnAppendLayout(VisdomHTTPTestCase):
         resp = self.append_scatter("made", layout={}, layout_create="title")
         self.assertEqual(resp.code, 400)
         self.assertFalse(self.win_exists("made"))
+
+
+class TestClientCreatesWithoutPreflight(VisdomHTTPTestCase):
+    """``use_preflight_checks=False`` builds the same pane the probe would have.
+
+    With the probe on, a missing window turns the call into an ``/events``
+    create. With it off, the client sends one ``/update`` with ``append`` and
+    trusts the server's create-on-append branch to do that job. The unit tests
+    pin the payload; these send it through a real ``Visdom`` to a real server
+    with the window genuinely absent and compare what gets created.
+    """
+
+    def client(self, use_preflight_checks):
+        with (
+            mock.patch.object(visdom.Visdom, "_handle_post", return_value=True),
+            mock.patch.object(visdom.Visdom, "_start_session_reaper"),
+            mock.patch.object(visdom.logger, "warning"),
+        ):
+            vis = visdom.Visdom(
+                use_incoming_socket=False,
+                raise_exceptions=True,
+                use_preflight_checks=use_preflight_checks,
+            )
+        vis.requests = []
+
+        def post(url, data=None):
+            endpoint = url.rsplit("/", 1)[1]
+            vis.requests.append(endpoint)
+            resp = self.fetch("/" + endpoint, method="POST", body=data)
+            self.assertEqual(resp.code, 200, resp.body)
+            return resp.body.decode()
+
+        vis._handle_post = post
+        return vis
+
+    def created_by(self, call, win):
+        """Run ``call`` both ways against a missing window; return both panes."""
+        panes = {}
+        for preflight in (True, False):
+            vis = self.client(preflight)
+            name = "{}_{}".format(win, "probed" if preflight else "direct")
+            self.assertFalse(self.win_exists(name))
+            call(vis, name)
+            self.assertEqual(
+                vis.requests, ["win_exists", "events"] if preflight else ["update"]
+            )
+            panes[preflight] = self.get_win_data(name)
+        return panes[True], panes[False]
+
+    def assertSamePane(self, probed, direct):
+        for pane in (probed, direct):
+            for per_window in ("id", "contentID", "i"):
+                pane.pop(per_window, None)
+        self.assertEqual(direct, probed)
+
+    def test_image_store_history_creates_an_image_history_pane(self):
+        opts = dict(store_history=True, title="frames", caption="c0")
+        image = np.zeros((4, 6), dtype=np.uint8)
+        probed, direct = self.created_by(
+            lambda vis, win: vis.image(image, win=win, opts=dict(opts)), "img"
+        )
+        self.assertEqual(direct["type"], "image_history")
+        self.assertEqual(len(direct["content"]), 1)
+        self.assertTrue(direct["content"][0]["src"].startswith("data:image/png"))
+        self.assertEqual(direct["content"][0]["caption"], "c0")
+        self.assertEqual(direct["selected"], 0)
+        self.assertTrue(direct["show_slider"])
+        self.assertEqual(direct["title"], "frames")
+        self.assertEqual((direct["width"], direct["height"]), (6, 4))
+        self.assertSamePane(probed, direct)
+
+    def test_scatter_store_history_creates_a_plot_history_pane(self):
+        opts = dict(store_history=True, title="snapshots", xlabel="x")
+        points = np.array([[1.0, 2.0], [3.0, 4.0]])
+        probed, direct = self.created_by(
+            lambda vis, win: vis.scatter(points, win=win, opts=dict(opts)), "hist"
+        )
+        self.assertEqual(direct["type"], "plot_history")
+        self.assertEqual(len(direct["content"]), 1)
+        frame = direct["content"][0]
+        self.assertEqual(frame["data"][0]["x"], [1.0, 3.0])
+        self.assertEqual(frame["data"][0]["y"], [2.0, 4.0])
+        self.assertEqual(frame["layout"]["title"], {"text": "snapshots"})
+        self.assertEqual(frame["layout"]["xaxis"]["title"], {"text": "x"})
+        self.assertEqual(direct["selected"], 0)
+        self.assertEqual(direct["title"], "snapshots")
+        self.assertSamePane(probed, direct)
+
+    def test_scatter_append_creates_a_laid_out_plot(self):
+        opts = dict(title="appended", xlabel="step")
+        points = np.array([[0.0, 1.0], [1.0, 2.0]])
+        probed, direct = self.created_by(
+            lambda vis, win: vis.scatter(
+                points, win=win, name="loss", update="append", opts=dict(opts)
+            ),
+            "app",
+        )
+        self.assertEqual(direct["type"], "plot")
+        traces = direct["content"]["data"]
+        self.assertEqual([t["name"] for t in traces], ["loss"])
+        self.assertEqual(traces[0]["x"], [0.0, 1.0])
+        self.assertEqual(direct["content"]["layout"]["title"], {"text": "appended"})
+        self.assertEqual(
+            direct["content"]["layout"]["xaxis"]["title"], {"text": "step"}
+        )
+        self.assertSamePane(probed, direct)
+
+    def test_the_next_frame_appends_to_the_pane_it_created(self):
+        vis = self.client(use_preflight_checks=False)
+        for shade in (0, 255):
+            vis.image(
+                np.full((4, 4), shade, dtype=np.uint8),
+                win="frames",
+                opts=dict(store_history=True),
+            )
+        self.assertEqual(vis.requests, ["update", "update"])
+        pane = self.get_win_data("frames")
+        self.assertEqual(pane["type"], "image_history")
+        self.assertEqual(len(pane["content"]), 2)
+        self.assertNotEqual(pane["content"][0]["src"], pane["content"][1]["src"])
 
 
 class TestWindowOrdering(VisdomHTTPTestCase):
