@@ -145,7 +145,29 @@ class UpdateHandler(BaseHandler):
             max_image_history,
             max_plot_history,
         )
+        # ``update()`` hands the pane straight back when it turns an update
+        # down: a ``/update`` aimed at a table, an image slider move on a pane
+        # holding no frames, a heatmap append whose shape does not line up with
+        # the plot it is aimed at. ``old_p`` deep-copied everything ``update()``
+        # mutates in place, so an unchanged pane here means nothing was applied.
+        # A rejected update has no revision to announce: bumping for one spends
+        # a version on a patch that carries no change and rerolls ``contentID``
+        # to make the frontend redraw the pane it already has. Leave both alone
+        # and hand back an empty patch, which ``wrap_func`` declines to send.
+        if p == old_p:
+            return p, []
+
         p["contentID"] = get_rand_id()
+        # Bump here, not in ``update_window()``. Every pane type that carries
+        # content rather than traces -- text, image_history and plot_history --
+        # returns from ``update()`` before ``update_window()`` is ever
+        # reached, so those panes stayed pinned at version 1 while the server
+        # went on broadcasting ``window_update`` for them. The frontend only
+        # applies a patch whose version is exactly one ahead of the pane it
+        # holds, so with both sides stuck at 1 every update fell through to a
+        # full environment reload. Bumping once per accepted update, ahead of
+        # the diff, puts the new version in the patch for every type.
+        p["version"] = p.get("version", 1) + 1
 
         patch = jsonpatch.make_patch(old_p, p)
         return p, patch.patch
@@ -158,11 +180,13 @@ class UpdateHandler(BaseHandler):
             selected = args["data"]["selected"]
             p["content"]["selected"] = selected
             p["contentID"] = content_id
+            p["version"] = p.get("version", 1) + 1
             # `selected` may not exist yet on the first selection, so use "add"
             # (which also overwrites when the key is already present).
             return [
                 {"op": "add", "path": "/content/selected", "value": selected},
                 {"op": "replace", "path": "/contentID", "value": content_id},
+                {"op": "add", "path": "/version", "value": p["version"]},
             ]
         if update_type == "RegionSelected":
             old_data = p["content"]["data"]
@@ -175,11 +199,13 @@ class UpdateHandler(BaseHandler):
             p["content"]["has_previous"] = True
             p["content"]["selected"] = None
             p["contentID"] = content_id
+            p["version"] = p.get("version", 1) + 1
             return [
                 {"op": "replace", "path": "/content/data", "value": new_data},
                 {"op": "add", "path": "/content/has_previous", "value": True},
                 {"op": "add", "path": "/content/selected", "value": None},
                 {"op": "replace", "path": "/contentID", "value": content_id},
+                {"op": "add", "path": "/version", "value": p["version"]},
             ]
         return []
 
@@ -472,8 +498,17 @@ class UpdateHandler(BaseHandler):
             diff_packet = UpdateHandler.update_embeddings_packet(
                 p, args, handler.max_old_content
             )
-            UpdateHandler.broadcast_window_update(handler, args, eid, p, diff_packet)
-            handler.mark_dirty(eid)
+            # An unrecognised ``update_type`` applies nothing and returns an
+            # empty patch. Announcing it would repeat the version the client
+            # already holds, which fails the frontend's "exactly one ahead"
+            # check and reloads the whole environment -- the reload the bump
+            # exists to prevent. Nothing changed, so nothing needs saving
+            # either.
+            if diff_packet:
+                UpdateHandler.broadcast_window_update(
+                    handler, args, eid, p, diff_packet
+                )
+                handler.mark_dirty(eid)
             handler.write(p["id"])
             return
 
@@ -492,6 +527,16 @@ class UpdateHandler(BaseHandler):
                 handler.write(str(exc))
                 return
             raise
+        if not diff_packet:
+            # ``update_packet`` refused the update and left the pane on the
+            # version the browser already holds. A ``window_update`` repeating
+            # that version fails the frontend's "exactly one ahead" check and
+            # sends it back for the whole environment, so say nothing at all --
+            # there is no change to save either. The pane id is still returned
+            # as the ack, as it is for an update that did land.
+            handler.write(p["id"])
+            return
+
         # send the smaller of the patch and the updated pane
         if len(stringify(p)) <= len(stringify(diff_packet)):
             broadcast_msg = dict(p)
