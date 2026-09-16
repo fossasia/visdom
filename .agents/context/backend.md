@@ -4,8 +4,10 @@
 
 - `py/visdom/__init__.py` — Client class (40+ viz methods). Use `@pytorch_wrap` on all new methods.
 - `py/visdom/__init__.pyi` — Type stubs. Update when changing client API.
+- `py/visdom/async_client.py(+.pyi)` — `AsyncVisdom`. A new public `Visdom` method must be added to `_PROXIED` and to the stub, or it is unreachable from the async client.
 - `py/visdom/VERSION` — Version string. Changing on master triggers PyPI publish.
-- `py/visdom/server/app.py` — Application class, routes, state management.
+- `py/visdom/server/app.py` — Application class, routes, wiring.
+- `py/visdom/server/server_state.py` — `ServerState`: the state containers, the storage executor, autosave, shutdown.
 - `py/visdom/server/handlers/web_handlers.py` — HTTP handlers. Copy app attributes in `initialize()`, use `@check_auth`.
 - `py/visdom/server/handlers/socket_handlers.py` — WebSocket handlers (read-only + write-enabled).
 - `py/visdom/utils/server_utils.py` — `check_auth`, `broadcast`, `LazyEnvData`. Environment persistence lives in `py/visdom/data_model/json_store.py` (`JSONStore`).
@@ -17,6 +19,8 @@
 - Python >= 3.12 compatibility
 - Use `@pytorch_wrap` on all `Visdom` methods
 - Use `warn_once()` for deprecation warnings
+- **Never touch disk on the IOLoop.** Handlers are `async def`; disk work goes through `run_on_storage_executor` / the `*_off_loop` helpers in `server_utils.py`, and the env is snapshotted on the loop first. `ServerState.storage_executor` has one worker on purpose — see Concurrency Model in `architecture.md`.
+- After an `await`, re-check that the env you were working on still exists before writing to `state`
 
 ## License Headers
 
