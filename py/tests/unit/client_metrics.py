@@ -311,9 +311,14 @@ def test_curve_legend_warns_when_a_legend_is_unusable(legend):
 
 
 def test_curve_legend_passes_a_valid_legend_through():
-    """Two or more elements are accepted verbatim, as a list."""
+    """A legend of the required length is accepted verbatim, as a list."""
     assert _curve_legend(("a", "b"), ["ROC", "Chance"]) == ["a", "b"]
-    assert _curve_legend(["a", "b", "c"], ["ROC", "Chance"]) == ["a", "b", "c"]
+
+
+def test_curve_legend_drops_labels_beyond_the_required_count():
+    """Extra labels would name traces the plot does not draw."""
+    assert _curve_legend(["a", "b", "c"], ["ROC", "Chance"]) == ["a", "b"]
+    assert _curve_legend(["a", "b"], ["PR", "Baseline"], required=1) == ["a"]
 
 
 @pytest.mark.parametrize(
@@ -559,12 +564,17 @@ def test_pr_curve_default_title_carries_the_average_precision(capture_send):
     assert sent["payload"]["opts"]["ylabel"] == "Precision"
 
 
-def test_pr_curve_from_precomputed_points_infers_the_baseline(capture_send):
-    """With recall starting at 0, precision[0] stands in for the positive rate."""
+def test_pr_curve_from_precomputed_points_omits_the_baseline(capture_send):
+    """Precision at recall 0 is a curve endpoint, not the positive rate.
+
+    Precision and recall are both ratios and neither carries the class
+    counts, so the positive rate cannot be recovered from precomputed
+    points -- not even when recall starts at 0.
+    """
     sent = capture_send(
         lambda v: v.pr_curve(recall=[0.0, 0.5, 1.0], precision=[0.4, 0.4, 0.4])
     )
-    assert sent["payload"]["data"][1]["y"] == [0.4, 0.4]
+    assert len(sent["payload"]["data"]) == 1
 
 
 def test_pr_curve_omits_the_baseline_when_it_cannot_be_inferred(capture_send):
@@ -573,6 +583,58 @@ def test_pr_curve_omits_the_baseline_when_it_cannot_be_inferred(capture_send):
         lambda v: v.pr_curve(recall=[0.2, 0.6, 1.0], precision=[0.4, 0.4, 0.4])
     )
     assert len(sent["payload"]["data"]) == 1
+
+
+def test_pr_curve_keeps_a_single_legend_label_without_a_baseline(capture_send):
+    """One label is enough when only the curve is drawn."""
+    sent = capture_send(
+        lambda v: v.pr_curve(
+            recall=[0.0, 0.5, 1.0],
+            precision=[0.4, 0.4, 0.4],
+            opts={"legend": ["My Curve"]},
+        )
+    )
+    assert [d["name"] for d in sent["payload"]["data"]] == ["My Curve"]
+    assert sent["payload"]["opts"]["legend"] == ["My Curve"]
+
+
+def test_pr_curve_drops_extra_legend_labels_without_a_baseline(capture_send):
+    """A legend must not name traces the plot does not draw."""
+    sent = capture_send(
+        lambda v: v.pr_curve(
+            recall=[0.0, 0.5, 1.0],
+            precision=[0.4, 0.4, 0.4],
+            opts={"legend": ["Curve", "Baseline", "Extra"]},
+        )
+    )
+    assert [d["name"] for d in sent["payload"]["data"]] == ["Curve"]
+    assert sent["payload"]["opts"]["legend"] == ["Curve"]
+
+
+def test_pr_curve_drops_extra_legend_labels_with_a_baseline(capture_send):
+    """The same holds for the two-trace case."""
+    sent = capture_send(
+        lambda v: v.pr_curve(
+            y_true=[0, 0, 0, 1],
+            y_score=[0.1, 0.2, 0.3, 0.9],
+            opts={"legend": ["Curve", "Base", "Extra", "More"]},
+        )
+    )
+    assert [d["name"] for d in sent["payload"]["data"]] == ["Curve", "Base"]
+    assert sent["payload"]["opts"]["legend"] == ["Curve", "Base"]
+
+
+def test_roc_curve_drops_extra_legend_labels(capture_send):
+    """roc_curve always draws two traces, so it keeps exactly two labels."""
+    sent = capture_send(
+        lambda v: v.roc_curve(
+            y_true=[0, 0, 0, 1],
+            y_score=[0.1, 0.2, 0.3, 0.9],
+            opts={"legend": ["Roc", "Chance", "Extra"]},
+        )
+    )
+    assert [d["name"] for d in sent["payload"]["data"]] == ["Roc", "Chance"]
+    assert sent["payload"]["opts"]["legend"] == ["Roc", "Chance"]
 
 
 @pytest.mark.parametrize(
