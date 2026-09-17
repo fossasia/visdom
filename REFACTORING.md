@@ -141,6 +141,7 @@ Every row of the original table now runs on the storage worker, reached through
 | `JSONStore.save_envs()` / `save_env()` | `save_env_off_loop`, `save_envs_off_loop`, `save_all_off_loop` |
 | `compare_envs()` env reads | `CompareHandler` awaits the comparison on the worker |
 | Experiment search's full-disk scan | `ensure_env_loaded` per eid, then the unchanged sync search over warm state |
+| Hyper-parameter pane selection + save | `_select_hparams` on the worker over a loop-side copy of the resident experiments, then `save_env_off_loop` |
 | Layout save / load (`app.py`) | `ServerState.save_layouts`, awaited off the loop |
 | State load at startup | `ServerState`, before the loop starts serving |
 | PBKDF2 login hash (~50-100 ms) | The **default** executor, not the storage one — logins must not queue behind env saves |
@@ -156,8 +157,11 @@ synchronous. The `wrap_func` staticmethods stayed synchronous too — they are
 pure state manipulation, and keeping them sync is what let the polling bridge
 and the websocket path share one body.
 
-One endpoint, `/experiments/hparams/update`, does not hold that line yet; see
-follow-up 4j.
+The two hyper-parameter pane endpoints, `/experiments/hparams` and
+`/experiments/hparams/update`, arrived with the hparams track after the handler
+line was drawn and were brought across afterwards; see follow-up 4j. The
+live-refresh queue that drives the update endpoint drains as a coroutine on the
+loop, awaiting each rebuild in turn.
 
 `check_auth` was the blocker, and its fix is the reason no handler needed a
 per-handler edit: it discarded the wrapped call's return value, so an
@@ -248,7 +252,12 @@ over a real network the two cost the same and the ratio approaches 2x.
 | 4g | `AsyncVisdom` HTTP proxy support | `create()` raises `NotImplementedError` for `proxies` / `http_proxy_host`: tornado's `AsyncHTTPClient` has no proxy support without pycurl, which would be a new dependency |
 | 4h | Native async plotting bodies | Only worth doing if the bridge's thread pool ever shows up in a profile. It would fork every plotting method, so the bar is high |
 | 4i | Retire the polling backchannel | Both clients carry a websocket path and an HTTP polling fallback, and every socket change has to be made twice. Phase 6 is where that gets decided |
-| 4j | `/experiments/hparams/update` still writes on the loop | The handler is synchronous: its `wrap_func` re-runs the pane's selection through `ExperimentStore` and calls `handler.storage.save_env` inline, and the live-refresh queue drives that same `wrap_func` from an IOLoop timer, so converting it means making the queue's drain a coroutine as well. `/experiments/hparams`, which had the same shape, now selects on the storage worker from a copy of the resident experiments taken on the loop and saves through `save_env_off_loop`. `py/tests/unit/refactoring_docs.py` records the remaining site, so a new one fails the suite |
+
+### Follow-ups delivered
+
+| # | Item | How it was closed |
+|---|------|-------------------|
+| 4j | The hyper-parameter pane endpoints wrote on the loop | Both handlers were synchronous: each ran its selection through `ExperimentStore` and called `handler.storage.save_env` inline, and the live-refresh queue drove the update handler from an IOLoop timer. Both now select on the storage worker (`_select_hparams`) from a copy of the resident experiments taken on the loop, and save through `save_env_off_loop`. `LiveUpdateQueue.drain` is a coroutine that awaits each rebuild, and drains never overlap. The update re-checks the window once the read is back, and a refresh whose stored selection was replaced meanwhile is dropped rather than written back. `py/tests/unit/refactoring_docs.py` no longer records any on-loop write, so a new one fails the suite |
 
 ---
 

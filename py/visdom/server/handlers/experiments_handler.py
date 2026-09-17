@@ -25,18 +25,19 @@ That save goes through ``save_env_off_loop`` as well; only the window itself is
 registered on the loop.
 ``/experiments/hparams/update`` is the matching write path for an existing pane
 — replace its selection or re-run the stored one — since the generic
-``/update`` endpoint only understands plot-shaped windows.
+``/update`` endpoint only understands plot-shaped windows. It reads and saves
+off the loop the same way.
 
 That update path is also how a pane refreshes itself: :func:`make_live_queue`
 builds the queue that logging a run feeds, and drains it back into this module's
 own update handler, so a live refresh and a hand-written one are the same code.
+A drain is a coroutine on the server's loop that awaits each rebuild in turn.
 """
 
 import copy
 import logging
 
 import tornado.escape
-import tornado.ioloop
 import tornado.web
 
 from visdom.experiments import (
@@ -276,19 +277,13 @@ class ExperimentHparamsHandler(BaseHandler):
         return experiments
 
     @staticmethod
-    def _build_content(handler, spec):
-        """Select the runs ``spec`` names and flatten them into pane content."""
-        store = ExperimentStore(handler.storage, env_provider=handler.state.get)
-        experiments = ExperimentHparamsHandler._select(store, spec)
-        return flatten_experiments([experiment.to_dict() for experiment in experiments])
-
-    @staticmethod
     async def _build_content_off_loop(handler, spec):
-        """:meth:`_build_content`, with its reads on the storage worker.
+        """Select the runs ``spec`` names and flatten them into pane content.
 
-        A query selection reads the metadata of every environment the store
-        knows, and an ``env_ids`` one a file per id; on the loop, either would
-        stall every other request for the whole of it.
+        The reads run on the storage worker: a query selection reads the
+        metadata of every environment the store knows, and an ``env_ids`` one a
+        file per id; on the loop, either would stall every other request for
+        the whole of it.
         """
         return await run_on_storage_executor(
             handler,
@@ -357,20 +352,28 @@ class ExperimentHparamsUpdateHandler(BaseHandler):
     The refresh case is what a live update is, so :func:`make_live_queue` drives
     :meth:`wrap_func` directly rather than growing a second rebuild path.
 
+    The selection is read on the storage worker, exactly as on create, and the
+    env is saved through ``save_env_off_loop``. The window is checked again once
+    that read is back, because the loop kept serving requests while it ran: an
+    env deleted or a window closed or retyped in the meantime answers as it
+    would have up front, and a refresh whose stored selection was replaced by
+    another update in the meantime is dropped rather than put back.
+
     That write reaches disk, so the endpoint is rejected with 403 while the
     server runs in readonly mode.
     """
 
     @staticmethod
-    def wrap_func(handler, args):
-        win = args.get("win")
-        if not isinstance(win, str) or not win:
-            raise tornado.web.HTTPError(400, reason="'win' is required")
+    def _hparams_window(handler, eid, win):
+        """Return the hparams window ``win`` in env ``eid``, or raise.
 
-        eid = extract_eid(args)
-        if eid not in handler.state:
+        404 when the env or the window is unknown, 400 when the window is some
+        other type.
+        """
+        env = handler.state.get(eid)
+        if env is None:
             raise tornado.web.HTTPError(404, reason="unknown env {0!r}".format(eid))
-        existing = handler.state[eid]["jsons"].get(win)
+        existing = env["jsons"].get(win)
         if existing is None:
             raise tornado.web.HTTPError(
                 404, reason="no window {0!r} in env {1!r}".format(win, eid)
@@ -379,6 +382,19 @@ class ExperimentHparamsUpdateHandler(BaseHandler):
             raise tornado.web.HTTPError(
                 400, reason="window {0!r} is not an hparams window".format(win)
             )
+        return existing
+
+    @staticmethod
+    async def wrap_func(handler, args):
+        win = args.get("win")
+        if not isinstance(win, str) or not win:
+            raise tornado.web.HTTPError(400, reason="'win' is required")
+
+        eid = extract_eid(args)
+        # the pane's env may be known only by its file; reading its windows
+        # would load that file on the loop.
+        await ensure_env_loaded(handler, eid)
+        existing = ExperimentHparamsUpdateHandler._hparams_window(handler, eid, win)
 
         has_selection = any(
             args.get(key) is not None for key in ("query", "env_ids", "mode")
@@ -396,7 +412,16 @@ class ExperimentHparamsUpdateHandler(BaseHandler):
                     "pass a query and/or env_ids".format(win),
                 )
 
-        content = ExperimentHparamsHandler._build_content(handler, spec)
+        content = await ExperimentHparamsHandler._build_content_off_loop(handler, spec)
+
+        # the loop kept serving while the selection was read, so the pane may be
+        # gone, retyped, or rebuilt by another update since it was looked up.
+        existing = ExperimentHparamsUpdateHandler._hparams_window(handler, eid, win)
+        if not has_selection and existing.get("hparams") != spec:
+            # a newer selection has been written since this refresh read the
+            # old one; rebuilding from the old one would undo it.
+            handler.write(win)
+            return
 
         opts = {
             "title": existing.get("title", ""),
@@ -415,16 +440,18 @@ class ExperimentHparamsUpdateHandler(BaseHandler):
             }
         )
         p["hparams"] = spec
+        # nothing awaits between registering and the snapshot the save takes,
+        # so the window saved is the window registered.
         register_window(handler, p, eid)
-        handler.storage.save_env(eid, handler.state[eid])
+        await save_env_off_loop(handler, eid)
 
     @check_auth
     @check_readonly_message(READONLY_MESSAGE)
-    def post(self):
+    async def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
-        self.wrap_func(self, args)
+        await self.wrap_func(self, args)
 
 
 class LivePaneWriter:
@@ -451,19 +478,6 @@ class LivePaneWriter:
         """Swallow the window id ``register_window`` writes to the response."""
 
 
-def _schedule_on_ioloop(delay, callback):
-    """Run ``callback`` on the event loop after ``delay`` seconds.
-
-    Without a running loop — an application built outside a server, as tests
-    and embedders do — there is nothing to defer onto, so the drain runs inline
-    rather than being lost.
-    """
-    try:
-        tornado.ioloop.IOLoop.current().call_later(delay, callback)
-    except RuntimeError:
-        callback()
-
-
 def make_live_queue(server_state, delay=DEFAULT_DEBOUNCE_SECONDS):
     """Build the queue that keeps ``server_state``'s hparams panes in step with
     its runs.
@@ -487,9 +501,9 @@ def make_live_queue(server_state, delay=DEFAULT_DEBOUNCE_SECONDS):
     """
     writer = LivePaneWriter(server_state)
 
-    def rebuild(eid, win_id):
+    async def rebuild(eid, win_id):
         try:
-            ExperimentHparamsUpdateHandler.wrap_func(
+            await ExperimentHparamsUpdateHandler.wrap_func(
                 writer, {"win": win_id, "eid": eid}
             )
         except tornado.web.HTTPError as e:
@@ -504,5 +518,4 @@ def make_live_queue(server_state, delay=DEFAULT_DEBOUNCE_SECONDS):
         resolve=lambda changed: resolve_targets(server_state.state, changed),
         rebuild=rebuild,
         delay=delay,
-        schedule=_schedule_on_ioloop,
     )

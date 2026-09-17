@@ -62,8 +62,7 @@ visdom/
 
 Defined in `py/visdom/server/app.py`. All endpoints are prefixed with `base_url`. Handler entrypoints that touch
 storage are `async def`; ones that only read memory or serve a static asset stay
-synchronous. `/experiments/hparams/update` is the one known exception: it still
-saves on the loop (follow-up 4j). See Concurrency Model below.
+synchronous. See Concurrency Model below.
 
 | Endpoint | Handler | Purpose |
 |----------|---------|---------|
@@ -119,9 +118,7 @@ Pane updates are batched via `addPaneBatched()` → `processBatchedPanes()` usin
 Tornado runs on asyncio and every handler entrypoint that touches storage is
 `async def`, so anything that blocks the IOLoop stalls every other connection.
 The four rules below are **required** for new and changed handlers; breaking one
-of them fails quietly rather than loudly. The one remaining violation is
-`/experiments/hparams/update`, which still calls `save_env` on the loop
-(follow-up 4j in `REFACTORING.md`) — legacy to be fixed, not a pattern to copy.
+of them fails quietly rather than loudly.
 
 1. **No disk work on the loop.** Go through `run_on_storage_executor` (or the
    `*_off_loop` helpers) in `py/visdom/utils/server_utils.py`.
