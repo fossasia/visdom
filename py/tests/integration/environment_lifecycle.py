@@ -52,14 +52,30 @@ class TestImplicitCreation(VisdomHTTPTestCase):
 
 class TestForkEnv(VisdomHTTPTestCase):
     def test_fork_missing_prev_eid_is_bad_request(self):
-        resp = self.post_json("/fork_env", {"eid": "new_fork"})
-        self.assertEqual(resp.code, 400)
-        self.assertIn("must be strings", resp.reason)
+        for invalid in (
+            {"eid": "new_fork"},
+            {"prev_eid": None, "eid": "new_fork"},
+            {"prev_eid": 123, "eid": "new_fork"},
+        ):
+            resp = self.post_json("/fork_env", invalid)
+            self.assertEqual(resp.code, 400)
+            self.assertIn("must be strings", resp.reason)
 
     def test_fork_missing_eid_is_bad_request(self):
-        resp = self.post_json("/fork_env", {"prev_eid": "main"})
-        self.assertEqual(resp.code, 400)
-        self.assertIn("must be strings", resp.reason)
+        for invalid in (
+            {"prev_eid": "main"},
+            {"prev_eid": "main", "eid": None},
+            {"prev_eid": "main", "eid": 123},
+        ):
+            resp = self.post_json("/fork_env", invalid)
+            self.assertEqual(resp.code, 400)
+            self.assertIn("must be strings", resp.reason)
+
+    def test_fork_non_object_body_is_bad_request(self):
+        for invalid in ("not_a_dict", [1, 2, 3], None):
+            resp = self.post_json("/fork_env", invalid)
+            self.assertEqual(resp.code, 400)
+            self.assertIn("must be an object", resp.reason)
 
     def test_fork_copies_the_panes_across(self):
         self.create_text_window(eid="main", content="original", win="w1")
