@@ -10,8 +10,8 @@
 
 Comparing environments merges several envs into one synthetic env and pushes it
 down a subscriber socket. The merge is driven entirely by pane ``title``: panes
-sharing a title across envs are combined into a single pane, everything else is
-dropped, and a legend maps each env to the label its traces were renamed with.
+sharing a title across envs are combined, or shown separately for text windows.
+Everything else is dropped, and a legend maps each env to its source label.
 
 The function writes to a socket instead of returning, so every assertion here
 reads ``FakeSocket.sent``. Two rules are easy to break and are pinned
@@ -297,10 +297,93 @@ def test_a_shared_title_with_different_types_is_not_merged(fake_socket, store):
 
 
 def test_unsupported_pane_types_are_dropped(fake_socket, store):
-    """Only plot and image compare; text and friends never gain ``has_compare``."""
-    state = {"a": _env(_text_pane("w1", "notes")), "b": _env(_text_pane("w2", "notes"))}
+    """Continue dropping pane types that cannot be compared."""
+    pane = _text_pane("w1", "notes")
+    pane["type"] = "properties"
+    state = {"a": _env(pane), "b": _env(copy.deepcopy(pane))}
     compare_envs(state, ["a", "b"], fake_socket, store)
     assert _by_title(fake_socket, "notes") is None
+
+
+@pytest.mark.parametrize("show_all", [False, True])
+def test_matching_text_panes_keep_separate_contents(fake_socket, store, show_all):
+    """Preserve each matching text pane as a separately labeled window."""
+    first = _text_pane("config", "config")
+    second = _text_pane("config", "config")
+    first["content"] = "<b>learning rate: 0.1</b>"
+    second["content"] = "<b>learning rate: 0.2</b>"
+    state = {"a": _env(first), "b": _env(second)}
+    before = copy.deepcopy(state)
+
+    compare_envs(state, ["a", "b"], fake_socket, store, show_all=show_all)
+
+    panes = [win for win in _windows(fake_socket) if win != _legend(fake_socket)]
+    assert len(panes) == 2
+    assert {win["id"] for win in panes} == {"a_env_config", "b_env_config"}
+    assert _by_title(fake_socket, "[a] config")["content"] == first["content"]
+    assert _by_title(fake_socket, "[b] config")["content"] == second["content"]
+    assert state == before
+
+
+def test_matching_text_panes_need_not_be_in_first_env(fake_socket, store):
+    """Compare matching text panes even when the first env lacks them."""
+    state = {
+        "a": _env(),
+        "b": _env(_text_pane("w", "config")),
+        "c": _env(_text_pane("w", "config")),
+    }
+    compare_envs(state, ["a", "b", "c"], fake_socket, store)
+    assert set(_titles(fake_socket)) == {"[b] config", "[c] config", "compare_legend"}
+
+
+@pytest.mark.parametrize("other_type", ["text", "plot", "image"])
+def test_text_panes_require_same_title_in_distinct_envs(fake_socket, store, other_type):
+    """Do not compare text panes with different titles or pane types."""
+    other = _text_pane("w", "different" if other_type == "text" else "config")
+    other["type"] = other_type
+    state = {
+        "a": _env(_text_pane("w1", "config"), _text_pane("w2", "config")),
+        "b": _env(other),
+    }
+    compare_envs(state, ["a", "b"], fake_socket, store)
+    assert _titles(fake_socket) == ["compare_legend"]
+
+
+@pytest.mark.parametrize("missing", ["title", "content"])
+def test_incomplete_text_panes_are_not_compared(fake_socket, store, missing):
+    """Skip text panes that lack a title or content."""
+    other = _text_pane("w", "config")
+    del other[missing]
+    state = {"a": _env(_text_pane("w", "config")), "b": _env(other)}
+    compare_envs(state, ["a", "b"], fake_socket, store)
+    assert _titles(fake_socket) == ["compare_legend"]
+
+
+def test_untitled_text_panes_are_not_compared(fake_socket, store):
+    """Skip text panes whose title is empty."""
+    state = {eid: _env(_text_pane("w", "")) for eid in ["a", "b"]}
+    compare_envs(state, ["a", "b"], fake_socket, store)
+    assert _titles(fake_socket) == ["compare_legend"]
+
+
+def test_text_labels_follow_the_comparison_legend(fake_socket, store):
+    """Use legend indices when environment names exceed the label limit."""
+    long_eid = "e" * (MAX_ENV_NAME_LEN + 1)
+    state = {eid: _env(_text_pane("w", "config")) for eid in [long_eid, "a"]}
+    compare_envs(state, [long_eid, "a"], fake_socket, store)
+    assert set(_titles(fake_socket)) == {"[0] config", "[1] config", "compare_legend"}
+
+
+def test_text_pane_ids_are_collision_safe(fake_socket, store):
+    """Keep both panes when source IDs collide with the generated namespace."""
+    state = {
+        "a": _env(_text_pane("b_env_c", "config")),
+        "a_env_b": _env(_text_pane("c", "config")),
+    }
+    compare_envs(state, ["a", "a_env_b"], fake_socket, store)
+    panes = [win for win in _windows(fake_socket) if win["title"] != "compare_legend"]
+    assert len(panes) == 2
+    assert len({win["id"] for win in panes}) == 2
 
 
 def test_a_contributing_pane_without_content_is_skipped(fake_socket, store):

@@ -103,6 +103,8 @@ From the main page it is possible to toggle between different environments using
 
 #### Comparing Environments
 
+Text windows with the same non-empty title in at least two selected environments are also shown. Each remains a separate window with its original content and a `[source]` title prefix, so experiment configurations can be read side by side. The source is the environment name, or its index in the compare legend when an environment name is long.
+
 From the main page it is possible to compare different environments using the environment selector. Selecting multiple environments in the check box will query the server for the plots with the same titles in all environments and plot them in a single plot. An additional compare legend pane is created with a number corresponding to each selected environment. Individual plots are updated with legends corresponding to "x_name" where `x` is a number corresponding with the compare legend pane and `name` is the original name in the legend.
 
 > **Note**: The compare envs view is not robust to high throughput data, as the server is responsible for generating the compared content. Do not compare an environment that is receiving a high quantity of updates on any plot, as every update will request regenerating the comparison. If you need to compare two plots that are receiving high quantities of data, have them share the same window on a singular env.

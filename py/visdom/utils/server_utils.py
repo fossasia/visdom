@@ -770,14 +770,38 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
         ):
             del res["jsons"][destWid]
 
-    if show_all:
+    # Text contents cannot be merged like traces. Keep each source pane for
+    # titles present in at least two environments, using the same labels and
+    # window IDs as show_all so toggling it does not duplicate those panes.
+    text_title_envs = {}
+    if not show_all:
+        for eid, env in envs.items():
+            for win in env.get("jsons", {}).values():
+                if win.get("type") == "text" and win.get("title") and "content" in win:
+                    text_title_envs.setdefault(win["title"], set()).add(eid)
+    shared_text_titles = {
+        title for title, sources in text_title_envs.items() if len(sources) > 1
+    }
+    generated_wids = set()
+
+    if show_all or shared_text_titles:
         for eid in sorted(envs.keys()):
             eid_num = eidNums[eid]
             for wid, win in envs[eid].get("jsons", {}).items():
                 win_title = win.get("title", "")
-                new_wid = "{}_env_{}".format(eid, wid)
-                if new_wid in res["jsons"]:
+                if not show_all and (
+                    win.get("type") != "text"
+                    or win_title not in shared_text_titles
+                    or "content" not in win
+                ):
                     continue
+                new_wid = "{}_env_{}".format(eid, wid)
+                if new_wid in res["jsons"] or new_wid in generated_wids:
+                    suffix = 1
+                    base_wid = new_wid
+                    while new_wid in res["jsons"] or new_wid in generated_wids:
+                        new_wid = "{}_{}".format(base_wid, suffix)
+                        suffix += 1
                 win_copy = copy.deepcopy(win)
                 win_copy["id"] = new_wid
                 label = (
@@ -794,6 +818,7 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
                     win_copy["content"]["layout"]["title"] = {"text": label}
                 win_copy["has_compare"] = True
                 res["jsons"][new_wid] = win_copy
+                generated_wids.add(new_wid)
 
     # create legend mapping environment names to environment numbers so one can
     # look it up for the new legend
