@@ -77,6 +77,17 @@ class TestForkEnv(VisdomHTTPTestCase):
             self.assertEqual(resp.code, 400)
             self.assertIn("must be an object", resp.reason)
 
+    def test_fork_empty_eid_is_bad_request(self):
+        for empty in ("", "   "):
+            resp = self.post_json("/fork_env", {"prev_eid": "main", "eid": empty})
+            self.assertEqual(resp.code, 400)
+            self.assertIn("must not be empty", resp.reason)
+
+        for empty in ("", "   "):
+            resp = self.post_json("/fork_env", {"prev_eid": empty, "eid": "valid"})
+            self.assertEqual(resp.code, 400)
+            self.assertIn("must not be empty", resp.reason)
+
     def test_fork_copies_the_panes_across(self):
         self.create_text_window(eid="main", content="original", win="w1")
         resp = self.post_json("/fork_env", {"prev_eid": "main", "eid": "fork1"})

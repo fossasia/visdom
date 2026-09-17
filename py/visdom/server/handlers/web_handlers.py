@@ -611,6 +611,10 @@ class ForkEnvHandler(BaseHandler):
             )
         prev_eid = escape_eid(prev_eid)
         eid = escape_eid(eid)
+        if not eid:
+            raise tornado.web.HTTPError(400, reason="'eid' must not be empty")
+        if not prev_eid:
+            raise tornado.web.HTTPError(400, reason="'prev_eid' must not be empty")
 
         if prev_eid not in handler.state:
             # the eid stays out of the reason: it is echoed on the status line,
