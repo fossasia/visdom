@@ -782,6 +782,7 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
     shared_text_titles = {
         title for title, sources in text_title_envs.items() if len(sources) > 1
     }
+    generated_wids = set()
 
     if show_all or shared_text_titles:
         for eid in sorted(envs.keys()):
@@ -795,8 +796,12 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
                 ):
                     continue
                 new_wid = "{}_env_{}".format(eid, wid)
-                if new_wid in res["jsons"]:
-                    continue
+                if new_wid in res["jsons"] or new_wid in generated_wids:
+                    suffix = 1
+                    base_wid = new_wid
+                    while new_wid in res["jsons"] or new_wid in generated_wids:
+                        new_wid = "{}_{}".format(base_wid, suffix)
+                        suffix += 1
                 win_copy = copy.deepcopy(win)
                 win_copy["id"] = new_wid
                 label = (
@@ -813,6 +818,7 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
                     win_copy["content"]["layout"]["title"] = {"text": label}
                 win_copy["has_compare"] = True
                 res["jsons"][new_wid] = win_copy
+                generated_wids.add(new_wid)
 
     # create legend mapping environment names to environment numbers so one can
     # look it up for the new legend

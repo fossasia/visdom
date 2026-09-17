@@ -374,6 +374,18 @@ def test_text_labels_follow_the_comparison_legend(fake_socket, store):
     assert set(_titles(fake_socket)) == {"[0] config", "[1] config", "compare_legend"}
 
 
+def test_text_pane_ids_are_collision_safe(fake_socket, store):
+    """Keep both panes when source IDs collide with the generated namespace."""
+    state = {
+        "a": _env(_text_pane("b_env_c", "config")),
+        "a_env_b": _env(_text_pane("c", "config")),
+    }
+    compare_envs(state, ["a", "a_env_b"], fake_socket, store)
+    panes = [win for win in _windows(fake_socket) if win["title"] != "compare_legend"]
+    assert len(panes) == 2
+    assert len({win["id"] for win in panes}) == 2
+
+
 def test_a_contributing_pane_without_content_is_skipped(fake_socket, store):
     pane = _plot_pane("w2", "loss")
     del pane["content"]
