@@ -146,6 +146,10 @@ button>svg {
     color var(--vis-transition);
 }
 
+.bar button[hidden] {
+  display: none;
+}
+
 .bar button:hover {
   background-color: var(--vis-bg-hover);
 }
