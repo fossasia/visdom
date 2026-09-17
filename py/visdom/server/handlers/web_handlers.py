@@ -601,6 +601,8 @@ class EnvStateHandler(BaseHandler):
 class ForkEnvHandler(BaseHandler):
     @staticmethod
     async def wrap_func(handler, args):
+        if not isinstance(args, Mapping):
+            raise tornado.web.HTTPError(400, reason="request body must be an object")
         prev_eid = args.get("prev_eid")
         eid = args.get("eid")
         if not isinstance(prev_eid, str) or not isinstance(eid, str):
