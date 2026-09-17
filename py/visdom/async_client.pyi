@@ -4,104 +4,216 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Text, Tuple, Union
+# Stubs for 'visdom.async_client'.
+#
+# 'AsyncVisdom' builds its plotting surface at runtime: '__getattr__' wraps
+# whichever 'Visdom' method the caller asked for, as long as its name is in
+# '_PROXIED'. A type checker cannot see through that, so every proxied method is
+# written out here as 'async def' with the signature its synchronous twin has in
+# '__init__.pyi'. The two files are kept in step by 'py/tests/unit/client_stubs.py'.
+#
+# '__getattr__' is deliberately *not* declared: declaring it would make the
+# checker accept every attribute name, which is exactly what these stubs exist
+# to prevent.
 
-### Type aliases for commonly-used types.
-# For optional 'options' parameters.
-# The options parameters can be strongly-typed with the proposed TypedDict type once that is incorporated into the standard.
-# See  http://mypy.readthedocs.io/en/latest/more_types.html#typeddict.
-_OptOps = Optional[Mapping[Text, Any]]
-_OptStr = Optional[Text]  # For optional string parameters, like 'window' and 'env'.
+import asyncio
+from concurrent.futures import Future as _ConcurrentFuture
+from concurrent.futures import ThreadPoolExecutor
+from types import TracebackType
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    FrozenSet,
+    List,
+    Mapping,
+    Optional,
+    Set,
+    Text,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+)
 
-# For the list of environments to compare. Spelled out rather than Sequence[Text]
-# because a bare str is itself a Sequence[str]: 'compare_experiments' rejects one
-# at runtime, so a checker must not accept it here.
-_EnvIds = Union[List[Text], Tuple[Text, ...]]
+from tornado.httpclient import AsyncHTTPClient, HTTPRequest, HTTPResponse
 
-# The decoded JSON reply of the experiment endpoints.
-_ExperimentReply = Mapping[Text, Any]
-_TagMap = Mapping[Text, Text]
+from visdom import (
+    Tensor,
+    Visdom,
+    _EnvIds,
+    _Event,
+    _EventHandler,
+    _ExperimentQueryReply,
+    _OptOps,
+    _OptStr,
+    _SendReturn,
+    _TagMap,
+)
 
-# The reply of the experiment endpoints that only answer questions. An offline
-# client has no server to ask, so those hand back None rather than a reply.
-_ExperimentQueryReply = Optional[_ExperimentReply]
+_A = TypeVar("_A", bound="AsyncVisdom")
 
-# No widely-deployed stubs exist at the moment for torch or numpy. When they are available, the correct type of the tensor-like inputs
-# to the plotting commands should be
-# Tensor = Union[torch.Tensor, numpy.ndarray, List]
-# For now, we fall back to 'Any'.
-Tensor = Any
+# 'AsyncVisdom.register_event_handler' takes either kind: a plain handler runs on
+# the client's dispatch thread, a coroutine one is awaited on its loop.
+_AsyncEventHandler = Callable[[_Event], Awaitable[Any]]
 
-# The return type of 'Visdom._send', which is turn is also the return type of most of the the plotting commands.
-# It technically can return a union of several different types, but in normal usage,
-# it will return a single string. We only type it as such to prevent the need for users to unwrap the union.
-# See https://github.com/python/mypy/issues/1693.
-_SendReturn = Text
+CONNECT_TIMEOUT: float
+REQUEST_TIMEOUT: int
+DEFAULT_MAX_CONCURRENCY: int
+HANDSHAKE_TIMEOUT: float
+RECONNECT_DELAY: float
+POLL_INTERVAL: float
+PING_INTERVAL: float
 
-# A decoded server event, as handed to a registered event handler. The handler's
-# return value is discarded, so it is deliberately unconstrained.
-_Event = Mapping[Text, Any]
-_EventHandler = Callable[[_Event], Any]
+# The names 'AsyncVisdom.__getattr__' will proxy. Every one of them appears
+# below as an 'async def'.
+_PROXIED: FrozenSet[Text]
 
-# Event handlers are keyed by the (env, target) pair they were registered under.
-# 'env' is None for a handler registered for every environment.
-_EventKey = Tuple[_OptStr, Text]
+def _extract_cookie(response: HTTPResponse, name: Text) -> _OptStr: ...
+def _as_requests_error(error: BaseException) -> Exception: ...
 
-class Visdom:
-    # Public attributes. Callers read 'env' to see the environment new windows
-    # land in and assign it to change that; the rest are the connection state the
-    # documented patterns poll ('while not vis.check_connection()' and friends).
-    env: Text
-    env_list: Set[Text]
-    win_data: Dict[Text, Any]
-    offline: bool
-    use_socket: bool
-    socket_alive: bool
-    use_preflight_checks: bool
-    event_handlers: Dict[_EventKey, List[_EventHandler]]
-
+class _AsyncTransport:
+    server: Text
+    port: int
+    base_url: Text
+    username: _OptStr
+    password: _OptStr
+    ssl_verify: Union[bool, Text]
+    max_clients: int
+    cookie: _OptStr
     def __init__(
         self,
+        server: Text,
+        port: int,
+        base_url: Text = ...,
+        username: _OptStr = ...,
+        password: _OptStr = ...,
+        ssl_verify: Union[bool, Text] = ...,
+        max_clients: int = ...,
+    ) -> None: ...
+    @property
+    def client(self) -> AsyncHTTPClient: ...
+    def websocket_url(self) -> Text: ...
+    def websocket_request(self) -> HTTPRequest: ...
+    async def post(self, url: Text, data: _OptStr = ...) -> Text: ...
+    def close(self) -> None: ...
+
+class _AsyncBackchannel:
+    name: Text
+    def __init__(
+        self,
+        client: _BridgedVisdom,
+        loop: asyncio.AbstractEventLoop,
+        transport: _AsyncTransport,
+    ) -> None: ...
+    def start(self) -> None: ...
+    def close(self) -> Optional[asyncio.Task[None]]: ...
+
+class _AsyncWebSocket(_AsyncBackchannel): ...
+class _AsyncPolling(_AsyncBackchannel): ...
+
+class _Call:
+    future: Optional[_ConcurrentFuture[Text]]
+    cancelled: bool
+    def __init__(self) -> None: ...
+
+class _BridgedVisdom(Visdom):
+    def __init__(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        *args: Any,
+        transport: Optional[_AsyncTransport] = ...,
+        max_clients: int = ...,
+        **kwargs: Any,
+    ) -> None: ...
+    @property
+    def transport(self) -> _AsyncTransport: ...
+    def run_call(
+        self,
+        call: _Call,
+        bound: Callable[..., Any],
+        args: Tuple[Any, ...],
+        kwargs: Mapping[Text, Any],
+    ) -> Any: ...
+    def cancel_call(self, call: _Call) -> None: ...
+    def close_backchannel(self) -> Optional[asyncio.Task[None]]: ...
+
+class AsyncVisdom:
+    def __init__(self, inner: _BridgedVisdom, executor: ThreadPoolExecutor) -> None: ...
+    @classmethod
+    async def create(
+        cls: Type[_A],
         server: Text = ...,
         endpoint: Text = ...,
         port: int = ...,
         base_url: Text = ...,
         ipv6: bool = ...,
-        http_proxy_host: _OptStr = ...,
-        http_proxy_port: Optional[int] = ...,
+        http_proxy_host: None = ...,
+        http_proxy_port: None = ...,
         env: Text = ...,
         *,
+        max_concurrency: int = ...,
+        transport: Optional[_AsyncTransport] = ...,
+        max_clients: int = ...,
         raise_exceptions: Optional[bool] = ...,
         use_incoming_socket: bool = ...,
         log_to_filename: _OptStr = ...,
         username: _OptStr = ...,
         password: _OptStr = ...,
-        proxies: Optional[Mapping[Text, Text]] = ...,
         offline: bool = ...,
         use_polling: bool = ...,
         session_idle_timeout: Union[int, float] = ...,
         session_idle_check_interval: Union[int, float] = ...,
         ssl_verify: Optional[Union[bool, Text]] = ...,
         use_preflight_checks: bool = ...,
-    ) -> None: ...
-    def setup_socket(self, polling: bool = ...) -> None: ...
-    def setup_polling(self) -> None: ...
+    ) -> _A: ...
+    def __dir__(self) -> List[Text]: ...
+
+    # -- Passthrough state ----------------------------------------------------
+    @property
+    def client(self) -> _BridgedVisdom: ...
+    @property
+    def env(self) -> Text: ...
+    @env.setter
+    def env(self, value: Text) -> None: ...
+    @property
+    def env_list(self) -> Set[Text]: ...
+    @property
+    def win_data(self) -> Dict[Text, Any]: ...
+    @property
+    def offline(self) -> bool: ...
+    @property
+    def socket_alive(self) -> bool: ...
+    @property
+    def use_socket(self) -> bool: ...
+
+    # -- Events ---------------------------------------------------------------
+    # Registration is bookkeeping, so these stay synchronous.
     def register_event_handler(
-        self, handler: _EventHandler, target: Text, env: _OptStr = ...
+        self,
+        handler: Union[_EventHandler, _AsyncEventHandler],
+        target: Text,
+        env: _OptStr = ...,
     ) -> None: ...
     def clear_event_handlers(self, target: Text, env: _OptStr = ...) -> None: ...
-    def _send(
+
+    # -- Lifecycle ------------------------------------------------------------
+    async def shutdown(self) -> None: ...
+    async def __aenter__(self: _A) -> _A: ...
+    async def __aexit__(
         self,
-        msg: Any,
-        endpoint: Text = ...,
-        quiet: bool = ...,
-        from_log: bool = ...,
-        create: bool = ...,
-        default_eid: bool = ...,
-    ) -> _SendReturn: ...
-    def save(self, envs: List[Text]) -> _SendReturn: ...
-    def close(self, win: _OptStr = ..., env: _OptStr = ...) -> _SendReturn: ...
-    def experiment(
+        exc_type: Optional[Type[BaseException]],
+        exc: Optional[BaseException],
+        tb: Optional[TracebackType],
+    ) -> bool: ...
+
+    # -- The proxied 'Visdom' surface -----------------------------------------
+    # Generated from the matching entries in 'visdom/__init__.pyi'; every name
+    # here is in '_PROXIED' and every name in '_PROXIED' is here.
+    async def save(self, envs: List[Text]) -> _SendReturn: ...
+    async def close(self, win: _OptStr = ..., env: _OptStr = ...) -> _SendReturn: ...
+    async def experiment(
         self,
         name: _OptStr = ...,
         params: _OptOps = ...,
@@ -109,23 +221,23 @@ class Visdom:
         description: _OptStr = ...,
         env: _OptStr = ...,
     ) -> Mapping[Text, Any]: ...
-    def log_metrics(
+    async def log_metrics(
         self,
         metrics: Mapping[Text, Any],
         step: Optional[int] = ...,
         env: _OptStr = ...,
     ) -> Mapping[Text, Any]: ...
-    def finish_experiment(
+    async def finish_experiment(
         self, status: Text = ..., env: _OptStr = ...
     ) -> Mapping[Text, Any]: ...
-    def set_tags(
+    async def set_tags(
         self,
         tags: _TagMap,
         env: _OptStr = ...,
         append: bool = ...,
     ) -> _TagMap: ...
-    def get_tags(self, env: _OptStr = ...) -> _TagMap: ...
-    def search_experiments(
+    async def get_tags(self, env: _OptStr = ...) -> _TagMap: ...
+    async def search_experiments(
         self,
         query: _OptStr = ...,
         limit: Optional[int] = ...,
@@ -133,11 +245,11 @@ class Visdom:
         sort_by: _OptStr = ...,
         descending: bool = ...,
     ) -> _ExperimentQueryReply: ...
-    def compare_experiments(self, env_ids: _EnvIds) -> _ExperimentQueryReply: ...
-    def suggest_experiment(
+    async def compare_experiments(self, env_ids: _EnvIds) -> _ExperimentQueryReply: ...
+    async def suggest_experiment(
         self, params: _OptOps = ..., env: _OptStr = ...
     ) -> _ExperimentQueryReply: ...
-    def hparams(
+    async def hparams(
         self,
         query: _OptStr = ...,
         env_ids: Optional[_EnvIds] = ...,
@@ -146,7 +258,7 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
-    def update_hparams(
+    async def update_hparams(
         self,
         win: Text,
         query: _OptStr = ...,
@@ -155,21 +267,23 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
-    def get_window_data(
+    async def get_window_data(
         self, win: _OptStr = ..., env: _OptStr = ...
     ) -> _SendReturn: ...
-    def set_window_data(
+    async def set_window_data(
         self, data: Any, win: _OptStr = ..., env: _OptStr = ...
     ) -> _SendReturn: ...
-    def delete_env(self, env: Text) -> _SendReturn: ...
-    def delete_envs(self, env_list: _EnvIds) -> List[_SendReturn]: ...
-    def fork_env(self, prev_eid: Text, eid: Text) -> _SendReturn: ...
-    def get_env_list(self) -> List[Text]: ...
-    def get_env_state(self, env: Text) -> Optional[Mapping[Text, Any]]: ...
-    def win_exists(self, win: Text, env: _OptStr = ...) -> Optional[bool]: ...
-    def check_connection(self, timeout_seconds: Union[int, float] = ...) -> bool: ...
-    def replay_log(self, log_filename: Text) -> None: ...
-    def text(
+    async def delete_env(self, env: Text) -> _SendReturn: ...
+    async def delete_envs(self, env_list: _EnvIds) -> List[_SendReturn]: ...
+    async def fork_env(self, prev_eid: Text, eid: Text) -> _SendReturn: ...
+    async def get_env_list(self) -> List[Text]: ...
+    async def get_env_state(self, env: Text) -> Optional[Mapping[Text, Any]]: ...
+    async def win_exists(self, win: Text, env: _OptStr = ...) -> Optional[bool]: ...
+    async def check_connection(
+        self, timeout_seconds: Union[int, float] = ...
+    ) -> bool: ...
+    async def replay_log(self, log_filename: Text) -> None: ...
+    async def text(
         self,
         text: Text,
         win: _OptStr = ...,
@@ -177,7 +291,7 @@ class Visdom:
         opts: _OptOps = ...,
         append: bool = ...,
     ) -> _SendReturn: ...
-    def svg(
+    async def svg(
         self,
         svgstr: _OptStr = ...,
         svgfile: _OptStr = ...,
@@ -185,13 +299,13 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
-    def matplot(
+    async def matplot(
         self, plot: Any, opts: _OptOps = ..., env: _OptStr = ..., win: _OptStr = ...
     ) -> _SendReturn: ...
-    def save_plotly_figure(
+    async def save_plotly_figure(
         self, figure: Any, filepath: Text, **kwargs: Any
     ) -> None: ...
-    def plotlyplot(
+    async def plotlyplot(
         self,
         figure: Any,
         win: _OptStr = ...,
@@ -199,13 +313,13 @@ class Visdom:
         save_path: _OptStr = ...,
         save_kwargs: Optional[Mapping[Text, Any]] = ...,
     ) -> _SendReturn: ...
-    def image(
+    async def image(
         self, img: Tensor, win: _OptStr = ..., env: _OptStr = ..., opts: _OptOps = ...
     ) -> _SendReturn: ...
-    def image_select(
+    async def image_select(
         self, win: Text, selected: int, env: _OptStr = ...
     ) -> _SendReturn: ...
-    def image_heatmap(
+    async def image_heatmap(
         self,
         img: Tensor,
         heatmap: Tensor,
@@ -213,10 +327,10 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
-    def update_image_slider(
+    async def update_image_slider(
         self, win: Text, index: Union[int, float], env: _OptStr = ...
     ) -> _SendReturn: ...
-    def images(
+    async def images(
         self,
         tensor: Tensor,
         nrow: int = ...,
@@ -225,7 +339,7 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
-    def audio(
+    async def audio(
         self,
         tensor: Tensor,
         audiofile: _OptStr = ...,
@@ -233,7 +347,7 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
-    def video(
+    async def video(
         self,
         tensor: Tensor = ...,
         dim: Text = ...,
@@ -242,10 +356,10 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
-    def update_window_opts(
+    async def update_window_opts(
         self, win: Text, opts: Mapping[Text, Any], env: _OptStr = ...
     ) -> _SendReturn: ...
-    def learning_curve(
+    async def learning_curve(
         self,
         metrics: Mapping[Text, Any],
         step: Optional[Tensor] = ...,
@@ -254,7 +368,7 @@ class Visdom:
         opts: _OptOps = ...,
         update: _OptStr = ...,
     ) -> _SendReturn: ...
-    def scatter(
+    async def scatter(
         self,
         X: Tensor,
         Y: Optional[Tensor] = ...,
@@ -264,7 +378,7 @@ class Visdom:
         update: _OptStr = ...,
         name: _OptStr = ...,
     ) -> _SendReturn: ...
-    def line(
+    async def line(
         self,
         Y: Tensor,
         X: Optional[Tensor] = ...,
@@ -276,7 +390,7 @@ class Visdom:
         Z: Optional[Tensor] = ...,
         is3d: bool = ...,
     ) -> _SendReturn: ...
-    def heatmap(
+    async def heatmap(
         self,
         X: Tensor,
         win: _OptStr = ...,
@@ -284,7 +398,7 @@ class Visdom:
         update: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
-    def bar(
+    async def bar(
         self,
         X: Tensor,
         Y: Optional[Tensor] = ...,
@@ -292,10 +406,10 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
-    def histogram(
+    async def histogram(
         self, X: Tensor, win: _OptStr = ..., env: _OptStr = ..., opts: _OptOps = ...
     ) -> _SendReturn: ...
-    def histogram2d(
+    async def histogram2d(
         self,
         X: Tensor,
         Y: Tensor,
@@ -303,10 +417,10 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
-    def boxplot(
+    async def boxplot(
         self, X: Tensor, win: _OptStr = ..., env: _OptStr = ..., opts: _OptOps = ...
     ) -> _SendReturn: ...
-    def roc_curve(
+    async def roc_curve(
         self,
         y_true: Optional[Tensor] = ...,
         y_score: Optional[Tensor] = ...,
@@ -317,7 +431,7 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
-    def pr_curve(
+    async def pr_curve(
         self,
         y_true: Optional[Tensor] = ...,
         y_score: Optional[Tensor] = ...,
@@ -328,7 +442,7 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
-    def confusion_matrix(
+    async def confusion_matrix(
         self,
         y_true: Optional[Tensor] = ...,
         y_pred: Optional[Tensor] = ...,
@@ -340,13 +454,13 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
-    def surf(
+    async def surf(
         self, X: Tensor, win: _OptStr = ..., env: _OptStr = ..., opts: _OptOps = ...
     ) -> _SendReturn: ...
-    def contour(
+    async def contour(
         self, X: Tensor, win: _OptStr = ..., env: _OptStr = ..., opts: _OptOps = ...
     ) -> _SendReturn: ...
-    def quiver(
+    async def quiver(
         self,
         X: Tensor,
         Y: Tensor,
@@ -356,7 +470,7 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
-    def stem(
+    async def stem(
         self,
         X: Tensor,
         Y: Optional[Tensor] = ...,
@@ -364,10 +478,10 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
-    def pie(
+    async def pie(
         self, X: Tensor, win: _OptStr = ..., env: _OptStr = ..., opts: _OptOps = ...
     ) -> _SendReturn: ...
-    def mesh(
+    async def mesh(
         self,
         X: Tensor,
         Y: Optional[Tensor] = ...,
@@ -375,7 +489,7 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
-    def sankey(
+    async def sankey(
         self,
         source: Tensor,
         target: Tensor,
@@ -385,7 +499,7 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
-    def graph(
+    async def graph(
         self,
         edges: List,
         edgeLabels: Optional[List] = ...,
@@ -394,7 +508,7 @@ class Visdom:
         env: _OptStr = ...,
         win: _OptStr = ...,
     ) -> _SendReturn: ...
-    def parallel_coordinates(
+    async def parallel_coordinates(
         self,
         X: Tensor,
         Y: Optional[Tensor] = ...,
@@ -402,21 +516,21 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
-    def violin(
+    async def violin(
         self,
         X: Tensor,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
-    def properties(
+    async def properties(
         self,
         data: List,
         win: _OptStr = ...,
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
-    def html_table(
+    async def html_table(
         self,
         data: List[Any],
         headers: Optional[List[Any]] = ...,
@@ -424,7 +538,7 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
-    def embeddings(
+    async def embeddings(
         self,
         features: Tensor,
         labels: Tensor,
@@ -434,7 +548,7 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
-    def sunburst(
+    async def sunburst(
         self,
         labels: Tensor,
         parents: Tensor,
@@ -443,7 +557,7 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
-    def dual_axis_lines(
+    async def dual_axis_lines(
         self,
         X: Optional[Tensor] = ...,
         Y1: Optional[Tensor] = ...,
@@ -452,7 +566,7 @@ class Visdom:
         win: _OptStr = ...,
         env: _OptStr = ...,
     ) -> _SendReturn: ...
-    def table(
+    async def table(
         self,
         data: List[Any],
         headers: Optional[List[Any]] = ...,

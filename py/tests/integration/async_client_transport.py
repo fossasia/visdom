@@ -18,6 +18,7 @@ one loop serving the requests that the worker threads are blocked on.
 
 import asyncio
 import json
+import time
 
 import pytest
 from tornado.testing import gen_test
@@ -27,6 +28,13 @@ from visdom.async_client import AsyncVisdom
 from testutils.http import VisdomHTTPTestCase
 
 pytestmark = pytest.mark.integration
+
+
+async def wait_for(predicate, timeout=5.0):
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        assert time.monotonic() < deadline, "timed out waiting for the backchannel"
+        await asyncio.sleep(0.01)
 
 
 class AsyncClientTestCase(VisdomHTTPTestCase):
@@ -145,6 +153,64 @@ class TestAsyncVisdomAgainstServer(AsyncClientTestCase):
         await client.save(["saved"])
         with open("%s/saved.json" % self.env_path) as handle:
             assert "w1" in json.load(handle)["jsons"]
+
+
+class TestAsyncVisdomBackchannel(AsyncClientTestCase):
+    """The real handshake, over a real socket, against the real routes."""
+
+    async def connect_with_events(self, **kwargs):
+        client = await self.connect(**kwargs)
+        self.addCleanup(client.client.close_backchannel)
+        return client
+
+    async def push(self, message):
+        """What ``forward_to_vis`` does when the browser reports an event."""
+        await wait_for(lambda: self._app.sources)
+        for source in list(self._app.sources.values()):
+            source.write_message(json.dumps(message))
+
+    @gen_test
+    async def test_the_websocket_handshake_completes(self):
+        client = await self.connect_with_events(use_incoming_socket=True)
+
+        assert client.socket_alive is True
+        assert len(self._app.sources) == 1
+        await client.shutdown()
+
+    @gen_test
+    async def test_an_event_reaches_a_handler(self):
+        client = await self.connect_with_events(use_incoming_socket=True)
+        seen = []
+        client.register_event_handler(seen.append, "w1")
+
+        await client.text("hello", win="w1")
+        await self.push({"target": "w1", "eid": "main", "event_type": "Click"})
+        await wait_for(lambda: seen)
+
+        assert seen[0]["event_type"] == "Click"
+        await client.shutdown()
+
+    @gen_test
+    async def test_polling_delivers_the_same_events(self):
+        """The fallback for deployments that cannot hold a websocket open."""
+        client = await self.connect_with_events(use_polling=True)
+        seen = []
+        client.register_event_handler(seen.append, "w1")
+
+        await self.push({"target": "w1", "eid": "main", "event_type": "Click"})
+        await wait_for(lambda: seen)
+
+        assert client.socket_alive is True
+        assert seen[0]["event_type"] == "Click"
+        await client.shutdown()
+
+    @gen_test
+    async def test_shutdown_drops_the_connection_server_side(self):
+        client = await self.connect_with_events(use_incoming_socket=True)
+        await client.shutdown()
+        await wait_for(lambda: not self._app.sources)
+
+        assert self._app.sources == {}
 
 
 class TestAsyncVisdomAgainstReadonlyServer(AsyncClientTestCase):
