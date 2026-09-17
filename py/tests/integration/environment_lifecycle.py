@@ -51,6 +51,16 @@ class TestImplicitCreation(VisdomHTTPTestCase):
 
 
 class TestForkEnv(VisdomHTTPTestCase):
+    def test_fork_missing_prev_eid_is_bad_request(self):
+        resp = self.post_json("/fork_env", {"eid": "new_fork"})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("must be strings", resp.reason)
+
+    def test_fork_missing_eid_is_bad_request(self):
+        resp = self.post_json("/fork_env", {"prev_eid": "main"})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("must be strings", resp.reason)
+
     def test_fork_copies_the_panes_across(self):
         self.create_text_window(eid="main", content="original", win="w1")
         resp = self.post_json("/fork_env", {"prev_eid": "main", "eid": "fork1"})
