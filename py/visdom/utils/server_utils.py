@@ -770,11 +770,30 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
         ):
             del res["jsons"][destWid]
 
-    if show_all:
+    # Text contents cannot be merged like traces. Keep each source pane for
+    # titles present in at least two environments, using the same labels and
+    # window IDs as show_all so toggling it does not duplicate those panes.
+    text_title_envs = {}
+    if not show_all:
+        for eid, env in envs.items():
+            for win in env.get("jsons", {}).values():
+                if win.get("type") == "text" and win.get("title") and "content" in win:
+                    text_title_envs.setdefault(win["title"], set()).add(eid)
+    shared_text_titles = {
+        title for title, sources in text_title_envs.items() if len(sources) > 1
+    }
+
+    if show_all or shared_text_titles:
         for eid in sorted(envs.keys()):
             eid_num = eidNums[eid]
             for wid, win in envs[eid].get("jsons", {}).items():
                 win_title = win.get("title", "")
+                if not show_all and (
+                    win.get("type") != "text"
+                    or win_title not in shared_text_titles
+                    or "content" not in win
+                ):
+                    continue
                 new_wid = "{}_env_{}".format(eid, wid)
                 if new_wid in res["jsons"]:
                     continue
