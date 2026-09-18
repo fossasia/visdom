@@ -649,7 +649,9 @@ class ForkEnvHandler(BaseHandler):
                 tornado.escape.to_basestring(self.request.body)
             )
         except (ValueError, TypeError):
-            raise tornado.web.HTTPError(400, reason="request body must be valid JSON")
+            raise tornado.web.HTTPError(
+                400, reason="request body must be valid JSON"
+            ) from None
         await self.wrap_func(self, args)
 
 
