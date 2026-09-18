@@ -223,3 +223,39 @@ def test_a_named_update_without_data_is_a_client_error():
     with pytest.raises(tornado.web.HTTPError) as excinfo:
         _opts_only(pane, name="a", opts=dict(OPTS))
     assert excinfo.value.status_code == 400
+
+
+def test_a_rejected_named_update_leaves_the_plot_alone():
+    """The 400 has to come before the opts merge, not after it.
+
+    Nothing downstream broadcasts or marks the env dirty once the request is
+    rejected, so anything applied on the way to the error is a change only the
+    server can see.
+    """
+    pane = _plot_pane()
+    before = copy.deepcopy(pane)
+    with pytest.raises(tornado.web.HTTPError):
+        _opts_only(pane, name="a", layout=copy.deepcopy(LAYOUT), opts=dict(OPTS))
+    assert pane == before
+
+
+@pytest.mark.parametrize(
+    "name, build",
+    CONTENT_PRESERVING_CASES,
+    ids=[c[0] for c in CONTENT_PRESERVING_CASES],
+)
+def test_a_named_update_without_data_is_refused_on_any_pane(name, build):
+    """A trace name means nothing on a pane that has no traces."""
+    pane = build()
+    before = copy.deepcopy(pane)
+    with pytest.raises(tornado.web.HTTPError) as excinfo:
+        _opts_only(pane, name="a", layout=copy.deepcopy(LAYOUT), opts=dict(OPTS))
+    assert excinfo.value.status_code == 400
+    assert pane == before
+
+
+def test_a_named_delete_still_carries_no_trace_data():
+    """``update='remove'`` sends name + delete with an empty data list."""
+    pane = _plot_pane()
+    _opts_only(pane, data=[], name="a", delete=True)
+    assert pane["content"]["data"] == []

@@ -187,7 +187,15 @@ class UpdateHandler(BaseHandler):
     def update(
         p, args, max_text_lines, max_old_content, max_image_history, max_plot_history
     ):
-        if not args.get("data") and p["type"] != "plot":
+        name = args.get("name")
+        new_data = args.get("data")
+        delete = args.get("delete")
+        if name is not None and not delete and (not new_data or len(new_data) != 1):
+            raise tornado.web.HTTPError(
+                400, reason="a named trace update takes exactly one data entry"
+            )
+
+        if not new_data and p["type"] != "plot":
             return update_window(p, args)
 
         # Update text in window, separated by a line break
@@ -238,10 +246,7 @@ class UpdateHandler(BaseHandler):
 
         pdata = p["content"]["data"]
 
-        new_data = args.get("data")
         p = update_window(p, args)
-        name = args.get("name")
-        delete = args.get("delete")
         # An unnamed delete carries no name and no data, which this shortcut used
         # to read as "opts-only update" and return early, silently dropping the
         # deletion. Ask about the delete flag first. ``not new_data`` also covers
@@ -253,10 +258,6 @@ class UpdateHandler(BaseHandler):
         idxs = list(range(len(pdata)))
 
         if name is not None:
-            if not delete and (not new_data or len(new_data) != 1):
-                raise tornado.web.HTTPError(
-                    400, reason="a named trace update takes exactly one data entry"
-                )
             idxs = [i for i in idxs if pdata[i]["name"] == name]
 
         # Delete a trace
