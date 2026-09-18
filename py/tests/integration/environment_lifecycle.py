@@ -77,6 +77,17 @@ class TestForkEnv(VisdomHTTPTestCase):
             self.assertEqual(resp.code, 400)
             self.assertIn("must be an object", resp.reason)
 
+    def test_fork_invalid_json_is_bad_request(self):
+        for invalid_body in ("{invalid_json", "", "   "):
+            resp = self.fetch(
+                "/fork_env",
+                method="POST",
+                body=invalid_body,
+                headers={"Content-Type": "application/json"},
+            )
+            self.assertEqual(resp.code, 400)
+            self.assertIn("must be valid JSON", resp.reason)
+
     def test_fork_empty_eid_is_bad_request(self):
         for empty in ("", "   "):
             resp = self.post_json("/fork_env", {"prev_eid": "main", "eid": empty})
