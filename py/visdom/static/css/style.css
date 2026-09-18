@@ -539,6 +539,7 @@ button[title="annotate points"].active > svg {
   display: block;
   float: none;
   width: 100%;
+  height: auto;
   margin: 0;
   padding: 4px 8px;
   cursor: pointer;
