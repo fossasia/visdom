@@ -32,6 +32,7 @@ import os
 import pytest
 
 import visdom
+import visdom.async_client as async_client
 from visdom.async_client import _PROXIED, AsyncVisdom
 
 pytestmark = pytest.mark.unit
@@ -133,6 +134,74 @@ def runtime_methods(cls):
     }
 
 
+def stub_classes(path):
+    """Map name -> node for every class the stub declares."""
+    return {
+        node.name: node
+        for node in parse_stub(path).body
+        if isinstance(node, ast.ClassDef)
+    }
+
+
+def annotated_names(body):
+    return {
+        node.target.id
+        for node in body
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+    }
+
+
+def module_annotations(path):
+    """Map name -> annotation source for the stub's module-level variables."""
+    return {
+        node.target.id: ast.unparse(node.annotation)
+        for node in parse_stub(path).body
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+    }
+
+
+def runtime_properties(cls):
+    return {name for name, member in vars(cls).items() if isinstance(member, property)}
+
+
+def private_runtime_classes():
+    return {
+        name: member
+        for name, member in vars(async_client).items()
+        if inspect.isclass(member)
+        and member.__module__ == async_client.__name__
+        and name.startswith("_")
+    }
+
+
+def declared_in_stub(name, class_node, stubs):
+    """Whether the class or one of its stubbed bases declares ``name``."""
+    if name in stub_functions(class_node) or name in stub_properties(class_node):
+        return True
+    for base in class_node.bases:
+        base_name = ast.unparse(base)
+        if base_name == "Visdom":
+            parent = stub_class(CLIENT_STUB, "Visdom")
+        elif base_name in stubs:
+            parent = stubs[base_name]
+        else:
+            continue
+        if declared_in_stub(name, parent, stubs):
+            return True
+    return False
+
+
+# What the module-level declarations in the async stub have to hold at runtime.
+# 'float' also accepts an int, the way a checker does.
+ANNOTATION_TYPES = {
+    "bool": bool,
+    "int": int,
+    "float": (int, float),
+    "Text": str,
+    "FrozenSet": frozenset,
+}
+
+
 @pytest.fixture(scope="module")
 def client_stub():
     return stub_class(CLIENT_STUB, "Visdom")
@@ -141,6 +210,11 @@ def client_stub():
 @pytest.fixture(scope="module")
 def async_stub():
     return stub_class(ASYNC_STUB, "AsyncVisdom")
+
+
+@pytest.fixture(scope="module")
+def async_stubs():
+    return stub_classes(ASYNC_STUB)
 
 
 class TestClientStub:
@@ -279,3 +353,79 @@ class TestAsyncStub:
         }
         assert annotated["http_proxy_host"] == "None"
         assert annotated["http_proxy_port"] == "None"
+
+
+class TestAsyncPrivateStub:
+    """The helper declarations in ``async_client.pyi``.
+
+    Nothing outside the module names these classes, so the parity tests above
+    never reach them, and a stub is not executed either -- a declaration that
+    never matched the implementation, or one left behind by a rename, simply
+    stands. A checker then blesses a call that raises ``AttributeError``:
+    ``_BridgedVisdom.cancel_call`` was declared here and never existed at all,
+    and ``_Call`` was declared with two public attributes it does not have
+    instead of the three methods it does.
+    """
+
+    def test_every_private_class_is_declared(self, async_stubs):
+        declared = {name for name in async_stubs if name.startswith("_")}
+        assert declared == set(private_runtime_classes())
+
+    @pytest.mark.parametrize("name", sorted(private_runtime_classes()))
+    def test_declared_members_exist(self, async_stubs, name):
+        cls = private_runtime_classes()[name]
+        for member in stub_functions(async_stubs[name]):
+            assert hasattr(cls, member), "{0}.{1}".format(name, member)
+        for member in stub_properties(async_stubs[name]):
+            assert hasattr(cls, member), "{0}.{1}".format(name, member)
+
+    @pytest.mark.parametrize("name", sorted(private_runtime_classes()))
+    def test_declared_signatures_match(self, async_stubs, name):
+        cls = private_runtime_classes()[name]
+        for member, node in stub_functions(async_stubs[name]).items():
+            runtime = getattr(cls, member)
+            if not inspect.isfunction(runtime):
+                continue
+            assert stub_signature(node) == runtime_signature(runtime), "{0}.{1}".format(
+                name, member
+            )
+
+    @pytest.mark.parametrize("name", sorted(private_runtime_classes()))
+    def test_public_members_are_declared(self, async_stubs, name):
+        cls = private_runtime_classes()[name]
+        members = set(runtime_methods(cls)) | runtime_properties(cls)
+        for member in members:
+            if member.startswith("_"):
+                continue
+            assert declared_in_stub(
+                member, async_stubs[name], async_stubs
+            ), "{0}.{1}".format(name, member)
+
+    @pytest.mark.parametrize("name", sorted(private_runtime_classes()))
+    def test_no_attribute_outside_the_slots_is_declared(self, async_stubs, name):
+        # '_Call' and '_Construction' are slotted, so an annotated attribute
+        # the class cannot hold is a declaration a checker would let through.
+        cls = private_runtime_classes()[name]
+        slots = getattr(cls, "__slots__", None)
+        if slots is None:
+            return
+        assert annotated_names(async_stubs[name].body) <= set(slots)
+
+    def test_module_constants_are_declared(self):
+        declared = set(module_annotations(ASYNC_STUB))
+        actual = {
+            attribute
+            for attribute in vars(async_client)
+            if attribute.isupper() and not attribute.startswith("_")
+        }
+        assert actual <= declared
+
+    def test_module_constants_hold_what_they_declare(self):
+        for attribute, annotation in module_annotations(ASYNC_STUB).items():
+            assert hasattr(async_client, attribute), attribute
+            expected = ANNOTATION_TYPES.get(annotation.split("[")[0])
+            if expected is None:
+                continue
+            assert isinstance(
+                getattr(async_client, attribute), expected
+            ), "{0}: {1}".format(attribute, annotation)

@@ -59,7 +59,10 @@ _A = TypeVar("_A", bound="AsyncVisdom")
 _AsyncEventHandler = Callable[[_Event], Awaitable[Any]]
 
 CONNECT_TIMEOUT: float
-REQUEST_TIMEOUT: int
+REQUEST_TIMEOUT: float
+# tornado reads 0 as "no timeout": the backchannel connection is held for the
+# life of the client, not for one request.
+SOCKET_REQUEST_TIMEOUT: int
 DEFAULT_MAX_CONCURRENCY: int
 HANDSHAKE_TIMEOUT: float
 RECONNECT_DELAY: float
@@ -115,9 +118,24 @@ class _AsyncWebSocket(_AsyncBackchannel): ...
 class _AsyncPolling(_AsyncBackchannel): ...
 
 class _Call:
-    future: Optional[_ConcurrentFuture[Text]]
-    cancelled: bool
+    # The POST in flight and the cancelled flag are guarded by a lock and are
+    # reached only through these methods -- one side is a worker thread and the
+    # other is the loop. 'attach' returns True when the call was cancelled
+    # before the POST was recorded, which makes cancelling it the worker's job.
     def __init__(self) -> None: ...
+    def attach(self, future: _ConcurrentFuture[Text]) -> bool: ...
+    def detach(self) -> None: ...
+    def cancel(self) -> None: ...
+
+class _Construction:
+    # Ownership of a half-built client while 'create' can still be cancelled.
+    # 'finish' is the worker's report and returns True when releasing the
+    # client is the worker's job; 'abandon' is the loop's and returns the
+    # instance to release, or None when the worker will do it.
+    def __init__(self) -> None: ...
+    def publish(self, inner: _BridgedVisdom) -> None: ...
+    def finish(self) -> bool: ...
+    def abandon(self) -> Optional[_BridgedVisdom]: ...
 
 class _BridgedVisdom(Visdom):
     def __init__(
@@ -126,6 +144,7 @@ class _BridgedVisdom(Visdom):
         *args: Any,
         transport: Optional[_AsyncTransport] = ...,
         max_clients: int = ...,
+        call: Optional[_Call] = ...,
         **kwargs: Any,
     ) -> None: ...
     @property
@@ -137,7 +156,6 @@ class _BridgedVisdom(Visdom):
         args: Tuple[Any, ...],
         kwargs: Mapping[Text, Any],
     ) -> Any: ...
-    def cancel_call(self, call: _Call) -> None: ...
     def close_backchannel(self) -> Optional[_AsyncBackchannel]: ...
 
 class AsyncVisdom:
