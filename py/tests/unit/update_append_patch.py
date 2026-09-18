@@ -20,9 +20,11 @@ import json
 import jsonpatch
 import pytest
 
+from visdom.utils.server_utils import stringify
 from visdom.server.handlers.web_handlers import (
     UpdateHandler,
     _planned_extensions,
+    compact_len,
     pane_fits_in,
 )
 
@@ -363,3 +365,25 @@ def test_pane_fits_in_stops_once_the_limit_is_passed():
     encoded = len(json.dumps(big, separators=(",", ":")))
     assert encoded > 1_000_000
     assert pane_fits_in(big, 50) is False
+
+
+def test_ordering_is_not_a_one_way_shrink():
+    """recursive_order() can make a value longer, not just shorter.
+
+    It rewrites an integral float as an int, which drops two characters from
+    1.0 but expands anything past 1e16 into its full decimal expansion. The
+    pane side of the size check is measured raw, so measuring the patch side
+    through stringify() would compare two encodings that disagree in both
+    directions -- that is why compact_len() sizes the limit instead.
+    """
+    assert len(stringify(1.0)) < compact_len(1.0)
+    assert len(stringify(1e20)) > compact_len(1e20)
+
+
+def test_the_size_check_measures_both_sides_alike():
+    """A pane is exactly as big as its own compact_len(), from either side."""
+    pane = plot_pane()
+    pane["content"]["data"][0]["x"][0] = 1e20
+    size = compact_len(pane)
+    assert pane_fits_in(pane, size) is True
+    assert pane_fits_in(pane, size - 1) is False

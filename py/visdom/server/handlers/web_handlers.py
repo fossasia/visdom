@@ -57,7 +57,6 @@ from visdom.utils.server_utils import (
     broadcast,
     update_window,
     hash_password_off_loop,
-    stringify,
     push_deleted,
     clear_deleted,
     notify,
@@ -214,10 +213,6 @@ def _planned_extensions(p, args):
         if all(_is_missing_value(value) for value in xs):
             continue
 
-        # x/y/z and marker.color are the whole of what update() writes back to
-        # a trace it is appending to. Styling that rides along in new_trace --
-        # mode, line, marker size and symbol -- is ignored there too, so leaving
-        # it alone here is the same answer the diff would have given.
         axes = ["x", "y"]
         if trace.get("type") == "scatter3d":
             axes.append("z")
@@ -293,6 +288,11 @@ def append_patch(p, args):
 _COMPACT_ENCODER = json.JSONEncoder(separators=(",", ":"))
 
 
+def compact_len(node):
+    """Encoded length of `node`, measured the way pane_fits_in measures a pane."""
+    return sum(len(chunk) for chunk in _COMPACT_ENCODER.iterencode(node))
+
+
 def pane_fits_in(p, limit):
     """Whether the serialized pane is at most `limit` bytes.
 
@@ -300,10 +300,12 @@ def pane_fits_in(p, limit):
     paying for a full serialization we only wanted a length from.
 
     Measures the pane raw rather than through stringify(), which would have to
-    build the ordered structure first. That ordering only ever shortens things
-    (integral floats render as ints, sorting keys doesn't change length), so
-    anything that fits here fits there too. The reverse can miss by a few bytes
-    and we send the patch instead of the pane, which is fine.
+    build the whole ordered structure first -- the cost this exists to avoid.
+    So `limit` has to be measured the same way, with compact_len(). Sizing one
+    side through stringify() and the other raw compares two different encodings:
+    recursive_order() shortens an integral float like 1.0 to 1, but expands one
+    past 1e16 into its full decimal expansion, so neither side is reliably the
+    larger and the two can disagree about which representation to broadcast.
     """
     total = 0
     for chunk in _COMPACT_ENCODER.iterencode(p):
@@ -686,7 +688,7 @@ class UpdateHandler(BaseHandler):
                 return
             raise
         # send the smaller of the patch and the updated pane
-        if pane_fits_in(p, len(stringify(diff_packet))):
+        if pane_fits_in(p, compact_len(diff_packet)):
             broadcast_msg = dict(p)
             broadcast_msg["eid"] = eid
             broadcast(handler, json.dumps(broadcast_msg, cls=NanSafeEncoder), eid)
