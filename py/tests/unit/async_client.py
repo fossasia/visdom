@@ -36,7 +36,7 @@ from tornado.httpclient import AsyncHTTPClient, HTTPClientError, HTTPRequest
 from tornado.simple_httpclient import HTTPTimeoutError
 from tornado.testing import gen_test
 
-from visdom import async_client
+from visdom import async_client, Visdom
 from visdom.async_client import (
     AsyncVisdom,
     DEFAULT_MAX_CONCURRENCY,
@@ -1031,6 +1031,22 @@ async def wait_for(predicate, timeout=2.0):
         await asyncio.sleep(0.01)
 
 
+def _slowly(seconds):
+    """``_handle_incoming_message``, but taking ``seconds`` over it.
+
+    Patched onto the class rather than registered as a handler, because the
+    messages these tests are slow about arrive before there is a client to
+    register anything on.
+    """
+    handle = Visdom._handle_incoming_message
+
+    def slow(self, raw_message):
+        time.sleep(seconds)
+        return handle(self, raw_message)
+
+    return slow
+
+
 def test_the_websocket_url_follows_the_http_url():
     transport = _AsyncTransport("http://localhost", 8097, base_url="/proxy")
     assert transport.websocket_url() == "ws://localhost:8097/proxy/vis_socket"
@@ -1205,6 +1221,80 @@ class TestWebSocketBackchannel(tornado.testing.AsyncTestCase):
             assert client.client._backchannel is None
             assert client.use_socket is False
 
+    @gen_test
+    async def test_a_slow_handler_does_not_spend_the_handshake_budget(self):
+        """The budget bounds the wait for ``vis_alive``, not what happens
+        after it arrives. Handling is the caller's code and runs on its own
+        thread; charged to the handshake it would tear down the very session
+        that had just delivered one."""
+        with patch("visdom.async_client.HANDSHAKE_TIMEOUT", 0.1), patch.object(
+            Visdom, "_handle_incoming_message", _slowly(0.4)
+        ):
+            connector = FakeConnector(FakeConnection(ALIVE))
+            async with socket_client(connector) as (client, _):
+                assert client.socket_alive is True
+                assert client.use_socket is True
+                assert len(connector.requests) == 1, "the session restarted"
+
+    @gen_test
+    async def test_shutdown_waits_for_a_handler_already_running(self):
+        """A pool cannot interrupt a worker, so a handler mid-flight outlives
+        the reader task's cancellation. Returning from ``shutdown`` while it
+        runs hands back a client whose handlers are still firing."""
+        connection = FakeConnection(ALIVE)
+        async with socket_client(FakeConnector(connection)) as (client, _):
+            started = threading.Event()
+            finished = []
+
+            def handler(message):
+                started.set()
+                time.sleep(0.2)
+                finished.append(message)
+
+            client.register_event_handler(handler, "win")
+            connection.push(json.dumps({"target": "win"}))
+            await wait_for(started.is_set)
+            await client.shutdown()
+
+            assert finished, "shutdown returned with a handler still running"
+
+    @gen_test
+    async def test_shutdown_releases_a_coroutine_handler_that_never_finishes(self):
+        """A coroutine handler finishes by waiting on this loop, which
+        ``shutdown`` is about to hand back. One still parked then would never
+        be woken, and the interpreter-exit join every ``ThreadPoolExecutor``
+        registers would hang the process on its thread."""
+        connection = FakeConnection(ALIVE)
+        async with socket_client(FakeConnector(connection)) as (client, _):
+            entered = asyncio.Event()
+
+            async def handler(message):
+                entered.set()
+                await asyncio.Event().wait()
+
+            client.register_event_handler(handler, "win")
+            threads = list(client.client._backchannel._dispatch_executor._threads)
+            connection.push(json.dumps({"target": "win"}))
+            await entered.wait()
+
+            with patch("visdom.async_client.DISPATCH_DRAIN_TIMEOUT", 0.1):
+                await client.shutdown()
+
+            for thread in threads:
+                thread.join(5)
+                assert not thread.is_alive(), "the handler thread is still parked"
+
+    @gen_test
+    async def test_a_message_arriving_after_the_drain_is_dropped(self):
+        """``submit`` raises on a pool that has been shut down, so the check
+        and the submit have to happen under the drain's own lock."""
+        connection = FakeConnection(ALIVE)
+        async with socket_client(FakeConnector(connection)) as (client, _):
+            backchannel = client.client._backchannel
+            await client.shutdown()
+
+            assert backchannel._submit(json.dumps({"target": "win"})) is None
+
 
 class TestPollingBackchannel(tornado.testing.AsyncTestCase):
     @gen_test
@@ -1323,6 +1413,36 @@ class TestPollingBackchannel(tornado.testing.AsyncTestCase):
                 assert client.use_socket is True
                 inits = [data for _, data in transport.calls if data and "init" in data]
                 assert len(inits) == 1
+            finally:
+                await client.shutdown()
+
+    @gen_test
+    async def test_a_slow_handler_does_not_bury_the_handshake_behind_it(self):
+        """Polling hands over a whole batch between two checks of the budget.
+        A handler slower than the budget on an earlier message used to spend
+        it before the ``vis_alive`` behind it was ever looked at."""
+        outbox = [json.dumps({"target": "win"}), ALIVE]
+
+        def respond(url, data):
+            if not url.endswith("/vis_socket_wrap"):
+                return ""
+            payload = json.loads(data)
+            if payload["message_type"] == "init":
+                return json.dumps({"success": True, "sid": "sid-1"})
+            messages, outbox[:] = list(outbox), []
+            return json.dumps({"success": True, "messages": messages})
+
+        with patch("visdom.async_client.HANDSHAKE_TIMEOUT", 0.1), patch.object(
+            Visdom, "_handle_incoming_message", _slowly(0.2)
+        ):
+            client, transport = await make_client(
+                transport=RecordingTransport(response=respond), use_polling=True
+            )
+            try:
+                assert client.socket_alive is True
+                assert client.use_socket is True
+                inits = [data for _, data in transport.calls if data and "init" in data]
+                assert len(inits) == 1, "the session restarted"
             finally:
                 await client.shutdown()
 

@@ -18,6 +18,7 @@ one loop serving the requests that the worker threads are blocked on.
 
 import asyncio
 import json
+import logging
 import time
 
 import pytest
@@ -52,9 +53,23 @@ class AsyncClientTestCase(VisdomHTTPTestCase):
         self.clients = []
 
     def tearDown(self):
-        for client in self.clients:
-            self.io_loop.run_sync(client.shutdown)
-        super().tearDown()
+        """Shut every client down, then hand back to the server's teardown.
+
+        Each client is released on its own, and the base ``tearDown`` runs
+        whatever happened: one client failing to shut down must not leave the
+        rest of them, the IOLoop and the temporary ``env_path`` behind for the
+        remainder of the run. A failure here is logged rather than raised, so
+        the test's own failure stays the one reported.
+        """
+        try:
+            for client in self.clients:
+                try:
+                    self.io_loop.run_sync(client.shutdown)
+                except Exception:
+                    logging.exception("Failed to shut an async client down")
+        finally:
+            self.clients = []
+            super().tearDown()
 
     async def connect(self, **kwargs):
         kwargs.setdefault("raise_exceptions", True)

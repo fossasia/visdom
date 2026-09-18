@@ -20,6 +20,7 @@ client cannot play that part; it plays the healthy one instead.
 
 import asyncio
 import base64
+import contextlib
 import json
 import os
 import time
@@ -96,6 +97,10 @@ class TestWebsocketHeartbeat(VisdomHTTPTestCase):
             assert b"ping timed out" in payload
         finally:
             writer.close()
+            # Awaited, so the connection is gone before the assertion below
+            # rather than being closed somewhere in the loop's next few turns.
+            with contextlib.suppress(ConnectionError):
+                await writer.wait_closed()
 
         await wait_for(lambda: not self._app.sources)
 
@@ -114,3 +119,4 @@ class TestWebsocketHeartbeat(VisdomHTTPTestCase):
             assert connection.close_code is None
         finally:
             connection.close()
+            await wait_for(lambda: not self._app.sources)
