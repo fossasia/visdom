@@ -56,6 +56,7 @@ def reference_update_packet(p, args):
 
 
 def plot_pane(points=3, traces=1, trace_type="scatter", marker_color=False):
+    """A stored line plot, shaped the way the server keeps one."""
     data = []
     for index in range(traces):
         trace = {
@@ -83,6 +84,7 @@ def plot_pane(points=3, traces=1, trace_type="scatter", marker_color=False):
 
 
 def sample(name="1", trace_type="scatter", count=1, marker_color=False, x=None):
+    """One update's worth of new points for a trace."""
     trace = {
         "x": [99.0] * count if x is None else x,
         "y": [0.5] * count,
@@ -98,7 +100,21 @@ def sample(name="1", trace_type="scatter", count=1, marker_color=False, x=None):
     return trace
 
 
+def restyled_sample(name="1"):
+    """A sample whose trace carries styling the pane doesn't have yet.
+
+    The client always sends the full trace on an append, so this is what a
+    plot looks like after someone changes markersize or mode mid-run.
+    """
+    trace = sample(name)
+    trace["mode"] = "markers"
+    trace["marker"] = {"size": 42, "symbol": "cross"}
+    trace["line"] = {"color": "#123456"}
+    return trace
+
+
 def append_args(data, **extra):
+    """The /update body for an append, with room to override a field."""
     args = {
         "win": "w",
         "append": True,
@@ -150,6 +166,10 @@ FAST_CASES = {
     "fewer entries than the pane has traces": (
         plot_pane(traces=3),
         append_args([sample("1")]),
+    ),
+    "styling sent alongside the samples": (
+        plot_pane(),
+        append_args([restyled_sample()]),
     ),
 }
 
@@ -218,18 +238,21 @@ def normalized(pane):
 
 @pytest.mark.parametrize("label", sorted(FAST_CASES))
 def test_fast_path_is_taken_for_appends(label):
+    """These are plain appends, so they never reach the differ."""
     pane, args = FAST_CASES[label]
     assert _planned_extensions(copy.deepcopy(pane), copy.deepcopy(args)) is not None
 
 
 @pytest.mark.parametrize("label", sorted(FALLBACK_CASES))
 def test_other_updates_fall_back_to_the_differ(label):
+    """Anything the fast path can't express has to be handed back."""
     pane, args = FALLBACK_CASES[label]
     assert _planned_extensions(copy.deepcopy(pane), copy.deepcopy(args)) is None
 
 
 @pytest.mark.parametrize("label", sorted(ALL_CASES))
 def test_pane_matches_the_implementation_it_replaced(label):
+    """The stored pane is what the diff-based version would have stored."""
     pane, args = ALL_CASES[label]
     fast, _ = UpdateHandler.update_packet(
         copy.deepcopy(pane), copy.deepcopy(args), *MAXES
@@ -278,6 +301,7 @@ def test_appending_does_not_diff_the_samples(monkeypatch):
 
 
 def test_patch_size_does_not_grow_with_the_plot():
+    """One appended point costs one op, whatever the plot already holds."""
     counts = []
     for points in (10, 10000):
         _, ops = UpdateHandler.update_packet(
@@ -287,7 +311,36 @@ def test_patch_size_does_not_grow_with_the_plot():
     assert counts[0] == counts[1]
 
 
+def test_restyling_on_an_append_is_ignored_the_same_way():
+    """An append carrying new styling must not half-apply it.
+
+    update() writes back x/y/z and marker.color and nothing else, so a changed
+    markersize or mode never reaches an existing trace. The fast path has to
+    drop it for the same reason -- applying only some of it would leave the
+    stored pane and the subscribers disagreeing about the rest.
+    """
+    pane = plot_pane()
+    args = append_args([restyled_sample()])
+
+    fast, ops = UpdateHandler.update_packet(
+        copy.deepcopy(pane), copy.deepcopy(args), *MAXES
+    )
+    slow, _ = reference_update_packet(copy.deepcopy(pane), copy.deepcopy(args))
+    assert normalized(fast) == normalized(slow)
+
+    trace = fast["content"]["data"][0]
+    assert trace["marker"] == {"size": 10, "symbol": "dot"}
+    assert trace["mode"] == "lines"
+    assert "line" not in trace
+    assert trace["x"] == [0.0, 1.0, 2.0, 99.0]
+
+    # and the subscribers land on that same pane, not a partly restyled one
+    rebuilt = jsonpatch.JsonPatch(ops).apply(copy.deepcopy(pane))
+    assert normalized(rebuilt) == normalized(fast)
+
+
 def test_appended_samples_land_at_the_end():
+    """New points go after the existing ones, in order."""
     pane = plot_pane(points=3)
     updated, _ = UpdateHandler.update_packet(
         pane, append_args([sample(count=2)]), *MAXES
@@ -298,6 +351,7 @@ def test_appended_samples_land_at_the_end():
 
 
 def test_pane_fits_in_answers_the_size_question():
+    """Same verdict stringify() plus len() used to give."""
     small = {"a": 1}
     assert pane_fits_in(small, 10_000) is True
     assert pane_fits_in({"a": "x" * 100}, 10) is False

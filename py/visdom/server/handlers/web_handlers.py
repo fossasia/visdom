@@ -214,6 +214,10 @@ def _planned_extensions(p, args):
         if all(_is_missing_value(value) for value in xs):
             continue
 
+        # x/y/z and marker.color are the whole of what update() writes back to
+        # a trace it is appending to. Styling that rides along in new_trace --
+        # mode, line, marker size and symbol -- is ignored there too, so leaving
+        # it alone here is the same answer the diff would have given.
         axes = ["x", "y"]
         if trace.get("type") == "scatter3d":
             axes.append("z")
