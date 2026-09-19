@@ -212,7 +212,16 @@ function EnvModal(props) {
               disabled={!canWrite || selectableEnvs.length === 0}
               checked={isAllSelected}
               onChange={(ev) => {
-                setSelectedEnvs(ev.target.checked ? selectableEnvs : []);
+                if (ev.target.checked) {
+                  setSelectedEnvs((prev) =>
+                    Array.from(new Set([...prev, ...selectableEnvs]))
+                  );
+                } else {
+                  const selectableSet = new Set(selectableEnvs);
+                  setSelectedEnvs((prev) =>
+                    prev.filter((env) => !selectableSet.has(env))
+                  );
+                }
               }}
             />
             Select All
