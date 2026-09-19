@@ -16,7 +16,7 @@ import re
 
 from visdom.data_model.base import DataStore
 from visdom.server.defaults import LAYOUT_FILE, UNDO_DIRNAME
-from visdom.utils.server_utils import escape_eid, LazyEnvData
+from visdom.utils.server_utils import env_is_well_formed, escape_eid, LazyEnvData
 from visdom.utils.shared_utils import ensure_dir_exists, NanSafeEncoder
 
 HASHED_ENV_RE = re.compile(r"^hash_[a-f0-9]{64}\.json$", re.IGNORECASE)
@@ -195,7 +195,11 @@ class JSONStore(DataStore):
                 data = json.load(fn)
         except (OSError, ValueError):
             return {}
-        if not (isinstance(data, dict) and "jsons" in data and "reload" in data):
+        if not env_is_well_formed(data):
+            logging.warning(
+                "Environment file %s does not hold a readable environment; ignoring it",
+                path,
+            )
             return {}
         env = {"jsons": data.get("jsons", {}), "reload": data.get("reload", {})}
         if "experiment" in data:
