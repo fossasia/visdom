@@ -59,6 +59,7 @@ from visdom.utils.server_utils import (
     update_window,
     hash_password_off_loop,
     stringify,
+    env_is_well_formed,
     push_deleted,
     notify,
     LazyEnvData,
@@ -906,7 +907,7 @@ class UploadEnvHandler(BaseHandler):
             self.write({"success": False, "error": "Invalid JSON file"})
             return
 
-        if not (isinstance(data, dict) and "jsons" in data and "reload" in data):
+        if not env_is_well_formed(data):
             self.set_status(400)
             self.write({"success": False, "error": "This is not a valid Visdom JSON"})
             return
