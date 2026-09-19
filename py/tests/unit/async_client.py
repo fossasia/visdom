@@ -21,14 +21,18 @@ pattern used by the handler tests.
 
 import asyncio
 import contextlib
+import errno
+import json
 import ssl
 import threading
 import time
+from contextlib import asynccontextmanager
+from unittest.mock import patch
 
 import pytest
 import requests
 import tornado.testing
-from tornado.httpclient import AsyncHTTPClient, HTTPClientError
+from tornado.httpclient import AsyncHTTPClient, HTTPClientError, HTTPRequest
 from tornado.simple_httpclient import HTTPTimeoutError
 from tornado.testing import gen_test
 
@@ -36,7 +40,9 @@ from visdom import async_client
 from visdom.async_client import (
     AsyncVisdom,
     DEFAULT_MAX_CONCURRENCY,
+    _AsyncPolling,
     _AsyncTransport,
+    _AsyncWebSocket,
     _as_requests_error,
     _BridgedVisdom,
     _Call,
@@ -55,12 +61,21 @@ class RecordingTransport(object):
         self.calls = []
         self.response = response
         self.closed = False
+        self.server = "http://localhost"
+        self.port = 8097
+        self.base_url = ""
 
     async def post(self, url, data=None):
         self.calls.append((url, data))
         if callable(self.response):
             return self.response(url, data)
         return self.response
+
+    async def _ensure_login(self):
+        """No credentials to exchange; the backchannel calls it regardless."""
+
+    def websocket_request(self):
+        return HTTPRequest("ws://localhost:8097/vis_socket")
 
     def close(self):
         self.closed = True
@@ -313,16 +328,12 @@ class TestAsyncVisdomConstruction(tornado.testing.AsyncTestCase):
         assert opted_in.client.use_preflight_checks is True
 
     @gen_test
-    async def test_create_rejects_the_incoming_socket(self):
-        with pytest.raises(NotImplementedError, match="events"):
-            await AsyncVisdom.create(
-                transport=RecordingTransport(), use_incoming_socket=True
-            )
-
-    @gen_test
-    async def test_create_rejects_polling(self):
-        with pytest.raises(NotImplementedError, match="events"):
-            await AsyncVisdom.create(transport=RecordingTransport(), use_polling=True)
+    async def test_create_defaults_the_backchannel_off(self):
+        """Unlike ``Visdom``: an async caller who never registers a handler
+        should not pay for a held-open connection and an events thread."""
+        client, _ = await make_client()
+        assert client.use_socket is False
+        assert client.client._backchannel is None
 
     @gen_test
     async def test_create_rejects_proxies(self):
@@ -442,12 +453,6 @@ class TestAsyncVisdomConstruction(tornado.testing.AsyncTestCase):
         -- and a daemon thread per client would be a leak."""
         client, _ = await make_client()
         assert not hasattr(client.client, "session_reaper_thread")
-
-    @gen_test
-    async def test_setup_socket_on_the_inner_client_is_refused(self):
-        client, _ = await make_client()
-        with pytest.raises(NotImplementedError):
-            client.client.setup_socket()
 
 
 class TestTransportHTTPClient(tornado.testing.AsyncTestCase):
@@ -570,14 +575,6 @@ class TestAsyncVisdomProxying(tornado.testing.AsyncTestCase):
         client, _ = await make_client()
         with pytest.raises(AttributeError):
             client._send
-
-    @gen_test
-    async def test_socket_entry_points_say_what_is_missing(self):
-        client, _ = await make_client()
-        with pytest.raises(NotImplementedError, match="event"):
-            client.register_event_handler(lambda m: None, "t")
-        with pytest.raises(NotImplementedError, match="event"):
-            client.clear_event_handlers("t")
 
     @gen_test
     async def test_dir_advertises_the_proxied_methods(self):
@@ -968,3 +965,302 @@ class TestBridgedVisdom(tornado.testing.AsyncTestCase):
             )
             await client.text("hello", win="w1")
             assert transport.calls == []
+
+
+# -------------------------------------------------------------- backchannel --
+
+
+ALIVE = json.dumps({"command": "alive", "data": "vis_alive"})
+
+
+class FakeConnection(object):
+    """Stands in for a ``WebSocketClientConnection``: ``read_message`` drains a
+    queue and returns ``None`` once closed, as the real one does."""
+
+    def __init__(self, *messages):
+        self.queue = asyncio.Queue()
+        self.closed = False
+        for message in messages:
+            self.queue.put_nowait(message)
+
+    def push(self, message):
+        self.queue.put_nowait(message)
+
+    async def read_message(self):
+        return await self.queue.get()
+
+    def close(self):
+        self.closed = True
+        self.queue.put_nowait(None)
+
+
+class FakeConnector(object):
+    """Patched in for ``websocket_connect``. Once out of prepared connections
+    it refuses, which is how a test says the server went away."""
+
+    def __init__(self, *connections):
+        self.connections = list(connections)
+        self.requests = []
+
+    async def __call__(self, request, **kwargs):
+        self.requests.append(request)
+        if not self.connections:
+            raise ConnectionRefusedError(errno.ECONNREFUSED, "refused")
+        return self.connections.pop(0)
+
+
+class FailingConnector(FakeConnector):
+    """A ``websocket_connect`` that fails every attempt with ``error``."""
+
+    def __init__(self, error):
+        super().__init__()
+        self.error = error
+
+    async def __call__(self, request, **kwargs):
+        self.requests.append(request)
+        raise self.error
+
+
+@asynccontextmanager
+async def socket_client(connector, **kwargs):
+    """A client whose websocket is ``connector`` rather than a real socket."""
+    with patch("visdom.async_client.websocket_connect", connector):
+        client, transport = await make_client(use_incoming_socket=True, **kwargs)
+        try:
+            yield client, transport
+        finally:
+            await client.shutdown()
+
+
+async def wait_for(predicate, timeout=2.0):
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        assert time.monotonic() < deadline, "timed out waiting for the backchannel"
+        await asyncio.sleep(0.01)
+
+
+def test_the_websocket_url_follows_the_http_url():
+    transport = _AsyncTransport("http://localhost", 8097, base_url="/proxy")
+    assert transport.websocket_url() == "ws://localhost:8097/proxy/vis_socket"
+
+
+def test_an_https_server_gets_a_wss_socket():
+    transport = _AsyncTransport("https://example.com", 443)
+    assert transport.websocket_url() == "wss://example.com:443/vis_socket"
+
+
+def test_the_handshake_request_carries_the_login_cookie():
+    """The socket route is behind the same login as the POST routes."""
+    transport = _AsyncTransport("http://localhost", 8097, username="u", password="p")
+    transport.cookie = "user_password=abc"
+    assert transport.websocket_request().headers["Cookie"] == "user_password=abc"
+
+
+def test_the_handshake_request_leaves_the_read_unbounded():
+    """A request timeout would tear down a healthy long-lived socket."""
+    request = _AsyncTransport("http://localhost", 8097).websocket_request()
+    assert request.request_timeout == 0
+
+
+class TestWebSocketBackchannel(tornado.testing.AsyncTestCase):
+    @gen_test
+    async def test_the_handshake_marks_the_socket_alive(self):
+        """``Visdom.__init__`` waits for this flag before returning, so the
+        loop has to serve the socket while the constructor thread waits."""
+        async with socket_client(FakeConnector(FakeConnection(ALIVE))) as (client, _):
+            assert client.socket_alive is True
+            assert isinstance(client.client._backchannel, _AsyncWebSocket)
+
+    @gen_test
+    async def test_events_reach_a_registered_handler_in_order(self):
+        connection = FakeConnection(ALIVE)
+        async with socket_client(FakeConnector(connection)) as (client, _):
+            seen = []
+            client.register_event_handler(seen.append, "win")
+            for index in range(3):
+                connection.push(json.dumps({"target": "win", "index": index}))
+            await wait_for(lambda: len(seen) == 3)
+
+            assert [message["index"] for message in seen] == [0, 1, 2]
+
+    @gen_test
+    async def test_a_coroutine_handler_runs_on_the_loop(self):
+        """Handlers arrive on the events thread; an ``async def`` one is
+        bridged back so it can await other calls on this same client."""
+        connection = FakeConnection(ALIVE)
+        async with socket_client(FakeConnector(connection)) as (client, _):
+            seen = []
+
+            async def handler(message):
+                seen.append((message["target"], asyncio.get_running_loop()))
+
+            client.register_event_handler(handler, "win")
+            connection.push(json.dumps({"target": "win"}))
+            await wait_for(lambda: seen)
+
+            assert seen == [("win", asyncio.get_running_loop())]
+
+    @gen_test
+    async def test_clearing_handlers_stops_delivery(self):
+        connection = FakeConnection(ALIVE)
+        async with socket_client(FakeConnector(connection)) as (client, _):
+            seen = []
+            client.register_event_handler(seen.append, "win")
+            client.clear_event_handlers("win")
+            connection.push(json.dumps({"target": "win"}))
+            await asyncio.sleep(0.05)
+
+            assert seen == []
+
+    @gen_test
+    async def test_a_refused_socket_runs_socketless(self):
+        """A socket that never worked stops retrying, so the constructor stops
+        waiting for a handshake that is not coming."""
+        async with socket_client(FakeConnector()) as (client, _):
+            assert client.use_socket is False
+            assert client.socket_alive is False
+
+    @gen_test
+    async def test_a_socket_that_worked_once_reconnects(self):
+        """The other side of that rule: a dropped connection is retried."""
+        first, second = FakeConnection(ALIVE), FakeConnection(ALIVE)
+        connector = FakeConnector(first, second)
+        with patch("visdom.async_client.RECONNECT_DELAY", 0):
+            async with socket_client(connector) as (client, _):
+                first.close()
+                await wait_for(lambda: len(connector.requests) == 2)
+                await wait_for(lambda: client.socket_alive)
+
+                assert client.use_socket is True
+
+    @gen_test
+    async def test_a_socket_that_fails_its_handshake_stops_retrying(self):
+        """Not only a refusal: any first session that ends before ``alive`` --
+        here an unreachable host -- gives up instead of retrying forever."""
+        connector = FailingConnector(OSError(errno.EHOSTUNREACH, "unreachable"))
+        with patch("visdom.async_client.RECONNECT_DELAY", 0):
+            async with socket_client(connector) as (client, _):
+                await asyncio.sleep(0.05)
+
+                assert client.use_socket is False
+                assert len(connector.requests) == 1
+
+    @gen_test
+    async def test_shutdown_waits_for_a_handler_already_running(self):
+        """A started handler cannot be interrupted, so ``shutdown`` must not
+        return while it can still touch the client."""
+        connection = FakeConnection(ALIVE)
+        started, release, finished = threading.Event(), threading.Event(), []
+
+        def handler(message):
+            started.set()
+            release.wait(5)
+            finished.append(message["target"])
+
+        async with socket_client(FakeConnector(connection)) as (client, transport):
+            client.register_event_handler(handler, "win")
+            connection.push(json.dumps({"target": "win"}))
+            await wait_for(started.is_set)
+
+            shutdown = asyncio.ensure_future(client.shutdown())
+            await asyncio.sleep(0.05)
+            assert not shutdown.done()
+            assert transport.closed is False
+
+            release.set()
+            await asyncio.wait_for(shutdown, 5)
+            assert finished == ["win"]
+            assert transport.closed is True
+
+    @gen_test
+    async def test_a_coroutine_handler_can_shut_its_own_client_down(self):
+        """The release waits on running handlers, and this one is waiting on
+        the release -- so it is cancelled rather than left to deadlock."""
+        connection = FakeConnection(ALIVE)
+        outcome = []
+
+        async with socket_client(FakeConnector(connection)) as (client, transport):
+
+            async def handler(message):
+                try:
+                    await client.shutdown()
+                except asyncio.CancelledError:
+                    outcome.append("cancelled")
+                    raise
+                outcome.append("returned")
+
+            client.register_event_handler(handler, "win")
+            connection.push(json.dumps({"target": "win"}))
+            await wait_for(lambda: client._finalizer is not None)
+            await asyncio.wait_for(asyncio.shield(client._finalizer), 5)
+
+            assert outcome == ["cancelled"]
+            assert transport.closed is True
+            assert client._handler_tasks == set()
+
+    @gen_test
+    async def test_shutdown_closes_the_socket(self):
+        connection = FakeConnection(ALIVE)
+        async with socket_client(FakeConnector(connection)) as (client, _):
+            await client.shutdown()
+
+            assert connection.closed is True
+            assert client.client._backchannel is None
+            assert client.use_socket is False
+
+
+class TestPollingBackchannel(tornado.testing.AsyncTestCase):
+    @gen_test
+    async def test_polling_hands_the_queued_messages_to_the_handlers(self):
+        """The synchronous polling protocol -- one ``init`` for a sid, then
+        ``query`` in a loop -- with awaits instead of a parked thread."""
+        outbox = [ALIVE]
+
+        def respond(url, data):
+            if not url.endswith("/vis_socket_wrap"):
+                return ""
+            payload = json.loads(data)
+            if payload["message_type"] == "init":
+                return json.dumps({"success": True, "sid": "sid-1"})
+            assert payload["sid"] == "sid-1"
+            messages, outbox[:] = list(outbox), []
+            return json.dumps({"success": True, "messages": messages})
+
+        client, transport = await make_client(
+            transport=RecordingTransport(response=respond), use_polling=True
+        )
+        try:
+            seen = []
+            client.register_event_handler(seen.append, "win")
+            outbox.append(json.dumps({"target": "win", "index": 0}))
+            await wait_for(lambda: seen)
+
+            assert client.socket_alive is True
+            assert isinstance(client.client._backchannel, _AsyncPolling)
+            assert client.client.vis_sid == "sid-1"
+            assert seen == [{"target": "win", "index": 0}]
+            assert "/vis_socket_wrap" in transport.endpoints
+        finally:
+            await client.shutdown()
+
+    @gen_test
+    async def test_a_rejected_init_stops_polling(self):
+        """A polling ``init`` the server turns down is not retried every
+        ``RECONNECT_DELAY`` for the life of the client."""
+
+        def respond(url, data):
+            if not url.endswith("/vis_socket_wrap"):
+                return ""
+            return json.dumps({"success": False, "detail": "no sessions"})
+
+        with patch("visdom.async_client.RECONNECT_DELAY", 0):
+            client, transport = await make_client(
+                transport=RecordingTransport(response=respond), use_polling=True
+            )
+            try:
+                await asyncio.sleep(0.05)
+
+                assert client.use_socket is False
+                assert transport.endpoints.count("/vis_socket_wrap") == 1
+            finally:
+                await client.shutdown()
