@@ -498,6 +498,23 @@ def escape_eid(eid):
     )
 
 
+def env_is_well_formed(env):
+    """Whether ``env`` is shaped like ``{"jsons": {win_id: pane}, "reload": {}}``.
+
+    ``load_env`` reads ``jsons.values()`` and then ``pane.get()``,
+    ``compare_envs`` reads ``jsons.keys()``, so both keys being present is not
+    enough: the values have to be mappings too.
+
+    Takes any ``Mapping``, so a ``LazyEnvData`` can be checked without copying it.
+    """
+    if not isinstance(env, Mapping):
+        return False
+    jsons = env.get("jsons")
+    if not isinstance(jsons, Mapping) or not isinstance(env.get("reload"), Mapping):
+        return False
+    return all(isinstance(pane, Mapping) for pane in jsons.values())
+
+
 def extract_eid(args):
     """Extract eid from args. If eid does not exist in args,
     it returns 'main'."""
@@ -665,6 +682,10 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
             if env:
                 state[eid] = env
                 envs[eid] = env
+
+    for name, env in envs.items():
+        if not env_is_well_formed(env):
+            raise ValueError(f"environment {name!r} is not a readable environment")
 
     valid_eids = [eid for eid in eids if eid in envs]
     if not valid_eids:
@@ -894,6 +915,9 @@ def load_env(state, eid, socket, store, undo_count=None, warmed=False):
         if loaded:
             env = loaded
             state[eid] = env
+
+    if env != {} and not env_is_well_formed(env):
+        raise ValueError(f"environment {eid!r} is not a readable environment")
 
     if "reload" in env:
         socket.write_message(
