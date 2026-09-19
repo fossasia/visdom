@@ -259,3 +259,55 @@ def test_a_named_delete_still_carries_no_trace_data():
     pane = _plot_pane()
     _opts_only(pane, data=[], name="a", delete=True)
     assert pane["content"]["data"] == []
+
+
+def test_a_named_update_whose_data_is_not_a_list_is_a_client_error():
+    pane = _plot_pane()
+    before = copy.deepcopy(pane)
+    with pytest.raises(tornado.web.HTTPError) as excinfo:
+        _opts_only(pane, name="a", data=1, opts=dict(OPTS))
+    assert excinfo.value.status_code == 400
+    assert pane == before
+
+
+def test_a_named_update_whose_data_is_a_one_key_object_is_a_client_error():
+    pane = _plot_pane()
+    before = copy.deepcopy(pane)
+    with pytest.raises(tornado.web.HTTPError) as excinfo:
+        _opts_only(pane, name="a", data={"y": [1]}, opts=dict(OPTS))
+    assert excinfo.value.status_code == 400
+    assert pane == before
+
+
+def test_a_layout_that_is_not_an_object_is_a_client_error():
+    pane = _plot_pane()
+    before = copy.deepcopy(pane)
+    with pytest.raises(tornado.web.HTTPError) as excinfo:
+        _opts_only(pane, layout=5, opts=dict(OPTS))
+    assert excinfo.value.status_code == 400
+    assert pane == before
+
+
+def test_opts_that_are_not_an_object_are_a_client_error():
+    pane = _plot_pane()
+    before = copy.deepcopy(pane)
+    with pytest.raises(tornado.web.HTTPError) as excinfo:
+        _opts_only(pane, opts="renamed")
+    assert excinfo.value.status_code == 400
+    assert pane == before
+
+
+def test_a_legend_that_is_not_a_list_is_a_client_error():
+    pane = _plot_pane()
+    before = copy.deepcopy(pane)
+    with pytest.raises(tornado.web.HTTPError) as excinfo:
+        _opts_only(pane, opts={"title": "renamed", "legend": 1})
+    assert excinfo.value.status_code == 400
+    assert pane == before
+
+
+def test_a_null_opts_is_treated_as_absent():
+    pane = _plot_pane()
+    _opts_only(pane, layout=copy.deepcopy(LAYOUT), opts=None)
+    assert pane["content"]["layout"]["title"] == {"text": "renamed"}
+    assert pane["version"] == 2

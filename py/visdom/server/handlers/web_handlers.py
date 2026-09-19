@@ -190,9 +190,30 @@ class UpdateHandler(BaseHandler):
         name = args.get("name")
         new_data = args.get("data")
         delete = args.get("delete")
-        if name is not None and not delete and (not new_data or len(new_data) != 1):
+        if (
+            name is not None
+            and not delete
+            and (not isinstance(new_data, list) or len(new_data) != 1)
+        ):
             raise tornado.web.HTTPError(
                 400, reason="a named trace update takes exactly one data entry"
+            )
+
+        layout_update = args.get("layout")
+        if layout_update is not None and not isinstance(layout_update, dict):
+            raise tornado.web.HTTPError(400, reason="layout must be an object")
+
+        opts = args.get("opts")
+        if opts is not None and not isinstance(opts, dict):
+            raise tornado.web.HTTPError(400, reason="opts must be an object")
+
+        if (
+            opts is not None
+            and "legend" in opts
+            and not isinstance(opts["legend"], list)
+        ):
+            raise tornado.web.HTTPError(
+                400, reason="opts.legend must be a list of trace names"
             )
 
         if not new_data and p["type"] != "plot":

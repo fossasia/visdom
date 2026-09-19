@@ -426,7 +426,7 @@ def update_window(p, args):
             for layout_name, layout_val in layout_update.items():
                 if layout_val is not None:
                     layout[layout_name] = layout_val
-    opts = args.get("opts", {})
+    opts = args.get("opts") or {}
     for opt_name, opt_val in opts.items():
         if opt_val is not None:
             if opt_name == "caption":
