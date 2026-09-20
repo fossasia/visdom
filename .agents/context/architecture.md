@@ -4,7 +4,7 @@
 
 1. **Python Client** (`py/visdom/__init__.py`) — The `Visdom` class provides 40+ visualization methods. Communicates with the server via HTTP POST (using `requests.Session`) and WebSocket (`websocket-client`). Supports PyTorch tensor auto-conversion via the `@pytorch_wrap` decorator. Also supports offline mode and a polling fallback.
 
-2. **Async Python Client** (`py/visdom/async_client.py`) — `AsyncVisdom`, an awaitable front end to the same `Visdom`. It duplicates none of the plotting methods: `_BridgedVisdom` subclasses `Visdom` and overrides only `_handle_post`, so method bodies run on the client's own thread pool while the wire hop runs on the caller's event loop. Opt-in; `Visdom` is unchanged.
+2. **Async Python Client** (`py/visdom/async_client.py`) — `AsyncVisdom`, an awaitable front end to the same `Visdom`. It duplicates none of the plotting methods: `_BridgedVisdom` subclasses `Visdom`, and `_handle_post` is its only substantive transport override — `setup_socket` just hands the backchannel to the event loop, and `_start_session_reaper` is a no-op because there is no `requests` session to reap. Method bodies run on the client's own thread pool while the wire hop runs on the caller's event loop. Opt-in; `Visdom` is unchanged.
 
 3. **Tornado Server** (`py/visdom/server/`) — `ServerState` (`server_state.py`) owns the server-wide containers; `Application` wires routes to them and handlers reach them through `StateAccessorsMixin`:
    - `state` — Dict mapping environment IDs to window data (loaded via `LazyEnvData`)
