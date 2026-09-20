@@ -360,7 +360,7 @@ class AsyncVisdom:
     ) -> _SendReturn: ...
     async def audio(
         self,
-        tensor: Tensor,
+        tensor: Tensor = ...,
         audiofile: _OptStr = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
