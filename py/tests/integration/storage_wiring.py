@@ -39,6 +39,7 @@ from visdom.data_model.json_store import JSONStore
 from visdom.server.defaults import DEFAULT_MAX_UNDO_HISTORY
 from visdom.server.handlers.socket_handlers import AnySocketHandlerOrWrapper
 from visdom.server.handlers.web_handlers import (
+    CloseHandler,
     DeleteEnvHandler,
     ForkEnvHandler,
     SaveHandler,
@@ -48,12 +49,12 @@ from visdom.utils.server_utils import (
     clear_deleted,
     compare_envs,
     count_deleted,
-    gather_envs,
     ensure_env_loaded,
     load_env,
     pop_deleted,
     purge_env,
     push_deleted,
+    push_deleted_many,
     push_deleted_off_loop,
     save_env_off_loop,
     warm_env,
@@ -276,6 +277,56 @@ def test_push_routes_through_store(spy_store):
     assert spy_store.calls["save_undo"] == ["expt"]
 
 
+def closed_panes(*win_ids):
+    """The ``(win_id, p_data)`` pairs a close hands to the undo stack."""
+    return [(win_id, {"id": win_id}) for win_id in win_ids]
+
+
+def env_with(*win_ids):
+    """An environment holding one bare pane per id."""
+    return env_payload(jsons={win_id: {"id": win_id} for win_id in win_ids})
+
+
+def test_pushing_many_stacks_them_in_the_order_they_were_closed(store):
+    """Closing a whole env leaves the stack pushing one at a time would have."""
+    push_deleted_many(store, "expt", closed_panes("win_0", "win_1"))
+
+    assert count_deleted(store, "expt") == 2
+    assert pop_deleted(store, "expt") == ("win_1", {"id": "win_1"})
+    assert pop_deleted(store, "expt") == ("win_0", {"id": "win_0"})
+    assert pop_deleted(store, "expt") is None
+
+
+def test_pushing_many_is_one_read_and_one_write(spy_store):
+    """The point of the batch: a file per pane becomes a file per close."""
+    depth = push_deleted_many(
+        spy_store, "expt", closed_panes("win_0", "win_1", "win_2")
+    )
+
+    assert depth == 3
+    assert spy_store.calls["load_undo"] == ["expt"]
+    assert spy_store.calls["save_undo"] == ["expt"]
+
+
+def test_pushing_many_trims_to_max_history(store):
+    """The cap holds over a batch, and the last panes closed are the survivors."""
+    many = closed_panes(*[f"win_{i}" for i in range(DEFAULT_MAX_UNDO_HISTORY + 3)])
+
+    assert push_deleted_many(store, "expt", many) == DEFAULT_MAX_UNDO_HISTORY
+
+    win_id, _ = pop_deleted(store, "expt")
+    assert win_id == f"win_{DEFAULT_MAX_UNDO_HISTORY + 2}"
+
+
+def test_pushing_many_keeps_what_an_earlier_close_left(store):
+    """A second close stacks on top of the first rather than replacing it."""
+    push_deleted(store, "expt", "win_0", {"id": "win_0"})
+
+    assert push_deleted_many(store, "expt", closed_panes("win_1")) == 2
+    assert pop_deleted(store, "expt") == ("win_1", {"id": "win_1"})
+    assert pop_deleted(store, "expt") == ("win_0", {"id": "win_0"})
+
+
 # -- LazyEnvData --------------------------------------------------------------
 
 
@@ -321,21 +372,6 @@ def test_load_env_skips_store_when_already_in_state(spy_store, fake_socket):
     load_env(state, "expt", fake_socket, spy_store)
 
     assert spy_store.calls["load_env"] == []
-
-
-def test_gather_envs_lists_through_store(spy_store):
-    """gather_envs merges in-memory ids with whatever the store lists."""
-    spy_store.save_env("on_disk", env_payload())
-
-    items = gather_envs({"in_memory": env_payload()}, spy_store)
-
-    assert spy_store.calls["list_envs"] == 1
-    assert items == ["in_memory", "on_disk"]
-
-
-def test_gather_envs_in_memory_only():
-    """With persistence disabled only the in-memory ids come back."""
-    assert gather_envs({"main": env_payload()}, SpyStore(None)) == ["main"]
 
 
 def test_compare_envs_reads_cold_env_through_store(spy_store, fake_socket):
@@ -463,6 +499,80 @@ def test_socket_close_writes_the_undo_stack_off_the_loop(spy_store, env_path):
 
     assert spy_store.calls["save_undo"] == ["expt"]
     assert_off_loop(spy_store, loop_thread, {"load_undo", "save_undo"})
+
+
+def close_handler(spy_store, env_path, state):
+    """The handler ``/close`` runs against, with no Tornado request behind it."""
+    return FakeHandler(state=state, storage=spy_store, env_path=env_path)
+
+
+def close_over_http(handler, **args):
+    """Run the ``/close`` wrap function to completion, reporting the loop's thread.
+
+    Like ``dispatch`` for socket commands: ``wrap_func`` is a coroutine now, so
+    a loop has to drive it, and the name of the thread that loop ran on is what
+    the store's calls are compared against.
+    """
+    loop_thread = {}
+
+    async def main():
+        loop_thread["name"] = threading.current_thread().name
+        await CloseHandler.wrap_func(handler, args)
+
+    asyncio.run(main())
+    return loop_thread["name"]
+
+
+def test_http_close_writes_the_undo_stack_off_the_loop(spy_store, env_path):
+    """``/close`` records the pane for undo, and not on the loop.
+
+    The socket close was taken off the loop with the rest of the commands; this
+    one kept writing the undo file inline, under a ``post`` that was already a
+    coroutine.
+    """
+    handler = close_handler(spy_store, env_path, {"expt": env_payload()})
+
+    loop_thread = close_over_http(handler, eid="expt", win="win_0")
+
+    assert spy_store.calls["save_undo"] == ["expt"]
+    assert_off_loop(spy_store, loop_thread, {"load_undo", "save_undo"})
+
+
+def test_http_close_of_a_whole_env_writes_the_stack_once(spy_store, env_path):
+    """Every pane of the env goes to the worker as one write, off the loop."""
+    env = env_with("win_0", "win_1", "win_2")
+    handler = close_handler(spy_store, env_path, {"expt": env})
+
+    loop_thread = close_over_http(handler, eid="expt", win=None)
+
+    assert handler.state["expt"]["jsons"] == {}
+    assert spy_store.calls["load_undo"] == ["expt"]
+    assert spy_store.calls["save_undo"] == ["expt"]
+    assert_off_loop(spy_store, loop_thread, {"load_undo", "save_undo"})
+
+
+def test_http_close_of_a_whole_env_can_be_undone_pane_by_pane(spy_store, env_path):
+    """The batch leaves the stack a client can walk back, newest pane first."""
+    env = env_with("win_0", "win_1")
+    handler = close_handler(spy_store, env_path, {"expt": env})
+
+    close_over_http(handler, eid="expt", win=None)
+
+    assert count_deleted(spy_store, "expt") == 2
+    assert pop_deleted(spy_store, "expt")[0] == "win_1"
+    assert pop_deleted(spy_store, "expt")[0] == "win_0"
+
+
+def test_http_close_of_a_pane_that_is_already_gone_writes_nothing(spy_store, env_path):
+    """Nothing was closed, so there is nothing to record -- but it is announced."""
+    handler = close_handler(spy_store, env_path, {"expt": env_payload()})
+    sub = handler.add_sub(eid="expt")
+
+    close_over_http(handler, eid="expt", win="never_existed")
+
+    assert spy_store.calls["save_undo"] == []
+    assert handler.dirtied == []
+    assert sub.last()["data"] == "never_existed"
 
 
 def test_socket_close_reports_the_depth_it_was_just_told(spy_store, env_path):
@@ -604,6 +714,31 @@ def race_with_delete(handler, store, **msg):
     asyncio.run(main())
 
 
+def race_close_with_delete(handler, store, eid, **args):
+    """Delete ``eid`` on the loop while the HTTP close's undo write is out.
+
+    ``race_with_delete`` for ``/close`` instead of a socket command: the undo
+    read is held open on the worker, so the delete runs with the close parked on
+    the disk -- exactly as it would if a second client had sent one.
+    """
+
+    async def main():
+        with call_held_open(store, "load_undo", eid) as (running, finish):
+            close = asyncio.ensure_future(
+                CloseHandler.wrap_func(handler, dict(args, eid=eid))
+            )
+            assert await asyncio.to_thread(
+                running.wait, 10
+            ), "the close never reached the disk"
+            removal = DeleteEnvHandler.wrap_func(handler, {"eid": eid})
+            finish.set()
+            await close
+            if removal is not None:
+                await removal
+
+    asyncio.run(main())
+
+
 def race_read_with_delete(handler, store, eid, make_reader):
     """Delete ``eid`` on the loop while a read of it is out on the worker.
 
@@ -625,6 +760,42 @@ def race_read_with_delete(handler, store, eid, make_reader):
                 await removal
 
     asyncio.run(main())
+
+
+def test_http_close_racing_a_delete_announces_nothing(
+    spy_store, env_path, storage_worker
+):
+    """The env is gone by the time the close resumes, so nobody hears about it.
+
+    The pane left ``state`` before the delete landed, so the close has an undo
+    entry on its way to a file the purge is about to remove. Announcing it
+    would tell subscribers a pane of an environment they have already been told
+    is gone just closed.
+    """
+    spy_store.save_env("expt", env_payload())
+    handler = close_handler(spy_store, env_path, {"expt": env_payload()})
+    handler.storage_executor = storage_worker
+    sub = handler.add_sub(eid="expt")
+
+    race_close_with_delete(handler, spy_store, "expt", win="win_0")
+
+    # The delete announced itself; the close that resumed behind it did not.
+    assert sub.commands() == ["env_update"]
+    assert "expt" not in handler.state
+
+
+def test_http_close_racing_a_delete_leaves_no_undo_history(
+    spy_store, env_path, storage_worker
+):
+    """A close on its way to disk cannot restore the undo file behind a delete."""
+    spy_store.save_env("expt", env_payload())
+    handler = close_handler(spy_store, env_path, {"expt": env_payload()})
+    handler.storage_executor = storage_worker
+
+    race_close_with_delete(handler, spy_store, "expt", win="win_0")
+
+    assert not spy_store.env_exists("expt")
+    assert count_deleted(spy_store, "expt") == 0
 
 
 def test_socket_close_racing_a_delete_leaves_no_undo_history(
@@ -765,7 +936,7 @@ def test_a_read_that_outlives_a_delete_does_not_relist_the_env(
     race_read_with_delete(handler, spy_store, "expt", lambda: warm_env(handler, "expt"))
 
     assert "expt" not in handler.state
-    assert gather_envs(handler.state, spy_store) == []
+    assert spy_store.list_envs() == []
 
 
 async def serve_env(handler, eid, socket):
@@ -793,7 +964,7 @@ def test_serving_an_env_deleted_mid_read_does_not_relist_it(
     )
 
     assert "expt" not in handler.state
-    assert gather_envs(handler.state, spy_store) == []
+    assert spy_store.list_envs() == []
 
 
 def test_a_warmed_send_does_not_read_the_env_again(spy_store, env_path):

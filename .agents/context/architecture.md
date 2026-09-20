@@ -121,7 +121,9 @@ The four rules below are **required** for new and changed handlers; breaking one
 of them fails quietly rather than loudly.
 
 1. **No disk work on the loop.** Go through `run_on_storage_executor` (or the
-   `*_off_loop` helpers) in `py/visdom/utils/server_utils.py`.
+   `*_off_loop` helpers) in `py/visdom/utils/server_utils.py`. A helper that takes
+   a `store` reaches the disk too, so calling one inline is the same mistake as
+   calling the backend inline; `py/tests/unit/refactoring_docs.py` scans for both.
 2. **One storage worker.** `ServerState.storage_executor` is
    `ThreadPoolExecutor(max_workers=1)`, and the single worker is what serializes
    writes — two saves of one env would otherwise interleave and truncate a file.

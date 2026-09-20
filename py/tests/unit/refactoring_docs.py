@@ -20,7 +20,10 @@ So these tests read the prose and then check the code against it: the paths and
 symbols it names resolve, ``max_workers`` really is 1, the off-loop helpers
 really snapshot first, ``shutdown_storage`` really orders its three steps that
 way, and the handlers hold the no-disk-on-the-loop line with no exception left
-since follow-up 4j closed. The cross-document claims -- the benchmark
+since follow-up 4j closed -- in both shapes it can be broken in, the backend
+called directly and a store-taking helper called inline, which is how ``/close``
+kept writing its undo file on the loop after the route itself had moved off it.
+The cross-document claims -- the benchmark
 table, the proxied-name count, the invariants restated in
 ``.agents/context/architecture.md`` -- are compared against their sources
 rather than trusted.
@@ -29,12 +32,14 @@ The companion for the user-facing async docs is ``unit/async_docs.py``.
 """
 
 import ast
+import inspect
 import os
 import re
 
 import pytest
 
 from visdom.async_client import _PROXIED
+from visdom.utils import server_utils
 
 pytestmark = pytest.mark.unit
 
@@ -334,33 +339,48 @@ BLOCKING_STORE_CALLS = ("save_env", "save_envs", "save_all", "load_env")
 KNOWN_ON_LOOP_WRITES = set()
 
 
+def handler_trees():
+    """Every handler module, as ``(filename, tree)``."""
+    trees = []
+    for filename in sorted(os.listdir(HANDLER_DIR)):
+        if filename.endswith(".py"):
+            trees.append((filename, parse(os.path.join(HANDLER_DIR, filename))))
+    return trees
+
+
+def module_functions(tree):
+    """Every function of a module, as ``(qualified name, node)``.
+
+    Module level and one class deep, which is every shape the handler modules
+    use: the ``post``/``on_message``/``wrap_func`` members and the worker shims
+    they hand to the executor.
+    """
+    for classnode in [None] + [
+        node for node in tree.body if isinstance(node, ast.ClassDef)
+    ]:
+        scope = tree if classnode is None else classnode
+        prefix = "" if classnode is None else classnode.name + "."
+        for node in scope.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                yield prefix + node.name, node
+
+
 def direct_storage_calls():
     """Every ``<something>.storage.<blocking call>`` inside a handler module."""
     found = set()
-    for filename in sorted(os.listdir(HANDLER_DIR)):
-        if not filename.endswith(".py"):
-            continue
-        path = os.path.join(HANDLER_DIR, filename)
-        tree = parse(path)
-        for classnode in [None] + [
-            node for node in tree.body if isinstance(node, ast.ClassDef)
-        ]:
-            scope = tree if classnode is None else classnode
-            prefix = "" if classnode is None else classnode.name + "."
-            for node in scope.body:
-                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+    for filename, tree in handler_trees():
+        for qualname, node in module_functions(tree):
+            for call in ast.walk(node):
+                if not isinstance(call, ast.Call):
                     continue
-                for call in ast.walk(node):
-                    if not isinstance(call, ast.Call):
-                        continue
-                    func = call.func
-                    if not isinstance(func, ast.Attribute):
-                        continue
-                    if func.attr not in BLOCKING_STORE_CALLS:
-                        continue
-                    owner = func.value
-                    if isinstance(owner, ast.Attribute) and owner.attr == "storage":
-                        found.add((filename, prefix + node.name, func.attr))
+                func = call.func
+                if not isinstance(func, ast.Attribute):
+                    continue
+                if func.attr not in BLOCKING_STORE_CALLS:
+                    continue
+                owner = func.value
+                if isinstance(owner, ast.Attribute) and owner.attr == "storage":
+                    found.add((filename, qualname, func.attr))
     return found
 
 
@@ -380,6 +400,126 @@ def test_the_recorded_on_loop_writes_are_still_there():
         f"{sorted(stale)} no longer blocks the loop -- drop it from "
         "KNOWN_ON_LOOP_WRITES and close its follow-up in REFACTORING.md"
     )
+
+
+# --- invariant 1 (the last part): helpers that take the store as an argument -
+
+# ``<handler>.storage.save_env(...)`` is not the only way to reach the disk on
+# the loop. A ``server_utils`` helper that takes a ``DataStore`` reaches it just
+# as surely, one argument deeper, and the scanner above sees nothing: the store
+# is being passed, not called. Which helpers those are is ``server_utils``'s
+# own answer, read off their signatures rather than listed here, so a new one
+# is covered the day it is written.
+
+# The exceptions, and what makes them exceptions: an argument that says the
+# caller has already done the read off the loop and is handing the answer in.
+# Without it the same call does reach disk, so the keyword is the whole licence.
+READ_FREE_ARGUMENT = {
+    "load_env": "warmed",
+    "compare_envs": "warmed",
+    "broadcast_undo_state": "count",
+}
+
+
+def store_taking_helpers():
+    """``server_utils`` functions that reach a store through a parameter.
+
+    Maps each to its parameter names, so a call's positional arguments can be
+    bound the way Python would bind them.
+    """
+    helpers = {}
+    for name, value in vars(server_utils).items():
+        if not inspect.isfunction(value):
+            continue
+        if value.__module__ != server_utils.__name__:
+            continue
+        params = list(inspect.signature(value).parameters)
+        if "store" in params:
+            helpers[name] = params
+    return helpers
+
+
+def takes_a_store(node):
+    """This function is worker code: the store arrives as an argument."""
+    return any(arg.arg in ("store", "storage") for arg in node.args.args)
+
+
+def store_helper_calls_on_the_loop(trees=None):
+    """Every store-taking helper a handler module calls inline.
+
+    Functions that take a store themselves are skipped -- those are the shims
+    handed to the executor, and reaching the disk is their job.
+    """
+    helpers = store_taking_helpers()
+    found = set()
+    for filename, tree in handler_trees() if trees is None else trees:
+        for qualname, node in module_functions(tree):
+            if takes_a_store(node):
+                continue
+            for call in ast.walk(node):
+                if not isinstance(call, ast.Call):
+                    continue
+                if not isinstance(call.func, ast.Name):
+                    continue
+                params = helpers.get(call.func.id)
+                if params is None:
+                    continue
+                passed = set(params[: len(call.args)])
+                passed.update(keyword.arg for keyword in call.keywords)
+                if READ_FREE_ARGUMENT.get(call.func.id) in passed:
+                    continue
+                found.add((filename, qualname, call.func.id))
+    return found
+
+
+def test_the_store_taking_helpers_are_discovered_by_signature():
+    """A scan that found nothing would let every one of them through."""
+    helpers = store_taking_helpers()
+    assert {"push_deleted", "count_deleted", "load_env", "compare_envs"} <= set(helpers)
+
+
+def test_every_read_free_argument_is_a_real_parameter():
+    """An exemption naming an argument the helper no longer takes is a hole."""
+    helpers = store_taking_helpers()
+    for name, argument in READ_FREE_ARGUMENT.items():
+        assert name in helpers, f"{name} no longer takes a store"
+        assert argument in helpers[name], (name, argument)
+
+
+def test_handlers_do_not_call_a_store_taking_helper_on_the_loop():
+    found = store_helper_calls_on_the_loop()
+    assert not found, (
+        "these hand the store to a helper that reads or writes it, on the "
+        f"loop; go through the executor or a *_off_loop helper: {sorted(found)}"
+    )
+
+
+def test_the_guard_catches_a_helper_called_inline():
+    """The scanner has to bite, or the test above passes for the wrong reason."""
+    source = (
+        "class CloseHandler:\n"
+        "    async def post(self):\n"
+        "        push_deleted(self.storage, 'e', 'w', {})\n"
+    )
+    found = store_helper_calls_on_the_loop([("web_handlers.py", ast.parse(source))])
+    assert found == {("web_handlers.py", "CloseHandler.post", "push_deleted")}
+
+
+def test_the_guard_accepts_a_helper_told_not_to_read():
+    """Both shapes the handlers use: the keyword, and the depth passed in."""
+    source = (
+        "class EnvHandler:\n"
+        "    async def post(self):\n"
+        "        load_env(self.state, 'e', sub, self.storage, 0, warmed=True)\n"
+        "        broadcast_undo_state(self, 'e', self.storage, 3)\n"
+    )
+    assert store_helper_calls_on_the_loop([("x.py", ast.parse(source))]) == set()
+
+
+def test_the_guard_leaves_the_worker_shims_alone():
+    """A function that is handed the store is the code running off the loop."""
+    source = "def _select(store, eid):\n" "    return count_deleted(store, eid)\n"
+    assert store_helper_calls_on_the_loop([("x.py", ast.parse(source))]) == set()
 
 
 def test_followup_4j_is_recorded_as_delivered():
@@ -464,8 +604,28 @@ def test_every_statement_of_the_pr_count_agrees_with_the_table():
     assert int(closing.group(1)) == LANDED_PR_COUNT
 
 
+FOLLOWUP_TABLES = ("### Follow-ups not taken", "### Follow-ups delivered")
+
+
+def followup_ids(markdown):
+    return re.findall(r"^\| (4[a-z]) \|", markdown, re.MULTILINE)
+
+
 def test_followups_are_uniquely_numbered_and_in_order():
-    ids = re.findall(r"^\| (4[a-z]) \|", PHASE_4, re.MULTILINE)
-    assert ids, "the follow-up table lost its rows"
-    assert len(ids) == len(set(ids)), ids
-    assert ids == sorted(ids), ids
+    """Unique across both tables, and in order within each one.
+
+    The numbers are how the phase refers to itself -- a pull request closing 4j
+    has to find exactly one row. Order is checked per table rather than over the
+    section: a follow-up that gets delivered moves out of the first table into
+    the second, which leaves the two tables' numbers interleaved for good.
+    """
+    tables = [
+        followup_ids(section(REFACTORING, heading, level="### "))
+        for heading in FOLLOWUP_TABLES
+    ]
+    assert all(tables), tables
+    for ids in tables:
+        assert ids == sorted(ids), ids
+    listed = [followup for ids in tables for followup in ids]
+    assert len(listed) == len(set(listed)), listed
+    assert set(listed) == set(followup_ids(PHASE_4)), "a follow-up row is off-table"
