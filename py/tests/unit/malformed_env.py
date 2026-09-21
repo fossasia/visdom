@@ -67,6 +67,21 @@ def test_a_lazy_env_is_well_formed_once_it_is_primed(store):
 
 
 @pytest.mark.parametrize("name, payload", MALFORMED, ids=MALFORMED_IDS)
+def test_priming_a_lazy_env_with_a_malformed_env_is_a_value_error(name, payload, store):
+    lazy = LazyEnvData(store, "broken")
+    with pytest.raises(ValueError):
+        lazy.prime(payload)
+    assert lazy.is_loaded is False
+
+
+def test_priming_a_lazy_env_with_nothing_is_still_a_value_error(store):
+    lazy = LazyEnvData(store, "broken")
+    with pytest.raises(ValueError):
+        lazy.prime({})
+    assert lazy.is_loaded is False
+
+
+@pytest.mark.parametrize("name, payload", MALFORMED, ids=MALFORMED_IDS)
 def test_a_malformed_file_is_not_loaded(name, payload, store, env_path):
     with open(os.path.join(env_path, "broken.json"), "w") as fn:
         fn.write(json.dumps(payload))
