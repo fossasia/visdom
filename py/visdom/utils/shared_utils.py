@@ -106,9 +106,11 @@ def _normalize_table_data(data, headers):
     used by both `table()` and `html_table()` so that the two can
     accept identical set of input shapes:
 
-    - `data`: a 2D list/tuple of rows, a 2D numpy array, or a list of
-      dicts (in which case `headers` is derived from the first dict's
-      keys unless `headers` is explicitly given).
+    - `data`: a 2D list/tuple of rows (each a list, tuple or 1-D numpy
+      array), a 2D numpy array, or a list of dicts (in which case
+      `headers` is derived from the first dict's keys unless `headers` is
+      explicitly given). A row that is itself a multi-dimensional array is
+      rejected.
     - `headers`: a list/tuple/1D numpy array of column names. Optional
       only when `data` is a list of dicts.
 
