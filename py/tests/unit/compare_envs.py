@@ -437,6 +437,29 @@ def test_a_malformed_base_image_is_never_marked_initialised(fake_socket, store):
     assert pane["content"] == ["not", "a", "dict"]
 
 
+@pytest.mark.parametrize("layout", ["missing", None, [], "not a dict"])
+def test_a_base_plot_without_a_usable_layout_still_compares(
+    layout, fake_socket, store
+):
+    """Layout is optional in Plotly; its absence must not sink the comparison."""
+    pane = _plot_pane("w1", "loss")
+    if layout == "missing":
+        del pane["content"]["layout"]
+    else:
+        pane["content"]["layout"] = layout
+    original = copy.deepcopy(pane)
+    state = {"a": _env(pane), "b": _env(_plot_pane("w2", "loss"))}
+
+    compare_envs(state, ["a", "b"], fake_socket, store)
+
+    win = _by_title(fake_socket, "loss")
+    assert win is not None
+    assert win["content"]["layout"]["showlegend"] is True
+    assert _trace_names(win) == ["a_loss", "b_loss"]
+    # The merged pane gets a layout; the stored env it came from does not.
+    assert pane == original
+
+
 def test_an_empty_title_is_never_merged(fake_socket, store):
     state = {"a": _env(_plot_pane("w1", "")), "b": _env(_plot_pane("w2", ""))}
     compare_envs(state, ["a", "b"], fake_socket, store)

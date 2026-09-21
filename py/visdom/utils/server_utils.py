@@ -763,6 +763,11 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
                     continue  # Skip windows with unnamed data
                 if ix == 0:
                     destWidJson["has_compare"] = False
+                    # Plotly treats layout as optional, so a stored plot can
+                    # legitimately carry none. Give the merged pane one rather
+                    # than failing the whole comparison over a missing key.
+                    if not isinstance(destWidJson["content"].get("layout"), dict):
+                        destWidJson["content"]["layout"] = {}
                     destWidJson["content"]["layout"]["showlegend"] = True
                     destWidJson["contentID"] = get_rand_id()
                     # Every base trace was validated above, so the rename
