@@ -13,7 +13,6 @@ necessary, but defers underlying manipulations of the server's data to
 the data_model itself.
 """
 
-import copy
 import json
 import logging
 import time
@@ -30,14 +29,18 @@ from visdom.utils.server_utils import (
     broadcast_envs,
     send_to_sources,
     broadcast,
+    count_deleted_off_loop,
+    delete_env_off_loop,
+    ensure_env_loaded,
     escape_eid,
-    push_deleted,
-    pop_deleted,
-    clear_deleted,
+    push_deleted_off_loop,
+    pop_deleted_off_loop,
     broadcast_undo_state,
     notify,
     fire_and_forget_save_all,
-    delete_env_off_loop,
+    save_env_off_loop,
+    save_layouts_off_loop,
+    snapshot_env,
 )
 from visdom.experiments import retarget_experiment
 
@@ -98,7 +101,14 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 )
             )
 
-    def on_message(self, message):
+    async def on_message(self, message):
+        """Dispatch one socket command, keeping its disk work off the loop.
+
+        Tornado awaits a coroutine ``on_message`` before it reads the next
+        frame from the same connection, so commands still land one after the
+        other in the order the client sent them -- only now a save or an undo
+        yields the loop to everyone else while the file is being written.
+        """
         logging.info(f"from visdom client: {message}")
         msg = tornado.escape.json_decode(tornado.escape.to_basestring(message))
 
@@ -117,9 +127,25 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                 # sources always saw pane_data: None -- and when the raw id was
                 # not itself a key in state, the lookup returned None and the
                 # close was never announced at all.
-                p_data = self.state[eid]["jsons"].pop(msg["data"], None)
+                env = self.state[eid]
+                p_data = env["jsons"].pop(msg["data"], None)
                 if p_data is not None:
-                    push_deleted(self.storage, eid, msg["data"], p_data)
+                    undo_count = await push_deleted_off_loop(
+                        self, eid, msg["data"], p_data
+                    )
+                else:
+                    # Closing a pane that is already gone still reports the
+                    # depth, and reading it here would put the file back on the
+                    # loop the push it replaces was just taken off.
+                    undo_count = await count_deleted_off_loop(self, eid)
+                if self.state.get(eid) is not env:
+                    # A delete_env landed while the undo stack was being
+                    # written. The env this close belongs to is gone -- along
+                    # with the files behind the depth just read -- so there is
+                    # nothing left to mark for saving or to announce.
+                    return
+                if p_data is not None:
+                    self.mark_dirty(eid)
                 event = {
                     "event_type": "close",
                     "target": msg["data"],
@@ -127,15 +153,20 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     "pane_data": p_data,
                 }
                 send_to_sources(self, event)
-                self.mark_dirty(eid)
-                broadcast_undo_state(self, eid, self.storage)
+                broadcast_undo_state(self, eid, self.storage, undo_count)
 
         elif cmd == "undo":
             if "eid" in msg:
                 eid = escape_eid(msg["eid"])
                 if eid not in self.state:
                     return
-                popped = pop_deleted(self.storage, eid)
+                env_before = self.state[eid]
+                popped, undo_count = await pop_deleted_off_loop(self, eid)
+                if self.state.get(eid) is not env_before:
+                    # delete_env ran while the stack was being popped; putting
+                    # the pane back would have raised on an env that is no
+                    # longer in ``state``, or restored it into its replacement.
+                    return
                 if popped:
                     win_id, p_data = popped
                     env = self.state[eid]["jsons"]
@@ -150,7 +181,7 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                         eid,
                     )
                     self.mark_dirty(eid)
-                broadcast_undo_state(self, eid, self.storage)
+                broadcast_undo_state(self, eid, self.storage, undo_count)
 
         elif cmd == "save":
             # save localStorage window metadata
@@ -161,13 +192,22 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     return
                 # Saving under a new eid clones the env, metadata blob and all,
                 # so retarget the copy rather than leave it recording the env
-                # it was cloned from.
+                # it was cloned from. The source is read off the loop first:
+                # copying a cold env carries its source's id rather than its
+                # data, and the retarget below would then reach for the file
+                # from here, on the loop.
+                source = self.state[prev_eid]
+                await ensure_env_loaded(self, prev_eid)
+                if self.state.get(prev_eid) is not source:
+                    # the env being saved under a new id was deleted while it
+                    # was being read; there is nothing left to copy.
+                    return
                 self.state[msg["eid"]] = retarget_experiment(
-                    copy.deepcopy(self.state[prev_eid]), msg["eid"]
+                    snapshot_env(source), msg["eid"]
                 )
                 self.state[msg["eid"]]["reload"] = msg["data"]
                 self.eid = msg["eid"]
-                self.storage.save_env(self.eid, self.state[self.eid])
+                await save_env_off_loop(self, self.eid)
 
         elif cmd == "save_all":
             fire_and_forget_save_all(self)
@@ -179,14 +219,18 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
                     return
                 logging.info(f"closing environment {eid}")
                 self.state.pop(eid, None)
-                clear_deleted(self.storage, eid)
-                delete_env_off_loop(self, eid)
+                removal = delete_env_off_loop(self, eid)
                 broadcast_envs(self)
+                # subscribers hear about the shorter env list at once, but the
+                # command is not finished until the files are gone: the polling
+                # bridge answers by returning from here, and a client told the
+                # env was deleted must not find it on the next listing.
+                await removal
 
         elif cmd == "save_layouts":
             if "data" in msg:
                 self.server_state.set_layouts(msg.get("data"))
-                self.server_state.save_layouts()
+                await save_layouts_off_loop(self)
                 self.broadcast_layouts()
 
         elif cmd == "forward_to_vis":
@@ -667,7 +711,7 @@ class VisSocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
         if self in list(self.sources.values()):
             self.sources.pop(self.sid, None)
 
-    def on_message(self, message):
+    async def on_message(self, message):
         msg = tornado.escape.json_decode(tornado.escape.to_basestring(message))
         cmd = msg.get("cmd")
 
@@ -677,7 +721,7 @@ class VisSocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
                 sub.write_message(json.dumps(msg, cls=NanSafeEncoder))
             return
 
-        super().on_message(message)
+        await super().on_message(message)
 
 
 class VisSocketHandler(VisSocketHandlerOrWrapper):
@@ -786,8 +830,13 @@ def _spawn_socket(cls, server_state, request):
 def WrapSocketWrapper(BaseWrapper):
     class WrappedSocketWrap(BaseHandler):
         @check_auth
-        def post(self):
-            """Either write a message to the socket, or query what's there"""
+        async def post(self):
+            """Either write a message to the socket, or query what's there
+
+            Dispatch is a coroutine now, so a polling client's send is awaited
+            here the way the WebSocket edge awaits it: the response still goes
+            out only once the command has been carried out.
+            """
             args = tornado.escape.json_decode(
                 tornado.escape.to_basestring(self.request.body)
             )
@@ -831,7 +880,7 @@ def WrapSocketWrapper(BaseWrapper):
                         )
                     )
                 else:
-                    socket_wrap.on_message(msg)
+                    await socket_wrap.on_message(msg)
                     self.write(json.dumps({"success": True}))
             else:
                 self.write(

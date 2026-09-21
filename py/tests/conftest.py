@@ -13,6 +13,7 @@ no network. Tests that genuinely need an externally launched visdom must carry
 ``@pytest.mark.server`` so CI can deselect them.
 """
 
+import asyncio
 import types
 from concurrent.futures import Future
 from unittest.mock import Mock, patch
@@ -83,9 +84,20 @@ def inline_executor(monkeypatch):
     """
     scheduled = []
 
+    def new_future():
+        """Hand back the future type the caller can actually wait on.
+
+        Inside a running loop the result is awaited, which needs the loop's own
+        future; outside one, a settled ``Future`` is what the real call returns.
+        """
+        try:
+            return asyncio.get_running_loop().create_future()
+        except RuntimeError:
+            return Future()
+
     def run_in_executor(_self_executor, func, *args):
         scheduled.append((func, args))
-        future = Future()
+        future = new_future()
         try:
             future.set_result(func(*args))
         except Exception as exc:
