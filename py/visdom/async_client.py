@@ -52,7 +52,6 @@ synchronous client feeds. It is opt-in here: ``create()`` defaults
 """
 
 import asyncio
-import errno
 import functools
 import inspect
 import json
@@ -325,8 +324,13 @@ class _AsyncBackchannel(object):
         )
 
     def start(self):
-        """Spawn the reader task. Must run on the event loop thread."""
-        if self._task is None:
+        """Spawn the reader task. Must run on the event loop thread.
+
+        ``setup_socket`` hands this to the loop with ``call_soon_threadsafe``,
+        so a ``close`` from the loop can get there first; starting afterwards
+        would leave a task nobody holds.
+        """
+        if self._task is None and not self._closing:
             self._task = self._loop.create_task(self._run())
 
     async def _run(self):
@@ -334,7 +338,16 @@ class _AsyncBackchannel(object):
             try:
                 await self._session()
             except Exception as e:
-                logger.error("%s had error %s, attempting restart", self.name, e)
+                # A failure that arrives before this backchannel has ever
+                # connected is the give-up case, whatever raised it: an
+                # unreachable server, a route that is not there, a login this
+                # client cannot pass. Retrying those every ``RECONNECT_DELAY``
+                # for the life of the process is the loop the synchronous
+                # client's ``on_close`` avoids.
+                if not self._give_up_if_never_connected(
+                    "{0} had error {1} before it ever connected".format(self.name, e)
+                ):
+                    logger.error("%s had error %s, attempting restart", self.name, e)
             finally:
                 self._client.socket_alive = False
             if self._closing or not self._client.use_socket:
@@ -395,10 +408,14 @@ class _AsyncWebSocket(_AsyncBackchannel):
                     ping_interval=PING_INTERVAL,
                 )
         except (OSError, HTTPClientError, TimeoutError) as e:
-            if getattr(e, "errno", None) == errno.ECONNREFUSED:
-                if self._give_up_if_never_connected("Socket refused connection"):
-                    return
             logger.error("Socket failed to connect: %s", e)
+            # Every one of these is a handshake that did not happen, so a
+            # client that has never connected gives up rather than retrying:
+            # a refused connection, a server with no ``/vis_socket`` route, a
+            # rejected login, a DNS or TLS failure, and -- the case the
+            # ``asyncio.timeout`` above turns into a ``TimeoutError`` -- an
+            # endpoint that accepts the connection and never upgrades.
+            self._give_up_if_never_connected("Socket never completed a handshake")
             return
         self._connection = connection
         try:
@@ -840,12 +857,38 @@ class AsyncVisdom(object):
         call = _Call()
         state = _Construction()
 
-        def release(inner):
-            """Release a client the caller will never see. Runs on the loop."""
+        def close(inner):
             transport = None if inner is None else getattr(inner, "_transport", None)
             if transport is not None:
                 transport.close()
             executor.shutdown(wait=False)
+
+        async def drain(inner, backchannel):
+            """Wait out the cancelled backchannel, then release the rest.
+
+            The order is :meth:`shutdown`'s: a polling backchannel POSTs
+            through the transport, so closing the transport under it would only
+            have the ``transport`` property rebuild it for the next poll.
+            """
+            await asyncio.wait({backchannel})
+            close(inner)
+
+        def release(inner):
+            """Release a client the caller will never see. Runs on the loop.
+
+            The backchannel goes first. ``Visdom.__init__`` starts one before
+            it returns, and the cancel most often lands while it is sitting in
+            the handshake wait that follows -- so by the time a caller gives up
+            there is a reader task on this loop, a dispatch thread behind it,
+            and a reconnect loop that would go on retrying every
+            ``RECONNECT_DELAY`` forever. Nothing else can ever stop it: the
+            caller has no wrapper to :meth:`shutdown`.
+            """
+            backchannel = None if inner is None else inner.close_backchannel()
+            if backchannel is None:
+                close(inner)
+            else:
+                loop.create_task(drain(inner, backchannel))
 
         def build():
             inner = _BridgedVisdom.__new__(_BridgedVisdom)
