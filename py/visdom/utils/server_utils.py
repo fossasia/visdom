@@ -189,15 +189,9 @@ class LazyEnvData(Mapping):
         if self._raw_dict is not None:
             return
 
-        try:
-            raw = dict(env_data)
-            raw["jsons"] = env_data["jsons"]
-            raw["reload"] = env_data["reload"]
-        except (KeyError, TypeError) as e:
-            raise ValueError(
-                "Failed loading environment json: {} - {}".format(self._eid, repr(e))
-            )
-        self._raw_dict = raw
+        if not env_is_well_formed(env_data):
+            raise ValueError("Failed loading environment json: {}".format(self._eid))
+        self._raw_dict = dict(env_data)
 
     def __getitem__(self, key):
         self.lazy_load_data()
