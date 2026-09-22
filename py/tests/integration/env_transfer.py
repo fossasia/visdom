@@ -219,14 +219,10 @@ class TestSaveEnvTransfer(VisdomHTTPTestCase):
         self.assertEqual(json.loads(self.save(["ghost"]).body), [])
         self.assertFalse(os.path.isfile(os.path.join(self.env_path, "ghost.json")))
 
-    def test_a_body_without_data_is_an_unhandled_error(self):
-        """Documents today's contract: the missing key surfaces as a 500.
-
-        Every sibling route validates its body and answers 400. ``/save`` reads
-        ``args["data"]`` straight, so a body without it is a server error rather
-        than a client one. Pinned so that fixing it is a visible change.
-        """
-        self.assertEqual(self.post_json("/save", {}).code, 500)
+    def test_a_body_without_data_is_a_bad_request(self):
+        resp = self.post_json("/save", {})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("missing required field: 'data'", resp.reason)
 
 
 class TestEnvStateTransfer(VisdomHTTPTestCase):

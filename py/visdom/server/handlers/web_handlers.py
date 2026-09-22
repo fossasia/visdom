@@ -731,7 +731,20 @@ class CompareHandler(BaseHandler):
 class SaveHandler(BaseHandler):
     @staticmethod
     async def wrap_func(handler, args):
+        if not isinstance(args, Mapping):
+            raise tornado.web.HTTPError(400, reason="request body must be an object")
+        if "data" not in args:
+            raise tornado.web.HTTPError(400, reason="missing required field: 'data'")
         envs = args["data"]
+        if not isinstance(envs, Sequence) or isinstance(envs, (str, bytes)):
+            raise tornado.web.HTTPError(
+                400, reason="'data' must be a list of environment ids"
+            )
+        for eid in envs:
+            if not isinstance(eid, str) or not eid.strip():
+                raise tornado.web.HTTPError(
+                    400, reason="environment ids in 'data' must be non-empty strings"
+                )
         envs = [escape_eid(eid) for eid in envs]
         # this drops invalid env ids
         ret = await save_envs_off_loop(handler, envs)
@@ -740,9 +753,14 @@ class SaveHandler(BaseHandler):
     @check_auth
     @check_readonly
     async def post(self):
-        args = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
+        try:
+            args = tornado.escape.json_decode(
+                tornado.escape.to_basestring(self.request.body)
+            )
+        except (ValueError, TypeError):
+            raise tornado.web.HTTPError(
+                400, reason="request body must be valid JSON"
+            ) from None
         await self.wrap_func(self, args)
 
 
