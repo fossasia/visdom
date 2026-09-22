@@ -187,6 +187,10 @@ class UpdateHandler(BaseHandler):
     def update(
         p, args, max_text_lines, max_old_content, max_image_history, max_plot_history
     ):
+        if "data" not in args:
+            # opts/layout-only update (e.g. update_window_opts): applies to
+            # any pane type without touching its content.
+            return update_window(p, args)
         # Update text in window, separated by a line break
         if p["type"] == "text":
             p["content"] += "<br>" + args["data"][0]["content"]
@@ -446,29 +450,35 @@ class UpdateHandler(BaseHandler):
             handler.write("win is not image_history; was {}".format(p["type"]))
             return
 
-        if not (
+        content_data = (
+            p["content"].get("data") if isinstance(p["content"], dict) else None
+        )
+        if "data" in args and not (
             p["type"] == "text"
             or p["type"] == "image_history"
             or p["type"] == "plot_history"
             or p["type"] == "embeddings"
             or p["type"] == "table"
             or (
-                len(p["content"]["data"]) == 0
-                or p["content"]["data"][0]["type"]
-                in ["scatter", "scatter3d", "scattergl", "custom", "heatmap"]
+                isinstance(content_data, list)
+                and (
+                    len(content_data) == 0
+                    or content_data[0]["type"]
+                    in ["scatter", "scatter3d", "scattergl", "custom", "heatmap"]
+                )
             )
         ):
             handler.write(
                 "win is not scatter, heatmap, custom, image_history, plot_history, embeddings, or text; "
                 "was {}".format(
-                    p["content"]["data"][0]["type"]
-                    if len(p["content"]["data"]) > 0
+                    content_data[0]["type"]
+                    if isinstance(content_data, list) and len(content_data) > 0
                     else "empty"
                 )
             )
             return
 
-        if p["type"] == "embeddings":
+        if p["type"] == "embeddings" and "data" in args:
             diff_packet = UpdateHandler.update_embeddings_packet(
                 p, args, handler.max_old_content
             )
