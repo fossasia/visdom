@@ -302,6 +302,16 @@ def _as_requests_error(error):
     return requests.exceptions.ConnectionError(str(error))
 
 
+async def _awaited(awaitable):
+    """Await ``awaitable`` from inside a coroutine.
+
+    ``asyncio.run_coroutine_threadsafe`` accepts coroutines and nothing else,
+    so anything else awaitable -- a future, an object with ``__await__`` --
+    reaches the loop wrapped in this.
+    """
+    return await awaitable
+
+
 class _AsyncBackchannel(object):
     """Base for the two ways a client hears back from the server.
 
@@ -1089,33 +1099,46 @@ class AsyncVisdom(object):
         """Register ``handler`` for events on ``target``.
 
         Not a coroutine: registration is bookkeeping, and awaiting it would
-        only suggest it reaches the server. ``handler`` may be a plain function
-        or a coroutine function. A plain one runs on the client's own dispatch
-        thread; a coroutine has only its wrapper there, and its body runs on
-        this client's loop, so it can await other calls on this same client.
+        only suggest it reaches the server. ``handler`` may be a plain callable
+        or an asynchronous one. A plain one runs on the client's own dispatch
+        thread; an asynchronous one has only its wrapper there, and its body
+        runs on this client's loop, so it can await other calls on this same
+        client.
 
         One dispatch thread serves every handler, so they run one at a time, in
         arrival order -- a slow one delays later events but nothing else.
         """
         assert callable(handler), "Event handler must be a function"
-        if inspect.iscoroutinefunction(handler):
-            handler = self._as_blocking_handler(handler)
-        self._inner.register_event_handler(handler, target, env=env)
+        self._inner.register_event_handler(
+            self._as_blocking_handler(handler), target, env=env
+        )
 
     def clear_event_handlers(self, target, env=None):
         self._inner.clear_event_handlers(target, env=env)
 
     def _as_blocking_handler(self, handler):
-        """Run a coroutine handler on the loop, from the dispatch thread.
+        """Adapt a handler to the dispatch thread, awaiting it if it asks.
 
-        Blocking that thread is the point: it keeps events in order while the
+        Which kind it is, is decided by what the call returns rather than by
+        what the handler looks like: an object whose ``__call__`` is an
+        ``async def`` is a perfectly good asynchronous handler, but
+        ``inspect.iscoroutinefunction`` sees only the instance and says no, so
+        inspecting up front would silently drop its coroutine on the floor.
+
+        An awaitable result is finished on the loop, and blocking the dispatch
+        thread until it is, is the point: it keeps events in order while the
         loop stays free to run the coroutine.
         """
         loop = self._inner._aloop
 
         @functools.wraps(handler)
         def run(message):
-            call = asyncio.run_coroutine_threadsafe(handler(message), loop)
+            result = handler(message)
+            if not inspect.isawaitable(result):
+                return result
+            # 'run_coroutine_threadsafe' takes coroutines only, and an
+            # awaitable need not be one; '_awaited' makes it one.
+            call = asyncio.run_coroutine_threadsafe(_awaited(result), loop)
             self._handler_calls.add(call)
             try:
                 return call.result()

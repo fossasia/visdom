@@ -88,10 +88,10 @@ async def on_event(event):
 vis.register_event_handler(on_event, win)
 ```
 
-`register_event_handler` is not a coroutine: registration is bookkeeping and never reaches the server. The handler may be a plain function or a coroutine function, and the two run in different places:
+`register_event_handler` is not a coroutine: registration is bookkeeping and never reaches the server. The handler may be a plain callable or an asynchronous one, and the two run in different places:
 
-- **A plain function runs on the dispatch thread.** Incoming messages are handed to a single-worker executor the client owns, named `visdom-async-events`, and your function runs there — off your loop, so it cannot await, and it must not block for long.
-- **A coroutine function runs on your loop.** Registration wraps it, and only that wrapper runs on the dispatch thread: the wrapper submits the coroutine to the client's loop with `asyncio.run_coroutine_threadsafe` and blocks on the result. The body is therefore ordinary loop code and can await further calls on this same client.
+- **A plain callable runs on the dispatch thread.** Incoming messages are handed to a single-worker executor the client owns, named `visdom-async-events`, and your function runs there — off your loop, so it cannot await, and it must not block for long.
+- **An asynchronous one runs on your loop.** Registration wraps every handler, and only that wrapper runs on the dispatch thread: when the call returns an awaitable, the wrapper submits it to the client's loop with `asyncio.run_coroutine_threadsafe` and blocks on the result. The body is therefore ordinary loop code and can await further calls on this same client. Which kind a handler is, is decided by what the call returns, so an `async def` and an object with an `async def __call__` are treated alike.
 
 Blocking the wrapper is deliberate — it is what keeps ordering. One dispatch thread serves every handler either way, so handlers run one at a time, in arrival order, and a slow one delays later events but nothing else.
 

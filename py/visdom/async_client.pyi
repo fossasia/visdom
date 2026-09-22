@@ -55,7 +55,8 @@ from visdom import (
 _A = TypeVar("_A", bound="AsyncVisdom")
 
 # 'AsyncVisdom.register_event_handler' takes either kind: a plain handler runs on
-# the client's dispatch thread, a coroutine one is awaited on its loop.
+# the client's dispatch thread, one that returns an awaitable -- an 'async def'
+# or an object with an 'async def __call__' -- is awaited on its loop.
 _AsyncEventHandler = Callable[[_Event], Awaitable[Any]]
 
 CONNECT_TIMEOUT: float
