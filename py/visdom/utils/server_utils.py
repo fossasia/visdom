@@ -501,12 +501,31 @@ def env_is_well_formed(env):
 
     Takes any ``Mapping``, so a ``LazyEnvData`` can be checked without copying it.
     """
+    kept, skipped = drop_unreadable_panes(env)
+    return kept is not None and not skipped
+
+
+def drop_unreadable_panes(env):
+    """Split off the panes in ``env`` that are not mappings.
+
+    Returns ``(env, skipped)``: ``env`` holding only its readable panes, and the
+    ids of the ones left out. ``env`` itself is returned when nothing was left
+    out. If ``jsons`` or ``reload`` is not a mapping there is nothing to keep,
+    and ``None`` comes back in its place.
+    """
     if not isinstance(env, Mapping):
-        return False
+        return None, []
     jsons = env.get("jsons")
     if not isinstance(jsons, Mapping) or not isinstance(env.get("reload"), Mapping):
-        return False
-    return all(isinstance(pane, Mapping) for pane in jsons.values())
+        return None, []
+    skipped = [wid for wid, pane in jsons.items() if not isinstance(pane, Mapping)]
+    if not skipped:
+        return env, []
+    kept = dict(env)
+    kept["jsons"] = {
+        wid: pane for wid, pane in jsons.items() if isinstance(pane, Mapping)
+    }
+    return kept, skipped
 
 
 def extract_eid(args):
