@@ -813,8 +813,8 @@ class TestMatplotResizable(unittest.TestCase):
 # --------------------------------------------------- parallel_coordinates ----
 
 
-def test_parallel_coordinates_size1_y(capture_send):
-    """Size-1 Y does not collapse to 0-D scalar and succeeds."""
+def test_parallel_coordinates_size1_list_y(capture_send):
+    """Size-1 Python list Y is preserved as a 1D vector and plots successfully."""
     sent = capture_send(
         lambda v: v.parallel_coordinates(
             X=[[1.0, 2.0, 3.0]],
@@ -826,12 +826,38 @@ def test_parallel_coordinates_size1_y(capture_send):
     assert trace["line"]["color"] == [0.5]
 
 
-def test_parallel_coordinates_numpy_size1_y(capture_send):
-    """NumPy 1D and 2D row vector size-1 Y also succeed."""
+def test_parallel_coordinates_numpy_1d_size1_y(capture_send):
+    """NumPy 1D array of shape (1,) succeeds for size-1 Y."""
     sent = capture_send(
         lambda v: v.parallel_coordinates(
             X=np.array([[1.0, 2.0]]),
             Y=np.array([0.7]),
+        )
+    )
+    trace = sent["payload"]["data"][0]
+    assert trace["type"] == "parcoords"
+    assert trace["line"]["color"] == [0.7]
+
+
+def test_parallel_coordinates_numpy_2d_size1_y(capture_send):
+    """NumPy 2D array of shape (1, 1) is squeezed and preserved as a 1D vector."""
+    sent = capture_send(
+        lambda v: v.parallel_coordinates(
+            X=np.array([[1.0, 2.0]]),
+            Y=np.array([[0.7]]),
+        )
+    )
+    trace = sent["payload"]["data"][0]
+    assert trace["type"] == "parcoords"
+    assert trace["line"]["color"] == [0.7]
+
+
+def test_parallel_coordinates_scalar_y(capture_send):
+    """Pure numeric scalar Y is normalized to a 1D vector for N=1 experiment."""
+    sent = capture_send(
+        lambda v: v.parallel_coordinates(
+            X=[[1.0, 2.0]],
+            Y=0.7,
         )
     )
     trace = sent["payload"]["data"][0]
