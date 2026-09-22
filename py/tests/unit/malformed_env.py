@@ -23,6 +23,7 @@ import pytest
 from visdom.utils.server_utils import (
     LazyEnvData,
     compare_envs,
+    drop_unreadable_panes,
     env_is_well_formed,
     load_env,
 )
@@ -32,19 +33,32 @@ from testutils.payloads import env_payload
 pytestmark = pytest.mark.unit
 
 
-MALFORMED = [
+UNREADABLE = [
     ("jsons_is_a_list", {"jsons": [], "reload": {}}),
     ("jsons_is_null", {"jsons": None, "reload": {}}),
     ("jsons_is_a_string", {"jsons": "panes", "reload": {}}),
-    ("a_pane_is_a_string", {"jsons": {"w1": "not a pane"}, "reload": {}}),
-    ("a_pane_is_a_list", {"jsons": {"w1": []}, "reload": {}}),
     ("reload_is_a_list", {"jsons": {}, "reload": []}),
     ("jsons_is_missing", {"reload": {}}),
     ("reload_is_missing", {"jsons": {}}),
     ("not_an_object", []),
 ]
 
+BAD_PANE = [
+    ("a_pane_is_a_string", {"jsons": {"w1": "not a pane"}, "reload": {}}),
+    ("a_pane_is_a_list", {"jsons": {"w1": []}, "reload": {}}),
+]
+
+MALFORMED = UNREADABLE + BAD_PANE
+
+UNREADABLE_IDS = [case[0] for case in UNREADABLE]
 MALFORMED_IDS = [case[0] for case in MALFORMED]
+
+
+def _with_one_bad_pane():
+    return {
+        "jsons": {"good": {"id": "good", "type": "text"}, "bad": "not a pane"},
+        "reload": {"width": 300},
+    }
 
 
 @pytest.mark.parametrize("name, payload", MALFORMED, ids=MALFORMED_IDS)
@@ -81,11 +95,43 @@ def test_priming_a_lazy_env_with_nothing_is_still_a_value_error(store):
     assert lazy.is_loaded is False
 
 
-@pytest.mark.parametrize("name, payload", MALFORMED, ids=MALFORMED_IDS)
-def test_a_malformed_file_is_not_loaded(name, payload, store, env_path):
+@pytest.mark.parametrize("name, payload", UNREADABLE, ids=UNREADABLE_IDS)
+def test_an_unreadable_file_is_not_loaded(name, payload, store, env_path):
     with open(os.path.join(env_path, "broken.json"), "w") as fn:
         fn.write(json.dumps(payload))
     assert store.load_env("broken") == {}
+
+
+def test_a_file_with_one_bad_pane_keeps_the_rest(store, env_path):
+    with open(os.path.join(env_path, "mixed.json"), "w") as fn:
+        fn.write(json.dumps(_with_one_bad_pane()))
+    env = store.load_env("mixed")
+    assert env["jsons"] == {"good": {"id": "good", "type": "text"}}
+    assert env["reload"] == {"width": 300}
+
+
+@pytest.mark.parametrize("name, payload", UNREADABLE, ids=UNREADABLE_IDS)
+def test_nothing_is_kept_from_an_unreadable_env(name, payload):
+    assert drop_unreadable_panes(payload) == (None, [])
+
+
+def test_only_the_bad_panes_are_dropped():
+    kept, skipped = drop_unreadable_panes(_with_one_bad_pane())
+    assert kept["jsons"] == {"good": {"id": "good", "type": "text"}}
+    assert kept["reload"] == {"width": 300}
+    assert skipped == ["bad"]
+
+
+def test_a_readable_env_comes_back_as_it_is():
+    env = env_payload()
+    assert drop_unreadable_panes(env) == (env, [])
+    assert drop_unreadable_panes(env)[0] is env
+
+
+def test_dropping_bad_panes_leaves_the_original_alone():
+    env = _with_one_bad_pane()
+    drop_unreadable_panes(env)
+    assert "bad" in env["jsons"]
 
 
 def test_a_well_formed_file_is_still_loaded(store, env_path):
