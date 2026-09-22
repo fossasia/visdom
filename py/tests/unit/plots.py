@@ -808,3 +808,45 @@ class TestMatplotResizable(unittest.TestCase):
         opts = self._matplot(_FakePlot(width_pt="100.5", height_pt="200.5"))
         self.assertEqual(opts["height"], 1.4 * math.ceil(200.5))  # 1.4 * 201
         self.assertEqual(opts["width"], 1.35 * math.ceil(100.5))  # 1.35 * 101
+
+
+# --------------------------------------------------- parallel_coordinates ----
+
+
+def test_parallel_coordinates_size1_y(capture_send):
+    """Size-1 Y does not collapse to 0-D scalar and succeeds."""
+    sent = capture_send(
+        lambda v: v.parallel_coordinates(
+            X=[[1.0, 2.0, 3.0]],
+            Y=[0.5],
+        )
+    )
+    trace = sent["payload"]["data"][0]
+    assert trace["type"] == "parcoords"
+    assert trace["line"]["color"] == [0.5]
+
+
+def test_parallel_coordinates_numpy_size1_y(capture_send):
+    """NumPy 1D and 2D row vector size-1 Y also succeed."""
+    sent = capture_send(
+        lambda v: v.parallel_coordinates(
+            X=np.array([[1.0, 2.0]]),
+            Y=np.array([0.7]),
+        )
+    )
+    trace = sent["payload"]["data"][0]
+    assert trace["type"] == "parcoords"
+    assert trace["line"]["color"] == [0.7]
+
+
+def test_parallel_coordinates_multi_experiment(capture_send):
+    """Multi-experiment input with Y vector works as expected."""
+    sent = capture_send(
+        lambda v: v.parallel_coordinates(
+            X=[[1.0, 2.0], [3.0, 4.0]],
+            Y=[0.1, 0.9],
+        )
+    )
+    trace = sent["payload"]["data"][0]
+    assert trace["type"] == "parcoords"
+    assert trace["line"]["color"] == [0.1, 0.9]
