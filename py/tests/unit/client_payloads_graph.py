@@ -604,9 +604,7 @@ def test_parallel_coordinates_reserves_extra_width_for_the_colorbar(capture_send
 def test_parallel_coordinates_accepts_a_single_experiment_with_colors(capture_send):
     """Size-1 Y is preserved as a 1D vector and plots successfully."""
     sent = capture_send(
-        lambda v: v.parallel_coordinates(
-            X=np.array([[1.0, 2.0]]), Y=np.array([1.0])
-        )
+        lambda v: v.parallel_coordinates(X=np.array([[1.0, 2.0]]), Y=np.array([1.0]))
     )
     assert sent["payload"]["data"][0]["line"]["color"] == [1.0]
 
