@@ -200,5 +200,72 @@ class TestImageHistorySelection(ImageHistoryTestCase):
         self.assertIn(b"win is not image_history", resp.body)
 
 
+class OptsOnlyUpdateTestCase(VisdomHTTPTestCase):
+    """``Visdom.update_window_opts`` sends ``layout``/``opts`` and no ``data``.
+
+    ``UpdateHandler`` used to assume every pane's stored content is shaped
+    like a plot's (``{"data": [...], "layout": {...}}``), so a title-only
+    push crashed for any pane whose content isn't: ``image``/``network``/
+    ``hparams`` store a plain dict with no ``data`` key (``KeyError``), and
+    ``properties`` stores a plain list (``TypeError``). Text, image_history
+    and embeddings crashed one layer deeper, in ``UpdateHandler.update``,
+    which indexed ``args["data"]`` unconditionally.
+    """
+
+    def push_title(self, win, title):
+        return self.update(win, None, opts={"title": title})
+
+    def assert_title_applied(self, win, title):
+        resp = self.push_title(win, title)
+        self.assertEqual(resp.code, 200, resp.body)
+        self.assertEqual(self.get_win_data(win)["title"], title)
+
+
+class TestOptsOnlyUpdate(
+    ImageHistoryTestCase, EmbeddingsTestCase, OptsOnlyUpdateTestCase
+):
+    def test_text_pane(self):
+        win = self.create_text_window(content="hello")
+        self.assert_title_applied(win, "new title")
+
+    def test_image_history_pane(self):
+        win = self.create_image_history()
+        self.assert_title_applied(win, "new title")
+
+    def test_embeddings_pane(self):
+        win = self.create_embeddings()
+        self.assert_title_applied(win, "new title")
+
+    def test_image_pane(self):
+        args = content_args("image", {"src": "data:image/png;base64,", "caption": ""})
+        win = self.create_window(args["data"], layout=args["layout"])
+        self.assert_title_applied(win, "new title")
+
+    def test_properties_pane(self):
+        args = content_args(
+            "properties", [{"type": "text", "name": "prop", "value": "1"}]
+        )
+        win = self.create_window(args["data"], layout=args["layout"])
+        self.assert_title_applied(win, "new title")
+
+    def test_network_pane(self):
+        args = content_args("network", {"nodes": [], "edges": []})
+        win = self.create_window(args["data"], layout=args["layout"])
+        self.assert_title_applied(win, "new title")
+
+    def test_hparams_pane(self):
+        args = content_args("hparams", {"columns": [], "rows": []})
+        win = self.create_window(args["data"], layout=args["layout"])
+        self.assert_title_applied(win, "new title")
+
+    def test_table_pane(self):
+        """Table never crashed here -- its branch in ``update`` never reads
+        ``args["data"]`` -- but it silently ignored opts-only updates instead
+        of applying them, since it returned before ``update_window`` ran."""
+        args = content_args("table", {"headers": ["a", "b"], "rows": [["1", "2"]]})
+        win = self.create_window(args["data"], layout=args["layout"])
+        self.assert_title_applied(win, "new title")
+
+
 if __name__ == "__main__":
     unittest.main()

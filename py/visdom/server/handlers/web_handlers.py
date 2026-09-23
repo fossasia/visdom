@@ -187,7 +187,7 @@ class UpdateHandler(BaseHandler):
     def update(
         p, args, max_text_lines, max_old_content, max_image_history, max_plot_history
     ):
-        if "data" not in args:
+        if args.get("data") is None:
             # opts/layout-only update (e.g. update_window_opts): applies to
             # any pane type without touching its content.
             return update_window(p, args)
@@ -453,7 +453,7 @@ class UpdateHandler(BaseHandler):
         content_data = (
             p["content"].get("data") if isinstance(p["content"], dict) else None
         )
-        if "data" in args and not (
+        if args.get("data") is not None and not (
             p["type"] == "text"
             or p["type"] == "image_history"
             or p["type"] == "plot_history"
@@ -478,7 +478,7 @@ class UpdateHandler(BaseHandler):
             )
             return
 
-        if p["type"] == "embeddings" and "data" in args:
+        if p["type"] == "embeddings" and args.get("data") is not None:
             diff_packet = UpdateHandler.update_embeddings_packet(
                 p, args, handler.max_old_content
             )
