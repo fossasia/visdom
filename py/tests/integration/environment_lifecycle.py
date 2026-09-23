@@ -101,38 +101,60 @@ class TestSaveEnv(VisdomHTTPTestCase):
         self.assertNotIn("nonexistent", saved)
 
     def test_save_missing_data_is_bad_request(self):
+        """A JSON object without 'data' raises HTTP 400 naming the missing field."""
         resp = self.post_json("/save", {})
         self.assertEqual(resp.code, 400)
         self.assertIn("missing required field: 'data'", resp.reason)
 
     def test_save_non_object_body_is_bad_request(self):
+        """Non-object payloads like JSON lists or scalars raise HTTP 400."""
         for invalid in ("not_a_dict", [1, 2, 3], None):
             resp = self.post_json("/save", invalid)
             self.assertEqual(resp.code, 400)
             self.assertIn("must be an object", resp.reason)
 
     def test_save_invalid_json_is_bad_request(self):
-        for invalid_body in ("{invalid_json", "", "   "):
+        """Malformed JSON strings raise HTTP 400."""
+        resp = self.fetch(
+            "/save",
+            method="POST",
+            body="{invalid_json",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("must be valid JSON", resp.reason)
+
+    def test_save_empty_body_is_bad_request(self):
+        """Empty request body decodes to empty arguments and raises HTTP 400."""
+        for empty_body in ("", "   "):
             resp = self.fetch(
                 "/save",
                 method="POST",
-                body=invalid_body,
+                body=empty_body,
                 headers={"Content-Type": "application/json"},
             )
             self.assertEqual(resp.code, 400)
-            self.assertIn("must be valid JSON", resp.reason)
+            self.assertIn("missing required field: 'data'", resp.reason)
 
     def test_save_non_sequence_data_is_bad_request(self):
+        """A 'data' value that is not a sequence of IDs raises HTTP 400."""
         for invalid in (123, "main", {"k": "v"}, True):
             resp = self.post_json("/save", {"data": invalid})
             self.assertEqual(resp.code, 400)
             self.assertIn("must be a list", resp.reason)
 
     def test_save_invalid_eid_in_data_is_bad_request(self):
+        """Non-string or empty environment IDs in 'data' raise HTTP 400."""
         for invalid_eid in (123, "", "   ", None):
             resp = self.post_json("/save", {"data": [invalid_eid]})
             self.assertEqual(resp.code, 400)
             self.assertIn("must be non-empty strings", resp.reason)
+
+    def test_save_empty_data_list_is_successful_noop(self):
+        """An empty list in 'data' is a valid no-op that succeeds and returns []."""
+        resp = self.post_json("/save", {"data": []})
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(json.loads(resp.body), [])
 
 
 class TestDeleteEnv(VisdomHTTPTestCase):

@@ -220,6 +220,7 @@ class TestSaveEnvTransfer(VisdomHTTPTestCase):
         self.assertFalse(os.path.isfile(os.path.join(self.env_path, "ghost.json")))
 
     def test_a_body_without_data_is_a_bad_request(self):
+        """A payload missing the required 'data' field returns HTTP 400 Bad Request."""
         resp = self.post_json("/save", {})
         self.assertEqual(resp.code, 400)
         self.assertIn("missing required field: 'data'", resp.reason)
