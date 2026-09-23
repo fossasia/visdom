@@ -743,8 +743,10 @@ def _decode_json_body(body):
         if not text:
             return {}
         args = tornado.escape.json_decode(text)
-    except ValueError:
-        raise tornado.web.HTTPError(400, reason="request body must be valid JSON")
+    except ValueError as error:
+        raise tornado.web.HTTPError(
+            400, reason="request body must be valid JSON"
+        ) from error
     if not isinstance(args, Mapping):
         raise tornado.web.HTTPError(400, reason="request body must be an object")
     return args
