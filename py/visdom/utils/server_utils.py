@@ -523,8 +523,12 @@ def update_window(p, args):
             else:
                 p[opt_name] = opt_val
 
-    has_data = isinstance(content, dict) and isinstance(content.get("data"), list)
-    if "legend" in opts and has_data:
+    has_traces = (
+        p.get("type") == "plot"
+        and isinstance(content, dict)
+        and isinstance(content.get("data"), list)
+    )
+    if "legend" in opts and has_traces:
         legend = opts["legend"]
         pdata = p["content"]["data"]
         name = args.get("name")

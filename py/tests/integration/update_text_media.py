@@ -236,6 +236,14 @@ class TestOptsOnlyUpdate(
         win = self.create_embeddings()
         self.assert_title_applied(win, "new title")
 
+    def test_embeddings_legend_opt_does_not_crash(self):
+        """``content["data"]`` is a list for embeddings too, but of raw
+        coordinate pairs rather than trace dicts, so the legend-rename loop
+        (built for plot traces) must not run against it."""
+        win = self.create_embeddings()
+        resp = self.update(win, None, opts={"legend": ["renamed"]})
+        self.assertEqual(resp.code, 200, resp.body)
+
     def test_image_pane(self):
         args = content_args("image", {"src": "data:image/png;base64,", "caption": ""})
         win = self.create_window(args["data"], layout=args["layout"])
