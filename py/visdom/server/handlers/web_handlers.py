@@ -192,28 +192,24 @@ class UpdateHandler(BaseHandler):
             and not args.get("delete")
             and args.get("name") is None
         ):
-            # opts/layout-only update (e.g. update_window_opts): applies to
-            # any pane type without touching its content. A delete or named
-            # trace update carries no data either, but is a content change
-            # and must still reach the type-specific branches below.
+            # opts/layout-only update (e.g. update_window_opts): works for
+            # any pane type. A delete/named update also carries no data but
+            # is a content change, so it must reach the branches below.
             return update_window(p, args)
-        if args.get("data") is None:
-            # Reached only for a delete/named request with no data - the
-            # opts-only case already returned above. text/image_history/
-            # plot_history have no delete/name semantics and would crash
-            # indexing into args["data"] below. embeddings has no named
-            # traces either, and would otherwise fall into the generic
-            # trace-delete logic further down and silently empty every
-            # point instead of being rejected.
-            if p["type"] in ("text", "image_history", "plot_history"):
-                raise tornado.web.HTTPError(
-                    400,
-                    reason="{} panes do not support delete/name updates".format(
-                        p["type"]
-                    ),
-                )
-            if p["type"] == "embeddings":
-                return update_window(p, args)
+        # A delete/named update with no data (opts-only already returned
+        # above). These types have no delete/name semantics and would
+        # otherwise crash indexing args["data"], or (embeddings) silently
+        # empty every point instead of being rejected.
+        if args.get("data") is None and p["type"] in (
+            "text",
+            "image_history",
+            "plot_history",
+            "embeddings",
+        ):
+            raise tornado.web.HTTPError(
+                400,
+                reason="{} panes do not support delete/name updates".format(p["type"]),
+            )
         # Update text in window, separated by a line break
         if p["type"] == "text":
             p["content"] += "<br>" + args["data"][0]["content"]
@@ -496,6 +492,7 @@ class UpdateHandler(BaseHandler):
                 )
             )
         ):
+            handler.set_status(400)
             handler.write(
                 "win is not scatter, heatmap, custom, image_history, plot_history, embeddings, or text; "
                 "was {}".format(
