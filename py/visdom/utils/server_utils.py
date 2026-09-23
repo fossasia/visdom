@@ -508,7 +508,7 @@ def extract_eid(args):
 def update_window(p, args):
     """Adds new args to a window if they exist"""
     content = p["content"]
-    has_layout = isinstance(content, dict) and "layout" in content
+    has_layout = isinstance(content, dict) and isinstance(content.get("layout"), dict)
     layout_update = args.get("layout", {})
     if has_layout:
         for layout_name, layout_val in layout_update.items():

@@ -197,6 +197,23 @@ class UpdateHandler(BaseHandler):
             # trace update carries no data either, but is a content change
             # and must still reach the type-specific branches below.
             return update_window(p, args)
+        if args.get("data") is None:
+            # Reached only for a delete/named request with no data - the
+            # opts-only case already returned above. text/image_history/
+            # plot_history have no delete/name semantics and would crash
+            # indexing into args["data"] below. embeddings has no named
+            # traces either, and would otherwise fall into the generic
+            # trace-delete logic further down and silently empty every
+            # point instead of being rejected.
+            if p["type"] in ("text", "image_history", "plot_history"):
+                raise tornado.web.HTTPError(
+                    400,
+                    reason="{} panes do not support delete/name updates".format(
+                        p["type"]
+                    ),
+                )
+            if p["type"] == "embeddings":
+                return update_window(p, args)
         # Update text in window, separated by a line break
         if p["type"] == "text":
             p["content"] += "<br>" + args["data"][0]["content"]
