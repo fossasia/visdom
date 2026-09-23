@@ -187,9 +187,15 @@ class UpdateHandler(BaseHandler):
     def update(
         p, args, max_text_lines, max_old_content, max_image_history, max_plot_history
     ):
-        if args.get("data") is None:
+        if (
+            args.get("data") is None
+            and not args.get("delete")
+            and args.get("name") is None
+        ):
             # opts/layout-only update (e.g. update_window_opts): applies to
-            # any pane type without touching its content.
+            # any pane type without touching its content. A delete or named
+            # trace update carries no data either, but is a content change
+            # and must still reach the type-specific branches below.
             return update_window(p, args)
         # Update text in window, separated by a line break
         if p["type"] == "text":
@@ -450,10 +456,15 @@ class UpdateHandler(BaseHandler):
             handler.write("win is not image_history; was {}".format(p["type"]))
             return
 
+        is_content_update = (
+            args.get("data") is not None
+            or args.get("delete")
+            or args.get("name") is not None
+        )
         content_data = (
             p["content"].get("data") if isinstance(p["content"], dict) else None
         )
-        if args.get("data") is not None and not (
+        if is_content_update and not (
             p["type"] == "text"
             or p["type"] == "image_history"
             or p["type"] == "plot_history"
