@@ -17,6 +17,7 @@ Automated checks belong elsewhere:
 | Does the server behave correctly? | `py/tests/` (pytest) |
 | Does the UI still render the same pixels? | `playwright/` |
 | Does this *look* right to a person? | here |
+| How fast is it? | `example/benchmarks/` |
 
 ## `visual_check.py`
 
