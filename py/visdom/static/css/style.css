@@ -48,9 +48,7 @@ h1 {
   box-shadow: var(--vis-shadow-1);
 }
 
-/* ---------------------------------------------------------------- */
-/* redesigned top bar                                                */
-/* ---------------------------------------------------------------- */
+/* redesigned top bar */
 
 .navbar-form.navbar-default {
   display: flex;
