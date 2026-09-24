@@ -33,9 +33,142 @@ h1 {
   padding: 13px;
 }
 
+/* the brand wordmark only -- .visdom-title alone is reused by modal
+   section headers (Manage Views/Environments/Tags), which keep the
+   plain style above */
+.navbar-brand.visdom-title {
+  font-weight: 700;
+  color: var(--vis-accent);
+  letter-spacing: -0.01em;
+}
+
 .navbar-default {
-  background-color: #F0F0F0;
-  border-color: transparent;
+  background-color: var(--vis-bg-surface);
+  border: 1px solid var(--vis-border);
+  box-shadow: var(--vis-shadow-1);
+}
+
+/* ---------------------------------------------------------------- */
+/* redesigned top bar                                                */
+/* ---------------------------------------------------------------- */
+
+.navbar-form.navbar-default {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: var(--vis-space-2);
+  min-height: 46px;
+  padding: 6px 12px;
+  margin: 0;
+  /* span the full bar so topbar-spacer can push the status cluster to the
+     right edge; bootstrap floats .navbar-form and leaves it width:auto */
+  float: none;
+  width: 100%;
+}
+
+.navbar-form.navbar-default .navbar-brand,
+.navbar-form.navbar-default .visdom-title {
+  float: none;
+  height: auto;
+  padding: 0 2px;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
+/* the component wrappers EnvControls / ViewControls return */
+.navbar-form.navbar-default > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.navbar-form.navbar-default .navbar-btn,
+.navbar-form.navbar-default .btn-group.navbar-btn {
+  margin: 0;
+}
+
+.topbar-label {
+  color: var(--vis-text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.topbar-divider {
+  flex: 0 0 auto;
+  align-self: stretch;
+  width: 1px;
+  margin: 6px 2px;
+  background: var(--vis-border);
+}
+
+/* must out-rank .navbar-form.navbar-default > span { flex: 0 0 auto } */
+.navbar-form.navbar-default > span.topbar-spacer {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* filter field text reads at the same size as the rest of the bar --
+   height/radius/border already come from the global .btn / .btn-sm /
+   .form-control rules and the .input-group corner-flip in base.css */
+.navbar-form.navbar-default .btn-sm,
+.navbar-form.navbar-default .dropdown-toggle,
+.navbar-form.navbar-default .form-control {
+  font-size: 12px;
+}
+
+/* filter field + its clear button read as one 28px control */
+.navbar-form.navbar-default .input-group.navbar-btn {
+  width: 210px;
+  flex: 0 0 auto;
+  align-items: stretch;
+}
+
+.navbar-form.navbar-default .input-group-btn > .btn {
+  padding: 0 8px;
+  border-left: 0;
+}
+
+.navbar-form.navbar-default .input-group-btn > .btn:hover:not(:disabled) {
+  background-color: var(--vis-bg-hover);
+}
+
+/* env selector: capped, room to breathe on the right */
+.navbar-form.navbar-default .rc-tree-select {
+  max-width: 320px;
+}
+
+/* connection indicator: a quiet dot + label, not a solid fill */
+.topbar-conn {
+  gap: 6px;
+  color: var(--vis-text-muted);
+  background: transparent;
+  border: 1px solid var(--vis-border);
+}
+
+.topbar-conn:hover:not(:disabled) {
+  background: var(--vis-bg-hover);
+  border-color: var(--vis-border-strong);
+}
+
+.topbar-conn-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--vis-text-muted);
+  flex: 0 0 auto;
+}
+
+.topbar-conn-ok .topbar-conn-dot {
+  background: var(--vis-success);
+}
+
+.topbar-conn-warn .topbar-conn-dot {
+  background: var(--vis-warning);
+}
+
+.topbar-conn-off .topbar-conn-dot {
+  background: var(--vis-danger);
 }
 
 .form-inline {
@@ -53,10 +186,6 @@ h1 {
 
 .navbar {
   min-height: 30px !important;
-}
-
-.navbar-form {
-  margin-top: 0px !important;
 }
 
 .no-focus {
@@ -303,12 +432,6 @@ doesn't override our desire to make them non-interactable */
   overflow-x: auto;
 }
 
-.vertical-line {
-  border-left: thin solid #ccc;
-}
-
-
-
 .table-properties td {
   border: solid 1px #dedede;
 }
@@ -463,38 +586,44 @@ button[title="annotate points"].active > svg {
   top: 0;
   right: 0;
   height: 100%;
+  width: 18px;
   display: flex;
   flex-direction: column;
   z-index: 10;
-
 }
 
 .env-arrow-btn {
   flex: 1;
-  width: 17px;
+  width: 100%;
   padding: 0;
   margin: 0;
-  border: none;
-  border-top: 1px solid #ccc;
-  border-bottom: 1px solid #ccc;
+  border: 1px solid var(--vis-border);
   border-radius: 0;
-  background-color: #f0f0f0;
+  background-color: var(--vis-bg-subtle);
   cursor: pointer;
-  font-size: 8px;
-  color: #333;
+  color: var(--vis-text-muted);
   line-height: 1;
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: background-color var(--vis-transition);
+}
+
+.env-arrow-btn + .env-arrow-btn {
+  border-top: 0;
 }
 
 .env-arrow-btn:first-child {
-  border-bottom: 1px solid #ccc;
-  border-radius: 0 4px 0 0;
+  border-radius: 0 var(--vis-radius-2) 0 0;
 }
 
 .env-arrow-btn:last-child {
-  border-radius: 0 0 4px 0;
+  border-radius: 0 0 var(--vis-radius-2) 0;
+}
+
+.env-arrow-btn svg {
+  width: 11px;
+  height: 11px;
 }
 
 .env-arrow-btn:disabled {
@@ -503,7 +632,7 @@ button[title="annotate points"].active > svg {
 }
 
 .env-arrow-btn:hover:not(:disabled) {
-  background-color: #e0e0e0;
+  background-color: var(--vis-bg-hover);
 }
 
 .pull-right {

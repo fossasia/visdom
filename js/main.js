@@ -1234,22 +1234,15 @@ const App = () => {
       {modals}
       <div className="navbar-form navbar-default">
         <span className="navbar-brand visdom-title">visdom</span>
-        <span className="vertical-line" />
-        &nbsp;&nbsp;
+        <span className="topbar-divider" />
         {envControls}
-        &nbsp;&nbsp;
-        <span className="vertical-line" />
-        &nbsp;&nbsp;
+        <span className="topbar-divider" />
         {viewControls}
-        <span
-          style={{
-            float: 'right',
-          }}
-        >
-          {filterControl}
-          &nbsp;&nbsp;
-          {connectionIndicator}
-        </span>
+        <span className="topbar-divider" />
+        {filterControl}
+        <span className="topbar-spacer" />
+        <span className="topbar-divider" />
+        {connectionIndicator}
       </div>
       <div
         tabIndex="-1"
