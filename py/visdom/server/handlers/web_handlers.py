@@ -755,7 +755,7 @@ def _decode_json_body(body):
 class SaveHandler(BaseHandler):
     @staticmethod
     async def wrap_func(handler, args):
-        """Validate payload parameters and persist the specified environments."""
+        """Validate payload parameters, filter invalid env IDs, and persist valid environments."""
         if "data" not in args:
             raise tornado.web.HTTPError(400, reason="missing required field: 'data'")
         envs = args["data"]
@@ -763,14 +763,11 @@ class SaveHandler(BaseHandler):
             raise tornado.web.HTTPError(
                 400, reason="'data' must be a list of environment ids"
             )
-        for eid in envs:
-            if not isinstance(eid, str) or not eid.strip():
-                raise tornado.web.HTTPError(
-                    400, reason="environment ids in 'data' must be non-empty strings"
-                )
-        envs = [escape_eid(eid) for eid in envs]
+        valid_envs = [
+            escape_eid(eid) for eid in envs if isinstance(eid, str) and eid.strip()
+        ]
         # this drops invalid env ids
-        ret = await save_envs_off_loop(handler, envs)
+        ret = await save_envs_off_loop(handler, valid_envs)
         handler.write(json.dumps(ret))
 
     @check_auth

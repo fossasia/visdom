@@ -143,12 +143,24 @@ class TestSaveEnv(VisdomHTTPTestCase):
             self.assertEqual(resp.code, 400)
             self.assertIn("must be a list", resp.reason)
 
-    def test_save_invalid_eid_in_data_is_bad_request(self):
-        """Non-string or empty environment IDs in 'data' raise HTTP 400."""
-        for invalid_eid in (123, "", "   ", None):
-            resp = self.post_json("/save", {"data": [invalid_eid]})
-            self.assertEqual(resp.code, 400)
-            self.assertIn("must be non-empty strings", resp.reason)
+    def test_save_filters_invalid_eids_and_saves_valid_ones(self):
+        """Invalid environment IDs (non-string, empty, whitespace) are filtered out while valid ones are saved."""
+        self.create_text_window(eid="save_valid", content="content")
+        resp = self.post_json(
+            "/save",
+            {"data": ["save_valid", 123, "", "   ", None, "ghost"]},
+        )
+        self.assertEqual(resp.code, 200)
+        saved = json.loads(resp.body)
+        self.assertIn("save_valid", saved)
+        self.assertNotIn("ghost", saved)
+        self.assertTrue(os.path.exists(os.path.join(self.env_path, "save_valid.json")))
+
+    def test_save_all_invalid_eids_returns_empty_list(self):
+        """When all environment IDs in 'data' are invalid, none are saved and [] is returned."""
+        resp = self.post_json("/save", {"data": [123, "", "   ", None]})
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(json.loads(resp.body), [])
 
     def test_save_empty_data_list_is_successful_noop(self):
         """An empty list in 'data' is a valid no-op that succeeds and returns []."""
