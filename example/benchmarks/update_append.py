@@ -105,13 +105,23 @@ def measure_server(args):
     rows = []
     for n_points in harness.parse_sizes(args):
         x = np.arange(n_points, dtype=np.float64)
-        win = client.line(X=x, Y=np.sin(x / 50.0), env="benchmark")
+        y = np.sin(x / 50.0)
+        win = client.line(X=x, Y=y, env="benchmark")
         tip = np.array([float(n_points)])
 
         def append(win=win, tip=tip):
             client.line(X=tip, Y=tip, win=win, env="benchmark", update="append")
 
-        result = harness.measure(append, args.repeat, args.warmup)
+        # The pane lives on the server and every append grows it, so without a
+        # reset the row labelled ``n_points`` would measure a pane that ends at
+        # ``n_points + warmup + repeat``. Re-plotting the whole trace replaces
+        # the stored pane outright, which is the over-HTTP equivalent of the
+        # ``truncate_traces`` the in-process path uses, and it stays outside
+        # the timed call.
+        def reset(win=win, x=x, y=y):
+            client.line(X=x, Y=y, win=win, env="benchmark")
+
+        result = harness.measure(append, args.repeat, args.warmup, setup=reset)
         rows.append(
             (
                 n_points,
@@ -125,10 +135,14 @@ def measure_server(args):
 
 def main():
     parser = harness.arg_parser(__doc__.splitlines()[0])
-    parser.add_argument("--traces", type=int, default=1, help="traces in the pane")
+    parser.add_argument(
+        "--traces", type=harness.positive_int, default=1, help="traces in the pane"
+    )
     parser.add_argument("--breakdown", action="store_true", help="time the pieces")
     parser.add_argument("--server", action="store_true", help="drive a live server")
-    parser.add_argument("--port", type=int, default=8097, help="port for --server")
+    parser.add_argument(
+        "--port", type=harness.positive_int, default=8097, help="port for --server"
+    )
     args = parser.parse_args()
     if args.server:
         measure_server(args)

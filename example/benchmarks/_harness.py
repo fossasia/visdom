@@ -24,22 +24,72 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "py"))
 DEFAULT_SIZES = "500,4000,20000"
 
 
+def positive_int(value):
+    """An ``argparse`` type that rejects zero and negative counts.
+
+    ``--repeat 0`` would otherwise reach ``Result`` with no samples at all,
+    where ``statistics.median`` raises and ``p95`` indexes an empty list. That
+    surfaces as a traceback out of the reporting code rather than a word about
+    the argument that caused it.
+    """
+    try:
+        number = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("expected an integer, got %r" % value)
+    if number < 1:
+        raise argparse.ArgumentTypeError("expected a positive integer, got %r" % value)
+    return number
+
+
+def non_negative_int(value):
+    """Like ``positive_int``, except that no warmup at all is a valid ask."""
+    try:
+        number = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("expected an integer, got %r" % value)
+    if number < 0:
+        raise argparse.ArgumentTypeError("expected zero or more, got %r" % value)
+    return number
+
+
+def size_list(value):
+    """Parse ``--sizes`` into positive ints.
+
+    A zero or negative size reaches the client fixture and trips an assertion
+    inside ``Visdom.line``, which has no array to plot; rejecting it here names
+    the argument instead of failing several frames deeper.
+    """
+    sizes = [positive_int(chunk) for chunk in value.split(",") if chunk.strip()]
+    if not sizes:
+        raise argparse.ArgumentTypeError("expected at least one size")
+    return sizes
+
+
 def arg_parser(description, sizes=DEFAULT_SIZES, repeat=200):
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument("--sizes", default=sizes, help="comma-separated sizes")
-    parser.add_argument("--repeat", type=int, default=repeat, help="timed calls")
-    parser.add_argument("--warmup", type=int, default=20, help="untimed calls")
+    parser.add_argument(
+        "--sizes", type=size_list, default=sizes, help="comma-separated sizes"
+    )
+    parser.add_argument(
+        "--repeat", type=positive_int, default=repeat, help="timed calls"
+    )
+    parser.add_argument(
+        "--warmup", type=non_negative_int, default=20, help="untimed calls"
+    )
     return parser
 
 
 def parse_sizes(args):
-    return [int(chunk) for chunk in args.sizes.split(",") if chunk.strip()]
+    """The parsed ``--sizes``. ``size_list`` already validated and split it."""
+    return args.sizes
 
 
 class Result:
     """Per-call durations, in milliseconds."""
 
     def __init__(self, samples):
+        if not samples:
+            raise ValueError("no samples to summarise")
         self.samples = sorted(samples)
 
     @property
@@ -61,7 +111,14 @@ def measure(call, repeat, warmup=0, setup=None):
     ``setup`` is how a benchmark whose call mutates its own fixture keeps every
     iteration the same size: the append benchmark truncates the trace back to
     ``n`` points there, so the last timed append costs what the first did.
+    Every call that appends needs one, over HTTP as much as in process --
+    without it the pane carries ``warmup`` plus every prior timed append, and
+    the row is labelled with a size only its first sample ever saw.
     """
+    if repeat < 1:
+        raise ValueError("repeat must be at least 1, got %r" % repeat)
+    if warmup < 0:
+        raise ValueError("warmup cannot be negative, got %r" % warmup)
     samples = []
     for i in range(warmup + repeat):
         if setup is not None:

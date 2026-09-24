@@ -50,6 +50,12 @@ python -m visdom.server -port 8097            # in one shell
 python example/benchmarks/update_append.py --server --port 8097
 ```
 
+The pane a server append grows is the server's, not this process's, so
+`--server` resets it by re-plotting the whole trace before each timed call --
+the same job `truncate_traces` does in process, and likewise untimed. That
+costs a full create per iteration, so give `--server` a smaller `--repeat`
+(50 is plenty) when running the larger sizes.
+
 ## Reading the output
 
 Output is a markdown table, so it can be pasted straight into a PR body.
