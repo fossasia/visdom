@@ -350,8 +350,13 @@ class _AsyncBackchannel(object):
         self._dispatch_call = None
 
     def start(self):
-        """Spawn the reader task. Must run on the event loop thread."""
-        if self._task is None:
+        """Spawn the reader task. Must run on the event loop thread.
+
+        ``setup_socket`` hands this to the loop with ``call_soon_threadsafe``,
+        so a ``close`` from the loop can get there first; starting afterwards
+        would leave a task nobody holds.
+        """
+        if self._task is None and not self._closing:
             self._task = self._loop.create_task(self._run())
 
     async def _run(self):
@@ -975,12 +980,38 @@ class AsyncVisdom(object):
         call = _Call()
         state = _Construction()
 
-        def release(inner):
-            """Release a client the caller will never see. Runs on the loop."""
+        def close(inner):
             transport = None if inner is None else getattr(inner, "_transport", None)
             if transport is not None:
                 transport.close()
             executor.shutdown(wait=False)
+
+        async def drain(inner, backchannel):
+            """Settle the cancelled backchannel, then release the rest.
+
+            The order is :meth:`_release`'s: a polling backchannel POSTs
+            through the transport, so closing the transport under it would only
+            have the ``transport`` property rebuild it for the next poll.
+            """
+            await backchannel.drain()
+            close(inner)
+
+        def release(inner):
+            """Release a client the caller will never see. Runs on the loop.
+
+            The backchannel goes first. ``Visdom.__init__`` starts one before
+            it returns, and the cancel most often lands while it is sitting in
+            the handshake wait that follows -- so by the time a caller gives up
+            there is a reader task on this loop, a dispatch thread behind it,
+            and a reconnect loop that would go on retrying every
+            ``RECONNECT_DELAY`` forever. Nothing else can ever stop it: the
+            caller has no wrapper to :meth:`shutdown`.
+            """
+            backchannel = None if inner is None else inner.close_backchannel()
+            if backchannel is None:
+                close(inner)
+            else:
+                loop.create_task(drain(inner, backchannel))
 
         def build():
             inner = _BridgedVisdom.__new__(_BridgedVisdom)

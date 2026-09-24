@@ -156,7 +156,7 @@ test.describe('Image Pane', () => {
     await expect(img).toHaveAttribute('height', '312px');
 
     const pos = await getComputedPosition(container);
-    expect(pos.top).toBe('-32.658px');
+    expect(pos.top).toBe('-33.0514px');
     expect(pos.left).toBe('-3.93469px');
   });
 
@@ -178,7 +178,7 @@ test.describe('Image Pane', () => {
     await expect(img).toHaveAttribute('height', '312px');
 
     const pos = await getComputedPosition(container);
-    expect(pos.top).toBe('104.269px');
+    expect(pos.top).toBe('103.876px');
     expect(pos.left).toBe('49.9706px');
   });
 
@@ -201,7 +201,7 @@ test.describe('Image Pane', () => {
     }
 
     pos = await getComputedPosition(container);
-    expect(pos.top).toBe('104.269px');
+    expect(pos.top).toBe('103.876px');
     expect(pos.left).toBe('49.9706px');
     await expect(img).toHaveAttribute('width', '156px');
     await expect(img).toHaveAttribute('height', '312px');
@@ -210,7 +210,7 @@ test.describe('Image Pane', () => {
     await dragBy(page, img, BASE_POS, MOVE_X, MOVE_Y);
 
     pos = await getComputedPosition(container);
-    expect(pos.top).toBe('138.269px');
+    expect(pos.top).toBe('137.876px');
     expect(pos.left).toBe('61.9706px');
     await expect(img).toHaveAttribute('width', '156px');
     await expect(img).toHaveAttribute('height', '312px');

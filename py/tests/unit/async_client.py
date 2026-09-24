@@ -1014,6 +1014,17 @@ class FakeConnector(object):
         return self.connections.pop(0)
 
 
+class HangingConnector(object):
+    """A server that accepts the connection and never upgrades it."""
+
+    def __init__(self):
+        self.requests = []
+
+    async def __call__(self, request, **kwargs):
+        self.requests.append(request)
+        await asyncio.Event().wait()
+
+
 @asynccontextmanager
 async def socket_client(connector, **kwargs):
     """A client whose websocket is ``connector`` rather than a real socket."""
@@ -1246,6 +1257,103 @@ class TestWebSocketBackchannel(tornado.testing.AsyncTestCase):
                 assert client.socket_alive is True
                 assert connection.closed is False
                 assert len(connector.requests) == 1
+
+    @gen_test
+    async def test_a_handshake_that_never_finishes_runs_socketless(self):
+        """The give-up rule is about connecting, not about being refused.
+
+        A server that accepts the TCP connection and never upgrades it trips
+        the handshake timeout instead of raising a connection error, and
+        retrying it every ``RECONNECT_DELAY`` for the life of the process is
+        what the documented rule says does not happen.
+        """
+        connector = HangingConnector()
+        with patch("visdom.async_client.HANDSHAKE_TIMEOUT", 0.01), patch(
+            "visdom.async_client.RECONNECT_DELAY", 0
+        ):
+            async with socket_client(connector) as (client, _):
+                assert client.use_socket is False
+                assert client.socket_alive is False
+        assert len(connector.requests) == 1, "the socket kept retrying"
+
+    @gen_test
+    async def test_a_backchannel_that_cannot_log_in_runs_socketless(self):
+        """The failure need not come from the handshake itself. The login in
+        front of it raises before the socket is ever dialled, and that is the
+        case the rule was written for."""
+
+        class UnauthorizedTransport(RecordingTransport):
+            async def _ensure_login(self):
+                raise requests.exceptions.ConnectionError("login refused")
+
+        connector = FakeConnector(FakeConnection(ALIVE))
+        with patch("visdom.async_client.RECONNECT_DELAY", 0), patch(
+            "visdom.async_client.websocket_connect", connector
+        ):
+            client, _ = await make_client(
+                transport=UnauthorizedTransport(), use_incoming_socket=True
+            )
+            try:
+                assert client.use_socket is False
+                assert connector.requests == []
+            finally:
+                await client.shutdown()
+
+    @gen_test
+    async def test_a_socket_that_worked_once_retries_a_failed_handshake(self):
+        """The other side of the rule, and the reason it is not just "stop on
+        any error": a connection that was achieved once is worth redialling,
+        however the next handshake fails."""
+        connection = FakeConnection(ALIVE)
+        connector = FakeConnector(connection)
+        with patch("visdom.async_client.RECONNECT_DELAY", 0):
+            async with socket_client(connector) as (client, _):
+                await wait_for(lambda: client.socket_alive)
+                connection.close()
+                await wait_for(lambda: len(connector.requests) >= 3)
+
+                assert client.use_socket is True
+
+    @gen_test
+    async def test_a_cancelled_construction_closes_the_backchannel(self):
+        """``Visdom.__init__`` opens the backchannel before it returns, so a
+        ``create`` cancelled during the handshake wait that follows leaves one
+        running: a reader task on this loop, a dispatch thread behind it, and a
+        reconnect loop. The caller got no client, so nothing else could ever
+        stop them.
+        """
+        connection = FakeConnection(ALIVE)
+        connector = FakeConnector(connection)
+        transport = RecordingTransport()
+        released = threading.Event()
+
+        def hold(self):
+            # Runs on the worker immediately after ``setup_socket``: the
+            # backchannel is live, and the cancel has somewhere to land.
+            released.wait(5)
+
+        with patch("visdom.async_client.websocket_connect", connector), patch(
+            "visdom.async_client.RECONNECT_DELAY", 0
+        ), patch.object(_BridgedVisdom, "_start_session_reaper", hold):
+            task = asyncio.ensure_future(
+                AsyncVisdom.create(transport=transport, use_incoming_socket=True)
+            )
+            await wait_until(lambda: connector.requests, "the backchannel never opened")
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            released.set()
+            await wait_until(
+                lambda: connection.closed,
+                "the cancelled construction stranded its backchannel",
+            )
+            await wait_until(
+                lambda: transport.closed,
+                "the cancelled construction stranded its transport",
+            )
+            await asyncio.sleep(0.05)
+
+        assert len(connector.requests) == 1, "the stranded backchannel reconnected"
 
     @gen_test
     async def test_a_socket_that_worked_once_reconnects(self):
