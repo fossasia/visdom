@@ -187,20 +187,17 @@ class UpdateHandler(BaseHandler):
     def update(
         p, args, max_text_lines, max_old_content, max_image_history, max_plot_history
     ):
-        if (
-            args.get("data") is None
-            and not args.get("delete")
-            and args.get("name") is None
-        ):
+        if not args.get("data") and not args.get("delete") and args.get("name") is None:
             # opts/layout-only update (e.g. update_window_opts): works for
             # any pane type. A delete/named update also carries no data but
             # is a content change, so it must reach the branches below.
             return update_window(p, args)
-        # A delete/named update with no data (opts-only already returned
-        # above). These types have no delete/name semantics and would
-        # otherwise crash indexing args["data"], or (embeddings) silently
-        # empty every point instead of being rejected.
-        if args.get("data") is None and p["type"] in (
+        # A delete/named update with no data, or an empty data list -- the
+        # opts-only case already returned above. These types have no
+        # delete/name semantics and would otherwise crash indexing
+        # args["data"], or (embeddings) silently empty every point instead
+        # of being rejected.
+        if not args.get("data") and p["type"] in (
             "text",
             "image_history",
             "plot_history",
@@ -470,9 +467,7 @@ class UpdateHandler(BaseHandler):
             return
 
         is_content_update = (
-            args.get("data") is not None
-            or args.get("delete")
-            or args.get("name") is not None
+            args.get("data") or args.get("delete") or args.get("name") is not None
         )
         content_data = (
             p["content"].get("data") if isinstance(p["content"], dict) else None
@@ -503,7 +498,7 @@ class UpdateHandler(BaseHandler):
             )
             return
 
-        if p["type"] == "embeddings" and args.get("data") is not None:
+        if p["type"] == "embeddings" and args.get("data"):
             diff_packet = UpdateHandler.update_embeddings_packet(
                 p, args, handler.max_old_content
             )
