@@ -28,10 +28,12 @@ which type-checks is a call the runtime accepts, in both directions.
 import ast
 import inspect
 import os
+import textwrap
 
 import pytest
 
 import visdom
+from visdom import async_client
 from visdom.async_client import _PROXIED, AsyncVisdom
 
 pytestmark = pytest.mark.unit
@@ -61,6 +63,20 @@ CREATE_EXTRAS = frozenset({"max_clients", "max_concurrency", "transport"})
 # ``Visdom`` takes these; ``AsyncVisdom.create`` raises NotImplementedError for
 # them, because tornado's AsyncHTTPClient cannot proxy without pycurl.
 CREATE_REJECTS = frozenset({"http_proxy_host", "http_proxy_port", "proxies"})
+
+# The module's non-public classes are stubbed too, and a checker believes those
+# declarations for anyone who imports them -- the tests and the transport
+# injection in ``create(transport=...)`` do. Nothing here executes, so only a
+# parity check notices when one of them describes an API that is not there.
+INTERNAL_CLASSES = (
+    "_AsyncTransport",
+    "_AsyncBackchannel",
+    "_AsyncWebSocket",
+    "_AsyncPolling",
+    "_Call",
+    "_Construction",
+    "_BridgedVisdom",
+)
 
 
 def parse_stub(path):
@@ -130,6 +146,61 @@ def runtime_signature(function):
 def runtime_methods(cls):
     return {
         name: member for name, member in vars(cls).items() if inspect.isfunction(member)
+    }
+
+
+def runtime_attributes(cls):
+    """Every name the class could answer to: its own members, its ``__slots__``
+    and anything it assigns to ``self``.
+
+    Instance attributes are set in ``__init__``, so ``hasattr`` on the class
+    cannot see them -- but a stub that annotates one is making a promise about
+    them all the same, and ``__slots__`` makes a wrong one raise.
+    """
+    found = set(vars(cls)) | set(getattr(cls, "__slots__", ()))
+    tree = ast.parse(textwrap.dedent(inspect.getsource(cls)))
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.ctx, ast.Store)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "self"
+        ):
+            found.add(node.attr)
+    return found
+
+
+def stub_annotations(class_node):
+    """Map name -> annotation for the class's annotated attributes."""
+    return {
+        node.target.id: ast.unparse(node.annotation)
+        for node in class_node.body
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+    }
+
+
+def stub_declared(path, name):
+    """Every name a class's stub offers, its stubbed bases included.
+
+    A subclass that only overrides a value -- ``_AsyncPolling.name`` -- is
+    declared on the base it inherits the annotation from, and re-stating it
+    would be the drift this file exists to catch.
+    """
+    node = stub_class(path, name)
+    declared = (
+        set(stub_functions(node)) | stub_properties(node) | set(stub_annotations(node))
+    )
+    for base in node.bases:
+        if isinstance(base, ast.Name) and base.id in INTERNAL_CLASSES:
+            declared |= stub_declared(path, base.id)
+    return declared
+
+
+def module_annotations(path):
+    return {
+        node.target.id: ast.unparse(node.annotation)
+        for node in parse_stub(path).body
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
     }
 
 
@@ -279,3 +350,67 @@ class TestAsyncStub:
         }
         assert annotated["http_proxy_host"] == "None"
         assert annotated["http_proxy_port"] == "None"
+
+
+class TestAsyncStubInternals:
+    """``visdom/async_client.pyi`` against the module's non-public surface.
+
+    ``AsyncVisdom`` is covered above by its own ``_PROXIED``-driven checks. The
+    classes behind it are covered here, and they drift for the same reason: a
+    method can be renamed, an attribute can move behind ``__slots__`` under a
+    private name, and nothing anywhere fails.
+    """
+
+    @pytest.mark.parametrize("name", INTERNAL_CLASSES)
+    def test_the_class_exists_on_both_sides(self, name):
+        assert hasattr(async_client, name), name
+        stub_class(ASYNC_STUB, name)
+
+    @pytest.mark.parametrize("name", INTERNAL_CLASSES)
+    def test_stub_declares_no_member_that_does_not_exist(self, name):
+        # '_Call.future' was declared here for a value that lives in
+        # '__slots__' as '_future': reading it type-checks and raises.
+        runtime = getattr(async_client, name)
+        declared = stub_class(ASYNC_STUB, name)
+        reachable = runtime_attributes(runtime)
+        for member in list(stub_functions(declared)) + list(stub_properties(declared)):
+            assert hasattr(runtime, member), "{0}.{1}".format(name, member)
+        for attribute in stub_annotations(declared):
+            assert attribute in reachable, "{0}.{1}".format(name, attribute)
+
+    @pytest.mark.parametrize("name", INTERNAL_CLASSES)
+    def test_public_members_are_stubbed(self, name):
+        runtime = getattr(async_client, name)
+        declared = stub_declared(ASYNC_STUB, name)
+        own = {n for n in vars(runtime) if not n.startswith("_")}
+        assert own <= declared, "{0}: {1}".format(name, sorted(own - declared))
+
+    @pytest.mark.parametrize("name", INTERNAL_CLASSES)
+    def test_signatures_match(self, name):
+        runtime = getattr(async_client, name)
+        for member, node in stub_functions(stub_class(ASYNC_STUB, name)).items():
+            function = vars(runtime).get(member)
+            if not inspect.isfunction(function):
+                continue  # inherited, and checked against the class declaring it
+            assert stub_signature(node) == runtime_signature(
+                function
+            ), "{0}.{1}".format(name, member)
+
+    def test_every_module_constant_is_declared(self):
+        declared = module_annotations(ASYNC_STUB)
+        actual = {n for n in vars(async_client) if n.isupper()}
+        assert actual <= set(declared), sorted(actual - set(declared))
+
+    def test_constant_types_match_their_values(self):
+        # 'REQUEST_TIMEOUT: int' stood over a 20.0, which makes a checker
+        # reject the float a caller passes back into a tornado request.
+        for name, annotation in module_annotations(ASYNC_STUB).items():
+            if not name.isupper():
+                continue
+            value = getattr(async_client, name)
+            if annotation == "int":
+                assert isinstance(value, int) and not isinstance(value, bool), name
+            elif annotation == "float":
+                # An int where a float is annotated is fine -- PEP 484 promotes
+                # it -- but a float under 'int' is the mismatch that matters.
+                assert isinstance(value, (int, float)), name
