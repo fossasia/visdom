@@ -106,9 +106,11 @@ def _normalize_table_data(data, headers):
     used by both `table()` and `html_table()` so that the two can
     accept identical set of input shapes:
 
-    - `data`: a 2D list/tuple of rows, a 2D numpy array, or a list of
-      dicts (in which case `headers` is derived from the first dict's
-      keys unless `headers` is explicitly given).
+    - `data`: a 2D list/tuple of rows (each a list, tuple or 1-D numpy
+      array), a 2D numpy array, or a list of dicts (in which case
+      `headers` is derived from the first dict's keys unless `headers` is
+      explicitly given). A row that is itself a multi-dimensional array is
+      rejected.
     - `headers`: a list/tuple/1D numpy array of column names. Optional
       only when `data` is a list of dicts.
 
@@ -155,9 +157,16 @@ def _normalize_table_data(data, headers):
     else:
         assert has_headers, "headers required when data rows are lists/tuples"
         if has_data:
+            # Iterating a 2-D array -- list(arr), or a comprehension over it --
+            # yields 1-D arrays, so accept those rows the same way the 2-D array
+            # itself is accepted above.
+            data = [
+                row.tolist() if isinstance(row, np.ndarray) and row.ndim == 1 else row
+                for row in data
+            ]
             assert all(
                 isinstance(row, (list, tuple)) for row in data
-            ), "each row in `data` should be a list or tuple"
+            ), "each row in `data` should be a list, tuple or 1-D numpy array"
         headers = list(headers)
         rows = [list(r) for r in data] if has_data else []
 

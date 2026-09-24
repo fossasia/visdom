@@ -4890,7 +4890,8 @@ class Visdom(object):
         """
         This function renders structured data as a styled HTML table.
 
-        - `data`: a 2D `list`/`tuple` of row data, a 2D numpy array, or
+        - `data`: a 2D `list`/`tuple` of row data (each row a `list`,
+           `tuple` or 1-D numpy array), a 2D numpy array, or
            a list of `dict`s (in which case `headers` is derived from
            the first dict's keys unless explicitly given). In case of
            an empty list, a table with only headers will be rendered.
@@ -4957,7 +4958,8 @@ class Visdom(object):
         """
         Renders a native, structured, editable table pane.
 
-        - `data`: a 2D list of rows (list of lists/tuples), OR a list of
+        - `data`: a 2D list of rows (list of lists, tuples or 1-D numpy
+           arrays), a 2D numpy array, OR a list of
            dicts (in which case `headers` is derived from the first
            dict's keys unless explicitly given).
         - `headers`: list of column names. Required if `data` rows are
