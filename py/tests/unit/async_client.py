@@ -22,6 +22,7 @@ pattern used by the handler tests.
 import asyncio
 import contextlib
 import errno
+import inspect
 import json
 import ssl
 import threading
@@ -1114,6 +1115,54 @@ class TestWebSocketBackchannel(tornado.testing.AsyncTestCase):
                 seen.append((message["target"], asyncio.get_running_loop()))
 
             client.register_event_handler(handler, "win")
+            connection.push(json.dumps({"target": "win"}))
+            await wait_for(lambda: seen)
+
+            assert seen == [("win", asyncio.get_running_loop())]
+
+    @gen_test
+    async def test_an_async_callable_object_runs_on_the_loop(self):
+        """A class with an ``async def __call__`` is an asynchronous handler
+        too, and nothing about the instance says so: only the awaitable it
+        returns does, so that is what decides."""
+        connection = FakeConnection(ALIVE)
+        async with socket_client(FakeConnector(connection)) as (client, _):
+            seen = []
+
+            class Handler(object):
+                async def __call__(self, message):
+                    seen.append((message["target"], asyncio.get_running_loop()))
+
+            handler = Handler()
+            assert not inspect.iscoroutinefunction(handler)
+
+            client.register_event_handler(handler, "win")
+            connection.push(json.dumps({"target": "win"}))
+            await wait_for(lambda: seen)
+
+            assert seen == [("win", asyncio.get_running_loop())]
+
+    @gen_test
+    async def test_a_handler_returning_a_plain_awaitable_is_awaited(self):
+        """The bridge takes any awaitable, not just a coroutine: the loop only
+        accepts coroutines, so one that is not gets wrapped into one."""
+        connection = FakeConnection(ALIVE)
+        async with socket_client(FakeConnector(connection)) as (client, _):
+            seen = []
+
+            class Awaited(object):
+                def __init__(self, message):
+                    self._message = message
+
+                def __await__(self):
+                    async def run():
+                        seen.append(
+                            (self._message["target"], asyncio.get_running_loop())
+                        )
+
+                    return run().__await__()
+
+            client.register_event_handler(Awaited, "win")
             connection.push(json.dumps({"target": "win"}))
             await wait_for(lambda: seen)
 

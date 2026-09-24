@@ -145,9 +145,9 @@ as a gate, so an unmarked file is in neither job and is effectively only covered
 The invariant to preserve: **`-m unit` and `-m integration` must sum to the whole suite.**
 
 ```bash
-pytest py/tests --collect-only -q -o addopts="" | tail -1   # 2543
-pytest -m unit --collect-only -q -o addopts="" | tail -1    # 1771
-pytest -m integration --collect-only -q -o addopts="" | tail -1  # 772
+pytest py/tests --collect-only -q -o addopts="" | tail -1   # 2625
+pytest -m unit --collect-only -q -o addopts="" | tail -1    # 1851
+pytest -m integration --collect-only -q -o addopts="" | tail -1  # 774
 ```
 
 If those stop adding up, a file lost its marker. The counts assume the optional test

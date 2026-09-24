@@ -55,7 +55,8 @@ from visdom import (
 _A = TypeVar("_A", bound="AsyncVisdom")
 
 # 'AsyncVisdom.register_event_handler' takes either kind: a plain handler runs on
-# the client's dispatch thread, a coroutine one is awaited on its loop.
+# the client's dispatch thread, one that returns an awaitable -- an 'async def'
+# or an object with an 'async def __call__' -- is awaited on its loop.
 _AsyncEventHandler = Callable[[_Event], Awaitable[Any]]
 
 CONNECT_TIMEOUT: float
@@ -66,6 +67,8 @@ HANDSHAKE_TIMEOUT: float
 RECONNECT_DELAY: float
 POLL_INTERVAL: float
 PING_INTERVAL: float
+# How long 'drain' waits for a handler that was already running when the
+# backchannel closed, before giving up on it.
 DISPATCH_DRAIN_TIMEOUT: float
 
 # The names 'AsyncVisdom.__getattr__' will proxy. Every one of them appears
