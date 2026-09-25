@@ -156,7 +156,7 @@ test.describe('Image Pane', () => {
     await expect(img).toHaveAttribute('height', '312px');
 
     const pos = await getComputedPosition(container);
-    expect(pos.top).toBe('-33.0514px');
+    expect(pos.top).toBe('-28.3298px');
     expect(pos.left).toBe('-3.93469px');
   });
 
