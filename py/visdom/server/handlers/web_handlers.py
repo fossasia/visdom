@@ -152,10 +152,15 @@ class UpdateHandler(BaseHandler):
 
     @staticmethod
     def update_embeddings_packet(p, args, max_old_content):
-        update_type = args["data"]["update_type"]
+        data = args.get("data")
+        if not isinstance(data, dict):
+            raise tornado.web.HTTPError(
+                400, reason="embeddings update data must be an object"
+            )
+        update_type = data["update_type"]
         content_id = get_rand_id()
         if update_type == "EntitySelected":
-            selected = args["data"]["selected"]
+            selected = data["selected"]
             p["content"]["selected"] = selected
             p["contentID"] = content_id
             # `selected` may not exist yet on the first selection, so use "add"
@@ -166,7 +171,7 @@ class UpdateHandler(BaseHandler):
             ]
         if update_type == "RegionSelected":
             old_data = p["content"]["data"]
-            new_data = args["data"]["points"]
+            new_data = data["points"]
             p["old_content"].append(old_data)
             # Cap retained history to prevent unbounded in-memory growth (#1320).
             if len(p["old_content"]) > max_old_content:
@@ -187,6 +192,26 @@ class UpdateHandler(BaseHandler):
     def update(
         p, args, max_text_lines, max_old_content, max_image_history, max_plot_history
     ):
+        if not args.get("data") and not args.get("delete") and args.get("name") is None:
+            # opts/layout-only update (e.g. update_window_opts): works for
+            # any pane type. A delete/named update also carries no data but
+            # is a content change, so it must reach the branches below.
+            return update_window(p, args)
+        # A delete/named update with no data, or an empty data list -- the
+        # opts-only case already returned above. These types have no
+        # delete/name semantics and would otherwise crash indexing
+        # args["data"], or (embeddings) silently empty every point instead
+        # of being rejected.
+        if not args.get("data") and p["type"] in (
+            "text",
+            "image_history",
+            "plot_history",
+            "embeddings",
+        ):
+            raise tornado.web.HTTPError(
+                400,
+                reason="{} panes do not support delete/name updates".format(p["type"]),
+            )
         # Update text in window, separated by a line break
         if p["type"] == "text":
             p["content"] += "<br>" + args["data"][0]["content"]
@@ -446,29 +471,39 @@ class UpdateHandler(BaseHandler):
             handler.write("win is not image_history; was {}".format(p["type"]))
             return
 
-        if not (
+        is_content_update = (
+            args.get("data") or args.get("delete") or args.get("name") is not None
+        )
+        content_data = (
+            p["content"].get("data") if isinstance(p["content"], dict) else None
+        )
+        if is_content_update and not (
             p["type"] == "text"
             or p["type"] == "image_history"
             or p["type"] == "plot_history"
             or p["type"] == "embeddings"
             or p["type"] == "table"
             or (
-                len(p["content"]["data"]) == 0
-                or p["content"]["data"][0]["type"]
-                in ["scatter", "scatter3d", "scattergl", "custom", "heatmap"]
+                isinstance(content_data, list)
+                and (
+                    len(content_data) == 0
+                    or content_data[0]["type"]
+                    in ["scatter", "scatter3d", "scattergl", "custom", "heatmap"]
+                )
             )
         ):
+            handler.set_status(400)
             handler.write(
                 "win is not scatter, heatmap, custom, image_history, plot_history, embeddings, or text; "
                 "was {}".format(
-                    p["content"]["data"][0]["type"]
-                    if len(p["content"]["data"]) > 0
+                    content_data[0]["type"]
+                    if isinstance(content_data, list) and len(content_data) > 0
                     else "empty"
                 )
             )
             return
 
-        if p["type"] == "embeddings":
+        if p["type"] == "embeddings" and args.get("data"):
             diff_packet = UpdateHandler.update_embeddings_packet(
                 p, args, handler.max_old_content
             )

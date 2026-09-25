@@ -508,10 +508,12 @@ def extract_eid(args):
 def update_window(p, args):
     """Adds new args to a window if they exist"""
     content = p["content"]
+    has_layout = isinstance(content, dict) and isinstance(content.get("layout"), dict)
     layout_update = args.get("layout", {})
-    for layout_name, layout_val in layout_update.items():
-        if layout_val is not None:
-            content["layout"][layout_name] = layout_val
+    if has_layout:
+        for layout_name, layout_val in layout_update.items():
+            if layout_val is not None:
+                content["layout"][layout_name] = layout_val
     opts = args.get("opts", {})
     for opt_name, opt_val in opts.items():
         if opt_val is not None:
@@ -521,7 +523,12 @@ def update_window(p, args):
             else:
                 p[opt_name] = opt_val
 
-    if "legend" in opts:
+    has_traces = (
+        p.get("type") == "plot"
+        and isinstance(content, dict)
+        and isinstance(content.get("data"), list)
+    )
+    if "legend" in opts and has_traces:
         legend = opts["legend"]
         pdata = p["content"]["data"]
         name = args.get("name")
