@@ -13,12 +13,16 @@ matrix the pane renders from, and registers an ``hparams`` window with that
 content — so the ``Visdom.hparams`` client is a thin call to this endpoint
 rather than gathering, flattening and creating the window itself. It reads
 through the server's ``DataStore`` (:class:`ExperimentStore` over
-``handler.storage``), so it stays backend-agnostic.
+``handler.storage``), so it stays backend-agnostic. Those reads -- a query reads
+the metadata of every stored environment -- run on the storage worker, from a
+copy of the experiments the server holds in memory taken on the loop first.
 
 The window is registered like any other pane (:func:`register_window`): written
 into the env state and broadcast to connected clients, so it appears live and is
 also served on the next env load; the environment is saved as soon as the pane
 exists, so a pane survives a server crash without waiting for an explicit save.
+That save goes through ``save_env_off_loop`` as well; only the window itself is
+registered on the loop.
 ``/experiments/hparams/update`` is the matching write path for an existing pane
 — replace its selection or re-run the stored one — since the generic
 ``/update`` endpoint only understands plot-shaped windows.
@@ -28,6 +32,7 @@ builds the queue that logging a run feeds, and drains it back into this module's
 own update handler, so a live refresh and a hand-written one are the same code.
 """
 
+import copy
 import logging
 
 import tornado.escape
@@ -36,6 +41,7 @@ import tornado.web
 
 from visdom.experiments import (
     DEFAULT_DEBOUNCE_SECONDS,
+    METADATA_KEY,
     ExperimentStore,
     LiveUpdateQueue,
     QueryParseError,
@@ -44,10 +50,14 @@ from visdom.experiments import (
 )
 from visdom.server.handlers.base_handlers import BaseHandler
 from visdom.utils.server_utils import (
+    LazyEnvData,
     check_auth,
+    ensure_env_present,
     extract_eid,
     register_window,
     check_readonly_message,
+    run_on_storage_executor,
+    save_env_off_loop,
     window,
 )
 
@@ -78,6 +88,47 @@ def _unknown_env_ids(unknown):
     return tornado.web.HTTPError(
         404, reason=_reason("no experiment for env_ids: {0}".format(named))
     )
+
+
+# ---- Pane selection, as it runs on the storage worker ---- #
+
+
+def _resident_experiments(state):
+    """Copy what a selection reads from the envs the server holds in memory.
+
+    Taken on the loop and handed to the storage worker, which must never read
+    ``state`` itself: the loop goes on editing those envs for as long as the
+    worker runs. Only the experiment blob is copied, since it is all a selection
+    reads. A materialised env with no blob is kept, as an empty env, because in
+    memory it has no experiment and its file must not be asked instead; an env
+    never read off disk is left out, because its file is current and the worker
+    reads that.
+    """
+    resident = {}
+    for eid, env in list(state.items()):
+        if isinstance(env, LazyEnvData) and not env.is_loaded:
+            continue
+        blob = env.get(METADATA_KEY)
+        resident[eid] = (
+            {METADATA_KEY: copy.deepcopy(blob)} if isinstance(blob, dict) else {}
+        )
+    return resident
+
+
+def _select_hparams(store, spec, resident):
+    """Select the runs ``spec`` names and flatten them into pane content.
+
+    Runs on the storage worker. Every experiment comes off disk except those in
+    ``resident``, the loop's copies of the envs the server is holding, which win
+    over their files exactly as the live envs did when the selection ran on the
+    loop. It takes the ``DataStore`` and those copies rather than the handler, so
+    the worker never looks at state the loop may be editing underneath it, and
+    it flattens on the way out, so what crosses back is the content itself.
+    """
+    experiments = ExperimentHparamsHandler._select(
+        ExperimentStore(store, env_provider=resident.get), spec
+    )
+    return flatten_experiments([experiment.to_dict() for experiment in experiments])
 
 
 class ExperimentHparamsHandler(BaseHandler):
@@ -232,13 +283,56 @@ class ExperimentHparamsHandler(BaseHandler):
         return flatten_experiments([experiment.to_dict() for experiment in experiments])
 
     @staticmethod
-    def wrap_func(handler, args):
+    async def _build_content_off_loop(handler, spec):
+        """:meth:`_build_content`, with its reads on the storage worker.
+
+        A query selection reads the metadata of every environment the store
+        knows, and an ``env_ids`` one a file per id; on the loop, either would
+        stall every other request for the whole of it.
+        """
+        return await run_on_storage_executor(
+            handler,
+            _select_hparams,
+            handler.storage,
+            spec,
+            _resident_experiments(handler.state),
+        )
+
+    @staticmethod
+    async def wrap_func(handler, args):
         spec = ExperimentHparamsHandler._resolve_spec(
             args.get("query"), args.get("env_ids"), args.get("mode")
         )
-        content = ExperimentHparamsHandler._build_content(handler, spec)
-
         eid = extract_eid(args)
+        # read before the first await, to be compared against once the last
+        # one is done: the env the pane lands in has to still be the env this
+        # request started with. A delete that lands while the selection is on
+        # the worker leaves nothing under the id, and a delete followed by a
+        # recreate leaves a different env entirely -- registering the window
+        # into either one puts the pane somewhere the caller never asked for,
+        # and saves it there. An env that was absent to begin with has nothing
+        # to go stale, and is the case the check has to let through: that is
+        # the request that legitimately creates it.
+        destination = handler.state.get(eid)
+
+        content = await ExperimentHparamsHandler._build_content_off_loop(handler, spec)
+
+        # the pane lands in an env the server may know only by its file, and
+        # registering a window reads that env; bringing it in first keeps the
+        # read on the worker -- ``ensure_env_present`` rather than
+        # ``ensure_env_loaded`` because an env the server has never
+        # materialised is exactly that case, and priming only what ``state``
+        # already tracks would leave ``register_window`` to file an empty env
+        # over a file full of windows. Nothing awaits between here and the
+        # snapshot the save takes, so the window saved is the window
+        # registered.
+        await ensure_env_present(handler, eid)
+        if destination is not None and handler.state.get(eid) is not destination:
+            # the eid stays out of the reason: it is echoed on the status line,
+            # which is latin-1 only, and eids are free-form unicode.
+            raise tornado.web.HTTPError(
+                400, reason="env the pane targets changed while it was built"
+            )
         opts = dict(args.get("opts") or {})
         opts.setdefault("title", "Hyperparameters")
         p = window(
@@ -250,15 +344,15 @@ class ExperimentHparamsHandler(BaseHandler):
         )
         p["hparams"] = spec
         register_window(handler, p, eid)
-        handler.storage.save_env(eid, handler.state[eid])
+        await save_env_off_loop(handler, eid)
 
     @check_auth
     @check_readonly_message(READONLY_MESSAGE)
-    def post(self):
+    async def post(self):
         args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
-        self.wrap_func(self, args)
+        await self.wrap_func(self, args)
 
 
 class ExperimentHparamsUpdateHandler(BaseHandler):
