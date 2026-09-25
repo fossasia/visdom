@@ -17,6 +17,7 @@ window; the tests inspect the created window in the app state. Experiments are
 seeded through a real ``ExperimentStore`` over a temporary directory.
 """
 
+import asyncio
 import json
 import os
 import shutil
@@ -371,6 +372,125 @@ class TestHparamsPaneStaysOffTheLoop(tornado.testing.AsyncHTTPTestCase):
             self.records(resp)["run-a"]["tags"], {"dataset": "memory-only"}
         )
         self.assertEqual(self.spy.calls["load_experiment"], ["run-b"])
+
+
+class TestHparamsCreateRaces(tornado.testing.AsyncHTTPTestCase):
+    """The loop serves other requests while the selection is read.
+
+    The pane's env is materialised before that read and looked at again once it
+    is back, so a delete that lands in between is answered rather than undone.
+    Each test parks one selection, changes the state from the loop, then lets
+    the selection go; it is held with events rather than by yielding a few
+    times, so the interleaving does not depend on how quickly the storage
+    worker happens to answer.
+    """
+
+    def setUp(self):
+        self._tmp_dir = tempfile.mkdtemp(prefix="visdom_exp_hparams_race_")
+        super().setUp()
+        seed_experiments(ExperimentStore(self._app.storage))
+        self.held = []
+
+    def tearDown(self):
+        super().tearDown()
+        shutil.rmtree(self._tmp_dir, ignore_errors=True)
+
+    def get_app(self):
+        self._app = Application(port=self.get_http_port(), env_path=self._tmp_dir)
+        return self._app
+
+    def post(self, body):
+        return self.http_client.fetch(
+            self.get_url("/experiments/hparams"),
+            method="POST",
+            body=json.dumps(body),
+            headers={"Content-Type": "application/json"},
+            raise_error=False,
+        )
+
+    def hold_selections(self):
+        """Park every selection until the test releases it.
+
+        Returns a patch whose selections announce themselves on ``self.held``
+        as ``(started, release)`` event pairs, in the order they begin.
+        """
+        build = ExperimentHparamsHandler._build_content_off_loop
+
+        async def held_build(handler, spec):
+            started, release = asyncio.Event(), asyncio.Event()
+            self.held.append((started, release))
+            started.set()
+            await release.wait()
+            return await build(handler, spec)
+
+        return mock.patch.object(
+            ExperimentHparamsHandler,
+            "_build_content_off_loop",
+            staticmethod(held_build),
+        )
+
+    async def wait_held(self, count):
+        """Wait until ``count`` selections are parked."""
+        while len(self.held) < count:
+            await asyncio.sleep(0.001)
+        await self.held[count - 1][0].wait()
+
+    @tornado.testing.gen_test
+    async def test_an_env_deleted_during_the_read_is_not_brought_back(self):
+        await self.post({"env_ids": ["run-a"], "win": "hp1", "eid": "dash"})
+
+        with self.hold_selections():
+            pending = self.post({"env_ids": ["run-a"], "win": "hp2", "eid": "dash"})
+            await self.wait_held(1)
+            del self._app.state["dash"]
+            self.held[0][1].set()
+            resp = await pending
+
+        self.assertEqual(resp.code, 404)
+        self.assertNotIn("dash", self._app.state)
+
+    @tornado.testing.gen_test
+    async def test_an_env_replaced_during_the_read_is_a_404(self):
+        """A deleted env recreated under the same name is not the target."""
+        await self.post({"env_ids": ["run-a"], "win": "hp1", "eid": "dash"})
+
+        with self.hold_selections():
+            pending = self.post({"env_ids": ["run-a"], "win": "hp2", "eid": "dash"})
+            await self.wait_held(1)
+            self._app.state["dash"] = {"jsons": {}, "reload": {}}
+            self.held[0][1].set()
+            resp = await pending
+
+        self.assertEqual(resp.code, 404)
+        self.assertEqual(self._app.state["dash"]["jsons"], {})
+
+    @tornado.testing.gen_test
+    async def test_an_env_the_server_never_knew_is_still_created(self):
+        """Only a target that was there and went away is refused."""
+        with self.hold_selections():
+            pending = self.post({"env_ids": ["run-a"], "win": "hp1", "eid": "fresh"})
+            await self.wait_held(1)
+            self.held[0][1].set()
+            resp = await pending
+
+        self.assertEqual(resp.code, 200)
+        self.assertIn("hp1", self._app.state["fresh"]["jsons"])
+
+    @tornado.testing.gen_test
+    async def test_an_env_created_during_the_read_receives_the_pane(self):
+        """An env that appeared while the selection ran is not a conflict."""
+        with self.hold_selections():
+            pending = self.post({"env_ids": ["run-a"], "win": "hp1", "eid": "fresh"})
+            await self.wait_held(1)
+            self._app.state["fresh"] = {
+                "jsons": {"other": {"id": "other", "type": "text"}},
+                "reload": {},
+            }
+            self.held[0][1].set()
+            resp = await pending
+
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(sorted(self._app.state["fresh"]["jsons"]), ["hp1", "other"])
 
 
 class TestSelectHparams(unittest.TestCase):

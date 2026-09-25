@@ -884,6 +884,11 @@ paths:
           description: >
             Creating a pane writes a window, so it is disabled because the
             server is in readonly mode.
+        "404":
+          description: >
+            An `env_ids` selection names an environment that has no
+            experiment, or the environment the pane was to be registered in
+            was deleted while the selection was being read.
 
   /experiments/hparams/update:
     post:
@@ -940,7 +945,10 @@ paths:
                   description: Overrides for the pane's window options.
       responses:
         "200":
-          description: The updated window ID as plain text.
+          description: >
+            The updated window ID as plain text. The pane is left as it is,
+            and the same ID returned, when a newer rebuild of it landed while
+            this one was reading its selection.
           content:
             text/plain:
               schema:
@@ -1040,6 +1048,11 @@ paths:
           description: >
             Creating a pane writes a window, so it is disabled because the
             server is in readonly mode.
+        "404":
+          description: >
+            An `env_ids` selection names an environment that has no
+            experiment, or the environment the pane was to be registered in
+            was deleted while the selection was being read.
 
   /experiments/hparams/update:
     post:
@@ -1096,7 +1109,10 @@ paths:
                   description: Overrides for the pane's window options.
       responses:
         "200":
-          description: The updated window ID as plain text.
+          description: >
+            The updated window ID as plain text. The pane is left as it is,
+            and the same ID returned, when a newer rebuild of it landed while
+            this one was reading its selection.
           content:
             text/plain:
               schema:

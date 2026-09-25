@@ -153,6 +153,14 @@ class ExperimentHparamsHandler(BaseHandler):
     window content and registered as a window (env state + broadcast); the reply
     is the created window id.
 
+    The selection is read on the storage worker, so the loop keeps serving
+    while it runs; the target env is materialised before that read and checked
+    again once it is back. An env deleted in the meantime answers 404 rather
+    than coming back as a new env holding the pane -- registering a window
+    files its env under ``state`` and the save behind it writes the file. An
+    env that was never there to begin with is still created, exactly as
+    registering a window in an unknown env has always done.
+
     Creating the pane writes a window into the env, so the endpoint is rejected
     with 403 while the server runs in readonly mode.
     """
@@ -298,14 +306,31 @@ class ExperimentHparamsHandler(BaseHandler):
         spec = ExperimentHparamsHandler._resolve_spec(
             args.get("query"), args.get("env_ids"), args.get("mode")
         )
-        content = await ExperimentHparamsHandler._build_content_off_loop(handler, spec)
-
         eid = extract_eid(args)
         # the pane lands in an env the server may know only by its file, and
-        # registering a window reads that env; bringing it in first keeps the
-        # read on the worker. Nothing awaits between here and the snapshot the
-        # save takes, so the window saved is the window registered.
+        # registering a window reads that env; bringing it in before the
+        # selection is read keeps the read on the worker, and holding on to the
+        # env it materialised gives the check below something to compare
+        # against. An env absent here is one the server does not track at all,
+        # and registering a window in one of those has always created it.
+        target = handler.state.get(eid)
         await ensure_env_loaded(handler, eid)
+
+        content = await ExperimentHparamsHandler._build_content_off_loop(handler, spec)
+
+        # the loop kept serving while the selection was read, so an env that
+        # was there when this started may have been deleted since. Registering
+        # the window would file it under ``state`` again and the save behind it
+        # would write its file back, so a target that is gone -- or has been
+        # replaced by a new env of the same name -- answers as the update path
+        # does rather than bringing a deleted env back carrying a pane.
+        if target is not None and handler.state.get(eid) is not target:
+            raise tornado.web.HTTPError(
+                404, reason=_reason("unknown env {0!r}".format(eid))
+            )
+
+        # nothing awaits between here and the snapshot the save takes, so the
+        # window saved is the window registered.
         opts = dict(args.get("opts") or {})
         opts.setdefault("title", "Hyperparameters")
         p = window(
@@ -356,8 +381,13 @@ class ExperimentHparamsUpdateHandler(BaseHandler):
     env is saved through ``save_env_off_loop``. The window is checked again once
     that read is back, because the loop kept serving requests while it ran: an
     env deleted or a window closed or retyped in the meantime answers as it
-    would have up front, and a refresh whose stored selection was replaced by
-    another update in the meantime is dropped rather than put back.
+    would have up front, and a rebuild that would undo a newer one is dropped
+    rather than written -- a refresh when the stored selection it replays has
+    since been replaced, an explicit update when the pane has since been
+    rebuilt (its ``contentID`` changed, which editing the window in place does
+    not). Either way the reply is still the window id: the pane the caller
+    asked about is there, carrying content at least as new as the content this
+    request built.
 
     That write reaches disk, so the endpoint is rejected with 403 while the
     server runs in readonly mode.
@@ -412,6 +442,7 @@ class ExperimentHparamsUpdateHandler(BaseHandler):
                     "pass a query and/or env_ids".format(win),
                 )
 
+        rebuilt_from = existing.get("contentID")
         content = await ExperimentHparamsHandler._build_content_off_loop(handler, spec)
 
         # the loop kept serving while the selection was read, so the pane may be
@@ -420,6 +451,14 @@ class ExperimentHparamsUpdateHandler(BaseHandler):
         if not has_selection and existing.get("hparams") != spec:
             # a newer selection has been written since this refresh read the
             # old one; rebuilding from the old one would undo it.
+            handler.write(win)
+            return
+        if has_selection and existing.get("contentID") != rebuilt_from:
+            # another rebuild landed while this one was reading, so the content
+            # on the pane is newer than the content this holds -- every rebuild
+            # carries a fresh contentID, which an edit to the window in place
+            # does not. Writing this one would put the older selection back and
+            # queue its snapshot behind the newer save.
             handler.write(win)
             return
 

@@ -466,6 +466,67 @@ class TestHparamsUpdateRaces(tornado.testing.AsyncHTTPTestCase):
         )
 
     @tornado.testing.gen_test
+    async def test_an_explicit_update_does_not_undo_a_newer_rebuild(self):
+        """The older of two overlapping selections must not win the pane.
+
+        Both name their own selection, so neither is caught by the refresh
+        check; the one that started first finishes last, and writing it would
+        replace the newer pane with older content and queue a snapshot of it
+        behind the newer save.
+        """
+        await self.post("/experiments/hparams", {"query": "lr < 0.01", "win": "hp1"})
+
+        with self.hold_selections():
+            older = self.post(
+                "/experiments/hparams/update", {"win": "hp1", "query": "lr < 1"}
+            )
+            await self.wait_held(1)
+            newer = self.post(
+                "/experiments/hparams/update", {"win": "hp1", "env_ids": ["run-b"]}
+            )
+            await self.wait_held(2)
+
+            self.held[1][1].set()
+            newer_resp = await newer
+            content_id = self.window()["contentID"]
+            self.held[0][1].set()
+            older_resp = await older
+
+        self.assertEqual((older_resp.code, newer_resp.code), (200, 200))
+        self.assertEqual(older_resp.body.decode(), "hp1")
+        self.assertEqual(self.window()["hparams"]["env_ids"], ["run-b"])
+        self.assertEqual(self.window()["contentID"], content_id)
+        records = self.window()["content"]["records"]
+        self.assertEqual([record["env_id"] for record in records], ["run-b"])
+
+    @tornado.testing.gen_test
+    async def test_an_explicit_update_outlives_an_edit_to_the_window(self):
+        """Only a rebuild of the pane drops one: a rename is not content.
+
+        The window dict is replaced while the selection is read, but no new
+        content came with it, so the update it was racing still lands -- and on
+        the window as it is now.
+        """
+        await self.post("/experiments/hparams", {"env_ids": ["run-a"], "win": "hp1"})
+
+        with self.hold_selections():
+            pending = self.post(
+                "/experiments/hparams/update", {"win": "hp1", "env_ids": ["run-b"]}
+            )
+            await self.wait_held(1)
+            self._app.state["main"]["jsons"]["hp1"] = dict(
+                self.window(), title="renamed"
+            )
+            self.held[0][1].set()
+            resp = await pending
+
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(self.window()["title"], "renamed")
+        self.assertEqual(self.window()["hparams"]["env_ids"], ["run-b"])
+        records = self.window()["content"]["records"]
+        self.assertEqual([record["env_id"] for record in records], ["run-b"])
+
+    @tornado.testing.gen_test
     async def test_opts_changed_during_the_read_are_kept(self):
         """The rebuilt pane takes its title from the window as it is now."""
         await self.post("/experiments/hparams", {"env_ids": ["run-a"], "win": "hp1"})
