@@ -189,15 +189,9 @@ class LazyEnvData(Mapping):
         if self._raw_dict is not None:
             return
 
-        try:
-            raw = dict(env_data)
-            raw["jsons"] = env_data["jsons"]
-            raw["reload"] = env_data["reload"]
-        except (KeyError, TypeError) as e:
-            raise ValueError(
-                "Failed loading environment json: {} - {}".format(self._eid, repr(e))
-            )
-        self._raw_dict = raw
+        if not env_is_well_formed(env_data):
+            raise ValueError("Failed loading environment json: {}".format(self._eid))
+        self._raw_dict = dict(env_data)
 
     def __getitem__(self, key):
         self.lazy_load_data()
@@ -498,6 +492,42 @@ def escape_eid(eid):
     )
 
 
+def env_is_well_formed(env):
+    """Whether ``env`` is shaped like ``{"jsons": {win_id: pane}, "reload": {}}``.
+
+    ``load_env`` reads ``jsons.values()`` and then ``pane.get()``,
+    ``compare_envs`` reads ``jsons.keys()``, so both keys being present is not
+    enough: the values have to be mappings too.
+
+    Takes any ``Mapping``, so a ``LazyEnvData`` can be checked without copying it.
+    """
+    kept, skipped = drop_unreadable_panes(env)
+    return kept is not None and not skipped
+
+
+def drop_unreadable_panes(env):
+    """Split off the panes in ``env`` that are not mappings.
+
+    Returns ``(env, skipped)``: ``env`` holding only its readable panes, and the
+    ids of the ones left out. ``env`` itself is returned when nothing was left
+    out. If ``jsons`` or ``reload`` is not a mapping there is nothing to keep,
+    and ``None`` comes back in its place.
+    """
+    if not isinstance(env, Mapping):
+        return None, []
+    jsons = env.get("jsons")
+    if not isinstance(jsons, Mapping) or not isinstance(env.get("reload"), Mapping):
+        return None, []
+    skipped = [wid for wid, pane in jsons.items() if not isinstance(pane, Mapping)]
+    if not skipped:
+        return env, []
+    kept = dict(env)
+    kept["jsons"] = {
+        wid: pane for wid, pane in jsons.items() if isinstance(pane, Mapping)
+    }
+    return kept, skipped
+
+
 def extract_eid(args):
     """Extract eid from args. If eid does not exist in args,
     it returns 'main'."""
@@ -665,6 +695,10 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
             if env:
                 state[eid] = env
                 envs[eid] = env
+
+    for name, env in envs.items():
+        if not env_is_well_formed(env):
+            raise ValueError(f"environment {name!r} is not a readable environment")
 
     valid_eids = [eid for eid in eids if eid in envs]
     if not valid_eids:
@@ -894,6 +928,9 @@ def load_env(state, eid, socket, store, undo_count=None, warmed=False):
         if loaded:
             env = loaded
             state[eid] = env
+
+    if env != {} and not env_is_well_formed(env):
+        raise ValueError(f"environment {eid!r} is not a readable environment")
 
     if "reload" in env:
         socket.write_message(

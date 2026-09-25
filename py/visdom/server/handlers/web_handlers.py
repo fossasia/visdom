@@ -59,6 +59,7 @@ from visdom.utils.server_utils import (
     update_window,
     hash_password_off_loop,
     stringify,
+    drop_unreadable_panes,
     push_deleted,
     notify,
     LazyEnvData,
@@ -906,10 +907,15 @@ class UploadEnvHandler(BaseHandler):
             self.write({"success": False, "error": "Invalid JSON file"})
             return
 
-        if not (isinstance(data, dict) and "jsons" in data and "reload" in data):
+        data, skipped = drop_unreadable_panes(data)
+        if data is None:
             self.set_status(400)
             self.write({"success": False, "error": "This is not a valid Visdom JSON"})
             return
+        if skipped:
+            logging.warning(
+                "upload_env: skipping unreadable panes %s in %s", skipped, filename
+            )
 
         uid = uuid.uuid4().hex[:8]
         new_eid = f"uploaded_{uid}"
@@ -924,11 +930,15 @@ class UploadEnvHandler(BaseHandler):
 
         broadcast_envs(self)
 
+        message = f"Dashboard loaded successfully as '{new_eid}'"
+        if skipped:
+            message += f", skipping {len(skipped)} unreadable pane(s)"
         self.write(
             {
                 "success": True,
                 "eid": new_eid,
-                "message": f"Dashboard loaded successfully as '{new_eid}'",
+                "message": message,
+                "skipped_panes": skipped,
             }
         )
 
