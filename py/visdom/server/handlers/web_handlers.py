@@ -187,6 +187,38 @@ class UpdateHandler(BaseHandler):
     def update(
         p, args, max_text_lines, max_old_content, max_image_history, max_plot_history
     ):
+        name = args.get("name")
+        new_data = args.get("data")
+        delete = args.get("delete")
+        if (
+            name is not None
+            and not delete
+            and (not isinstance(new_data, list) or len(new_data) != 1)
+        ):
+            raise tornado.web.HTTPError(
+                400, reason="a named trace update takes exactly one data entry"
+            )
+
+        layout_update = args.get("layout")
+        if layout_update is not None and not isinstance(layout_update, dict):
+            raise tornado.web.HTTPError(400, reason="layout must be an object")
+
+        opts = args.get("opts")
+        if opts is not None and not isinstance(opts, dict):
+            raise tornado.web.HTTPError(400, reason="opts must be an object")
+
+        if (
+            opts is not None
+            and "legend" in opts
+            and not isinstance(opts["legend"], list)
+        ):
+            raise tornado.web.HTTPError(
+                400, reason="opts.legend must be a list of trace names"
+            )
+
+        if not new_data and p["type"] != "plot":
+            return update_window(p, args)
+
         # Update text in window, separated by a line break
         if p["type"] == "text":
             p["content"] += "<br>" + args["data"][0]["content"]
@@ -235,10 +267,7 @@ class UpdateHandler(BaseHandler):
 
         pdata = p["content"]["data"]
 
-        new_data = args.get("data")
         p = update_window(p, args)
-        name = args.get("name")
-        delete = args.get("delete")
         # An unnamed delete carries no name and no data, which this shortcut used
         # to read as "opts-only update" and return early, silently dropping the
         # deletion. Ask about the delete flag first. ``not new_data`` also covers
@@ -250,10 +279,6 @@ class UpdateHandler(BaseHandler):
         idxs = list(range(len(pdata)))
 
         if name is not None:
-            if not delete and len(new_data) != 1:
-                raise tornado.web.HTTPError(
-                    400, reason="a named trace update takes exactly one data entry"
-                )
             idxs = [i for i in idxs if pdata[i]["name"] == name]
 
         # Delete a trace
@@ -446,29 +471,34 @@ class UpdateHandler(BaseHandler):
             handler.write("win is not image_history; was {}".format(p["type"]))
             return
 
+        content = p.get("content")
+        traces = content.get("data") if isinstance(content, dict) else None
+        first = traces[0] if isinstance(traces, list) and traces else None
+        trace_type = first.get("type") if isinstance(first, dict) else None
+        # opts and layout apply to every plot pane. Only a data update cares
+        # about the trace type, because update() reads x/y straight off it.
+        opts_only = not args.get("data")
+        is_plot = isinstance(traces, list) and (
+            not traces
+            or opts_only
+            or trace_type in ["scatter", "scatter3d", "scattergl", "custom", "heatmap"]
+        )
+
         if not (
             p["type"] == "text"
             or p["type"] == "image_history"
             or p["type"] == "plot_history"
             or p["type"] == "embeddings"
             or p["type"] == "table"
-            or (
-                len(p["content"]["data"]) == 0
-                or p["content"]["data"][0]["type"]
-                in ["scatter", "scatter3d", "scattergl", "custom", "heatmap"]
-            )
+            or is_plot
         ):
             handler.write(
                 "win is not scatter, heatmap, custom, image_history, plot_history, embeddings, or text; "
-                "was {}".format(
-                    p["content"]["data"][0]["type"]
-                    if len(p["content"]["data"]) > 0
-                    else "empty"
-                )
+                "was {}".format(trace_type or p["type"])
             )
             return
 
-        if p["type"] == "embeddings":
+        if p["type"] == "embeddings" and args.get("data"):
             diff_packet = UpdateHandler.update_embeddings_packet(
                 p, args, handler.max_old_content
             )
