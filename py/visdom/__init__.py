@@ -4661,7 +4661,7 @@ class Visdom(object):
         assert M >= 2, "X must have at least 2 dimensions (columns)"
 
         if Y is not None:
-            Y = np.squeeze(np.asarray(Y, dtype=float))
+            Y = np.atleast_1d(np.squeeze(np.asarray(Y, dtype=float)))
             assert Y.ndim == 1, "Y must be a 1D vector"
             assert (
                 len(Y) == N
