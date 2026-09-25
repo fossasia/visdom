@@ -106,11 +106,17 @@ def measure_server(args):
     for n_points in harness.parse_sizes(args):
         x = np.arange(n_points, dtype=np.float64)
         y = np.sin(x / 50.0)
+        # ``--traces n`` has to shape the pane here too, or the row would be
+        # labelled with a trace count only the in-process path ever honoured.
+        # Visdom reads a column per trace out of a two-dimensional ``Y``.
+        if args.traces > 1:
+            y = np.column_stack([y + offset for offset in range(args.traces)])
         win = client.line(X=x, Y=y, env="benchmark")
         tip = np.array([float(n_points)])
+        tip_y = np.full((1, args.traces), 0.5) if args.traces > 1 else np.array([0.5])
 
-        def append(win=win, tip=tip):
-            client.line(X=tip, Y=tip, win=win, env="benchmark", update="append")
+        def append(win=win, tip=tip, tip_y=tip_y):
+            client.line(X=tip, Y=tip_y, win=win, env="benchmark", update="append")
 
         # The pane lives on the server and every append grows it, so without a
         # reset the row labelled ``n_points`` would measure a pane that ends at
