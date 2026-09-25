@@ -45,6 +45,7 @@ from visdom.experiments.store import (
     DEFAULT_SORT_FIELD,
     ExperimentStore,
     METADATA_KEY,
+    experiment_from_blob,
     retarget_experiment,
 )
 from visdom.experiments.tags import (
@@ -78,6 +79,7 @@ __all__ = [
     "tags_to_mapping",
     "build_comparison",
     "build_record",
+    "experiment_from_blob",
     "flatten_experiments",
     "parse_query",
     "resolve_targets",
