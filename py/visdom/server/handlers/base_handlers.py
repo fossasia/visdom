@@ -42,7 +42,7 @@ class BaseWebSocketHandler(StateAccessorsMixin, tornado.websocket.WebSocketHandl
         """
         try:
             return self.get_secure_cookie("user_password")
-        except Exception:  # Not using secure cookies
+        except (ValueError, TypeError):  # Not using secure cookies
             return None
 
 
