@@ -601,14 +601,12 @@ def test_parallel_coordinates_reserves_extra_width_for_the_colorbar(capture_send
     assert sent["payload"]["opts"]["width"] == 5 * 140 + 100
 
 
-def test_parallel_coordinates_rejects_a_single_experiment_with_colors(offline_client):
-    """np.squeeze turns a one-element Y into a scalar, which the 1D check refuses.
-
-    A single-row X is otherwise legal, so colouring one experiment is the one
-    combination that cannot be plotted.
-    """
-    with pytest.raises(AssertionError, match="Y must be a 1D vector"):
-        offline_client.parallel_coordinates(X=np.array([[1.0, 2.0]]), Y=np.array([1.0]))
+def test_parallel_coordinates_accepts_a_single_experiment_with_colors(capture_send):
+    """Size-1 Y is preserved as a 1D vector and plots successfully."""
+    sent = capture_send(
+        lambda v: v.parallel_coordinates(X=np.array([[1.0, 2.0]]), Y=np.array([1.0]))
+    )
+    assert sent["payload"]["data"][0]["line"]["color"] == [1.0]
 
 
 def test_parallel_coordinates_never_goes_below_a_readable_width(capture_send):

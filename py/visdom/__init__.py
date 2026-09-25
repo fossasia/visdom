@@ -4630,9 +4630,9 @@ class Visdom(object):
         `X` represents one experiment and each column represents a dimension
         (e.g., a hyperparameter or metric).
 
-        An optional `N`-length vector `Y` supplies per-experiment color values
-        (e.g., accuracy or loss) so that the lines are shaded according to
-        a continuous colorscale.
+        An optional `N`-length vector or scalar (for `N=1`) `Y` supplies
+        per-experiment color values (e.g., accuracy or loss) so that the lines
+        are shaded according to a continuous colorscale.
 
         The following `opts` are supported:
 
@@ -4661,7 +4661,7 @@ class Visdom(object):
         assert M >= 2, "X must have at least 2 dimensions (columns)"
 
         if Y is not None:
-            Y = np.squeeze(np.asarray(Y, dtype=float))
+            Y = np.atleast_1d(np.squeeze(np.asarray(Y, dtype=float)))
             assert Y.ndim == 1, "Y must be a 1D vector"
             assert (
                 len(Y) == N

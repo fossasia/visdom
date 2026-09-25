@@ -13,6 +13,7 @@ receives, so these run on the ``capture_send`` fixture, which intercepts the
 payload, and on ``offline_client`` where only the input validation is under
 test. Neither opens a socket or reaches a server.
 """
+
 import math
 import unittest
 from unittest.mock import patch
@@ -808,3 +809,71 @@ class TestMatplotResizable(unittest.TestCase):
         opts = self._matplot(_FakePlot(width_pt="100.5", height_pt="200.5"))
         self.assertEqual(opts["height"], 1.4 * math.ceil(200.5))  # 1.4 * 201
         self.assertEqual(opts["width"], 1.35 * math.ceil(100.5))  # 1.35 * 101
+
+
+# --------------------------------------------------- parallel_coordinates ----
+
+
+def test_parallel_coordinates_size1_list_y(capture_send):
+    """Size-1 Python list Y is preserved as a 1D vector and plots successfully."""
+    sent = capture_send(
+        lambda v: v.parallel_coordinates(
+            X=[[1.0, 2.0, 3.0]],
+            Y=[0.5],
+        )
+    )
+    trace = sent["payload"]["data"][0]
+    assert trace["type"] == "parcoords"
+    assert trace["line"]["color"] == [0.5]
+
+
+def test_parallel_coordinates_numpy_1d_size1_y(capture_send):
+    """NumPy 1D array of shape (1,) succeeds for size-1 Y."""
+    sent = capture_send(
+        lambda v: v.parallel_coordinates(
+            X=np.array([[1.0, 2.0]]),
+            Y=np.array([0.7]),
+        )
+    )
+    trace = sent["payload"]["data"][0]
+    assert trace["type"] == "parcoords"
+    assert trace["line"]["color"] == [0.7]
+
+
+def test_parallel_coordinates_numpy_2d_size1_y(capture_send):
+    """NumPy 2D array of shape (1, 1) is squeezed and preserved as a 1D vector."""
+    sent = capture_send(
+        lambda v: v.parallel_coordinates(
+            X=np.array([[1.0, 2.0]]),
+            Y=np.array([[0.7]]),
+        )
+    )
+    trace = sent["payload"]["data"][0]
+    assert trace["type"] == "parcoords"
+    assert trace["line"]["color"] == [0.7]
+
+
+def test_parallel_coordinates_scalar_y(capture_send):
+    """Pure numeric scalar Y is normalized to a 1D vector for N=1 experiment."""
+    sent = capture_send(
+        lambda v: v.parallel_coordinates(
+            X=[[1.0, 2.0]],
+            Y=0.7,
+        )
+    )
+    trace = sent["payload"]["data"][0]
+    assert trace["type"] == "parcoords"
+    assert trace["line"]["color"] == [0.7]
+
+
+def test_parallel_coordinates_multi_experiment(capture_send):
+    """Multi-experiment input with Y vector works as expected."""
+    sent = capture_send(
+        lambda v: v.parallel_coordinates(
+            X=[[1.0, 2.0], [3.0, 4.0]],
+            Y=[0.1, 0.9],
+        )
+    )
+    trace = sent["payload"]["data"][0]
+    assert trace["type"] == "parcoords"
+    assert trace["line"]["color"] == [0.1, 0.9]
