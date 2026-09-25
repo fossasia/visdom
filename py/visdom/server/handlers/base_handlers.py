@@ -40,6 +40,8 @@ class BaseWebSocketHandler(StateAccessorsMixin, tornado.websocket.WebSocketHandl
         based the value of cookies that set in POST method
         at IndexHandler by self.set_secure_cookie
         """
+        if not self.application.settings.get("cookie_secret"):
+            return None
         try:
             return self.get_secure_cookie("user_password")
         except (ValueError, TypeError):  # Not using secure cookies
