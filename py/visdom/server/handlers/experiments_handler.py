@@ -52,7 +52,7 @@ from visdom.server.handlers.base_handlers import BaseHandler
 from visdom.utils.server_utils import (
     LazyEnvData,
     check_auth,
-    ensure_env_loaded,
+    ensure_env_present,
     extract_eid,
     register_window,
     check_readonly_message,
@@ -303,14 +303,36 @@ class ExperimentHparamsHandler(BaseHandler):
         spec = ExperimentHparamsHandler._resolve_spec(
             args.get("query"), args.get("env_ids"), args.get("mode")
         )
+        eid = extract_eid(args)
+        # read before the first await, to be compared against once the last
+        # one is done: the env the pane lands in has to still be the env this
+        # request started with. A delete that lands while the selection is on
+        # the worker leaves nothing under the id, and a delete followed by a
+        # recreate leaves a different env entirely -- registering the window
+        # into either one puts the pane somewhere the caller never asked for,
+        # and saves it there. An env that was absent to begin with has nothing
+        # to go stale, and is the case the check has to let through: that is
+        # the request that legitimately creates it.
+        destination = handler.state.get(eid)
+
         content = await ExperimentHparamsHandler._build_content_off_loop(handler, spec)
 
-        eid = extract_eid(args)
         # the pane lands in an env the server may know only by its file, and
         # registering a window reads that env; bringing it in first keeps the
-        # read on the worker. Nothing awaits between here and the snapshot the
-        # save takes, so the window saved is the window registered.
-        await ensure_env_loaded(handler, eid)
+        # read on the worker -- ``ensure_env_present`` rather than
+        # ``ensure_env_loaded`` because an env the server has never
+        # materialised is exactly that case, and priming only what ``state``
+        # already tracks would leave ``register_window`` to file an empty env
+        # over a file full of windows. Nothing awaits between here and the
+        # snapshot the save takes, so the window saved is the window
+        # registered.
+        await ensure_env_present(handler, eid)
+        if destination is not None and handler.state.get(eid) is not destination:
+            # the eid stays out of the reason: it is echoed on the status line,
+            # which is latin-1 only, and eids are free-form unicode.
+            raise tornado.web.HTTPError(
+                400, reason="env the pane targets changed while it was built"
+            )
         opts = dict(args.get("opts") or {})
         opts.setdefault("title", "Hyperparameters")
         p = window(
