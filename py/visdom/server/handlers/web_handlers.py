@@ -152,10 +152,15 @@ class UpdateHandler(BaseHandler):
 
     @staticmethod
     def update_embeddings_packet(p, args, max_old_content):
-        update_type = args["data"]["update_type"]
+        data = args.get("data")
+        if not isinstance(data, dict):
+            raise tornado.web.HTTPError(
+                400, reason="embeddings update data must be an object"
+            )
+        update_type = data["update_type"]
         content_id = get_rand_id()
         if update_type == "EntitySelected":
-            selected = args["data"]["selected"]
+            selected = data["selected"]
             p["content"]["selected"] = selected
             p["contentID"] = content_id
             # `selected` may not exist yet on the first selection, so use "add"
@@ -166,7 +171,7 @@ class UpdateHandler(BaseHandler):
             ]
         if update_type == "RegionSelected":
             old_data = p["content"]["data"]
-            new_data = args["data"]["points"]
+            new_data = data["points"]
             p["old_content"].append(old_data)
             # Cap retained history to prevent unbounded in-memory growth (#1320).
             if len(p["old_content"]) > max_old_content:
