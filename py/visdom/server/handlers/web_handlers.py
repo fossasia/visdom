@@ -525,6 +525,12 @@ class CloseHandler(BaseHandler):
         always was. Their undo entries then go to the storage worker as one
         write rather than one per pane: closing an env with many panes used to
         read and rewrite its undo file once per pane, inline.
+
+        What is announced is decided after that write, against the env as it
+        stands then: the loop kept serving while the undo stack was written, so
+        a pane id this close popped may have been written again in the
+        meantime. Announcing its close would take that new pane off every
+        client while the server still holds it.
         """
         eid = extract_eid(args)
         win = args.get("win")
@@ -548,6 +554,11 @@ class CloseHandler(BaseHandler):
                 return
 
         for key, _p_data in closed:
+            if key in env["jsons"]:
+                # A pane was written back under this id while the undo stack
+                # was: the window there now is a new one, not the one this
+                # close popped, and it is not this close's to announce.
+                continue
             broadcast(handler, json.dumps({"command": "close", "data": key}), eid)
 
     @check_auth

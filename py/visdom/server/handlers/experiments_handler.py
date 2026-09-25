@@ -94,7 +94,7 @@ def _unknown_env_ids(unknown):
 # ---- Pane selection, as it runs on the storage worker ---- #
 
 
-def _resident_experiments(state):
+def _resident_experiments(state, env_ids=None):
     """Copy what a selection reads from the envs the server holds in memory.
 
     Taken on the loop and handed to the storage worker, which must never read
@@ -104,9 +104,20 @@ def _resident_experiments(state):
     memory it has no experiment and its file must not be asked instead; an env
     never read off disk is left out, because its file is current and the worker
     reads that.
+
+    ``env_ids`` narrows the copy to the environments a selection will actually
+    ask for. A blob carries the run's whole metric history, so copying every
+    resident env costs the loop all of it -- for a selection naming two envs on
+    a server holding fifty, and again on every live rebuild. Only a selection
+    that reads just the ids it names may pass them; a query reads every
+    environment the store knows and takes the whole snapshot.
     """
+    if env_ids is None:
+        items = list(state.items())
+    else:
+        items = [(eid, state[eid]) for eid in dict.fromkeys(env_ids) if eid in state]
     resident = {}
-    for eid, env in list(state.items()):
+    for eid, env in items:
         if isinstance(env, LazyEnvData) and not env.is_loaded:
             continue
         blob = env.get(METADATA_KEY)
@@ -284,13 +295,18 @@ class ExperimentHparamsHandler(BaseHandler):
         metadata of every environment the store knows, and an ``env_ids`` one a
         file per id; on the loop, either would stall every other request for
         the whole of it.
+
+        The snapshot the worker reads resident envs from is narrowed to match:
+        an ``env_ids`` selection only ever asks for the ids it names, so only
+        those are copied.
         """
+        wanted = spec.get("env_ids") if spec.get("mode") == "env_ids" else None
         return await run_on_storage_executor(
             handler,
             _select_hparams,
             handler.storage,
             spec,
-            _resident_experiments(handler.state),
+            _resident_experiments(handler.state, wanted),
         )
 
     @staticmethod

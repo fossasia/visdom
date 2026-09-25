@@ -31,10 +31,13 @@ import tornado.web
 from visdom.data_model import JSONStore
 from visdom.experiments import METADATA_KEY, ExperimentStore, flatten_experiments
 from visdom.server.app import Application
+from visdom.server.handlers import experiments_handler
 from visdom.server.handlers.experiments_handler import (
     ExperimentHparamsHandler,
+    _resident_experiments,
     _select_hparams,
 )
+from visdom.utils.server_utils import LazyEnvData
 
 from testutils.fakes import SpyStore
 
@@ -332,6 +335,48 @@ class TestHparamsPaneStaysOffTheLoop(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(self.spy.calls["load_experiment"], ["run-c", "run-a"])
         self.assertReachedOffLoop("load_experiment")
 
+    def _snapshot_taken_for(self, body):
+        """Post ``body`` and return the resident ids the worker was handed."""
+        taken = []
+        select = experiments_handler._select_hparams
+
+        def capture(store, spec, resident):
+            taken.append(sorted(resident))
+            return select(store, spec, resident)
+
+        with mock.patch.object(experiments_handler, "_select_hparams", capture):
+            resp = self.hparams(body)
+
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(len(taken), 1)
+        return taken[0]
+
+    def _make_resident(self, *env_ids):
+        for env_id in env_ids:
+            self._app.state[env_id] = JSONStore(self._tmp_dir).load_env(env_id)
+
+    def test_an_env_ids_selection_copies_only_the_named_envs(self):
+        """The copy the loop takes is the ids asked for and nothing else.
+
+        The blobs carry the runs' metric histories, so copying every resident
+        env would charge a two-run pane -- and every live rebuild of it -- the
+        whole of what the server is holding.
+        """
+        self._make_resident("run-a", "run-b", "run-c")
+
+        self.assertEqual(self._snapshot_taken_for({"env_ids": ["run-a"]}), ["run-a"])
+
+    def test_a_query_selection_still_copies_every_resident_env(self):
+        """It reads every environment the store knows, so it needs them all."""
+        self._make_resident("run-a", "run-b", "run-c")
+
+        taken = self._snapshot_taken_for({"query": "epochs > 0"})
+
+        self.assertEqual(
+            [env_id for env_id in taken if env_id != "main"],
+            ["run-a", "run-b", "run-c"],
+        )
+
     def test_the_pane_is_saved_on_the_storage_worker(self):
         resp = self.hparams({"env_ids": ["run-a"]})
 
@@ -371,6 +416,61 @@ class TestHparamsPaneStaysOffTheLoop(tornado.testing.AsyncHTTPTestCase):
             self.records(resp)["run-a"]["tags"], {"dataset": "memory-only"}
         )
         self.assertEqual(self.spy.calls["load_experiment"], ["run-b"])
+
+
+class TestResidentSnapshot(unittest.TestCase):
+    """What the loop copies out of ``state`` for the worker to select from.
+
+    A run's blob holds its whole metric history, so the copy is what the loop
+    pays to start a selection -- and a live pane pays it again on every
+    rebuild. A selection that reads only the ids it names must not be charged
+    for every environment the server happens to be holding.
+    """
+
+    def state(self):
+        return {
+            "run-a": {METADATA_KEY: {"env_id": "run-a", "metrics": {"acc": [1]}}},
+            "run-b": {METADATA_KEY: {"env_id": "run-b", "metrics": {"acc": [2]}}},
+            "plain": {"jsons": {}},
+        }
+
+    def test_every_resident_env_is_copied_when_no_ids_are_named(self):
+        """A query reads them all, so the whole snapshot is what it needs."""
+        resident = _resident_experiments(self.state())
+
+        self.assertEqual(sorted(resident), ["plain", "run-a", "run-b"])
+
+    def test_only_the_named_ids_are_copied(self):
+        resident = _resident_experiments(self.state(), ["run-b"])
+
+        self.assertEqual(list(resident), ["run-b"])
+
+    def test_a_named_id_the_server_does_not_hold_is_left_out(self):
+        """It has no resident copy to prefer; the worker reads its file."""
+        resident = _resident_experiments(self.state(), ["run-a", "ghost"])
+
+        self.assertEqual(list(resident), ["run-a"])
+
+    def test_a_repeated_id_is_copied_once(self):
+        resident = _resident_experiments(self.state(), ["run-a", "run-a"])
+
+        self.assertEqual(list(resident), ["run-a"])
+
+    def test_a_named_env_never_read_off_disk_is_left_out(self):
+        state = {"run-a": LazyEnvData(object(), "run-a")}
+
+        self.assertEqual(_resident_experiments(state, ["run-a"]), {})
+
+    def test_the_named_blob_is_still_a_copy(self):
+        state = self.state()
+
+        resident = _resident_experiments(state, ["run-a"])
+
+        self.assertEqual(resident["run-a"], state["run-a"])
+        self.assertIsNot(
+            resident["run-a"][METADATA_KEY]["metrics"],
+            state["run-a"][METADATA_KEY]["metrics"],
+        )
 
 
 class TestSelectHparams(unittest.TestCase):

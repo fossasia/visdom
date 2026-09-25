@@ -56,6 +56,7 @@ from visdom.utils.server_utils import (
     push_deleted,
     push_deleted_many,
     push_deleted_off_loop,
+    register_window,
     save_env_off_loop,
     warm_env,
 )
@@ -800,6 +801,65 @@ def race_close_with_delete(handler, store, eid, **args):
                 await removal
 
     asyncio.run(main())
+
+
+def race_close_with_rewrite(handler, store, eid, rewritten, **args):
+    """Write ``rewritten`` back into ``eid`` while the close's undo write is out.
+
+    ``race_close_with_delete``, but with the second client re-creating the pane
+    id rather than deleting its environment: the undo read is held open on the
+    worker, so the new window lands on the loop with the close parked on the
+    disk -- what a ``/events`` post reusing the id does.
+    """
+
+    async def main():
+        with call_held_open(store, "load_undo", eid) as (running, finish):
+            close = asyncio.ensure_future(
+                CloseHandler.wrap_func(handler, dict(args, eid=eid))
+            )
+            assert await asyncio.to_thread(
+                running.wait, 10
+            ), "the close never reached the disk"
+            register_window(handler, {"id": rewritten, "type": "text"}, eid)
+            finish.set()
+            await close
+
+    asyncio.run(main())
+
+
+def test_http_close_does_not_announce_a_pane_written_again_behind_it(
+    spy_store, env_path, storage_worker
+):
+    """A pane re-created while the close was on the disk survives the close.
+
+    The close popped the id on the loop and then awaited its undo write, and
+    the loop went on serving: an ``/events`` post reusing the id put a new
+    window there. Announcing the close afterwards took that window off every
+    client while the server went on holding it -- a pane only a reload brought
+    back.
+    """
+    handler = close_handler(spy_store, env_path, {"expt": env_payload()})
+    handler.storage_executor = storage_worker
+    sub = handler.add_sub(eid="expt")
+
+    race_close_with_rewrite(handler, spy_store, "expt", "win_0", win="win_0")
+
+    assert "win_0" in handler.state["expt"]["jsons"]
+    assert "close" not in sub.commands()
+
+
+def test_http_close_still_announces_the_panes_that_stayed_closed(
+    spy_store, env_path, storage_worker
+):
+    """Only the id that came back is held back; the rest close as they always did."""
+    handler = close_handler(spy_store, env_path, {"expt": env_with("win_0", "win_1")})
+    handler.storage_executor = storage_worker
+    sub = handler.add_sub(eid="expt")
+
+    race_close_with_rewrite(handler, spy_store, "expt", "win_0", win=None)
+
+    closed = [m["data"] for m in sub.sent if m.get("command") == "close"]
+    assert closed == ["win_1"]
 
 
 def race_read_with_delete(handler, store, eid, make_reader):
