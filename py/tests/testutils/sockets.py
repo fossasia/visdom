@@ -52,9 +52,10 @@ def socket_double(cls, app, remote_ip="127.0.0.1"):
     ``WrapSocketWrapper``'s GET route.
     """
     sock = cls()
-    sock.request = types.SimpleNamespace(remote_ip=remote_ip)
+    sock.request = types.SimpleNamespace(remote_ip=remote_ip, cookies={})
     sock.messages = deque()
     sock.last_read_time = time.time()
+    sock.application = app
     BaseWebSocketHandler.initialize(sock, app.server_state)
     return sock
 

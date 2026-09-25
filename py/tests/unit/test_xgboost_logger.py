@@ -17,10 +17,7 @@ xgb = pytest.importorskip("xgboost")
 
 from visdom.loggers.xgboost import VisdomXGBLogger
 
-pytestmark = [
-    pytest.mark.unit,
-    pytest.mark.skip(reason="Segfaults during interpreter teardown in CI"),
-]
+pytestmark = pytest.mark.unit
 
 
 def _unconnected_visdom():
