@@ -1238,9 +1238,8 @@ const App = () => {
         {envControls}
         <span className="topbar-divider" />
         {viewControls}
-        <span className="topbar-divider" />
-        {filterControl}
         <span className="topbar-spacer" />
+        {filterControl}
         <span className="topbar-divider" />
         {connectionIndicator}
       </div>
