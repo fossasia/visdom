@@ -40,12 +40,10 @@ class BaseWebSocketHandler(StateAccessorsMixin, tornado.websocket.WebSocketHandl
         based the value of cookies that set in POST method
         at IndexHandler by self.set_secure_cookie
         """
-        if not self.application.settings.get("cookie_secret"):
+        app = getattr(self, "application", None)
+        if not app or not app.settings.get("cookie_secret"):
             return None
-        try:
-            return self.get_secure_cookie("user_password")
-        except (ValueError, TypeError):  # Not using secure cookies
-            return None
+        return self.get_secure_cookie("user_password")
 
 
 class BaseHandler(StateAccessorsMixin, tornado.web.RequestHandler):
@@ -109,10 +107,10 @@ class BaseHandler(StateAccessorsMixin, tornado.web.RequestHandler):
         based the value of cookies that set in POST method
         at IndexHandler by self.set_secure_cookie
         """
-        try:
-            return self.get_secure_cookie("user_password")
-        except Exception:  # Not using secure cookies
+        app = getattr(self, "application", None)
+        if not app or not app.settings.get("cookie_secret"):
             return None
+        return self.get_secure_cookie("user_password")
 
     def write_error(self, status_code, **kwargs):
         logging.error("ERROR: %s: %s" % (status_code, kwargs))
