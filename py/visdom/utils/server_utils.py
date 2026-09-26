@@ -435,6 +435,18 @@ def push_deleted_off_loop(handler, eid, win_id, p_data):
     )
 
 
+def push_deleted_many_off_loop(handler, eid, panes):
+    """Record several closed panes off the loop; resolves to the new undo depth.
+
+    The panes are already out of ``state`` -- the close popped them on the loop
+    -- so the worker is the only owner of what it is handed and there is
+    nothing left for the loop to mutate mid-write.
+    """
+    return run_on_storage_executor(
+        handler, push_deleted_many, handler.storage, eid, panes
+    )
+
+
 def pop_deleted_off_loop(handler, eid):
     """Undo the newest close off the loop; resolves to ``(popped, depth)``."""
     return run_on_storage_executor(
@@ -639,10 +651,6 @@ def window(args):
         p["type"] = "plot"
 
     return p
-
-
-def gather_envs(state, store):
-    return sorted(set(store.list_envs() + list(state.keys())))
 
 
 def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
@@ -943,6 +951,28 @@ def push_deleted(store, eid, win_id, p_data):
     """
     stack = store.load_undo(eid)
     stack.append([win_id, p_data])
+    if len(stack) > DEFAULT_MAX_UNDO_HISTORY:
+        stack = stack[-DEFAULT_MAX_UNDO_HISTORY:]
+    store.save_undo(eid, stack)
+    return len(stack)
+
+
+def push_deleted_many(store, eid, panes):
+    """Append several closed panes to the env's undo stack in one write.
+
+    ``/close`` with no ``win`` closes every pane an environment has. Pushing
+    them one at a time costs a read and a write of the stack per pane, and once
+    the push is off the loop, a round trip to the storage worker per pane with
+    the loop free to change the env in between. They travel together instead:
+    the stack is read once and extended in the order the panes were closed, so
+    what lands is the stack that pushing them in turn would have left --
+    including the trim, which keeps the last ``DEFAULT_MAX_UNDO_HISTORY``
+    either way.
+
+    Returns the depth the stack was left at, as ``push_deleted`` does.
+    """
+    stack = store.load_undo(eid)
+    stack.extend([win_id, p_data] for win_id, p_data in panes)
     if len(stack) > DEFAULT_MAX_UNDO_HISTORY:
         stack = stack[-DEFAULT_MAX_UNDO_HISTORY:]
     store.save_undo(eid, stack)
