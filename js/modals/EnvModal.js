@@ -13,6 +13,7 @@ import ReactModal from 'react-modal';
 import ApiContext from '../api/ApiContext';
 import { MODAL_STYLE } from '../settings';
 import { showToast } from '../toasts/toastEvents';
+import EnvSelectDropdown from './EnvSelectDropdown';
 
 const MAX_TAG_NAME_LENGTH = 50;
 const MAX_TAGS_PER_ENV = 20;
@@ -59,7 +60,6 @@ function EnvModal(props) {
   const [tagRows, setTagRows] = useState([]);
   const [tagSaveStatus, setTagSaveStatus] = useState('idle');
   const [tagSaveError, setTagSaveError] = useState('');
-  const [envFilter, setEnvFilter] = useState('');
   const [selectedEnvs, setSelectedEnvs] = useState([]);
   useEffect(() => {
     setInputText(activeEnv);
@@ -69,7 +69,6 @@ function EnvModal(props) {
   }, [activeEnv, show]);
 
   useEffect(() => {
-    setEnvFilter('');
     setSelectedEnvs([]);
   }, [show]);
 
@@ -137,15 +136,7 @@ function EnvModal(props) {
   // rendering
   // ---------
 
-  const normalizedEnvFilter = envFilter.trim().toLowerCase();
-  const filteredEnvs = envList.filter((env) =>
-    env.toLowerCase().includes(normalizedEnvFilter)
-  );
-  const selectableEnvs = filteredEnvs.filter((env) => env !== 'main');
   const selectedEnvsSet = new Set(selectedEnvs);
-  const isAllSelected =
-    selectableEnvs.length > 0 &&
-    selectableEnvs.every((env) => selectedEnvsSet.has(env));
   return (
     <ReactModal
       isOpen={show}
@@ -178,88 +169,17 @@ function EnvModal(props) {
       </div>
       <br />
       Select environments to delete:
-      <br />
-      <input
-        aria-label="Filter environments"
-        className="form-control"
-        type="search"
-        placeholder="Filter environments..."
-        value={envFilter}
-        onChange={(ev) => {
-          setEnvFilter(ev.target.value);
-        }}
-        style={{ marginBottom: '10px', width: '100%' }}
+      <EnvSelectDropdown
+        activeEnv={activeEnv}
+        disabled={!canWrite}
+        envList={envList}
+        onChange={setSelectedEnvs}
+        resetToken={show}
+        selectedEnvs={selectedEnvs}
       />
-      <div className="form-inline">
-        <div
-          style={{
-            border: '1px solid #ccc',
-            padding: '10px',
-            height: '140px',
-            overflowY: 'scroll',
-            marginBottom: '10px',
-            width: '100%',
-            borderRadius: '4px',
-            backgroundColor: '#fff',
-          }}
-        >
-          <label
-            style={{ display: 'block', fontWeight: 'bold', cursor: 'pointer' }}
-          >
-            <input
-              type="checkbox"
-              style={{ marginRight: '8px' }}
-              disabled={!canWrite || selectableEnvs.length === 0}
-              checked={isAllSelected}
-              onChange={(ev) => {
-                setSelectedEnvs(ev.target.checked ? selectableEnvs : []);
-              }}
-            />
-            Select All
-          </label>
-          <hr style={{ margin: '5px 0' }} />
-
-          {filteredEnvs.length === 0 ? (
-            <div style={{ color: '#777' }}>No environments match.</div>
-          ) : (
-            filteredEnvs.map((env) => (
-              <label
-                key={env}
-                style={{
-                  display: 'block',
-                  fontWeight: 'normal',
-                  cursor: env === 'main' ? 'not-allowed' : 'pointer',
-                  color: env === 'main' ? '#999' : '#333',
-                  wordBreak: 'break-all',
-                }}
-              >
-                <input
-                  type="checkbox"
-                  style={{ marginRight: '8px' }}
-                  value={env}
-                  disabled={!canWrite || env === 'main'}
-                  checked={selectedEnvsSet.has(env)}
-                  onChange={(ev) => {
-                    if (ev.target.checked) {
-                      setSelectedEnvs((prev) =>
-                        Array.from(new Set([...prev, env]))
-                      );
-                    } else {
-                      setSelectedEnvs((prev) => prev.filter((e) => e !== env));
-                    }
-                  }}
-                />
-                {env}{' '}
-                {env === 'main' && (
-                  <span style={{ fontSize: '0.8em' }}>(protected)</span>
-                )}
-              </label>
-            ))
-          )}
-        </div>
-
+      <div className="env-delete-row">
         <button
-          className="btn btn-default"
+          className="btn btn-danger"
           disabled={
             !canWrite ||
             selectedEnvs.length === 0 ||
@@ -307,9 +227,17 @@ function EnvModal(props) {
               'success'
             );
           }}
+          type="button"
         >
           Delete Selected
         </button>
+        <span className="env-delete-hint">
+          {selectedEnvs.length === 0
+            ? 'Pick one or more environments above.'
+            : `${selectedEnvs.length} environment${
+                selectedEnvs.length === 1 ? '' : 's'
+              } will be removed permanently.`}
+        </span>
       </div>
       <hr />
       <span className="visdom-title">Manage Tags</span>
