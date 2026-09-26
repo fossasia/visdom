@@ -47,14 +47,15 @@ def socket_double(cls, app, remote_ip="127.0.0.1"):
     :class:`VisSocketWrapper` (a source). The returned object is not registered
     yet — call ``open()`` to exercise the registration path under test.
 
-    ``request`` is a stub carrying only ``remote_ip``, which is all ``open()``
-    reads off it. The server assigns the real one the same way, in
+    ``request`` is a stub carrying only ``remote_ip`` and ``cookies``, which is all ``open()``
+    and ``get_current_user()`` read off it. The server assigns the real one the same way, in
     ``WrapSocketWrapper``'s GET route.
     """
     sock = cls()
-    sock.request = types.SimpleNamespace(remote_ip=remote_ip)
+    sock.request = types.SimpleNamespace(remote_ip=remote_ip, cookies={})
     sock.messages = deque()
     sock.last_read_time = time.time()
+    sock.application = app
     BaseWebSocketHandler.initialize(sock, app.server_state)
     return sock
 

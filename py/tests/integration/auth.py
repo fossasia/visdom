@@ -249,6 +249,26 @@ class TestHealthIsPublic(LoginTestCase):
         self.assertEqual(json.loads(resp.body), {"status": "ok"})
 
 
+class TestBadCookieSecretConfig(LoginTestCase):
+    """Ensure misconfigured cookie_secret raises exception instead of hiding it."""
+
+    def get_app(self):
+        app = super().get_app()
+        # Deliberately misconfigure the cookie secret to be an integer (wrong type)
+        # to ensure that get_current_user does not swallow TypeError silently.
+        app.settings["cookie_secret"] = 12345
+        return app
+
+    def test_get_current_user_does_not_swallow_typeerror(self):
+        # Provide a syntactically valid secure cookie so get_secure_cookie
+        # reaches the signature verification logic, which crashes on the int secret.
+        forged = "2|1:0|10:1790439103|13:user_password|8:dGVzdA==|7135b0700b5c87506de8f06c3981cf779671f6f76b8a1e6b688b408b3ca6349c"
+        resp = self.fetch("/env/main", headers={"Cookie": f"user_password={forged}"})
+        # The server should error out (500) rather than swallowing the TypeError
+        # and returning 401 Unauthorized.
+        self.assertEqual(resp.code, 500)
+
+
 class TestAuthDisabledByDefault(VisdomHTTPTestCase):
     def test_no_login_means_no_cookie_is_needed(self):
         self.assertEqual(self.post_json("/env_state", {}).code, 200)
