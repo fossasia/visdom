@@ -145,15 +145,15 @@ as a gate, so an unmarked file is in neither job and is effectively only covered
 The invariant to preserve: **`-m unit` and `-m integration` must sum to the whole suite.**
 
 ```bash
-pytest py/tests --collect-only -q -o addopts="" | tail -1   # 2582
-pytest -m unit --collect-only -q -o addopts="" | tail -1    # 1810
-pytest -m integration --collect-only -q -o addopts="" | tail -1  # 772
+pytest py/tests --collect-only -q -o addopts="" | tail -1
+pytest -m unit --collect-only -q -o addopts="" | tail -1
+pytest -m integration --collect-only -q -o addopts="" | tail -1
 ```
 
 If those stop adding up, a file lost its marker. The counts assume the optional test
 dependencies are installed: `unit/keras_logger.py` and `unit/test_xgboost_logger.py` need
-`tensorflow` and `xgboost` (both in `test-requirements.txt`), and 39 of the `unit` total
-live in them.
+`tensorflow` and `xgboost` (both in `test-requirements.txt`), and their tests count towards
+the `unit` total.
 
 Nothing in the tracked suite is marked `server`; everything under `py/tests/` is hermetic by
 design. A script that needs a live server belongs in `example/manual/`.

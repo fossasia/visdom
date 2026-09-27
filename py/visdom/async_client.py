@@ -572,7 +572,11 @@ class _AsyncPolling(_AsyncBackchannel):
                     raise RuntimeError(
                         "polling query rejected: {0}".format(response.get("detail"))
                     )
-                for message in response["messages"]:
+                # A successful query need not carry a batch: the wrapper
+                # answers ``{"success": true}`` when it has nothing queued,
+                # and indexing that would end the session on a ``KeyError``
+                # and cost the sid over an ordinary empty poll.
+                for message in response.get("messages") or []:
                     await self._dispatch(message, handshake)
                 await asyncio.sleep(POLL_INTERVAL)
 
