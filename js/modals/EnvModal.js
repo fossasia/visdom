@@ -168,7 +168,16 @@ function EnvModal(props) {
         </button>
       </div>
       <br />
-      Select environments to delete:
+      <div className="env-delete-heading">
+        <span>Select environments to delete:</span>
+        <span className="env-delete-hint">
+          {selectedEnvs.length === 0
+            ? 'Pick one or more environments below.'
+            : `${selectedEnvs.length} environment${
+                selectedEnvs.length === 1 ? '' : 's'
+              } will be removed permanently.`}
+        </span>
+      </div>
       <EnvSelectDropdown
         activeEnv={activeEnv}
         disabled={!canWrite}
@@ -231,15 +240,8 @@ function EnvModal(props) {
         >
           Delete Selected
         </button>
-        <span className="env-delete-hint">
-          {selectedEnvs.length === 0
-            ? 'Pick one or more environments above.'
-            : `${selectedEnvs.length} environment${
-                selectedEnvs.length === 1 ? '' : 's'
-              } will be removed permanently.`}
-        </span>
       </div>
-      <hr />
+      <hr className="env-modal-divider" />
       <span className="visdom-title">Manage Tags</span>
       <br />
       Add optional key/value tags to an environment:

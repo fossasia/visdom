@@ -857,6 +857,13 @@ button[title="export latex"].active {
   cursor: not-allowed;
 }
 
+.env-delete-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  align-items: baseline;
+}
+
 .env-delete-row {
   display: flex;
   gap: 12px;
@@ -866,4 +873,8 @@ button[title="export latex"].active {
 .env-delete-hint {
   font-size: 12px;
   color: #6b6b6b;
+}
+
+.env-modal-divider {
+  margin: 24px 0 20px;
 }
