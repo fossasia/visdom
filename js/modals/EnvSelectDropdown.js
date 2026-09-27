@@ -7,6 +7,8 @@
  *
  */
 
+import './EnvSelectDropdown.css';
+
 import React, { useEffect, useRef, useState } from 'react';
 
 const PROTECTED_ENV = 'main';
@@ -86,8 +88,8 @@ function EnvSelectDropdown(props) {
   };
 
   useEffect(() => {
-    const panel = panelRef.current;
-    if (!open || !panel) return undefined;
+    const wrapper = wrapperRef.current;
+    if (!open || !wrapper) return undefined;
     const onKeyDown = (ev) => {
       if (ev.key === 'Escape') {
         ev.preventDefault();
@@ -97,6 +99,8 @@ function EnvSelectDropdown(props) {
         return;
       }
       if (ev.key !== 'ArrowDown' && ev.key !== 'ArrowUp') return;
+      const panel = panelRef.current;
+      if (!panel) return;
       ev.preventDefault();
       const boxes = Array.from(
         panel.querySelectorAll('input[type="checkbox"]:not(:disabled)')
@@ -113,8 +117,8 @@ function EnvSelectDropdown(props) {
       }
       boxes[next].focus();
     };
-    panel.addEventListener('keydown', onKeyDown);
-    return () => panel.removeEventListener('keydown', onKeyDown);
+    wrapper.addEventListener('keydown', onKeyDown);
+    return () => wrapper.removeEventListener('keydown', onKeyDown);
   }, [open]);
 
   const chips = selectedEnvs.slice(0, VISIBLE_CHIP_COUNT);

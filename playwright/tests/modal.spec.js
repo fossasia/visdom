@@ -162,6 +162,14 @@ test.describe.serial('Test Env Modal', () => {
     await page.keyboard.press('ArrowUp');
     await expect(page.getByLabel('Select All')).toBeFocused();
 
+    // shift+tab hands focus to the trigger; escape still closes the dropdown
+    await filterInput.press('Shift+Tab');
+    await expect(page.locator(envselecttrigger)).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(page.locator(envselectpanel)).toHaveCount(0);
+    await expect(page.locator(envmodal)).toBeVisible();
+    await openEnvSelect(page);
+
     // escape closes the dropdown only; the modal stays open
     await filterInput.press('Escape');
     await expect(page.locator(envselectpanel)).toHaveCount(0);

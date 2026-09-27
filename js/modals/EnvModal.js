@@ -7,6 +7,8 @@
  *
  */
 
+import './EnvModal.css';
+
 import React, { useContext, useEffect, useState } from 'react';
 import ReactModal from 'react-modal';
 
