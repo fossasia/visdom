@@ -19,7 +19,7 @@ We actively welcome your pull requests.
 5. Add demos for new features. Ensure the demos work.
 6. Make sure your code lints.
    - For JavaScript files, use `npm lint`
-   - For Python files, use `black py` (`pip install black==23.1`)
+   - For Python files, use `black py` (`pip install black==26.5.1`)
    - To do that automatically before each `git commit`, enable pre-commit hooks: `pre-commit install`.
 7. If you haven't already, complete the Contributor License Agreement ("CLA").
 

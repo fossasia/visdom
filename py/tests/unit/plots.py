@@ -13,6 +13,7 @@ receives, so these run on the ``capture_send`` fixture, which intercepts the
 payload, and on ``offline_client`` where only the input validation is under
 test. Neither opens a socket or reaches a server.
 """
+
 import math
 import unittest
 from unittest.mock import patch

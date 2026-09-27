@@ -29,7 +29,7 @@ jobs:
       - uses: psf/black@26.5.1
         with:
           src: "./py"
-          version: 23.1.0
+          version: 26.5.1
       - name: Check for Linting Errors
         if: failure()
         run: echo "::warning title='Python Linter Check failed'::Please run \"pip install black; black py\" before committing code changes to python files."

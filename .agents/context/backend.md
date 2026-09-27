@@ -13,7 +13,7 @@
 
 ## Coding Rules
 
-- Follow PEP 8, format with `black py` (v23.1.0), 80-char lines
+- Follow PEP 8, format with `black py` (v26.5.1), 80-char lines
 - Python >= 3.12 compatibility
 - Use `@pytorch_wrap` on all `Visdom` methods
 - Use `warn_once()` for deprecation warnings
