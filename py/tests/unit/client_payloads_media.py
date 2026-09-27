@@ -13,7 +13,7 @@ decode the payload back into an array and check the pixels the browser would
 receive. That is the only way to catch the failure mode this family actually
 has: a wrong scaling branch produces a valid payload holding a black image.
 
-Four behaviours pinned here are current, not desired:
+Three behaviours pinned here are current, not desired:
 
 * A float image whose maximum is just over 1.0 (1.0001 from a denormalization
   round trip, say) matches neither the [0, 1] nor the [-1, 1] branch, so it is
@@ -25,8 +25,6 @@ Four behaviours pinned here are current, not desired:
 * ``images`` insets each tile one pixel past its ``padding``, so the gap below
   and to the right of a tile is a pixel thinner than the gap above and to its
   left. See ``test_images_insets_each_tile_by_an_extra_pixel``.
-* ``svg(svgfile=...)`` stringifies the raw bytes, so newlines in the file reach
-  the browser as literal backslash-n.
 
 Everything runs against an ``offline_client`` through the
 ``capture_send`` fixture — no server, no sockets. ``update_image_slider``'s
@@ -729,17 +727,14 @@ def test_svg_reads_a_file(capture_send, tmp_path):
     assert content(sent) == "<svg width='2'><rect/></svg>"
 
 
-def test_svg_file_newlines_arrive_escaped(capture_send, tmp_path):
-    """Pinned defect: the file is read as bytes and stringified, not decoded.
-
-    ``str(b"...")`` renders every newline as a literal backslash-n, so a
-    pretty-printed SVG reaches the browser with escapes in its markup.
-    """
+@pytest.mark.parametrize("text", ["line one\nline two", "研究 café", r"literal \n path"])
+def test_svg_file_preserves_text(capture_send, tmp_path, text):
+    """File input must produce the same SVG text as the string API."""
+    markup = "<svg width='2'>\n<text>{}</text>\n</svg>".format(text)
     path = tmp_path / "drawing.svg"
-    path.write_text("<svg width='2'>\n  <rect/>\n</svg>\n")
+    path.write_text(markup + "\n", encoding="utf-8")
     sent = capture_send(lambda v: v.svg(svgfile=str(path)))
-    assert "\\n" in content(sent)
-    assert "\n" not in content(sent)
+    assert content(sent) == markup
 
 
 def test_svg_passes_opts_through(capture_send):
