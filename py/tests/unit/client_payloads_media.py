@@ -732,7 +732,7 @@ def test_svg_file_preserves_text(capture_send, tmp_path, text):
     """File input must produce the same SVG text as the string API."""
     markup = "<svg width='2'>\n<text>{}</text>\n</svg>".format(text)
     path = tmp_path / "drawing.svg"
-    path.write_text(markup + "\n", encoding="utf-8")
+    path.write_bytes((markup + "\n").encode("utf-8"))
     sent = capture_send(lambda v: v.svg(svgfile=str(path)))
     assert content(sent) == markup
 
