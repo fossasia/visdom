@@ -27,7 +27,6 @@ function EnvSelectDropdown(props) {
   const wrapperRef = useRef(null);
   const triggerRef = useRef(null);
   const filterRef = useRef(null);
-  const listRef = useRef(null);
   const panelRef = useRef(null);
 
   useEffect(() => {
@@ -98,12 +97,9 @@ function EnvSelectDropdown(props) {
         return;
       }
       if (ev.key !== 'ArrowDown' && ev.key !== 'ArrowUp') return;
-      if (!listRef.current) return;
       ev.preventDefault();
       const boxes = Array.from(
-        listRef.current.querySelectorAll(
-          'input[type="checkbox"]:not(:disabled)'
-        )
+        panel.querySelectorAll('input[type="checkbox"]:not(:disabled)')
       );
       if (boxes.length === 0) return;
       const step = ev.key === 'ArrowDown' ? 1 : -1;
@@ -187,7 +183,7 @@ function EnvSelectDropdown(props) {
             </label>
           )}
 
-          <div className="env-select-list" ref={listRef}>
+          <div className="env-select-list">
             {filteredEnvs.length === 0 ? (
               <div className="env-select-empty">
                 No environment matches that filter.

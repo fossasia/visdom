@@ -152,6 +152,16 @@ test.describe.serial('Test Env Modal', () => {
     await expect(page.locator(envselecttrigger)).toContainText(env + '_fork2');
     await expect(page.locator(envselecttrigger)).toContainText(env + '_fork3');
 
+    // arrow keys step through Select All as well as the options
+    await filterInput.press('ArrowDown');
+    await expect(page.getByLabel('Select All')).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(
+      page.locator(envmodal + `input[type="checkbox"][value="${env}_fork3"]`)
+    ).toBeFocused();
+    await page.keyboard.press('ArrowUp');
+    await expect(page.getByLabel('Select All')).toBeFocused();
+
     // escape closes the dropdown only; the modal stays open
     await filterInput.press('Escape');
     await expect(page.locator(envselectpanel)).toHaveCount(0);
