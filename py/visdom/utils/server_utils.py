@@ -805,7 +805,7 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
                 win_copy = copy.deepcopy(win)
                 win_copy["id"] = new_wid
                 label = (
-                    "[{}] {}".format(eid_num, html.escape(win_title))
+                    "[{}] {}".format(eid_num, win_title)
                     if win_title
                     else "[{}]".format(eid_num)
                 )

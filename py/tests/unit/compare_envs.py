@@ -516,10 +516,10 @@ def test_show_all_labels_every_pane_with_its_env(fake_socket, store):
     assert sorted(_titles(fake_socket)) == ["[a] notes", "[b] notes", "compare_legend"]
 
 
-def test_show_all_escapes_the_pane_title(fake_socket, store):
+def test_show_all_preserves_the_pane_title(fake_socket, store):
     state = {"a": _env(_text_pane("w1", "<script>"))}
     compare_envs(state, ["a"], fake_socket, store, show_all=True)
-    assert "[a] &lt;script&gt;" in _titles(fake_socket)
+    assert "[a] <script>" in _titles(fake_socket)
 
 
 def test_show_all_labels_an_untitled_pane_with_the_env_alone(fake_socket, store):
