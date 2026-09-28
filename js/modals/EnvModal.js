@@ -12,6 +12,7 @@ import ReactModal from 'react-modal';
 
 import ApiContext from '../api/ApiContext';
 import { MODAL_STYLE } from '../settings';
+import { showToast } from '../toasts/toastEvents';
 
 const MAX_TAG_NAME_LENGTH = 50;
 const MAX_TAGS_PER_ENV = 20;
@@ -58,14 +59,19 @@ function EnvModal(props) {
   const [tagRows, setTagRows] = useState([]);
   const [tagSaveStatus, setTagSaveStatus] = useState('idle');
   const [tagSaveError, setTagSaveError] = useState('');
+  const [envFilter, setEnvFilter] = useState('');
   const [selectedEnvs, setSelectedEnvs] = useState([]);
   useEffect(() => {
     setInputText(activeEnv);
     setTagEnv(activeEnv || envList[0] || '');
     setTagSaveStatus('idle');
     setTagSaveError('');
-    setSelectedEnvs([]);
   }, [activeEnv, show]);
+
+  useEffect(() => {
+    setEnvFilter('');
+    setSelectedEnvs([]);
+  }, [show]);
 
   useEffect(() => {
     setTagRows(rowsFromTags(tags[tagEnv]));
@@ -131,7 +137,11 @@ function EnvModal(props) {
   // rendering
   // ---------
 
-  const selectableEnvs = envList.filter((env) => env !== 'main');
+  const normalizedEnvFilter = envFilter.trim().toLowerCase();
+  const filteredEnvs = envList.filter((env) =>
+    env.toLowerCase().includes(normalizedEnvFilter)
+  );
+  const selectableEnvs = filteredEnvs.filter((env) => env !== 'main');
   const selectedEnvsSet = new Set(selectedEnvs);
   const isAllSelected =
     selectableEnvs.length > 0 &&
@@ -169,6 +179,17 @@ function EnvModal(props) {
       <br />
       Select environments to delete:
       <br />
+      <input
+        aria-label="Filter environments"
+        className="form-control"
+        type="search"
+        placeholder="Filter environments..."
+        value={envFilter}
+        onChange={(ev) => {
+          setEnvFilter(ev.target.value);
+        }}
+        style={{ marginBottom: '10px', width: '100%' }}
+      />
       <div className="form-inline">
         <div
           style={{
@@ -198,39 +219,43 @@ function EnvModal(props) {
           </label>
           <hr style={{ margin: '5px 0' }} />
 
-          {envList.map((env) => (
-            <label
-              key={env}
-              style={{
-                display: 'block',
-                fontWeight: 'normal',
-                cursor: env === 'main' ? 'not-allowed' : 'pointer',
-                color: env === 'main' ? '#999' : '#333',
-                wordBreak: 'break-all',
-              }}
-            >
-              <input
-                type="checkbox"
-                style={{ marginRight: '8px' }}
-                value={env}
-                disabled={!canWrite || env === 'main'}
-                checked={selectedEnvsSet.has(env)}
-                onChange={(ev) => {
-                  if (ev.target.checked) {
-                    setSelectedEnvs((prev) =>
-                      Array.from(new Set([...prev, env]))
-                    );
-                  } else {
-                    setSelectedEnvs((prev) => prev.filter((e) => e !== env));
-                  }
+          {filteredEnvs.length === 0 ? (
+            <div style={{ color: '#777' }}>No environments match.</div>
+          ) : (
+            filteredEnvs.map((env) => (
+              <label
+                key={env}
+                style={{
+                  display: 'block',
+                  fontWeight: 'normal',
+                  cursor: env === 'main' ? 'not-allowed' : 'pointer',
+                  color: env === 'main' ? '#999' : '#333',
+                  wordBreak: 'break-all',
                 }}
-              />
-              {env}{' '}
-              {env === 'main' && (
-                <span style={{ fontSize: '0.8em' }}>(protected)</span>
-              )}
-            </label>
-          ))}
+              >
+                <input
+                  type="checkbox"
+                  style={{ marginRight: '8px' }}
+                  value={env}
+                  disabled={!canWrite || env === 'main'}
+                  checked={selectedEnvsSet.has(env)}
+                  onChange={(ev) => {
+                    if (ev.target.checked) {
+                      setSelectedEnvs((prev) =>
+                        Array.from(new Set([...prev, env]))
+                      );
+                    } else {
+                      setSelectedEnvs((prev) => prev.filter((e) => e !== env));
+                    }
+                  }}
+                />
+                {env}{' '}
+                {env === 'main' && (
+                  <span style={{ fontSize: '0.8em' }}>(protected)</span>
+                )}
+              </label>
+            ))
+          )}
         </div>
 
         <button
@@ -241,16 +266,46 @@ function EnvModal(props) {
             selectedEnvsSet.has('main')
           }
           onClick={() => {
+            const deletedEnvs = [...selectedEnvs];
             // push active env at last to prevent breaking the queue
-            let sortedEnvs = selectedEnvs.filter((env) => env !== activeEnv);
+            let sortedEnvs = deletedEnvs.filter((env) => env !== activeEnv);
             if (selectedEnvsSet.has(activeEnv)) {
               sortedEnvs.push(activeEnv);
             }
-            sortedEnvs.forEach((env) => {
-              onEnvDelete(env, activeEnv);
-            });
-            setSelectedEnvs([]);
-            onModalClose();
+            const requestedDeletions = onEnvDelete(sortedEnvs, activeEnv);
+            if (requestedDeletions.length === 0) {
+              showToast(
+                'Unable to delete environments because the server connection is unavailable.',
+                'error'
+              );
+              return;
+            }
+            const requestedDeletionSet = new Set(requestedDeletions);
+            const failedDeletions = deletedEnvs.filter(
+              (env) => !requestedDeletionSet.has(env)
+            );
+            if (
+              requestedDeletionSet.has(tagEnv) &&
+              !requestedDeletionSet.has(activeEnv)
+            ) {
+              setTagEnv(activeEnv || 'main');
+              setTagSaveStatus('idle');
+              setTagSaveError('');
+            }
+            setSelectedEnvs(failedDeletions);
+            if (failedDeletions.length > 0) {
+              showToast(
+                'Some environment deletion requests could not be sent.',
+                'error'
+              );
+              return;
+            }
+            showToast(
+              deletedEnvs.length === 1
+                ? `Successfully deleted environment "${deletedEnvs[0]}".`
+                : `Successfully deleted ${deletedEnvs.length} environments.`,
+              'success'
+            );
           }}
         >
           Delete Selected

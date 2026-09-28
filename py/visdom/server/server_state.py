@@ -17,6 +17,7 @@ TODOs, and a natural future home for the data_model classes.
 """
 
 import logging
+import threading
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -147,12 +148,6 @@ class ServerState:
         self.sources = sources
         self.storage = storage
 
-        # Disk work runs on a single worker, so writes stay ordered with
-        # respect to each other and to the deletes queued behind them.
-        self.storage_executor = ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="visdom-storage"
-        )
-
         # Startup configuration (effectively immutable after construction).
         self.env_path = env_path
         self.port = port
@@ -188,6 +183,15 @@ class ServerState:
         self.storage_executor = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="visdom-storage"
         )
+        self._storage_shut_down = False
+        # ``shutdown_storage`` has two callers -- the graceful stop and the
+        # ``atexit`` hook -- and nothing orders them: a server embedded in a
+        # thread runs the first off the main thread, where the second always
+        # runs. Only the flag above keeps the second pass from saving again,
+        # and it is not set until the final save has returned, so without this
+        # both could be inside ``save_all`` at once, writing the same files
+        # from two threads.
+        self._storage_shutdown_lock = threading.Lock()
         # Set by the application once the handlers it drives can be imported;
         # a queue built here would need experiments_handler, which needs the
         # handlers that need this module.
@@ -331,12 +335,37 @@ class ServerState:
         Draining next stops an already-queued write from landing after the
         final save and putting a stale env back on disk. The final save covers
         whatever was still marked dirty, so the marks are cleared with it.
+
+        Idempotent: the graceful shutdown calls this, and the ``atexit`` hook
+        that covers a teardown which never reaches it calls it again. A second
+        pass must not re-run ``save_all`` -- the executor is already gone, so
+        anything written after the first pass could only be state the process
+        never served.
+
+        Only a final save that succeeded counts as shut down. If ``save_all``
+        raises, the ``atexit`` call tries it again instead of returning early
+        and leaving the changed environments in memory only. Stopping the timer
+        and the executor again on that retry is harmless.
+
+        That retry is also why the flag alone cannot be the whole guard: it is
+        not set until the save has returned, so two callers arriving at once
+        would both find it clear and write the same environment files from two
+        threads. The lock serializes them -- the second waits, then finds the
+        flag set and returns, which also makes it a real barrier rather than a
+        hint, so ``atexit`` never outruns a save still running on the loop. A
+        caller unwound out of the save, a signal handler raising ``SystemExit``
+        mid-write being the usual one, releases the lock on the way out, so the
+        retry can still take it.
         """
-        self.stop_autosave()
-        self.storage_executor.shutdown(wait=True)
-        self.storage.save_all(self.state)
-        self.dirty_envs.clear()
-        self.saving_envs.clear()
+        with self._storage_shutdown_lock:
+            if self._storage_shut_down:
+                return
+            self.stop_autosave()
+            self.storage_executor.shutdown(wait=True)
+            self.storage.save_all(self.state)
+            self._storage_shut_down = True
+            self.dirty_envs.clear()
+            self.saving_envs.clear()
 
     # ----- polling socket monitor ----- #
 
@@ -371,3 +400,24 @@ class ServerState:
     def stop_socket_monitor(self):
         if self._socket_wrap_monitor is not None:
             self._socket_wrap_monitor.stop()
+
+    # ----- shutdown ----- #
+
+    def close_connections(self):
+        """Close every open client connection and forget it.
+
+        Shutdown used to rebind ``Application.subs``/``sources`` to empty
+        lists, which left the sockets themselves open and this state -- the
+        holder of the real dictionaries every handler registers into --
+        untouched. Closing a connection lets its handler unregister itself;
+        clearing the containers afterwards covers a connection whose close
+        path never ran, and a handler that closes twice is harmless.
+        """
+        self.stop_socket_monitor()
+        for connections in (self.subs, self.sources):
+            for connection in list(connections.values()):
+                try:
+                    connection.close()
+                except Exception:
+                    logging.exception("Failed to close a client connection")
+            connections.clear()

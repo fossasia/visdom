@@ -33,7 +33,7 @@ visdom/
 ├── py/visdom/                           — Python package (client + server)
 │   ├── __init__.py                      — Visdom client class
 │   ├── __init__.pyi                     — Type stubs (PEP 484)
-│   ├── VERSION                          — Version string ("0.2.4")
+│   ├── VERSION                          — Version string ("0.3.0")
 │   ├── server/                          — Tornado web server
 │   │   ├── app.py                       — Application class: routes, state management
 │   │   ├── run_server.py                — CLI entry point

@@ -24,13 +24,17 @@ const ApiProvider = ({ children }) => {
 
   // Send a low-level message to the server
   const sendSocketMessage = (data) => {
-    if (!_socket.current) {
+    const socket = _socket.current;
+    if (
+      !socket ||
+      (socket.readyState !== undefined && socket.readyState !== WebSocket.OPEN)
+    ) {
       // eslint-disable-next-line no-console
       console.error(
         '[Visdom API] Cannot send message: WebSocket is not connected.',
         data
       );
-      return;
+      return false;
     }
 
     let msg = null;
@@ -39,15 +43,17 @@ const ApiProvider = ({ children }) => {
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error('[Visdom API] Failed to serialize message:', e, data);
-      return;
+      return false;
     }
 
     try {
-      _socket.current.send(msg);
+      socket.send(msg);
+      return true;
     } catch (e) {
       // WebSocket may be CLOSING or CLOSED state
       // eslint-disable-next-line no-console
       console.error('[Visdom API] Failed to send message:', e, data);
+      return false;
     }
   };
 
@@ -297,7 +303,7 @@ const ApiProvider = ({ children }) => {
 
   // Send request to delete an environment
   const sendEnvDelete = (envID, previousEnv) => {
-    sendSocketMessage({
+    return sendSocketMessage({
       cmd: 'delete_env',
       prev_eid: previousEnv,
       eid: envID,

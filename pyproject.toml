@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [tool.pytest.ini_options]
 # Scope discovery to the tracked suite under py/ so the experimental scratch
 # scripts in the repo root (test_*.py, test/) are ignored.

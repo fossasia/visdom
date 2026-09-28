@@ -52,7 +52,9 @@ from visdom.utils.server_utils import (
     ensure_env_loaded,
     load_env,
     pop_deleted,
+    purge_env,
     push_deleted,
+    push_deleted_off_loop,
     warm_env,
 )
 
@@ -376,6 +378,80 @@ def test_shutdown_drains_the_queue_before_the_final_save(app):
     app.shutdown_storage()
 
     assert order == ["queued-write", "final-save"]
+
+
+def test_a_second_shutdown_does_not_write_again(app):
+    """The graceful stop drains, then the atexit hook calls it once more."""
+    saves = []
+    app.storage.save_all = lambda state: saves.append(state)
+
+    app.shutdown_storage()
+    app.shutdown_storage()
+
+    assert len(saves) == 1
+
+
+def test_a_failed_final_save_is_retried_by_the_next_shutdown(app):
+    """A save that raised must not mark storage shut down, or atexit skips it."""
+    saves = []
+
+    def flaky_save_all(state):
+        saves.append(state)
+        if len(saves) == 1:
+            raise OSError("disk full")
+
+    app.storage.save_all = flaky_save_all
+
+    with pytest.raises(OSError):
+        app.shutdown_storage()
+    app.shutdown_storage()
+    app.shutdown_storage()
+
+    assert len(saves) == 2
+
+
+def test_two_shutdowns_at_once_still_save_only_once(app):
+    """Nothing orders the graceful stop against the ``atexit`` hook -- a server
+    embedded in a thread runs the first off the main thread, where the second
+    always runs -- and the flag that guards the second pass is not set until
+    the save has returned. So both used to get in and write the same
+    environment files from two threads at once.
+
+    The first save is held open rather than merely made slow, so the overlap
+    is certain on every schedule instead of on most of them.
+    """
+    saves = []
+    running = threading.Event()
+    finish = threading.Event()
+    overlapped = threading.Event()
+
+    def held_save_all(state):
+        saves.append(state)
+        if len(saves) > 1:
+            overlapped.set()
+            return
+        running.set()
+        assert finish.wait(10), "the first shutdown was never released"
+
+    app.storage.save_all = held_save_all
+
+    first = threading.Thread(target=app.shutdown_storage)
+    second = threading.Thread(target=app.shutdown_storage)
+    first.start()
+    try:
+        assert running.wait(10), "the first shutdown never reached save_all"
+        second.start()
+
+        assert not overlapped.wait(0.5), "both shutdowns were inside save_all"
+    finally:
+        finish.set()
+        first.join(10)
+        second.join(10)
+
+    # The second waited out the first, then found the flag set, so the state
+    # reached disk exactly once.
+    assert len(saves) == 1
+    assert not first.is_alive() and not second.is_alive()
 
 
 def test_shutdown_flushes_state_through_storage(app):
@@ -832,6 +908,49 @@ def test_socket_delete_env_finishes_only_once_the_files_are_gone(
 
     assert not spy_store.env_exists("expt")
     assert count_deleted(spy_store, "expt") == 0
+
+
+def test_delete_env_outlasts_a_close_already_queued(spy_store, env_path):
+    """A pane closed a moment earlier cannot leave undo history behind.
+
+    Both jobs land on one storage worker in submission order, so the close's
+    ``push_deleted`` runs *first* and writes the stack. Clearing it on the loop
+    therefore cleared nothing: the push put the file back, ``delete_env``
+    removes the env file and nothing else, and the stack outlived the
+    environment for the next env to reuse the id and undo panes out of.
+    """
+    spy_store.save_env("expt", env_payload())
+    handler = FakeHandler(
+        state={"expt": env_payload()}, storage=spy_store, env_path=env_path
+    )
+
+    async def close_then_delete():
+        with ThreadPoolExecutor(max_workers=1) as worker:
+            handler.storage_executor = worker
+            close = push_deleted_off_loop(handler, "expt", "win_0", {"id": "win_0"})
+            removal = DeleteEnvHandler.wrap_func(handler, {"eid": "expt"})
+            await close
+            await removal
+
+    asyncio.run(close_then_delete())
+
+    assert spy_store.calls["save_undo"] == ["expt"]
+    assert count_deleted(spy_store, "expt") == 0
+    assert not spy_store.env_exists("expt")
+
+
+def test_delete_env_clears_the_undo_history_before_the_file(spy_store, env_path):
+    """Within the one task, the stack goes first, so a failed unlink of the env
+    still leaves nothing to undo it with."""
+    spy_store.save_env("expt", env_payload())
+    push_deleted(spy_store, "expt", "win_0", {"id": "win_0"})
+
+    purge_env(spy_store, "expt")
+
+    order = [method for method, _thread in spy_store.threads]
+    assert order.index("clear_undo") < order.index("delete_env")
+    assert count_deleted(spy_store, "expt") == 0
+    assert not spy_store.env_exists("expt")
 
 
 def test_socket_save_writes_the_new_env_off_the_loop(spy_store, env_path):

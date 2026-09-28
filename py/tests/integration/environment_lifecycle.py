@@ -22,6 +22,7 @@ import unittest
 
 import pytest
 
+from visdom.server import app as app_module
 from visdom.server.app import Application
 
 from testutils.http import VisdomHTTPTestCase
@@ -132,6 +133,18 @@ class TestReload(VisdomHTTPTestCase):
         self.assertEqual(
             restarted.state["persist"]["jsons"]["w1"]["content"], "I survive"
         )
+
+
+class TestApplicationSettings(VisdomHTTPTestCase):
+    def test_building_an_application_leaves_the_settings_template_alone(self):
+        """``__init__`` used to write derived values back into the module dict,
+        so a second server inherited the first one's cookie secret."""
+        before = dict(app_module.tornado_settings)
+
+        built = Application(port=8097, env_path=self.env_path, base_url="/sub")
+
+        self.assertEqual(app_module.tornado_settings, before)
+        self.assertEqual(built.settings["static_url_prefix"], "/sub/static/")
 
 
 if __name__ == "__main__":

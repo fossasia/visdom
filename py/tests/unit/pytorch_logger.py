@@ -125,6 +125,21 @@ class TestPlotting(unittest.TestCase):
         kwargs = self.logger.viz.line.call_args.kwargs
         self.assertEqual(kwargs["opts"]["xlabel"], "step")
 
+    def test_failed_window_creation_is_not_tracked(self):
+        """A send that fails returns False instead of raising."""
+        self.logger.viz.line.side_effect = lambda *a, **kw: False
+        self.logger.log("loss", 0.9)
+        self.assertNotIn("loss", self.logger._wins)
+
+    def test_window_is_created_again_once_the_server_recovers(self):
+        self.logger.viz.line.side_effect = lambda *a, **kw: False
+        self.logger.log("loss", 0.9)
+        self.logger.viz.line.side_effect = lambda *a, **kw: Mock()
+        self.logger.log("loss", 0.8)
+        kwargs = self.logger.viz.line.call_args.kwargs
+        self.assertNotIn("win", kwargs)
+        self.assertIn("loss", self.logger._wins)
+
     def test_distinct_metrics_get_distinct_windows(self):
         self.logger.log("loss", 0.9)
         self.logger.log("acc", 0.1)
@@ -164,6 +179,20 @@ class TestContextManager(unittest.TestCase):
         self.assertEqual(kwargs["X"], [3])
         self.assertEqual(kwargs["Y"], [3.0])
 
+    def test_failed_interval_send_is_kept_for_the_exit_flush(self):
+        """A failed send must not clear the buffer, or the value is lost
+        even when the server is back by the time the block exits."""
+        logger = _logger(log_every=5)
+        logger.viz.line.side_effect = lambda *a, **kw: False
+        with logger as tracker:
+            for i in range(1, 6):
+                tracker.log("loss", float(i))
+            self.assertEqual(tracker._pending["loss"], (5, 5.0, "epoch"))
+            logger.viz.line.side_effect = lambda *a, **kw: Mock()
+            logger.viz.line.reset_mock()
+        logger.viz.line.assert_called_once()
+        self.assertEqual(logger.viz.line.call_args.kwargs["Y"], [5.0])
+
 
 class TestLogEvery(unittest.TestCase):
     def test_first_call_plotted_even_with_large_log_every(self):
@@ -186,6 +215,25 @@ class TestLogEvery(unittest.TestCase):
         logger.log("loss", 2.0)
         logger.viz.line.assert_called_once()
         self.assertNotIn("loss", logger._pending)
+
+    def test_failed_append_keeps_the_value_pending(self):
+        logger = _logger(log_every=1)
+        logger.log("loss", 1.0)
+        logger.viz.line.side_effect = lambda *a, **kw: False
+        logger.log("loss", 2.0)
+        self.assertEqual(logger._pending["loss"], (2, 2.0, "epoch"))
+
+    def test_throttling_holds_when_the_window_was_never_created(self):
+        """A failed send leaves the metric out of _wins, which must not
+        turn every later call into a send attempt."""
+        logger = _logger(log_every=5)
+        logger.viz.line.side_effect = lambda *a, **kw: False
+        logger.log("loss", 1.0)
+        logger.viz.line.reset_mock()
+        logger.log("loss", 2.0)
+        logger.log("loss", 3.0)
+        logger.viz.line.assert_not_called()
+        self.assertIn("loss", logger._pending)
 
     def test_plotted_value_after_buffered_one_drops_the_buffer(self):
         logger = _logger(log_every=2)

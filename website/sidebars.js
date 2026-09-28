@@ -62,6 +62,7 @@ const sidebars = {
         'api/customizing-plots',
         'api/network-graph',
         'api/other-functions',
+        'api/async-client',
       ],
     },
     'contributing',
