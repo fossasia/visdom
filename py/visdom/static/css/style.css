@@ -20,7 +20,7 @@ body {
 }
 
 html {
-  background-color: #3b5998;
+  background-color: var(--vis-bg-canvas);
 }
 
 h1 {
@@ -68,12 +68,15 @@ h1 {
 .window {
   overflow: hidden;
   box-sizing: border-box;
-  border: #FFF solid 1px;
-  background: white;
-  color: #3b5998;
+  border: 1px solid var(--vis-border);
+  border-radius: var(--vis-radius-3);
+  background: var(--vis-bg-surface);
+  color: var(--vis-text);
   height: 100%;
   width: 100%;
-  box-shadow: rgba(0, 0, 0, 0.1) 1px 1px 5px;
+  box-shadow: var(--vis-shadow-1);
+  transition: box-shadow var(--vis-transition),
+    border-color var(--vis-transition);
 }
 
 .maximized .window {
@@ -86,27 +89,29 @@ h1 {
   top: 0;
   left: 0;
   right: 0;
-  height: 14px;
-  color: #333;
+  height: 15px;
+  color: var(--vis-text-muted);
   text-align: right;
   font-size: 11px;
+  background: var(--vis-bg-surface);
+  border-bottom: 1px solid var(--vis-border);
+  border-radius: var(--vis-radius-3) var(--vis-radius-3) 0 0;
 }
 
 .window.focus {
-  border-color: #dedede;
-  outline-color: #6389d8;
-  outline-width: 4px;
-  outline-style: double;
+  border-color: var(--vis-accent);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--vis-accent), var(--vis-shadow-2);
 }
 
 .bar.focus {
-  font-weight: bold;
-  background-color: #dedede;
+  font-weight: 600;
+  color: var(--vis-text);
+  background-color: var(--vis-bg-subtle);
 }
 
 .bar button {
   font-size: 8px;
-  padding-right: 6px;
 }
 
 button {
@@ -127,17 +132,50 @@ button>svg {
 }
 
 .bar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 14px;
+  min-width: 15px;
+  padding: 0 3px;
+  margin: 0 2px;
   background: transparent;
-  margin: 0 4px;
   float: left;
+  border-radius: var(--vis-radius-1);
+  transition: background-color var(--vis-transition),
+    color var(--vis-transition);
+}
+
+.bar button[hidden] {
+  display: none;
+}
+
+.bar button:hover {
+  background-color: var(--vis-bg-hover);
+}
+
+.bar button.pane-close {
+  color: var(--vis-danger);
+  font-weight: 700;
+}
+
+.bar button.pane-close:hover {
+  background-color: var(--vis-danger-subtle);
 }
 
 .content {
   width: 100%;
-  height: calc(100% - 14px);
+  height: calc(100% - 15px);
   position: absolute;
   overflow: hidden;
   left: 0;
+  /* border-radius + overflow:hidden on .window does not clip nested WebGL
+     canvases (3d plots); clip-path does, so round the bottom corners here */
+  clip-path: inset(0 round 0 0 var(--vis-radius-3) var(--vis-radius-3));
+}
+
+.maximized .content {
+  clip-path: none;
 }
 
 .content.content-with-comment {
@@ -246,7 +284,8 @@ doesn't override our desire to make them non-interactable */
 
 
 .react-grid-item.react-grid-placeholder {
-  background: white;
+  background: var(--vis-accent);
+  border-radius: var(--vis-radius-3);
 }
 
 .content-text {
@@ -500,6 +539,7 @@ button[title="annotate points"].active > svg {
   display: block;
   float: none;
   width: 100%;
+  height: auto;
   margin: 0;
   padding: 4px 8px;
   cursor: pointer;
