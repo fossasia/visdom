@@ -19,6 +19,7 @@ today — the feature is fully opt-in.
 import heapq
 import logging
 import math
+import time
 from collections.abc import Mapping
 
 from visdom.data_model.base import DataStore
@@ -26,7 +27,12 @@ from visdom.experiments.compare import build_comparison
 from visdom.experiments.models import (
     Experiment,
     ExperimentFinishedError,
+    Metric,
+    Param,
     STATUS_FINISHED,
+    STATUS_RUNNING,
+    Tag,
+    VALID_STATUSES,
 )
 from visdom.experiments.query import Query, build_record
 from visdom.experiments.tags import MAX_TAGS_PER_ENV, normalize_tags
@@ -95,6 +101,83 @@ def experiment_from_blob(env_id, blob):
         return None
     experiment.env_id = env_id
     return experiment
+
+
+def _salvage_entries(cls, entries):
+    """Rebuild the members of ``entries`` that still parse, dropping the rest.
+
+    ``Param``/``Metric``/``Tag`` each index ``data["key"]``, so an entry that
+    is not a mapping, or is one without a key, is all that has to go. One
+    unusable entry must not cost a run the other hundred beside it, so the
+    list is filtered rather than refused. A ``params`` that is not a list at
+    all — an object, a scalar — yields nothing, since there are no entries
+    in it to keep.
+    """
+    if not isinstance(entries, (list, tuple)):
+        return []
+    salvaged = []
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            continue
+        try:
+            salvaged.append(cls.from_dict(entry))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return salvaged
+
+
+def salvage_experiment(env_id, blob):
+    """Rebuild everything in an unreadable ``blob`` that still parses.
+
+    :func:`experiment_from_blob` answers a *read*, where "cannot rebuild" is
+    fairly reported as "no experiment". A *write* must not use that answer:
+    the creating writers turn "no experiment" into a brand-new one and persist
+    it over the blob they just failed to read, so a status the model does not
+    recognise, or an ``env_id`` a half-finished save never got to, would cost
+    the run every param, metric and tag it had — silently, on a request as
+    small as adding a tag.
+
+    So a write reads through here instead. Each field is taken when it is
+    usable and defaulted when it is not, which is what
+    :meth:`Experiment.from_dict` already does for a field that is merely
+    absent; the difference is that one bad field no longer discards the good
+    ones beside it. What the write persists is then a repaired record rather
+    than an empty one, so the env is readable again *and* still carries its
+    history. A salvaged run that is still terminal stays terminal, and goes on
+    refusing new logs the way an intact one would.
+
+    Returns ``None`` when there is nothing to salvage: no blob, or one that is
+    not a mapping and so was never metadata to begin with.
+    """
+    if not isinstance(blob, Mapping):
+        return None
+    name = blob.get("name")
+    description = blob.get("description")
+    status = blob.get("status")
+    created_at = blob.get("created_at")
+    finished_at = blob.get("finished_at")
+    # ``_is_number`` is the finite-real test the sort path uses, which is also
+    # exactly what a timestamp has to be.
+    salvaged = Experiment(
+        env_id=env_id,
+        name=name if isinstance(name, str) else "",
+        description=description if isinstance(description, str) else "",
+        status=status if status in VALID_STATUSES else STATUS_RUNNING,
+        created_at=created_at if _is_number(created_at) else time.time(),
+        finished_at=finished_at if _is_number(finished_at) else None,
+        params=_salvage_entries(Param, blob.get("params")),
+        metrics=_salvage_entries(Metric, blob.get("metrics")),
+        tags=_salvage_entries(Tag, blob.get("tags")),
+    )
+    logging.warning(
+        "Repairing unreadable experiment metadata for env %s; keeping "
+        "%d param(s), %d metric(s) and %d tag(s)",
+        env_id,
+        len(salvaged.params),
+        len(salvaged.metrics),
+        len(salvaged.tags),
+    )
+    return salvaged
 
 
 def _is_number(value):
@@ -235,14 +318,13 @@ class ExperimentStore:
         would then fold the fork and its parent into one column.
 
         A blob :func:`experiment_from_blob` cannot rebuild reads as no
-        experiment, exactly as it does on the pure-read path. That is what
-        makes an unreadable blob recoverable rather than permanent: the callers
-        that write treat "no experiment" as "start one", so logging a param, a
-        metric or a tag to the env replaces the corrupt blob with a valid one
-        instead of failing on it forever. The callers that require an existing
-        run — :meth:`finish_experiment`, :meth:`compare` — still refuse, but
-        they refuse with the ``KeyError`` they already raise for an env that
-        never had metadata, not with a parse error out of the model.
+        experiment, exactly as it does on the pure-read path. The callers that
+        require an existing run — :meth:`finish_experiment`, :meth:`compare` —
+        therefore refuse with the ``KeyError`` they already raise for an env
+        that never had metadata, rather than with a parse error out of the
+        model. The callers that go on to *write* must not take that answer at
+        face value, since they would persist an empty record over the blob
+        they could not read; those go through :meth:`_read_for_write`.
         """
         env = self.env_provider(env_id) if self.env_provider is not None else None
         if env is None:
@@ -254,6 +336,25 @@ class ExperimentStore:
         if "reload" not in env:
             env["reload"] = {}
         return env, experiment_from_blob(env_id, env.get(METADATA_KEY))
+
+    def _read_for_write(self, env_id):
+        """:meth:`_read`, with an unreadable blob repaired rather than dropped.
+
+        The creating writers persist whatever they read back, so one that read
+        "no experiment" off a blob that is *there* would overwrite it with an
+        empty record: adding a tag to an env whose metadata got scrambled
+        would throw away its params, its metrics and its history, and report
+        success. :func:`salvage_experiment` keeps every field that still
+        parses, so the write repairs the run instead of resetting it, and the
+        env comes out both readable and intact.
+
+        An env with no metadata at all still reads as ``None`` here, which is
+        what lets the writers start a run for it as they always have.
+        """
+        env, experiment = self._read(env_id)
+        if experiment is None:
+            experiment = salvage_experiment(env_id, env.get(METADATA_KEY))
+        return env, experiment
 
     def _read_metadata(self, env_id):
         """Return ``env_id``'s :class:`Experiment` without materialising its env.
@@ -320,9 +421,10 @@ class ExperimentStore:
         Calling this repeatedly for the same ``env_id`` updates the existing
         record (merging in any ``params``/``tags`` and overwriting ``name``/
         ``description`` when provided) rather than replacing it, so previously
-        logged metrics survive.
+        logged metrics survive. An experiment whose blob no longer rebuilds is
+        repaired rather than started over — see :meth:`_read_for_write`.
         """
-        env, experiment = self._read(env_id)
+        env, experiment = self._read_for_write(env_id)
         if experiment is None:
             experiment = Experiment(
                 env_id=env_id,
@@ -343,7 +445,7 @@ class ExperimentStore:
 
     def log_metric(self, env_id, key, value, step=None):
         """Append a metric to ``env_id``'s experiment, creating it if needed."""
-        env, experiment = self._read(env_id)
+        env, experiment = self._read_for_write(env_id)
         if experiment is None:
             experiment = Experiment(env_id=env_id, name=env_id)
         else:
@@ -370,10 +472,16 @@ class ExperimentStore:
         tags = normalize_tags(tags)
 
         if env_data is None:
-            env, experiment = self._read(env_id)
+            env, experiment = self._read_for_write(env_id)
         else:
             env = env_data
-            experiment = experiment_from_blob(env_id, env.get(METADATA_KEY))
+            blob = env.get(METADATA_KEY)
+            experiment = experiment_from_blob(env_id, blob)
+            if experiment is None:
+                # The same repair :meth:`_read_for_write` performs, on the env
+                # the caller supplied: this branch rebuilds a blob of its own,
+                # and it is the one a tag update from the server takes.
+                experiment = salvage_experiment(env_id, blob)
         if experiment is None:
             experiment = Experiment(env_id=env_id, name=env_id)
         if append:

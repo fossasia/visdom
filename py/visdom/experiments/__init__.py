@@ -47,6 +47,7 @@ from visdom.experiments.store import (
     METADATA_KEY,
     experiment_from_blob,
     retarget_experiment,
+    salvage_experiment,
 )
 from visdom.experiments.tags import (
     normalize_tags,
@@ -84,6 +85,7 @@ __all__ = [
     "parse_query",
     "resolve_targets",
     "retarget_experiment",
+    "salvage_experiment",
     "STATUS_FAILED",
     "STATUS_FINISHED",
     "STATUS_RUNNING",

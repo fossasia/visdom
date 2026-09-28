@@ -128,6 +128,79 @@ class TestTagsEndpoint(VisdomHTTPTestCase):
         self.assertEqual(json.loads(response.body), {"owner": "alice"})
         self.assertEqual(self.read_tags("bad"), {"owner": "alice"})
 
+    def test_tagging_an_env_with_a_corrupt_blob_keeps_its_run(self):
+        """Repairing the blob must not be the thing that loses the run.
+
+        The handler passes its live env to the store, so this is the path
+        where a scrambled blob was replaced by an empty experiment: the tag
+        came back, and the params and metrics under it did not.
+        """
+        self.post_json(
+            "/experiments/log",
+            {"eid": "run-c", "name": "sweep-7", "params": {"lr": 0.1}},
+        )
+        blob = dict(self._app.state["run-c"]["experiment"])
+        blob.pop("env_id")
+        self.corrupt_env("run-c", blob)
+
+        response = self.post_json(
+            "/experiments/tags", {"eid": "run-c", "tags": {"owner": "alice"}}
+        )
+
+        self.assertEqual(response.code, 200)
+        experiment = ExperimentStore(JSONStore(self.env_path)).get_experiment("run-c")
+        self.assertEqual(experiment.name, "sweep-7")
+        self.assertEqual(experiment.get_param("lr").value, 0.1)
+        self.assertEqual(tags_to_mapping(experiment.tags), {"owner": "alice"})
+
+    def test_a_corrupt_resident_blob_does_not_serve_the_stored_tags(self):
+        """A materialized env is the version being served, readable or not.
+
+        Its file is whatever the last successful save left behind, so
+        answering from there reports tags the env may no longer have. The
+        resident blob cannot be read, so the honest answer is that it has
+        none.
+        """
+        self.post_json(
+            "/experiments/tags", {"eid": "run-a", "tags": {"owner": "alice"}}
+        )
+        self.assertEqual(self.read_tags("run-a"), {"owner": "alice"})
+        self.corrupt_env("run-a", {"env_id": "run-a", "status": "cancelled"})
+
+        response = self.fetch("/experiments/tags?eid=run-a")
+
+        self.assertEqual(response.code, 200)
+        self.assertEqual(json.loads(response.body), {})
+
+    def test_the_tag_map_drops_an_env_whose_resident_blob_is_corrupt(self):
+        """The map is built from storage and overlaid with live state.
+
+        An env the overlay cannot read has to be removed from it, not left
+        showing the stored entry it was meant to replace.
+        """
+        self.post_json(
+            "/experiments/tags", {"eid": "run-a", "tags": {"owner": "alice"}}
+        )
+        self.post_json("/experiments/tags", {"eid": "run-b", "tags": {"owner": "bob"}})
+        self.corrupt_env("run-a", {"env_id": "run-a", "status": "cancelled"})
+
+        response = self.post_json("/experiments/tags", {"action": "get"})
+
+        self.assertEqual(response.code, 200)
+        self.assertEqual(json.loads(response.body), {"run-b": {"owner": "bob"}})
+
+    def test_an_env_with_no_metadata_is_still_answered_from_storage(self):
+        """Only an unreadable blob shadows the file; an absent one does not."""
+        self.post_json(
+            "/experiments/tags", {"eid": "run-a", "tags": {"owner": "alice"}}
+        )
+        self._app.state["run-a"] = {"jsons": {}, "reload": {}}
+
+        response = self.fetch("/experiments/tags?eid=run-a")
+
+        self.assertEqual(response.code, 200)
+        self.assertEqual(json.loads(response.body), {"owner": "alice"})
+
     def test_set_broadcasts_one_transport_neutral_message(self):
         websocket = FakeSocket("websocket")
         polling = FakeSocket("polling")

@@ -22,7 +22,13 @@ import pytest
 
 from visdom.data_model import JSONStore
 from visdom.data_model.base import DataStore
-from visdom.experiments import ExperimentStore, STATUS_RUNNING, tags_to_mapping
+from visdom.experiments import (
+    ExperimentFinishedError,
+    ExperimentStore,
+    STATUS_FINISHED,
+    STATUS_RUNNING,
+    tags_to_mapping,
+)
 from visdom.utils.server_utils import LazyEnvData
 
 pytestmark = pytest.mark.unit
@@ -311,11 +317,14 @@ class TestMalformedMetadataOnWritePaths(MalformedBlobCase):
     A guard on the read alone would leave the corrupt environment visible-but-
     frozen: search would skip it, and every attempt to fix it — log to it, tag
     it, delete it — would still raise. Recovering would mean shell access to
-    the env directory. So the write paths read through the same guard, which
-    gives them the behaviour they already have for an env that never had
-    metadata: logging starts a fresh experiment (replacing the bad blob),
-    deleting removes it, and the operations that genuinely need an existing run
-    refuse with their ordinary ``KeyError``.
+    the env directory. So the write paths are guarded too: logging to the env
+    or tagging it makes its metadata readable again, deleting removes it, and
+    the operations that genuinely need an existing run refuse with their
+    ordinary ``KeyError``.
+
+    What a write *keeps* while doing that is pinned next door, in
+    :class:`TestWritesRepairRatherThanReset` — these only pin that it goes
+    through at all.
     """
 
     def test_log_experiment_replaces_an_unreadable_blob(self):
@@ -419,6 +428,166 @@ class TestMalformedMetadataOnWritePaths(MalformedBlobCase):
         self.store.log_metric("healthy", "acc", 0.75)
         self.assertEqual(
             self.store.get_experiment("healthy").latest_metric("acc").value, 0.75
+        )
+
+
+class TestWritesRepairRatherThanReset(MalformedBlobCase):
+    """A write over an unreadable blob keeps everything still legible in it.
+
+    Reading an unreadable blob as "no experiment" is right for a read, and
+    wrong for a write: the creating writers turn "no experiment" into a brand
+    new one and persist it, so the answer that makes ``search`` resilient also
+    made ``update_tags`` destructive. One unrecognised status, or an
+    ``env_id`` a half-finished save never reached, and adding a tag would quietly
+    drop the run's params, metrics, name and history — reporting success.
+
+    So a write salvages instead: every field that still parses is carried over
+    and only the unusable ones are defaulted. The env ends up readable *and*
+    intact, which is the whole point of letting the write through.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.store.log_experiment(
+            "rich",
+            name="sweep-7",
+            description="a real run",
+            params={"lr": 0.1, "batch": 32},
+            tags={"dataset": "mnist"},
+        )
+        self.store.log_metric("rich", "acc", 0.91, step=3)
+        self.rich = self.backing.load_experiment("rich")
+
+    def corrupt(self, **overrides):
+        """Write the rich run to env ``bad``, damaged by ``overrides``.
+
+        Returns the blob exactly as written, for the case that asserts a
+        refused write left it untouched.
+        """
+        blob = dict(self.rich)
+        for key, value in overrides.items():
+            if value is MISSING:
+                blob.pop(key, None)
+            else:
+                blob[key] = value
+        self.write("bad", blob)
+        return blob
+
+    def test_logging_a_metric_keeps_what_the_blob_still_holds(self):
+        """The run is repaired, not restarted."""
+        self.corrupt(status="cancelled")
+        self.store.log_metric("bad", "loss", 0.4)
+
+        experiment = self.store.get_experiment("bad")
+        self.assertEqual(experiment.name, "sweep-7")
+        self.assertEqual(experiment.description, "a real run")
+        self.assertEqual(experiment.get_param("lr").value, 0.1)
+        self.assertEqual(experiment.get_param("batch").value, 32)
+        self.assertEqual(tags_to_mapping(experiment.tags), {"dataset": "mnist"})
+        self.assertEqual([m.key for m in experiment.metrics], ["acc", "loss"])
+        self.assertEqual(experiment.created_at, self.rich["created_at"])
+
+    def test_log_experiment_merges_into_the_repaired_run(self):
+        """A re-log updates the salvaged record rather than starting over."""
+        self.corrupt(status="cancelled")
+        self.store.log_experiment("bad", params={"lr": 0.5})
+
+        experiment = self.store.get_experiment("bad")
+        self.assertEqual(experiment.get_param("lr").value, 0.5)
+        self.assertEqual(experiment.get_param("batch").value, 32)
+        self.assertEqual(experiment.latest_metric("acc").value, 0.91)
+        self.assertEqual(experiment.status, STATUS_RUNNING)
+
+    def test_tagging_keeps_the_runs_params_and_metrics(self):
+        """A tag update is the smallest write there is; it must cost nothing.
+
+        The previous tags do go, but only because a non-appending update
+        replaces them — that is what the caller asked for, and it is what an
+        intact blob would have done too.
+        """
+        self.corrupt(env_id=MISSING)
+        self.store.update_tags("bad", {"owner": "alice"})
+
+        experiment = self.store.get_experiment("bad")
+        self.assertEqual(experiment.name, "sweep-7")
+        self.assertEqual(experiment.get_param("lr").value, 0.1)
+        self.assertEqual(experiment.latest_metric("acc").value, 0.91)
+        self.assertEqual(tags_to_mapping(experiment.tags), {"owner": "alice"})
+
+    def test_the_supplied_env_branch_repairs_too(self):
+        """The server hands its live env to ``update_tags``; same rule there."""
+        env = {
+            "jsons": {},
+            "reload": {},
+            "experiment": dict(self.rich, status="cancelled"),
+        }
+        experiment = self.store.update_tags("bad", {"owner": "alice"}, env_data=env)
+
+        self.assertEqual(experiment.get_param("lr").value, 0.1)
+        self.assertEqual(experiment.latest_metric("acc").value, 0.91)
+
+    def test_only_the_unreadable_field_is_lost(self):
+        """``params`` that is no longer a list holds nothing to keep."""
+        self.corrupt(params={"lr": 0.1})
+        self.store.log_metric("bad", "loss", 0.4)
+
+        experiment = self.store.get_experiment("bad")
+        self.assertEqual(experiment.params, [])
+        self.assertEqual(experiment.name, "sweep-7")
+        self.assertEqual([m.key for m in experiment.metrics], ["acc", "loss"])
+        self.assertEqual(tags_to_mapping(experiment.tags), {"dataset": "mnist"})
+
+    def test_one_bad_entry_does_not_cost_the_whole_list(self):
+        """A keyless param is dropped; the ones beside it are not."""
+        self.corrupt(params=[{"value": 0.1}] + list(self.rich["params"]))
+        self.store.log_metric("bad", "loss", 0.4)
+
+        experiment = self.store.get_experiment("bad")
+        self.assertEqual(sorted(p.key for p in experiment.params), ["batch", "lr"])
+
+    def test_a_salvaged_terminal_run_still_refuses_new_logs(self):
+        """Damage elsewhere in the blob must not un-finish the run.
+
+        Resetting to an empty experiment did exactly that: the replacement was
+        ``running``, so a finished run silently accepted new metrics and lost
+        its ``finished_at``.
+        """
+        self.store.finish_experiment("rich")
+        self.rich = self.backing.load_experiment("rich")
+        blob = self.corrupt(env_id=MISSING)
+
+        with self.assertRaises(ExperimentFinishedError):
+            self.store.log_metric("bad", "loss", 0.4)
+        self.assertEqual(self.backing.load_experiment("bad"), blob)
+
+    def test_a_repaired_terminal_run_keeps_its_finish(self):
+        """Tagging is allowed after a finish, and must not undo one."""
+        self.store.finish_experiment("rich")
+        self.rich = self.backing.load_experiment("rich")
+        self.corrupt(env_id=MISSING)
+
+        experiment = self.store.update_tags("bad", {"owner": "alice"})
+
+        self.assertEqual(experiment.status, STATUS_FINISHED)
+        self.assertEqual(experiment.finished_at, self.rich["finished_at"])
+
+    def test_an_env_with_no_metadata_still_starts_a_run(self):
+        """Repair must not invent a run for an env that never had one."""
+        self.backing.save_env("plain", {"jsons": {}, "reload": {}})
+        self.store.log_metric("plain", "acc", 0.5)
+
+        experiment = self.store.get_experiment("plain")
+        self.assertEqual(experiment.env_id, "plain")
+        self.assertEqual(experiment.name, "plain")
+        self.assertEqual([m.key for m in experiment.metrics], ["acc"])
+
+    def test_a_blob_that_was_never_metadata_starts_a_run_too(self):
+        """A non-mapping blob has nothing to salvage, so it reads as absent."""
+        self.write("bad", "nope")
+        self.store.log_metric("bad", "acc", 0.5)
+
+        self.assertEqual(
+            self.store.get_experiment("bad").latest_metric("acc").value, 0.5
         )
 
 
