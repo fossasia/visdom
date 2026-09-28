@@ -1488,6 +1488,43 @@ class TestPollingBackchannel(tornado.testing.AsyncTestCase):
             await client.shutdown()
 
     @gen_test
+    async def test_a_query_without_a_batch_is_an_empty_poll(self):
+        """``{"success": true}`` with no ``messages`` is the wrapper saying it
+        has nothing queued. Indexing the key used to raise ``KeyError``, which
+        ended the session and cost the sid over an idle poll."""
+        outbox = [ALIVE]
+        queries = []
+
+        def respond(url, data):
+            if not url.endswith("/vis_socket_wrap"):
+                return ""
+            payload = json.loads(data)
+            if payload["message_type"] == "init":
+                return json.dumps({"success": True, "sid": "sid-1"})
+            queries.append(payload["sid"])
+            if len(queries) <= 3:
+                return json.dumps({"success": True})
+            messages, outbox[:] = list(outbox), []
+            return json.dumps({"success": True, "messages": messages})
+
+        client, transport = await make_client(
+            transport=RecordingTransport(response=respond), use_polling=True
+        )
+        try:
+            seen = []
+            client.register_event_handler(seen.append, "win")
+            outbox.append(json.dumps({"target": "win", "index": 0}))
+            await wait_for(lambda: seen)
+
+            assert client.socket_alive is True
+            assert client.client.vis_sid == "sid-1"
+            assert set(queries) == {"sid-1"}, "the session restarted"
+            inits = [data for _, data in transport.calls if data and "init" in data]
+            assert len(inits) == 1
+        finally:
+            await client.shutdown()
+
+    @gen_test
     async def test_a_failed_polling_init_runs_socketless(self):
         """A server without ``/vis_socket_wrap`` answers ``init`` with a 404
         page, which is not a sid; that must not be retried forever."""
