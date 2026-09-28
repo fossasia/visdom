@@ -343,6 +343,17 @@ def test_images_preserves_uint8_pixels_and_white_padding(capture_send, value):
     np.testing.assert_array_equal(pixels, expected)
 
 
+@pytest.mark.parametrize("dtype", [np.bool_, np.int16, np.int32])
+def test_images_encodes_non_uint8_integer_and_bool_batches(capture_send, dtype):
+    tensor = np.zeros((2, 3, 2, 2), dtype=dtype)
+    tensor[1] = 1
+    sent = capture_send(lambda v: v.images(tensor, nrow=2, padding=1))
+    _, pixels = decode(sent)
+    expected = np.full((4, 8, 3), 255, dtype=np.uint8)
+    expected[1:3, 1:3] = 0
+    np.testing.assert_array_equal(pixels, expected)
+
+
 def test_images_expands_a_single_channel_batch_to_rgb(capture_send):
     sent = capture_send(lambda v: v.images(np.zeros((4, 1, 4, 4), dtype=np.uint8)))
     _, pixels = decode(sent)

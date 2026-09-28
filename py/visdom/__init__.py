@@ -2508,11 +2508,12 @@ class Visdom(object):
         width = int(tensor.shape[3] + 2 * padding)
 
         offset = padding
-        pad_value = 255 if tensor.dtype == np.uint8 else 1
+        grid_dtype = np.uint8 if tensor.dtype == np.uint8 else np.float64
+        pad_value = 255 if grid_dtype == np.uint8 else 1
         grid = np.full(
             [tensor.shape[1], height * ymaps, width * xmaps],
             pad_value,
-            dtype=tensor.dtype,
+            dtype=grid_dtype,
         )
         k = 0
         for y in range(ymaps):
