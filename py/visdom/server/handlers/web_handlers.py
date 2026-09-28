@@ -58,7 +58,6 @@ from visdom.utils.server_utils import (
     broadcast,
     update_window,
     hash_password_off_loop,
-    stringify,
     push_deleted,
     notify,
     LazyEnvData,
@@ -121,6 +120,12 @@ class ExistsHandler(BaseHandler):
         )
         await ensure_env_loaded(self, extract_eid(args))
         self.wrap_func(self, args)
+
+
+# A patch smaller than this is broadcast without encoding the pane to compare
+# it against: the comparison could not save more than this many bytes, and the
+# pane encode it costs grows with the data already plotted.
+PANE_COMPARE_MIN_BYTES = 4096
 
 
 class UpdateHandler(BaseHandler):
@@ -396,7 +401,13 @@ class UpdateHandler(BaseHandler):
         return p
 
     @staticmethod
-    def broadcast_window_update(handler, args, eid, p, diff_packet):
+    def window_update_message(args, eid, p, diff_packet):
+        """Encode the patch broadcast for ``p``, ready to put on the wire.
+
+        Split out from ``broadcast_window_update`` so a caller that has to know
+        how large the patch is can measure the string it is about to send
+        instead of serialising the pane a second time to estimate it.
+        """
         broadcast_packet = {
             "command": "window_update",
             "win": args["win"],
@@ -404,7 +415,15 @@ class UpdateHandler(BaseHandler):
             "content": diff_packet,
             "version": p.get("version", 1),
         }
-        broadcast(handler, json.dumps(broadcast_packet, cls=NanSafeEncoder), eid)
+        return json.dumps(broadcast_packet, cls=NanSafeEncoder)
+
+    @staticmethod
+    def broadcast_window_update(handler, args, eid, p, diff_packet):
+        broadcast(
+            handler,
+            UpdateHandler.window_update_message(args, eid, p, diff_packet),
+            eid,
+        )
 
     @staticmethod
     def wrap_func(handler, args):
@@ -492,13 +511,21 @@ class UpdateHandler(BaseHandler):
                 handler.write(str(exc))
                 return
             raise
-        # send the smaller of the patch and the updated pane
-        if len(stringify(p)) <= len(stringify(diff_packet)):
+        # Send the smaller of the patch and the updated pane. Applying the patch
+        # leaves the frontend in the same state as replacing the pane, so this
+        # is a bandwidth heuristic and not a correctness gate -- which is what
+        # makes it safe to answer without measuring both. Below
+        # PANE_COMPARE_MIN_BYTES the pane cannot be enough smaller to be worth
+        # encoding it to find out, and that encode is the one whose cost grows
+        # with the data already plotted.
+        msg = UpdateHandler.window_update_message(args, eid, p, diff_packet)
+        if len(msg) >= PANE_COMPARE_MIN_BYTES:
             broadcast_msg = dict(p)
             broadcast_msg["eid"] = eid
-            broadcast(handler, json.dumps(broadcast_msg, cls=NanSafeEncoder), eid)
-        else:
-            UpdateHandler.broadcast_window_update(handler, args, eid, p, diff_packet)
+            pane_msg = json.dumps(broadcast_msg, cls=NanSafeEncoder)
+            if len(pane_msg) <= len(msg):
+                msg = pane_msg
+        broadcast(handler, msg, eid)
         handler.mark_dirty(eid)
         handler.write(p["id"])
 
