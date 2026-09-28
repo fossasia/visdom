@@ -560,6 +560,10 @@ class _AsyncPolling(_AsyncBackchannel):
         # every query without ever queueing ``vis_alive`` is not connected.
         async with asyncio.timeout(HANDSHAKE_TIMEOUT) as handshake:
             response = await self._post({"message_type": "init"})
+            if not response.get("success") or not response.get("sid"):
+                raise RuntimeError(
+                    "polling init rejected: {0}".format(response.get("detail"))
+                )
             sid = response["sid"]
             self._client.vis_sid = sid
             while self._client.use_socket and not self._closing:
@@ -568,7 +572,11 @@ class _AsyncPolling(_AsyncBackchannel):
                     raise RuntimeError(
                         "polling query rejected: {0}".format(response.get("detail"))
                     )
-                for message in response["messages"]:
+                # A successful query need not carry a batch: the wrapper
+                # answers ``{"success": true}`` when it has nothing queued,
+                # and indexing that would end the session on a ``KeyError``
+                # and cost the sid over an ordinary empty poll.
+                for message in response.get("messages") or []:
                     await self._dispatch(message, handshake)
                 await asyncio.sleep(POLL_INTERVAL)
 
@@ -1117,11 +1125,12 @@ class AsyncVisdom(object):
 
         Not a coroutine: registration is bookkeeping, and awaiting it would
         only suggest it reaches the server. ``handler`` may be a plain function
-        or a coroutine function; a coroutine runs on this client's loop, so it
-        can await other calls on this same client.
+        or a coroutine function. A plain one runs on the client's own dispatch
+        thread; a coroutine has only its wrapper there, and its body runs on
+        this client's loop, so it can await other calls on this same client.
 
-        Handlers run one at a time, in arrival order, on a thread of the
-        client's own -- a slow one delays later events but nothing else.
+        One dispatch thread serves every handler, so they run one at a time, in
+        arrival order -- a slow one delays later events but nothing else.
         """
         assert callable(handler), "Event handler must be a function"
         if inspect.iscoroutinefunction(handler):
