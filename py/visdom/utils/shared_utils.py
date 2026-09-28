@@ -31,7 +31,6 @@ def warn_once(msg, warningtype=None):
     :param str msg: Message to display
     :param Warning warningtype: Type of warning, e.g. DeprecationWarning
     """
-    
     if msg not in _seen_warnings:
         _seen_warnings.add(msg)
         warnings.warn(msg, warningtype, stacklevel=2)
