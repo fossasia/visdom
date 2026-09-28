@@ -12,7 +12,7 @@ def plot_roc_curve(viz, env, args):
     viz.roc_curve(
         y_true=y_true,
         y_score=y_score,
-        opts=dict(title="ROC Curve Example"),
+        opts=dict(title='ROC Curve Example'),
         env=env,
     )
 
@@ -28,7 +28,7 @@ def plot_pr_curve(viz, env, args):
     viz.pr_curve(
         y_true=y_true,
         y_score=y_score,
-        opts=dict(title="PR Curve Example"),
+        opts=dict(title='PR Curve Example'),
         env=env,
     )
 
@@ -40,6 +40,6 @@ def plot_roc_precomputed(viz, env, args):
     viz.roc_curve(
         fpr=fpr,
         tpr=tpr,
-        opts=dict(title="ROC Curve (Precomputed)"),
+        opts=dict(title='ROC Curve (Precomputed)'),
         env=env,
     )

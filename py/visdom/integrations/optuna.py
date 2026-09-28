@@ -28,6 +28,7 @@ from urllib.parse import quote
 from visdom.experiments.tags import MAX_TAGS_PER_ENV, normalize_tags
 from visdom.utils.server_utils import escape_eid
 
+
 _INTERMEDIATE_METRIC_NAME = "intermediate_value"
 _DASHBOARD_TAG_NAME = "optuna_dashboard_env"
 _OPTUNA_TAG_NAMES = {

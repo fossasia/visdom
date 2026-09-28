@@ -14,7 +14,7 @@ Version `0.3.0` · Python >= 3.12 · Apache 2.0
 
 ## Code Style
 
-- Format Python: `black py` (v26.5.1, CI-enforced)
+- Format Python: `black py` (v23.1.0, CI-enforced)
 - Lint JS: `npm run lint`
 - Format JS/CSS/JSON: Prettier (v2.6.2)
 - Add Apache License headers to all new files (see `context/backend.md`)
