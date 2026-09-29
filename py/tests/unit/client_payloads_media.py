@@ -343,6 +343,23 @@ def test_images_preserves_uint8_pixels_and_white_padding(capture_send, value):
     np.testing.assert_array_equal(pixels, expected)
 
 
+@pytest.mark.parametrize("padding", [0, 2])
+def test_images_normalizes_uint8_batch_when_requested(capture_send, padding):
+    tensor = np.full((2, 3, 2, 2), 20, dtype=np.uint8)
+    tensor[1] = 100
+    sent = capture_send(
+        lambda v: v.images(tensor, nrow=2, padding=padding, opts=dict(normalize=True))
+    )
+    _, pixels = decode(sent)
+    # With padding, the legacy float grid includes its fill value of 1 in the range.
+    expected_low = int(255 * (20 - 1) / (100 - 1)) if padding else 0
+    assert (pixels[padding : padding + 2, padding : padding + 2] == expected_low).all()
+    right = 2 + 3 * padding
+    assert (pixels[padding : padding + 2, right : right + 2] == 255).all()
+    if padding:
+        assert (pixels[0] == 0).all()
+
+
 @pytest.mark.parametrize("dtype", [np.bool_, np.int16, np.int32])
 def test_images_encodes_non_uint8_integer_and_bool_batches(capture_send, dtype):
     tensor = np.zeros((2, 3, 2, 2), dtype=dtype)
