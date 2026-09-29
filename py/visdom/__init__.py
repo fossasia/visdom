@@ -2204,7 +2204,7 @@ class Visdom(object):
         - `opts.caption`: caption below the image (`string`; optional)
         - `opts.store_history`: append to image history pane (`boolean`)
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
         if np.issubdtype(img.dtype, np.floating):
@@ -2914,7 +2914,7 @@ class Visdom(object):
 
         is3d = X.shape[1] == 3
 
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         if opts.get("textlabels") is None:
             opts["mode"] = opts.get("mode", "markers")
         else:
