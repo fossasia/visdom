@@ -52,8 +52,10 @@ synchronous client feeds. It is opt-in here: ``create()`` defaults
 """
 
 import asyncio
+import contextvars
 import functools
 import inspect
+import ipaddress
 import json
 import logging
 import ssl
@@ -99,6 +101,19 @@ RECONNECT_DELAY = 3.0
 POLL_INTERVAL = 0.1
 PING_INTERVAL = 30.0
 
+# Which client's event handler the running task belongs to, if any. Set on the
+# loop side of a bridged handler, so anything that handler awaits -- and any
+# task it spawns, which inherits this context -- can tell that the dispatch
+# thread is parked on it. ``shutdown`` is what needs to know: the drain it runs
+# must not wait for the very handler that is waiting for it.
+_HANDLER_CLIENT = contextvars.ContextVar("visdom_async_handler_client", default=None)
+
+# Cleanups nobody is awaiting, kept reachable while they run. ``asyncio`` holds
+# a task only weakly, so one whose sole reference was the ``ensure_future`` call
+# can be garbage collected mid-await -- and these are the last thing that will
+# ever close a transport, a backchannel and a worker pool.
+_CLEANUPS = set()
+
 # How long ``shutdown`` waits for a handler that was already running when the
 # backchannel closed. A thread pool cannot interrupt a worker, so this is a
 # backstop rather than a guarantee: past it the handler is assumed wedged and
@@ -138,6 +153,7 @@ class _AsyncTransport(object):
         self._connected = False
         self._client = None
         self._login_lock = None
+        self._warned_insecure = False
 
     # -- Plumbing -------------------------------------------------------------
 
@@ -208,6 +224,35 @@ class _AsyncTransport(object):
         # and TLS failures still raise.
         return await self.client.fetch(request, raise_error=False)
 
+    def _warn_if_insecure(self):
+        """Warn once when the login and its cookie cross the wire in the clear.
+
+        A plaintext deployment leaks twice over. The password is POSTed to an
+        ``http`` url, and the ``user_password`` cookie it comes back with is
+        then replayed on every later POST *and* on the backchannel handshake,
+        whose scheme is derived from the same url -- an ``http`` server gets a
+        ``ws`` socket. Anything on the path can read either.
+
+        A warning rather than a refusal: visdom is normally a local tool, and
+        an authenticated deployment that has always run over ``http`` should
+        not stop working on upgrade. Loopback is exempt, where the traffic
+        never reaches a network to be read on.
+        """
+        if self._warned_insecure:
+            return
+        parsed = urlparse(self.server)
+        if parsed.scheme == "https" or _is_loopback(parsed.hostname):
+            return
+        self._warned_insecure = True
+        logger.warning(
+            "Logging in to %s:%s over an unencrypted connection: the "
+            "credentials, and the user_password cookie sent with every "
+            "request and with the ws:// backchannel handshake, can be read "
+            "in transit. Use an https:// server url to protect them.",
+            self.server,
+            self.port,
+        )
+
     async def _ensure_login(self):
         """POST the credentials once and keep the ``user_password`` cookie.
 
@@ -229,6 +274,7 @@ class _AsyncTransport(object):
         async with self._login_lock:
             if self.cookie is not None:
                 return
+            self._warn_if_insecure()
             url = "{0}:{1}{2}".format(self.server, self.port, self.base_url)
             request = self._request(
                 url,
@@ -277,6 +323,18 @@ class _AsyncTransport(object):
             self._client = None
 
 
+def _is_loopback(host):
+    """Whether ``host`` names this machine, and so never reaches a network."""
+    if not host:
+        return False
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 def _extract_cookie(response, name):
     """Pull one cookie out of a response's ``Set-Cookie`` headers."""
     prefix = name + "="
@@ -302,14 +360,39 @@ def _as_requests_error(error):
     return requests.exceptions.ConnectionError(str(error))
 
 
-async def _awaited(awaitable):
+async def _awaited(awaitable, client=None):
     """Await ``awaitable`` from inside a coroutine.
 
     ``asyncio.run_coroutine_threadsafe`` accepts coroutines and nothing else,
     so anything else awaitable -- a future, an object with ``__await__`` --
     reaches the loop wrapped in this.
+
+    ``client`` marks the task as running ``client``'s event handler, which is
+    how a ``shutdown`` reached from in here knows that the dispatch thread is
+    blocked on it.
     """
+    if client is not None:
+        _HANDLER_CLIENT.set(client)
     return await awaitable
+
+
+def _run_cleanup(coro, what):
+    """Run a cleanup nobody will await, holding a reference until it finishes.
+
+    Dropping the task would let the garbage collector take it mid-await, and
+    with it the release of whatever it was about to close. Failures are logged
+    here for the same reason: there is no caller to raise them to.
+    """
+    task = asyncio.ensure_future(coro)
+    _CLEANUPS.add(task)
+
+    def finished(cleanup):
+        _CLEANUPS.discard(cleanup)
+        if not cleanup.cancelled() and cleanup.exception() is not None:
+            logger.warning("%s failed: %s", what, cleanup.exception())
+
+    task.add_done_callback(finished)
+    return task
 
 
 class _AsyncBackchannel(object):
@@ -470,7 +553,7 @@ class _AsyncBackchannel(object):
         if self._task is not None:
             self._task.cancel()
 
-    async def drain(self):
+    async def drain(self, abandon=None):
         """Settle the reader task and the handler thread. Returns whether it
         managed to, within ``DISPATCH_DRAIN_TIMEOUT``.
 
@@ -486,6 +569,13 @@ class _AsyncBackchannel(object):
         So the wait happens here, while the loop is still turning to feed it.
         The reader task goes first; the handler it was last awaiting outlives
         its cancellation and is waited on separately.
+
+        ``abandon`` ends that wait early. It is set when the handler being
+        waited for is itself parked on whoever called this drain -- a handler
+        that awaits ``shutdown`` -- which no amount of waiting can resolve:
+        the handler finishes when the caller does. That counts as settled,
+        because what it is waiting on is the caller's to finish rather than
+        this drain's to cancel.
         """
         task, self._task = self._task, None
         if task is not None:
@@ -495,8 +585,14 @@ class _AsyncBackchannel(object):
             call, self._dispatch_call = self._dispatch_call, None
         settled = True
         if call is not None and not call.done():
-            waiter = asyncio.wrap_future(call, loop=self._loop)
-            done, pending = await asyncio.wait({waiter}, timeout=DISPATCH_DRAIN_TIMEOUT)
+            waiters = {asyncio.wrap_future(call, loop=self._loop)}
+            if abandon is not None:
+                waiters.add(asyncio.ensure_future(abandon.wait()))
+            done, pending = await asyncio.wait(
+                waiters,
+                timeout=DISPATCH_DRAIN_TIMEOUT,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
             for unfinished in pending:
                 unfinished.cancel()
             settled = bool(done)
@@ -917,6 +1013,10 @@ class AsyncVisdom(object):
         # that thread cannot be interrupted, and what it waits on is about to
         # stop running.
         self._handler_calls = set()
+        # Set once a handler of this client asks it to shut down. The dispatch
+        # thread is parked on that call, so nothing in the shutdown may wait
+        # for the handler to finish first.
+        self._handler_shutdown = asyncio.Event()
 
     @classmethod
     async def create(cls, *args, max_concurrency=DEFAULT_MAX_CONCURRENCY, **kwargs):
@@ -1015,7 +1115,10 @@ class AsyncVisdom(object):
             if backchannel is None:
                 close(inner)
             else:
-                loop.create_task(drain(inner, backchannel))
+                # Nobody is left to await this -- the caller is already
+                # unwinding -- so it is held by ``_run_cleanup`` rather than by
+                # the loop, which keeps only a weak reference to a task.
+                _run_cleanup(drain(inner, backchannel), "Releasing a cancelled create")
 
         def build():
             inner = _BridgedVisdom.__new__(_BridgedVisdom)
@@ -1173,7 +1276,7 @@ class AsyncVisdom(object):
                 return result
             # 'run_coroutine_threadsafe' takes coroutines only, and an
             # awaitable need not be one; '_awaited' makes it one.
-            call = asyncio.run_coroutine_threadsafe(_awaited(result), loop)
+            call = asyncio.run_coroutine_threadsafe(_awaited(result, self), loop)
             self._handler_calls.add(call)
             try:
                 return call.result()
@@ -1206,7 +1309,18 @@ class AsyncVisdom(object):
         -- stops waiting without stopping the cleanup, and a later ``shutdown``
         awaits that same task rather than returning early on a ``_closed`` flag
         whose work never finished.
+
+        Callable from an event handler, which is the one caller the release
+        cannot wait for: the dispatch thread is blocked inside
+        ``_handle_incoming_message`` until this coroutine returns, so a drain
+        that waited for that handler would be waiting for itself, and would
+        spend ``DISPATCH_DRAIN_TIMEOUT`` doing it before cancelling the very
+        call the handler was parked on. The flag says so, and it is set before
+        the first await so that a drain another caller's ``shutdown`` already
+        started sees it too.
         """
+        if _HANDLER_CLIENT.get() is self:
+            self._handler_shutdown.set()
         if self._finalizer is None:
             # Set before the first await, so no call slips in behind it.
             self._closed = True
@@ -1216,8 +1330,9 @@ class AsyncVisdom(object):
             # Closed here rather than in ``_release`` so that the backchannel is
             # already shut before the loop is given back, leaving no turn in
             # which one more event could still be delivered.
-            self._finalizer = asyncio.ensure_future(
-                self._release(self._inner.close_backchannel())
+            self._finalizer = _run_cleanup(
+                self._release(self._inner.close_backchannel()),
+                "AsyncVisdom.shutdown",
             )
         await asyncio.shield(self._finalizer)
 
@@ -1225,8 +1340,10 @@ class AsyncVisdom(object):
         """Let the backchannel and the started calls settle, then close."""
         if backchannel is not None:
             # Awaited rather than merely stopped, so no task is left pending at
-            # loop close and no handler is still running when this returns.
-            if not await backchannel.drain():
+            # loop close and no handler is still running when this returns --
+            # unless that handler is the caller, which ``_handler_shutdown``
+            # tells the drain to stop waiting for.
+            if not await backchannel.drain(abandon=self._handler_shutdown):
                 # A handler outlasted the drain. If it is a coroutine one it is
                 # parked on this loop, which is about to be handed back, and
                 # nothing would ever wake its thread again; cancelling is what
