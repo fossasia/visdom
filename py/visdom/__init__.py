@@ -3168,7 +3168,7 @@ class Visdom(object):
         if Z is not None:
             assert Z.shape == Y.shape, "Z and Y should be the same shape"
 
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         opts["markers"] = opts.get("markers", False)
         opts["fillarea"] = opts.get("fillarea", False)
         if Z is not None and opts["fillarea"]:
