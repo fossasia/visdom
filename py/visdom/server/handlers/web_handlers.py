@@ -122,12 +122,6 @@ class ExistsHandler(BaseHandler):
         self.wrap_func(self, args)
 
 
-# A patch smaller than this is broadcast without encoding the pane to compare
-# it against: the comparison could not save more than this many bytes, and the
-# pane encode it costs grows with the data already plotted.
-PANE_COMPARE_MIN_BYTES = 4096
-
-
 class UpdateHandler(BaseHandler):
     @staticmethod
     def update_packet(
@@ -451,6 +445,37 @@ class UpdateHandler(BaseHandler):
         )
 
     @staticmethod
+    def pane_min_bytes(p):
+        """A lower bound on the encoded size of ``p``, without encoding it.
+
+        In a ``json.dumps`` array every element costs at least one character
+        and every element after the first also carries the two-character ``,``
+        separator, so a trace array of ``k`` values cannot encode to fewer than
+        ``3k - 2`` characters. That bounds the pane from below in O(traces)
+        where encoding it is O(points). Every element type clears the one-char
+        floor (``null`` is four, ``""`` and ``[]`` are two), and the pane's
+        keys, layout and envelope are ignored, so the bound only ever
+        understates -- which costs an exact comparison that could have been
+        skipped, never a wrong answer.
+
+        A pane with no trace arrays to count -- text, HTML, an image, anything
+        whose ``content`` is not a dict of traces -- bounds to zero, which is
+        the same understatement and simply leaves the comparison exact.
+        """
+        content = p.get("content")
+        traces = content.get("data") if isinstance(content, dict) else None
+        if not isinstance(traces, (list, tuple)):
+            return 0
+        total = 0
+        for trace in traces:
+            if not isinstance(trace, dict):
+                continue
+            for value in trace.values():
+                if isinstance(value, (list, tuple)) and value:
+                    total += 3 * len(value) - 2
+        return total
+
+    @staticmethod
     def wrap_func(handler, args):
         if "win" not in args:
             raise tornado.web.HTTPError(400, reason="missing required field: win")
@@ -546,15 +571,13 @@ class UpdateHandler(BaseHandler):
                 handler.write(str(exc))
                 return
             raise
-        # Send the smaller of the patch and the updated pane. Applying the patch
-        # leaves the frontend in the same state as replacing the pane, so this
-        # is a bandwidth heuristic and not a correctness gate -- which is what
-        # makes it safe to answer without measuring both. Below
-        # PANE_COMPARE_MIN_BYTES the pane cannot be enough smaller to be worth
-        # encoding it to find out, and that encode is the one whose cost grows
-        # with the data already plotted.
+        # Send the smaller of the patch and the updated pane. The pane is only
+        # encoded when it could actually win: pane_min_bytes bounds its encoded
+        # size from below, so a patch already shorter than that bound cannot be
+        # beaten and the encode -- the one whose cost grows with the data
+        # already plotted -- is skipped. Every other update compares for real.
         msg = UpdateHandler.window_update_message(args, eid, p, diff_packet)
-        if len(msg) >= PANE_COMPARE_MIN_BYTES:
+        if UpdateHandler.pane_min_bytes(p) < len(msg):
             broadcast_msg = dict(p)
             broadcast_msg["eid"] = eid
             pane_msg = json.dumps(broadcast_msg, cls=NanSafeEncoder)
