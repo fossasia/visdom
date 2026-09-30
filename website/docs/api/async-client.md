@@ -51,7 +51,7 @@ vis = await AsyncVisdom.create(server="http://localhost", port=8097, env="main")
 :::
 
 :::warning A login over `http://` travels in the clear
-`username`/`password` are POSTed to the `server` url as given, and the `user_password` cookie they return is replayed on every later request — and on the backchannel handshake, whose scheme follows the same url, so an `http://` server gets a `ws://` socket. Anything on the path can read both. The client logs a warning once per login when the server is neither `https://` nor loopback; use an `https://` url for anything that leaves the machine.
+`username`/`password` are POSTed to the `server` url as given, and the `user_password` cookie they return is replayed on every later request — and on the backchannel handshake, whose scheme follows the same url, so an `http://` server gets a plaintext websocket. Anything on the path can read both. The client logs a warning once per login when the server is neither `https://` nor loopback; use an `https://` url for anything that leaves the machine.
 :::
 
 ## Defaults that differ from `Visdom`

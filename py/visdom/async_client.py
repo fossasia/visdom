@@ -247,8 +247,9 @@ class _AsyncTransport(object):
         logger.warning(
             "Logging in to %s:%s over an unencrypted connection: the "
             "credentials, and the user_password cookie sent with every "
-            "request and with the ws:// backchannel handshake, can be read "
-            "in transit. Use an https:// server url to protect them.",
+            "request and with the plaintext websocket backchannel "
+            "handshake, can be read in transit. Use an https:// server url "
+            "to protect them.",
             self.server,
             self.port,
         )
