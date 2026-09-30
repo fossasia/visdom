@@ -501,31 +501,39 @@ def env_is_well_formed(env):
 
     Takes any ``Mapping``, so a ``LazyEnvData`` can be checked without copying it.
     """
-    kept, skipped = drop_unreadable_panes(env)
-    return kept is not None and not skipped
+    kept, skipped, reload_reset = salvage_env(env)
+    return kept is not None and not skipped and not reload_reset
 
 
-def drop_unreadable_panes(env):
-    """Split off the panes in ``env`` that are not mappings.
+def salvage_env(env):
+    """Return what of ``env`` can be read, and what had to be given up.
 
-    Returns ``(env, skipped)``: ``env`` holding only its readable panes, and the
-    ids of the ones left out. ``env`` itself is returned when nothing was left
-    out. If ``jsons`` or ``reload`` is not a mapping there is nothing to keep,
-    and ``None`` comes back in its place.
+    Returns ``(env, skipped, reload_reset)``. ``skipped`` holds the ids of the
+    panes that are not mappings and were left out. ``reload_reset`` says whether
+    ``reload`` was replaced with an empty one: it carries only the saved layout
+    of each pane, so an unusable one costs pane positions rather than panes.
+    ``env`` itself is returned when neither applied.
+
+    Nothing can be read out of an env that is not a mapping, whose ``jsons`` is
+    not one, or that has no ``reload`` at all, and ``None`` comes back for those.
     """
-    if not isinstance(env, Mapping):
-        return None, []
+    if not isinstance(env, Mapping) or "reload" not in env:
+        return None, [], False
     jsons = env.get("jsons")
-    if not isinstance(jsons, Mapping) or not isinstance(env.get("reload"), Mapping):
-        return None, []
+    if not isinstance(jsons, Mapping):
+        return None, [], False
     skipped = [wid for wid, pane in jsons.items() if not isinstance(pane, Mapping)]
-    if not skipped:
-        return env, []
+    reload_reset = not isinstance(env["reload"], Mapping)
+    if not skipped and not reload_reset:
+        return env, [], False
     kept = dict(env)
-    kept["jsons"] = {
-        wid: pane for wid, pane in jsons.items() if isinstance(pane, Mapping)
-    }
-    return kept, skipped
+    if skipped:
+        kept["jsons"] = {
+            wid: pane for wid, pane in jsons.items() if isinstance(pane, Mapping)
+        }
+    if reload_reset:
+        kept["reload"] = {}
+    return kept, skipped, reload_reset
 
 
 def extract_eid(args):

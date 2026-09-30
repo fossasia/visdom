@@ -23,7 +23,7 @@ import pytest
 from visdom.utils.server_utils import (
     LazyEnvData,
     compare_envs,
-    drop_unreadable_panes,
+    salvage_env,
     env_is_well_formed,
     load_env,
 )
@@ -37,7 +37,6 @@ UNREADABLE = [
     ("jsons_is_a_list", {"jsons": [], "reload": {}}),
     ("jsons_is_null", {"jsons": None, "reload": {}}),
     ("jsons_is_a_string", {"jsons": "panes", "reload": {}}),
-    ("reload_is_a_list", {"jsons": {}, "reload": []}),
     ("jsons_is_missing", {"reload": {}}),
     ("reload_is_missing", {"jsons": {}}),
     ("not_an_object", []),
@@ -48,9 +47,16 @@ BAD_PANE = [
     ("a_pane_is_a_list", {"jsons": {"w1": []}, "reload": {}}),
 ]
 
-MALFORMED = UNREADABLE + BAD_PANE
+BAD_RELOAD = [
+    ("reload_is_a_list", {"jsons": {}, "reload": []}),
+    ("reload_is_null", {"jsons": {}, "reload": None}),
+    ("reload_is_a_string", {"jsons": {}, "reload": "wide"}),
+]
+
+MALFORMED = UNREADABLE + BAD_PANE + BAD_RELOAD
 
 UNREADABLE_IDS = [case[0] for case in UNREADABLE]
+BAD_RELOAD_IDS = [case[0] for case in BAD_RELOAD]
 MALFORMED_IDS = [case[0] for case in MALFORMED]
 
 
@@ -59,6 +65,10 @@ def _with_one_bad_pane():
         "jsons": {"good": {"id": "good", "type": "text"}, "bad": "not a pane"},
         "reload": {"width": 300},
     }
+
+
+def _with_bad_reload():
+    return {"jsons": {"good": {"id": "good", "type": "text"}}, "reload": "wide"}
 
 
 @pytest.mark.parametrize("name, payload", MALFORMED, ids=MALFORMED_IDS)
@@ -102,6 +112,14 @@ def test_an_unreadable_file_is_not_loaded(name, payload, store, env_path):
     assert store.load_env("broken") == {}
 
 
+def test_a_file_with_an_unreadable_reload_still_loads(store, env_path):
+    with open(os.path.join(env_path, "reload.json"), "w") as fn:
+        fn.write(json.dumps(_with_bad_reload()))
+    env = store.load_env("reload")
+    assert env["jsons"] == {"good": {"id": "good", "type": "text"}}
+    assert env["reload"] == {}
+
+
 def test_a_file_with_one_bad_pane_keeps_the_rest(store, env_path):
     with open(os.path.join(env_path, "mixed.json"), "w") as fn:
         fn.write(json.dumps(_with_one_bad_pane()))
@@ -112,26 +130,44 @@ def test_a_file_with_one_bad_pane_keeps_the_rest(store, env_path):
 
 @pytest.mark.parametrize("name, payload", UNREADABLE, ids=UNREADABLE_IDS)
 def test_nothing_is_kept_from_an_unreadable_env(name, payload):
-    assert drop_unreadable_panes(payload) == (None, [])
+    assert salvage_env(payload) == (None, [], False)
 
 
 def test_only_the_bad_panes_are_dropped():
-    kept, skipped = drop_unreadable_panes(_with_one_bad_pane())
+    kept, skipped, reload_reset = salvage_env(_with_one_bad_pane())
     assert kept["jsons"] == {"good": {"id": "good", "type": "text"}}
     assert kept["reload"] == {"width": 300}
     assert skipped == ["bad"]
+    assert reload_reset is False
+
+
+@pytest.mark.parametrize("name, payload", BAD_RELOAD, ids=BAD_RELOAD_IDS)
+def test_an_unreadable_reload_is_emptied_rather_than_fatal(name, payload):
+    kept, skipped, reload_reset = salvage_env(payload)
+    assert kept["reload"] == {}
+    assert skipped == []
+    assert reload_reset is True
+
+
+def test_the_panes_survive_an_unreadable_reload():
+    kept, _, reload_reset = salvage_env(_with_bad_reload())
+    assert kept["jsons"] == {"good": {"id": "good", "type": "text"}}
+    assert reload_reset is True
 
 
 def test_a_readable_env_comes_back_as_it_is():
     env = env_payload()
-    assert drop_unreadable_panes(env) == (env, [])
-    assert drop_unreadable_panes(env)[0] is env
+    assert salvage_env(env) == (env, [], False)
+    assert salvage_env(env)[0] is env
 
 
-def test_dropping_bad_panes_leaves_the_original_alone():
+def test_salvaging_leaves_the_original_alone():
     env = _with_one_bad_pane()
-    drop_unreadable_panes(env)
+    salvage_env(env)
     assert "bad" in env["jsons"]
+    env = _with_bad_reload()
+    salvage_env(env)
+    assert env["reload"] == "wide"
 
 
 def test_a_well_formed_file_is_still_loaded(store, env_path):

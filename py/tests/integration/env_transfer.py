@@ -211,6 +211,35 @@ class TestUploadEnvBadPanes(UploadTestCase):
         self.assertEqual(body["skipped_panes"], [])
         self.assertNotIn("unreadable", body["message"])
 
+    def test_a_clean_upload_keeps_its_reload(self):
+        _, body = self.upload_json("run.json", self.exported_env())
+        self.assertFalse(body["reload_reset"])
+
+
+class TestUploadEnvBadReload(UploadTestCase):
+    def bad_reload_env(self):
+        payload = self.exported_env("kept")
+        payload["reload"] = "wide"
+        return payload
+
+    def test_an_upload_with_an_unreadable_reload_is_still_accepted(self):
+        resp, body = self.upload_json("run.json", self.bad_reload_env())
+        self.assertEqual(resp.code, 200)
+        self.assertTrue(body["success"])
+
+    def test_the_unreadable_reload_is_reported(self):
+        _, body = self.upload_json("run.json", self.bad_reload_env())
+        self.assertTrue(body["reload_reset"])
+        self.assertIn("unreadable layout data", body["message"])
+
+    def test_the_panes_are_kept(self):
+        _, body = self.upload_json("run.json", self.bad_reload_env())
+        self.assertEqual(self.get_win_data("w1", eid=body["eid"])["content"], "kept")
+
+    def test_the_env_is_left_with_an_empty_reload(self):
+        _, body = self.upload_json("run.json", self.bad_reload_env())
+        self.assertEqual(self._app.state[body["eid"]]["reload"], {})
+
 
 class TestForkEnvTransfer(VisdomHTTPTestCase):
     def test_the_new_id_is_returned(self):
