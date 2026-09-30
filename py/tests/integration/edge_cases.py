@@ -206,5 +206,59 @@ class TestRenderedPages(VisdomHTTPTestCase):
         self.assertEqual(self.fetch("/compare/main+main").code, 200)
 
 
+class TestCompareEndpoint(VisdomHTTPTestCase):
+    """Integration tests for POST ``/compare/<eids>`` payload validation."""
+
+    def test_missing_sid_returns_400(self):
+        """A compare request without the required 'sid' returns HTTP 400."""
+        resp = self.post_json("/compare/main+main", {"show_all": False})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("missing required field: 'sid'", resp.reason)
+
+    def test_empty_string_or_whitespace_sid_returns_400(self):
+        """A compare request with empty or whitespace-only 'sid' returns HTTP 400."""
+        for invalid_sid in ("", "   "):
+            resp = self.post_json("/compare/main+main", {"sid": invalid_sid})
+            self.assertEqual(resp.code, 400)
+            self.assertIn("missing required field: 'sid'", resp.reason)
+
+    def test_non_string_sid_returns_400(self):
+        """A compare request with non-string 'sid' (None, number) returns HTTP 400."""
+        for invalid_sid in (None, 123, []):
+            resp = self.post_json("/compare/main+main", {"sid": invalid_sid})
+            self.assertEqual(resp.code, 400)
+            self.assertIn("missing required field: 'sid'", resp.reason)
+
+    def test_malformed_json_body_returns_400(self):
+        """A compare request with invalid JSON returns HTTP 400."""
+        resp = self.fetch(
+            "/compare/main+main",
+            method="POST",
+            body="not-valid-json",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be valid JSON", resp.reason)
+
+    def test_non_object_json_body_returns_400(self):
+        """A compare request where body is a list or non-object returns HTTP 400."""
+        resp = self.fetch(
+            "/compare/main+main",
+            method="POST",
+            body="[1, 2, 3]",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be an object", resp.reason)
+
+    def test_valid_sid_unknown_subscriber_returns_200(self):
+        """A compare request with a valid string 'sid' unknown in self.subs returns HTTP 200."""
+        resp = self.post_json(
+            "/compare/main+main", {"sid": "valid-session-id", "show_all": False}
+        )
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(resp.body, b"")
+
+
 if __name__ == "__main__":
     unittest.main()

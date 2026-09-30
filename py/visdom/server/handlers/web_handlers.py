@@ -732,9 +732,29 @@ class CompareHandler(BaseHandler):
 
     @check_auth
     async def post(self, args):
-        body = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
+        """Send environment comparison data to a subscriber socket.
+
+        Expects a JSON object with a required ``sid`` string identifying the
+        target subscriber session. Returns HTTP 400 if the request body is
+        not valid JSON, is not an object, or is missing ``sid``.
+        """
+        try:
+            body = tornado.escape.json_decode(
+                tornado.escape.to_basestring(self.request.body)
+            )
+        except ValueError:
+            raise tornado.web.HTTPError(400, reason="request body must be valid JSON")
+
+        if not isinstance(body, Mapping):
+            raise tornado.web.HTTPError(400, reason="request body must be an object")
+
+        if (
+            "sid" not in body
+            or not isinstance(body["sid"], str)
+            or not body["sid"].strip()
+        ):
+            raise tornado.web.HTTPError(400, reason="missing required field: 'sid'")
+
         sid = body["sid"]
         show_all = body.get("show_all", False)
         if sid in self.subs:
