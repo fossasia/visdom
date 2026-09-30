@@ -391,6 +391,69 @@ def test_a_second_shutdown_does_not_write_again(app):
     assert len(saves) == 1
 
 
+def test_a_failed_final_save_is_retried_by_the_next_shutdown(app):
+    """A save that raised must not mark storage shut down, or atexit skips it."""
+    saves = []
+
+    def flaky_save_all(state):
+        saves.append(state)
+        if len(saves) == 1:
+            raise OSError("disk full")
+
+    app.storage.save_all = flaky_save_all
+
+    with pytest.raises(OSError):
+        app.shutdown_storage()
+    app.shutdown_storage()
+    app.shutdown_storage()
+
+    assert len(saves) == 2
+
+
+def test_two_shutdowns_at_once_still_save_only_once(app):
+    """Nothing orders the graceful stop against the ``atexit`` hook -- a server
+    embedded in a thread runs the first off the main thread, where the second
+    always runs -- and the flag that guards the second pass is not set until
+    the save has returned. So both used to get in and write the same
+    environment files from two threads at once.
+
+    The first save is held open rather than merely made slow, so the overlap
+    is certain on every schedule instead of on most of them.
+    """
+    saves = []
+    running = threading.Event()
+    finish = threading.Event()
+    overlapped = threading.Event()
+
+    def held_save_all(state):
+        saves.append(state)
+        if len(saves) > 1:
+            overlapped.set()
+            return
+        running.set()
+        assert finish.wait(10), "the first shutdown was never released"
+
+    app.storage.save_all = held_save_all
+
+    first = threading.Thread(target=app.shutdown_storage)
+    second = threading.Thread(target=app.shutdown_storage)
+    first.start()
+    try:
+        assert running.wait(10), "the first shutdown never reached save_all"
+        second.start()
+
+        assert not overlapped.wait(0.5), "both shutdowns were inside save_all"
+    finally:
+        finish.set()
+        first.join(10)
+        second.join(10)
+
+    # The second waited out the first, then found the flag set, so the state
+    # reached disk exactly once.
+    assert len(saves) == 1
+    assert not first.is_alive() and not second.is_alive()
+
+
 def test_shutdown_flushes_state_through_storage(app):
     app.state["expt"] = env_payload()
 
