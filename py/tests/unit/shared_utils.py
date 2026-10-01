@@ -136,6 +136,250 @@ def test_default_encoder_still_emits_nan():
     assert "NaN" in json.dumps({"y": [float("nan")]})
 
 
+class LegacyNanSafeEncoder(json.JSONEncoder):
+    """The pre-#1805 encoder, kept as the parity oracle for the tests below.
+
+    It sanitised in both ``encode`` and ``iterencode``; because
+    ``JSONEncoder.encode`` calls ``self.iterencode``, every payload was rebuilt
+    in pure Python twice. That is what the current implementation removes, so
+    its observable output -- byte for byte, under every encoder option -- is
+    the contract the fast path has to keep.
+    """
+
+    def encode(self, o):
+        return super().encode(shared_utils._sanitize_nans(o))
+
+    def iterencode(self, o, _one_shot=False):
+        return super().iterencode(shared_utils._sanitize_nans(o), _one_shot=_one_shot)
+
+
+ENCODER_PAYLOADS = [
+    pytest.param({"x": [1.0, 2.5], "n": 3, "s": "hello"}, id="clean"),
+    pytest.param({"x": [1.0, float("nan"), 2.0]}, id="nan"),
+    pytest.param({"x": [float("inf")]}, id="posinf"),
+    pytest.param({"x": [float("-inf")]}, id="neginf"),
+    pytest.param({"x": [np.float64("nan")]}, id="np-float64-nan"),
+    pytest.param({"x": [np.float32("nan")]}, id="np-float32-nan"),
+    pytest.param({"x": [np.float32(1.5)]}, id="np-float32"),
+    pytest.param({"x": [np.int64(7)]}, id="np-int64"),
+    pytest.param({"x": [np.bool_(True)]}, id="np-bool"),
+    pytest.param({"a": {"b": [[float("nan")], {"c": np.int64(2)}]}}, id="nested"),
+    pytest.param({"t": (1, float("nan"), 3)}, id="tuple"),
+    pytest.param({1: float("nan")}, id="non-str-key"),
+    # A non-finite *key* cannot become null -- JSON keys are strings -- so it
+    # keeps the token the encoder wrote for it before allow_nan=False.
+    pytest.param({float("nan"): 1}, id="nan-key"),
+    pytest.param({float("inf"): 1, float("-inf"): 2}, id="inf-keys"),
+    pytest.param({np.float32("nan"): 1}, id="np-float32-nan-key"),
+    pytest.param({}, id="empty"),
+    pytest.param("just a string", id="top-level-str"),
+    pytest.param(float("nan"), id="top-level-nan"),
+    # The adversarial pair. Deciding whether to sanitise by searching the
+    # encoded output for a "NaN" token would fire on these and pay for a
+    # second full pass; raising on the float itself cannot.
+    pytest.param({"x": ["this is NaN in a string"], "y": [1.0]}, id="str-nan-trap"),
+    pytest.param({"k": "Infinity and beyond"}, id="str-inf-trap"),
+]
+
+
+@pytest.mark.parametrize("payload", ENCODER_PAYLOADS)
+def test_encoder_output_matches_the_legacy_encoder(payload):
+    """Skipping the sanitise pass must not change a single byte it emitted."""
+    assert json.dumps(payload, cls=NanSafeEncoder) == json.dumps(
+        payload, cls=LegacyNanSafeEncoder
+    )
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        pytest.param({}, id="defaults"),
+        pytest.param({"sort_keys": True}, id="sort-keys"),
+        pytest.param({"indent": 2}, id="indent"),
+        pytest.param({"separators": (",", ":")}, id="separators"),
+        pytest.param({"ensure_ascii": False}, id="ensure-ascii"),
+        # The encoder forces allow_nan=False internally to make a non-finite
+        # float raise. Callers who pass either value must still get null, which
+        # is what both already did.
+        pytest.param({"allow_nan": True}, id="allow-nan-true"),
+        pytest.param({"allow_nan": False}, id="allow-nan-false"),
+    ],
+)
+@pytest.mark.parametrize("payload", ENCODER_PAYLOADS)
+def test_encoder_options_survive_the_fast_path(payload, options):
+    """``indent`` and friends reach the C encoder unchanged on both paths."""
+    assert json.dumps(payload, cls=NanSafeEncoder, **options) == json.dumps(
+        payload, cls=LegacyNanSafeEncoder, **options
+    )
+
+
+def test_encoder_sanitises_at_most_once(monkeypatch):
+    """The regression that motivated this: never rebuild the payload twice.
+
+    Asserting call counts rather than wall-clock, because CI runs a two-version
+    matrix on shared runners -- see ``example/benchmarks/README.md``. A clean
+    payload must not be rebuilt at all, and a dirty one exactly once; the old
+    ``encode``/``iterencode`` pair did it twice either way.
+    """
+    real = shared_utils._sanitize_nans
+    passes = []
+    depth = []
+
+    def counting(obj):
+        # _sanitize_nans recurses through this same module global, so only the
+        # outermost call counts -- one entry per full rebuild of the payload.
+        # Identity is not enough here: the legacy encoder's second pass ran on
+        # the copy the first one returned, not on the payload itself.
+        if not depth:
+            passes.append(obj)
+        depth.append(obj)
+        try:
+            return real(obj)
+        finally:
+            depth.pop()
+
+    monkeypatch.setattr(shared_utils, "_sanitize_nans", counting)
+
+    json.dumps({"y": [1.0, 2.0]}, cls=NanSafeEncoder)
+    assert passes == []
+
+    json.dumps({"y": [1.0, float("nan")]}, cls=NanSafeEncoder)
+    assert len(passes) == 1
+
+
+def test_encoder_still_rejects_what_it_cannot_serialise():
+    """The fallback is for NaN and numpy scalars, not for swallowing errors."""
+    with pytest.raises(TypeError):
+        json.dumps({"o": object()}, cls=NanSafeEncoder)
+    with pytest.raises(TypeError):
+        json.dumps({"a": np.arange(3)}, cls=NanSafeEncoder)
+
+
+def test_encoder_subclass_default_hook_is_still_reached():
+    """``default()`` is how a subclass handles its own types -- keep it working."""
+
+    class WithDefault(NanSafeEncoder):
+        def default(self, o):
+            return "custom"
+
+    assert json.dumps({"o": object()}, cls=WithDefault) == '{"o": "custom"}'
+
+
+def test_encoder_streams_numpy_scalars_too():
+    """``json.dump`` takes the iterencode path, where the fallback now lives."""
+    stream = io.StringIO()
+    json.dump({"n": np.int64(7), "y": float("nan")}, stream, cls=NanSafeEncoder)
+    assert json.loads(stream.getvalue()) == {"n": 7, "y": None}
+
+
+@pytest.mark.parametrize(
+    "key,token",
+    [
+        pytest.param(float("nan"), "NaN", id="nan"),
+        pytest.param(float("inf"), "Infinity", id="posinf"),
+        pytest.param(float("-inf"), "-Infinity", id="neginf"),
+        pytest.param(np.float32("nan"), "NaN", id="np-float32-nan"),
+        pytest.param(np.float64("-inf"), "-Infinity", id="np-float64-neginf"),
+    ],
+)
+def test_non_finite_dict_keys_keep_the_token_json_wrote_for_them(key, token):
+    """Sanitising values to null must not strip or rename the keys.
+
+    ``allow_nan=False`` makes the encoder raise on a non-finite key as well as
+    on a non-finite value, and the retry only helps if the rebuilt payload no
+    longer trips it. A key is not allowed to be null, so it takes the string
+    the encoder itself produced under the old allow_nan=True default.
+    """
+    assert json.dumps({key: 1}, cls=NanSafeEncoder) == f'{{"{token}": 1}}'
+
+
+def test_circular_payload_still_reports_a_circular_reference():
+    """The retry is for non-finite floats only; it must not mask other errors.
+
+    A circular payload makes json raise ValueError too. Sending it through
+    ``_sanitize_nans`` would recurse until the interpreter gave up, turning a
+    precise message into a RecursionError.
+    """
+    payload = {"name": "loop"}
+    payload["self"] = payload
+
+    with pytest.raises(ValueError, match="Circular reference"):
+        json.dumps(payload, cls=NanSafeEncoder)
+
+
+@pytest.mark.parametrize("error", [ValueError("boom"), TypeError("boom")])
+def test_errors_raised_by_a_default_hook_propagate(error):
+    """A hook's own failure is not a signal that the payload needs sanitising."""
+
+    def hook(o):
+        raise error
+
+    with pytest.raises(type(error), match="boom"):
+        json.dumps({"o": object()}, cls=NanSafeEncoder, default=hook)
+
+
+def test_default_hook_sees_each_object_once_even_with_a_later_nan():
+    """The retry re-encodes from the start, so a hook must not be on that path.
+
+    The object is encoded before the NaN is reached, so a retry would hand it
+    to the hook a second time -- twice the side effects, and a stateful hook
+    could even emit a different value the second time.
+    """
+    seen = []
+
+    def hook(o):
+        seen.append(o)
+        return f"custom-{len(seen)}"
+
+    marker = object()
+    encoded = json.dumps(
+        {"a": marker, "b": float("nan")}, cls=NanSafeEncoder, default=hook
+    )
+
+    assert encoded == '{"a": "custom-1", "b": null}'
+    assert seen == [marker]
+
+
+def test_subclass_default_hook_sees_each_object_once_too():
+    """Same guarantee when the hook arrives by subclassing rather than by kwarg."""
+
+    class Counting(NanSafeEncoder):
+        calls = 0
+
+        def default(self, o):
+            type(self).calls += 1
+            return "custom"
+
+    assert (
+        json.dumps({"a": object(), "b": float("nan")}, cls=Counting)
+        == '{"a": "custom", "b": null}'
+    )
+    assert Counting.calls == 1
+
+
+def test_streaming_iterencode_does_not_buffer_the_whole_payload(monkeypatch):
+    """``json.dump`` must keep its bounded memory: chunks stay lazy.
+
+    Recording what the underlying encoder has been asked for is what makes the
+    difference observable -- a materialised implementation drains it fully
+    before handing back the first chunk, so the count after one ``next()``
+    would be the whole payload rather than one.
+    """
+    pulled = []
+    real_iterencode = json.JSONEncoder.iterencode
+
+    def recording(self, o, _one_shot=False):
+        for chunk in real_iterencode(self, o, _one_shot=_one_shot):
+            pulled.append(chunk)
+            yield chunk
+
+    monkeypatch.setattr(json.JSONEncoder, "iterencode", recording)
+
+    chunks = NanSafeEncoder().iterencode({"x": list(range(1000))})
+    assert next(chunks) == "{"
+    assert len(pulled) == 1
+
+
 # -- _is_missing_value -------------------------------------------------------
 
 
