@@ -298,6 +298,64 @@ class TestLogHistory(unittest.TestCase):
         self.assertEqual(plot["X"], [1, 2, 3])
 
 
+class TestValidationCurveDiscovery(unittest.TestCase):
+    """The boosting estimators report a validation history under a different
+    name than MLP*, and without reporting a loss curve at all."""
+
+    def _hist_gb(self):
+        rng = np.random.RandomState(0)
+        X = rng.rand(300, 4)
+        y = (X[:, 0] > 0.5).astype(int)
+        return HistGradientBoostingClassifier(
+            early_stopping=True, max_iter=15, random_state=0
+        ).fit(X, y)
+
+    def _titles(self, logger):
+        return [c.kwargs["opts"]["title"] for c in logger.viz.line.call_args_list]
+
+    def test_singular_attribute_is_found(self):
+        logger = _logger()
+        est = self._hist_gb()
+        self.assertFalse(hasattr(est, "validation_scores_"))
+        self.assertTrue(hasattr(est, "validation_score_"))
+        logger._log_history(est)
+        self.assertTrue(any("validation_score_" in t for t in self._titles(logger)))
+
+    def test_found_without_a_loss_curve(self):
+        # The lookup used to sit inside the loss_curve_ branch, which these
+        # estimators never enter.
+        logger = _logger()
+        est = self._hist_gb()
+        self.assertFalse(hasattr(est, "loss_curve_"))
+        logger._log_history(est)
+        self.assertEqual(logger.viz.line.call_count, 2)
+
+    def test_plural_attribute_still_wins_for_mlp(self):
+        logger = _logger()
+        rng = np.random.RandomState(0)
+        est = MLPClassifier(
+            hidden_layer_sizes=(2,),
+            max_iter=20,
+            early_stopping=True,
+            n_iter_no_change=2,
+            random_state=0,
+        ).fit(rng.rand(40, 2), np.array([0, 1] * 20))
+        logger._log_history(est)
+        titles = self._titles(logger)
+        self.assertTrue(any("validation_scores_" in t for t in titles))
+        self.assertEqual(logger.viz.line.call_count, 2)
+
+    def test_only_one_validation_curve_when_both_names_exist(self):
+        # A future sklearn exposing both aliases must not produce two panes
+        # for the same history.
+        logger = _logger()
+        est = self._hist_gb()
+        est.validation_scores_ = list(est.validation_score_)
+        logger._log_history(est)
+        titles = self._titles(logger)
+        self.assertEqual(sum(1 for t in titles if "validation" in t), 1, titles)
+
+
 class TestLogCv(unittest.TestCase):
     def setUp(self):
         self.logger = _logger()

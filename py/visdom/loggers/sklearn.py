@@ -44,8 +44,10 @@ class VisdomSklearnLogger:
     (MLPClassifier/MLPRegressor via loss_curve_,
     GradientBoostingClassifier/GradientBoostingRegressor via
     train_score_) additionally produce a line chart of that history.
-    MLPClassifier/MLPRegressor fit with early_stopping=True also produce
-    a line chart of validation_scores_ per epoch.
+    Estimators fit with early_stopping=True also produce a line chart of
+    their held-out validation history, which MLPClassifier/MLPRegressor
+    expose as validation_scores_ and the HistGradientBoosting estimators
+    as validation_score_.
     Regressors additionally get train_rmse/train_mae rows in the text
     pane (R2 alone can be misleading) and a predicted-vs-residual
     scatter plot. Like train_score, these are computed on the data
@@ -288,16 +290,22 @@ class VisdomSklearnLogger:
         loss_curve = getattr(est, "loss_curve_", None)
         if loss_curve is not None and len(loss_curve) > 0:
             self._plot_history(est, loss_curve, "loss_curve_", "epoch", "loss")
-            val_scores = getattr(est, "validation_scores_", None)
+
+        # MLP* spell this plural, the boosting estimators singular. Kept out
+        # of the loss_curve_ branch above: the boosting estimators report a
+        # validation history without reporting a loss curve.
+        for attr in ("validation_scores_", "validation_score_"):
+            val_scores = getattr(est, attr, None)
             if val_scores is not None and len(val_scores) > 0:
                 self._plot_history(
                     est,
                     val_scores,
-                    "validation_scores_",
+                    attr,
                     "epoch",
                     "val_score",
                     x_start=self._history_x_start(est, val_scores),
                 )
+                break
 
         train_score = getattr(est, "train_score_", None)
         if train_score is not None and len(train_score) > 0:
