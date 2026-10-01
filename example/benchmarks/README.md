@@ -28,8 +28,9 @@ python example/benchmarks/encode.py
 ```
 
 Each accepts `--sizes` (comma-separated workload sizes), `--repeat` (timed
-calls per size) and `--warmup` (untimed calls first). `--breakdown` uses a
-tenth of `--repeat`, since it times five operations per size.
+calls per size) and `--warmup` (untimed calls first). `--breakdown` re-runs the
+append with the operations on the update path wrapped in timers, for a tenth
+of `--repeat`.
 
 ## How they measure
 
@@ -41,6 +42,13 @@ end-to-end until they are already large. `_harness.py` holds the timing loop
 (`time.perf_counter`, p50 and p95 over sorted per-call samples) and the
 fixtures, and it puts this checkout's `py/` ahead of any installed `visdom` so
 that comparing two commits compares the two commits.
+
+The server benchmarks drive their wrap functions through the suite's own
+`FakeHandler` (`py/tests/testutils/fakes.py`), which already carries every
+attribute a handler reads off the application. `StubHandler` subclasses it to
+replace the three methods that record into lists with counters, because a
+benchmark runs the handler tens of thousands of times and keeping every
+broadcast would put the garbage collector inside the measurement.
 
 `update_append.py --server` is the exception: it drives a server that is
 already running, over HTTP, for the end-to-end figure.
@@ -66,6 +74,29 @@ costs time quadratic in its own length — which is what issues
 [#1805](https://github.com/fossasia/visdom/issues/1805) and
 [#695](https://github.com/fossasia/visdom/issues/695) describe from opposite
 ends. Absolute milliseconds move with the machine; the growth does not.
+
+`--breakdown` splits one append across the operations it reaches, and the
+`calls` column is the part that carries the finding:
+
+```
+breakdown at 4000 points -- mean cost of one append
+| operation        | calls | ms    | share |
+|------------------|-------|-------|-------|
+| stringify        | 2     | 6.072 | 84%   |
+| deepcopy         | 1     | 0.621 | 9%    |
+| make_patch       | 1     | 0.453 | 6%    |
+| broadcast encode | 1     | 0.033 | 0%    |
+| unattributed     | -     | 0.057 | 1%    |
+| one append       | 1     | 7.235 | 100%  |
+```
+
+The timers sit on the attributes `UpdateHandler.wrap_func` resolves, rather
+than calling each operation directly on a pane of the right size, so a commit
+that takes a call off the update path reports `0` calls and no time instead of
+the cost the operation would have had. `unattributed` is the handler's own
+work plus the timing overhead, which is a pair of `perf_counter` calls per
+operation — enough that the instrumented `one append` sits a little above the
+`p50` in the summary table, so read the shares rather than the milliseconds.
 
 For the same reason, the regression tests in `py/tests/` assert *shape* —
 which functions an append calls, and that the work at 4,000 points matches the

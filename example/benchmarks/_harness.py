@@ -19,7 +19,13 @@ from unittest.mock import patch
 # A benchmark compares two commits of *this* checkout, so prefer the sibling
 # ``py/`` tree over whatever ``visdom`` happens to be installed in the
 # environment -- an editable install may well point somewhere else entirely.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "py"))
+# ``py/tests`` comes along for ``testutils``, whose handler double the server
+# benchmarks drive their wrap functions through.
+_PY = Path(__file__).resolve().parents[2] / "py"
+sys.path.insert(0, str(_PY / "tests"))
+sys.path.insert(0, str(_PY))
+
+from testutils.fakes import FakeHandler  # noqa: E402
 
 DEFAULT_SIZES = "500,4000,20000"
 
@@ -101,6 +107,17 @@ class Result:
         return self.samples[int(round(0.95 * (len(self.samples) - 1)))]
 
     @property
+    def mean(self):
+        """Arithmetic mean, for attributing a total across its parts.
+
+        The tables report ``p50``, which is the honest figure for "what does
+        one call cost" on a shared machine. A breakdown that divides summed
+        per-operation time by the iteration count is a mean, though, so it has
+        to be compared against a mean or the shares do not add up.
+        """
+        return sum(self.samples) / len(self.samples)
+
+    @property
     def per_sec(self):
         return 1000.0 / self.p50 if self.p50 else float("inf")
 
@@ -176,38 +193,46 @@ def offline_client(**kwargs):
     return client
 
 
-class StubHandler:
-    """Carries the attributes a ``web_handlers`` wrap function reads.
+class StubHandler(FakeHandler):
+    """The suite's handler double, counting instead of recording.
 
-    Handlers copy what they need off the application in ``initialize()``
-    instead of reaching through ``self.app``, so a wrap function runs against
-    any object that has those names -- the property that lets
-    ``py/tests/testutils/fakes.py`` drive them without a Tornado request. The
-    handler is its own subscriber, so the broadcast encode is paid here as it
-    is in production.
+    ``FakeHandler`` already carries every attribute a ``web_handlers`` wrap
+    function reads: handlers copy what they need off the application in
+    ``initialize()`` rather than reaching through ``self.app``, which is what
+    lets the suite -- and this harness -- drive them without a Tornado request.
+
+    What it is not built for is a hundred thousand iterations. Everything it
+    is handed goes into a list, so a benchmark appending to a multi-megabyte
+    pane would keep a copy of every broadcast and hand the garbage collector a
+    growing heap to walk, inside the measurement. Its three recording methods
+    are therefore replaced by counters. The handler also subscribes itself, so
+    the broadcast encode is paid here as it is in production.
+
+    The caps come from ``visdom.server.defaults`` rather than from
+    ``FakeHandler``'s own defaults, so a benchmark measures the limits the
+    server ships with even if the two ever drift apart.
     """
 
     def __init__(self, eid="main"):
         from visdom.server import defaults
 
-        self.state = {}
-        self.subs = {"sub_0": self}
-        self.sources = {}
+        super().__init__(
+            max_text_lines=defaults.DEFAULT_MAX_TEXT_LINES,
+            max_old_content=defaults.DEFAULT_MAX_OLD_CONTENT,
+            max_image_history=defaults.DEFAULT_MAX_IMAGE_HISTORY,
+            max_plot_history=defaults.DEFAULT_MAX_PLOT_HISTORY,
+        )
         self.eid = eid
+        self.subs["sub_0"] = self
         self.broadcast_bytes = 0
-        self.max_text_lines = defaults.DEFAULT_MAX_TEXT_LINES
-        self.max_old_content = defaults.DEFAULT_MAX_OLD_CONTENT
-        self.max_image_history = defaults.DEFAULT_MAX_IMAGE_HISTORY
-        self.max_plot_history = defaults.DEFAULT_MAX_PLOT_HISTORY
+        self.writes = 0
+        self.dirties = 0
 
     def mark_dirty(self, eid):
-        pass
-
-    def set_status(self, code, reason=None):
-        pass
+        self.dirties += 1
 
     def write(self, chunk):
-        pass
+        self.writes += 1
 
     def write_message(self, msg):
         self.broadcast_bytes += len(msg)

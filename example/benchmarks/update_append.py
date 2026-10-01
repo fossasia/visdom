@@ -13,16 +13,19 @@ This is the benchmark behind issues #1805 and #695. It times one whole
 smaller-of-patch-or-pane comparison and the broadcast encode are all included
 -- against a pane that already holds ``n`` points, for several ``n``.
 
-``--breakdown`` attributes that cost to the individual operations on the path;
-``--server`` measures the same append end-to-end against a running server.
+``--breakdown`` attributes that cost to the operations the append actually
+reaches, by timing them in place; ``--server`` measures the same append
+end-to-end against a running server.
 
     python example/benchmarks/update_append.py
     python example/benchmarks/update_append.py --breakdown
     python example/benchmarks/update_append.py --server --port 8097
 """
 
-import copy
+import contextlib
 import json
+import time
+from unittest.mock import patch
 
 import _harness as harness
 
@@ -56,40 +59,147 @@ def measure_append(args):
             )
         )
         if args.breakdown:
-            breakdowns.append((n_points, breakdown_rows(pane, n_points, args)))
+            breakdowns.append(
+                (n_points, breakdown_rows(handler, pane, append, n_points, args))
+            )
     harness.table(["points", "p50 ms", "p95 ms", "appends/s", "pane KB"], rows)
     for n_points, operations in breakdowns:
-        print("\nbreakdown at %d points" % n_points)
-        harness.table(["operation", "p50 ms"], operations)
+        print("\nbreakdown at %d points -- mean cost of one append" % n_points)
+        harness.table(["operation", "calls", "ms", "share"], operations)
 
 
-def breakdown_rows(pane, n_points, args):
-    """Time the individual operations one append runs, on a pane this size."""
-    import jsonpatch
+class OpTimer:
+    """Times named operations wherever the code under test calls them.
 
-    from visdom.utils.server_utils import recursive_order, stringify
+    The breakdown used to call ``stringify``, ``make_patch`` and the rest
+    directly, on a pane of the right size. That answers "what do these
+    operations cost", which is not the same question as "what does an append
+    spend": it prints a row for an operation whether or not the handler still
+    reaches it, so a commit that takes a call off the update path reports an
+    unchanged breakdown. These wrappers go on the attributes ``wrap_func``
+    resolves instead, so an operation is timed only when it is actually
+    called, with the arguments it is actually called with, and one that is no
+    longer on the path reports zero calls and no time.
+    """
 
-    harness.truncate_traces(pane, n_points)
-    repeat = max(10, args.repeat // 10)
+    def __init__(self):
+        # ``label -> [calls, milliseconds]``, in registration order, which is
+        # the order the rows print in.
+        self.records = {}
 
-    def timed(call):
-        return "%.3f" % harness.measure(call, repeat, 2).p50
+    def wrap(self, label, func):
+        record = self.records.setdefault(label, [0, 0.0])
 
-    rows = [
-        ("stringify", timed(lambda: stringify(pane))),
-        ("json.dumps", timed(lambda: json.dumps(pane))),
-        ("recursive_order", timed(lambda: recursive_order(pane))),
-        ("deepcopy(content)", timed(lambda: copy.deepcopy(pane["content"]))),
+        def timed(*args, **kwargs):
+            start = time.perf_counter()
+            try:
+                return func(*args, **kwargs)
+            finally:
+                record[0] += 1
+                record[1] += (time.perf_counter() - start) * 1000.0
+
+        return timed
+
+    def reset(self):
+        for record in self.records.values():
+            record[0], record[1] = 0, 0.0
+
+
+class ModuleProxy:
+    """Stands in for a module, with some of its functions timed.
+
+    ``web_handlers`` reaches ``json.dumps``, ``copy.deepcopy`` and
+    ``jsonpatch.make_patch`` through the module objects it imported, so a
+    wrapper meant for that one caller has to replace the module rather than
+    the function -- patching ``json.dumps`` itself would also time the copies
+    ``stringify`` makes internally, and then the shares would double-count.
+    Every other attribute falls through to the real module.
+    """
+
+    def __init__(self, module, wrapped):
+        self._module = module
+        for name, func in wrapped.items():
+            setattr(self, name, func)
+
+    def __getattr__(self, name):
+        return getattr(self._module, name)
+
+
+def instrumented(timer):
+    """Patches putting ``timer`` on the operations an append runs.
+
+    One entry per operation the update path is expected to reach, so a size
+    column of zeros is a finding rather than a missing row.
+    """
+    from visdom.server.handlers import web_handlers
+
+    def proxy(module, name, label):
+        return ModuleProxy(module, {name: timer.wrap(label, getattr(module, name))})
+
+    return [
+        patch.object(
+            web_handlers, "stringify", timer.wrap("stringify", web_handlers.stringify)
+        ),
+        patch.object(
+            web_handlers, "copy", proxy(web_handlers.copy, "deepcopy", "deepcopy")
+        ),
+        patch.object(
+            web_handlers,
+            "jsonpatch",
+            proxy(web_handlers.jsonpatch, "make_patch", "make_patch"),
+        ),
+        patch.object(
+            web_handlers,
+            "json",
+            proxy(web_handlers.json, "dumps", "broadcast encode"),
+        ),
     ]
 
-    # Built only now: a second live copy of a multi-MB pane changes what the
-    # measurements above cost, by way of the garbage collector.
-    old = {"contentID": pane["contentID"], "content": copy.deepcopy(pane["content"])}
-    new = {"contentID": "new", "content": pane["content"]}
-    for trace in new["content"]["data"]:
-        trace["x"].append(float(n_points))
-        trace["y"].append(0.5)
-    rows.append(("make_patch", timed(lambda: jsonpatch.make_patch(old, new))))
+
+def breakdown_rows(handler, pane, append, n_points, args):
+    """Attribute one append's cost to the operations it reaches.
+
+    Runs the same ``wrap_func`` the table above times, with the operations
+    wrapped, and divides each total by the iteration count. Timing in place
+    costs a pair of ``perf_counter`` calls per operation, so the accounted
+    total here runs a shade above the uninstrumented ``p50``; the share column
+    is what to read, and ``unattributed`` is the handler's own work plus that
+    overhead.
+    """
+    from visdom.server.handlers.web_handlers import UpdateHandler
+
+    repeat = max(10, args.repeat // 10)
+
+    def call():
+        UpdateHandler.wrap_func(handler, append)
+
+    def setup():
+        harness.truncate_traces(pane, n_points)
+
+    timer = OpTimer()
+    with contextlib.ExitStack() as stack:
+        for patcher in instrumented(timer):
+            stack.enter_context(patcher)
+        for _ in range(args.warmup):
+            setup()
+            call()
+        # The warmup ran through the same wrappers. Drop it, so ``calls`` is
+        # per append and the attributed time covers ``repeat`` appends.
+        timer.reset()
+        result = harness.measure(call, repeat, setup=setup)
+
+    per_append = result.mean
+
+    def row(label, calls, milliseconds):
+        share = "%.0f%%" % (100.0 * milliseconds / per_append) if per_append else "-"
+        return (label, calls, "%.3f" % milliseconds, share)
+
+    rows, attributed = [], 0.0
+    for label, (calls, milliseconds) in timer.records.items():
+        attributed += milliseconds
+        rows.append(row(label, "%g" % (calls / repeat), milliseconds / repeat))
+    rows.append(row("unattributed", "-", per_append - attributed / repeat))
+    rows.append(row("one append", "1", per_append))
     return rows
 
 
