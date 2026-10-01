@@ -205,6 +205,10 @@ class TestRenderedPages(VisdomHTTPTestCase):
     def test_compare_page_renders(self):
         self.assertEqual(self.fetch("/compare/main+main").code, 200)
 
+    def test_compare_page_escapes_environment_ids(self):
+        """Compare page sanitizes environment IDs containing surrounding whitespace."""
+        self.assertEqual(self.fetch("/compare/%20main%20+main").code, 200)
+
 
 class TestCompareEndpoint(VisdomHTTPTestCase):
     """Integration tests for POST ``/compare/<eids>`` payload validation."""
@@ -255,6 +259,15 @@ class TestCompareEndpoint(VisdomHTTPTestCase):
         """A compare request with a valid string 'sid' unknown in self.subs returns HTTP 200."""
         resp = self.post_json(
             "/compare/main+main", {"sid": "valid-session-id", "show_all": False}
+        )
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(resp.body, b"")
+
+    def test_compare_endpoint_escapes_environment_ids(self):
+        """A compare request normalizes environment IDs through escape_eid."""
+        resp = self.post_json(
+            "/compare/%20main%20+main",
+            {"sid": "valid-session-id", "show_all": False},
         )
         self.assertEqual(resp.code, 200)
         self.assertEqual(resp.body, b"")

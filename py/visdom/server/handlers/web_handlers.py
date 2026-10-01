@@ -720,7 +720,8 @@ class EnvHandler(BaseHandler):
 class CompareHandler(BaseHandler):
     @check_auth
     def get(self, eids):
-        for eid in eids.split("+"):
+        for raw_eid in eids.split("+"):
+            eid = escape_eid(raw_eid)
             if eid not in self.state:
                 raise tornado.web.HTTPError(
                     404, reason=f"Environment '{eid}' not found"
@@ -758,7 +759,7 @@ class CompareHandler(BaseHandler):
         sid = body["sid"]
         show_all = body.get("show_all", False)
         if sid in self.subs:
-            eids = args.split("+")
+            eids = [escape_eid(eid) for eid in args.split("+")]
             try:
                 # comparison reads every named env in full, and reads it from
                 # state -- so each one is brought into memory here, where the
