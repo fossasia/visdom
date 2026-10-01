@@ -22,7 +22,10 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 import pytest
-from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.ensemble import (
+    GradientBoostingRegressor,
+    HistGradientBoostingClassifier,
+)
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.model_selection import GridSearchCV
 from sklearn.neural_network import MLPClassifier
@@ -220,6 +223,44 @@ class TestLogHistory(unittest.TestCase):
         est = LinearRegression().fit(np.array([[0.0], [1.0]]), np.array([0.0, 1.0]))
         logger._log_history(est)
         logger.viz.line.assert_not_called()
+
+    def _hist_gb(self, max_iter=15):
+        rng = np.random.RandomState(0)
+        X = rng.rand(300, 4)
+        y = (X[:, 0] > 0.5).astype(int)
+        return HistGradientBoostingClassifier(
+            early_stopping=True, max_iter=max_iter, random_state=0
+        ).fit(X, y)
+
+    def _plot(self, logger, attr):
+        for call in logger.viz.line.call_args_list:
+            if attr in call.kwargs["opts"]["title"]:
+                return call.kwargs
+        return None
+
+    def test_hist_gradient_boosting_train_score_starts_at_zero(self):
+        # train_score_ is (n_iter_ + 1) long: its first entry is the score
+        # before the first iteration, so the curve starts at 0, not 1.
+        logger = _logger()
+        est = self._hist_gb()
+        logger._log_history(est)
+        plot = self._plot(logger, "train_score_")
+        self.assertIsNotNone(plot)
+        self.assertEqual(len(est.train_score_), est.n_iter_ + 1)
+        self.assertEqual(plot["X"][0], 0)
+        self.assertEqual(plot["X"][-1], est.n_iter_)
+
+    def test_gradient_boosting_train_score_still_starts_at_one(self):
+        # The older family records only the iterations themselves, so its
+        # curve must keep starting at 1.
+        logger = _logger()
+        X = np.arange(20).reshape(-1, 1).astype(float)
+        est = GradientBoostingRegressor(n_estimators=3, random_state=0).fit(
+            X, X.ravel() * 2
+        )
+        logger._log_history(est)
+        plot = self._plot(logger, "train_score_")
+        self.assertEqual(plot["X"], [1, 2, 3])
 
 
 class TestLogCv(unittest.TestCase):
