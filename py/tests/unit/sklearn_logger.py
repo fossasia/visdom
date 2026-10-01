@@ -250,6 +250,41 @@ class TestLogHistory(unittest.TestCase):
         self.assertEqual(plot["X"][0], 0)
         self.assertEqual(plot["X"][-1], est.n_iter_)
 
+    def test_validation_curve_starts_at_zero_when_it_has_a_baseline_entry(self):
+        # validation_scores_ runs through the same x_start helper, so an
+        # (n_iter_ + 1) curve has to start at 0 there too.
+        logger = _logger()
+        est = MLPClassifier(
+            hidden_layer_sizes=(2,),
+            max_iter=20,
+            early_stopping=True,
+            n_iter_no_change=2,
+            random_state=0,
+        ).fit(np.random.RandomState(0).rand(40, 2), np.array([0, 1] * 20))
+        est.n_iter_ = len(est.validation_scores_) - 1
+        logger._log_history(est)
+        plot = self._plot(logger, "validation_scores_")
+        self.assertIsNotNone(plot)
+        self.assertEqual(plot["X"][0], 0)
+        self.assertEqual(plot["X"][-1], est.n_iter_)
+
+    def test_validation_curve_starts_at_one_without_a_baseline_entry(self):
+        # MLP* normally report one score per epoch and no pre-training entry,
+        # so that curve must keep starting at 1.
+        logger = _logger()
+        est = MLPClassifier(
+            hidden_layer_sizes=(2,),
+            max_iter=20,
+            early_stopping=True,
+            n_iter_no_change=2,
+            random_state=0,
+        ).fit(np.random.RandomState(0).rand(40, 2), np.array([0, 1] * 20))
+        self.assertEqual(len(est.validation_scores_), est.n_iter_)
+        logger._log_history(est)
+        plot = self._plot(logger, "validation_scores_")
+        self.assertEqual(plot["X"][0], 1)
+        self.assertEqual(plot["X"][-1], len(est.validation_scores_))
+
     def test_gradient_boosting_train_score_still_starts_at_one(self):
         # The older family records only the iterations themselves, so its
         # curve must keep starting at 1.
