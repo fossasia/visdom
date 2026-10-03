@@ -562,24 +562,23 @@ class UpdateHandler(BaseHandler):
                 handler.write(str(exc))
                 return
             raise
-        if not diff_packet:
-            # ``update_packet`` refused the update and left the pane on the
-            # version the browser already holds. A ``window_update`` repeating
-            # that version fails the frontend's "exactly one ahead" check and
-            # sends it back for the whole environment, so say nothing at all --
-            # there is no change to save either. The pane id is still returned
-            # as the ack, as it is for an update that did land.
-            handler.write(p["id"])
-            return
-
-        # send the smaller of the patch and the updated pane
-        if len(stringify(p)) <= len(stringify(diff_packet)):
-            broadcast_msg = dict(p)
-            broadcast_msg["eid"] = eid
-            broadcast(handler, json.dumps(broadcast_msg, cls=NanSafeEncoder), eid)
-        else:
-            UpdateHandler.broadcast_window_update(handler, args, eid, p, diff_packet)
-        handler.mark_dirty(eid)
+        # An empty patch means ``update_packet`` refused the update and left the
+        # pane on the version the browser already holds. A ``window_update``
+        # repeating that version fails the frontend's "exactly one ahead" check
+        # and sends it back for the whole environment, so say nothing at all --
+        # there is no change to save either. The pane id below is still the
+        # ack, as it is for an update that did land.
+        if diff_packet:
+            # send the smaller of the patch and the updated pane
+            if len(stringify(p)) <= len(stringify(diff_packet)):
+                broadcast_msg = dict(p)
+                broadcast_msg["eid"] = eid
+                broadcast(handler, json.dumps(broadcast_msg, cls=NanSafeEncoder), eid)
+            else:
+                UpdateHandler.broadcast_window_update(
+                    handler, args, eid, p, diff_packet
+                )
+            handler.mark_dirty(eid)
         handler.write(p["id"])
 
     @check_auth
