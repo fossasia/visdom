@@ -13,18 +13,12 @@ decode the payload back into an array and check the pixels the browser would
 receive. That is the only way to catch the failure mode this family actually
 has: a wrong scaling branch produces a valid payload holding a black image.
 
-Four behaviours pinned here are current, not desired:
+Two behaviours pinned here are current, not desired:
 
 * A float image whose maximum is just over 1.0 (1.0001 from a denormalization
   round trip, say) matches neither the [0, 1] nor the [-1, 1] branch, so it is
   truncated to uint8 and arrives **black**. ``opts.normalize=True`` is the
   workaround. See ``test_image_float_just_over_one_arrives_black``.
-* ``images`` fills the gaps between tiles with 1.0, which the float branch
-  scales to white but the uint8 branch leaves as near-black, so the padding
-  colour depends on the input dtype.
-* ``images`` insets each tile one pixel past its ``padding``, so the gap below
-  and to the right of a tile is a pixel thinner than the gap above and to its
-  left. See ``test_images_insets_each_tile_by_an_extra_pixel``.
 * ``svg(svgfile=...)`` stringifies the raw bytes, so newlines in the file reach
   the browser as literal backslash-n.
 
@@ -319,37 +313,62 @@ def test_images_tiles_without_padding(capture_send):
     assert pixels.shape == (4, 8, 3)
 
 
-def test_images_insets_each_tile_by_an_extra_pixel(capture_send):
-    """Pinned quirk: the tile sits one pixel low and right inside its cell.
-
-    ``padding`` is added on all four sides of the cell but the tile starts
-    ``padding + 1`` into it, so the gap below and to the right of each tile is
-    one pixel thinner than the gap above and to its left.
-    """
+@pytest.mark.parametrize("padding", [0, 1, 2])
+def test_images_centers_tiles_with_symmetric_padding(capture_send, padding):
     sent = capture_send(
-        lambda v: v.images(np.zeros((2, 3, 4, 4), dtype=np.float32), nrow=2, padding=1)
+        lambda v: v.images(
+            np.zeros((2, 3, 4, 4), dtype=np.float32), nrow=2, padding=padding
+        )
     )
     _, pixels = decode(sent)
-    assert pixels.shape == (4 + 2, (4 + 2) * 2, 3)
-    assert (pixels[:2] == 255).all()  # two rows above, none below
-    assert (pixels[2:, 2:6] == 0).all()
-    assert (pixels[2:, 8:12] == 0).all()
+    cell_size = 4 + 2 * padding
+    expected = np.full((cell_size, cell_size * 2, 3), 255, dtype=np.uint8)
+    for column in range(2):
+        left = column * cell_size + padding
+        expected[padding : padding + 4, left : left + 4] = 0
+    np.testing.assert_array_equal(pixels, expected)
 
 
-def test_images_padding_colour_follows_the_input_dtype(capture_send):
-    """Pinned quirk: the gaps are filled with 1.0 before the scaling branch runs.
-
-    A float batch is scaled up so the fill becomes white; a uint8 batch takes
-    the clipping branch instead, so the same fill stays at 1 — near black.
-    """
-    float_grid = capture_send(
-        lambda v: v.images(np.full((2, 3, 2, 2), 0.8, dtype=np.float32), nrow=2)
+@pytest.mark.parametrize("value", [0, 1, 200])
+def test_images_preserves_uint8_pixels_and_white_padding(capture_send, value):
+    sent = capture_send(
+        lambda v: v.images(
+            np.full((2, 3, 2, 2), value, dtype=np.uint8), nrow=2, padding=1
+        )
     )
-    uint8_grid = capture_send(
-        lambda v: v.images(np.full((2, 3, 2, 2), 200, dtype=np.uint8), nrow=2)
+    _, pixels = decode(sent)
+    expected = np.full((4, 8, 3), 255, dtype=np.uint8)
+    expected[1:3, 1:3] = value
+    expected[1:3, 5:7] = value
+    np.testing.assert_array_equal(pixels, expected)
+
+
+@pytest.mark.parametrize("padding", [0, 2])
+def test_images_normalizes_uint8_batch_when_requested(capture_send, padding):
+    tensor = np.full((2, 3, 2, 2), 20, dtype=np.uint8)
+    tensor[1] = 100
+    sent = capture_send(
+        lambda v: v.images(tensor, nrow=2, padding=padding, opts=dict(normalize=True))
     )
-    assert decode(float_grid)[1][0, 0].tolist() == [255, 255, 255]
-    assert decode(uint8_grid)[1][0, 0].tolist() == [1, 1, 1]
+    _, pixels = decode(sent)
+    # With padding, the legacy float grid includes its fill value of 1 in the range.
+    expected_low = int(255 * (20 - 1) / (100 - 1)) if padding else 0
+    assert (pixels[padding : padding + 2, padding : padding + 2] == expected_low).all()
+    right = 2 + 3 * padding
+    assert (pixels[padding : padding + 2, right : right + 2] == 255).all()
+    if padding:
+        assert (pixels[0] == 0).all()
+
+
+@pytest.mark.parametrize("dtype", [np.bool_, np.int16, np.int32])
+def test_images_encodes_non_uint8_integer_and_bool_batches(capture_send, dtype):
+    tensor = np.zeros((2, 3, 2, 2), dtype=dtype)
+    tensor[1] = 1
+    sent = capture_send(lambda v: v.images(tensor, nrow=2, padding=1))
+    _, pixels = decode(sent)
+    expected = np.full((4, 8, 3), 255, dtype=np.uint8)
+    expected[1:3, 1:3] = 0
+    np.testing.assert_array_equal(pixels, expected)
 
 
 def test_images_expands_a_single_channel_batch_to_rgb(capture_send):
