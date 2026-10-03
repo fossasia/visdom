@@ -56,9 +56,15 @@ setup(
     # Metadata
     name="visdom",
     version=version,
-    author="Jack Urbanek, Allan Jabri, Laurens van der Maaten",
-    author_email="jju@fb.com",
-    url="https://github.com/facebookresearch/visdom",
+    author="FOSSASIA",
+    author_email="office@fossasia.org",
+    url="https://visdom.dev",
+    project_urls={
+        "Homepage": "https://visdom.dev",
+        "Source": "https://github.com/fossasia/visdom",
+        "Issues": "https://github.com/fossasia/visdom/issues",
+        "Releases": "https://github.com/fossasia/visdom/releases",
+    },
     description="A tool for visualizing live, rich data for Torch and Numpy",
     long_description_content_type="text/markdown",
     long_description=readme,
