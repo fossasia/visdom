@@ -22,7 +22,8 @@ def main():
     y_train, y_val = y[:400], y[400:]
 
     viz = visdom.Visdom()
-    logger = VisdomKerasLogger(viz, env="keras_run", log_every=5)
+    params = {"optimizer": "adam", "epochs": 20, "hidden_units": 32}
+    logger = VisdomKerasLogger(viz, env="keras_run", log_every=5, params=params)
 
     model = keras.Sequential(
         [
