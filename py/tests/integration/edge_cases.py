@@ -21,6 +21,7 @@ import unittest
 
 import pytest
 
+from testutils.fakes import FakeSocket
 from testutils.http import VisdomHTTPTestCase
 
 pytestmark = pytest.mark.integration
@@ -265,12 +266,16 @@ class TestCompareEndpoint(VisdomHTTPTestCase):
 
     def test_compare_endpoint_escapes_environment_ids(self):
         """A compare request normalizes environment IDs through escape_eid."""
+        subscriber = FakeSocket(sid="valid-session-id")
+        self._app.subs[subscriber.sid] = subscriber
         resp = self.post_json(
             "/compare/%20main%20+main",
             {"sid": "valid-session-id", "show_all": False},
         )
         self.assertEqual(resp.code, 200)
         self.assertEqual(resp.body, b"")
+        self.assertEqual(subscriber.eid, ["main", "main"])
+        self.assertEqual(subscriber.commands(), ["reload", "window", "layout"])
 
 
 if __name__ == "__main__":
