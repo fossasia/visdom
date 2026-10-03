@@ -40,6 +40,7 @@ import {
   DEFAULT_LAYOUT,
   MARGIN,
   PANE_SIZE,
+  PANE_TITLE_BAR_HEIGHT,
   PANES,
   ROW_HEIGHT,
 } from './settings';
@@ -98,7 +99,6 @@ const PaneWrapper = React.memo(
     defaultHeight,
   }) {
     const { width, height, ref } = useResizeDetector();
-    const PANE_TITLE_BAR_HEIGHT = 14;
 
     const finalWidth =
       width !== undefined && width > 0 ? width - 2 : defaultWidth;
@@ -347,7 +347,8 @@ const App = () => {
           h = PANE_SIZE[newPane.type][1];
 
         if (newPane.width) w = p2w(newPane.width);
-        if (newPane.height) h = Math.ceil(p2h(newPane.height + 14));
+        if (newPane.height)
+          h = Math.ceil(p2h(newPane.height + PANE_TITLE_BAR_HEIGHT));
         if (newPane.content && newPane.content.caption) h += 1;
 
         _bin.current.content.push({
@@ -376,7 +377,8 @@ const App = () => {
     } else {
       let currLayout = getLayoutItem(newLayout, newPane.id);
       if (newPane.width) currLayout.w = p2w(newPane.width);
-      if (newPane.height) currLayout.h = Math.ceil(p2h(newPane.height + 14));
+      if (newPane.height)
+        currLayout.h = Math.ceil(p2h(newPane.height + PANE_TITLE_BAR_HEIGHT));
       if (newPane.content && newPane.content.caption) currLayout.h += 1;
     }
   };
@@ -542,45 +544,62 @@ const App = () => {
     localStorage.setItem('envIDs', JSON.stringify(selectedNodes));
     sendEnvQuery(selectedNodes, showAllEnvWindows);
   };
-  const onEnvDelete = (env2delete, previousEnv) => {
-    if (env2delete === previousEnv) {
-      previousEnv = 'main';
+  const onEnvDelete = (envsToDelete, previousEnv) => {
+    const fallbackEnv =
+      selection.envIDs.find((env) => !envsToDelete.includes(env)) || 'main';
+    const sentEnvs = envsToDelete.filter((env) =>
+      sendEnvDelete(env, env === previousEnv ? fallbackEnv : previousEnv)
+    );
+    if (sentEnvs.length === 0) {
+      return [];
     }
 
-    setSelection((prev) => {
-      let EnvIds = prev.envIDs.filter((env) => env !== env2delete);
-      return {
+    const deletedEnvs = new Set(sentEnvs);
+    const remainingEnvIDs = selection.envIDs.filter(
+      (env) => !deletedEnvs.has(env)
+    );
+    const nextEnvIDs = remainingEnvIDs.length > 0 ? remainingEnvIDs : ['main'];
+    const selectionChanged = remainingEnvIDs.length !== selection.envIDs.length;
+
+    if (selectionChanged) {
+      setSelection((prev) => ({
         ...prev,
-        envIDs: EnvIds,
-      };
-    });
+        envIDs: nextEnvIDs,
+        layoutID: deletedEnvs.has(prev.envIDs[0])
+          ? DEFAULT_LAYOUT
+          : prev.layoutID,
+      }));
+      localStorage.setItem('envIDs', JSON.stringify(nextEnvIDs));
+    }
 
     setStoreMeta((prev) => {
       const layoutLists = new Map(prev.layoutLists);
-      layoutLists.delete(env2delete);
       const tagsByEnv = { ...prev.tagsByEnv };
-      delete tagsByEnv[env2delete];
-      let EnvIds = prev.envList.filter((env) => env !== env2delete);
+      deletedEnvs.forEach((env) => {
+        layoutLists.delete(env);
+        delete tagsByEnv[env];
+      });
       return {
         ...prev,
-        envList: EnvIds,
+        envList: prev.envList.filter((env) => !deletedEnvs.has(env)),
         layoutLists: layoutLists,
         tagsByEnv: tagsByEnv,
       };
     });
 
-    setStoreData((prev) => {
-      if (selection.envIDs.includes(env2delete)) {
-        return {
-          ...prev,
-          panes: {},
-          layout: [],
-        };
-      }
-      return prev;
-    });
+    if (selectionChanged) {
+      setStoreData((prev) => ({
+        ...prev,
+        panes: {},
+        layout: [],
+      }));
+      setFocusedPaneID(null);
+    }
 
-    sendEnvDelete(env2delete, previousEnv);
+    if (selectionChanged) {
+      sendEnvQuery(nextEnvIDs, showAllEnvWindows);
+    }
+    return sentEnvs;
   };
 
   const onTagsSave = (env, tags) => {
@@ -671,7 +690,7 @@ const App = () => {
       // resets to default layout (same as during pane creation)
       panelayout.w = pane.width ? p2w(pane.width) : PANE_SIZE[pane.type][0];
       panelayout.h = pane.height
-        ? Math.ceil(p2h(pane.height + 14))
+        ? Math.ceil(p2h(pane.height + PANE_TITLE_BAR_HEIGHT))
         : PANE_SIZE[pane.type][1];
       if (pane.content && pane.content.caption) panelayout.h += 1;
 
@@ -1215,22 +1234,14 @@ const App = () => {
       {modals}
       <div className="navbar-form navbar-default">
         <span className="navbar-brand visdom-title">visdom</span>
-        <span className="vertical-line" />
-        &nbsp;&nbsp;
+        <span className="topbar-divider" />
         {envControls}
-        &nbsp;&nbsp;
-        <span className="vertical-line" />
-        &nbsp;&nbsp;
+        <span className="topbar-divider" />
         {viewControls}
-        <span
-          style={{
-            float: 'right',
-          }}
-        >
-          {filterControl}
-          &nbsp;&nbsp;
-          {connectionIndicator}
-        </span>
+        <span className="topbar-spacer" />
+        {filterControl}
+        <span className="topbar-divider" />
+        {connectionIndicator}
       </div>
       <div
         tabIndex="-1"

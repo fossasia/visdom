@@ -268,6 +268,11 @@ If you have cloned this repository, you can run our demo showcase.
 python example/demo.py
 ```
 
+The same showcase for the asyncio client — concurrent plots, a single-request append loop and a coroutine event handler — is in [`example/async_demo.py`](example/async_demo.py); see [Async usage](#async-usage-python-only).
+```bash
+python example/async_demo.py
+```
+
 
 ## API
 For a quick introduction into the capabilities of `visdom`, have a look at the `example` directory, or read the details below.
@@ -287,8 +292,52 @@ The python visdom client takes a few options:
 - `password`: password to use for authentication, if server started with `-enable_login` (default: `None`)
 - `proxies`: Dictionary mapping protocol to the URL of the proxy (e.g. {`http`: `foo.bar:3128`}) to be used on each Request. (default: `None`)
 - `offline`: Flag to run visdom in offline mode, where all requests are logged to file rather than to the server. Requires `log_to_filename` is set. In offline mode, all visdom commands that don't create or update plots will simply return `True`. (default: `False`)
+- `use_preflight_checks`: Ask the server whether a window exists before an `update='append'` or a `store_history=True` frame, which costs a second round trip per call. Set it to `False` to send one request and let the server create the window if it isn't there -- roughly halving the requests of an append loop. Requires a server new enough to lay out a window it creates from an append; against an older one such a window comes out unstyled. (default: `True`)
 
 Other options are either currently unused (endpoint, ipv6) or used for internal functionality.
+
+### Async usage (Python only)
+`visdom.async_client.AsyncVisdom` is an awaitable front end to the same client. It exists for callers that already run an event loop, or that want several plots in flight at once; `visdom.Visdom` is unchanged and remains the way to use visdom from ordinary synchronous code.
+
+```python
+import asyncio
+import numpy as np
+from visdom.async_client import AsyncVisdom
+
+async def main():
+    vis = await AsyncVisdom.create(server="http://localhost", port=8097)
+    async with vis:
+        await asyncio.gather(
+            vis.line(Y=np.random.rand(20), win="a"),
+            vis.line(Y=np.random.rand(20), win="b"),
+        )
+
+asyncio.run(main())
+```
+
+Every plotting method of `Visdom` is available with the same name, the same arguments and the same return value — as a coroutine. Nothing is reimplemented: the method bodies run as the synchronous code they already are, on a thread pool the client owns, and only the request itself is asynchronous. That is also why the CPU-heavy encodes (`image`, `matplot`) stay off your event loop for free.
+
+Things to know:
+
+- **Build it with `create`, not `()`.** Connecting means a POST and `__init__` cannot await. `create` accepts every `Visdom` argument, plus `max_concurrency` (default `10`) which sizes both the client's thread pool and the number of requests tornado will start at once. `max_concurrency` only supplies the default for tornado's `max_clients`: pass `max_clients` explicitly and it wins, so the two limits then differ by as much as you asked for.
+- **`shutdown` closes the client, `close` closes a window.** `close` is `Visdom.close` and keeps its usual meaning, so the method that releases the HTTP client and the worker pool is `shutdown()`. Using the client as an async context manager calls it for you.
+- **Two defaults differ from `Visdom`.** `use_incoming_socket` is `False` here (most async callers never register a handler, and a backchannel costs a held-open connection plus a thread), and `use_preflight_checks` is `False` (an async client is new code talking to a server that understands `layout_create`, so an append costs one request rather than two). Pass either explicitly to get the synchronous behavior back.
+- **Concurrency is yours to ask for.** `gather` runs the calls on separate worker threads against one shared inner client, and that client is no more thread-safe than the synchronous one — concurrent calls should target distinct windows.
+- **Event handlers work, and may be coroutines.** Pass `use_incoming_socket=True` (or `use_polling=True` for the HTTP fallback) and register as usual with `register_event_handler`; registration is not a coroutine, since it never reaches the server. A plain handler runs on the client's own single dispatch thread; a coroutine handler has only its wrapper there, and its body runs on your loop, so it can await further calls on the same client. Either way handlers run one at a time, in arrival order.
+- **No HTTP proxies.** `create` raises `NotImplementedError` for `proxies` / `http_proxy_host` / `http_proxy_port`: the transport is tornado's `AsyncHTTPClient`, which has no proxy support without `pycurl`. Use `Visdom` behind a proxy.
+
+Measured on loopback over 300 `line(update='append')` calls — the path profiled in [#771](https://github.com/fossasia/visdom/issues/771):
+
+| Client | plots/s | p50 | p95 |
+|---|---|---|---|
+| `Visdom`, preflight on (default) | 198 | 5.00 ms | 5.73 ms |
+| `Visdom`, `use_preflight_checks=False` | 304 | 3.32 ms | 4.09 ms |
+| `AsyncVisdom`, awaited serially | 235 | 4.24 ms | 4.87 ms |
+| `AsyncVisdom`, 8 concurrent | 410 | 13.19 ms | 18.33 ms |
+
+Requests halve exactly once the preflight is off. Throughput does not quite double because on loopback the preflight is the cheaper of the two round trips; over a real network the two cost the same.
+
+`example/async_demo.py` runs all of the above against a live server.
 
 ### Basics
 Visdom offers the following basic visualization functions:
@@ -614,10 +663,24 @@ model.fit(x_train, y_train, epochs=20, callbacks=[logger])
 
 Each metric gets its own window titled `"<name> (step)"`, throttled to one send every `log_every` batches. The optimizer's current learning rate is read (not computed) and plotted alongside as `lr`.
 
+**Experiment tracking with `params`** — records the run in the ExperimentStore alongside the charts, so it becomes queryable through [`vis.search_experiments`](#vissearch_experiments) / [`vis.compare_experiments`](#viscompare_experiments). Off by default. Without `params` the logger only ever calls `viz.line()`:
+
+```python
+logger = VisdomKerasLogger(viz, env="keras_run", params={"lr": 0.01})
+model.fit(x_train, y_train, epochs=20, callbacks=[logger])
+
+viz.search_experiments("status = finished")
+```
+
+Hyper-parameters are recorded when training begins, each epoch's metrics as they are plotted, and the run is marked `finished` when `fit()` returns. Only epoch metrics are recorded — per-batch values from `log_every` stay visualization-only so a run's metric history keeps the granularity the search and compare views read it at.
+
+**Note:** a finished experiment rejects further writes, so an env records one tracked run. Give every run its own env, including a repeat run of the same script. Keras reports no exception to `on_train_end`, so a tracked run is always recorded as `finished`. Call `viz.finish_experiment(status="failed", env=...)` directly to record a run that did not.
+
 **Parameters:**
 - `viz`: a connected `visdom.Visdom()` instance
 - `env`: environment name (default: `viz.env` if set, otherwise auto-generated from timestamp)
 - `log_every`: also plot metrics at batch granularity, one send every N batches (default: `None`, disabled)
+- `params`: hyper-parameters to record, opting the run into experiment tracking (default: `None`, disabled)
 
 **Note:** each call to `viz.line()` is a synchronous network request made on the training thread. Pick a `log_every` large enough that it doesn't stall training waiting on the server — 50+ is a reasonable default on GPU.
 
@@ -649,12 +712,14 @@ callback = OptunaCallback(
     objective_names=["loss"],
     create_dashboard=True,
     refresh_every=10,
+    contour_params=["x", "y"],
 )
 
 
 def objective(trial):
     x = trial.suggest_float("x", -10, 10)
-    return (x - 2) ** 2
+    y = trial.suggest_float("y", -10, 10)
+    return (x - 2) ** 2 + (y + 1) ** 2
 
 
 study = optuna.create_study(study_name="quadratic", direction="minimize")
@@ -662,16 +727,61 @@ study.optimize(objective, n_trials=100, callbacks=[callback])
 callback.update_dashboard(study)
 ```
 
+For multi-objective studies, list the objective names in the same order as the
+study directions and return values:
+
+```python
+callback = OptunaCallback(
+    viz,
+    dashboard_env="optuna_accuracy_latency",
+    objective_names=["accuracy", "latency_ms"],
+    create_dashboard=True,
+)
+
+
+def multi_objective(trial):
+    width = trial.suggest_int("width", 1, 10)
+    accuracy = 0.80 + 0.01 * width
+    latency_ms = 10.0 + 2.0 * width
+    return accuracy, latency_ms
+
+
+study = optuna.create_study(
+    study_name="accuracy-latency",
+    directions=["maximize", "minimize"],
+)
+study.optimize(multi_objective, n_trials=40, callbacks=[callback])
+callback.update_dashboard(study)
+```
+
 The integration records one experiment per trial, using names such as
 `optuna_quadratic_trial_000017`. Intermediate values reported with
 `trial.report(value, step)` are stored as the `intermediate_value` metric in
-step order before the final objective value. With `create_dashboard=True`, the
-first trial creates summary, HParams, optimization history and timeline panes,
-plus intermediate-value and parameter-importance panes when Optuna can compute
-them. Later trials refresh the panes in `optuna_quadratic` every `refresh_every`
-successful writes. The explicit final `update_dashboard()` includes any trials
-left since the last scheduled refresh. Plotly is only needed for the Optuna
-visualization panes.
+step order before the final objective value. Each experiment also carries a
+stable `optuna_dashboard_env` tag. With `create_dashboard=True`, the first trial
+creates summary, HParams, optimization history and timeline panes, plus
+intermediate-value and parameter-importance panes when Optuna can compute them.
+Supplying at least two parameter names through `contour_params` adds a contour
+pane for each objective; Optuna handles numerical, categorical and log-scaled
+parameters when it builds those Plotly figures.
+The HParams pane selects experiments by that dashboard tag rather than by a
+callback-local list, so `update_dashboard()` on a new callback recovers trials
+logged before a process restart. Dashboard refreshes from one callback are
+serialized, so `study.optimize(..., n_jobs=N)` cannot publish them out of order.
+When multiple processes or nodes share a study and dashboard namespace, enable
+`create_dashboard=True` in exactly one process; callbacks in the other workers
+still log their trials with the default `create_dashboard=False`. The designated
+writer's tag query includes trials from every worker. After all workers finish,
+have the coordinating process call `update_dashboard()` once for the final
+refresh.
+
+Completed studies with two or three objectives also get a Pareto-front pane.
+Later trials refresh the panes in `optuna_quadratic` every `refresh_every`
+successful writes by the dashboard writer. The explicit final
+`update_dashboard()` includes any trials left since the last scheduled refresh.
+Plotly is only needed for the Optuna visualization panes. Timeline bars preserve
+each trial's true duration, and a fixed-size marker at the true start time keeps
+even sub-pixel trials visible and hoverable without exaggerating their runtime.
 
 The summary pane links directly to the best and latest terminal trial
 environments. The callback never opens a browser on its own.
@@ -685,7 +795,9 @@ pruning decision: call `trial.report()` and `trial.should_prune()` inside the
 objective and raise `optuna.TrialPruned` when requested. Because Optuna invokes
 study callbacks after a trial reaches a terminal state, `OptunaCallback`
 records these values after the trial finishes rather than streaming them while
-the trial is running.
+the trial is running. Optuna does not support `trial.report()` or
+`trial.should_prune()` for multi-objective studies, so intermediate-value and
+pruning support applies only to single-objective studies.
 
 ## Details
 <img src="https://user-images.githubusercontent.com/19650074/198747904-7a8a580f-851a-45fb-8f45-94e54a910ee2.png"/>
@@ -975,6 +1087,12 @@ The following `opts` are supported:
 - `opts.markerborderwidth`: marker border line width (`float`; default = 0.5)
 - `opts.legend`           : `table` containing legend names
 - `opts.textlabels`       : text label for each point (`list`: default = `None`)
+- `opts.aspectmode`       : how the three axes of a 3D plot are scaled (`string`; default = `'auto'`). One of:
+  - `auto`   : proportional to the data extents (like `data`), but Plotly switches to `cube` when one axis spans more than 4x the others -- so a plot with one dominant dimension silently renders distorted.
+  - `data`   : always proportional to the data extents, so 1 unit looks the same on every axis -- use this for point clouds, SLAM maps, trajectories, or anything where shape must be preserved.
+  - `cube`   : all three axes drawn the same length regardless of the data, deliberately distorting proportions to fill a cube.
+  - `manual` : proportions taken from `opts.aspectratio` (falls back to `1:1:1` if not set).
+- `opts.aspectratio`      : per-axis scale for `manual` mode, a dict `{'x': .., 'y': .., 'z': ..}` (`dict`; default = `None`).
 - `opts.layoutopts`       : dict of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 - `opts.traceopts`        : dict mapping trace names or indices to dicts of additional options that the graph backend accepts. For example `traceopts = {'plotly': {'myTrace': {'mode': 'markers'}}}`.
 - `opts.webgl`            : use WebGL for plotting (`boolean`; default = `false`). It is faster if a plot contains too many points. Use sparingly as browsers won't allow more than a couple of WebGL contexts on a single page.
@@ -1021,6 +1139,8 @@ The following `opts` are supported:
 - `opts.linecolor`   : line colors (`np.array`; default = None)
 - `opts.dash`        : line dash type for each line (`np.array`; default = 'solid'), one of `solid`, `dash`, `dashdot` or `dash`, size should match number of lines being drawn
 - `opts.legend`      : `table` containing legend names
+- `opts.aspectmode`  : axis scaling for 3D line plots (`string`; default = `'auto'`); `auto` is proportional to the data but flips to `cube` when one axis is over 4x the others, `data` stays proportional so shape is preserved, `cube` forces all axes to equal length, `manual` uses `opts.aspectratio`.
+- `opts.aspectratio` : per-axis scale `{'x': .., 'y': .., 'z': ..}` for `manual` mode (`dict`; default = `None`).
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 - `opts.traceopts`   : `dict` mapping trace names or indices to `dict`s of additional options that plot.ly accepts for a trace.
 - `opts.webgl`       : use WebGL for plotting (`boolean`; default = `false`). It is faster if a plot contains too many points. Use sparingly as browsers won't allow more than a couple of WebGL contexts on a single page.
@@ -1214,6 +1334,8 @@ The following `opts` are supported:
 - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
 - `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
 - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
+- `opts.aspectmode`  : axis scaling for the 3D surface (`string`; default = `'auto'`); `auto` is proportional to the data but flips to `cube` when one axis is over 4x the others, `data` stays proportional so shape is preserved, `cube` forces all axes to equal length, `manual` uses `opts.aspectratio`.
+- `opts.aspectratio` : per-axis scale `{'x': .., 'y': .., 'z': ..}` for `manual` mode (`dict`; default = `None`).
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 
 #### vis.contour
@@ -1248,6 +1370,8 @@ The following `opts` are supported:
 
 - `opts.color`: color (`string`)
 - `opts.opacity`: opacity of polygons (`number` between 0 and 1)
+- `opts.aspectmode`: axis scaling for a 3D (`Nx3`) mesh (`string`; default = `'auto'`); `auto` is proportional to the data but flips to `cube` when one axis is over 4x the others, `data` stays proportional so shape is preserved, `cube` forces all axes to equal length, `manual` uses `opts.aspectratio`.
+- `opts.aspectratio`: per-axis scale `{'x': .., 'y': .., 'z': ..}` for `manual` mode (`dict`; default = `None`).
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
 
 #### vis.sankey

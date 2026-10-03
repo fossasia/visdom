@@ -159,11 +159,20 @@ def test_an_empty_data_list_is_treated_as_opts_only():
     assert pane["content"] == "line0"
 
 
-def test_a_pane_type_that_cannot_be_updated_is_reported():
+def test_an_image_pane_takes_opts_as_well():
     pane = _image_pane()
     handler, sub = _opts_only(pane, layout=copy.deepcopy(LAYOUT), opts=dict(OPTS))
+    assert "win is not scatter" not in handler.body
+    assert pane["title"] == "renamed"
+    assert pane["width"] == 400
+
+
+def test_a_data_update_on_a_pane_type_that_cannot_take_one_is_reported():
+    pane = _image_pane()
+    handler, sub = _opts_only(
+        pane, data=[{"type": "image", "content": {"src": "img1"}}], opts=dict(OPTS)
+    )
     assert "win is not scatter" in handler.body
-    assert "was image" in handler.body
     assert sub.sent == []
     assert handler.dirtied == []
 

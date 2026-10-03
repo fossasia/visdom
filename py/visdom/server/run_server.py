@@ -10,6 +10,7 @@
 Provides simple entrypoints to set up and run the main visdom server.
 """
 
+import asyncio
 import atexit
 import argparse
 import getpass
@@ -21,7 +22,6 @@ import ssl
 import sys
 import errno
 import socket
-from tornado import ioloop
 import tornado.httpserver
 import tornado.netutil
 from visdom.server.app import Application
@@ -90,6 +90,116 @@ def start_server(
     save_threshold=DEFAULT_SAVE_THRESHOLD,
 ):
     logging.info("Server started")
+    # Reading the certificate before anything is constructed keeps a bad path
+    # from leaving a storage worker and an open port behind.
+    ssl_ctx = _build_ssl_context(ssl_certfile, ssl_keyfile)
+    asyncio.run(
+        _serve(
+            port=port,
+            hostname=hostname,
+            base_url=base_url,
+            env_path=env_path,
+            readonly=readonly,
+            print_func=print_func,
+            user_credential=user_credential,
+            use_frontend_client_polling=use_frontend_client_polling,
+            bind_local=bind_local,
+            eager_data_loading=eager_data_loading,
+            ssl_ctx=ssl_ctx,
+            save_interval=save_interval,
+            save_threshold=save_threshold,
+        )
+    )
+
+
+def _build_ssl_context(ssl_certfile, ssl_keyfile):
+    """Load the certificate pair, or return ``None`` when TLS is not configured.
+
+    Half a pair is a configuration error, not "TLS off". ``main`` already
+    rejects it at the command line, but ``start_server`` takes the two paths as
+    independent arguments, so a direct caller that sets only one would otherwise
+    get a plain ``HTTPServer`` advertising ``http`` -- serving in the clear
+    exactly where it asked for TLS.
+    """
+    if bool(ssl_certfile) != bool(ssl_keyfile):
+        raise ValueError("ssl_certfile and ssl_keyfile must be provided together")
+    if not (ssl_certfile and ssl_keyfile):
+        return None
+    if not os.path.isfile(ssl_certfile):
+        raise FileNotFoundError(f"SSL certificate file not found: {ssl_certfile}")
+    if not os.path.isfile(ssl_keyfile):
+        raise FileNotFoundError(f"SSL key file not found: {ssl_keyfile}")
+    ssl_ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    ssl_ctx.load_cert_chain(ssl_certfile, ssl_keyfile)
+    logging.info("SSL enabled")
+    return ssl_ctx
+
+
+def _install_stop_handlers(stop):
+    """Ask for a graceful stop on SIGINT/SIGTERM, falling back to SystemExit.
+
+    ``loop.add_signal_handler`` runs the callback *on* the loop, so the drain
+    below is an ordinary awaited shutdown rather than something racing an
+    interpreter teardown. It is POSIX-and-main-thread only, hence the fallback
+    to the old ``signal.signal`` behaviour everywhere else -- Windows, and any
+    caller running the server from a worker thread.
+
+    Off the main thread neither API is available: ``signal.signal`` is itself
+    main-thread-only and raises ``ValueError``. Nothing here can install a
+    handler in that case -- CPython only delivers signals to the main thread --
+    so the remaining job is to say so. SIGTERM keeps its default disposition,
+    which ends the process without unwinding, so the ``atexit`` drain never runs
+    and whatever the storage worker still had queued is lost. A caller that
+    embeds the server in a thread has to install ``_exit_cleanly`` (or its own
+    handler) from the main thread *before* starting that thread.
+    """
+    loop = asyncio.get_running_loop()
+    for signame in ("SIGINT", "SIGTERM"):
+        sig = getattr(signal, signame, None)
+        if sig is None:
+            continue
+        try:
+            loop.add_signal_handler(sig, stop.set)
+            continue
+        except (NotImplementedError, RuntimeError, ValueError):
+            pass
+        if sig != getattr(signal, "SIGTERM", None):
+            continue
+        try:
+            signal.signal(sig, _exit_cleanly)
+        except ValueError:
+            logging.warning(
+                "Could not install a SIGTERM handler: the server is not running "
+                "on the main thread. SIGTERM will terminate the process without "
+                "saving queued environment writes. Install a handler from the "
+                "main thread before starting the server thread, or stop the "
+                "server from the main thread instead of signalling it."
+            )
+
+
+async def _serve(
+    port,
+    hostname,
+    base_url,
+    env_path,
+    readonly,
+    print_func,
+    user_credential,
+    use_frontend_client_polling,
+    bind_local,
+    eager_data_loading,
+    ssl_ctx,
+    save_interval,
+    save_threshold,
+):
+    """Build the server on a running loop, then serve until asked to stop.
+
+    Everything here used to run before ``IOLoop.current().start()``, so the
+    autosave timer and the storage executor were attached to a loop that
+    tornado conjured out of the current asyncio policy. Constructing them
+    inside ``asyncio.run`` means there is exactly one loop, it is already
+    running, and it is closed on the way out.
+    """
     app = Application(
         port=port,
         base_url=base_url,
@@ -103,16 +213,6 @@ def start_server(
     )
     bind_addr = "127.0.0.1" if bind_local else None
     family = socket.AF_INET if bind_local else socket.AF_UNSPEC
-
-    ssl_ctx = None
-    if ssl_certfile and ssl_keyfile:
-        if not os.path.isfile(ssl_certfile):
-            raise FileNotFoundError(f"SSL certificate file not found: {ssl_certfile}")
-        if not os.path.isfile(ssl_keyfile):
-            raise FileNotFoundError(f"SSL key file not found: {ssl_keyfile}")
-        ssl_ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-        ssl_ctx.load_cert_chain(ssl_certfile, ssl_keyfile)
-        logging.info("SSL enabled")
 
     server = tornado.httpserver.HTTPServer(
         app, max_buffer_size=1024**3, ssl_options=ssl_ctx
@@ -134,8 +234,13 @@ def start_server(
     logging.info("Application Started")
     logging.info(f"Working directory: {os.path.abspath(env_path)}")
 
+    # Still registered: the graceful path below covers a signal or a normal
+    # exit, this covers the ones that never unwind through it. The drain is
+    # idempotent, so running twice costs nothing.
     atexit.register(app.shutdown_storage)
-    signal.signal(signal.SIGTERM, _exit_cleanly)
+
+    stop = asyncio.Event()
+    _install_stop_handlers(stop)
 
     app.server_state.start_autosave()
 
@@ -149,9 +254,24 @@ def start_server(
     else:
         print_func(port)
 
-    ioloop.IOLoop.current().start()
-    app.subs = []
-    app.sources = []
+    try:
+        await stop.wait()
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        pass
+    finally:
+        logging.info("Shutting down")
+        server.stop()
+        # Through the state that owns them: rebinding ``app.subs`` left both
+        # the live sockets and the dictionaries the handlers share untouched.
+        app.server_state.close_connections()
+        # Blocking, but nothing is being served by now: the listening sockets
+        # are closed and this is the last thing the loop does.
+        app.shutdown_storage()
+        # The drain has happened, so the interpreter-exit copy has nothing left
+        # to do; leaving it registered would pin this Application and its state
+        # in memory until the process ends, and add one more callback per
+        # ``serve`` call in a process that serves more than once (the tests do).
+        atexit.unregister(app.shutdown_storage)
 
 
 def main(print_func=None):

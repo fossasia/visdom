@@ -16,6 +16,7 @@ exploits.
 """
 
 import json
+import threading
 
 from visdom.data_model.json_store import JSONStore
 
@@ -97,6 +98,10 @@ class FakeHandler:
         self.max_image_history = max_image_history
         self.max_plot_history = max_plot_history
 
+        # Envs with a delete on its way to disk, as ``ServerState`` tracks
+        # them; readers that resume after yielding the loop consult it.
+        self.deleting_envs = {}
+
         self.written = []
         self.status = None
         self.eid = "main"
@@ -142,7 +147,10 @@ class SpyStore(JSONStore):
     """JSONStore that counts backend calls while delegating to the real impl.
 
     Used to prove the server reaches persistence through the DataStore
-    abstraction instead of touching ``env_path`` directly.
+    abstraction instead of touching ``env_path`` directly. Every call also
+    records the thread it ran on, in ``threads``, which is how a test tells
+    disk work handed to the storage executor from disk work still done on the
+    IOLoop.
     """
 
     def __init__(self, env_path):
@@ -154,33 +162,52 @@ class SpyStore(JSONStore):
             "save_envs": [],
             "save_layouts": [],
             "delete_env": [],
+            "load_undo": [],
             "save_undo": [],
+            "clear_undo": [],
         }
+        self.threads = []
+
+    def _record(self, method, detail=None):
+        """Log one backend call: what it was asked for, and from where."""
+        if isinstance(self.calls[method], int):
+            self.calls[method] += 1
+        else:
+            self.calls[method].append(detail)
+        self.threads.append((method, threading.current_thread().name))
 
     def list_envs(self):
-        self.calls["list_envs"] += 1
+        self._record("list_envs")
         return super().list_envs()
 
     def load_env(self, eid):
-        self.calls["load_env"].append(eid)
+        self._record("load_env", eid)
         return super().load_env(eid)
 
     def save_env(self, eid, env_data):
-        self.calls["save_env"].append(eid)
+        self._record("save_env", eid)
         return super().save_env(eid, env_data)
 
     def save_envs(self, state, eids):
-        self.calls["save_envs"].append(list(eids))
+        self._record("save_envs", list(eids))
         return super().save_envs(state, eids)
 
     def save_layouts(self, layouts):
-        self.calls["save_layouts"].append(layouts)
+        self._record("save_layouts", layouts)
         return super().save_layouts(layouts)
 
     def delete_env(self, eid):
-        self.calls["delete_env"].append(eid)
+        self._record("delete_env", eid)
         return super().delete_env(eid)
 
+    def load_undo(self, eid):
+        self._record("load_undo", eid)
+        return super().load_undo(eid)
+
     def save_undo(self, eid, stack):
-        self.calls["save_undo"].append(eid)
+        self._record("save_undo", eid)
         return super().save_undo(eid, stack)
+
+    def clear_undo(self, eid):
+        self._record("clear_undo", eid)
+        return super().clear_undo(eid)
