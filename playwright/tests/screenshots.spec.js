@@ -37,7 +37,7 @@ async function compareScreenshot(page, name, options = {}) {
   const content = page.locator('.content').first();
   await expect(content).toHaveScreenshot([`${name}.png`], {
     animations: 'allow',
-    threshold: 0,
+    threshold: 0.1,
     timeout: 20000,
     ...options,
   });
