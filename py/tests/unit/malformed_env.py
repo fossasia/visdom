@@ -202,6 +202,20 @@ def test_saving_an_env_writes_its_bad_reload_back_unchanged(store, env_path):
     assert _read(env_path, "r")["reload"] == "wide"
 
 
+def test_a_layout_saved_since_the_read_is_not_overwritten(store, env_path):
+    _write(env_path, "r", _with_bad_reload())
+    env = store.load_env("r")
+    env["reload"]["good"] = {"h": 4}
+    store.save_env("r", env)
+    assert _read(env_path, "r")["reload"] == {"good": {"h": 4}}
+
+
+def test_an_untouched_layout_is_written_back_as_it_was(store, env_path):
+    _write(env_path, "r", _with_bad_reload())
+    store.save_env("r", store.load_env("r"))
+    assert _read(env_path, "r")["reload"] == "wide"
+
+
 def test_what_is_held_back_never_reaches_the_file_as_its_own_key(store, env_path):
     _write(env_path, "mixed", _with_one_bad_pane())
     store.save_env("mixed", store.load_env("mixed"))
@@ -273,3 +287,16 @@ def test_comparing_readable_envs_still_works(store, fake_socket):
     compare_envs(state, ["a", "b"], fake_socket, store)
     assert "layout" in fake_socket.commands()
     assert _notifications(fake_socket) == []
+
+
+def test_a_pane_that_is_not_a_mapping_never_reaches_a_client(store, fake_socket):
+    state = {"mixed": _with_one_bad_pane()}
+    load_env(state, "mixed", fake_socket, store)
+    assert [w["id"] for w in _windows(fake_socket)] == ["good"]
+
+
+def test_comparing_does_not_read_a_pane_that_is_not_a_mapping(store, fake_socket):
+    state = {"a": _with_one_bad_pane(), "b": _with_one_bad_pane()}
+    compare_envs(state, ["a", "b"], fake_socket, store)
+    assert "layout" in fake_socket.commands()
+    assert state["a"]["jsons"]["bad"] == "not a pane"

@@ -196,7 +196,7 @@ class JSONStore(DataStore):
         restored = {k: v for k, v in payload.items() if k != UNREADABLE_PARTS}
         if "jsons" in held:
             restored["jsons"] = dict(held["jsons"], **restored.get("jsons", {}))
-        if "reload" in held:
+        if "reload" in held and not restored.get("reload"):
             restored["reload"] = held["reload"]
         return restored
 

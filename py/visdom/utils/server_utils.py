@@ -715,10 +715,13 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
                 state[eid] = env
                 envs[eid] = env
 
-    for name, env in envs.items():
+    for name, env in list(envs.items()):
         if not env_is_readable(env):
             raise ValueError(f"environment {name!r} is not a readable environment")
         warn_unreadable_parts(socket, name, env)
+        panes, unreadable = readable_panes(env)
+        if unreadable:
+            envs[name] = dict(env, jsons=panes)
 
     valid_eids = [eid for eid in eids if eid in envs]
     if not valid_eids:
@@ -957,8 +960,8 @@ def load_env(state, eid, socket, store, undo_count=None, warmed=False):
             json.dumps({"command": "reload", "data": env["reload"]}, cls=NanSafeEncoder)
         )
 
-    jsons = list(env.get("jsons", {}).values())
-    windows = sorted(jsons, key=lambda k: ("i" not in k, k.get("i", None)))
+    panes, _ = readable_panes(env)
+    windows = sorted(panes.values(), key=lambda k: ("i" not in k, k.get("i", None)))
     for v in windows:
         msg = dict(v)
         msg["eid"] = eid
