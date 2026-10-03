@@ -257,9 +257,9 @@ class VisdomSklearnLogger:
         )
         self.viz.text(body, win=self._win(est, "summary"), env=self.env)
 
-    def _plot_history(self, est, curve, attr, xlabel, ylabel):
+    def _plot_history(self, est, curve, attr, xlabel, ylabel, x_start=1):
         self.viz.line(
-            X=list(range(1, len(curve) + 1)),
+            X=list(range(x_start, x_start + len(curve))),
             Y=curve,
             win=self._win(est, attr),
             env=self.env,
@@ -270,6 +270,20 @@ class VisdomSklearnLogger:
             },
         )
 
+    @staticmethod
+    def _history_x_start(est, curve):
+        """Where the x-axis of a per-iteration curve begins.
+
+        The HistGradientBoosting estimators record one score per iteration
+        plus an entry for the ensemble before the first one, so their curve
+        is ``n_iter_ + 1`` long and starts at 0. The older GradientBoosting
+        family records only the iterations themselves and starts at 1.
+        """
+        n_iter = getattr(est, "n_iter_", None)
+        if n_iter is not None and len(curve) == n_iter + 1:
+            return 0
+        return 1
+
     def _log_history(self, est):
         loss_curve = getattr(est, "loss_curve_", None)
         if loss_curve is not None and len(loss_curve) > 0:
@@ -277,13 +291,23 @@ class VisdomSklearnLogger:
             val_scores = getattr(est, "validation_scores_", None)
             if val_scores is not None and len(val_scores) > 0:
                 self._plot_history(
-                    est, val_scores, "validation_scores_", "epoch", "val_score"
+                    est,
+                    val_scores,
+                    "validation_scores_",
+                    "epoch",
+                    "val_score",
+                    x_start=self._history_x_start(est, val_scores),
                 )
 
         train_score = getattr(est, "train_score_", None)
         if train_score is not None and len(train_score) > 0:
             self._plot_history(
-                est, train_score, "train_score_", "iteration", "train_score"
+                est,
+                train_score,
+                "train_score_",
+                "iteration",
+                "train_score",
+                x_start=self._history_x_start(est, train_score),
             )
 
     def _log_regression_diagnostics(self, est, X, y, summary_rows):
