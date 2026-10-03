@@ -4647,9 +4647,9 @@ class Visdom(object):
         `X` represents one experiment and each column represents a dimension
         (e.g., a hyperparameter or metric).
 
-        An optional `N`-length vector `Y` supplies per-experiment color values
-        (e.g., accuracy or loss) so that the lines are shaded according to
-        a continuous colorscale.
+        An optional `N`-length vector or scalar (for `N=1`) `Y` supplies
+        per-experiment color values (e.g., accuracy or loss) so that the lines
+        are shaded according to a continuous colorscale.
 
         The following `opts` are supported:
 
@@ -4678,7 +4678,7 @@ class Visdom(object):
         assert M >= 2, "X must have at least 2 dimensions (columns)"
 
         if Y is not None:
-            Y = np.squeeze(np.asarray(Y, dtype=float))
+            Y = np.atleast_1d(np.squeeze(np.asarray(Y, dtype=float)))
             assert Y.ndim == 1, "Y must be a 1D vector"
             assert (
                 len(Y) == N
@@ -4907,7 +4907,8 @@ class Visdom(object):
         """
         This function renders structured data as a styled HTML table.
 
-        - `data`: a 2D `list`/`tuple` of row data, a 2D numpy array, or
+        - `data`: a 2D `list`/`tuple` of row data (each row a `list`,
+           `tuple` or 1-D numpy array), a 2D numpy array, or
            a list of `dict`s (in which case `headers` is derived from
            the first dict's keys unless explicitly given). In case of
            an empty list, a table with only headers will be rendered.
@@ -4974,7 +4975,8 @@ class Visdom(object):
         """
         Renders a native, structured, editable table pane.
 
-        - `data`: a 2D list of rows (list of lists/tuples), OR a list of
+        - `data`: a 2D list of rows (list of lists, tuples or 1-D numpy
+           arrays), a 2D numpy array, OR a list of
            dicts (in which case `headers` is derived from the first
            dict's keys unless explicitly given).
         - `headers`: list of column names. Required if `data` rows are
