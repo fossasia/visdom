@@ -508,13 +508,19 @@ def extract_eid(args):
 def update_window(p, args):
     """Adds new args to a window if they exist"""
     content = p["content"]
-    has_layout = isinstance(content, dict) and isinstance(content.get("layout"), dict)
-    layout_update = args.get("layout", {})
-    if has_layout:
-        for layout_name, layout_val in layout_update.items():
-            if layout_val is not None:
-                content["layout"][layout_name] = layout_val
-    opts = args.get("opts", {})
+    pdata = content.get("data") if isinstance(content, dict) else None
+    layout_update = args.get("layout") or {}
+    if layout_update and isinstance(content, dict):
+        layout = content.get("layout")
+        if not isinstance(layout, dict) and p.get("type") == "plot":
+            # a plot built without a layout still has to accept one; the other
+            # pane types have no layout and must not grow one
+            layout = content["layout"] = {}
+        if isinstance(layout, dict):
+            for layout_name, layout_val in layout_update.items():
+                if layout_val is not None:
+                    layout[layout_name] = layout_val
+    opts = args.get("opts") or {}
     for opt_name, opt_val in opts.items():
         if opt_val is not None:
             if opt_name == "caption":
@@ -526,16 +532,15 @@ def update_window(p, args):
     has_traces = (
         p.get("type") == "plot"
         and isinstance(content, dict)
-        and isinstance(content.get("data"), list)
+        and isinstance(pdata, list)
     )
     if "legend" in opts and has_traces:
         legend = opts["legend"]
-        pdata = p["content"]["data"]
         name = args.get("name")
         if name is not None:
             if len(legend) > 0:
                 for d in pdata:
-                    if d.get("name") == name:
+                    if isinstance(d, dict) and d.get("name") == name:
                         d["name"] = legend[0]
         else:
             if len(legend) < len(pdata):
@@ -546,7 +551,7 @@ def update_window(p, args):
                     len(pdata),
                 )
             for i, d in enumerate(pdata):
-                if i < len(legend):
+                if i < len(legend) and isinstance(d, dict):
                     d["name"] = legend[i]
     p["version"] += 1
     return p
