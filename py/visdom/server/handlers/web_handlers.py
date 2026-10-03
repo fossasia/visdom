@@ -123,10 +123,123 @@ class ExistsHandler(BaseHandler):
 
 
 class UpdateHandler(BaseHandler):
+    #: Trace types whose append is a plain push onto the end of each axis.
+    #: ``heatmap`` is not one of them: its own branch rewrites ``z`` and the
+    #: axis labels rather than extending a series.
+    APPENDABLE_TRACE_TYPES = frozenset(("scatter", "scatter3d", "scattergl", "custom"))
+
+    @staticmethod
+    def resolve_trace_idxs(pdata, name):
+        """Which traces of ``pdata`` an update naming ``name`` applies to.
+
+        An unnamed update applies to every trace in order, a named one to the
+        traces carrying that name. O(traces) either way, so the append fast
+        path can ask the question before anything has been mutated.
+        """
+        if name is None:
+            return list(range(len(pdata)))
+        return [i for i in range(len(pdata)) if pdata[i]["name"] == name]
+
+    @staticmethod
+    def window_args_are_noops(p, args):
+        """Whether ``update_window`` would change nothing but the version.
+
+        It writes every non-``None`` ``opts`` entry onto the pane and every
+        non-``None`` ``layout`` entry into the pane's layout, and ``legend``
+        renames traces on top of that. A value already equal to what the pane
+        holds writes the same bytes back, so it produces no patch operation --
+        which is the case every append after the first one hits, because the
+        client resends the same ``opts`` each time.
+        """
+        content = p.get("content")
+        if isinstance(content, dict) and isinstance(content.get("layout"), dict):
+            current = content["layout"]
+            for key, val in (args.get("layout") or {}).items():
+                if val is not None and current.get(key) != val:
+                    return False
+        for key, val in (args.get("opts") or {}).items():
+            if val is None:
+                continue
+            if key == "legend":
+                return False
+            if key == "caption":
+                if not isinstance(content, dict) or content.get("caption") != val:
+                    return False
+            elif p.get(key) != val:
+                return False
+        return True
+
+    @staticmethod
+    def appendable(p, args):
+        """Whether ``args`` appends to ``p`` in a way whose patch is predictable.
+
+        True only for a pure append: new points pushed onto the end of traces
+        that already exist, with nothing else about the pane changing. Every
+        check is O(traces), never O(points), so asking costs nothing against
+        the deepcopy and the diff it saves.
+
+        An update that also changes an opt, a layout entry or a trace name
+        takes the general path below. The first append after a plot is created
+        is one of those -- the client's ``opts`` carry keys the fresh pane does
+        not have yet -- and every append after it is not, which is the case
+        that matters for a plot being appended to in a loop.
+        """
+        if not args.get("append") or args.get("delete"):
+            return False
+        new_data = args.get("data")
+        if not isinstance(new_data, list) or not new_data:
+            return False
+        content = p.get("content")
+        if p.get("type") != "plot" or not isinstance(content, dict):
+            return False
+        pdata = content.get("data")
+        if not isinstance(pdata, list) or not pdata:
+            return False
+        if not UpdateHandler.window_args_are_noops(p, args):
+            return False
+        name = args.get("name")
+        if name is not None and len(new_data) != 1:
+            # ``update`` answers this with a 400; leave the rejecting to it.
+            return False
+        idxs = UpdateHandler.resolve_trace_idxs(pdata, name)
+        if not idxs:
+            # Nothing matched, so ``update`` injects a new trace rather than
+            # appending to an existing one.
+            return False
+        # ``update`` walks ``zip(idxs, new_data)``, so only this many traces
+        # are actually touched.
+        return all(
+            pdata[i].get("type") in UpdateHandler.APPENDABLE_TRACE_TYPES
+            for i in idxs[: len(new_data)]
+        )
+
     @staticmethod
     def update_packet(
         p, args, max_text_lines, max_old_content, max_image_history, max_plot_history
     ):
+        # A pure append's patch is known before the append happens: it adds the
+        # new points at the end of the traces they belong to. Building it
+        # directly skips both the deepcopy of the pane and the diff of the two
+        # copies, which are the two costs in #1805 that grow with the data
+        # already plotted. Everything else keeps the general path below.
+        if UpdateHandler.appendable(p, args):
+            ops = []
+            p = UpdateHandler.update(
+                p,
+                args,
+                max_text_lines,
+                max_old_content,
+                max_image_history,
+                max_plot_history,
+                record_ops=ops,
+            )
+            p["contentID"] = get_rand_id()
+            ops.append({"op": "replace", "path": "/contentID", "value": p["contentID"]})
+            # ``update_window`` bumps the version on every update, so the patch
+            # has to carry it or the frontend's copy drifts out of step.
+            ops.append({"op": "replace", "path": "/version", "value": p["version"]})
+            return p, ops
+
         # Shallow copy the packet to dynamically capture changes to top-level keys.
         old_p = p.copy()
 
@@ -189,8 +302,21 @@ class UpdateHandler(BaseHandler):
 
     @staticmethod
     def update(
-        p, args, max_text_lines, max_old_content, max_image_history, max_plot_history
+        p,
+        args,
+        max_text_lines,
+        max_old_content,
+        max_image_history,
+        max_plot_history,
+        *,
+        record_ops=None,
     ):
+        """Apply ``args`` to pane ``p`` in place.
+
+        ``record_ops``, when given a list, collects the JSON Patch operations
+        describing an append as it is performed -- see ``appendable``, which is
+        what decides whether the caller may ask for them.
+        """
         if not args.get("data") and not args.get("delete") and args.get("name") is None:
             # opts/layout-only update (e.g. update_window_opts): works for
             # any pane type. A delete/named update also carries no data but
@@ -271,14 +397,11 @@ class UpdateHandler(BaseHandler):
             return p  # we only updated the opts or layout
         append = args.get("append")
 
-        idxs = list(range(len(pdata)))
-
-        if name is not None:
-            if not delete and len(new_data) != 1:
-                raise tornado.web.HTTPError(
-                    400, reason="a named trace update takes exactly one data entry"
-                )
-            idxs = [i for i in idxs if pdata[i]["name"] == name]
+        if name is not None and not delete and len(new_data) != 1:
+            raise tornado.web.HTTPError(
+                400, reason="a named trace update takes exactly one data entry"
+            )
+        idxs = UpdateHandler.resolve_trace_idxs(pdata, name)
 
         # Delete a trace
         if delete:
@@ -396,9 +519,26 @@ class UpdateHandler(BaseHandler):
             if pdata[idx]["type"] == "scatter3d":
                 axes.append("z")
             for axis in axes:
-                pdata[idx][axis] = (
-                    (pdata[idx][axis] + new_trace[axis]) if append else new_trace[axis]
-                )
+                if not append:
+                    pdata[idx][axis] = new_trace[axis]
+                    continue
+                series = pdata[idx][axis]
+                if record_ops is not None:
+                    path = "/content/data/%d/%s" % (idx, axis)
+                    for at, value in enumerate(new_trace[axis], len(series)):
+                        record_ops.append(
+                            {
+                                "op": "add",
+                                "path": "%s/%d" % (path, at),
+                                "value": value,
+                            }
+                        )
+                # ``series = series + new_trace[axis]`` reallocated the whole
+                # series and copied every existing point on every append, an
+                # O(n^2) of its own on top of the diff #1805 measured. ``+=``
+                # extends a list in place, and still rebinds anything else
+                # exactly as the concatenation did.
+                series += new_trace[axis]
 
             # handle marker properties
             if "marker" not in new_trace:
@@ -409,13 +549,24 @@ class UpdateHandler(BaseHandler):
             for marker_prop in ["color"]:
                 if marker_prop not in new_trace["marker"]:
                     continue
-                if marker_prop not in pdata[idx]["marker"]:
-                    pdata[idx]["marker"][marker_prop] = []
-                pdata_marker[marker_prop] = (
-                    (pdata_marker[marker_prop] + new_trace["marker"][marker_prop])
-                    if append
-                    else new_trace["marker"][marker_prop]
-                )
+                if marker_prop not in pdata_marker:
+                    pdata_marker[marker_prop] = []
+                new_marker = new_trace["marker"][marker_prop]
+                if not append:
+                    pdata_marker[marker_prop] = new_marker
+                    continue
+                series = pdata_marker[marker_prop]
+                if record_ops is not None:
+                    path = "/content/data/%d/marker/%s" % (idx, marker_prop)
+                    for at, value in enumerate(new_marker, len(series)):
+                        record_ops.append(
+                            {
+                                "op": "add",
+                                "path": "%s/%d" % (path, at),
+                                "value": value,
+                            }
+                        )
+                series += new_marker
 
         return p
 
