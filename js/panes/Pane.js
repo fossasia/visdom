@@ -7,7 +7,7 @@
  *
  */
 
-import { MessageSquare, Tags } from 'lucide-react';
+import { Maximize2, MessageSquare, Tags } from 'lucide-react';
 import React, {
   forwardRef,
   useContext,
@@ -211,7 +211,19 @@ var Pane = forwardRef((props, ref) => {
           <MessageSquare size={10} />
         </button>
         {barwidgets}
-        <div className="pull-right">{title}</div>
+        {props.onExpand ? (
+          <button
+            className="pane-title"
+            title="Open full-screen view"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={() => props.onExpand(id)}
+          >
+            <Maximize2 size={10} />
+            {title}
+          </button>
+        ) : (
+          <div className="pull-right">{title}</div>
+        )}
       </div>
       <div className={contentClassNames}>
         {children}

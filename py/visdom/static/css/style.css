@@ -290,6 +290,39 @@ button>svg {
   background-color: var(--vis-danger-subtle);
 }
 
+.bar .pane-title {
+  float: right;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 60%;
+  margin: 0;
+  padding: 0 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  font-size: 11px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.bar .pane-title svg {
+  flex: 0 0 auto;
+  opacity: 0.6;
+}
+
+.bar .pane-title:hover svg {
+  opacity: 1;
+}
+
+.bar .pane-title:hover {
+  color: var(--vis-accent);
+  text-decoration: underline;
+}
+
 .content {
   width: 100%;
   height: calc(100% - 15px);
@@ -844,4 +877,201 @@ button[title="export latex"].active {
 .table-header-cell:hover .table-delete-col,
 .table-cell-first:hover .table-delete-row {
   visibility: visible;
+}
+
+.metric-detail {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  background: var(--vis-bg-surface);
+  color: var(--vis-text);
+}
+
+.metric-detail-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--vis-border);
+  font-size: 13px;
+}
+
+.metric-detail-breadcrumb .crumb,
+.metric-detail-breadcrumb .crumb-sep {
+  color: var(--vis-text-muted);
+}
+
+.metric-detail-breadcrumb .crumb-current {
+  color: var(--vis-text);
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.metric-detail-close {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--vis-radius-2);
+  background: transparent;
+  color: var(--vis-text-muted);
+  transition: background-color var(--vis-transition);
+}
+
+.metric-detail-close:hover {
+  background: var(--vis-bg-hover);
+  color: var(--vis-text);
+}
+
+.metric-detail-body {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+}
+
+.metric-detail-rail {
+  flex: 0 0 240px;
+  border-right: 1px solid var(--vis-border);
+  padding: 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  font-size: 13px;
+}
+
+.rail-meta {
+  color: var(--vis-text-muted);
+  font-size: 12px;
+}
+
+.rail-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rail-row > span:first-child {
+  color: var(--vis-text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.rail-toggle {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.rail-toggle > span {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 13px;
+  color: var(--vis-text);
+}
+
+.rail-group label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.rail-group input,
+.rail-toggle input[type="checkbox"],
+.rail-row input[type="range"] {
+  accent-color: var(--vis-accent);
+}
+
+.rail-toggle input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+}
+
+.rail-row input[type="range"] {
+  width: 100%;
+}
+
+.rail-disabled {
+  opacity: 0.4;
+}
+
+.rail-num {
+  color: var(--vis-text-muted);
+  font-size: 12px;
+}
+
+.rail-csv {
+  margin-top: auto;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.metric-detail-chart {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.metric-detail-chart .widget {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 15;
+  margin: 0;
+  padding: 4px 10px;
+  background: var(--vis-bg-surface);
+  border: 1px solid var(--vis-border);
+  border-radius: var(--vis-radius-2);
+  box-shadow: var(--vis-shadow-1);
+  font-size: 12px;
+  color: var(--vis-text-muted);
+}
+
+.metric-detail-note {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  text-align: center;
+  color: var(--vis-text-muted);
+}
+
+.metric-detail-stats {
+  flex: 0 0 auto;
+  max-height: 30vh;
+  border-top: 1px solid var(--vis-border);
+  padding: 8px 16px 14px;
+  overflow: auto;
+}
+
+.metric-detail-stats table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.metric-detail-stats th {
+  text-align: left;
+  padding: 8px;
+  color: var(--vis-text-muted);
+  font-weight: 600;
+  border-bottom: 1px solid var(--vis-border);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.metric-detail-stats td {
+  padding: 8px;
+  border-bottom: 1px solid var(--vis-border);
+  font-variant-numeric: tabular-nums;
 }
