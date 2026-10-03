@@ -286,16 +286,16 @@ def test_caption_is_skipped_when_content_is_not_a_dict():
     assert text_pane["content"] == "hello"
 
 
-def test_version_is_bumped_once_per_update(titled_pane):
+def test_version_is_left_to_the_caller(titled_pane):
+    """``update_window`` used to own the version bump, and could not.
+
+    Only plot panes reach it: ``UpdateHandler.update`` returns ahead of it for
+    text, image and plot history and tables, so those types never got a bump
+    at all. The increment now sits in ``UpdateHandler.update_packet``, which
+    runs once for every type -- see ``py/tests/unit/pane_versioning.py``.
+    """
     update_window(titled_pane, {"opts": {"title": "a"}})
-    assert titled_pane["version"] == 2
-    update_window(titled_pane, {"opts": {"title": "b"}})
-    assert titled_pane["version"] == 3
-
-
-def test_version_is_bumped_even_for_an_empty_update(titled_pane):
-    update_window(titled_pane, {})
-    assert titled_pane["version"] == 2
+    assert titled_pane["version"] == 1
 
 
 def test_returns_the_same_pane_object(titled_pane):
