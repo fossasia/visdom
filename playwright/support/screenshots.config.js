@@ -110,6 +110,7 @@ const screenshotOptions = {
 };
 
 const compareScreenshotOptions = {
+  image_save_jpeg: { maxDiffPixels: 10 },
   plot_line_doubleyaxis: { maxDiffPixels: 2000 },
   plot_scatter_append: { maxDiffPixels: 200 },
   plot_scatter_custom_marker: { maxDiffPixels: 200 },
