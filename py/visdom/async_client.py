@@ -44,23 +44,30 @@ re-raised as the ``requests`` exceptions the inherited ``_send`` already knows
 how to handle, so error semantics -- ``raise_exceptions``, the SSL hint, the
 ``return False`` fallback -- match the synchronous client exactly.
 
-Incoming-socket support (event handlers) is not part of this module yet;
-``create()`` rejects ``use_incoming_socket``/``use_polling`` rather than
-pretending to deliver events.
+The backchannel that carries server events is asyncio too: a task on the
+caller's loop reads a ``websocket_connect`` connection (or polls the HTTP
+fallback) and feeds ``_handle_incoming_message``, the same seam the
+synchronous client feeds. It is opt-in here: ``create()`` defaults
+``use_incoming_socket`` to ``False``, unlike ``Visdom``.
 """
 
 import asyncio
+import contextvars
 import functools
+import inspect
+import ipaddress
 import json
 import logging
 import ssl
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urlparse
 
 import requests
 from tornado.httpclient import AsyncHTTPClient, HTTPClientError, HTTPRequest
 from tornado.simple_httpclient import HTTPTimeoutError
+from tornado.websocket import websocket_connect
 
 from visdom import Visdom
 
@@ -73,12 +80,45 @@ logger = logging.getLogger(__name__)
 CONNECT_TIMEOUT = 20.0
 REQUEST_TIMEOUT = 20.0
 
+# The backchannel handshake is exempt: the connection it opens is held for the
+# life of the client, not for one request. tornado reads 0 as "no timeout".
+SOCKET_REQUEST_TIMEOUT = 0
+
 # How many plot calls may be in flight at once. It sizes the client's own
 # thread pool and tornado's ``max_clients`` together, so a worker thread only
 # ever exists for a request tornado is willing to start immediately; anything
 # beyond that waits in the pool rather than in tornado's queue, where the
 # connect timeout would already be ticking.
 DEFAULT_MAX_CONCURRENCY = 10
+
+# Backchannel timings, matching the synchronous client: the handshake budget
+# ``Visdom.__init__`` waits out, its three-second reconnect gap, its poll
+# interval. Pings have no counterpart -- the synchronous client sets a pong
+# deadline but never pings, so a half-open connection sits there until the OS
+# notices; tornado defaults the pong deadline to the interval.
+HANDSHAKE_TIMEOUT = 5.0
+RECONNECT_DELAY = 3.0
+POLL_INTERVAL = 0.1
+PING_INTERVAL = 30.0
+
+# Which client's event handler the running task belongs to, if any. Set on the
+# loop side of a bridged handler, so anything that handler awaits -- and any
+# task it spawns, which inherits this context -- can tell that the dispatch
+# thread is parked on it. ``shutdown`` is what needs to know: the drain it runs
+# must not wait for the very handler that is waiting for it.
+_HANDLER_CLIENT = contextvars.ContextVar("visdom_async_handler_client", default=None)
+
+# Cleanups nobody is awaiting, kept reachable while they run. ``asyncio`` holds
+# a task only weakly, so one whose sole reference was the ``ensure_future`` call
+# can be garbage collected mid-await -- and these are the last thing that will
+# ever close a transport, a backchannel and a worker pool.
+_CLEANUPS = set()
+
+# How long ``shutdown`` waits for a handler that was already running when the
+# backchannel closed. A thread pool cannot interrupt a worker, so this is a
+# backstop rather than a guarantee: past it the handler is assumed wedged and
+# what it is waiting on is cancelled, rather than holding the caller forever.
+DISPATCH_DRAIN_TIMEOUT = 5.0
 
 
 class _AsyncTransport(object):
@@ -113,6 +153,7 @@ class _AsyncTransport(object):
         self._connected = False
         self._client = None
         self._login_lock = None
+        self._warned_insecure = False
 
     # -- Plumbing -------------------------------------------------------------
 
@@ -144,12 +185,74 @@ class _AsyncTransport(object):
             kwargs["validate_cert"] = False
         return HTTPRequest(url, **kwargs)
 
+    def websocket_url(self):
+        """``ws(s)://host:port<base_url>/vis_socket``, off the POST url."""
+        parsed = urlparse(self.server)
+        scheme = "wss" if parsed.scheme == "https" else "ws"
+        return "{0}://{1}:{2}{3}/vis_socket".format(
+            scheme, parsed.netloc, self.port, self.base_url
+        )
+
+    def websocket_request(self):
+        """The handshake request, with the login cookie and TLS settings.
+
+        Not built through ``_request``: the handshake is a GET, and its
+        ``request_timeout`` has to stay off rather than follow
+        ``REQUEST_TIMEOUT``. That bound exists to stop a wedged POST from
+        holding a worker thread; this connection is meant to stay open for the
+        life of the client, so tornado would tear a healthy socket down once
+        the deadline passed.
+        """
+        headers = {}
+        if self.cookie:
+            headers["Cookie"] = self.cookie
+        kwargs = {
+            "headers": headers,
+            "connect_timeout": CONNECT_TIMEOUT,
+            "request_timeout": SOCKET_REQUEST_TIMEOUT,
+        }
+        if isinstance(self.ssl_verify, str):
+            kwargs["ca_certs"] = self.ssl_verify
+        elif not self.ssl_verify:
+            kwargs["validate_cert"] = False
+        return HTTPRequest(self.websocket_url(), **kwargs)
+
     async def _fetch(self, request):
         # ``raise_error=False`` suppresses only the HTTP status error, which is
         # what makes this match ``requests``: a 400 or a 403 comes back as a
         # body for the caller to read, exactly as ``r.text`` would. Connection
         # and TLS failures still raise.
         return await self.client.fetch(request, raise_error=False)
+
+    def _warn_if_insecure(self):
+        """Warn once when the login and its cookie cross the wire in the clear.
+
+        A plaintext deployment leaks twice over. The password is POSTed to an
+        ``http`` url, and the ``user_password`` cookie it comes back with is
+        then replayed on every later POST *and* on the backchannel handshake,
+        whose scheme is derived from the same url -- an ``http`` server gets a
+        ``ws`` socket. Anything on the path can read either.
+
+        A warning rather than a refusal: visdom is normally a local tool, and
+        an authenticated deployment that has always run over ``http`` should
+        not stop working on upgrade. Loopback is exempt, where the traffic
+        never reaches a network to be read on.
+        """
+        if self._warned_insecure:
+            return
+        parsed = urlparse(self.server)
+        if parsed.scheme == "https" or _is_loopback(parsed.hostname):
+            return
+        self._warned_insecure = True
+        logger.warning(
+            "Logging in to %s:%s over an unencrypted connection: the "
+            "credentials, and the user_password cookie sent with every "
+            "request and with the plaintext websocket backchannel "
+            "handshake, can be read in transit. Use an https:// server url "
+            "to protect them.",
+            self.server,
+            self.port,
+        )
 
     async def _ensure_login(self):
         """POST the credentials once and keep the ``user_password`` cookie.
@@ -172,6 +275,7 @@ class _AsyncTransport(object):
         async with self._login_lock:
             if self.cookie is not None:
                 return
+            self._warn_if_insecure()
             url = "{0}:{1}{2}".format(self.server, self.port, self.base_url)
             request = self._request(
                 url,
@@ -220,6 +324,18 @@ class _AsyncTransport(object):
             self._client = None
 
 
+def _is_loopback(host):
+    """Whether ``host`` names this machine, and so never reaches a network."""
+    if not host:
+        return False
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 def _extract_cookie(response, name):
     """Pull one cookie out of a response's ``Set-Cookie`` headers."""
     prefix = name + "="
@@ -243,6 +359,333 @@ def _as_requests_error(error):
     if isinstance(error, (HTTPTimeoutError, TimeoutError)):
         return requests.exceptions.Timeout(str(error))
     return requests.exceptions.ConnectionError(str(error))
+
+
+async def _awaited(awaitable, client=None):
+    """Await ``awaitable`` from inside a coroutine.
+
+    ``asyncio.run_coroutine_threadsafe`` accepts coroutines and nothing else,
+    so anything else awaitable -- a future, an object with ``__await__`` --
+    reaches the loop wrapped in this.
+
+    ``client`` marks the task as running ``client``'s event handler, which is
+    how a ``shutdown`` reached from in here knows that the dispatch thread is
+    blocked on it.
+    """
+    if client is not None:
+        _HANDLER_CLIENT.set(client)
+    return await awaitable
+
+
+def _run_cleanup(coro, what):
+    """Run a cleanup nobody will await, holding a reference until it finishes.
+
+    Dropping the task would let the garbage collector take it mid-await, and
+    with it the release of whatever it was about to close. Failures are logged
+    here for the same reason: there is no caller to raise them to.
+    """
+    task = asyncio.ensure_future(coro)
+    _CLEANUPS.add(task)
+
+    def finished(cleanup):
+        _CLEANUPS.discard(cleanup)
+        if not cleanup.cancelled() and cleanup.exception() is not None:
+            logger.warning("%s failed: %s", what, cleanup.exception())
+
+    task.add_done_callback(finished)
+    return task
+
+
+class _AsyncBackchannel(object):
+    """Base for the two ways a client hears back from the server.
+
+    Owns a task on the caller's loop that keeps one session alive and restarts
+    it after a failure, as the synchronous client's socket thread does -- but
+    only once a handshake has arrived: a session that ends before one did, for
+    whatever reason, drops the client to socketless instead.
+    Subclasses provide ``_session``, which returns when the connection is gone
+    and raises when it could not be made.
+
+    Messages go to ``_handle_incoming_message`` on a private single-thread
+    executor: handlers are blocking functions written against the synchronous
+    client, so the loop must not run them, and one thread keeps them in arrival
+    order. The pool is its own because the plot pool can be fully parked on
+    POSTs -- a ``max_concurrency=1`` client is parked for the whole time its
+    constructor waits on this handshake.
+    """
+
+    name = "Socket"
+
+    def __init__(self, client, loop, transport):
+        self._client = client
+        self._loop = loop
+        self._transport = transport
+        self._task = None
+        self._closing = False
+        self._dispatch_executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="visdom-async-events"
+        )
+        # Submission and shutdown of that pool, paired. ``submit`` raises once
+        # the pool is shut down, so the check and the submit have to be one
+        # step -- and the shutdown itself has to see whatever the last submit
+        # left behind, which is the handler :meth:`drain` waits on.
+        self._dispatch_lock = threading.Lock()
+        self._dispatch_closed = False
+        self._dispatch_call = None
+
+    def start(self):
+        """Spawn the reader task. Must run on the event loop thread.
+
+        ``setup_socket`` hands this to the loop with ``call_soon_threadsafe``,
+        so a ``close`` from the loop can get there first; starting afterwards
+        would leave a task nobody holds.
+        """
+        if self._task is None and not self._closing:
+            self._task = self._loop.create_task(self._run())
+
+    async def _run(self):
+        while self._client.use_socket and not self._closing:
+            error = None
+            try:
+                await self._session()
+            except Exception as e:
+                error = e
+            finally:
+                self._client.socket_alive = False
+            if self._closing or not self._client.use_socket:
+                break
+            # Checked here, after every kind of ending, rather than in each
+            # session: a rejected upgrade, a timed-out handshake or a failed
+            # polling ``init`` would otherwise retry forever.
+            if error is None:
+                reason = (
+                    "{0} closed before the handshake arrived (if login is "
+                    "enabled, pass username/password to AsyncVisdom.create)"
+                ).format(self.name)
+            else:
+                reason = "{0} failed before the handshake arrived: {1}".format(
+                    self.name, error
+                )
+            if self._give_up_if_never_connected(reason):
+                break
+            if error is not None:
+                logger.error("%s had error %s, attempting restart", self.name, error)
+            await asyncio.sleep(RECONNECT_DELAY)
+
+    async def _session(self):
+        raise NotImplementedError
+
+    async def _dispatch(self, raw_message, handshake):
+        """Deliver one message, off the handshake clock.
+
+        Until ``vis_alive`` arrives the session runs under
+        ``HANDSHAKE_TIMEOUT``: an open connection is not a handshake, and a
+        server that accepts one without ever sending ``vis_alive`` would
+        otherwise hold the session forever, out of reach of both the retry loop
+        and the socketless fallback.
+
+        Handler code must not be spent out of that budget, though. The handlers
+        are the caller's own and may take as long as they like; counted against
+        the handshake, one slower than ``HANDSHAKE_TIMEOUT`` would tear down the
+        very session that had just delivered ``vis_alive``. Polling made that
+        worse, because it delivers a whole batch between two checks: a slow
+        handler on an earlier message in the batch could bury the handshake that
+        came behind it. So the deadline is lifted for the length of the
+        delivery, and put back -- pushed out by however long the delivery took
+        -- only if the message turned out not to be the handshake. Once it is,
+        the connection is meant to last, and the deadline stays gone.
+        """
+        deadline = handshake.when()
+        if deadline is None:
+            await self._deliver(raw_message)
+            return
+        handshake.reschedule(None)
+        started = self._loop.time()
+        try:
+            await self._deliver(raw_message)
+        finally:
+            if not self._client.socket_alive:
+                handshake.reschedule(deadline + (self._loop.time() - started))
+
+    async def _deliver(self, raw_message):
+        """Run one message through ``_handle_incoming_message`` on the handler
+        thread, and wait for it there rather than on the loop."""
+        call = self._submit(raw_message)
+        if call is not None:
+            await asyncio.wrap_future(call, loop=self._loop)
+
+    def _submit(self, raw_message):
+        """Queue one message on the handler thread, or ``None`` once closed.
+
+        Kept under the lock that :meth:`drain` takes: the pool is shut down in
+        there, and a submit that had merely checked a flag beforehand could
+        still land after it and raise ``cannot schedule new futures``.
+        """
+        with self._dispatch_lock:
+            if self._dispatch_closed:
+                return None
+            call = self._dispatch_executor.submit(
+                self._client._handle_incoming_message, raw_message
+            )
+            self._dispatch_call = call
+            return call
+
+    def _give_up_if_never_connected(self, reason):
+        """Stop retrying a backchannel that never worked once: a server
+        without the route, a proxy that refuses the upgrade, or a login this
+        client cannot pass degrades to socketless instead of looping forever.
+        One that did connect keeps retrying, so a server restart is survived."""
+        if self._client.socket_connection_achieved:
+            return False
+        logger.warning("%s; running socketless", reason)
+        self._client.use_socket = False
+        return True
+
+    def close(self):
+        """Stop the backchannel. Idempotent, and safe to call on the loop.
+
+        Only the half that cannot block: nothing new is read and nothing new is
+        dispatched from here on. What is already running is settled by
+        :meth:`drain`, which needs to await.
+        """
+        self._closing = True
+        self._client.use_socket = False
+        self._client.socket_alive = False
+        if self._task is not None:
+            self._task.cancel()
+
+    async def drain(self, abandon=None):
+        """Settle the reader task and the handler thread. Returns whether it
+        managed to, within ``DISPATCH_DRAIN_TIMEOUT``.
+
+        ``close`` stops the reader, but a thread pool cannot interrupt a worker:
+        a handler already inside ``_handle_incoming_message`` runs to completion
+        on its own thread regardless. Shutting the pool down ``wait=False`` and
+        returning left that handler firing into a client the caller had been
+        told was closed -- and, for a coroutine handler, worse: those finish by
+        waiting on *this* loop, so one still running when the loop closes parks
+        its thread forever, where the interpreter-exit join every
+        ``ThreadPoolExecutor`` registers then hangs the process.
+
+        So the wait happens here, while the loop is still turning to feed it.
+        The reader task goes first; the handler it was last awaiting outlives
+        its cancellation and is waited on separately.
+
+        ``abandon`` ends that wait early. It is set when the handler being
+        waited for is itself parked on whoever called this drain -- a handler
+        that awaits ``shutdown`` -- which no amount of waiting can resolve:
+        the handler finishes when the caller does. That counts as settled,
+        because what it is waiting on is the caller's to finish rather than
+        this drain's to cancel.
+        """
+        task, self._task = self._task, None
+        if task is not None:
+            await asyncio.wait({task})
+        with self._dispatch_lock:
+            self._dispatch_closed = True
+            call, self._dispatch_call = self._dispatch_call, None
+        settled = True
+        if call is not None and not call.done():
+            waiters = {asyncio.wrap_future(call, loop=self._loop)}
+            if abandon is not None:
+                waiters.add(asyncio.ensure_future(abandon.wait()))
+            done, pending = await asyncio.wait(
+                waiters,
+                timeout=DISPATCH_DRAIN_TIMEOUT,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for unfinished in pending:
+                unfinished.cancel()
+            settled = bool(done)
+            if not settled:
+                logger.warning(
+                    "%s handler did not finish within %ss of shutdown",
+                    self.name,
+                    DISPATCH_DRAIN_TIMEOUT,
+                )
+        self._dispatch_executor.shutdown(wait=False)
+        return settled
+
+
+class _AsyncWebSocket(_AsyncBackchannel):
+    """The ``/vis_socket`` backchannel over ``websocket_connect``."""
+
+    def __init__(self, client, loop, transport):
+        super().__init__(client, loop, transport)
+        self._connection = None
+
+    async def _session(self):
+        await self._transport._ensure_login()
+        # One budget for the connect and the ``vis_alive`` after it. Bounded
+        # here rather than by tornado's connect timeout, which a server that
+        # accepts the connection and never upgrades never trips -- and which
+        # stops counting at the upgrade, long before the handshake.
+        async with asyncio.timeout(HANDSHAKE_TIMEOUT) as handshake:
+            connection = await websocket_connect(
+                self._transport.websocket_request(),
+                ping_interval=PING_INTERVAL,
+            )
+            self._connection = connection
+            try:
+                while True:
+                    message = await connection.read_message()
+                    if message is None:
+                        break
+                    await self._dispatch(message, handshake)
+            finally:
+                self._connection = None
+                connection.close()
+
+    def close(self):
+        # Before the cancel, so the read loop wakes with a ``None`` message
+        # instead of being torn out of a live read.
+        if self._connection is not None:
+            self._connection.close()
+            self._connection = None
+        super().close()
+
+
+class _AsyncPolling(_AsyncBackchannel):
+    """The ``/vis_socket_wrap`` backchannel, for deployments that cannot hold
+    a websocket open. Same two-step protocol the synchronous client speaks --
+    an ``init`` POST for a sid, then ``query`` POSTs -- but the wait between
+    polls is an ``await`` rather than a parked thread."""
+
+    name = "Polling"
+
+    @property
+    def _url(self):
+        return "{0}:{1}{2}/vis_socket_wrap".format(
+            self._transport.server, self._transport.port, self._transport.base_url
+        )
+
+    async def _post(self, payload):
+        return json.loads(await self._transport.post(self._url, json.dumps(payload)))
+
+    async def _session(self):
+        # The same handshake budget as the websocket: a wrapper that answers
+        # every query without ever queueing ``vis_alive`` is not connected.
+        async with asyncio.timeout(HANDSHAKE_TIMEOUT) as handshake:
+            response = await self._post({"message_type": "init"})
+            if not response.get("success") or not response.get("sid"):
+                raise RuntimeError(
+                    "polling init rejected: {0}".format(response.get("detail"))
+                )
+            sid = response["sid"]
+            self._client.vis_sid = sid
+            while self._client.use_socket and not self._closing:
+                response = await self._post({"message_type": "query", "sid": sid})
+                if not response.get("success"):
+                    raise RuntimeError(
+                        "polling query rejected: {0}".format(response.get("detail"))
+                    )
+                # A successful query need not carry a batch: the wrapper
+                # answers ``{"success": true}`` when it has nothing queued,
+                # and indexing that would end the session on a ``KeyError``
+                # and cost the sid over an ordinary empty poll.
+                for message in response.get("messages") or []:
+                    await self._dispatch(message, handshake)
+                await asyncio.sleep(POLL_INTERVAL)
 
 
 class _Call(object):
@@ -364,6 +807,10 @@ class _BridgedVisdom(Visdom):
         self._aloop = loop
         self._transport = transport
         self._max_clients = max_clients
+        # ``super().__init__`` calls ``setup_socket`` when asked for a
+        # backchannel, so the attribute has to exist before it runs.
+        self._backchannel = None
+
         # Which ``_Call`` the running worker thread belongs to, so the POST it
         # is about to make can be found and cancelled from the loop.
         self._calls = threading.local()
@@ -431,14 +878,28 @@ class _BridgedVisdom(Visdom):
         """No-op: there is no ``requests`` session to reap."""
 
     def setup_socket(self, polling=False):
-        raise NotImplementedError(
-            "AsyncVisdom has no incoming socket yet; construct it with "
-            "use_incoming_socket=False, or use the synchronous Visdom client "
-            "if you need event handlers."
-        )
+        """Start the backchannel on the event loop instead of on a thread.
 
-    def setup_polling(self):
-        self.setup_socket(polling=True)
+        ``Visdom.__init__`` calls this from the worker thread it is being
+        constructed on, so the task has to be handed to the loop. The
+        constructor then waits out its usual sleep loop for ``socket_alive``,
+        which the loop is free to deliver.
+        """
+        backchannel = _AsyncPolling if polling else _AsyncWebSocket
+        self._backchannel = backchannel(self, self._aloop, self.transport)
+        self._aloop.call_soon_threadsafe(self._backchannel.start)
+
+    def close_backchannel(self):
+        """Stop the backchannel and hand it back for the caller to drain.
+
+        The stop is synchronous, so no event can be delivered after this
+        returns; settling the reader task and the handler thread needs an
+        await, and is the caller's ``drain``.
+        """
+        backchannel, self._backchannel = self._backchannel, None
+        if backchannel is not None:
+            backchannel.close()
+        return backchannel
 
 
 # Every public ``Visdom`` method that reaches the wire or is otherwise safe to
@@ -548,27 +1009,42 @@ class AsyncVisdom(object):
         # Held on the instance so that a caller who cancels its ``shutdown``
         # does not take the cleanup down with it.
         self._finalizer = None
+        # Coroutine handlers currently parked on this loop, held by the thread
+        # that bridged them. Shutdown cancels any that outlast the drain --
+        # that thread cannot be interrupted, and what it waits on is about to
+        # stop running.
+        self._handler_calls = set()
+        # Set once a handler of this client asks it to shut down. The dispatch
+        # thread is parked on that call, so nothing in the shutdown may wait
+        # for the handler to finish first.
+        self._handler_shutdown = asyncio.Event()
 
     @classmethod
     async def create(cls, *args, max_concurrency=DEFAULT_MAX_CONCURRENCY, **kwargs):
         """Connect and return a ready client.
 
         Accepts every :class:`~visdom.Visdom` argument. ``use_incoming_socket``
-        defaults to ``False`` here (the synchronous client defaults it to
-        ``True``) because the backchannel is not implemented yet; asking for it
-        explicitly raises rather than quietly dropping server events.
+        defaults to ``False`` here, where the synchronous client defaults it to
+        ``True``: most async callers are after throughput and never register a
+        handler, and a backchannel costs a held-open connection plus a thread
+        to run handlers on. Pass ``use_incoming_socket=True`` for the
+        websocket, or ``use_polling=True`` for the HTTP fallback, and the
+        client will wait for the handshake exactly as the synchronous one
+        does.
+
+        ``use_preflight_checks`` defaults to ``False`` here as well. The
+        synchronous client keeps it on so that nobody's wire traffic changes
+        under them, but an async client is new code talking to a server that
+        understands ``layout_create``, and halving the round trips per append
+        is the point of using it. Pass ``use_preflight_checks=True`` to get the
+        old two-POST behavior back against an older server.
 
         Cancelling the ``create`` itself is safe: the opening POST is cancelled
         with it, and whatever it managed to build is released rather than left
         holding a connection no caller can ever reach.
         """
         kwargs.setdefault("use_incoming_socket", False)
-        if kwargs.get("use_incoming_socket") or kwargs.get("use_polling"):
-            raise NotImplementedError(
-                "AsyncVisdom cannot receive server events yet. Pass "
-                "use_incoming_socket=False, or use the synchronous Visdom "
-                "client if you need event handlers."
-            )
+        kwargs.setdefault("use_preflight_checks", False)
         if (
             kwargs.get("proxies")
             or kwargs.get("http_proxy_host")
@@ -609,12 +1085,41 @@ class AsyncVisdom(object):
         call = _Call()
         state = _Construction()
 
-        def release(inner):
-            """Release a client the caller will never see. Runs on the loop."""
+        def close(inner):
             transport = None if inner is None else getattr(inner, "_transport", None)
             if transport is not None:
                 transport.close()
             executor.shutdown(wait=False)
+
+        async def drain(inner, backchannel):
+            """Settle the cancelled backchannel, then release the rest.
+
+            The order is :meth:`_release`'s: a polling backchannel POSTs
+            through the transport, so closing the transport under it would only
+            have the ``transport`` property rebuild it for the next poll.
+            """
+            await backchannel.drain()
+            close(inner)
+
+        def release(inner):
+            """Release a client the caller will never see. Runs on the loop.
+
+            The backchannel goes first. ``Visdom.__init__`` starts one before
+            it returns, and the cancel most often lands while it is sitting in
+            the handshake wait that follows -- so by the time a caller gives up
+            there is a reader task on this loop, a dispatch thread behind it,
+            and a reconnect loop that would go on retrying every
+            ``RECONNECT_DELAY`` forever. Nothing else can ever stop it: the
+            caller has no wrapper to :meth:`shutdown`.
+            """
+            backchannel = None if inner is None else inner.close_backchannel()
+            if backchannel is None:
+                close(inner)
+            else:
+                # Nobody is left to await this -- the caller is already
+                # unwinding -- so it is held by ``_run_cleanup`` rather than by
+                # the loop, which keeps only a weak reference to a task.
+                _run_cleanup(drain(inner, backchannel), "Releasing a cancelled create")
 
         def build():
             inner = _BridgedVisdom.__new__(_BridgedVisdom)
@@ -717,19 +1222,69 @@ class AsyncVisdom(object):
     def offline(self):
         return self._inner.offline
 
-    # -- Not available yet ----------------------------------------------------
+    @property
+    def socket_alive(self):
+        """Whether the backchannel is connected and past its handshake."""
+        return self._inner.socket_alive
 
-    def register_event_handler(self, *args, **kwargs):
-        raise NotImplementedError(
-            "AsyncVisdom has no incoming socket yet, so no events arrive to "
-            "handle. Use the synchronous Visdom client for event handlers."
+    @property
+    def use_socket(self):
+        """Whether a backchannel was asked for and has not given up."""
+        return self._inner.use_socket
+
+    # -- Events ---------------------------------------------------------------
+
+    def register_event_handler(self, handler, target, env=None):
+        """Register ``handler`` for events on ``target``.
+
+        Not a coroutine: registration is bookkeeping, and awaiting it would
+        only suggest it reaches the server. ``handler`` may be a plain callable
+        or an asynchronous one. A plain one runs on the client's own dispatch
+        thread; an asynchronous one has only its wrapper there, and its body
+        runs on this client's loop, so it can await other calls on this same
+        client.
+
+        One dispatch thread serves every handler, so they run one at a time, in
+        arrival order -- a slow one delays later events but nothing else.
+        """
+        assert callable(handler), "Event handler must be a function"
+        self._inner.register_event_handler(
+            self._as_blocking_handler(handler), target, env=env
         )
 
-    def clear_event_handlers(self, *args, **kwargs):
-        raise NotImplementedError(
-            "AsyncVisdom has no incoming socket yet, so no events arrive to "
-            "handle. Use the synchronous Visdom client for event handlers."
-        )
+    def clear_event_handlers(self, target, env=None):
+        self._inner.clear_event_handlers(target, env=env)
+
+    def _as_blocking_handler(self, handler):
+        """Adapt a handler to the dispatch thread, awaiting it if it asks.
+
+        Which kind it is, is decided by what the call returns rather than by
+        what the handler looks like: an object whose ``__call__`` is an
+        ``async def`` is a perfectly good asynchronous handler, but
+        ``inspect.iscoroutinefunction`` sees only the instance and says no, so
+        inspecting up front would silently drop its coroutine on the floor.
+
+        An awaitable result is finished on the loop, and blocking the dispatch
+        thread until it is, is the point: it keeps events in order while the
+        loop stays free to run the coroutine.
+        """
+        loop = self._inner._aloop
+
+        @functools.wraps(handler)
+        def run(message):
+            result = handler(message)
+            if not inspect.isawaitable(result):
+                return result
+            # 'run_coroutine_threadsafe' takes coroutines only, and an
+            # awaitable need not be one; '_awaited' makes it one.
+            call = asyncio.run_coroutine_threadsafe(_awaited(result, self), loop)
+            self._handler_calls.add(call)
+            try:
+                return call.result()
+            finally:
+                self._handler_calls.discard(call)
+
+        return run
 
     # -- Lifecycle ------------------------------------------------------------
 
@@ -748,23 +1303,54 @@ class AsyncVisdom(object):
         already shut down. So: refuse new calls, drop the ones that never
         started, let the ones that did settle, and only then close.
 
-        Waiting for those calls is the one suspension point here, which makes
-        this cancellable at exactly the wrong moment. The release therefore runs
-        as its own task and is awaited through :func:`asyncio.shield`: a caller
-        who gives up -- or is cancelled by the ``wait_for`` or task group it sits
-        in -- stops waiting without stopping the cleanup, and a later
-        ``shutdown`` awaits that same task rather than returning early on a
-        ``_closed`` flag whose work never finished.
+        Waiting for those calls is a suspension point, which makes this
+        cancellable at exactly the wrong moment. The release therefore runs as
+        its own task and is awaited through :func:`asyncio.shield`: a caller who
+        gives up -- or is cancelled by the ``wait_for`` or task group it sits in
+        -- stops waiting without stopping the cleanup, and a later ``shutdown``
+        awaits that same task rather than returning early on a ``_closed`` flag
+        whose work never finished.
+
+        Callable from an event handler, which is the one caller the release
+        cannot wait for: the dispatch thread is blocked inside
+        ``_handle_incoming_message`` until this coroutine returns, so a drain
+        that waited for that handler would be waiting for itself, and would
+        spend ``DISPATCH_DRAIN_TIMEOUT`` doing it before cancelling the very
+        call the handler was parked on. The flag says so, and it is set before
+        the first await so that a drain another caller's ``shutdown`` already
+        started sees it too.
         """
+        if _HANDLER_CLIENT.get() is self:
+            self._handler_shutdown.set()
         if self._finalizer is None:
             # Set before the first await, so no call slips in behind it.
             self._closed = True
+            # Nothing new is accepted from here, in either direction: the
+            # backchannel stops delivering events, the pool stops taking calls.
             self._executor.shutdown(wait=False, cancel_futures=True)
-            self._finalizer = asyncio.ensure_future(self._release())
+            # Closed here rather than in ``_release`` so that the backchannel is
+            # already shut before the loop is given back, leaving no turn in
+            # which one more event could still be delivered.
+            self._finalizer = _run_cleanup(
+                self._release(self._inner.close_backchannel()),
+                "AsyncVisdom.shutdown",
+            )
         await asyncio.shield(self._finalizer)
 
-    async def _release(self):
-        """Let the calls that already started settle, then drop the transport."""
+    async def _release(self, backchannel):
+        """Let the backchannel and the started calls settle, then close."""
+        if backchannel is not None:
+            # Awaited rather than merely stopped, so no task is left pending at
+            # loop close and no handler is still running when this returns --
+            # unless that handler is the caller, which ``_handler_shutdown``
+            # tells the drain to stop waiting for.
+            if not await backchannel.drain(abandon=self._handler_shutdown):
+                # A handler outlasted the drain. If it is a coroutine one it is
+                # parked on this loop, which is about to be handed back, and
+                # nothing would ever wake its thread again; cancelling is what
+                # lets that thread unwind instead of being joined at exit.
+                for call in tuple(self._handler_calls):
+                    call.cancel()
         if self._pending:
             await asyncio.gather(*tuple(self._pending), return_exceptions=True)
         if self._inner._transport is not None:

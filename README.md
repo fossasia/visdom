@@ -268,6 +268,11 @@ If you have cloned this repository, you can run our demo showcase.
 python example/demo.py
 ```
 
+The same showcase for the asyncio client — concurrent plots, a single-request append loop and a coroutine event handler — is in [`example/async_demo.py`](example/async_demo.py); see [Async usage](#async-usage-python-only).
+```bash
+python example/async_demo.py
+```
+
 
 ## API
 For a quick introduction into the capabilities of `visdom`, have a look at the `example` directory, or read the details below.
@@ -287,8 +292,52 @@ The python visdom client takes a few options:
 - `password`: password to use for authentication, if server started with `-enable_login` (default: `None`)
 - `proxies`: Dictionary mapping protocol to the URL of the proxy (e.g. {`http`: `foo.bar:3128`}) to be used on each Request. (default: `None`)
 - `offline`: Flag to run visdom in offline mode, where all requests are logged to file rather than to the server. Requires `log_to_filename` is set. In offline mode, all visdom commands that don't create or update plots will simply return `True`. (default: `False`)
+- `use_preflight_checks`: Ask the server whether a window exists before an `update='append'` or a `store_history=True` frame, which costs a second round trip per call. Set it to `False` to send one request and let the server create the window if it isn't there -- roughly halving the requests of an append loop. Requires a server new enough to lay out a window it creates from an append; against an older one such a window comes out unstyled. (default: `True`)
 
 Other options are either currently unused (endpoint, ipv6) or used for internal functionality.
+
+### Async usage (Python only)
+`visdom.async_client.AsyncVisdom` is an awaitable front end to the same client. It exists for callers that already run an event loop, or that want several plots in flight at once; `visdom.Visdom` is unchanged and remains the way to use visdom from ordinary synchronous code.
+
+```python
+import asyncio
+import numpy as np
+from visdom.async_client import AsyncVisdom
+
+async def main():
+    vis = await AsyncVisdom.create(server="http://localhost", port=8097)
+    async with vis:
+        await asyncio.gather(
+            vis.line(Y=np.random.rand(20), win="a"),
+            vis.line(Y=np.random.rand(20), win="b"),
+        )
+
+asyncio.run(main())
+```
+
+Every plotting method of `Visdom` is available with the same name, the same arguments and the same return value — as a coroutine. Nothing is reimplemented: the method bodies run as the synchronous code they already are, on a thread pool the client owns, and only the request itself is asynchronous. That is also why the CPU-heavy encodes (`image`, `matplot`) stay off your event loop for free.
+
+Things to know:
+
+- **Build it with `create`, not `()`.** Connecting means a POST and `__init__` cannot await. `create` accepts every `Visdom` argument, plus `max_concurrency` (default `10`) which sizes both the client's thread pool and the number of requests tornado will start at once. `max_concurrency` only supplies the default for tornado's `max_clients`: pass `max_clients` explicitly and it wins, so the two limits then differ by as much as you asked for.
+- **`shutdown` closes the client, `close` closes a window.** `close` is `Visdom.close` and keeps its usual meaning, so the method that releases the HTTP client and the worker pool is `shutdown()`. Using the client as an async context manager calls it for you.
+- **Two defaults differ from `Visdom`.** `use_incoming_socket` is `False` here (most async callers never register a handler, and a backchannel costs a held-open connection plus a thread), and `use_preflight_checks` is `False` (an async client is new code talking to a server that understands `layout_create`, so an append costs one request rather than two). Pass either explicitly to get the synchronous behavior back.
+- **Concurrency is yours to ask for.** `gather` runs the calls on separate worker threads against one shared inner client, and that client is no more thread-safe than the synchronous one — concurrent calls should target distinct windows.
+- **Event handlers work, and may be coroutines.** Pass `use_incoming_socket=True` (or `use_polling=True` for the HTTP fallback) and register as usual with `register_event_handler`; registration is not a coroutine, since it never reaches the server. A plain handler runs on the client's own single dispatch thread; a coroutine handler has only its wrapper there, and its body runs on your loop, so it can await further calls on the same client. Either way handlers run one at a time, in arrival order.
+- **No HTTP proxies.** `create` raises `NotImplementedError` for `proxies` / `http_proxy_host` / `http_proxy_port`: the transport is tornado's `AsyncHTTPClient`, which has no proxy support without `pycurl`. Use `Visdom` behind a proxy.
+
+Measured on loopback over 300 `line(update='append')` calls — the path profiled in [#771](https://github.com/fossasia/visdom/issues/771):
+
+| Client | plots/s | p50 | p95 |
+|---|---|---|---|
+| `Visdom`, preflight on (default) | 198 | 5.00 ms | 5.73 ms |
+| `Visdom`, `use_preflight_checks=False` | 304 | 3.32 ms | 4.09 ms |
+| `AsyncVisdom`, awaited serially | 235 | 4.24 ms | 4.87 ms |
+| `AsyncVisdom`, 8 concurrent | 410 | 13.19 ms | 18.33 ms |
+
+Requests halve exactly once the preflight is off. Throughput does not quite double because on loopback the preflight is the cheaper of the two round trips; over a real network the two cost the same.
+
+`example/async_demo.py` runs all of the above against a live server.
 
 ### Basics
 Visdom offers the following basic visualization functions:

@@ -567,6 +567,84 @@ def test_pr_curve_from_precomputed_points_infers_the_baseline(capture_send):
     assert sent["payload"]["data"][1]["y"] == [0.4, 0.4]
 
 
+def test_pr_curve_auc_matches_sklearn_when_recall_ties(capture_send):
+    """Tied recall points must not skew the average precision.
+
+    ``precision_recall_curve`` returns several points sharing a recall value
+    for any data the classes overlap in. Sorting on recall alone leaves their
+    order to the sort's tie-breaking, which pairs a recall with the wrong
+    precision and quietly moves the area.
+    """
+    sklearn_metrics = pytest.importorskip("sklearn.metrics")
+
+    for seed in range(10):
+        rng = np.random.RandomState(seed)
+        size = rng.randint(15, 60)
+        y_true = rng.randint(0, 2, size=size)
+        if y_true.sum() in (0, size):
+            continue
+        # Rounding the scores forces the ties this is about.
+        y_score = np.round(
+            y_true * rng.uniform(0.3, 0.7, size=size) + rng.uniform(0, 1, size=size), 1
+        )
+        precision, recall, _ = sklearn_metrics.precision_recall_curve(y_true, y_score)
+
+        sent = capture_send(
+            lambda v, precision=precision, recall=recall: v.pr_curve(
+                precision=precision, recall=recall
+            )
+        )
+
+        title = sent["payload"]["opts"]["title"]
+        auc = float(title.rsplit("AUC=", 1)[1].rstrip(")"))
+        expected = sklearn_metrics.average_precision_score(y_true, y_score)
+        assert auc == pytest.approx(expected, abs=5e-5)
+
+
+@pytest.mark.parametrize(
+    "dtype", [np.uint8, np.int16, np.float32], ids=["uint8", "int16", "float32"]
+)
+def test_pr_curve_breaks_recall_ties_whatever_the_precision_dtype(dtype):
+    """The tie-break must reorder the group, for signed and unsigned alike.
+
+    The tied pair is given in ascending precision so that leaving it alone
+    fails: a sort on recall with no tie-break would keep it, and negating an
+    unsigned array wraps rather than changing sign, turning ``0``/``1`` into
+    ``0``/``255`` and keeping it just the same.
+    """
+    recall = np.array([0.0, 0.5, 0.5, 1.0])
+    precision = np.array([1, 0, 1, 0], dtype=dtype)
+
+    _, ordered = _coerce_curve_xy(
+        recall, precision, "recall", "precision", y_tiebreak_descending=True
+    )
+
+    assert list(ordered) == [1, 1, 0, 0]
+
+
+def test_roc_curve_auc_is_unaffected_by_the_pr_tiebreak(capture_send):
+    """ROC integrates a trapezoid, so its points keep their plain ordering."""
+    sklearn_metrics = pytest.importorskip("sklearn.metrics")
+
+    for seed in range(10):
+        rng = np.random.RandomState(seed)
+        size = rng.randint(15, 60)
+        y_true = rng.randint(0, 2, size=size)
+        if y_true.sum() in (0, size):
+            continue
+        y_score = np.round(
+            y_true * rng.uniform(0.3, 0.7, size=size) + rng.uniform(0, 1, size=size), 1
+        )
+        fpr, tpr, _ = sklearn_metrics.roc_curve(y_true, y_score)
+
+        sent = capture_send(lambda v, fpr=fpr, tpr=tpr: v.roc_curve(fpr=fpr, tpr=tpr))
+
+        title = sent["payload"]["opts"]["title"]
+        auc = float(title.rsplit("AUC=", 1)[1].rstrip(")"))
+        expected = sklearn_metrics.roc_auc_score(y_true, y_score)
+        assert auc == pytest.approx(expected, abs=5e-5)
+
+
 def test_pr_curve_omits_the_baseline_when_it_cannot_be_inferred(capture_send):
     """Precomputed points that do not start at recall 0 get the curve only."""
     sent = capture_send(
