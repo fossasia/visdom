@@ -47,9 +47,13 @@ const COLORWAY = [
 const isLineTrace = (t) =>
   t && (t.type === undefined || t.type === 'scatter' || t.type === 'scattergl');
 
+// a per-point marker.color array isn't a valid line.color, so only reuse a
+// scalar color and fall back to the palette otherwise
+const scalarColor = (c) => (typeof c === 'string' ? c : null);
+
 const traceColor = (t, ordinal) =>
-  (t.line && t.line.color) ||
-  (t.marker && t.marker.color) ||
+  scalarColor(t.line && t.line.color) ||
+  scalarColor(t.marker && t.marker.color) ||
   COLORWAY[ordinal % COLORWAY.length];
 
 // a single unnamed trace gets the literal name "1" from the server
@@ -73,6 +77,28 @@ const num = (v) => (typeof v === 'number' && !Number.isNaN(v) ? v : null);
 const csvCell = (v) => {
   const s = String(v);
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+
+// traces aren't guaranteed to share one x axis (different length/cadence
+// per trace), so match each trace's own x/y pairs and merge on the actual
+// x value instead of assuming every trace's row r lines up with trace 0's
+const buildMatchedRows = (traces, idxs) => {
+  const byTrace = idxs.map((i) => {
+    const t = traces[i];
+    const txs = Array.isArray(t.x) ? t.x : [];
+    const tys = Array.isArray(t.y) ? t.y : [];
+    const map = new Map();
+    txs.forEach((x, r) => map.set(x, tys[r]));
+    return map;
+  });
+  const allX = new Set();
+  byTrace.forEach((map) => map.forEach((_, x) => allX.add(x)));
+  return [...allX]
+    .sort((a, b) => a - b)
+    .map((x) => ({
+      x,
+      values: byTrace.map((map) => (map.has(x) ? map.get(x) : undefined)),
+    }));
 };
 
 function MetricDetailView({ pane, envID, onClose }) {
@@ -139,19 +165,12 @@ function MetricDetailView({ pane, envID, onClose }) {
   const [stepsDesc, setStepsDesc] = useState(false);
   const stepRows = visibleIdx.length
     ? (() => {
-        const xs = allTraces[visibleIdx[0]].x || [];
-        const maxLen = Math.max(
-          ...visibleIdx.map((i) => (allTraces[i].y || []).length)
-        );
-        const out = [];
-        for (let r = 0; r < maxLen; r++) {
-          out.push({
-            key: r,
-            x: xs[r] !== undefined ? xs[r] : r,
-            cells: visibleIdx.map((i) => num((allTraces[i].y || [])[r])),
-          });
-        }
-        return stepsDesc ? out.reverse() : out;
+        const rows = buildMatchedRows(allTraces, visibleIdx).map((row, r) => ({
+          key: r,
+          x: row.x,
+          cells: row.values.map(num),
+        }));
+        return stepsDesc ? rows.reverse() : rows;
       })()
     : [];
 
@@ -277,19 +296,13 @@ function MetricDetailView({ pane, envID, onClose }) {
   const downloadCsv = () => {
     if (!visibleIdx.length) return;
     const cols = visibleIdx.map((i) => names[i]);
-    const xs = allTraces[visibleIdx[0]].x || [];
-    const maxLen = Math.max(
-      ...visibleIdx.map((i) => (allTraces[i].y || []).length)
-    );
     const lines = ['step,' + cols.map(csvCell).join(',')];
-    for (let r = 0; r < maxLen; r++) {
-      const x = xs[r] !== undefined ? xs[r] : r;
-      const cells = visibleIdx.map((i) => {
-        const y = (allTraces[i].y || [])[r];
-        return y === undefined || y === null ? '' : y;
-      });
-      lines.push([x, ...cells].map(csvCell).join(','));
-    }
+    buildMatchedRows(allTraces, visibleIdx).forEach((row) => {
+      const cells = row.values.map((y) =>
+        y === undefined || y === null ? '' : y
+      );
+      lines.push([row.x, ...cells].map(csvCell).join(','));
+    });
     const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');

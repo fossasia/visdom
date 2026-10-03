@@ -227,7 +227,7 @@ const App = () => {
   const openDetail = (paneID) => {
     if (latestRef.current.expandedPaneID == null) {
       try {
-        window.history.pushState({ visdomDetail: true }, '');
+        window.history.pushState({ visdomDetail: true, paneID }, '');
       } catch (e) {
         // history unavailable
       }
@@ -249,9 +249,11 @@ const App = () => {
 
   useEffect(() => {
     const onPop = () => {
-      if (!window.history.state || !window.history.state.visdomDetail) {
-        setExpandedPaneID(null);
-      }
+      const state = window.history.state;
+      // Forward lands back on the pushed detail entry: restore the pane it
+      // was for, rather than leaving the grid showing while history still
+      // thinks a detail view is open.
+      setExpandedPaneID(state && state.visdomDetail ? state.paneID : null);
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
@@ -549,6 +551,9 @@ const App = () => {
       setFocusedPaneID((currentFocusedPaneID) =>
         currentFocusedPaneID === paneID ? null : currentFocusedPaneID
       );
+      if (latestRef.current.expandedPaneID === paneID) {
+        closeDetail();
+      }
       relayout();
     }
   };
@@ -566,6 +571,9 @@ const App = () => {
       panes: {},
     }));
     setFocusedPaneID(null);
+    if (expandedPaneID != null) {
+      closeDetail();
+    }
   };
 
   const onEnvSelect = (selectedNodes) => {
@@ -588,6 +596,9 @@ const App = () => {
       layout: isSameEnv ? storeData.layout : [],
     }));
     setFocusedPaneID(isSameEnv ? focusedPaneID : null);
+    if (!isSameEnv && expandedPaneID != null) {
+      closeDetail();
+    }
     localStorage.setItem('envIDs', JSON.stringify(selectedNodes));
     sendEnvQuery(selectedNodes, showAllEnvWindows);
   };
@@ -641,6 +652,9 @@ const App = () => {
         layout: [],
       }));
       setFocusedPaneID(null);
+      if (expandedPaneID != null) {
+        closeDetail();
+      }
     }
 
     if (selectionChanged) {
