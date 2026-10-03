@@ -26,6 +26,8 @@ import uuid
 
 import pytest
 
+from visdom.utils.server_utils import unreadable_parts
+
 from testutils.http import VisdomHTTPTestCase
 from testutils.payloads import env_payload
 
@@ -172,6 +174,82 @@ class TestUploadEnvRejections(UploadTestCase):
         before = set(self.get_envs())
         self.upload_json("run.json", "{not json")
         self.assertEqual(set(self.get_envs()), before)
+
+    def test_jsons_that_is_not_an_object_is_rejected(self):
+        resp, body = self.upload_json("run.json", {"jsons": [], "reload": {}})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("Visdom JSON", body["error"])
+
+
+class TestUploadEnvUnreadableParts(UploadTestCase):
+    """An upload keeps what it was given; the parts that cannot be read are named."""
+
+    def mixed_env(self):
+        return env_payload(
+            jsons={
+                "w1": {"id": "w1", "type": "text", "content": "kept"},
+                "w2": "not a pane",
+            }
+        )
+
+    def bad_reload_env(self):
+        payload = self.exported_env("kept")
+        payload["reload"] = "wide"
+        return payload
+
+    def test_an_upload_with_a_bad_pane_is_still_accepted(self):
+        resp, body = self.upload_json("run.json", self.mixed_env())
+        self.assertEqual(resp.code, 200)
+        self.assertTrue(body["success"])
+
+    def test_the_bad_pane_is_reported(self):
+        _, body = self.upload_json("run.json", self.mixed_env())
+        self.assertEqual(body["unreadable_panes"], ["w2"])
+        self.assertIn("1 pane(s) could not be read", body["message"])
+
+    def test_the_readable_panes_are_served(self):
+        _, body = self.upload_json("run.json", self.mixed_env())
+        self.assertEqual(self.get_win_data("w1", eid=body["eid"])["content"], "kept")
+
+    def test_the_bad_pane_is_held_back_rather_than_served(self):
+        _, body = self.upload_json("run.json", self.mixed_env())
+        env = self._app.state[body["eid"]]
+        self.assertNotIn("w2", env["jsons"])
+        self.assertEqual(unreadable_parts(env)["jsons"], {"w2": "not a pane"})
+
+    def test_the_bad_pane_survives_to_disk(self):
+        _, body = self.upload_json("run.json", self.mixed_env())
+        saved = os.path.join(self.env_path, "{0}.json".format(body["eid"]))
+        with open(saved) as fn:
+            self.assertEqual(json.load(fn)["jsons"]["w2"], "not a pane")
+
+    def test_an_upload_with_an_unreadable_reload_is_still_accepted(self):
+        resp, body = self.upload_json("run.json", self.bad_reload_env())
+        self.assertEqual(resp.code, 200)
+        self.assertTrue(body["success"])
+
+    def test_the_unreadable_reload_is_reported(self):
+        _, body = self.upload_json("run.json", self.bad_reload_env())
+        self.assertTrue(body["unreadable_reload"])
+        self.assertIn("the saved layout could not be read", body["message"])
+
+    def test_the_unreadable_reload_is_held_back(self):
+        _, body = self.upload_json("run.json", self.bad_reload_env())
+        env = self._app.state[body["eid"]]
+        self.assertEqual(env["reload"], {})
+        self.assertEqual(unreadable_parts(env)["reload"], "wide")
+
+    def test_the_unreadable_reload_survives_to_disk(self):
+        _, body = self.upload_json("run.json", self.bad_reload_env())
+        saved = os.path.join(self.env_path, "{0}.json".format(body["eid"]))
+        with open(saved) as fn:
+            self.assertEqual(json.load(fn)["reload"], "wide")
+
+    def test_a_clean_upload_reports_nothing_unreadable(self):
+        _, body = self.upload_json("run.json", self.exported_env())
+        self.assertEqual(body["unreadable_panes"], [])
+        self.assertFalse(body["unreadable_reload"])
+        self.assertNotIn("could not be read", body["message"])
 
 
 class TestForkEnvTransfer(VisdomHTTPTestCase):

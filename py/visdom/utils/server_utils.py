@@ -189,15 +189,9 @@ class LazyEnvData(Mapping):
         if self._raw_dict is not None:
             return
 
-        try:
-            raw = dict(env_data)
-            raw["jsons"] = env_data["jsons"]
-            raw["reload"] = env_data["reload"]
-        except (KeyError, TypeError) as e:
-            raise ValueError(
-                "Failed loading environment json: {} - {}".format(self._eid, repr(e))
-            )
-        self._raw_dict = raw
+        if not env_is_readable(env_data):
+            raise ValueError("Failed loading environment json: {}".format(self._eid))
+        self._raw_dict = dict(env_data)
 
     def __getitem__(self, key):
         self.lazy_load_data()
@@ -498,6 +492,54 @@ def escape_eid(eid):
     )
 
 
+def env_is_readable(env):
+    """Whether ``env`` is shaped enough to be served at all.
+
+    An environment is ``{"jsons": {win_id: pane}, "reload": {...}}``. Only the
+    outer shape is required here: a ``jsons`` that is not a mapping leaves
+    nothing to read, and a missing ``reload`` is the mark of a file that was
+    never a Visdom environment. What is inside is the reader's problem, so a
+    pane or a ``reload`` that cannot be used is handled where it is read rather
+    than refused here.
+
+    Takes any ``Mapping``, so a ``LazyEnvData`` can be checked without copying it.
+    """
+    return (
+        isinstance(env, Mapping)
+        and isinstance(env.get("jsons"), Mapping)
+        and "reload" in env
+    )
+
+
+def reload_is_readable(env):
+    """Whether ``env``'s saved layout can be handed to a client.
+
+    The client walks it key by key, so anything that is not a mapping would
+    reach local storage as one entry per character.
+    """
+    return isinstance(env, Mapping) and isinstance(env.get("reload"), Mapping)
+
+
+def readable_panes(env):
+    """Split ``env``'s panes into the ones that can be read and the rest.
+
+    Returns ``(panes, unreadable)``: the panes that are mappings, and the ids of
+    the ones that are not. ``env`` is not touched, so what is on disk keeps
+    whatever it holds and only what is sent to a client is filtered.
+    """
+    jsons = env.get("jsons") if isinstance(env, Mapping) else None
+    if not isinstance(jsons, Mapping):
+        return {}, []
+    panes = {}
+    unreadable = []
+    for wid, pane in jsons.items():
+        if isinstance(pane, Mapping):
+            panes[wid] = pane
+        else:
+            unreadable.append(wid)
+    return panes, unreadable
+
+
 def extract_eid(args):
     """Extract eid from args. If eid does not exist in args,
     it returns 'main'."""
@@ -672,6 +714,14 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
             if env:
                 state[eid] = env
                 envs[eid] = env
+
+    for name, env in list(envs.items()):
+        if not env_is_readable(env):
+            raise ValueError(f"environment {name!r} is not a readable environment")
+        warn_unreadable_parts(socket, name, env)
+        panes, unreadable = readable_panes(env)
+        if unreadable:
+            envs[name] = dict(env, jsons=panes)
 
     valid_eids = [eid for eid in eids if eid in envs]
     if not valid_eids:
@@ -902,17 +952,22 @@ def load_env(state, eid, socket, store, undo_count=None, warmed=False):
             env = loaded
             state[eid] = env
 
+    if env != {} and not env_is_readable(env):
+        raise ValueError(f"environment {eid!r} is not a readable environment")
+
     if "reload" in env:
         socket.write_message(
             json.dumps({"command": "reload", "data": env["reload"]}, cls=NanSafeEncoder)
         )
 
-    jsons = list(env.get("jsons", {}).values())
-    windows = sorted(jsons, key=lambda k: ("i" not in k, k.get("i", None)))
+    panes, _ = readable_panes(env)
+    windows = sorted(panes.values(), key=lambda k: ("i" not in k, k.get("i", None)))
     for v in windows:
         msg = dict(v)
         msg["eid"] = eid
         socket.write_message(json.dumps(msg, cls=NanSafeEncoder))
+
+    warn_unreadable_parts(socket, eid, env)
 
     socket.write_message(json.dumps({"command": "layout"}, cls=NanSafeEncoder))
     socket.write_message(
@@ -1007,6 +1062,48 @@ def broadcast_undo_state(handler, eid, store, count=None):
         cls=NanSafeEncoder,
     )
     broadcast(handler, msg, eid)
+
+
+UNREADABLE_PARTS = "unreadable_parts"
+
+
+def unreadable_parts(env):
+    """What of ``env`` the store is holding back, or ``{}``.
+
+    The store files away anything it cannot hand to a client, and writes it
+    back out untouched, so this is how the rest of the server learns that an
+    env on disk holds more than it is serving.
+    """
+    held = env.get(UNREADABLE_PARTS) if isinstance(env, Mapping) else None
+    return held if isinstance(held, Mapping) else {}
+
+
+def warn_unreadable_parts(socket, eid, env):
+    """Tell one client that ``eid`` is served without part of what is on disk."""
+    held = unreadable_parts(env)
+    if not held:
+        return
+    missing = []
+    panes = held.get("jsons") or {}
+    if panes:
+        missing.append(
+            "{} pane(s) ({})".format(len(panes), ", ".join(str(w) for w in panes))
+        )
+    if "reload" in held:
+        missing.append("the saved layout")
+    message = (
+        "Environment '{}' is shown without {}: that part of its file could not"
+        " be read.".format(eid, " and ".join(missing))
+    )
+    socket.write_message(
+        json.dumps(
+            {
+                "command": "notification",
+                "data": {"message": message, "type": "warning"},
+            },
+            cls=NanSafeEncoder,
+        )
+    )
 
 
 def notify(handler, message, type="info", duration=None, eid=None, target_subs=None):
