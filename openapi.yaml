@@ -20,7 +20,7 @@ info:
     The server also supports WebSocket connections at `/socket` (read-only
     subscriber) and `/vis_socket` (write-capable visualization source), as
     well as HTTP polling fallbacks at `/socket_wrap` and `/vis_socket_wrap`.
-  version: 0.2.4
+  version: 0.3.0
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -106,7 +106,9 @@ paths:
         rows or columns), appending text, managing image history, updating
         embeddings selections, adding/removing traces, and modifying plot
         options or layout properties. If `append` is true and the window does
-        not exist, a new window is created.
+        not exist, a new window is created -- laid out with `layout_create`
+        when the request carries it, since an append itself sends an empty
+        `layout` by design.
       requestBody:
         required: true
         content:
@@ -1811,6 +1813,18 @@ components:
           $ref: "#/components/schemas/WindowOptions"
         layout:
           $ref: "#/components/schemas/PlotlyLayout"
+        layout_create:
+          allOf:
+            - $ref: "#/components/schemas/PlotlyLayout"
+          description: >
+            Layout to use only if this request has to create the window --
+            that is, when `append` is true and `win` does not exist yet. An
+            append deliberately sends an empty `layout` so that it never
+            restyles a window that is already there, which leaves a
+            create-on-append with no layout at all; sending `layout_create`
+            lets a client append and create in one call instead of asking
+            `/win_exists` first. Ignored when the window already exists, and
+            ignored when a non-empty `layout` is also present.
 
     GetWindowDataRequest:
       type: object
