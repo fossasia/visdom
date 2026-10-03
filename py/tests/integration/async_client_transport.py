@@ -18,6 +18,8 @@ one loop serving the requests that the worker threads are blocked on.
 
 import asyncio
 import json
+import logging
+import time
 
 import pytest
 from tornado.testing import gen_test
@@ -29,15 +31,52 @@ from testutils.http import VisdomHTTPTestCase
 pytestmark = pytest.mark.integration
 
 
+async def wait_for(predicate, timeout=5.0):
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        assert time.monotonic() < deadline, "timed out waiting for the backchannel"
+        await asyncio.sleep(0.01)
+
+
 class AsyncClientTestCase(VisdomHTTPTestCase):
-    """Adds a client factory bound to this test's server."""
+    """Adds a client factory bound to this test's server.
+
+    Every client it hands out is shut down in ``tearDown`` -- the whole client,
+    so the backchannel task is awaited and the pool released along with the
+    transport, whether or not the test got as far as its own ``shutdown``. It
+    has to happen before the base ``tearDown``, which closes the loop that
+    ``shutdown`` runs on; an ``addCleanup`` would run after that.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.clients = []
+
+    def tearDown(self):
+        """Shut every client down, then hand back to the server's teardown.
+
+        Each client is released on its own, and the base ``tearDown`` runs
+        whatever happened: one client failing to shut down must not leave the
+        rest of them, the IOLoop and the temporary ``env_path`` behind for the
+        remainder of the run. A failure here is logged rather than raised, so
+        the test's own failure stays the one reported.
+        """
+        try:
+            for client in self.clients:
+                try:
+                    self.io_loop.run_sync(client.shutdown)
+                except Exception:
+                    logging.exception("Failed to shut an async client down")
+        finally:
+            self.clients = []
+            super().tearDown()
 
     async def connect(self, **kwargs):
         kwargs.setdefault("raise_exceptions", True)
         client = await AsyncVisdom.create(
             server="http://localhost", port=self.get_http_port(), **kwargs
         )
-        self.addCleanup(lambda: client.client.transport.close())
+        self.clients.append(client)
         return client
 
 
@@ -145,6 +184,56 @@ class TestAsyncVisdomAgainstServer(AsyncClientTestCase):
         await client.save(["saved"])
         with open("%s/saved.json" % self.env_path) as handle:
             assert "w1" in json.load(handle)["jsons"]
+
+
+class TestAsyncVisdomBackchannel(AsyncClientTestCase):
+    """The real handshake, over a real socket, against the real routes."""
+
+    async def push(self, message):
+        """What ``forward_to_vis`` does when the browser reports an event."""
+        await wait_for(lambda: self._app.sources)
+        for source in list(self._app.sources.values()):
+            source.write_message(json.dumps(message))
+
+    @gen_test
+    async def test_the_websocket_handshake_completes(self):
+        client = await self.connect(use_incoming_socket=True)
+
+        assert client.socket_alive is True
+        assert len(self._app.sources) == 1
+
+    @gen_test
+    async def test_an_event_reaches_a_handler(self):
+        client = await self.connect(use_incoming_socket=True)
+        seen = []
+        client.register_event_handler(seen.append, "w1")
+
+        await client.text("hello", win="w1")
+        await self.push({"target": "w1", "eid": "main", "event_type": "Click"})
+        await wait_for(lambda: seen)
+
+        assert seen[0]["event_type"] == "Click"
+
+    @gen_test
+    async def test_polling_delivers_the_same_events(self):
+        """The fallback for deployments that cannot hold a websocket open."""
+        client = await self.connect(use_polling=True)
+        seen = []
+        client.register_event_handler(seen.append, "w1")
+
+        await self.push({"target": "w1", "eid": "main", "event_type": "Click"})
+        await wait_for(lambda: seen)
+
+        assert client.socket_alive is True
+        assert seen[0]["event_type"] == "Click"
+
+    @gen_test
+    async def test_shutdown_drops_the_connection_server_side(self):
+        client = await self.connect(use_incoming_socket=True)
+        await client.shutdown()
+        await wait_for(lambda: not self._app.sources)
+
+        assert self._app.sources == {}
 
 
 class TestAsyncVisdomAgainstReadonlyServer(AsyncClientTestCase):
