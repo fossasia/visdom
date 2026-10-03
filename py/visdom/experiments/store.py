@@ -107,11 +107,13 @@ def _salvage_entries(cls, entries):
     """Rebuild the members of ``entries`` that still parse, dropping the rest.
 
     ``Param``/``Metric``/``Tag`` each index ``data["key"]``, so an entry that
-    is not a mapping, or is one without a key, is all that has to go. One
-    unusable entry must not cost a run the other hundred beside it, so the
-    list is filtered rather than refused. A ``params`` that is not a list at
-    all — an object, a scalar — yields nothing, since there are no entries
-    in it to keep.
+    is not a mapping, or is one without a key, has to go. So does one whose
+    key is unhashable: ``from_dict`` accepts a list key, but the writers then
+    build sets and dicts by key and raise ``TypeError`` before saving the
+    repair. One unusable entry must not cost a run the other hundred beside
+    it, so the list is filtered rather than refused. A ``params`` that is not
+    a list at all — an object, a scalar — yields nothing, since there are no
+    entries in it to keep.
     """
     if not isinstance(entries, (list, tuple)):
         return []
@@ -120,9 +122,11 @@ def _salvage_entries(cls, entries):
         if not isinstance(entry, Mapping):
             continue
         try:
-            salvaged.append(cls.from_dict(entry))
+            rebuilt = cls.from_dict(entry)
+            hash(rebuilt.key)
         except (KeyError, TypeError, ValueError):
             continue
+        salvaged.append(rebuilt)
     return salvaged
 
 

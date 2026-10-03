@@ -545,6 +545,25 @@ class TestWritesRepairRatherThanReset(MalformedBlobCase):
         experiment = self.store.get_experiment("bad")
         self.assertEqual(sorted(p.key for p in experiment.params), ["batch", "lr"])
 
+    def test_an_entry_with_an_unhashable_key_is_dropped(self):
+        """A list key parses, but the writers set and map by key, so it goes.
+
+        Keeping it made an appending tag update raise ``TypeError`` before it
+        saved anything, which left the env as unreadable as it started.
+        """
+        self.corrupt(
+            status="cancelled",
+            tags=[{"key": ["dataset"], "value": "x"}] + list(self.rich["tags"]),
+            params=[{"key": {"lr": 1}, "value": 0.1}] + list(self.rich["params"]),
+        )
+        experiment = self.store.update_tags("bad", {"owner": "alice"}, append=True)
+
+        self.assertEqual(
+            tags_to_mapping(experiment.tags), {"dataset": "mnist", "owner": "alice"}
+        )
+        self.assertEqual(sorted(p.key for p in experiment.params), ["batch", "lr"])
+        self.assertIsNotNone(self.store.get_experiment("bad"))
+
     def test_a_salvaged_terminal_run_still_refuses_new_logs(self):
         """Damage elsewhere in the blob must not un-finish the run.
 
