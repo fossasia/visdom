@@ -250,23 +250,39 @@ class TestLogHistory(unittest.TestCase):
         self.assertEqual(plot["X"][0], 0)
         self.assertEqual(plot["X"][-1], est.n_iter_)
 
-    def test_validation_curve_starts_at_zero_when_it_has_a_baseline_entry(self):
-        # validation_scores_ runs through the same x_start helper, so an
-        # (n_iter_ + 1) curve has to start at 0 there too.
+    def test_hist_gradient_boosting_validation_curve_starts_at_zero(self):
+        # The boosting validation history carries the same pre-training
+        # entry as train_score_, so it belongs on a zero-based axis too.
         logger = _logger()
-        est = MLPClassifier(
-            hidden_layer_sizes=(2,),
-            max_iter=20,
-            early_stopping=True,
-            n_iter_no_change=2,
-            random_state=0,
-        ).fit(np.random.RandomState(0).rand(40, 2), np.array([0, 1] * 20))
-        est.n_iter_ = len(est.validation_scores_) - 1
+        est = self._hist_gb()
         logger._log_history(est)
-        plot = self._plot(logger, "validation_scores_")
+        plot = self._plot(logger, "validation_score_")
         self.assertIsNotNone(plot)
+        self.assertEqual(len(est.validation_score_), est.n_iter_ + 1)
         self.assertEqual(plot["X"][0], 0)
         self.assertEqual(plot["X"][-1], est.n_iter_)
+
+    def test_a_warm_started_mlp_keeps_a_one_based_axis(self):
+        # warm_start accumulates epochs across fits while n_iter_ reports
+        # only the latest one, so len(curve) can equal n_iter_ + 1 by
+        # coincidence. That must not shift MLP's 1-based epochs to 0.
+        logger = _logger()
+        rng = np.random.RandomState(0)
+        X, y = rng.rand(60, 3), (rng.rand(60) > 0.5).astype(int)
+        est = MLPClassifier(
+            hidden_layer_sizes=(4,),
+            max_iter=10,
+            early_stopping=True,
+            n_iter_no_change=10,
+            warm_start=True,
+            random_state=0,
+        ).fit(X, y)
+        est.fit(X, y)
+        est.n_iter_ = len(est.validation_scores_) - 1
+        logger._log_history(est)
+        for attr in ("loss_curve_", "validation_scores_"):
+            plot = self._plot(logger, attr)
+            self.assertEqual(plot["X"][0], 1, attr)
 
     def test_validation_curve_starts_at_one_without_a_baseline_entry(self):
         # MLP* normally report one score per epoch and no pre-training entry,
@@ -284,6 +300,32 @@ class TestLogHistory(unittest.TestCase):
         plot = self._plot(logger, "validation_scores_")
         self.assertEqual(plot["X"][0], 1)
         self.assertEqual(plot["X"][-1], len(est.validation_scores_))
+
+    def test_axis_labels_name_the_right_step(self):
+        # loss_curve_ counts epochs; the score histories count boosting
+        # iterations. The label follows the curve, not the estimator.
+        logger = _logger()
+        logger._log_history(self._hist_gb())
+        for attr in ("train_score_", "validation_score_"):
+            self.assertEqual(
+                self._plot(logger, attr)["opts"]["xlabel"], "iteration", attr
+            )
+
+        mlp_logger = _logger()
+        rng = np.random.RandomState(0)
+        mlp_logger._log_history(
+            MLPClassifier(
+                hidden_layer_sizes=(2,),
+                max_iter=20,
+                early_stopping=True,
+                n_iter_no_change=2,
+                random_state=0,
+            ).fit(rng.rand(40, 2), np.array([0, 1] * 20))
+        )
+        for attr in ("loss_curve_", "validation_scores_"):
+            self.assertEqual(
+                self._plot(mlp_logger, attr)["opts"]["xlabel"], "epoch", attr
+            )
 
     def test_gradient_boosting_train_score_still_starts_at_one(self):
         # The older family records only the iterations themselves, so its

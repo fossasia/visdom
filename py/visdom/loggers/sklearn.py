@@ -273,20 +273,31 @@ class VisdomSklearnLogger:
         )
 
     @staticmethod
-    def _history_x_start(est, curve):
-        """Where the x-axis of a per-iteration curve begins.
+    def _counts_a_baseline(est):
+        """Whether this estimator's history starts before the first iteration.
 
-        The HistGradientBoosting estimators record one score per iteration
-        plus an entry for the ensemble before the first one, so their curve
-        is ``n_iter_ + 1`` long and starts at 0. The older GradientBoosting
-        family records only the iterations themselves and starts at 1.
+        The HistGradientBoosting estimators prepend the score of the ensemble
+        before any boosting happened, so their histories are ``n_iter_ + 1``
+        long and belong on a zero-based axis. Everything else reports one
+        entry per iteration or epoch and starts at 1.
+
+        Decided from the attribute that identifies that family rather than
+        from the length of the curve: a warm-started MLP accumulates epochs
+        across fits while ``n_iter_`` reports only the latest one, so a
+        length comparison can match by coincidence and shift a 1-based curve.
         """
-        n_iter = getattr(est, "n_iter_", None)
-        if n_iter is not None and len(curve) == n_iter + 1:
-            return 0
-        return 1
+        return hasattr(est, "validation_score_") or hasattr(est, "_baseline_prediction")
+
+    @classmethod
+    def _history_x_start(cls, est):
+        return 0 if cls._counts_a_baseline(est) else 1
 
     def _log_history(self, est):
+        # loss_curve_ is reported per epoch over the training set; the
+        # score histories are reported per boosting iteration.
+        step = "epoch" if hasattr(est, "loss_curve_") else "iteration"
+        x_start = self._history_x_start(est)
+
         loss_curve = getattr(est, "loss_curve_", None)
         if loss_curve is not None and len(loss_curve) > 0:
             self._plot_history(est, loss_curve, "loss_curve_", "epoch", "loss")
@@ -301,9 +312,9 @@ class VisdomSklearnLogger:
                     est,
                     val_scores,
                     attr,
-                    "epoch",
+                    step,
                     "val_score",
-                    x_start=self._history_x_start(est, val_scores),
+                    x_start=x_start,
                 )
                 break
 
@@ -315,7 +326,7 @@ class VisdomSklearnLogger:
                 "train_score_",
                 "iteration",
                 "train_score",
-                x_start=self._history_x_start(est, train_score),
+                x_start=x_start,
             )
 
     def _log_regression_diagnostics(self, est, X, y, summary_rows):
