@@ -29,6 +29,7 @@ var ImagePane = function (props) {
   const { sendPaneMessage } = useContext(ApiContext);
   const { envID, id, contentID, title, type, selected, width, height } = props;
   var { isFocused, content } = props;
+  const isHistory = type === 'image_history';
 
   // state variables
   // --------------
@@ -38,7 +39,9 @@ var ImagePane = function (props) {
   const mouseLocationRef = useRef({ x: null, y: null });
   const [view, setView] = useState({ scale: 1, tx: 0, ty: 0 });
   const [imgDim, setImgDim] = useState({ width: null, height: 0 });
-  const [actualSelected, setActualSelected] = useState(props.selected);
+  const [actualSelected, setActualSelected] = useState(
+    isHistory && (selected === undefined || selected === null) ? 0 : selected
+  );
   const [mouseLocation, setMouseLocation] = useState({
     x: 0,
     y: 0,
@@ -241,8 +244,10 @@ var ImagePane = function (props) {
 
   // reset image selection upon property change
   useEffect(() => {
-    setActualSelected(selected);
-  }, [selected]);
+    if (isHistory && selected !== undefined) {
+      setActualSelected(selected);
+    }
+  }, [isHistory, selected]);
 
   useEffect(() => {
     return () => {
@@ -373,7 +378,20 @@ var ImagePane = function (props) {
   const divstyle = { left: view['tx'], top: view['ty'], position: 'absolute' };
 
   // add image slider as widget
-  if (type === 'image_history') {
+  let historyLen = 0;
+  let displaySelected = actualSelected;
+  if (isHistory) {
+    const frames = Array.isArray(content) ? content : [];
+    historyLen = frames.length;
+    if (historyLen === 0) {
+      displaySelected = 0;
+      content = {};
+    } else {
+      const raw = Number(actualSelected);
+      const idx = Number.isFinite(raw) ? raw : 0;
+      displaySelected = Math.min(Math.max(0, idx), historyLen - 1);
+      content = frames[displaySelected] || {};
+    }
     if (props.show_slider) {
       widgets.push(
         <div className="widget" key="image_slider">
@@ -382,18 +400,17 @@ var ImagePane = function (props) {
             <input
               type="range"
               min="0"
-              max={content.length - 1}
-              value={actualSelected}
+              max={Math.max(0, historyLen - 1)}
+              value={displaySelected}
               onChange={updateSlider}
               onPointerUp={finalizeSlider}
               onKeyUp={finalizeSlider}
             />
-            <span>&nbsp;&nbsp;{actualSelected}&nbsp;&nbsp;</span>
+            <span>&nbsp;&nbsp;{displaySelected}&nbsp;&nbsp;</span>
           </div>
         </div>
       );
     }
-    content = content[actualSelected];
   }
 
   useEffect(() => {
@@ -402,10 +419,10 @@ var ImagePane = function (props) {
     return () => {
       cancelled = true;
     };
-  }, [content.caption]);
+  }, [content && content.caption]);
 
   // add caption as widget
-  if (content.caption) {
+  if (content && content.caption) {
     widgets.splice(
       0,
       0,
@@ -432,8 +449,8 @@ var ImagePane = function (props) {
         <div style={imageContainerStyle}>
           <img
             className="content-image cssTransforms"
-            alt={content.caption}
-            src={content.src}
+            alt={content && content.caption}
+            src={content && content.src}
             ref={imgRef}
             onLoad={() => {
               setImgDim({
@@ -471,6 +488,7 @@ ImagePane = React.memo(ImagePane, (props, nextProps) => {
   )
     return false;
   else if (props.isFocused !== nextProps.isFocused) return false;
+  else if (props.selected !== nextProps.selected) return false;
   return true;
 });
 
