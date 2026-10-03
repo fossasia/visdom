@@ -189,7 +189,7 @@ class LazyEnvData(Mapping):
         if self._raw_dict is not None:
             return
 
-        if not env_is_well_formed(env_data):
+        if not env_is_readable(env_data):
             raise ValueError("Failed loading environment json: {}".format(self._eid))
         self._raw_dict = dict(env_data)
 
@@ -492,48 +492,52 @@ def escape_eid(eid):
     )
 
 
-def env_is_well_formed(env):
-    """Whether ``env`` is shaped like ``{"jsons": {win_id: pane}, "reload": {}}``.
+def env_is_readable(env):
+    """Whether ``env`` is shaped enough to be served at all.
 
-    ``load_env`` reads ``jsons.values()`` and then ``pane.get()``,
-    ``compare_envs`` reads ``jsons.keys()``, so both keys being present is not
-    enough: the values have to be mappings too.
+    An environment is ``{"jsons": {win_id: pane}, "reload": {...}}``. Only the
+    outer shape is required here: a ``jsons`` that is not a mapping leaves
+    nothing to read, and a missing ``reload`` is the mark of a file that was
+    never a Visdom environment. What is inside is the reader's problem, so a
+    pane or a ``reload`` that cannot be used is handled where it is read rather
+    than refused here.
 
     Takes any ``Mapping``, so a ``LazyEnvData`` can be checked without copying it.
     """
-    kept, skipped, reload_reset = salvage_env(env)
-    return kept is not None and not skipped and not reload_reset
+    return (
+        isinstance(env, Mapping)
+        and isinstance(env.get("jsons"), Mapping)
+        and "reload" in env
+    )
 
 
-def salvage_env(env):
-    """Return what of ``env`` can be read, and what had to be given up.
+def reload_is_readable(env):
+    """Whether ``env``'s saved layout can be handed to a client.
 
-    Returns ``(env, skipped, reload_reset)``. ``skipped`` holds the ids of the
-    panes that are not mappings and were left out. ``reload_reset`` says whether
-    ``reload`` was replaced with an empty one: it carries only the saved layout
-    of each pane, so an unusable one costs pane positions rather than panes.
-    ``env`` itself is returned when neither applied.
-
-    Nothing can be read out of an env that is not a mapping, whose ``jsons`` is
-    not one, or that has no ``reload`` at all, and ``None`` comes back for those.
+    The client walks it key by key, so anything that is not a mapping would
+    reach local storage as one entry per character.
     """
-    if not isinstance(env, Mapping) or "reload" not in env:
-        return None, [], False
-    jsons = env.get("jsons")
+    return isinstance(env, Mapping) and isinstance(env.get("reload"), Mapping)
+
+
+def readable_panes(env):
+    """Split ``env``'s panes into the ones that can be read and the rest.
+
+    Returns ``(panes, unreadable)``: the panes that are mappings, and the ids of
+    the ones that are not. ``env`` is not touched, so what is on disk keeps
+    whatever it holds and only what is sent to a client is filtered.
+    """
+    jsons = env.get("jsons") if isinstance(env, Mapping) else None
     if not isinstance(jsons, Mapping):
-        return None, [], False
-    skipped = [wid for wid, pane in jsons.items() if not isinstance(pane, Mapping)]
-    reload_reset = not isinstance(env["reload"], Mapping)
-    if not skipped and not reload_reset:
-        return env, [], False
-    kept = dict(env)
-    if skipped:
-        kept["jsons"] = {
-            wid: pane for wid, pane in jsons.items() if isinstance(pane, Mapping)
-        }
-    if reload_reset:
-        kept["reload"] = {}
-    return kept, skipped, reload_reset
+        return {}, []
+    panes = {}
+    unreadable = []
+    for wid, pane in jsons.items():
+        if isinstance(pane, Mapping):
+            panes[wid] = pane
+        else:
+            unreadable.append(wid)
+    return panes, unreadable
 
 
 def extract_eid(args):
@@ -712,8 +716,9 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
                 envs[eid] = env
 
     for name, env in envs.items():
-        if not env_is_well_formed(env):
+        if not env_is_readable(env):
             raise ValueError(f"environment {name!r} is not a readable environment")
+        warn_unreadable_parts(socket, name, env)
 
     valid_eids = [eid for eid in eids if eid in envs]
     if not valid_eids:
@@ -944,7 +949,7 @@ def load_env(state, eid, socket, store, undo_count=None, warmed=False):
             env = loaded
             state[eid] = env
 
-    if env != {} and not env_is_well_formed(env):
+    if env != {} and not env_is_readable(env):
         raise ValueError(f"environment {eid!r} is not a readable environment")
 
     if "reload" in env:
@@ -958,6 +963,8 @@ def load_env(state, eid, socket, store, undo_count=None, warmed=False):
         msg = dict(v)
         msg["eid"] = eid
         socket.write_message(json.dumps(msg, cls=NanSafeEncoder))
+
+    warn_unreadable_parts(socket, eid, env)
 
     socket.write_message(json.dumps({"command": "layout"}, cls=NanSafeEncoder))
     socket.write_message(
@@ -1052,6 +1059,48 @@ def broadcast_undo_state(handler, eid, store, count=None):
         cls=NanSafeEncoder,
     )
     broadcast(handler, msg, eid)
+
+
+UNREADABLE_PARTS = "unreadable_parts"
+
+
+def unreadable_parts(env):
+    """What of ``env`` the store is holding back, or ``{}``.
+
+    The store files away anything it cannot hand to a client, and writes it
+    back out untouched, so this is how the rest of the server learns that an
+    env on disk holds more than it is serving.
+    """
+    held = env.get(UNREADABLE_PARTS) if isinstance(env, Mapping) else None
+    return held if isinstance(held, Mapping) else {}
+
+
+def warn_unreadable_parts(socket, eid, env):
+    """Tell one client that ``eid`` is served without part of what is on disk."""
+    held = unreadable_parts(env)
+    if not held:
+        return
+    missing = []
+    panes = held.get("jsons") or {}
+    if panes:
+        missing.append(
+            "{} pane(s) ({})".format(len(panes), ", ".join(str(w) for w in panes))
+        )
+    if "reload" in held:
+        missing.append("the saved layout")
+    message = (
+        "Environment '{}' is shown without {}: that part of its file could not"
+        " be read.".format(eid, " and ".join(missing))
+    )
+    socket.write_message(
+        json.dumps(
+            {
+                "command": "notification",
+                "data": {"message": message, "type": "warning"},
+            },
+            cls=NanSafeEncoder,
+        )
+    )
 
 
 def notify(handler, message, type="info", duration=None, eid=None, target_subs=None):

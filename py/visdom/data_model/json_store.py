@@ -16,7 +16,14 @@ import re
 
 from visdom.data_model.base import DataStore
 from visdom.server.defaults import LAYOUT_FILE, UNDO_DIRNAME
-from visdom.utils.server_utils import escape_eid, LazyEnvData, salvage_env
+from visdom.utils.server_utils import (
+    env_is_readable,
+    escape_eid,
+    LazyEnvData,
+    readable_panes,
+    reload_is_readable,
+    UNREADABLE_PARTS,
+)
 from visdom.utils.shared_utils import ensure_dir_exists, NanSafeEncoder
 
 HASHED_ENV_RE = re.compile(r"^hash_[a-f0-9]{64}\.json$", re.IGNORECASE)
@@ -159,6 +166,8 @@ class JSONStore(DataStore):
         else:
             payload = env_data
 
+        payload = self._with_unreadable_restored(payload)
+
         primary = self._primary_path(eid)
         try:
             if primary is None:
@@ -173,6 +182,23 @@ class JSONStore(DataStore):
                 self._hash_path(eid), json.dumps(data_to_save, cls=NanSafeEncoder)
             )
         return True
+
+    def _with_unreadable_restored(self, payload):
+        """Put back whatever :meth:`load_env` held out of ``payload``.
+
+        An env that was read past an unreadable pane or layout is saved with
+        that part exactly as it was found, so a file is never rewritten without
+        something it used to hold.
+        """
+        held = payload.get(UNREADABLE_PARTS) if isinstance(payload, dict) else None
+        if not isinstance(held, dict) or not held:
+            return payload
+        restored = {k: v for k, v in payload.items() if k != UNREADABLE_PARTS}
+        if "jsons" in held:
+            restored["jsons"] = dict(held["jsons"], **restored.get("jsons", {}))
+        if "reload" in held:
+            restored["reload"] = held["reload"]
+        return restored
 
     def save_all(self, state):
         """Persist every environment in ``state``; return the ids written."""
@@ -195,24 +221,28 @@ class JSONStore(DataStore):
                 data = json.load(fn)
         except (OSError, ValueError):
             return {}
-        data, skipped, reload_reset = salvage_env(data)
-        if data is None:
+        if not env_is_readable(data):
             logging.warning(
                 "Environment file %s does not hold a readable environment; ignoring it",
                 path,
             )
             return {}
-        if skipped:
+        panes, unreadable = readable_panes(data)
+        reload_ok = reload_is_readable(data)
+        env = {"jsons": panes, "reload": data["reload"] if reload_ok else {}}
+        held = {}
+        if unreadable:
+            held["jsons"] = {wid: data["jsons"][wid] for wid in unreadable}
+        if not reload_ok:
+            held["reload"] = data["reload"]
+        if held:
+            env[UNREADABLE_PARTS] = held
             logging.warning(
-                "Environment file %s has unreadable panes %s; skipping them",
+                "Environment file %s holds parts that cannot be read (%s);"
+                " serving the rest and writing them back unchanged",
                 path,
-                skipped,
+                ", ".join(sorted(held)),
             )
-        if reload_reset:
-            logging.warning(
-                "Environment file %s has unreadable layout data; ignoring it", path
-            )
-        env = {"jsons": data.get("jsons", {}), "reload": data.get("reload", {})}
         if "experiment" in data:
             env["experiment"] = data["experiment"]
         return env
