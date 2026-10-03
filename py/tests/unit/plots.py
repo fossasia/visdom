@@ -13,6 +13,7 @@ receives, so these run on the ``capture_send`` fixture, which intercepts the
 payload, and on ``offline_client`` where only the input validation is under
 test. Neither opens a socket or reaches a server.
 """
+
 import math
 import unittest
 from unittest.mock import patch
@@ -841,7 +842,6 @@ class TestMatplotResizable(unittest.TestCase):
         self.assertEqual(opts["width"], 1.35 * math.ceil(100.5))  # 1.35 * 101
 
 
-
 # -------------------------------------------------------------------- pie ----
 
 
@@ -857,7 +857,6 @@ def test_pie_multi_value_x_renders(capture_send):
     """Normal multi-slice pie chart still works after the fix."""
     sent = capture_send(lambda v: v.pie(np.array([30.0, 70.0])))
     assert sent["payload"]["data"][0]["values"] == [30.0, 70.0]
-
 
 
 # ------------------------------------------------------------------- stem ----
