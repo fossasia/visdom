@@ -123,6 +123,11 @@ class ExistsHandler(BaseHandler):
         self.wrap_func(self, args)
 
 
+RESERVED_PANE_FIELDS = frozenset(
+    {"command", "content", "contentID", "i", "id", "old_content", "type", "version"}
+)
+
+
 class UpdateHandler(BaseHandler):
     @staticmethod
     def update_packet(
@@ -195,6 +200,11 @@ class UpdateHandler(BaseHandler):
         name = args.get("name")
         new_data = args.get("data")
         delete = args.get("delete")
+        if new_data is not None and not isinstance(new_data, list):
+            raise tornado.web.HTTPError(
+                400, reason="data must be a list of trace updates"
+            )
+
         if (
             name is not None
             and not delete
@@ -219,6 +229,15 @@ class UpdateHandler(BaseHandler):
         ):
             raise tornado.web.HTTPError(
                 400, reason="opts.legend must be a list of trace names"
+            )
+
+        reserved = sorted(RESERVED_PANE_FIELDS.intersection(opts or {}))
+        if reserved:
+            raise tornado.web.HTTPError(
+                400,
+                reason="opts cannot set the pane's own fields: {}".format(
+                    ", ".join(reserved)
+                ),
             )
 
         if not new_data and not delete and name is None:

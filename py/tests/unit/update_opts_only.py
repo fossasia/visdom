@@ -320,3 +320,43 @@ def test_a_null_opts_is_treated_as_absent():
     _opts_only(pane, layout=copy.deepcopy(LAYOUT), opts=None)
     assert pane["content"]["layout"]["title"] == {"text": "renamed"}
     assert pane["version"] == 2
+
+
+@pytest.mark.parametrize(
+    "bad", [0, 1, "x", {"y": [1]}], ids=["zero", "int", "str", "object"]
+)
+def test_data_that_is_not_a_list_is_a_client_error(bad):
+    pane = _text_pane()
+    before = copy.deepcopy(pane)
+    with pytest.raises(tornado.web.HTTPError) as excinfo:
+        _opts_only(pane, data=bad, opts=dict(OPTS))
+    assert excinfo.value.status_code == 400
+    assert pane == before
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["content", "id", "type", "command", "contentID", "i", "version", "old_content"],
+)
+def test_opts_cannot_set_the_pane_s_own_fields(field):
+    pane = _text_pane()
+    before = copy.deepcopy(pane)
+    with pytest.raises(tornado.web.HTTPError) as excinfo:
+        _opts_only(pane, opts={"title": "renamed", field: "hijacked"})
+    assert excinfo.value.status_code == 400
+    assert pane == before
+
+
+def test_the_refusal_names_the_field_it_turned_down():
+    pane = _text_pane()
+    with pytest.raises(tornado.web.HTTPError) as excinfo:
+        _opts_only(pane, opts={"content": "replacement"})
+    assert "content" in excinfo.value.reason
+
+
+def test_ordinary_opts_are_still_applied():
+    pane = _text_pane()
+    _opts_only(pane, opts={"title": "renamed", "width": 400, "caption": "c"})
+    assert pane["title"] == "renamed"
+    assert pane["width"] == 400
+    assert pane["content"] == "line0"
