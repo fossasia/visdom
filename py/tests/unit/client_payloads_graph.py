@@ -74,6 +74,18 @@ def test_sunburst_sends_values_when_given(capture_send):
     assert trace(sent)["values"] == [1, 2]
 
 
+def test_sunburst_size_one_values_renders(capture_send):
+    """Regression test for #1787: a single-value `values` array used to
+    collapse to a 0-d array via an unconditional np.squeeze() and fail the
+    ndim assert, even though labels/parents were already correctly guarded."""
+    sent = capture_send(
+        lambda v: v.sunburst(
+            labels=np.array(["a"]), parents=np.array([""]), values=np.array([7])
+        )
+    )
+    assert trace(sent)["values"] == [7]
+
+
 def test_sunburst_reads_its_styling_from_opts(capture_send):
     """The four style opts are spelled differently in the trace than in opts."""
     sent = capture_send(
