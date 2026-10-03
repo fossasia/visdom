@@ -44,8 +44,10 @@ class VisdomSklearnLogger:
     (MLPClassifier/MLPRegressor via loss_curve_,
     GradientBoostingClassifier/GradientBoostingRegressor via
     train_score_) additionally produce a line chart of that history.
-    MLPClassifier/MLPRegressor fit with early_stopping=True also produce
-    a line chart of validation_scores_ per epoch.
+    Estimators fit with early_stopping=True also produce a line chart of
+    their held-out validation history, which MLPClassifier/MLPRegressor
+    expose as validation_scores_ and the HistGradientBoosting estimators
+    as validation_score_.
     Regressors additionally get train_rmse/train_mae rows in the text
     pane (R2 alone can be misleading) and a predicted-vs-residual
     scatter plot. Like train_score, these are computed on the data
@@ -257,9 +259,9 @@ class VisdomSklearnLogger:
         )
         self.viz.text(body, win=self._win(est, "summary"), env=self.env)
 
-    def _plot_history(self, est, curve, attr, xlabel, ylabel):
+    def _plot_history(self, est, curve, attr, xlabel, ylabel, x_start=1):
         self.viz.line(
-            X=list(range(1, len(curve) + 1)),
+            X=list(range(x_start, x_start + len(curve))),
             Y=curve,
             win=self._win(est, attr),
             env=self.env,
@@ -270,20 +272,61 @@ class VisdomSklearnLogger:
             },
         )
 
+    @staticmethod
+    def _counts_a_baseline(est):
+        """Whether this estimator's history starts before the first iteration.
+
+        The HistGradientBoosting estimators prepend the score of the ensemble
+        before any boosting happened, so their histories are ``n_iter_ + 1``
+        long and belong on a zero-based axis. Everything else reports one
+        entry per iteration or epoch and starts at 1.
+
+        Decided from the attribute that identifies that family rather than
+        from the length of the curve: a warm-started MLP accumulates epochs
+        across fits while ``n_iter_`` reports only the latest one, so a
+        length comparison can match by coincidence and shift a 1-based curve.
+        """
+        return hasattr(est, "validation_score_") or hasattr(est, "_baseline_prediction")
+
+    @classmethod
+    def _history_x_start(cls, est):
+        return 0 if cls._counts_a_baseline(est) else 1
+
     def _log_history(self, est):
+        # loss_curve_ is reported per epoch over the training set; the
+        # score histories are reported per boosting iteration.
+        step = "epoch" if hasattr(est, "loss_curve_") else "iteration"
+        x_start = self._history_x_start(est)
+
         loss_curve = getattr(est, "loss_curve_", None)
         if loss_curve is not None and len(loss_curve) > 0:
             self._plot_history(est, loss_curve, "loss_curve_", "epoch", "loss")
-            val_scores = getattr(est, "validation_scores_", None)
+
+        # MLP* spell this plural, the boosting estimators singular. Kept out
+        # of the loss_curve_ branch above: the boosting estimators report a
+        # validation history without reporting a loss curve.
+        for attr in ("validation_scores_", "validation_score_"):
+            val_scores = getattr(est, attr, None)
             if val_scores is not None and len(val_scores) > 0:
                 self._plot_history(
-                    est, val_scores, "validation_scores_", "epoch", "val_score"
+                    est,
+                    val_scores,
+                    attr,
+                    step,
+                    "val_score",
+                    x_start=x_start,
                 )
+                break
 
         train_score = getattr(est, "train_score_", None)
         if train_score is not None and len(train_score) > 0:
             self._plot_history(
-                est, train_score, "train_score_", "iteration", "train_score"
+                est,
+                train_score,
+                "train_score_",
+                "iteration",
+                "train_score",
+                x_start=x_start,
             )
 
     def _log_regression_diagnostics(self, est, X, y, summary_rows):
