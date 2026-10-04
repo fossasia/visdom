@@ -47,11 +47,20 @@ class VisdomLogger:
     Only values that actually get plotted are recorded to ``run`` — a value
     withheld by ``log_every`` throttling and later flushed on exit is
     recorded once, at the point it's actually plotted, not once per raw
-    ``log()`` call. A failure while recording to ``run`` never breaks the
-    plot itself: the ``viz.line()`` call has already succeeded by the time
-    recording is attempted, and any unexpected recording failure surfaces
-    as a warning rather than an exception (the run already having finished
-    is expected/benign and stays silent).
+    ``log()`` call. "Actually get plotted" is checked, not assumed: a
+    client built with ``raise_exceptions=False`` can have ``viz.line()``
+    return ``False``/``None`` on a failed send instead of raising, and that
+    point is skipped for both ``run=`` and ``params=`` tracking rather than
+    recorded as if it had succeeded. A failure while recording to ``run``
+    never breaks the plot itself: the ``viz.line()`` call has already
+    succeeded by the time recording is attempted, and any unexpected
+    recording failure surfaces as a warning rather than an exception (the
+    run already having finished is expected/benign and stays silent).
+
+    ``run=``, if passed, must be a :class:`~visdom.tracking.RunTracker` (or
+    a duck-typed equivalent exposing ``log_plot_update()``) — anything else
+    raises ``TypeError`` immediately, rather than appearing to work and
+    then failing confusingly on the first logged metric.
 
     Do not pass a proxy returned by ``run.track(viz)`` as ``viz`` here
     while also passing that same run as ``run=`` — that double-tracks
@@ -89,6 +98,21 @@ class VisdomLogger:
         if self.log_every < 1:
             raise ValueError("log_every must be >= 1, got {}".format(log_every))
         self._params = params
+        if run is not None and not hasattr(run, "log_plot_update"):
+            # Fail fast and clearly here, at construction time, rather than
+            # letting a nonsensical run= (a plain string, an int, some
+            # unrelated object) silently no-op its way to a crash deep
+            # inside _log_to_run's own warning formatting the first time a
+            # metric is logged -- see the run_id access there, which
+            # assumes `run` is at least roughly RunTracker-shaped. Checking
+            # for log_plot_update (not isinstance(run, RunTracker)) keeps
+            # the same deliberate duck-typing this module already uses for
+            # the run.track(viz) detection below, so a test double/mock
+            # with the right interface still works.
+            raise TypeError(
+                "run must be a visdom.tracking.RunTracker (or a duck-typed "
+                "equivalent exposing log_plot_update()), got {!r}".format(run)
+            )
         self.run = run
         # Best-effort detection of the double-tracking mistake described
         # above: run.track(viz) returns a proxy that stores the run it's
@@ -169,6 +193,15 @@ class VisdomLogger:
         return False
 
     def _plot(self, name, x_val, value, xlabel):
+        """Send one point to viz.line(), then best-effort mirror it to
+        params=/run= tracking if (and only if) the send actually succeeded.
+
+        Returns True if the point was actually plotted, False if the send
+        failed (or raised) -- log() uses this to decide whether to clear
+        the metric's pending buffer or keep the value there for a retry
+        on the metric's next call, or at the context manager's exit flush.
+        """
+        win = None
         try:
             if name not in self._wins:
                 win = self.viz.line(
@@ -177,9 +210,8 @@ class VisdomLogger:
                     env=self.env,
                     opts={"title": name, "xlabel": xlabel, "ylabel": name},
                 )
-                self._wins[name] = win
             else:
-                self.viz.line(
+                win = self.viz.line(
                     X=[x_val],
                     Y=[value],
                     win=self._wins[name],
@@ -190,7 +222,37 @@ class VisdomLogger:
             _safe_warn(
                 "VisdomLogger failed to log {!r}: {}".format(name, e), UserWarning
             )
-            return
+            return False
+        # viz.line() doesn't always raise on failure: a client built with
+        # raise_exceptions=False can return False/None from a failed send
+        # instead -- a real attempt that the server never actually applied.
+        # Plain truthiness is deliberately all that's checked here (not,
+        # say, requiring a str): the real client only ever returns a
+        # string win id or the True offline-mode sentinel on success (see
+        # _check_experiment_reply's docstring above), but this also has to
+        # keep working for any other truthy stand-in a wrapped/mocked viz
+        # returns, matching the plain `if win:` convention this module's
+        # window-caching already uses elsewhere. Without this check at
+        # all, a non-raising failed append would silently keep whatever
+        # window id the *previous, genuinely successful* call left behind
+        # and have both log_metrics() and run= tracking below record this
+        # failed point as if it had actually been plotted.
+        send_ok = bool(win)
+        if not send_ok:
+            return False
+        if name not in self._wins:
+            # Only cache a window id once creation has actually succeeded
+            # (send_ok is True here) -- caching a falsy one would make
+            # every later call for this metric believe a window already
+            # exists (the check right above is membership, not
+            # truthiness) and permanently skip retrying creation; log()'s
+            # own throttle is based on the call counter rather than this
+            # dict precisely so a failed creation doesn't also disable
+            # throttling. An append's own win is deliberately never
+            # (re)cached here: the id already on file from the successful
+            # creation is the one every later append keeps using,
+            # regardless of this particular call's result.
+            self._wins[name] = win
         if self._params is not None:
             # Its own try/except, separate from the viz.line() one above:
             # log_metrics() is a second, unrelated call (to the
@@ -208,24 +270,22 @@ class VisdomLogger:
                     UserWarning,
                 )
         if self.run is not None:
-            # self.viz.line() doesn't always return a real window id:
-            # True is _send's own offline-mode sentinel (see
-            # _check_experiment_reply's docstring above), and a client
-            # built with raise_exceptions=False can return False/None on
-            # a failed send instead of raising. RunTracker.log_plot_update
-            # keys its per-window sequence counters on win, so passing a
-            # non-string straight through would collapse every metric
-            # onto the one shared True/False/None key instead of keeping
-            # each metric's window_update_seq independent (every
-            # offline-mode call returns the identical True sentinel).
-            # visdom.tracking.graphs._resolve_win applies the same check
-            # for TrackedVisdom; name is used as the fallback here
-            # specifically because it's already guaranteed to be a
-            # non-empty string, unique per metric within this
+            # send_ok (above) has already ruled out the genuine-failure
+            # case (False/None); what's left to handle here is just the
+            # offline-mode sentinel, where win is True rather than a real
+            # server-assigned id. RunTracker.log_plot_update keys its
+            # per-window sequence counters on win, so passing True straight
+            # through would collapse every metric onto that one shared
+            # value instead of keeping each metric's window_update_seq
+            # independent (every offline-mode call returns the identical
+            # True sentinel). visdom.tracking.graphs._resolve_win applies
+            # the same kind of check for TrackedVisdom; name is used as the
+            # fallback here specifically because it's already guaranteed to
+            # be a non-empty string, unique per metric within this
             # VisdomLogger instance.
-            win = self._wins[name]
             tracked_win = win if isinstance(win, str) and win else name
             self._log_to_run(name, tracked_win, x_val, value, xlabel)
+        return True
 
     def _log_to_run(self, name, win, x_val, value, xlabel):
         """Best-effort record this already-plotted update on self.run.
@@ -260,7 +320,18 @@ class VisdomLogger:
                 "visdom.pytorch: failed to record metric {0!r} on run "
                 "{1!r} ({2}: {3}) -- the plot itself still succeeded "
                 "normally, only the tracking record is affected.".format(
-                    name, self.run.run_id, type(e).__name__, e
+                    # getattr, not self.run.run_id directly: __init__
+                    # already rejects a run= that lacks log_plot_update
+                    # entirely, but a duck-typed object can still satisfy
+                    # that check while lacking run_id specifically (e.g. a
+                    # test double, or a genuinely broken log_plot_update
+                    # implementation on an otherwise-valid-looking object).
+                    # That must not turn this best-effort warning itself
+                    # into a second, unrelated crash.
+                    name,
+                    getattr(self.run, "run_id", repr(self.run)),
+                    type(e).__name__,
+                    e,
                 ),
                 RuntimeWarning,
                 stacklevel=4,
@@ -304,9 +375,11 @@ class VisdomLogger:
 
         x_val = x if x is not None else self._step.get(name, 1) - 1
 
-        if name in self._wins and self._counter[name] % self.log_every != 0:
+        if self._counter[name] > 1 and self._counter[name] % self.log_every != 0:
             self._pending[name] = (x_val, value, xlabel)
             return
 
-        self._plot(name, x_val, value, xlabel)
-        self._pending.pop(name, None)
+        if self._plot(name, x_val, value, xlabel):
+            self._pending.pop(name, None)
+        else:
+            self._pending[name] = (x_val, value, xlabel)
