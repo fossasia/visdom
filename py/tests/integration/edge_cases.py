@@ -15,6 +15,7 @@ missing envs and windows, twenty creations in a row, empty and enormous and
 markup-bearing content, and the pages that render straight from state.
 """
 
+import json
 import logging
 import os
 import unittest
@@ -284,6 +285,125 @@ class TestCompareEndpoint(VisdomHTTPTestCase):
         self.assertEqual(resp.body, b"")
         self.assertEqual(subscriber.eid, ["main", "main"])
         self.assertEqual(subscriber.commands(), ["reload", "window", "layout"])
+
+
+class TestDeleteEnvEndpoint(VisdomHTTPTestCase):
+    """Integration tests for POST ``/delete_env`` payload validation."""
+
+    def test_malformed_json_body_returns_400(self):
+        """A delete_env request with invalid JSON returns HTTP 400."""
+        resp = self.fetch(
+            "/delete_env",
+            method="POST",
+            body="not-valid-json",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be valid JSON", resp.reason)
+
+    def test_non_object_json_body_returns_400(self):
+        """A delete_env request where body is not a JSON object returns HTTP 400."""
+        resp = self.fetch(
+            "/delete_env",
+            method="POST",
+            body="[1, 2, 3]",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be an object", resp.reason)
+
+    def test_non_string_eid_returns_400(self):
+        """A delete_env request with non-string 'eid' (number, bool, list) returns HTTP 400."""
+        for invalid_eid in (123, True, [1]):
+            resp = self.post_json("/delete_env", {"eid": invalid_eid})
+            self.assertEqual(resp.code, 400)
+            self.assertIn("'eid' must be a string", resp.reason)
+
+    def test_empty_string_or_whitespace_eid_is_noop(self):
+        """A delete_env request with empty or whitespace-only 'eid' is a safe no-op returning 200."""
+        for empty_eid in ("", "   "):
+            resp = self.post_json("/delete_env", {"eid": empty_eid})
+            self.assertEqual(resp.code, 200)
+
+    def test_valid_eid_deletes_env(self):
+        """A valid delete_env request deletes the environment."""
+        self.create_text_window(eid="to_delete", content="hello")
+        self.assertIn("to_delete", self.get_envs())
+        resp = self.post_json("/delete_env", {"eid": "to_delete"})
+        self.assertEqual(resp.code, 200)
+        self.assertNotIn("to_delete", self.get_envs())
+
+
+class TestEnvStateEndpoint(VisdomHTTPTestCase):
+    """Integration tests for POST ``/env_state`` payload validation."""
+
+    def test_malformed_json_body_returns_400(self):
+        """An env_state request with invalid JSON returns HTTP 400."""
+        resp = self.fetch(
+            "/env_state",
+            method="POST",
+            body="not-valid-json",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be valid JSON", resp.reason)
+
+    def test_non_object_json_body_returns_400(self):
+        """An env_state request where body is not a JSON object returns HTTP 400."""
+        resp = self.fetch(
+            "/env_state",
+            method="POST",
+            body="[1, 2, 3]",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be an object", resp.reason)
+
+    def test_non_string_eid_returns_400(self):
+        """An env_state request with non-string 'eid' returns HTTP 400."""
+        for invalid_eid in (123, True, [1]):
+            resp = self.post_json("/env_state", {"eid": invalid_eid})
+            self.assertEqual(resp.code, 400)
+            self.assertIn("'eid' must be a string", resp.reason)
+
+    def test_empty_body_returns_all_envs(self):
+        """An env_state request with an empty object returns all environment IDs."""
+        resp = self.post_json("/env_state", {})
+        self.assertEqual(resp.code, 200)
+        envs = json.loads(resp.body.decode())
+        self.assertIn("main", envs)
+
+
+class TestWinExistsEndpoint(VisdomHTTPTestCase):
+    """Integration tests for POST ``/win_exists`` payload validation."""
+
+    def test_malformed_json_body_returns_400(self):
+        """A win_exists request with invalid JSON returns HTTP 400."""
+        resp = self.fetch(
+            "/win_exists",
+            method="POST",
+            body="not-valid-json",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be valid JSON", resp.reason)
+
+    def test_non_object_json_body_returns_400(self):
+        """A win_exists request where body is not a JSON object returns HTTP 400."""
+        resp = self.fetch(
+            "/win_exists",
+            method="POST",
+            body="[1, 2, 3]",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be an object", resp.reason)
+
+    def test_missing_win_field_returns_400(self):
+        """A win_exists request missing 'win' returns HTTP 400."""
+        resp = self.post_json("/win_exists", {"eid": "main"})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("missing required field: win", resp.reason)
 
 
 if __name__ == "__main__":
