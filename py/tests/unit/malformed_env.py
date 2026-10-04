@@ -13,10 +13,10 @@ called ``.values()`` on ``jsons`` and ``.get()`` on each pane, ``compare_envs``
 called ``.keys()``. An env carrying ``{"jsons": [], "reload": {}}`` was stored,
 persisted and then answered HTTP 500 on every attempt to open or compare it.
 
-The rule now: an env with no ``jsons`` mapping cannot be read at all and is
-refused, and anything inside one that cannot be used is held back by the store,
-kept out of the state the server works on, written back to the file exactly as
-it was found, and reported to the client being served.
+The rule now: anything the store cannot read is left out of the env it serves
+and out of what it writes back, the client being served is told what is
+missing, and the file is copied to ``<name>.json.unreadable`` before it is
+first written over, so nothing that was on disk is lost.
 """
 
 import json
@@ -24,15 +24,14 @@ import os
 
 import pytest
 
+from visdom.data_model.json_store import UNREADABLE_SUFFIX
 from visdom.utils.server_utils import (
     LazyEnvData,
-    UNREADABLE_PARTS,
     compare_envs,
     env_is_readable,
     load_env,
     readable_panes,
     reload_is_readable,
-    unreadable_parts,
 )
 
 from testutils.payloads import env_payload
@@ -167,59 +166,83 @@ def test_a_bad_pane_is_kept_out_of_the_env_the_server_works_on(store, env_path):
     _write(env_path, "mixed", _with_one_bad_pane())
     env = store.load_env("mixed")
     assert env["jsons"] == {"good": GOOD_PANE}
-    assert unreadable_parts(env)["jsons"] == {"bad": "not a pane"}
+    assert store.unreadable_report("mixed")["panes"] == ["bad"]
 
 
 def test_a_bad_reload_is_kept_out_of_the_env_the_server_works_on(store, env_path):
     _write(env_path, "r", _with_bad_reload())
     env = store.load_env("r")
     assert env["reload"] == {}
-    assert unreadable_parts(env)["reload"] == "wide"
+    assert store.unreadable_report("r")["reload"] is True
 
 
-def test_a_readable_file_holds_nothing_back(store, env_path):
+def test_a_readable_file_is_reported_as_whole(store, env_path):
     _write(env_path, "good", env_payload())
     env = store.load_env("good")
     assert env["jsons"] == {"win_0": {"id": "win_0"}}
-    assert unreadable_parts(env) == {}
-    assert UNREADABLE_PARTS not in env
+    assert store.unreadable_report("good") == {}
 
 
-def test_saving_an_env_writes_its_bad_pane_back_unchanged(store, env_path):
+@pytest.mark.parametrize("name, payload", UNREADABLE, ids=UNREADABLE_IDS)
+def test_a_file_that_cannot_be_read_at_all_is_reported(name, payload, store, env_path):
+    _write(env_path, "broken", payload)
+    store.load_env("broken")
+    assert store.unreadable_report("broken")["whole"] is True
+
+
+def test_nothing_is_reported_before_the_file_is_read(store, env_path):
+    _write(env_path, "mixed", _with_one_bad_pane())
+    assert store.unreadable_report("mixed") == {}
+
+
+def test_the_file_is_copied_aside_before_it_is_written_over(store, env_path):
     _write(env_path, "mixed", _with_one_bad_pane())
     env = store.load_env("mixed")
-    env["jsons"]["added"] = {"id": "added", "type": "text", "content": "new"}
     store.save_env("mixed", env)
-    saved = _read(env_path, "mixed")
-    assert saved["jsons"]["bad"] == "not a pane"
-    assert sorted(saved["jsons"]) == ["added", "bad", "good"]
+    kept = json.load(open(os.path.join(env_path, "mixed.json" + UNREADABLE_SUFFIX)))
+    assert kept["jsons"]["bad"] == "not a pane"
+    assert json.load(open(os.path.join(env_path, "mixed.json")))["jsons"] == {
+        "good": GOOD_PANE
+    }
 
 
-def test_saving_an_env_writes_its_bad_reload_back_unchanged(store, env_path):
-    _write(env_path, "r", _with_bad_reload())
-    env = store.load_env("r")
-    store.save_env("r", env)
-    assert _read(env_path, "r")["reload"] == "wide"
+def test_a_file_whose_jsons_cannot_be_read_is_copied_aside_too(store, env_path):
+    _write(env_path, "broken", {"jsons": ["not a map"], "reload": {}})
+    store.load_env("broken")
+    store.save_env("broken", {"jsons": {}, "reload": {}})
+    kept = json.load(open(os.path.join(env_path, "broken.json" + UNREADABLE_SUFFIX)))
+    assert kept["jsons"] == ["not a map"]
 
 
-def test_a_layout_saved_since_the_read_is_not_overwritten(store, env_path):
-    _write(env_path, "r", _with_bad_reload())
-    env = store.load_env("r")
-    env["reload"]["good"] = {"h": 4}
-    store.save_env("r", env)
-    assert _read(env_path, "r")["reload"] == {"good": {"h": 4}}
+def test_the_copy_is_only_taken_once(store, env_path):
+    _write(env_path, "mixed", _with_one_bad_pane())
+    env = store.load_env("mixed")
+    store.save_env("mixed", env)
+    backup = os.path.join(env_path, "mixed.json" + UNREADABLE_SUFFIX)
+    first = open(backup).read()
+    env["jsons"]["added"] = {"id": "added", "type": "text"}
+    store.save_env("mixed", env)
+    assert open(backup).read() == first
 
 
-def test_an_untouched_layout_is_written_back_as_it_was(store, env_path):
-    _write(env_path, "r", _with_bad_reload())
-    store.save_env("r", store.load_env("r"))
-    assert _read(env_path, "r")["reload"] == "wide"
+def test_a_readable_file_is_never_copied_aside(store, env_path):
+    _write(env_path, "good", env_payload())
+    store.save_env("good", store.load_env("good"))
+    assert not os.path.exists(os.path.join(env_path, "good.json" + UNREADABLE_SUFFIX))
 
 
-def test_what_is_held_back_never_reaches_the_file_as_its_own_key(store, env_path):
+def test_the_copy_is_not_listed_as_an_environment(store, env_path):
     _write(env_path, "mixed", _with_one_bad_pane())
     store.save_env("mixed", store.load_env("mixed"))
-    assert UNREADABLE_PARTS not in _read(env_path, "mixed")
+    assert store.list_envs() == ["mixed"]
+
+
+def test_what_is_written_back_holds_only_what_could_be_read(store, env_path):
+    _write(env_path, "mixed", _with_one_bad_pane())
+    store.save_env("mixed", store.load_env("mixed"))
+    saved = _read(env_path, "mixed")
+    assert sorted(saved["jsons"]) == ["good"]
+    assert "unreadable_parts" not in saved
 
 
 @pytest.mark.parametrize("name, payload", UNREADABLE, ids=UNREADABLE_IDS)

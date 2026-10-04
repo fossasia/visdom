@@ -26,8 +26,6 @@ import uuid
 
 import pytest
 
-from visdom.utils.server_utils import unreadable_parts
-
 from testutils.http import VisdomHTTPTestCase
 from testutils.payloads import env_payload
 
@@ -211,17 +209,15 @@ class TestUploadEnvUnreadableParts(UploadTestCase):
         _, body = self.upload_json("run.json", self.mixed_env())
         self.assertEqual(self.get_win_data("w1", eid=body["eid"])["content"], "kept")
 
-    def test_the_bad_pane_is_held_back_rather_than_served(self):
+    def test_the_bad_pane_is_left_out_of_the_environment(self):
         _, body = self.upload_json("run.json", self.mixed_env())
-        env = self._app.state[body["eid"]]
-        self.assertNotIn("w2", env["jsons"])
-        self.assertEqual(unreadable_parts(env)["jsons"], {"w2": "not a pane"})
+        self.assertNotIn("w2", self._app.state[body["eid"]]["jsons"])
 
-    def test_the_bad_pane_survives_to_disk(self):
+    def test_only_the_readable_panes_are_written_to_disk(self):
         _, body = self.upload_json("run.json", self.mixed_env())
         saved = os.path.join(self.env_path, "{0}.json".format(body["eid"]))
         with open(saved) as fn:
-            self.assertEqual(json.load(fn)["jsons"]["w2"], "not a pane")
+            self.assertEqual(sorted(json.load(fn)["jsons"]), ["w1"])
 
     def test_an_upload_with_an_unreadable_reload_is_still_accepted(self):
         resp, body = self.upload_json("run.json", self.bad_reload_env())
@@ -233,17 +229,15 @@ class TestUploadEnvUnreadableParts(UploadTestCase):
         self.assertTrue(body["unreadable_reload"])
         self.assertIn("the saved layout could not be read", body["message"])
 
-    def test_the_unreadable_reload_is_held_back(self):
+    def test_the_unreadable_reload_is_left_out_of_the_environment(self):
         _, body = self.upload_json("run.json", self.bad_reload_env())
-        env = self._app.state[body["eid"]]
-        self.assertEqual(env["reload"], {})
-        self.assertEqual(unreadable_parts(env)["reload"], "wide")
+        self.assertEqual(self._app.state[body["eid"]]["reload"], {})
 
-    def test_the_unreadable_reload_survives_to_disk(self):
+    def test_an_unreadable_reload_is_not_written_to_disk(self):
         _, body = self.upload_json("run.json", self.bad_reload_env())
         saved = os.path.join(self.env_path, "{0}.json".format(body["eid"]))
         with open(saved) as fn:
-            self.assertEqual(json.load(fn)["reload"], "wide")
+            self.assertEqual(json.load(fn)["reload"], {})
 
     def test_a_clean_upload_reports_nothing_unreadable(self):
         _, body = self.upload_json("run.json", self.exported_env())

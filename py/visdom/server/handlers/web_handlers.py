@@ -62,7 +62,6 @@ from visdom.utils.server_utils import (
     env_is_readable,
     readable_panes,
     reload_is_readable,
-    UNREADABLE_PARTS,
     push_deleted,
     notify,
     LazyEnvData,
@@ -951,17 +950,18 @@ class UploadEnvHandler(BaseHandler):
             return
         panes, unreadable = readable_panes(data)
         reload_unreadable = not reload_is_readable(data)
-        held = {}
-        if unreadable:
-            held["jsons"] = {wid: data["jsons"][wid] for wid in unreadable}
-        if reload_unreadable:
-            held["reload"] = data["reload"]
-        if held:
+        if unreadable or reload_unreadable:
             logging.warning(
-                "upload_env: %s holds parts that cannot be read (%s); loading the"
-                " rest and keeping them as they are",
+                "upload_env: %s holds parts that cannot be read (%s); loading the rest",
                 filename,
-                ", ".join(sorted(held)),
+                ", ".join(
+                    part
+                    for part in (
+                        "{} pane(s)".format(len(unreadable)) if unreadable else "",
+                        "the saved layout" if reload_unreadable else "",
+                    )
+                    if part
+                ),
             )
 
         uid = uuid.uuid4().hex[:8]
@@ -971,10 +971,10 @@ class UploadEnvHandler(BaseHandler):
             if suggested_name and suggested_name != "main":
                 new_eid = f"uploaded_{suggested_name}_{uid}"
 
-        env = {"jsons": panes, "reload": {} if reload_unreadable else data["reload"]}
-        if held:
-            env[UNREADABLE_PARTS] = held
-        self.state[new_eid] = env
+        self.state[new_eid] = {
+            "jsons": panes,
+            "reload": {} if reload_unreadable else data["reload"],
+        }
 
         await save_env_off_loop(self, new_eid)
 
