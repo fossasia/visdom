@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+-#!/usr/bin/env python3
 # Copyright 2017-present, The Visdom Authors
 # All rights reserved.
 #
@@ -43,6 +43,15 @@ class VisdomLogger:
             with VisdomLogger(viz, env="run_1", run=run) as tracker:
                 for epoch in range(num_epochs):
                     tracker.log("Train Loss", train_loss)  # plotted AND tracked
+
+    Nest in that order -- ``run`` outer, ``VisdomLogger`` inner, as above
+    -- not the reverse. ``VisdomLogger.__exit__`` flushes any value still
+    held back by ``log_every`` throttling, and that flush has to happen
+    while ``run`` is still open to be recorded; nesting the other way
+    finishes ``run`` first, so the flushed value's tracking call silently
+    no-ops (``RunAlreadyFinishedError`` is swallowed, by design, same as
+    any other already-finished-run write) instead of raising to tell you
+    something was dropped.
 
     Only values that actually get plotted are recorded to ``run`` — a value
     withheld by ``log_every`` throttling and later flushed on exit is

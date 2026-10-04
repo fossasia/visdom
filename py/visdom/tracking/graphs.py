@@ -125,11 +125,22 @@ def _resolve_win(result: Any, kwargs: dict) -> Any:
     calls). That return value is authoritative, so it's preferred over
     whatever the caller passed in.
 
-    Falls back to an explicit ``win=`` keyword argument if the return value
-    isn't a usable string (e.g. a connection error returned ``False``/
-    ``None`` instead of raising, when the client was built with
-    ``raise_exceptions=False``). Returns ``None`` if neither is available,
-    which tells the caller to skip logging rather than record a guess.
+    ``False``/``None`` are different from every other non-string result:
+    they're specifically what a client built with ``raise_exceptions=False``
+    returns on a non-raising failed send (a swallowed connection error, a
+    rejected request, etc.) -- a real attempt that the server never
+    actually applied. That must not fall back to the caller's own ``win=``
+    and get logged as a successful update anyway; doing so would silently
+    turn "we tried to plot this and it failed" into "this was plotted",
+    corrupting the run's persisted history with an update that never
+    happened. Returns ``None`` immediately for this case, same as when no
+    win can be resolved at all.
+
+    Falls back to an explicit ``win=`` keyword argument for every other
+    non-string result (e.g. ``True``, ``_send``'s own offline-mode
+    sentinel, where the send genuinely succeeded without a server-assigned
+    id). Returns ``None`` if neither is available, which tells the caller
+    to skip logging rather than record a guess.
 
     Does not attempt to recover a positional ``win`` argument -- if a
     caller passes it positionally *and* the call didn't return a usable
@@ -138,6 +149,8 @@ def _resolve_win(result: Any, kwargs: dict) -> Any:
     """
     if isinstance(result, str) and result:
         return result
+    if result is False or result is None:
+        return None
     win = kwargs.get("win")
     if isinstance(win, str) and win:
         return win

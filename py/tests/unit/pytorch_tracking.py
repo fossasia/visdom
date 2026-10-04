@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+-#!/usr/bin/env python3
 
 # Copyright 2017-present, The Visdom Authors
 # All rights reserved.
@@ -586,6 +586,32 @@ class TestVisdomLoggerBothIntegrationsTogether(unittest.TestCase):
             e for e in _read_events_jsonl(events_path) if e["type"] == "plot_update"
         ]
         self.assertEqual([e["data"]["value"] for e in updates], [0.5, 0.3])
+
+    def test_nesting_run_inside_visdomlogger_silently_drops_the_exit_flush(self):
+        """Documents the exact foot-gun the docstring warns against:
+        nesting the two context managers in the wrong order (run= inner,
+        VisdomLogger outer) finishes run before VisdomLogger.__exit__'s
+        own pending-value flush runs, so that flushed update is silently
+        dropped from run's record -- RunAlreadyFinishedError is swallowed
+        by design, the same as any other already-finished-run write, so
+        this must not raise. The documented order (run outer, VisdomLogger
+        inner) does not have this problem; see
+        test_both_together_each_record_independently above."""
+        run = RunTracker("exp", out_dir=self.out_dir)
+        with patch.object(self.vis, "_send", side_effect=_unique_win_send):
+            with VisdomLogger(self.vis, env="e1", run=run, log_every=5) as tracker:
+                with run:  # wrong order: run finishes before __exit__ below
+                    tracker.log("loss", 1.0)  # first call -> plotted & tracked
+                    tracker.log("loss", 2.0)  # buffered by log_every=5
+                # VisdomLogger.__exit__ flushes "loss"=2.0 here, but run is
+                # already finished -- must not raise.
+        events_path = os.path.join(
+            self.out_dir, json.load(open(run.path))["events_file"]
+        )
+        updates = [
+            e for e in _read_events_jsonl(events_path) if e["type"] == "plot_update"
+        ]
+        self.assertEqual([e["data"]["value"] for e in updates], [1.0])
 
 
 if __name__ == "__main__":
