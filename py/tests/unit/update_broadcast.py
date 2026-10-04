@@ -303,8 +303,11 @@ def diffed_update_packet(p, args):
 
     Every claim about the direct patch is checked against this rather than
     against a description of it, so the comparison is with the behaviour that
-    actually shipped: deepcopy the pane, mutate it, hand both copies to
-    ``jsonpatch``.
+    actually shipped: deepcopy the pane, mutate it, bump the version, hand both
+    copies to ``jsonpatch``. The bump sits where ``update_packet`` puts it --
+    after the mutation and before the diff, so the patch carries the new value
+    (#1775) -- because a mirror that skipped it would report every version
+    difference as a disagreement about the data.
     """
     old_p = p.copy()
     if "content" in p:
@@ -312,6 +315,7 @@ def diffed_update_packet(p, args):
     if "old_content" in p:
         old_p["old_content"] = copy.deepcopy(p["old_content"])
     p = UpdateHandler.update(p, args, *CAPS)
+    UpdateHandler.bump_version(p)
     p["contentID"] = FIXED_ID
     return p, jsonpatch.make_patch(old_p, p).patch
 
@@ -457,7 +461,7 @@ def test_direct_patch_uses_index_form_paths():
 
 
 def test_append_patch_carries_a_version_op():
-    """``update_window`` bumps the version on every update, patch or not.
+    """``update_packet`` bumps the version on every accepted update.
 
     Leaving it out of a hand-built patch desyncs the frontend's copy of the
     pane from the server's, which no assertion about the data would catch.
@@ -469,6 +473,37 @@ def test_append_patch_carries_a_version_op():
     versions = [op for op in ops if op["path"] == "/version"]
     assert versions == [{"op": "replace", "path": "/version", "value": before + 1}]
     assert [op["path"] for op in ops].count("/contentID") == 1
+
+
+def test_repeated_append_broadcasts_carry_consecutive_versions():
+    """A run of appends has to move the counter once per broadcast.
+
+    ``update_window`` does not touch ``version``; ``update_packet`` advances it
+    (#1775). The fast path returns before the general path's bump, so it has to
+    do its own -- and nothing in ``pane_versions.py`` would notice if it did
+    not, because every plot case there is a replace rather than an append and
+    so never reaches this branch.
+
+    The frontend applies a patch only when it reads ``pane.version + 1``
+    (``updateWindow`` in ``js/main.js``). A repeated version makes it discard
+    the patch and re-request the whole environment, which is the #1805 cost
+    back in full through the path meant to remove it -- and the broadcast would
+    still look correct, since the data ops are all there.
+    """
+    handler = FakeHandler()
+    sub = handler.add_sub()
+    pane = make_pane(handler, 5)
+    stored = handler.state["main"]["jsons"][pane["id"]]
+    assert UpdateHandler.appendable(stored, append_args()) is True
+
+    for _ in range(5):
+        UpdateHandler.wrap_func(handler, append_args())
+
+    broadcasts = [
+        msg for msg in sub.sent if msg.get("command") in ("window", "window_update")
+    ]
+    assert [msg["version"] for msg in broadcasts] == [2, 3, 4, 5, 6]
+    assert stored["version"] == 6
 
 
 def test_append_calls_neither_deepcopy_nor_make_patch(monkeypatch):

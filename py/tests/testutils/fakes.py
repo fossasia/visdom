@@ -116,6 +116,15 @@ class FakeHandler:
     def write(self, chunk):
         self.written.append(chunk)
 
+    def write_text(self, body):
+        """``BaseHandler.write_text``, as far as a test can observe it.
+
+        The real one declares the content type and finishes the response; here
+        only the body is observable, so it lands where ``write`` puts it and
+        ``handler.body`` keeps reading the same way.
+        """
+        self.write(body)
+
     def set_status(self, code, reason=None):
         self.status = code
 

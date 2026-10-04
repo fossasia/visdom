@@ -142,7 +142,7 @@ class UpdateHandler(BaseHandler):
 
     @staticmethod
     def window_args_are_noops(p, args):
-        """Whether ``update_window`` would change nothing but the version.
+        """Whether ``update_window`` would leave the pane exactly as it is.
 
         It writes every non-``None`` ``opts`` entry onto the pane and every
         non-``None`` ``layout`` entry into the pane's layout, and ``legend``
@@ -257,11 +257,14 @@ class UpdateHandler(BaseHandler):
                 max_plot_history,
                 record_ops=ops,
             )
+            # ``update_window`` does not advance the version; ``update_packet``
+            # does it once per accepted update, so the fast path has to as well
+            # -- and the patch has to carry the new value, or the frontend
+            # discards it and reloads the whole environment (``bump_version``).
+            version = UpdateHandler.bump_version(p)
             p["contentID"] = get_rand_id()
             ops.append({"op": "replace", "path": "/contentID", "value": p["contentID"]})
-            # ``update_window`` bumps the version on every update, so the patch
-            # has to carry it or the frontend's copy drifts out of step.
-            ops.append({"op": "replace", "path": "/version", "value": p["version"]})
+            ops.append({"op": "replace", "path": "/version", "value": version})
             return p, ops
 
         # Shallow copy the packet to dynamically capture changes to top-level keys.
@@ -744,7 +747,7 @@ class UpdateHandler(BaseHandler):
                     handler, args, eid, p, diff_packet
                 )
                 handler.mark_dirty(eid)
-            handler.write(p["id"])
+            handler.write_text(p["id"])
             return
 
         try:
@@ -776,7 +779,7 @@ class UpdateHandler(BaseHandler):
                 msg = pane_msg
         broadcast(handler, msg, eid)
         handler.mark_dirty(eid)
-        handler.write(p["id"])
+        handler.write_text(p["id"])
 
     @check_auth
     @check_readonly
