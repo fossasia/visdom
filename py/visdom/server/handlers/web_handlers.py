@@ -125,6 +125,30 @@ class ExistsHandler(BaseHandler):
 
 class UpdateHandler(BaseHandler):
     @staticmethod
+    def bump_version(p):
+        """Advance the pane's broadcast sequence number and return the new value.
+
+        The frontend applies an incremental patch only when the message carries
+        exactly ``pane.version + 1`` (``updateWindow`` in ``js/main.js``); any
+        other value makes it discard the patch and re-request the whole
+        environment. Every path that broadcasts a ``window_update`` therefore has
+        to move this counter.
+
+        It lives here rather than in ``update_window()`` because
+        ``UpdateHandler.update()`` returns before that helper for text,
+        image_history, plot_history and table panes, and the embeddings route
+        never calls it at all. Those types stayed pinned at version 1 while the
+        server kept broadcasting updates, so the client's check could never pass
+        and every update cost a full environment reload.
+
+        Reads through ``get`` rather than ``+= 1`` so that an environment
+        persisted before panes carried a version still updates instead of raising
+        ``KeyError`` out of a request.
+        """
+        p["version"] = p.get("version", 1) + 1
+        return p["version"]
+
+    @staticmethod
     def update_packet(
         p, args, max_text_lines, max_old_content, max_image_history, max_plot_history
     ):
@@ -145,6 +169,9 @@ class UpdateHandler(BaseHandler):
             max_image_history,
             max_plot_history,
         )
+        # Bumped before the patch is computed so the diff carries the new
+        # version to the client, keeping its copy in step for the next update.
+        UpdateHandler.bump_version(p)
         p["contentID"] = get_rand_id()
 
         patch = jsonpatch.make_patch(old_p, p)
@@ -152,21 +179,28 @@ class UpdateHandler(BaseHandler):
 
     @staticmethod
     def update_embeddings_packet(p, args, max_old_content):
-        update_type = args["data"]["update_type"]
+        data = args.get("data")
+        if not isinstance(data, dict):
+            raise tornado.web.HTTPError(
+                400, reason="embeddings update data must be an object"
+            )
+        update_type = data["update_type"]
         content_id = get_rand_id()
         if update_type == "EntitySelected":
-            selected = args["data"]["selected"]
+            selected = data["selected"]
             p["content"]["selected"] = selected
             p["contentID"] = content_id
+            version = UpdateHandler.bump_version(p)
             # `selected` may not exist yet on the first selection, so use "add"
             # (which also overwrites when the key is already present).
             return [
                 {"op": "add", "path": "/content/selected", "value": selected},
                 {"op": "replace", "path": "/contentID", "value": content_id},
+                {"op": "replace", "path": "/version", "value": version},
             ]
         if update_type == "RegionSelected":
             old_data = p["content"]["data"]
-            new_data = args["data"]["points"]
+            new_data = data["points"]
             p["old_content"].append(old_data)
             # Cap retained history to prevent unbounded in-memory growth (#1320).
             if len(p["old_content"]) > max_old_content:
@@ -175,18 +209,42 @@ class UpdateHandler(BaseHandler):
             p["content"]["has_previous"] = True
             p["content"]["selected"] = None
             p["contentID"] = content_id
+            version = UpdateHandler.bump_version(p)
             return [
                 {"op": "replace", "path": "/content/data", "value": new_data},
                 {"op": "add", "path": "/content/has_previous", "value": True},
                 {"op": "add", "path": "/content/selected", "value": None},
                 {"op": "replace", "path": "/contentID", "value": content_id},
+                {"op": "replace", "path": "/version", "value": version},
             ]
+        # An unrecognised update_type changed nothing, so there is no version to
+        # announce and no patch to send.
         return []
 
     @staticmethod
     def update(
         p, args, max_text_lines, max_old_content, max_image_history, max_plot_history
     ):
+        if not args.get("data") and not args.get("delete") and args.get("name") is None:
+            # opts/layout-only update (e.g. update_window_opts): works for
+            # any pane type. A delete/named update also carries no data but
+            # is a content change, so it must reach the branches below.
+            return update_window(p, args)
+        # A delete/named update with no data, or an empty data list -- the
+        # opts-only case already returned above. These types have no
+        # delete/name semantics and would otherwise crash indexing
+        # args["data"], or (embeddings) silently empty every point instead
+        # of being rejected.
+        if not args.get("data") and p["type"] in (
+            "text",
+            "image_history",
+            "plot_history",
+            "embeddings",
+        ):
+            raise tornado.web.HTTPError(
+                400,
+                reason="{} panes do not support delete/name updates".format(p["type"]),
+            )
         # Update text in window, separated by a line break
         if p["type"] == "text":
             p["content"] += "<br>" + args["data"][0]["content"]
@@ -446,34 +504,51 @@ class UpdateHandler(BaseHandler):
             handler.write("win is not image_history; was {}".format(p["type"]))
             return
 
-        if not (
+        is_content_update = (
+            args.get("data") or args.get("delete") or args.get("name") is not None
+        )
+        content_data = (
+            p["content"].get("data") if isinstance(p["content"], dict) else None
+        )
+        if is_content_update and not (
             p["type"] == "text"
             or p["type"] == "image_history"
             or p["type"] == "plot_history"
             or p["type"] == "embeddings"
             or p["type"] == "table"
             or (
-                len(p["content"]["data"]) == 0
-                or p["content"]["data"][0]["type"]
-                in ["scatter", "scatter3d", "scattergl", "custom", "heatmap"]
+                isinstance(content_data, list)
+                and (
+                    len(content_data) == 0
+                    or content_data[0]["type"]
+                    in ["scatter", "scatter3d", "scattergl", "custom", "heatmap"]
+                )
             )
         ):
+            handler.set_status(400)
             handler.write(
                 "win is not scatter, heatmap, custom, image_history, plot_history, embeddings, or text; "
                 "was {}".format(
-                    p["content"]["data"][0]["type"]
-                    if len(p["content"]["data"]) > 0
+                    content_data[0]["type"]
+                    if isinstance(content_data, list) and len(content_data) > 0
                     else "empty"
                 )
             )
             return
 
-        if p["type"] == "embeddings":
+        if p["type"] == "embeddings" and args.get("data"):
             diff_packet = UpdateHandler.update_embeddings_packet(
                 p, args, handler.max_old_content
             )
-            UpdateHandler.broadcast_window_update(handler, args, eid, p, diff_packet)
-            handler.mark_dirty(eid)
+            # An empty patch means the update_type was not recognised and the
+            # pane is unchanged. Broadcasting it anyway would send a version the
+            # client cannot reconcile, costing it a full environment reload for a
+            # no-op.
+            if diff_packet:
+                UpdateHandler.broadcast_window_update(
+                    handler, args, eid, p, diff_packet
+                )
+                handler.mark_dirty(eid)
             handler.write(p["id"])
             return
 
@@ -728,22 +803,53 @@ class CompareHandler(BaseHandler):
                 return
 
 
+def _decode_json_body(body):
+    """Return a request body decoded into a dict of arguments.
+
+    Shared by handlers whose bodies are JSON objects, so an empty body is read
+    as an empty object and each handler decides on its own whether the arguments
+    it needs are missing. Anything else that is not a JSON object is the caller's
+    error: without this check, malformed JSON or a bare list would surface as an
+    unhandled exception and a 500 rather than a 400 naming what was wrong with
+    the request.
+    """
+    try:
+        text = tornado.escape.to_basestring(body).strip()
+        if not text:
+            return {}
+        args = tornado.escape.json_decode(text)
+    except ValueError as error:
+        raise tornado.web.HTTPError(
+            400, reason="request body must be valid JSON"
+        ) from error
+    if not isinstance(args, Mapping):
+        raise tornado.web.HTTPError(400, reason="request body must be an object")
+    return args
+
+
 class SaveHandler(BaseHandler):
     @staticmethod
     async def wrap_func(handler, args):
+        """Validate payload parameters, filter invalid env IDs, and persist valid environments."""
+        if "data" not in args:
+            raise tornado.web.HTTPError(400, reason="missing required field: 'data'")
         envs = args["data"]
-        envs = [escape_eid(eid) for eid in envs]
+        if not isinstance(envs, Sequence) or isinstance(envs, (str, bytes)):
+            raise tornado.web.HTTPError(
+                400, reason="'data' must be a list of environment ids"
+            )
+        valid_envs = [
+            escape_eid(eid) for eid in envs if isinstance(eid, str) and eid.strip()
+        ]
         # this drops invalid env ids
-        ret = await save_envs_off_loop(handler, envs)
+        ret = await save_envs_off_loop(handler, valid_envs)
         handler.write(json.dumps(ret))
 
     @check_auth
     @check_readonly
     async def post(self):
-        args = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
-        await self.wrap_func(self, args)
+        """Decode JSON request body and save environments."""
+        await self.wrap_func(self, _decode_json_body(self.request.body))
 
 
 class DataHandler(BaseHandler):
@@ -1040,28 +1146,6 @@ def _stored_experiment_map(store):
     worker is already in the shape the overlay on the loop needs.
     """
     return {exp.env_id: exp for exp in ExperimentStore(store).list_experiments()}
-
-
-def _decode_json_body(body):
-    """Return a request body decoded into a dict of arguments.
-
-    Shared by the ``/experiments/*`` endpoints, whose bodies are all optional
-    JSON objects, so an empty body is read as an empty object and each handler
-    decides on its own whether the arguments it needs are missing. Anything else
-    that is not a JSON object is the caller's error: without this check,
-    malformed JSON or a bare list would surface as an unhandled exception and a
-    500 rather than a 400 naming what was wrong with the request.
-    """
-    try:
-        text = tornado.escape.to_basestring(body).strip()
-        if not text:
-            return {}
-        args = tornado.escape.json_decode(text)
-    except ValueError:
-        raise tornado.web.HTTPError(400, reason="request body must be valid JSON")
-    if not isinstance(args, Mapping):
-        raise tornado.web.HTTPError(400, reason="request body must be an object")
-    return args
 
 
 class ExperimentLogHandler(BaseHandler):

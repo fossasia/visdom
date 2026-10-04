@@ -914,10 +914,11 @@ This function renders structured data as a styled, static HTML
 table (read-only — use `vis.table` if you need an editable pane).
 
 Arguments:
-- `data`: a 2D `list`/`tuple` of rows, a 2D numpy array, or a
-  `list` of `dict`s (in which case `headers` is derived from the
-  first dict's keys unless explicitly given). In case of an empty
-  list, a table with only the header row is rendered.
+- `data`: a 2D `list`/`tuple` of rows (each a `list`, `tuple` or 1-D
+  numpy array), a 2D numpy array, or a `list` of `dict`s (in which
+  case `headers` is derived from the first dict's keys unless
+  explicitly given). In case of an empty list, a table with only the
+  header row is rendered.
 - `headers`: a `list`/`tuple`/1D numpy array of column names.
   Required unless `data` is a list of dicts.
 
@@ -945,7 +946,8 @@ resized by dragging -- purely a client-side visual convenience, not
 persisted server-side.
 
 It takes as input `data`, either:
- - a 2D list of rows (list of lists/tuples), with `headers` required, or
+ - a 2D list of rows (lists, tuples or 1-D numpy arrays, e.g. `list(arr)`),
+   with `headers` required, or
  - a list of dicts, in which case `headers` is derived from the first
    dict's keys unless explicitly given (and can be used to reorder or
    select a subset of columns)
@@ -1166,9 +1168,13 @@ It accepts either:
 - raw binary labels and scores via `y_true` and `y_score`, or
 - precomputed curve points via `precision` and `recall`.
 
+A baseline showing the true class prevalence is only drawn for the
+`y_true`/`y_score` path, since prevalence cannot be recovered from
+`precision`/`recall` points alone.
+
 The following `opts` are supported:
 - `opts.title`      : plot title (`string`; default includes PR-AUC)
-- `opts.legend`     : two legend labels for curve and baseline (`list`)
+- `opts.legend`     : two legend labels for curve and baseline (`list`); only one label is needed when no baseline is drawn
 - `opts.xlabel`     : x-axis label (`string`; default = `Recall`)
 - `opts.ylabel`     : y-axis label (`string`; default = `Precision`)
 - `opts.layoutopts` : additional backend layout options (`dict`)
