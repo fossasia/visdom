@@ -224,10 +224,23 @@ const App = () => {
   // full-screen metric view //
   // ----------------------- //
 
+  const sameEnvIDs = (a, b) =>
+    Array.isArray(a) &&
+    Array.isArray(b) &&
+    a.length === b.length &&
+    a.every((id, i) => id === b[i]);
+
   const openDetail = (paneID) => {
     if (latestRef.current.expandedPaneID == null) {
       try {
-        window.history.pushState({ visdomDetail: true, paneID }, '');
+        window.history.pushState(
+          {
+            visdomDetail: true,
+            paneID,
+            envIDs: latestRef.current.selection.envIDs,
+          },
+          ''
+        );
       } catch (e) {
         // history unavailable
       }
@@ -250,14 +263,24 @@ const App = () => {
   useEffect(() => {
     const onPop = () => {
       const state = window.history.state;
-      // Forward lands back on the pushed detail entry: restore the pane it
-      // was for, rather than leaving the grid showing while history still
-      // thinks a detail view is open.
-      setExpandedPaneID(state && state.visdomDetail ? state.paneID : null);
+      // only restore if still in the same env the entry was pushed from
+      const valid =
+        state &&
+        state.visdomDetail &&
+        sameEnvIDs(state.envIDs, latestRef.current.selection.envIDs);
+      setExpandedPaneID(valid ? state.paneID : null);
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
+
+  // clear expandedPaneID if its pane is ever gone; state only, not history,
+  // so this can't double up with the explicit history.back() calls elsewhere
+  useEffect(() => {
+    if (expandedPaneID != null && !storeData.panes[expandedPaneID]) {
+      setExpandedPaneID(null);
+    }
+  }, [expandedPaneID, storeData.panes]);
 
   // --------------------- //
   // grid helper functions //

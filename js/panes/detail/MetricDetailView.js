@@ -79,26 +79,50 @@ const csvCell = (v) => {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
-// traces aren't guaranteed to share one x axis (different length/cadence
-// per trace), so match each trace's own x/y pairs and merge on the actual
-// x value instead of assuming every trace's row r lines up with trace 0's
+// Plotly fills in x as x0 + i*dx when a trace omits it; match that here
+const effectiveX = (t) => {
+  if (Array.isArray(t.x)) return t.x;
+  const ys = Array.isArray(t.y) ? t.y : [];
+  const x0 = typeof t.x0 === 'number' ? t.x0 : 0;
+  const dx = typeof t.dx === 'number' ? t.dx : 1;
+  return ys.map((_, i) => x0 + i * dx);
+};
+
+// merge traces by their own x values (not by row index), keeping every
+// value at a repeated x instead of letting later ones overwrite earlier ones
 const buildMatchedRows = (traces, idxs) => {
   const byTrace = idxs.map((i) => {
     const t = traces[i];
-    const txs = Array.isArray(t.x) ? t.x : [];
+    const txs = effectiveX(t);
     const tys = Array.isArray(t.y) ? t.y : [];
     const map = new Map();
-    txs.forEach((x, r) => map.set(x, tys[r]));
+    txs.forEach((x, r) => {
+      if (!map.has(x)) map.set(x, []);
+      map.get(x).push(tys[r]);
+    });
     return map;
   });
   const allX = new Set();
   byTrace.forEach((map) => map.forEach((_, x) => allX.add(x)));
-  return [...allX]
+  const rows = [];
+  [...allX]
     .sort((a, b) => a - b)
-    .map((x) => ({
-      x,
-      values: byTrace.map((map) => (map.has(x) ? map.get(x) : undefined)),
-    }));
+    .forEach((x) => {
+      const depth = Math.max(
+        1,
+        ...byTrace.map((map) => (map.get(x) || []).length)
+      );
+      for (let d = 0; d < depth; d++) {
+        rows.push({
+          x,
+          values: byTrace.map((map) => {
+            const ys = map.get(x);
+            return ys && d < ys.length ? ys[d] : undefined;
+          }),
+        });
+      }
+    });
+  return rows;
 };
 
 function MetricDetailView({ pane, envID, onClose }) {
