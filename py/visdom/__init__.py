@@ -1880,7 +1880,7 @@ class Visdom(object):
         _assert_opts(opts)
 
         if svgfile is not None:
-            svgstr = str(loadfile(svgfile))
+            svgstr = loadfile(svgfile).decode("utf-8")
 
         assert svgstr is not None, "should specify SVG string or filename"
         svg = re.search("<svg .+</svg>", svgstr, re.DOTALL)
