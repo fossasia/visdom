@@ -156,14 +156,14 @@ class TestLiveUpdateQueue(unittest.TestCase):
         self.resolved = []
         self.rebuilt = []
 
-    def schedule(self, delay, callback):
-        self.scheduled.append((delay, callback))
+    def schedule(self, delay, drain):
+        self.scheduled.append((delay, drain))
 
     def resolve(self, changed):
         self.resolved.append(set(changed))
         return [("main", "hp1")]
 
-    def rebuild(self, eid, win_id):
+    async def rebuild(self, eid, win_id):
         self.rebuilt.append((eid, win_id))
 
     def queue(self, **kwargs):
@@ -171,6 +171,10 @@ class TestLiveUpdateQueue(unittest.TestCase):
         kwargs.setdefault("rebuild", self.rebuild)
         kwargs.setdefault("schedule", self.schedule)
         return LiveUpdateQueue(**kwargs)
+
+    def run_drain(self, index):
+        """Run the drain the queue handed to the scheduler ``index``-th."""
+        asyncio.run(self.scheduled[index][1]())
 
     def test_a_burst_of_marks_costs_one_drain(self):
         """A training loop logging every step must not rebuild every step."""
@@ -180,7 +184,7 @@ class TestLiveUpdateQueue(unittest.TestCase):
         queue.mark("run-b")
 
         self.assertEqual(len(self.scheduled), 1)
-        self.scheduled[0][1]()
+        self.run_drain(0)
         self.assertEqual(self.resolved, [{"run-a", "run-b"}])
         self.assertEqual(self.rebuilt, [("main", "hp1")])
 
@@ -193,32 +197,87 @@ class TestLiveUpdateQueue(unittest.TestCase):
         """The queue re-arms rather than going quiet after its first drain."""
         queue = self.queue()
         queue.mark("run-a")
-        self.scheduled[0][1]()
+        self.run_drain(0)
         queue.mark("run-b")
 
         self.assertEqual(len(self.scheduled), 2)
-        self.scheduled[1][1]()
+        self.run_drain(1)
         self.assertEqual(self.resolved, [{"run-a"}, {"run-b"}])
 
     def test_a_mark_during_a_drain_is_not_swallowed(self):
         """Marks are taken before rebuilding, so a late one opens a new round."""
         queue = self.queue()
 
-        def rebuild_and_mark(eid, win_id):
+        async def rebuild_and_mark(eid, win_id):
             self.rebuilt.append((eid, win_id))
             queue.mark("run-late")
 
         queue._rebuild = rebuild_and_mark
         queue.mark("run-a")
-        self.scheduled[0][1]()
+        self.run_drain(0)
 
         self.assertEqual(len(self.scheduled), 2)
-        self.scheduled[1][1]()
+        self.run_drain(1)
         self.assertEqual(self.resolved, [{"run-a"}, {"run-late"}])
+
+    def test_drains_never_overlap(self):
+        """A mark while a rebuild is parked waits for that drain to finish.
+
+        Arming a second drain straight away would let it rebuild the same pane
+        while the first is still reading, so the round is armed only once the
+        running drain is done.
+        """
+        queue = self.queue()
+
+        async def scenario():
+            parked = asyncio.Event()
+            release = asyncio.Event()
+
+            async def slow_rebuild(eid, win_id):
+                self.rebuilt.append((eid, win_id))
+                parked.set()
+                await release.wait()
+
+            queue._rebuild = slow_rebuild
+            queue.mark("run-a")
+            running = asyncio.ensure_future(self.scheduled[0][1]())
+            await parked.wait()
+
+            queue.mark("run-b")
+            self.assertEqual(len(self.scheduled), 1)
+
+            release.set()
+            await running
+            self.assertEqual(len(self.scheduled), 2)
+
+        asyncio.run(scenario())
+        self.run_drain(1)
+        self.assertEqual(self.resolved, [{"run-a"}, {"run-b"}])
+
+    def test_rebuilds_within_a_drain_run_one_at_a_time(self):
+        """Each rebuild is awaited before the next pane starts."""
+        events = []
+
+        async def rebuild(eid, win_id):
+            events.append(("start", win_id))
+            await asyncio.sleep(0)
+            events.append(("end", win_id))
+
+        queue = self.queue(
+            resolve=lambda changed: [("main", "hp1"), ("main", "hp2")],
+            rebuild=rebuild,
+        )
+        queue.mark("run-a")
+        self.run_drain(0)
+
+        self.assertEqual(
+            events,
+            [("start", "hp1"), ("end", "hp1"), ("start", "hp2"), ("end", "hp2")],
+        )
 
     def test_an_empty_drain_does_nothing(self):
         """A drain with nothing pending must not resolve or rebuild."""
-        self.queue().drain()
+        asyncio.run(self.queue().drain())
         self.assertEqual(self.resolved, [])
         self.assertEqual(self.rebuilt, [])
 
@@ -226,7 +285,7 @@ class TestLiveUpdateQueue(unittest.TestCase):
         """One unbuildable pane must not cost the rest their update."""
         attempted = []
 
-        def rebuild(eid, win_id):
+        async def rebuild(eid, win_id):
             attempted.append(win_id)
             if win_id == "hp1":
                 raise RuntimeError("boom")
@@ -237,7 +296,7 @@ class TestLiveUpdateQueue(unittest.TestCase):
         )
         queue.mark("run-a")
         with self.assertLogs(level="ERROR"):
-            self.scheduled[0][1]()
+            self.run_drain(0)
 
         self.assertEqual(attempted, ["hp1", "hp2"])
 
@@ -250,7 +309,7 @@ class TestLiveUpdateQueue(unittest.TestCase):
         queue = self.queue(resolve=resolve)
         queue.mark("run-a")
         with self.assertLogs(level="ERROR"):
-            self.scheduled[0][1]()
+            self.run_drain(0)
 
         self.assertEqual(self.rebuilt, [])
 
@@ -266,18 +325,18 @@ class TestLiveUpdateQueue(unittest.TestCase):
         queue = self.queue(resolve=resolve)
         queue.mark("run-a")
         with self.assertLogs(level="ERROR"):
-            self.scheduled[0][1]()
+            self.run_drain(0)
 
         failing[0] = False
         queue.mark("run-b")
         self.assertEqual(len(self.scheduled), 2)
-        self.scheduled[1][1]()
+        self.run_drain(1)
         self.assertEqual(self.rebuilt, [("main", "hp1")])
 
     def test_a_failing_schedule_leaves_the_queue_usable(self):
         """A queue that could not arm itself must still arm on the next mark."""
 
-        def schedule(delay, callback):
+        def schedule(delay, drain):
             raise RuntimeError("no loop")
 
         queue = self.queue(schedule=schedule)
@@ -287,14 +346,37 @@ class TestLiveUpdateQueue(unittest.TestCase):
         queue._schedule = self.schedule
         queue.mark("run-b")
         self.assertEqual(len(self.scheduled), 1)
-        self.scheduled[0][1]()
+        self.run_drain(0)
         self.assertEqual(self.resolved, [{"run-a", "run-b"}])
 
-    def test_without_a_scheduler_a_mark_drains_inline(self):
-        """With no loop to defer onto the work still happens, just immediately."""
-        self.queue(schedule=None).mark("run-a")
+    def test_without_a_scheduler_the_drain_runs_on_the_running_loop(self):
+        """The default defers onto the loop the mark was made from."""
+
+        async def scenario():
+            queue = LiveUpdateQueue(
+                resolve=self.resolve, rebuild=self.rebuild, delay=0.01
+            )
+            queue.mark("run-a")
+            self.assertEqual(self.rebuilt, [])
+            for _ in range(100):
+                if self.rebuilt:
+                    break
+                await asyncio.sleep(0.01)
+
+        asyncio.run(scenario())
         self.assertEqual(self.resolved, [{"run-a"}])
         self.assertEqual(self.rebuilt, [("main", "hp1")])
+
+    def test_without_a_scheduler_or_a_loop_the_mark_is_kept(self):
+        """Marked outside a loop, nothing can drain, so the mark waits for one."""
+        queue = LiveUpdateQueue(resolve=self.resolve, rebuild=self.rebuild)
+        with self.assertLogs(level="ERROR"):
+            queue.mark("run-a")
+
+        queue._schedule = self.schedule
+        queue.mark("run-b")
+        self.run_drain(0)
+        self.assertEqual(self.resolved, [{"run-a", "run-b"}])
 
 
 @pytest.mark.integration
@@ -428,7 +510,7 @@ class TestLiveHparamsPanes(tornado.testing.AsyncHTTPTestCase):
         self.create({"env_ids": ["run-a"], "win": "hp1"})
         queue = self._app.live_updates
         drains = []
-        queue._schedule = lambda delay, callback: drains.append(callback)
+        queue._schedule = lambda delay, drain: drains.append(drain)
         content_ids = set()
 
         for step in range(5):
@@ -445,7 +527,7 @@ class TestLiveHparamsPanes(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(len(drains), 1)
         self.assertEqual(len(content_ids), 1)
 
-        drains[0]()
+        self.io_loop.run_sync(drains[0])
         self.assertNotIn(self._window("hp1")["contentID"], content_ids)
 
     def test_a_pane_closed_before_the_drain_is_skipped(self):
