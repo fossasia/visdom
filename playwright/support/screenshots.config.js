@@ -107,6 +107,7 @@ const screenshotOptions = {
   misc_plot_latex: { maxDiffPixels: 3000 },
   text_basic: { threshold: 0.05 },
   text_update: { threshold: 0.05 },
+  image_basic: { threshold: 0.05, maxDiffPixels: 50 },
 };
 
 const compareScreenshotOptions = {
