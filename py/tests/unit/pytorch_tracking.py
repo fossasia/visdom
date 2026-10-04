@@ -363,6 +363,41 @@ class TestVisdomLoggerRunTracking(unittest.TestCase):
         self.assertEqual(updates[0]["data"]["value"], 0.5)
         self.assertEqual(updates[0]["data"]["win"], "win_1")
 
+    def test_unverifiable_truthy_win_is_cached_but_not_tracked(self):
+        """Regression test for a flagged review issue: viz.line() returning
+        some arbitrary truthy value that isn't a real window id or the
+        True offline sentinel (e.g. from a malformed/wrapped client) is
+        not proof the point was genuinely plotted. It's still cached/
+        reused like any other successful send (so it isn't retried
+        forever), but params=/run= tracking -- a durable, external claim
+        that this point was plotted -- must not record it on such
+        unverifiable evidence."""
+        run = RunTracker("exp", out_dir=self.out_dir)
+        metric_calls = []
+        with patch.object(self.vis, "experiment", return_value={"env_id": "e1"}):
+            with patch.object(
+                self.vis, "finish_experiment", return_value={"env_id": "e1"}
+            ):
+                with patch.object(
+                    self.vis,
+                    "log_metrics",
+                    side_effect=lambda metrics, step=None, env=None: metric_calls.append(
+                        metrics
+                    )
+                    or {"env_id": env},
+                ):
+                    with patch.object(
+                        self.vis, "line", side_effect=lambda *a, **kw: 12345
+                    ):
+                        with VisdomLogger(
+                            self.vis, env="e1", params={"lr": 0.01}, run=run
+                        ) as tracker:
+                            tracker.log("loss", 0.5)  # must not raise
+                            self.assertEqual(tracker._wins["loss"], 12345)
+        run.finish()
+        self.assertEqual(metric_calls, [])
+        self.assertEqual(self._plot_update_events(run), [])
+
     def test_failed_send_also_skips_experiment_store_log_metrics(self):
         """The same genuine-failure check guards params=/ExperimentStore
         tracking too, for the same reason: viz.log_metrics() must not
@@ -393,6 +428,25 @@ class TestVisdomLoggerRunTracking(unittest.TestCase):
             VisdomLogger(self.vis, env="e1", run=object())
         with self.assertRaises(TypeError):
             VisdomLogger(self.vis, env="e1", run="not-a-run-tracker")
+
+    def test_run_with_non_callable_log_plot_update_raises_at_construction(self):
+        """Regression test for a flagged review issue: hasattr() alone
+        accepts a run= whose log_plot_update attribute exists but isn't
+        callable (e.g. None, or any other non-method value), which would
+        otherwise raise TypeError inside _log_to_run on every single
+        logged metric instead of failing once, clearly, up front."""
+
+        class _RunWithNoneAttribute:
+            log_plot_update = None
+
+        with self.assertRaises(TypeError):
+            VisdomLogger(self.vis, env="e1", run=_RunWithNoneAttribute())
+
+        class _RunWithNonCallableAttribute:
+            log_plot_update = "not a method either"
+
+        with self.assertRaises(TypeError):
+            VisdomLogger(self.vis, env="e1", run=_RunWithNonCallableAttribute())
 
     def test_run_like_object_missing_run_id_does_not_crash_on_warning(self):
         """A duck-typed run= can satisfy the log_plot_update check at
