@@ -273,6 +273,8 @@ def _opts2layout(opts, is3d=False):
             "xaxis": _axisformat3d("x", opts),
             "yaxis": _axisformat3d("y", opts),
             "zaxis": _axisformat3d("z", opts),
+            "aspectmode": opts.get("aspectmode"),
+            "aspectratio": opts.get("aspectratio"),
         }
     else:
         layout["xaxis"] = _axisformat("x", opts)
@@ -423,6 +425,23 @@ def _assert_opts(opts):
 
     if opts.get("mode"):
         assert isstr(opts.get("mode")), "mode should be a string"
+
+    if opts.get("aspectmode") is not None:
+        assert opts.get("aspectmode") in (
+            "auto",
+            "cube",
+            "data",
+            "manual",
+        ), "aspectmode should be one of 'auto', 'cube', 'data', 'manual'"
+
+    if opts.get("aspectratio") is not None:
+        ar = opts.get("aspectratio")
+        assert isinstance(ar, dict) and all(
+            k in ar for k in ("x", "y", "z")
+        ), "aspectratio should be a dict with 'x', 'y' and 'z' keys"
+        assert all(
+            isnum(ar[k]) and math.isfinite(ar[k]) and ar[k] > 0 for k in ("x", "y", "z")
+        ), "aspectratio values should be finite positive numbers"
 
     if opts.get("markersymbol"):
         assert isstr(opts.get("markersymbol")), "marker symbol should be string"
@@ -595,8 +614,23 @@ def _compute_pr_curve(y_true, y_score, pos_label=1):
     return precision, recall
 
 
-def _coerce_curve_xy(x, y, x_name, y_name):
-    """Validate and sort precomputed curve arrays by x."""
+def _coerce_curve_xy(x, y, x_name, y_name, y_tiebreak_descending=False):
+    """Validate and sort precomputed curve arrays by x, breaking ties in y.
+
+    A tied-``x`` group must be ordered to match how the curve was
+    actually traversed, or downstream area calculations that are
+    sensitive to point order (e.g. :func:`_average_precision`'s
+    precision-weighted sum) can silently compute the wrong value even
+    though a trapezoidal area (:func:`_trapz_area`, used for ROC) would
+    be unaffected either way.
+
+    For a precision-recall curve, precision only decreases as more
+    points are accepted at a fixed recall, so pass
+    ``y_tiebreak_descending=True`` to put the higher-precision point
+    first within each tied-recall group. ROC's fpr/tpr pairs need no
+    such tiebreak (tpr ascends within a tied-fpr group, matching a plain
+    ascending sort), so the default preserves that.
+    """
     x = np.asarray(x)
     y = np.asarray(y)
     if x.ndim != 1:
@@ -610,7 +644,10 @@ def _coerce_curve_xy(x, y, x_name, y_name):
             "{} and {} should have at least 2 points".format(x_name, y_name)
         )
 
-    order = np.argsort(x, kind="mergesort")
+    # Negating an unsigned array wraps instead of changing sign, which would
+    # order a tied group by ascending y, so widen before negating.
+    tiebreak = -y.astype(np.float64) if y_tiebreak_descending else y
+    order = np.lexsort((tiebreak, x))
     return x[order], y[order]
 
 
@@ -623,17 +660,24 @@ def _validate_curve_range(values, name):
         raise ValueError("{} should be within [0, 1]".format(name))
 
 
-def _curve_legend(legend, default_legend):
-    """Return user-provided legend or default 2-element list."""
-    if not isinstance(legend, (tuple, list)) or len(legend) < 2:
+def _curve_legend(legend, default_legend, required=None):
+    """Return exactly ``required`` legend labels (defaults to the length of
+    ``default_legend``), falling back to the defaults if too few are given."""
+    if required is None:
+        required = len(default_legend)
+    if not isinstance(legend, (tuple, list)) or len(legend) < required:
         if legend is not None:
             warnings.warn(
-                "legend should be a list/tuple with at least 2 elements, "
-                "falling back to default: {}".format(default_legend),
+                "legend should be a list/tuple with at least {} element{}, "
+                "falling back to default: {}".format(
+                    required,
+                    "" if required == 1 else "s",
+                    default_legend[:required],
+                ),
                 UserWarning,
             )
-        return list(default_legend)
-    return list(legend)
+        return list(default_legend[:required])
+    return list(legend[:required])
 
 
 def _trapz_area(y, x):
@@ -746,6 +790,7 @@ class Visdom(object):
         session_idle_timeout=SESSION_IDLE_TIMEOUT,
         session_idle_check_interval=SESSION_IDLE_CHECK_INTERVAL,
         ssl_verify=None,
+        use_preflight_checks=True,
     ):
         parsed_url = urlparse(server)
         if not parsed_url.scheme:
@@ -790,6 +835,7 @@ class Visdom(object):
         self.raise_exceptions = raise_exceptions
         self.log_to_filename = log_to_filename
         self.offline = offline
+        self.use_preflight_checks = use_preflight_checks
         self._session = None
         self._pid = os.getpid()
         self._session_lock = threading.Lock()
@@ -1834,7 +1880,7 @@ class Visdom(object):
         _assert_opts(opts)
 
         if svgfile is not None:
-            svgstr = str(loadfile(svgfile))
+            svgstr = loadfile(svgfile).decode("utf-8")
 
         assert svgstr is not None, "should specify SVG string or filename"
         svg = re.search("<svg .+</svg>", svgstr, re.DOTALL)
@@ -2165,7 +2211,7 @@ class Visdom(object):
         - `opts.caption`: caption below the image (`string`; optional)
         - `opts.store_history`: append to image history pane (`boolean`)
         """
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         _title2str(opts)
         _assert_opts(opts)
         if np.issubdtype(img.dtype, np.floating):
@@ -2238,20 +2284,22 @@ class Visdom(object):
             }
         ]
 
+        msg = {
+            "data": data,
+            "win": win,
+            "eid": env,
+            "opts": opts,
+        }
         endpoint = "events"
-        if opts.get("store_history"):
-            if win is not None and self.win_exists(win, env):
+        if opts.get("store_history") and win is not None:
+            if self.use_preflight_checks:
+                if self.win_exists(win, env):
+                    endpoint = "update"
+            else:
+                msg["append"] = True
                 endpoint = "update"
 
-        return self._send(
-            {
-                "data": data,
-                "win": win,
-                "eid": env,
-                "opts": opts,
-            },
-            endpoint=endpoint,
-        )
+        return self._send(msg, endpoint=endpoint)
 
     def image_select(self, win, selected, env=None):
         """
@@ -2801,11 +2849,17 @@ class Visdom(object):
         - `opts.dash`             : dash type (`np.array`; default = 'solid'`)
         - `opts.textlabels`       : text label for each point (`list`: default = `None`)
         - `opts.legend`           : `list` or `tuple` containing legend names
+        - `opts.aspectmode`       : 3D axis scaling: `'auto'`, `'cube'`, `'data'`
+                                    or `'manual'` (`string`; default = `'auto'`)
+        - `opts.aspectratio`      : `{'x', 'y', 'z'}` scale dict, applied when
+                                    `aspectmode` is `'manual'`
         """
         if opts and opts.get("store_history") and update is not None:
             raise ValueError(
                 "Cannot use store_history=True together with the update parameter"
             )
+
+        send_layout_create = False
 
         if update == "remove":
             assert win is not None
@@ -2826,7 +2880,9 @@ class Visdom(object):
                 raise ValueError("Must define a window to update")
 
             if update == "append":
-                if not self.offline:
+                if not self.use_preflight_checks:
+                    send_layout_create = True
+                elif not self.offline:
                     exists = self.win_exists(win, env)
                     if exists is False:
                         update = None
@@ -2865,7 +2921,7 @@ class Visdom(object):
 
         is3d = X.shape[1] == 3
 
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         if opts.get("textlabels") is None:
             opts["mode"] = opts.get("mode", "markers")
         else:
@@ -2997,8 +3053,13 @@ class Visdom(object):
                 "opts": opts,
             }
             endpoint = "events"
-            if win is not None and self.win_exists(win, env):
-                endpoint = "update"
+            if win is not None:
+                if self.use_preflight_checks:
+                    if self.win_exists(win, env):
+                        endpoint = "update"
+                else:
+                    data_to_send["append"] = True
+                    endpoint = "update"
             return self._send(data_to_send, endpoint=endpoint)
 
         # Only send updates to the layout on the first plot, future updates
@@ -3014,6 +3075,8 @@ class Visdom(object):
         if update:
             data_to_send["name"] = name
             data_to_send["append"] = update == "append"
+            if send_layout_create:
+                data_to_send["layout_create"] = _opts2layout(opts, is3d)
             endpoint = "update"
 
         return self._send(data_to_send, endpoint=endpoint)
@@ -3059,6 +3122,9 @@ class Visdom(object):
         - `opts.linecolor`   : line colors (`np.array`; default = None)
         - `opts.dash`        : line dash type (`np.array`; default = None)
         - `opts.legend`      : `list` or `tuple` containing legend names
+        - `opts.aspectmode`  : 3D axis scaling: `'auto'`, `'cube'`, `'data'` or
+                               `'manual'` (`string`; default = `'auto'`)
+        - `opts.aspectratio` : `{'x', 'y', 'z'}` scale dict for `'manual'` mode
 
         If `update` is specified, the figure will be updated without
         creating a new plot -- this can be used for efficient updating.
@@ -3109,7 +3175,7 @@ class Visdom(object):
         if Z is not None:
             assert Z.shape == Y.shape, "Z and Y should be the same shape"
 
-        opts = {} if opts is None else opts
+        opts = {} if opts is None else dict(opts)
         opts["markers"] = opts.get("markers", False)
         opts["fillarea"] = opts.get("fillarea", False)
         if Z is not None and opts["fillarea"]:
@@ -3249,12 +3315,16 @@ class Visdom(object):
         Draw a precision-recall curve for binary classification.
 
         You can either provide raw labels/scores (`y_true`, `y_score`) or
-        precomputed points (`precision`, `recall`).
+        precomputed points (`precision`, `recall`). A baseline showing the
+        true class prevalence is only drawn for the `y_true`/`y_score`
+        path, since prevalence cannot be recovered from `precision`/
+        `recall` points alone.
 
         The following `opts` are supported:
 
         - `opts.title`      : plot title (`string`; default includes PR-AUC)
-        - `opts.legend`     : two legend labels for curve and baseline (`list`)
+        - `opts.legend`     : two legend labels for curve and baseline
+          (`list`); only one label is needed when no baseline is drawn
         - `opts.xlabel`     : x-axis label (`string`; default = `Recall`)
         - `opts.ylabel`     : y-axis label (`string`; default = `Precision`)
         - `opts.layoutopts` : additional backend layout options (`dict`)
@@ -3283,7 +3353,7 @@ class Visdom(object):
             if precision is None or recall is None:
                 raise ValueError("both precision and recall are required")
             recall, precision = _coerce_curve_xy(
-                recall, precision, "recall", "precision"
+                recall, precision, "recall", "precision", y_tiebreak_descending=True
             )
 
         _validate_curve_range(recall, "recall")
@@ -3291,19 +3361,25 @@ class Visdom(object):
 
         auc = _average_precision(precision, recall)
 
-        opts = dict(opts)
-        opts["xlabel"] = opts.get("xlabel", "Recall")
-        opts["ylabel"] = opts.get("ylabel", "Precision")
-        opts["legend"] = _curve_legend(opts.get("legend"), ["PR", "Baseline"])
-        opts["title"] = opts.get("title", "PR Curve (AUC={:.4f})".format(auc))
-
         if has_raw:
             y_true_arr = np.ravel(np.asarray(y_true))
             positive_rate = float(np.mean(y_true_arr == pos_label))
         else:
-            positive_rate = float(precision[0]) if float(recall[0]) == 0.0 else None
+            # Precision/recall alone don't preserve class counts, so
+            # prevalence can't be recovered from them.
+            positive_rate = None
 
         baseline = [positive_rate, positive_rate] if positive_rate is not None else None
+
+        opts = dict(opts)
+        opts["xlabel"] = opts.get("xlabel", "Recall")
+        opts["ylabel"] = opts.get("ylabel", "Precision")
+        opts["legend"] = _curve_legend(
+            opts.get("legend"),
+            ["PR", "Baseline"],
+            required=2 if baseline is not None else 1,
+        )
+        opts["title"] = opts.get("title", "PR Curve (AUC={:.4f})".format(auc))
 
         data = [
             {
@@ -3643,7 +3719,8 @@ class Visdom(object):
         - `opts.stacked` : stack multiple columns in `X`
             - `opts.legend`  : `list` containing legend labels
         """
-        X = np.squeeze(X)
+        X = np.atleast_1d(np.squeeze(np.asarray(X)))
+
         assert X.ndim == 1 or X.ndim == 2, "X should be one or two-dimensional"
         if X.ndim == 1:
             if opts is not None and opts.get("legend") is not None:
@@ -3655,7 +3732,7 @@ class Visdom(object):
             else:
                 X = X[:, None]
         if Y is not None:
-            Y = np.squeeze(Y)
+            Y = np.atleast_1d(np.squeeze(np.asarray(Y)))
             assert Y.ndim == 1, "Y should be one-dimensional"
             assert len(X) == len(Y), "sizes of X and Y should match"
         else:
@@ -3709,8 +3786,7 @@ class Visdom(object):
 
         - `opts.numbins`: number of bins (`number`; default = 30)
         """
-
-        X = np.squeeze(X)
+        X = np.atleast_1d(np.squeeze(np.asarray(X)))
         assert X.ndim == 1, "X should be one-dimensional"
 
         opts = {} if opts is None else opts
@@ -3884,9 +3960,12 @@ class Visdom(object):
 
         The following `opts` are supported:
 
-        - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
-        - `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
-        - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
+        - `opts.colormap`  : colormap (`string`; default = `'Viridis'`)
+        - `opts.xmin`      : clip minimum value (`number`; default = `X:min()`)
+        - `opts.xmax`      : clip maximum value (`number`; default = `X:max()`)
+        - `opts.aspectmode`: 3D axis scaling: `'auto'`, `'cube'`, `'data'` or
+                             `'manual'` (`string`; default = `'auto'`)
+        - `opts.aspectratio`: `{'x', 'y', 'z'}` scale dict for `'manual'` mode
         """
 
         return self._surface(X=X, stype="surface", opts=opts, win=win, env=env)
@@ -4152,7 +4231,7 @@ class Visdom(object):
                 values = np.asarray(values, dtype=np.float64)
             except (TypeError, ValueError):
                 raise AssertionError("values must be numeric")
-            values = np.squeeze(values)
+            values = np.atleast_1d(np.squeeze(values))
             assert values.ndim == 1, "values should be one-dimensional"
             assert len(values) == len(
                 labels
@@ -4219,6 +4298,9 @@ class Visdom(object):
 
         - `opts.color`: color (`string`)
         - `opts.opacity`: opacity of polygons (`number` between 0 and 1)
+        - `opts.aspectmode`: 3D axis scaling: `'auto'`, `'cube'`, `'data'` or
+          `'manual'` (`string`; default = `'auto'`; 3D mesh only)
+        - `opts.aspectratio`: `{'x', 'y', 'z'}` scale dict for `'manual'` mode
         """
         opts = {} if opts is None else opts
         _title2str(opts)
@@ -4253,7 +4335,7 @@ class Visdom(object):
                 "data": data,
                 "win": win,
                 "eid": env,
-                "layout": _opts2layout(opts),
+                "layout": _opts2layout(opts, is3d),
                 "opts": opts,
             }
         )
@@ -4565,9 +4647,9 @@ class Visdom(object):
         `X` represents one experiment and each column represents a dimension
         (e.g., a hyperparameter or metric).
 
-        An optional `N`-length vector `Y` supplies per-experiment color values
-        (e.g., accuracy or loss) so that the lines are shaded according to
-        a continuous colorscale.
+        An optional `N`-length vector or scalar (for `N=1`) `Y` supplies
+        per-experiment color values (e.g., accuracy or loss) so that the lines
+        are shaded according to a continuous colorscale.
 
         The following `opts` are supported:
 
@@ -4596,7 +4678,7 @@ class Visdom(object):
         assert M >= 2, "X must have at least 2 dimensions (columns)"
 
         if Y is not None:
-            Y = np.squeeze(np.asarray(Y, dtype=float))
+            Y = np.atleast_1d(np.squeeze(np.asarray(Y, dtype=float)))
             assert Y.ndim == 1, "Y must be a 1D vector"
             assert (
                 len(Y) == N
@@ -4825,7 +4907,8 @@ class Visdom(object):
         """
         This function renders structured data as a styled HTML table.
 
-        - `data`: a 2D `list`/`tuple` of row data, a 2D numpy array, or
+        - `data`: a 2D `list`/`tuple` of row data (each row a `list`,
+           `tuple` or 1-D numpy array), a 2D numpy array, or
            a list of `dict`s (in which case `headers` is derived from
            the first dict's keys unless explicitly given). In case of
            an empty list, a table with only headers will be rendered.
@@ -4892,7 +4975,8 @@ class Visdom(object):
         """
         Renders a native, structured, editable table pane.
 
-        - `data`: a 2D list of rows (list of lists/tuples), OR a list of
+        - `data`: a 2D list of rows (list of lists, tuples or 1-D numpy
+           arrays), a 2D numpy array, OR a list of
            dicts (in which case `headers` is derived from the first
            dict's keys unless explicitly given).
         - `headers`: list of column names. Required if `data` rows are

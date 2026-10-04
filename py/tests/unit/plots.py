@@ -13,6 +13,7 @@ receives, so these run on the ``capture_send`` fixture, which intercepts the
 payload, and on ``offline_client`` where only the input validation is under
 test. Neither opens a socket or reaches a server.
 """
+
 import math
 import unittest
 from unittest.mock import patch
@@ -131,6 +132,42 @@ def test_line_update_append_new_window_no_append_key(capture_send):
     assert "append" not in sent["payload"]
 
 
+def test_line_update_append_without_preflight_skips_the_probe(
+    capture_send, offline_client
+):
+    """With the preflight off the append is one POST, not two.
+
+    The layout an append deliberately leaves empty rides along as
+    ``layout_create``, which the server reads only if it has to create the
+    window this append landed on.
+    """
+    offline_client.use_preflight_checks = False
+    Y = np.array([1.0, 2.0])
+    X = np.array([0.0, 1.0])
+    with patch.object(offline_client, "win_exists") as probe:
+        sent = capture_send(
+            lambda v: v.line(Y, X=X, win="w", update="append", opts=dict(title="t"))
+        )
+    assert not probe.called
+    assert sent["endpoint"] == "update"
+    assert sent["payload"]["append"]
+    assert sent["payload"]["layout"] == {}
+    assert sent["payload"]["layout_create"]["title"] == {"text": "t"}
+
+
+def test_line_update_replace_without_preflight_sends_no_layout_create(
+    capture_send, offline_client
+):
+    """Only an append can create a window, so only an append carries the key."""
+    offline_client.use_preflight_checks = False
+    sent = capture_send(
+        lambda v: v.line(
+            np.array([1.0, 2.0]), X=np.array([0.0, 1.0]), win="w", update="replace"
+        )
+    )
+    assert "layout_create" not in sent["payload"]
+
+
 def test_line_update_remove_sends_delete(capture_send):
     """update='remove' sends delete=True without touching Y."""
     sent = capture_send(lambda v: v.line(None, win="w", name="trace1", update="remove"))
@@ -215,6 +252,22 @@ def test_scatter_name_with_multiple_labels_raises(offline_client):
         offline_client.scatter(X, Y=np.array([1, 2]), name="trace1")
 
 
+def test_scatter_store_history_without_preflight_always_updates(
+    capture_send, offline_client
+):
+    """One POST either way: /update appends the frame, or builds the pane."""
+    offline_client.use_preflight_checks = False
+    with patch.object(offline_client, "win_exists") as probe:
+        sent = capture_send(
+            lambda v: v.scatter(
+                np.array([[1.0, 2.0]]), win="w", opts=dict(store_history=True)
+            )
+        )
+    assert not probe.called
+    assert sent["endpoint"] == "update"
+    assert sent["payload"]["append"]
+
+
 def test_scatter_store_history_with_update_raises(offline_client):
     """store_history=True combined with update raises ValueError."""
     X = np.array([[1.0, 2.0], [3.0, 4.0]])
@@ -272,6 +325,69 @@ def test_scatter_name_based_update_1d_x_1d_y(capture_send):
     data = sent["payload"]["data"][0]
     assert data["x"] == [1.0, 2.0, 3.0]
     assert data["y"] == [4.0, 5.0, 6.0]
+
+
+def test_scatter_3d_aspectmode_forwarded_to_scene(capture_send):
+    """aspectmode opt reaches layout.scene for a 3D scatter."""
+    X = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    sent = capture_send(lambda v: v.scatter(X, opts={"aspectmode": "data"}))
+    assert sent["payload"]["layout"]["scene"]["aspectmode"] == "data"
+
+
+def test_scatter_3d_aspectmode_absent_by_default(capture_send):
+    """No aspectmode key is emitted when the opt is not set."""
+    X = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    sent = capture_send(lambda v: v.scatter(X))
+    assert "aspectmode" not in sent["payload"]["layout"]["scene"]
+
+
+def test_scatter_2d_ignores_aspectmode(capture_send):
+    """A 2D scatter builds no scene, so aspectmode has nowhere to land."""
+    X = np.array([[1.0, 2.0], [3.0, 4.0]])
+    sent = capture_send(lambda v: v.scatter(X, opts={"aspectmode": "data"}))
+    assert "scene" not in sent["payload"]["layout"]
+
+
+@pytest.mark.parametrize("bad", ["bogus", ""], ids=["unknown", "empty"])
+def test_scatter_invalid_aspectmode_raises(offline_client, bad):
+    """A non-enum aspectmode value raises in _assert_opts, falsy included."""
+    X = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    with pytest.raises(AssertionError):
+        offline_client.scatter(X, opts={"aspectmode": bad})
+
+
+def test_scatter_3d_aspectratio_forwarded_to_scene(capture_send):
+    """aspectratio opt reaches layout.scene for manual mode."""
+    X = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    ratio = {"x": 1, "y": 1, "z": 0.5}
+    sent = capture_send(
+        lambda v: v.scatter(X, opts={"aspectmode": "manual", "aspectratio": ratio})
+    )
+    scene = sent["payload"]["layout"]["scene"]
+    assert scene["aspectmode"] == "manual"
+    assert scene["aspectratio"] == ratio
+
+
+def test_scatter_aspectratio_missing_axis_raises(offline_client):
+    """An aspectratio dict without all of x, y, z raises."""
+    X = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    with pytest.raises(AssertionError):
+        offline_client.scatter(X, opts={"aspectratio": {"x": 1, "y": 1}})
+
+
+def test_line_3d_aspectmode_forwarded_to_scene(capture_send):
+    """aspectmode reaches layout.scene and x/y/z stay on their own axes."""
+    Y = np.array([1.0, 2.0, 3.0])
+    X = np.array([10.0, 20.0, 30.0])
+    Z = np.array([100.0, 200.0, 300.0])
+    sent = capture_send(
+        lambda v: v.line(Y, X=X, Z=Z, is3d=True, opts={"aspectmode": "cube"})
+    )
+    trace = sent["payload"]["data"][0]
+    assert trace["x"] == [10.0, 20.0, 30.0]
+    assert trace["y"] == [1.0, 2.0, 3.0]
+    assert trace["z"] == [100.0, 200.0, 300.0]
+    assert sent["payload"]["layout"]["scene"]["aspectmode"] == "cube"
 
 
 # ------------------------------------------------------------------- heatmap ----
@@ -428,6 +544,29 @@ def test_bar_legend_with_rownames_on_1d_raises(offline_client):
         offline_client.bar(np.array([1.0, 2.0, 3.0]), opts=opts)
 
 
+def test_bar_size_one_x_renders(capture_send):
+    """Regression test for #1787: a single-value X used to collapse to a
+    0-d array via an unconditional np.squeeze() and fail the ndim assert."""
+    sent = capture_send(lambda v: v.bar(np.array([5.0])))
+    assert sent["payload"]["data"][0]["y"] == [5.0]
+
+
+def test_bar_size_one_y_renders(capture_send):
+    """Regression test for #1787: a single-value Y hit the same unconditional
+    np.squeeze() bug as X, one call deeper in bar()."""
+    sent = capture_send(lambda v: v.bar(np.array([5.0]), Y=np.array([10.0])))
+    assert sent["payload"]["data"][0]["x"] == [10.0]
+
+
+def test_bar_2d_row_vector_still_squeezes(capture_send):
+    """A 2D row vector must still collapse to a single 1D trace, matching
+    np.squeeze()'s original behavior -- only the size-1 case should be
+    guarded, not squeezing in general."""
+    sent = capture_send(lambda v: v.bar(np.array([[1.0, 2.0, 3.0, 4.0, 5.0]])))
+    assert len(sent["payload"]["data"]) == 1
+    assert sent["payload"]["data"][0]["y"] == [1.0, 2.0, 3.0, 4.0, 5.0]
+
+
 def test_bar_stacked_sets_barmode(capture_send):
     """stacked=True stacks the columns instead of grouping them."""
     X = np.array([[1.0, 2.0], [3.0, 4.0]])
@@ -474,6 +613,13 @@ def test_histogram_bin_edges_span_data_range(capture_send):
     x = sent["payload"]["data"][0]["x"]
     assert x[0] == 0.0
     assert x[-1] == 99.0
+
+
+def test_histogram_size_one_x_renders(capture_send):
+    """Regression test for #1787: a single-value X used to collapse to a
+    0-d array via an unconditional np.squeeze() and fail the ndim assert."""
+    sent = capture_send(lambda v: v.histogram(np.array([42.0])))
+    assert sum(sent["payload"]["data"][0]["y"]) == 1
 
 
 # ------------------------------------------------------------------- boxplot ----
@@ -594,6 +740,12 @@ def test_surf_layout_is_3d(capture_send):
     assert "scene" in sent["payload"]["layout"]
 
 
+def test_surf_aspectmode_forwarded_to_scene(capture_send):
+    """aspectmode opt reaches layout.scene for surf."""
+    sent = capture_send(lambda v: v.surf(np.ones((2, 2)), opts={"aspectmode": "data"}))
+    assert sent["payload"]["layout"]["scene"]["aspectmode"] == "data"
+
+
 # ------------------------------------------------------------------- contour ----
 
 
@@ -606,6 +758,31 @@ def test_contour_type_is_contour(capture_send):
 def test_contour_layout_is_flat(capture_send):
     """contour renders flat, without the 3D scene surf builds."""
     sent = capture_send(lambda v: v.contour(np.ones((2, 2))))
+    assert "scene" not in sent["payload"]["layout"]
+
+
+# ---------------------------------------------------------------------- mesh ----
+
+
+def test_mesh_3d_builds_scene_layout(capture_send):
+    """An Nx3 mesh renders as mesh3d with a 3D scene layout."""
+    X = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    sent = capture_send(lambda v: v.mesh(X))
+    assert sent["payload"]["data"][0]["type"] == "mesh3d"
+    assert "scene" in sent["payload"]["layout"]
+
+
+def test_mesh_3d_aspectmode_forwarded_to_scene(capture_send):
+    """aspectmode opt reaches layout.scene for a 3D mesh."""
+    X = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    sent = capture_send(lambda v: v.mesh(X, opts={"aspectmode": "data"}))
+    assert sent["payload"]["layout"]["scene"]["aspectmode"] == "data"
+
+
+def test_mesh_2d_layout_is_flat(capture_send):
+    """An Nx2 mesh builds no 3D scene."""
+    X = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
+    sent = capture_send(lambda v: v.mesh(X))
     assert "scene" not in sent["payload"]["layout"]
 
 
@@ -662,3 +839,71 @@ class TestMatplotResizable(unittest.TestCase):
         opts = self._matplot(_FakePlot(width_pt="100.5", height_pt="200.5"))
         self.assertEqual(opts["height"], 1.4 * math.ceil(200.5))  # 1.4 * 201
         self.assertEqual(opts["width"], 1.35 * math.ceil(100.5))  # 1.35 * 101
+
+
+# --------------------------------------------------- parallel_coordinates ----
+
+
+def test_parallel_coordinates_size1_list_y(capture_send):
+    """Size-1 Python list Y is preserved as a 1D vector and plots successfully."""
+    sent = capture_send(
+        lambda v: v.parallel_coordinates(
+            X=[[1.0, 2.0, 3.0]],
+            Y=[0.5],
+        )
+    )
+    trace = sent["payload"]["data"][0]
+    assert trace["type"] == "parcoords"
+    assert trace["line"]["color"] == [0.5]
+
+
+def test_parallel_coordinates_numpy_1d_size1_y(capture_send):
+    """NumPy 1D array of shape (1,) succeeds for size-1 Y."""
+    sent = capture_send(
+        lambda v: v.parallel_coordinates(
+            X=np.array([[1.0, 2.0]]),
+            Y=np.array([0.7]),
+        )
+    )
+    trace = sent["payload"]["data"][0]
+    assert trace["type"] == "parcoords"
+    assert trace["line"]["color"] == [0.7]
+
+
+def test_parallel_coordinates_numpy_2d_size1_y(capture_send):
+    """NumPy 2D array of shape (1, 1) is squeezed and preserved as a 1D vector."""
+    sent = capture_send(
+        lambda v: v.parallel_coordinates(
+            X=np.array([[1.0, 2.0]]),
+            Y=np.array([[0.7]]),
+        )
+    )
+    trace = sent["payload"]["data"][0]
+    assert trace["type"] == "parcoords"
+    assert trace["line"]["color"] == [0.7]
+
+
+def test_parallel_coordinates_scalar_y(capture_send):
+    """Pure numeric scalar Y is normalized to a 1D vector for N=1 experiment."""
+    sent = capture_send(
+        lambda v: v.parallel_coordinates(
+            X=[[1.0, 2.0]],
+            Y=0.7,
+        )
+    )
+    trace = sent["payload"]["data"][0]
+    assert trace["type"] == "parcoords"
+    assert trace["line"]["color"] == [0.7]
+
+
+def test_parallel_coordinates_multi_experiment(capture_send):
+    """Multi-experiment input with Y vector works as expected."""
+    sent = capture_send(
+        lambda v: v.parallel_coordinates(
+            X=[[1.0, 2.0], [3.0, 4.0]],
+            Y=[0.1, 0.9],
+        )
+    )
+    trace = sent["payload"]["data"][0]
+    assert trace["type"] == "parcoords"
+    assert trace["line"]["color"] == [0.1, 0.9]

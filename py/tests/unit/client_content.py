@@ -235,6 +235,30 @@ def test_table_coerces_numpy_cells_to_native_types(capture_send):
     assert [type(cell) for cell in rows[0]] == [int, float]
 
 
+def test_table_accepts_1d_numpy_rows(capture_send):
+    """A list of 1-D arrays is the same data as the 2-D array it came from."""
+    sent = capture_send(
+        lambda v: v.table([np.array([1, 2]), np.array([3, 4])], headers=["a", "b"])
+    )
+    rows = block(sent)["content"]["rows"]
+    assert rows == [[1, 2], [3, 4]]
+    assert [type(cell) for cell in rows[0]] == [int, int]
+
+
+def test_table_accepts_the_rows_of_a_2d_array(capture_send):
+    """Iterating a 2-D array yields 1-D arrays; list(arr) must still work."""
+    array = np.array([[1.5, 2.0], [3.0, 4.0]])
+    as_array = capture_send(lambda v: v.table(array, headers=["a", "b"]))
+    as_rows = capture_send(lambda v: v.table(list(array), headers=["a", "b"]))
+    assert block(as_rows)["content"] == block(as_array)["content"]
+
+
+def test_table_rejects_rows_that_are_not_one_dimensional(capture_send):
+    """Only 1-D array rows are unwrapped; a nested array is still an error."""
+    with pytest.raises(AssertionError, match="1-D numpy array"):
+        capture_send(lambda v: v.table([np.array([[1, 2]])], headers=["a", "b"]))
+
+
 # ------------------------------------------------------------ html_table ----
 
 
@@ -259,6 +283,16 @@ def test_html_table_escapes_markup_in_cells_and_headers(capture_send):
 def test_html_table_accepts_an_empty_body(capture_send):
     sent = capture_send(lambda v: v.html_table([], ["a"]))
     assert "<tbody></tbody>" in block(sent)["content"]
+
+
+def test_html_table_accepts_1d_numpy_rows(capture_send):
+    """html_table shares the normalisation, so it takes the same shapes."""
+    sent = capture_send(
+        lambda v: v.html_table([np.array([1, 2]), np.array([3, 4])], ["a", "b"])
+    )
+    html = block(sent)["content"]
+    assert "<tr><td>1</td><td>2</td></tr>" in html
+    assert "<tr><td>3</td><td>4</td></tr>" in html
 
 
 def test_html_table_accepts_tuple_rows(capture_send):

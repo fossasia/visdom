@@ -241,6 +241,23 @@ class TestPollingCommandParity(PollingTestCase):
 
         self.assertIn(win, self.panes())
 
+    def test_save_has_persisted_before_the_response_returns(self):
+        """The bridge awaits dispatch, so a command's disk work is done by then.
+
+        Dispatch hands the write to the storage worker; answering the POST
+        without waiting for it would tell the client the env was saved while
+        the file was still queued behind whatever else that worker had.
+        """
+        self.create_text_window(eid="expt", content="polled")
+        sid = self.sub_sid()
+
+        resp = self.send(
+            sid, {"cmd": "save", "eid": "copy", "prev_eid": "expt", "data": {}}
+        )
+
+        self.assertTrue(json.loads(resp.body)["success"])
+        self.assertTrue(self._app.storage.env_exists("copy"))
+
     def test_delete_env_removes_the_environment(self):
         self.create_text_window(eid="expt", content="polled")
         sid = self.sub_sid()

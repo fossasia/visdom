@@ -18,7 +18,7 @@ dependency so they can be exercised on their own:
   runs are coalesced, so a training loop logging a metric every step costs one
   rebuild per burst rather than one per step.
 * :func:`resolve_targets` — *what* to rebuild. Given the server's env state and
-  the environments that just changed, it names the panes affected.
+  the environments that just changed, it names the explicit-id panes affected.
 
 The queue is handed a resolver and a rebuild callback rather than reaching for
 either itself, which is what lets the server point it at the existing
@@ -54,10 +54,10 @@ def resolve_targets(state, changed):
     ids just written. Returns ``(eid, win_id)`` pairs — what a rebuild needs to
     identify a pane — in a stable order, grouped by environment.
 
-    A pane that names its runs explicitly (``mode="env_ids"``) is affected only
-    when one of those runs changed. A pane holding a query is affected by any
-    change at all: a run that did not match before may match now, and deciding
-    otherwise would mean re-running the query, which is the rebuild itself.
+    Only a pane that names its runs explicitly (``mode="env_ids"``) is refreshed
+    automatically, and only when one of those runs changed. Query selections
+    require a whole-store scan, so ``query`` and ``both`` panes are refreshed
+    only when requested explicitly.
 
     Environments that are not resident in memory are skipped rather than paged
     in. With an env per file, touching them all on every logged metric would
@@ -82,9 +82,9 @@ def resolve_targets(state, changed):
             spec = win.get("hparams")
             if not isinstance(spec, dict):
                 continue
-            if spec.get("mode") == "env_ids" and not changed.intersection(
-                _named_env_ids(spec)
-            ):
+            if spec.get("mode") != "env_ids":
+                continue
+            if not changed.intersection(_named_env_ids(spec)):
                 continue
             targets.append((eid, win_id))
     return targets

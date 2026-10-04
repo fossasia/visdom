@@ -30,7 +30,7 @@ Use this skill when preparing a new release or updating the version.
 - Version stored as single-line plaintext in `py/visdom/VERSION`
 - `setup.py` reads this file at build time
 - `build.py` uses version to track CDN dependency freshness
-- PyPI build uses `python setup.py sdist`
+- PyPI build uses `python -m build --sdist`
 
 ## Guardrails
 

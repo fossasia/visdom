@@ -4,7 +4,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Optional, List, Any, Union, Mapping, overload, Text, Tuple, Callable
+from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Text, Tuple, Union
 
 ### Type aliases for commonly-used types.
 # For optional 'options' parameters.
@@ -38,7 +38,28 @@ Tensor = Any
 # See https://github.com/python/mypy/issues/1693.
 _SendReturn = Text
 
+# A decoded server event, as handed to a registered event handler. The handler's
+# return value is discarded, so it is deliberately unconstrained.
+_Event = Mapping[Text, Any]
+_EventHandler = Callable[[_Event], Any]
+
+# Event handlers are keyed by the (env, target) pair they were registered under.
+# 'env' is None for a handler registered for every environment.
+_EventKey = Tuple[_OptStr, Text]
+
 class Visdom:
+    # Public attributes. Callers read 'env' to see the environment new windows
+    # land in and assign it to change that; the rest are the connection state the
+    # documented patterns poll ('while not vis.check_connection()' and friends).
+    env: Text
+    env_list: Set[Text]
+    win_data: Dict[Text, Any]
+    offline: bool
+    use_socket: bool
+    socket_alive: bool
+    use_preflight_checks: bool
+    event_handlers: Dict[_EventKey, List[_EventHandler]]
+
     def __init__(
         self,
         server: Text = ...,
@@ -53,9 +74,30 @@ class Visdom:
         raise_exceptions: Optional[bool] = ...,
         use_incoming_socket: bool = ...,
         log_to_filename: _OptStr = ...,
+        username: _OptStr = ...,
+        password: _OptStr = ...,
+        proxies: Optional[Mapping[Text, Text]] = ...,
+        offline: bool = ...,
+        use_polling: bool = ...,
+        session_idle_timeout: Union[int, float] = ...,
+        session_idle_check_interval: Union[int, float] = ...,
+        ssl_verify: Optional[Union[bool, Text]] = ...,
+        use_preflight_checks: bool = ...,
     ) -> None: ...
+    def setup_socket(self, polling: bool = ...) -> None: ...
+    def setup_polling(self) -> None: ...
+    def register_event_handler(
+        self, handler: _EventHandler, target: Text, env: _OptStr = ...
+    ) -> None: ...
+    def clear_event_handlers(self, target: Text, env: _OptStr = ...) -> None: ...
     def _send(
-        self, msg, endpoint: Text = ..., quiet: bool = ..., from_log: bool = ...
+        self,
+        msg: Any,
+        endpoint: Text = ...,
+        quiet: bool = ...,
+        from_log: bool = ...,
+        create: bool = ...,
+        default_eid: bool = ...,
     ) -> _SendReturn: ...
     def save(self, envs: List[Text]) -> _SendReturn: ...
     def close(self, win: _OptStr = ..., env: _OptStr = ...) -> _SendReturn: ...
@@ -116,11 +158,16 @@ class Visdom:
     def get_window_data(
         self, win: _OptStr = ..., env: _OptStr = ...
     ) -> _SendReturn: ...
+    def set_window_data(
+        self, data: Any, win: _OptStr = ..., env: _OptStr = ...
+    ) -> _SendReturn: ...
     def delete_env(self, env: Text) -> _SendReturn: ...
+    def delete_envs(self, env_list: _EnvIds) -> _SendReturn: ...
+    def fork_env(self, prev_eid: Text, eid: Text) -> _SendReturn: ...
     def get_env_list(self) -> List[Text]: ...
     def get_env_state(self, env: Text) -> Optional[Mapping[Text, Any]]: ...
     def win_exists(self, win: Text, env: _OptStr = ...) -> Optional[bool]: ...
-    def check_connection(self) -> bool: ...
+    def check_connection(self, timeout_seconds: Union[int, float] = ...) -> bool: ...
     def replay_log(self, log_filename: Text) -> None: ...
     def text(
         self,
@@ -130,17 +177,9 @@ class Visdom:
         opts: _OptOps = ...,
         append: bool = ...,
     ) -> _SendReturn: ...
-    @overload
     def svg(
         self,
         svgstr: _OptStr = ...,
-        win: _OptStr = ...,
-        env: _OptStr = ...,
-        opts: _OptOps = ...,
-    ) -> _SendReturn: ...
-    @overload
-    def svg(
-        self,
         svgfile: _OptStr = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
@@ -197,6 +236,7 @@ class Visdom:
     def video(
         self,
         tensor: Tensor = ...,
+        dim: Text = ...,
         videofile: _OptStr = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
@@ -230,21 +270,11 @@ class Visdom:
         X: Optional[Tensor] = ...,
         win: _OptStr = ...,
         env: _OptStr = ...,
+        opts: _OptOps = ...,
         update: _OptStr = ...,
         name: _OptStr = ...,
-        opts: _OptOps = ...,
         Z: Optional[Tensor] = ...,
         is3d: bool = ...,
-    ) -> _SendReturn: ...
-    def grid(
-        self,
-        X: Tensor,
-        Y: Tensor,
-        gridX: Optional[Tensor] = ...,
-        gridY: Optional[Tensor] = ...,
-        win: _OptStr = ...,
-        env: _OptStr = ...,
-        opts: _OptOps = ...,
     ) -> _SendReturn: ...
     def heatmap(
         self,
@@ -358,11 +388,11 @@ class Visdom:
     def graph(
         self,
         edges: List,
-        edgeLabels: List,
-        nodeLabels: List,
-        win: _OptStr = ...,
-        env: _OptStr = ...,
+        edgeLabels: Optional[List] = ...,
+        nodeLabels: Optional[List] = ...,
         opts: _OptOps = ...,
+        env: _OptStr = ...,
+        win: _OptStr = ...,
     ) -> _SendReturn: ...
     def parallel_coordinates(
         self,
