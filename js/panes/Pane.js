@@ -213,9 +213,8 @@ var Pane = forwardRef((props, ref) => {
         {barwidgets}
         {props.onExpand ? (
           <button
-            className="pane-title"
+            className="pull-right pane-title"
             title="Open full-screen view"
-            onMouseDown={(e) => e.stopPropagation()}
             onClick={() => props.onExpand(id)}
           >
             <Maximize2 size={10} />
