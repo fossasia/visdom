@@ -179,8 +179,16 @@ def _planned_extensions(p, args):
     new_data = args.get("data")
     if not isinstance(new_data, list) or not new_data:
         return None
+    opts = args.get("opts")
+    layout = args.get("layout")
+    if opts is not None and not isinstance(opts, dict):
+        return None
+    if layout is not None and not isinstance(layout, dict):
+        return None
+    if "content" in (opts or {}):
+        return None
     # legend renames traces rather than extending them
-    if "legend" in (args.get("opts") or {}):
+    if "legend" in (opts or {}):
         return None
 
     name = args.get("name")
@@ -257,6 +265,12 @@ def append_patch(p, args):
     old_pane_head = _pane_head(p)
     old_content_head = _content_head(content)
 
+    UpdateHandler.bump_version(p)
+    # opts have to be applied before we diff for them, and before the samples
+    # move, so a layout that cannot be applied leaves no half-finished append.
+    # Op order doesn't matter to the client, every path here is distinct.
+    p = update_window(p, args)
+
     ops = []
     for path, current, added in extensions:
         # update() does `trace[axis] + new[axis]`, rebuilding the array every
@@ -272,9 +286,6 @@ def append_patch(p, args):
                 }
             )
 
-    # opts have to be applied before we diff for them. Op order doesn't matter
-    # to the client, every path here is distinct.
-    p = update_window(p, args)
     p["contentID"] = get_rand_id()
 
     head_ops = jsonpatch.make_patch(old_pane_head, _pane_head(p)).patch

@@ -53,6 +53,7 @@ def reference_update_packet(p, args):
     if "old_content" in p:
         old_p["old_content"] = copy.deepcopy(p["old_content"])
     p = UpdateHandler.update(p, args, *MAXES)
+    UpdateHandler.bump_version(p)
     p["contentID"] = "fixed-content-id"
     return p, jsonpatch.make_patch(old_p, p).patch
 
@@ -195,6 +196,10 @@ FALLBACK_CASES = {
             [sample("1"), sample("2")],
             opts=dict(CLIENT_OPTS, legend=["a", "b"]),
         ),
+    ),
+    "opts replacing the pane content": (
+        plot_pane(),
+        append_args([sample()], opts=dict(CLIENT_OPTS, content="replacement")),
     ),
     "a heatmap": (
         {
@@ -387,3 +392,35 @@ def test_the_size_check_measures_both_sides_alike():
     size = compact_len(pane)
     assert pane_fits_in(pane, size) is True
     assert pane_fits_in(pane, size - 1) is False
+
+
+@pytest.mark.parametrize("label", sorted(FAST_CASES))
+def test_the_append_carries_the_next_version(label):
+    """The client applies a patch only if it is exactly one version ahead."""
+    pane, args = FAST_CASES[label]
+    pane = copy.deepcopy(pane)
+    before = pane["version"]
+    updated, ops = UpdateHandler.update_packet(pane, copy.deepcopy(args), *MAXES)
+    assert updated["version"] == before + 1
+    assert any(op["path"] == "/version" and op["value"] == before + 1 for op in ops)
+
+
+def test_a_layout_that_cannot_be_applied_leaves_the_samples_alone():
+    """The metadata lands first, so a failure cannot leave half an append."""
+    pane = plot_pane()
+    before = copy.deepcopy(pane["content"]["data"])
+    with pytest.raises(AttributeError):
+        UpdateHandler.update_packet(
+            pane, append_args([sample()], layout=["not", "a", "layout"]), *MAXES
+        )
+    assert pane["content"]["data"] == before
+
+
+def test_opts_that_are_not_an_object_fall_back_to_the_differ():
+    pane = plot_pane()
+    assert _planned_extensions(pane, append_args([sample()], opts="wide")) is None
+
+
+def test_a_layout_that_is_not_an_object_falls_back_to_the_differ():
+    pane = plot_pane()
+    assert _planned_extensions(pane, append_args([sample()], layout=[1, 2])) is None
