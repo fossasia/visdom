@@ -147,12 +147,10 @@ class TestEmbeddingsBroadcasts(BroadcastTestCase):
             for msg in sent(sub)
             if isinstance(msg, dict) and msg.get("command") == "window_update"
         ][-1]
-        # "add" rather than "replace": a pane the browser loaded from an env
-        # saved before panes carried a version has no ``/version`` member for
-        # "replace" to land on, and a patch that fails to apply reloads the
-        # whole environment. "add" overwrites when the member is there.
+        # "replace" lands even on a pane saved before panes carried a version:
+        # main.js applies the patch with validation off, so the member is set.
         self.assertIn(
-            {"op": "add", "path": "/version", "value": packet["version"]},
+            {"op": "replace", "path": "/version", "value": packet["version"]},
             packet["content"],
         )
 

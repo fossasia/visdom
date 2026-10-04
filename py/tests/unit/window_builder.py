@@ -286,15 +286,17 @@ def test_caption_is_skipped_when_content_is_not_a_dict():
     assert text_pane["content"] == "hello"
 
 
-def test_version_is_left_to_the_caller(titled_pane):
-    """``update_window`` used to own the version bump, and could not.
+@pytest.mark.parametrize("args", [{"opts": {"title": "a"}}, {}])
+def test_version_is_left_to_the_caller(titled_pane, args):
+    """``update_window`` merges fields; it does not sequence the broadcast.
 
-    Only plot panes reach it: ``UpdateHandler.update`` returns ahead of it for
-    text, image and plot history and tables, so those types never got a bump
-    at all. The increment now sits in ``UpdateHandler.update_packet``, which
-    runs once for every type -- see ``py/tests/unit/pane_versioning.py``.
+    Only some updates reach this helper -- ``UpdateHandler.update()`` returns
+    before it for text, image_history, plot_history and table panes -- so
+    bumping here left those types stuck at version 1 and made the frontend
+    reload the whole environment on every update. The counter now moves in
+    ``UpdateHandler.update_packet()``; see ``unit/pane_versions.py``.
     """
-    update_window(titled_pane, {"opts": {"title": "a"}})
+    update_window(titled_pane, args)
     assert titled_pane["version"] == 1
 
 

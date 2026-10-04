@@ -436,7 +436,7 @@ def test_an_applied_embeddings_update_is_still_broadcast(handler):
 
     packet = sub.last("window_update")
     assert packet["version"] == 2
-    assert {"op": "add", "path": "/version", "value": 2} in packet["content"]
+    assert {"op": "replace", "path": "/version", "value": 2} in packet["content"]
     assert handler.dirtied == ["main"]
 
 
