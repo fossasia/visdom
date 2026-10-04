@@ -287,6 +287,19 @@ class TestReviewRegressions(unittest.TestCase):
         self.assertTrue(os.path.exists(run.path))
         run.finish()
 
+    def test_long_unicode_name_keeps_filenames_within_byte_limit(self):
+        """Non-ASCII run names must leave space for the generated suffixes."""
+        name = "研究" * 100
+        run = RunTracker(name, out_dir=self.out_dir, capture_environment=False)
+        try:
+            run.log_event("checkpoint")
+            for path in (run.path, run.events_path):
+                self.assertLessEqual(len(os.path.basename(path).encode("utf-8")), 255)
+                self.assertTrue(os.path.exists(path))
+            self.assertEqual(run.name, name)
+        finally:
+            run.finish()
+
     def test_invalid_name_type_raises_value_error(self):
         with self.assertRaises(ValueError):
             RunTracker(None, out_dir=self.out_dir)
@@ -512,6 +525,16 @@ class TestSlugify(unittest.TestCase):
         from visdom.tracking.core import _slugify, _MAX_SLUG_LEN
 
         self.assertEqual(len(_slugify("x" * 500)), _MAX_SLUG_LEN)
+
+    def test_unicode_slug_is_bounded_without_splitting_characters(self):
+        from visdom.tracking.core import _slugify, _MAX_SLUG_LEN
+
+        for name in ("研究" * 100, "𐐀" * 100, "a" * 99 + "界"):
+            with self.subTest(name=name):
+                slug = _slugify(name)
+                self.assertLessEqual(len(slug.encode("utf-8")), _MAX_SLUG_LEN)
+                self.assertTrue(name.startswith(slug))
+                self.assertNotIn("\ufffd", slug)
 
 
 class TestJsonSafe(unittest.TestCase):

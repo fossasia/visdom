@@ -50,6 +50,10 @@ vis = await AsyncVisdom.create(server="http://localhost", port=8097, env="main")
 `close` is `Visdom.close` and keeps its usual meaning, so the method that releases the HTTP client and the worker pool is `shutdown()`. Using the client as an async context manager — `async with vis:` — calls it for you. Calling it twice is safe.
 :::
 
+:::warning A login over `http://` travels in the clear
+`username`/`password` are POSTed to the `server` url as given, and the `user_password` cookie they return is replayed on every later request — and on the backchannel handshake, whose scheme follows the same url, so an `http://` server gets a plaintext websocket. Anything on the path can read both. The client logs a warning once per login when the server is neither `https://` nor loopback; use an `https://` url for anything that leaves the machine.
+:::
+
 ## Defaults that differ from `Visdom`
 
 | Option | `Visdom` | `AsyncVisdom` | Why |
@@ -88,12 +92,14 @@ async def on_event(event):
 vis.register_event_handler(on_event, win)
 ```
 
-`register_event_handler` is not a coroutine: registration is bookkeeping and never reaches the server. The handler may be a plain function or a coroutine function, and the two run in different places:
+`register_event_handler` is not a coroutine: registration is bookkeeping and never reaches the server. The handler may be a plain callable or an asynchronous one, and the two run in different places:
 
-- **A plain function runs on the dispatch thread.** Incoming messages are handed to a single-worker executor the client owns, named `visdom-async-events`, and your function runs there — off your loop, so it cannot await, and it must not block for long.
-- **A coroutine function runs on your loop.** Registration wraps it, and only that wrapper runs on the dispatch thread: the wrapper submits the coroutine to the client's loop with `asyncio.run_coroutine_threadsafe` and blocks on the result. The body is therefore ordinary loop code and can await further calls on this same client.
+- **A plain callable runs on the dispatch thread.** Incoming messages are handed to a single-worker executor the client owns, named `visdom-async-events`, and your function runs there — off your loop, so it cannot await, and it must not block for long.
+- **An asynchronous one runs on your loop.** Registration wraps every handler, and only that wrapper runs on the dispatch thread: when the call returns an awaitable, the wrapper submits it to the client's loop with `asyncio.run_coroutine_threadsafe` and blocks on the result. The body is therefore ordinary loop code and can await further calls on this same client. Which kind a handler is, is decided by what the call returns, so an `async def` and an object with an `async def __call__` are treated alike.
 
 Blocking the wrapper is deliberate — it is what keeps ordering. One dispatch thread serves every handler either way, so handlers run one at a time, in arrival order, and a slow one delays later events but nothing else.
+
+An asynchronous handler may `await vis.shutdown()`, which is how an event can stop the client. `shutdown` normally waits for a handler that is still running, but not for the one that called it: the dispatch thread is blocked inside that handler until the call returns, so waiting for it would be waiting for itself.
 
 ## Limitations
 
