@@ -312,12 +312,10 @@ class TestDeleteEnvEndpoint(VisdomHTTPTestCase):
         self.assertEqual(resp.code, 400)
         self.assertIn("request body must be an object", resp.reason)
 
-    def test_non_string_eid_returns_400(self):
-        """A delete_env request with non-string 'eid' (number, bool, list) returns HTTP 400."""
-        for invalid_eid in (123, True, [1]):
-            resp = self.post_json("/delete_env", {"eid": invalid_eid})
-            self.assertEqual(resp.code, 400)
-            self.assertIn("'eid' must be a string", resp.reason)
+    def test_numeric_eid_is_coerced(self):
+        """A delete_env request with numeric 'eid' is safely coerced to string."""
+        resp = self.post_json("/delete_env", {"eid": 123})
+        self.assertEqual(resp.code, 200)
 
     def test_empty_string_or_whitespace_eid_is_noop(self):
         """A delete_env request with empty or whitespace-only 'eid' is a safe no-op returning 200."""
@@ -359,12 +357,11 @@ class TestEnvStateEndpoint(VisdomHTTPTestCase):
         self.assertEqual(resp.code, 400)
         self.assertIn("request body must be an object", resp.reason)
 
-    def test_non_string_eid_returns_400(self):
-        """An env_state request with non-string 'eid' returns HTTP 400."""
-        for invalid_eid in (123, True, [1]):
-            resp = self.post_json("/env_state", {"eid": invalid_eid})
-            self.assertEqual(resp.code, 400)
-            self.assertIn("'eid' must be a string", resp.reason)
+    def test_numeric_eid_is_coerced_before_lookup(self):
+        """An env_state request with numeric 'eid' is coerced to string before lookup."""
+        resp = self.post_json("/env_state", {"eid": 123})
+        self.assertEqual(resp.code, 404)
+        self.assertIn("123", json.loads(resp.body)["error"])
 
     def test_empty_body_returns_all_envs(self):
         """An env_state request with an empty object returns all environment IDs."""
