@@ -34,6 +34,7 @@ from visdom.experiments import METADATA_KEY, ExperimentStore, flatten_experiment
 from visdom.server.app import Application
 from visdom.server.handlers.experiments_handler import (
     ExperimentHparamsHandler,
+    _resident_experiments,
     _select_hparams,
 )
 from visdom.utils.server_utils import LazyEnvData
@@ -425,6 +426,67 @@ class TestSelectHparams(unittest.TestCase):
         self.assertEqual(caught.exception.status_code, 404)
 
 
+class TestResidentExperiments(unittest.TestCase):
+    """What the loop hands the worker about the envs it is holding."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.store = SpyStore(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def env(self, env_id, **params):
+        return {
+            METADATA_KEY: {
+                "env_id": env_id,
+                "params": [{"key": k, "value": v} for k, v in params.items()],
+            }
+        }
+
+    def test_a_blob_crosses_over_as_it_stands(self):
+        """No deep copy: copying every resident experiment to hand the worker
+        a selection puts all of the server's metadata through the loop first."""
+        env = self.env("run-a", lr=0.1)
+
+        resident = _resident_experiments({"run-a": env})
+
+        self.assertIs(resident["run-a"][METADATA_KEY], env[METADATA_KEY])
+
+    def test_a_blob_the_loop_replaces_leaves_the_handed_one_alone(self):
+        """Which is what makes handing the object over safe: a write rebinds
+        ``env["experiment"]`` rather than editing the dict the worker holds."""
+        env = self.env("run-a", lr=0.1)
+        resident = _resident_experiments({"run-a": env})
+
+        ExperimentStore(
+            self.store,
+            env_provider=lambda eid: env if eid == "run-a" else None,
+            persist=lambda eid, data: None,
+        ).log_experiment("run-a", params={"lr": 0.2})
+
+        self.assertEqual(resident["run-a"][METADATA_KEY]["params"][0]["value"], 0.1)
+
+    def test_a_materialised_env_with_no_experiment_is_kept_as_an_empty_one(self):
+        resident = _resident_experiments({"run-a": {"jsons": {}}})
+
+        self.assertEqual(resident, {"run-a": {}})
+
+    def test_an_env_never_read_off_disk_is_left_to_its_file(self):
+        state = {"run-a": LazyEnvData(self.store, "run-a")}
+
+        self.assertEqual(_resident_experiments(state), {})
+
+    def test_named_ids_bound_the_walk(self):
+        """An ``env_ids`` selection cannot reach past the ids it names, so the
+        envs the server holds beyond them are never visited."""
+        state = {"run-a": self.env("run-a"), "run-b": self.env("run-b")}
+
+        resident = _resident_experiments(state, ["run-a", "run-a", "ghost"])
+
+        self.assertEqual(list(resident), ["run-a"])
+
+
 class TestHparamsPaneRejectsAStaleEnv(unittest.TestCase):
     """The env a pane targets has to be the same env when the pane is written.
 
@@ -495,6 +557,28 @@ class TestHparamsPaneRejectsAStaleEnv(unittest.TestCase):
 
         self.assertEqual(caught.exception.status_code, 400)
         self.assertNotIn("main", self.handler.state)
+        self.assertEqual(self.store.calls["save_env"], [])
+
+    def test_an_env_being_deleted_is_not_recreated_by_the_pane(self):
+        """A destination the server knows only by its file, deleted mid-build.
+
+        ``state`` held nothing under the id, so there is no entry to compare
+        against and the delete on its way to disk is the only sign the
+        destination is gone. Creating the env regardless would queue the pane's
+        save behind that delete on the one storage worker, so the env the user
+        deleted would come back holding nothing but the pane.
+        """
+        self.store.save_env("filed", env_payload("plot_0"))
+        self.store.calls["save_env"].clear()
+
+        def start_delete(handler):
+            handler.deleting_envs["filed"] = 1
+
+        with self.assertRaises(tornado.web.HTTPError) as caught:
+            self.build_pane("filed", start_delete)
+
+        self.assertEqual(caught.exception.status_code, 400)
+        self.assertNotIn("filed", self.handler.state)
         self.assertEqual(self.store.calls["save_env"], [])
 
     def test_an_env_absent_from_the_start_is_created(self):
