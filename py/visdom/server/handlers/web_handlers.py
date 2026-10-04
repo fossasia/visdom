@@ -654,9 +654,7 @@ class DeleteEnvHandler(BaseHandler):
         eid = args.get("eid")
         if eid is None:
             return None
-        if not isinstance(eid, str):
-            raise tornado.web.HTTPError(400, reason="'eid' must be a string")
-        eid = escape_eid(eid)
+        eid = escape_eid(str(eid))
         if not eid or eid == "main":
             return None
         handler.state.pop(eid, None)
@@ -680,9 +678,7 @@ class EnvStateHandler(BaseHandler):
             raise tornado.web.HTTPError(400, reason="request body must be an object")
         eid = args.get("eid")
         if eid is not None:
-            if not isinstance(eid, str):
-                raise tornado.web.HTTPError(400, reason="'eid' must be a string")
-            eid = escape_eid(eid)
+            eid = escape_eid(str(eid))
             if eid not in handler.state:
                 handler.set_status(404)
                 handler.write(json.dumps({"error": "env '{}' not found".format(eid)}))
@@ -697,9 +693,7 @@ class EnvStateHandler(BaseHandler):
         args = _decode_json_body(self.request.body)
         eid = args.get("eid")
         if eid is not None:
-            if not isinstance(eid, str):
-                raise tornado.web.HTTPError(400, reason="'eid' must be a string")
-            await ensure_env_loaded(self, escape_eid(eid))
+            await ensure_env_loaded(self, escape_eid(str(eid)))
         self.wrap_func(self, args)
 
 
