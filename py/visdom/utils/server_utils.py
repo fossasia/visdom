@@ -501,8 +501,10 @@ def escape_eid(eid):
 def extract_eid(args):
     """Extract eid from args. If eid does not exist in args,
     it returns 'main'."""
-    eid = "main" if args.get("eid") is None else args.get("eid")
-    return escape_eid(eid)
+    eid = args.get("eid") if isinstance(args, Mapping) else None
+    if eid is None:
+        eid = "main"
+    return escape_eid(str(eid))
 
 
 def update_window(p, args):
