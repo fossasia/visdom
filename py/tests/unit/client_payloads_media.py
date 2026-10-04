@@ -13,14 +13,12 @@ decode the payload back into an array and check the pixels the browser would
 receive. That is the only way to catch the failure mode this family actually
 has: a wrong scaling branch produces a valid payload holding a black image.
 
-Two behaviours pinned here are current, not desired:
+One behaviour pinned here is current, not desired:
 
 * A float image whose maximum is just over 1.0 (1.0001 from a denormalization
   round trip, say) matches neither the [0, 1] nor the [-1, 1] branch, so it is
   truncated to uint8 and arrives **black**. ``opts.normalize=True`` is the
   workaround. See ``test_image_float_just_over_one_arrives_black``.
-* ``svg(svgfile=...)`` stringifies the raw bytes, so newlines in the file reach
-  the browser as literal backslash-n.
 
 Everything runs against an ``offline_client`` through the
 ``capture_send`` fixture — no server, no sockets. ``update_image_slider``'s
@@ -748,17 +746,14 @@ def test_svg_reads_a_file(capture_send, tmp_path):
     assert content(sent) == "<svg width='2'><rect/></svg>"
 
 
-def test_svg_file_newlines_arrive_escaped(capture_send, tmp_path):
-    """Pinned defect: the file is read as bytes and stringified, not decoded.
-
-    ``str(b"...")`` renders every newline as a literal backslash-n, so a
-    pretty-printed SVG reaches the browser with escapes in its markup.
-    """
+@pytest.mark.parametrize("text", ["line one\nline two", "研究 café", r"literal \n path"])
+def test_svg_file_preserves_text(capture_send, tmp_path, text):
+    """File input must produce the same SVG text as the string API."""
+    markup = "<svg width='2'>\n<text>{}</text>\n</svg>".format(text)
     path = tmp_path / "drawing.svg"
-    path.write_text("<svg width='2'>\n  <rect/>\n</svg>\n")
+    path.write_bytes((markup + "\n").encode("utf-8"))
     sent = capture_send(lambda v: v.svg(svgfile=str(path)))
-    assert "\\n" in content(sent)
-    assert "\n" not in content(sent)
+    assert content(sent) == markup
 
 
 def test_svg_passes_opts_through(capture_send):
