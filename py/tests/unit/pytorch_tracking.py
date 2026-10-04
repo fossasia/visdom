@@ -23,10 +23,14 @@ import unittest
 import warnings
 from unittest.mock import Mock, patch
 
+import pytest
+
 import visdom
 from visdom.pytorch import VisdomLogger
 from visdom.tracking import RunTracker
 from visdom.tracking.core import RunTracker as _RunTrackerClass
+
+pytestmark = pytest.mark.unit
 
 
 def _unconnected_visdom():
@@ -327,17 +331,84 @@ class TestVisdomLoggerRunTracking(unittest.TestCase):
         self.assertEqual([seq for _, seq in by_name["Train Loss"]], [1, 2])
         self.assertEqual([seq for _, seq in by_name["Val Loss"]], [1])
 
-    def test_failed_send_with_raise_exceptions_false_falls_back_to_name(self):
-        """Same fallback, for the other non-string sentinel a client
-        built with raise_exceptions=False can return on a failed send
-        (False/None) instead of raising."""
+    def test_failed_create_send_is_not_tracked(self):
+        """Regression test for a flagged review issue ("failed sends can
+        still be recorded as successful"): a client built with
+        raise_exceptions=False can have viz.line() return False/None on a
+        failed send instead of raising -- a real attempt the server never
+        actually applied. That must not be recorded to run= at all, not
+        recorded under a name-fallback window id as if it had succeeded."""
         run = RunTracker("exp", out_dir=self.out_dir)
         with patch.object(self.vis, "_send", return_value=False):
             with VisdomLogger(self.vis, env="e1", run=run) as tracker:
-                tracker.log("loss", 0.5)
+                tracker.log("loss", 0.5)  # must not raise
+        run.finish()
+        self.assertEqual(self._plot_update_events(run), [])
+
+    def test_failed_append_is_skipped_but_prior_success_stays_tracked(self):
+        """Regression test for the exact review comment this fixes: when
+        viz.line(..., update="append") returns False/None, the update
+        must be skipped for run= tracking rather than recorded under the
+        window id the earlier, genuinely successful send left behind. A
+        successful first send followed by a non-raising failed append."""
+        run = RunTracker("exp", out_dir=self.out_dir)
+        results = iter(["win_1", False])
+        with patch.object(self.vis, "line", side_effect=lambda *a, **kw: next(results)):
+            with VisdomLogger(self.vis, env="e1", run=run) as tracker:
+                tracker.log("loss", 0.5)  # creates win_1, tracked
+                tracker.log("loss", 0.4)  # append fails, must be skipped
         run.finish()
         updates = self._plot_update_events(run)
-        self.assertEqual(updates[0]["data"]["win"], "loss")
+        self.assertEqual(len(updates), 1)
+        self.assertEqual(updates[0]["data"]["value"], 0.5)
+        self.assertEqual(updates[0]["data"]["win"], "win_1")
+
+    def test_failed_send_also_skips_experiment_store_log_metrics(self):
+        """The same genuine-failure check guards params=/ExperimentStore
+        tracking too, for the same reason: viz.log_metrics() must not
+        record a point that was never actually plotted."""
+        metric_calls = []
+        with patch.object(self.vis, "experiment", return_value={"env_id": "e1"}):
+            with patch.object(
+                self.vis,
+                "log_metrics",
+                side_effect=lambda metrics, step=None, env=None: metric_calls.append(
+                    metrics
+                )
+                or {"env_id": env},
+            ):
+                with patch.object(self.vis, "_send", return_value=False):
+                    with VisdomLogger(
+                        self.vis, env="e1", params={"lr": 0.01}
+                    ) as tracker:
+                        tracker.log("loss", 0.5)  # must not raise
+        self.assertEqual(metric_calls, [])
+
+    def test_invalid_run_value_raises_clear_error_at_construction(self):
+        """Regression test for a flagged review issue: an invalid run=
+        (anything without log_plot_update) must raise TypeError at
+        construction time, not crash later inside tracking's own
+        best-effort warning formatting."""
+        with self.assertRaises(TypeError):
+            VisdomLogger(self.vis, env="e1", run=object())
+        with self.assertRaises(TypeError):
+            VisdomLogger(self.vis, env="e1", run="not-a-run-tracker")
+
+    def test_run_like_object_missing_run_id_does_not_crash_on_warning(self):
+        """A duck-typed run= can satisfy the log_plot_update check at
+        construction yet still lack run_id (e.g. a broken/partial test
+        double). The best-effort warning this triggers must use it
+        defensively and never crash itself."""
+
+        class _BrokenRun:
+            def log_plot_update(self, *a, **kw):
+                raise TypeError("injected bug")
+
+        with patch.object(self.vis, "_send", side_effect=_unique_win_send):
+            tracker = VisdomLogger(self.vis, env="e1", run=_BrokenRun())
+            with self.assertWarns(RuntimeWarning):
+                tracker.log("loss", 0.5)  # must not raise
+        self.assertIn("loss", tracker._wins)
 
     def test_unexpected_internal_bug_warns_but_does_not_break_logging(self):
         run = RunTracker("exp", out_dir=self.out_dir)
