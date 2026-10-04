@@ -217,6 +217,9 @@ def test_full_replacement_broadcasts_the_pane():
             id="floats",
         ),
         pytest.param(
+            {"type": "scatter", "x": [0] * 200, "y": [1] * 200}, id="one-char-ints"
+        ),
+        pytest.param(
             {"type": "scatter", "x": [None] * 50, "y": [None] * 50}, id="nulls"
         ),
         pytest.param({"type": "scatter", "x": [""] * 50, "y": [""] * 50}, id="strings"),
@@ -241,6 +244,31 @@ def test_pane_min_bytes_never_exceeds_the_real_encoding(trace):
     encoded = json.dumps(broadcast_msg, cls=NanSafeEncoder)
 
     assert UpdateHandler.pane_min_bytes(pane) <= len(encoded)
+
+
+@pytest.mark.parametrize("k", [1, 2, 3, 10, 500])
+def test_pane_min_bytes_is_tight_for_one_char_values(k):
+    """``3k - 2`` is exact for one-character elements, never above them.
+
+    This is the case the bound is tightest on, so it is the one that decides
+    whether it is a lower bound at all: ``json.dumps`` separates array elements
+    with ``", "`` by default, which is two characters, and an array of ``0``
+    spends one character per element. Hand it ``separators=(",", ":")`` and the
+    same array encodes to ``2k - 1`` instead -- the bound would then overstate,
+    and ``wrap_func`` would skip encoding a pane that was genuinely smaller than
+    the patch and broadcast the larger message. Asserting equality here means
+    that change fails this test instead of quietly picking worse broadcasts.
+    """
+    values = [0] * k
+    encoded_array = json.dumps(values, cls=NanSafeEncoder)
+
+    assert len(encoded_array) - len("[]") == 3 * k - 2
+    assert (
+        UpdateHandler.pane_min_bytes(
+            {"content": {"data": [{"type": "scatter", "x": values}]}}
+        )
+        == 3 * k - 2
+    )
 
 
 @pytest.mark.parametrize(
@@ -603,6 +631,68 @@ def test_an_append_that_also_changes_the_pane_keeps_the_diffed_path(extra):
 
     assert UpdateHandler.appendable(pane, args) is False
     assert_patches_agree(pane, args)
+
+
+def strip_marker(pane, prop=None):
+    """Drop a trace's marker container, or just one property inside it."""
+    trace = pane["content"]["data"][0]
+    if prop is None:
+        trace.pop("marker", None)
+    else:
+        trace["marker"].pop(prop, None)
+    return pane
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        pytest.param(lambda: strip_marker(plot_pane(marker=True)), id="no-marker"),
+        pytest.param(
+            lambda: strip_marker(plot_pane(marker=True), "color"), id="no-color"
+        ),
+    ],
+)
+def test_an_append_that_must_create_a_marker_container_keeps_the_diffed_path(build):
+    """Creating ``marker`` or ``marker.color`` is not something an index can say.
+
+    ``update`` creates either when the append carries a marker the stored trace
+    has not got. An ``add`` at ``/content/data/0/marker/color/0`` then has no
+    parent to land on in the client's copy, and *the whole patch* fails to
+    apply -- not just that op -- leaving the browser's pane stuck behind the
+    server's. The diffed path emits the parent ``add`` carrying the container,
+    so this case belongs to it.
+    """
+    pane = build()
+    args = trace_append_args(marker=True)
+
+    assert UpdateHandler.appendable(pane, args) is False
+    ops = assert_patches_agree(pane, args)
+    # The container arrives as its own value, not as an index into one that is
+    # not there: ``/marker`` when the whole object is new, ``/marker/color``
+    # when only the list is.
+    containers = ("/content/data/0/marker", "/content/data/0/marker/color")
+    assert any(op["op"] == "add" and op["path"] in containers for op in ops), ops
+
+
+def test_the_append_after_a_marker_container_exists_takes_the_fast_path():
+    """Only the append that creates the container pays for the diff.
+
+    The same shape as the first append after a plot is created: one update goes
+    the general way, and every one after it is a plain extend.
+    """
+    pane = strip_marker(plot_pane(marker=True))
+    args = trace_append_args(marker=True)
+
+    pane, _ = UpdateHandler.update_packet(pane, copy.deepcopy(args), *CAPS)
+    assert pane["content"]["data"][0]["marker"]["color"] == ["#abcdef"]
+
+    assert UpdateHandler.appendable(pane, args) is True
+    ops = assert_patches_agree(pane, args)
+    assert {
+        "op": "add",
+        "path": "/content/data/0/marker/color/1",
+        "value": "#abcdef",
+    } in ops
 
 
 @pytest.mark.parametrize(

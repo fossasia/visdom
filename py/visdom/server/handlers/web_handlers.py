@@ -128,6 +128,11 @@ class UpdateHandler(BaseHandler):
     #: axis labels rather than extending a series.
     APPENDABLE_TRACE_TYPES = frozenset(("scatter", "scatter3d", "scattergl", "custom"))
 
+    #: Marker properties ``update`` appends to, rather than replaces. Shared
+    #: with ``appendable`` so the question it asks about them cannot drift from
+    #: what the append actually does.
+    APPENDABLE_MARKER_PROPS = ("color",)
+
     @staticmethod
     def resolve_trace_idxs(pdata, name):
         """Which traces of ``pdata`` an update naming ``name`` applies to.
@@ -206,11 +211,43 @@ class UpdateHandler(BaseHandler):
             # Nothing matched, so ``update`` injects a new trace rather than
             # appending to an existing one.
             return False
-        # ``update`` walks ``zip(idxs, new_data)``, so only this many traces
-        # are actually touched.
+        # ``update`` walks ``zip(idxs, new_data)``, so only these traces are
+        # actually touched.
+        for i, new_trace in zip(idxs, new_data):
+            target = pdata[i]
+            if not isinstance(target, dict) or not isinstance(new_trace, dict):
+                return False
+            if target.get("type") not in UpdateHandler.APPENDABLE_TRACE_TYPES:
+                return False
+            if not UpdateHandler.marker_is_appendable(target, new_trace):
+                return False
+        return True
+
+    @staticmethod
+    def marker_is_appendable(target, new_trace):
+        """Whether appending ``new_trace``'s marker only extends what is there.
+
+        ``update`` creates ``target["marker"]`` and the property list inside it
+        when they are missing, and those are structural changes an index-form
+        ``add`` cannot describe: the client's copy has no ``marker`` object, so
+        ``add /content/data/0/marker/color/0`` has nothing to land on and the
+        whole patch fails to apply. The diffed path did not have this problem,
+        because ``make_patch`` emits the parent ``add`` carrying the container.
+
+        So an append that has to create one takes the general path, exactly as
+        the first append after a plot is created does. The one after it, with
+        the container now in place, is a plain extend and takes the fast path.
+        """
+        if "marker" not in new_trace:
+            return True
+        new_marker = new_trace["marker"]
+        target_marker = target.get("marker")
+        if not isinstance(new_marker, dict) or not isinstance(target_marker, dict):
+            return False
         return all(
-            pdata[i].get("type") in UpdateHandler.APPENDABLE_TRACE_TYPES
-            for i in idxs[: len(new_data)]
+            prop in target_marker
+            for prop in UpdateHandler.APPENDABLE_MARKER_PROPS
+            if prop in new_marker
         )
 
     @staticmethod
@@ -582,7 +619,7 @@ class UpdateHandler(BaseHandler):
             if "marker" not in pdata[idx]:
                 pdata[idx]["marker"] = {}
             pdata_marker = pdata[idx]["marker"]
-            for marker_prop in ["color"]:
+            for marker_prop in UpdateHandler.APPENDABLE_MARKER_PROPS:
                 if marker_prop not in new_trace["marker"]:
                     continue
                 if marker_prop not in pdata_marker:
@@ -636,14 +673,24 @@ class UpdateHandler(BaseHandler):
         """A lower bound on the encoded size of ``p``, without encoding it.
 
         In a ``json.dumps`` array every element costs at least one character
-        and every element after the first also carries the two-character ``,``
-        separator, so a trace array of ``k`` values cannot encode to fewer than
+        and every element after the first also carries a separator. That
+        separator is ``", "`` -- two characters, the default whenever no
+        ``separators`` argument is passed, which is how both broadcast encodes
+        call it -- so a trace array of ``k`` values cannot encode to fewer than
         ``3k - 2`` characters. That bounds the pane from below in O(traces)
         where encoding it is O(points). Every element type clears the one-char
         floor (``null`` is four, ``""`` and ``[]`` are two), and the pane's
         keys, layout and envelope are ignored, so the bound only ever
         understates -- which costs an exact comparison that could have been
         skipped, never a wrong answer.
+
+        The one-character elements an array of small integers is made of --
+        ``[0, 1, 2]`` encodes to ``3k - 2`` characters between the brackets --
+        are where the bound is exactly tight rather than loose. Compact
+        separators would make it an overestimate instead, and an overestimate
+        here is a real bug: it would skip the encode of a pane that was in fact
+        smaller than the patch. ``test_pane_min_bytes_is_tight_for_one_char_values``
+        pins that, so the assumption fails loudly rather than silently.
 
         A pane with no trace arrays to count -- text, HTML, an image, anything
         whose ``content`` is not a dict of traces -- bounds to zero, which is
