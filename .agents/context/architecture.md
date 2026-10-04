@@ -4,7 +4,7 @@
 
 1. **Python Client** (`py/visdom/__init__.py`) — The `Visdom` class provides 40+ visualization methods. Communicates with the server via HTTP POST (using `requests.Session`) and WebSocket (`websocket-client`). Supports PyTorch tensor auto-conversion via the `@pytorch_wrap` decorator. Also supports offline mode and a polling fallback.
 
-2. **Async Python Client** (`py/visdom/async_client.py`) — `AsyncVisdom`, an awaitable front end to the same `Visdom`. It duplicates none of the plotting methods: `_BridgedVisdom` subclasses `Visdom` and overrides only `_handle_post`, so method bodies run on the client's own thread pool while the wire hop runs on the caller's event loop. Opt-in; `Visdom` is unchanged.
+2. **Async Python Client** (`py/visdom/async_client.py`) — `AsyncVisdom`, an awaitable front end to the same `Visdom`. It duplicates none of the plotting methods: `_BridgedVisdom` subclasses `Visdom`, and `_handle_post` is its only substantive transport override — `setup_socket` just hands the backchannel to the event loop, and `_start_session_reaper` is a no-op because there is no `requests` session to reap. Method bodies run on the client's own thread pool while the wire hop runs on the caller's event loop. Opt-in; `Visdom` is unchanged.
 
 3. **Tornado Server** (`py/visdom/server/`) — `ServerState` (`server_state.py`) owns the server-wide containers; `Application` wires routes to them and handlers reach them through `StateAccessorsMixin`:
    - `state` — Dict mapping environment IDs to window data (loaded via `LazyEnvData`)
@@ -60,7 +60,9 @@ visdom/
 
 ## API Endpoints
 
-Defined in `py/visdom/server/app.py`. All endpoints are prefixed with `base_url`. Handler entrypoints are `async def`; see Concurrency Model below.
+Defined in `py/visdom/server/app.py`. All endpoints are prefixed with `base_url`. Handler entrypoints that touch
+storage are `async def`; ones that only read memory or serve a static asset stay
+synchronous. See Concurrency Model below.
 
 | Endpoint | Handler | Purpose |
 |----------|---------|---------|
@@ -113,12 +115,15 @@ Pane updates are batched via `addPaneBatched()` → `processBatchedPanes()` usin
 
 ## Concurrency Model
 
-Tornado runs on asyncio and the handler entrypoints are `async def`, so anything
-that blocks the IOLoop stalls every other connection. Four rules keep that from
-happening; breaking one of them fails quietly rather than loudly.
+Tornado runs on asyncio and every handler entrypoint that touches storage is
+`async def`, so anything that blocks the IOLoop stalls every other connection.
+The four rules below are **required** for new and changed handlers; breaking one
+of them fails quietly rather than loudly.
 
 1. **No disk work on the loop.** Go through `run_on_storage_executor` (or the
-   `*_off_loop` helpers) in `py/visdom/utils/server_utils.py`.
+   `*_off_loop` helpers) in `py/visdom/utils/server_utils.py`. A helper that takes
+   a `store` reaches the disk too, so calling one inline is the same mistake as
+   calling the backend inline; `py/tests/unit/refactoring_docs.py` scans for both.
 2. **One storage worker.** `ServerState.storage_executor` is
    `ThreadPoolExecutor(max_workers=1)`, and the single worker is what serializes
    writes — two saves of one env would otherwise interleave and truncate a file.

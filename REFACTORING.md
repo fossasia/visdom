@@ -79,7 +79,7 @@ This is the primary TODO from PR #675: *"move the logic that actually parses env
 | File | Purpose |
 |------|---------|
 | `environment.py` | `Environment` class wrapping `{"jsons": {}, "reload": {}}` dict. Methods: `get_window()`, `set_window()`, `remove_window()`, `list_windows()`, `get_reload()` |
-| `state_manager.py` | `StateManager` class wrapping the top-level `state` dict. Methods: `get_env()`, `create_env()`, `delete_env()`, `list_envs()`, `fork_env()`, `serialize()`, `serialize_all()`. Absorbs functions from `server_utils.py` (`load_env`, `gather_envs`, `compare_envs`). Environment file serialization now lives in `data_model/json_store.py` (`JSONStore`) via the `DataStore` abstraction |
+| `state_manager.py` | `StateManager` class wrapping the top-level `state` dict. Methods: `get_env()`, `create_env()`, `delete_env()`, `list_envs()`, `fork_env()`, `serialize()`, `serialize_all()`. Absorbs functions from `server_utils.py` (`load_env`, `compare_envs`). Environment file serialization now lives in `data_model/json_store.py` (`JSONStore`) via the `DataStore` abstraction |
 | `window.py` | Typed window structures (dataclasses/TypedDicts) replacing raw dicts built in `server_utils.py:window()` (lines 202-258) |
 
 ### 3b. Refactor handlers to use data model
@@ -141,6 +141,9 @@ Every row of the original table now runs on the storage worker, reached through
 | `JSONStore.save_envs()` / `save_env()` | `save_env_off_loop`, `save_envs_off_loop`, `save_all_off_loop` |
 | `compare_envs()` env reads | `CompareHandler` awaits the comparison on the worker |
 | Experiment search's full-disk scan | `ensure_env_loaded` per eid, then the unchanged sync search over warm state |
+| Hyper-parameter pane selection + save | `_select_hparams` on the worker over a loop-side copy of the resident experiments, then `save_env_off_loop` |
+| `/close`'s undo entry | `push_deleted_many_off_loop`: the panes are popped on the loop, then their undo entries are written as one task rather than one per pane |
+| The login page's env listing | Removed. `login.html` has never rendered the `items` it was handed, so the directory read was built and thrown away |
 | Layout save / load (`app.py`) | `ServerState.save_layouts`, awaited off the loop |
 | State load at startup | `ServerState`, before the loop starts serving |
 | PBKDF2 login hash (~50-100 ms) | The **default** executor, not the storage one — logins must not queue behind env saves |
@@ -150,13 +153,20 @@ the server accepts a connection.
 
 ### 4b. Handlers
 
-The handler entrypoints that touch storage are `async def` (`get`, `post`,
+The handler entrypoints that touch storage are `async def` (`post`,
 `on_message`); the ones that only read memory or serve a static asset were left
-synchronous. The `wrap_func` staticmethods stayed synchronous too — they are
-pure state manipulation, and keeping them sync is what let the polling bridge
-and the websocket path share one body.
+synchronous — `IndexHandler.get` among them, once the env listing it never
+rendered was dropped. Most `wrap_func` staticmethods stayed synchronous as well:
+they are pure state manipulation, and keeping them sync is what let the polling
+bridge and the websocket path share one body. The exceptions are the ones whose
+own body has to reach the disk — the two hyper-parameter pane endpoints, and
+`CloseHandler`, which awaits the undo entry it leaves behind.
 
-Two endpoints do not hold that line yet; see follow-up 4j.
+The two hyper-parameter pane endpoints, `/experiments/hparams` and
+`/experiments/hparams/update`, arrived with the hparams track after the handler
+line was drawn and were brought across afterwards; see follow-up 4j. The
+live-refresh queue that drives the update endpoint drains as a coroutine on the
+loop, awaiting each rebuild in turn.
 
 `check_auth` was the blocker, and its fix is the reason no handler needed a
 per-handler edit: it discarded the wrapped call's return value, so an
@@ -169,6 +179,13 @@ empty 200. It now returns the result untouched and carries `functools.wraps`.
    `ThreadPoolExecutor(max_workers=1)`. The single worker is what serializes
    writes: with two, two saves of the same env interleave and leave a
    half-written file. Widening it is a data-loss change, not a tuning knob.
+   Reaching the disk through a helper counts: a `server_utils` function that
+   takes a `store` is disk work wherever it is called, and calling one on the
+   loop is the same stall as calling the backend there. `py/tests/unit/refactoring_docs.py`
+   scans the handler modules for both shapes -- the backend called directly, and
+   a store-taking helper called inline -- and the only calls it allows on the
+   loop are the ones handed the answer to the read (`warmed=True`, a `count=`
+   already known).
 2. **Snapshot on the loop, hand the copy to the worker.** `snapshot_env` /
    `snapshot_envs` deep-copy on the IOLoop thread before the executor call.
    Passing live state to a worker means the loop can mutate an env mid-write.
@@ -247,7 +264,13 @@ over a real network the two cost the same and the ratio approaches 2x.
 | 4g | `AsyncVisdom` HTTP proxy support | `create()` raises `NotImplementedError` for `proxies` / `http_proxy_host`: tornado's `AsyncHTTPClient` has no proxy support without pycurl, which would be a new dependency |
 | 4h | Native async plotting bodies | Only worth doing if the bridge's thread pool ever shows up in a profile. It would fork every plotting method, so the bar is high |
 | 4i | Retire the polling backchannel | Both clients carry a websocket path and an HTTP polling fallback, and every socket change has to be made twice. Phase 6 is where that gets decided |
-| 4j | `/experiments/hparams` and `/experiments/hparams/update` still write on the loop | Both handlers are synchronous and their `wrap_func` calls `handler.storage.save_env` inline, and the selection they build reads through `ExperimentStore` on the loop. They arrived with the hparams track after this phase's server PRs were scoped, so nothing converted them. Small and mechanical — `async def post` plus `save_env_off_loop` — but it is a live write path and belongs in its own PR. `py/tests/unit/refactoring_docs.py` records both sites, so a third one fails the suite |
+| 4k | Async loggers and integrations | `visdom.loggers.*` and `visdom.integrations.optuna` still reach the server through the synchronous client. They are called from training loops and callbacks, which have no running event loop to await on, so an async logger would mean requiring one from the caller. Out of scope deliberately, not overlooked |
+
+### Follow-ups delivered
+
+| # | Item | How it was closed |
+|---|------|-------------------|
+| 4j | The hyper-parameter pane endpoints wrote on the loop | Both handlers were synchronous: each ran its selection through `ExperimentStore` and called `handler.storage.save_env` inline, and the live-refresh queue drove the update handler from an IOLoop timer. Both now select on the storage worker (`_select_hparams`) from a copy of the resident experiments taken on the loop, and save through `save_env_off_loop`. `LiveUpdateQueue.drain` is a coroutine that awaits each rebuild, and drains never overlap. The update re-checks the window once the read is back, and a refresh whose stored selection was replaced meanwhile is dropped rather than written back. `py/tests/unit/refactoring_docs.py` no longer records any on-loop write, so a new one fails the suite |
 
 ---
 

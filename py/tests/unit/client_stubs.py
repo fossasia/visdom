@@ -20,12 +20,14 @@ manufactured by ``__getattr__`` for any name in ``_PROXIED``, so its stub has to
 spell out all 62 of them by hand and there is no import that would fail if one
 were missing.
 
-The checks are structural -- names, parameter order, parameter kinds -- and
-deliberately not about the annotations themselves: the point is that a call
-which type-checks is a call the runtime accepts, in both directions.
+The checks are structural -- names, parameter order, parameter kinds, and which
+parameters carry a default -- and deliberately not about the annotations
+themselves: the point is that a call which type-checks is a call the
+runtime accepts, in both directions.
 """
 
 import ast
+import collections
 import inspect
 import os
 import textwrap
@@ -63,6 +65,32 @@ CREATE_EXTRAS = frozenset({"max_clients", "max_concurrency", "transport"})
 # ``Visdom`` takes these; ``AsyncVisdom.create`` raises NotImplementedError for
 # them, because tornado's AsyncHTTPClient cannot proxy without pycurl.
 CREATE_REJECTS = frozenset({"http_proxy_host", "http_proxy_port", "proxies"})
+
+POSITIONAL_ONLY = "positional-only"
+POSITIONAL_OR_KEYWORD = "positional-or-keyword"
+KEYWORD_ONLY = "keyword-only"
+
+RUNTIME_KINDS = {
+    inspect.Parameter.POSITIONAL_ONLY: POSITIONAL_ONLY,
+    inspect.Parameter.POSITIONAL_OR_KEYWORD: POSITIONAL_OR_KEYWORD,
+    inspect.Parameter.KEYWORD_ONLY: KEYWORD_ONLY,
+}
+
+# One parameter as a caller meets it. ``optional`` is whether it has a default,
+# which a comparison of names alone cannot see: it counts a stub demanding an
+# argument the runtime defaults as a match, and a checker then rejects a call
+# the runtime accepts -- ``Visdom.audio`` defaults 'tensor' to None, and its
+# stub required it.
+Parameter = collections.namedtuple("Parameter", ("name", "kind", "optional"))
+
+# The whole contract. ``positional`` keeps declaration order, because that order
+# is what a positional call binds against; ``keyword`` is sorted by name,
+# because the order keyword-only parameters are declared in cannot change which
+# calls are accepted.
+Signature = collections.namedtuple(
+    "Signature", ("positional", "keyword", "varargs", "kwargs")
+)
+
 
 # The module's non-public classes are stubbed too, and a checker believes those
 # declarations for anyone who imports them -- the tests and the transport
@@ -114,30 +142,49 @@ def stub_properties(class_node):
 
 
 def stub_signature(node):
-    """(positional names, keyword-only names, *args?, **kwargs?) of a stub."""
+    """The call contract ``node`` declares, as a ``Signature``."""
     args = node.args
+    slots = [(a, POSITIONAL_ONLY) for a in args.posonlyargs]
+    slots += [(a, POSITIONAL_OR_KEYWORD) for a in args.args]
+    # ast pads the defaults from the right, across both positional groups.
+    defaults = [None] * (len(slots) - len(args.defaults)) + list(args.defaults)
     positional = [
-        a.arg for a in args.posonlyargs + args.args if a.arg not in ("self", "cls")
+        Parameter(arg.arg, kind, default is not None)
+        for (arg, kind), default in zip(slots, defaults)
+        if arg.arg not in ("self", "cls")
     ]
-    return (
-        positional,
-        sorted(a.arg for a in args.kwonlyargs),
+    keyword = [
+        Parameter(arg.arg, KEYWORD_ONLY, default is not None)
+        for arg, default in zip(args.kwonlyargs, args.kw_defaults)
+    ]
+    return Signature(
+        tuple(positional),
+        tuple(sorted(keyword)),
         args.vararg is not None,
         args.kwarg is not None,
     )
 
 
 def runtime_signature(function):
-    parameters = list(inspect.signature(function).parameters.values())
+    """The call contract ``function`` has at runtime, as a ``Signature``."""
+    parameters = [
+        p
+        for p in inspect.signature(function).parameters.values()
+        if p.name not in ("self", "cls")
+    ]
     positional = [
-        p.name
+        Parameter(p.name, RUNTIME_KINDS[p.kind], p.default is not p.empty)
         for p in parameters
         if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
-        and p.name not in ("self", "cls")
     ]
-    return (
-        positional,
-        sorted(p.name for p in parameters if p.kind is p.KEYWORD_ONLY),
+    keyword = [
+        Parameter(p.name, KEYWORD_ONLY, p.default is not p.empty)
+        for p in parameters
+        if p.kind is p.KEYWORD_ONLY
+    ]
+    return Signature(
+        tuple(positional),
+        tuple(sorted(keyword)),
         any(p.kind is p.VAR_POSITIONAL for p in parameters),
         any(p.kind is p.VAR_KEYWORD for p in parameters),
     )
@@ -326,15 +373,26 @@ class TestAsyncStub:
         assert actual <= stub_properties(async_stub)
 
     def test_create_accepts_the_constructor_arguments(self, async_stub, client_stub):
-        create = stub_functions(async_stub)["create"]
-        positional, keyword, _, _ = stub_signature(create)
-        accepted = set(positional) | set(keyword)
-        constructor = stub_functions(client_stub)["__init__"]
-        expected = set(stub_signature(constructor)[0]) | set(
-            stub_signature(constructor)[1]
+        # Names alone are not the contract. A shared argument has to keep its
+        # position, its kind and its default as well, or a call that checks
+        # against Visdom(...) is rejected against AsyncVisdom.create(...).
+        create = stub_signature(stub_functions(async_stub)["create"])
+        constructor = stub_signature(stub_functions(client_stub)["__init__"])
+
+        # Positionally nothing moves, rejects included: they keep their slots so
+        # that every argument after them stays where Visdom(...) puts it. Only
+        # their annotation narrows -- test_create_leaves_no_room_for_a_proxy.
+        assert create.positional == constructor.positional
+
+        # Keyword-only, the rejected ones are dropped and create's own added.
+        # Both tuples are sorted by name, so removing a subset keeps them aligned.
+        assert tuple(p for p in create.keyword if p.name not in CREATE_EXTRAS) == tuple(
+            p for p in constructor.keyword if p.name not in CREATE_REJECTS
         )
-        assert (expected - CREATE_REJECTS) <= accepted
-        assert CREATE_EXTRAS <= accepted
+        assert {
+            p.name for p in create.keyword if p.name in CREATE_EXTRAS
+        } == CREATE_EXTRAS
+        assert all(p.optional for p in create.keyword)
 
     def test_create_leaves_no_room_for_a_proxy(self, async_stub):
         # create() raises NotImplementedError for any of these. The two
