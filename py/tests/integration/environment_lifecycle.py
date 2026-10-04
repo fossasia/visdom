@@ -100,6 +100,74 @@ class TestSaveEnv(VisdomHTTPTestCase):
         self.assertIn("main", saved)
         self.assertNotIn("nonexistent", saved)
 
+    def test_save_missing_data_is_bad_request(self):
+        """A JSON object without 'data' raises HTTP 400 naming the missing field."""
+        resp = self.post_json("/save", {})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("missing required field: 'data'", resp.reason)
+
+    def test_save_non_object_body_is_bad_request(self):
+        """Non-object payloads like JSON lists or scalars raise HTTP 400."""
+        for invalid in ("not_a_dict", [1, 2, 3], None):
+            resp = self.post_json("/save", invalid)
+            self.assertEqual(resp.code, 400)
+            self.assertIn("must be an object", resp.reason)
+
+    def test_save_invalid_json_is_bad_request(self):
+        """Malformed JSON strings raise HTTP 400."""
+        resp = self.fetch(
+            "/save",
+            method="POST",
+            body="{invalid_json",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("must be valid JSON", resp.reason)
+
+    def test_save_empty_body_is_bad_request(self):
+        """Empty request body decodes to empty arguments and raises HTTP 400."""
+        for empty_body in ("", "   "):
+            resp = self.fetch(
+                "/save",
+                method="POST",
+                body=empty_body,
+                headers={"Content-Type": "application/json"},
+            )
+            self.assertEqual(resp.code, 400)
+            self.assertIn("missing required field: 'data'", resp.reason)
+
+    def test_save_non_sequence_data_is_bad_request(self):
+        """A 'data' value that is not a sequence of IDs raises HTTP 400."""
+        for invalid in (123, "main", {"k": "v"}, True):
+            resp = self.post_json("/save", {"data": invalid})
+            self.assertEqual(resp.code, 400)
+            self.assertIn("must be a list", resp.reason)
+
+    def test_save_filters_invalid_eids_and_saves_valid_ones(self):
+        """Invalid environment IDs (non-string, empty, whitespace) are filtered out while valid ones are saved."""
+        self.create_text_window(eid="save_valid", content="content")
+        resp = self.post_json(
+            "/save",
+            {"data": ["save_valid", 123, "", "   ", None, "ghost"]},
+        )
+        self.assertEqual(resp.code, 200)
+        saved = json.loads(resp.body)
+        self.assertIn("save_valid", saved)
+        self.assertNotIn("ghost", saved)
+        self.assertTrue(os.path.exists(os.path.join(self.env_path, "save_valid.json")))
+
+    def test_save_all_invalid_eids_returns_empty_list(self):
+        """When all environment IDs in 'data' are invalid, none are saved and [] is returned."""
+        resp = self.post_json("/save", {"data": [123, "", "   ", None]})
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(json.loads(resp.body), [])
+
+    def test_save_empty_data_list_is_successful_noop(self):
+        """An empty list in 'data' is a valid no-op that succeeds and returns []."""
+        resp = self.post_json("/save", {"data": []})
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(json.loads(resp.body), [])
+
 
 class TestDeleteEnv(VisdomHTTPTestCase):
     def test_delete_removes_the_env_from_state(self):
