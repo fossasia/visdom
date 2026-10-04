@@ -55,6 +55,7 @@ from visdom.utils.server_utils import (
     purge_env,
     push_deleted,
     push_deleted_off_loop,
+    save_env_off_loop,
     warm_env,
 )
 
@@ -389,6 +390,69 @@ def test_a_second_shutdown_does_not_write_again(app):
     app.shutdown_storage()
 
     assert len(saves) == 1
+
+
+def test_a_failed_final_save_is_retried_by_the_next_shutdown(app):
+    """A save that raised must not mark storage shut down, or atexit skips it."""
+    saves = []
+
+    def flaky_save_all(state):
+        saves.append(state)
+        if len(saves) == 1:
+            raise OSError("disk full")
+
+    app.storage.save_all = flaky_save_all
+
+    with pytest.raises(OSError):
+        app.shutdown_storage()
+    app.shutdown_storage()
+    app.shutdown_storage()
+
+    assert len(saves) == 2
+
+
+def test_two_shutdowns_at_once_still_save_only_once(app):
+    """Nothing orders the graceful stop against the ``atexit`` hook -- a server
+    embedded in a thread runs the first off the main thread, where the second
+    always runs -- and the flag that guards the second pass is not set until
+    the save has returned. So both used to get in and write the same
+    environment files from two threads at once.
+
+    The first save is held open rather than merely made slow, so the overlap
+    is certain on every schedule instead of on most of them.
+    """
+    saves = []
+    running = threading.Event()
+    finish = threading.Event()
+    overlapped = threading.Event()
+
+    def held_save_all(state):
+        saves.append(state)
+        if len(saves) > 1:
+            overlapped.set()
+            return
+        running.set()
+        assert finish.wait(10), "the first shutdown was never released"
+
+    app.storage.save_all = held_save_all
+
+    first = threading.Thread(target=app.shutdown_storage)
+    second = threading.Thread(target=app.shutdown_storage)
+    first.start()
+    try:
+        assert running.wait(10), "the first shutdown never reached save_all"
+        second.start()
+
+        assert not overlapped.wait(0.5), "both shutdowns were inside save_all"
+    finally:
+        finish.set()
+        first.join(10)
+        second.join(10)
+
+    # The second waited out the first, then found the flag set, so the state
+    # reached disk exactly once.
+    assert len(saves) == 1
+    assert not first.is_alive() and not second.is_alive()
 
 
 def test_shutdown_flushes_state_through_storage(app):
@@ -898,6 +962,38 @@ def test_socket_save_writes_the_new_env_off_the_loop(spy_store, env_path):
 
     assert spy_store.calls["save_env"] == ["copy"]
     assert_off_loop(spy_store, loop_thread, {"save_env"})
+
+
+def test_save_env_off_loop_hands_the_worker_a_snapshot(inline_executor):
+    """The worker is given a copy, never the env the loop keeps mutating."""
+    storage = mock.Mock()
+    handler = FakeHandler(state={"expt": env_payload()}, storage=storage)
+    live = handler.state["expt"]
+
+    save_env_off_loop(handler, "expt")
+
+    func, (eid, handed) = inline_executor[0]
+    assert func == storage.save_env
+    assert eid == "expt"
+    assert handed is not live
+    assert handed["jsons"] is not live["jsons"]
+    assert handed == dict(live)
+
+
+def test_save_env_off_loop_snapshot_ignores_later_mutations(inline_executor):
+    """What reaches disk is the env as it was when the save was asked for."""
+    captured = {}
+    handler = FakeHandler(state={"expt": env_payload()}, storage=mock.Mock())
+
+    def capture(eid, env):
+        captured["panes"] = sorted(env["jsons"])
+        handler.state["expt"]["jsons"]["win_late"] = {"id": "win_late"}
+
+    handler.storage.save_env = capture
+    save_env_off_loop(handler, "expt")
+
+    assert captured["panes"] == sorted(env_payload()["jsons"])
+    assert "win_late" in handler.state["expt"]["jsons"]
 
 
 def test_socket_save_reads_a_cold_source_env_off_the_loop(spy_store, env_path):
