@@ -793,10 +793,11 @@ class CompareHandler(BaseHandler):
         """Send environment comparison data to a subscriber socket.
 
         Expects a JSON object with a ``sid`` string identifying the target
-        subscriber session. Returns HTTP 400 if the request body is not valid
-        JSON, is not an object, or contains an invalid ``sid`` type. When
-        ``sid`` is null (uninitialized client session) or unknown, the
-        request safely returns HTTP 200 without dispatching comparison data.
+        subscriber session, or null representing an uninitialized client
+        session that is handled as a no-op. Returns HTTP 400 if the request
+        body is not valid JSON, is not an object, or contains an invalid
+        ``sid`` type. When ``sid`` is unknown, the request safely returns
+        HTTP 200 without dispatching comparison data.
         """
         try:
             body = tornado.escape.json_decode(

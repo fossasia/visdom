@@ -37,7 +37,7 @@ async function openCompareView(page, envs) {
     if (request.method() === 'POST') {
       try {
         const postData = request.postDataJSON();
-        if (postData && !postData.sid) {
+        if (postData && postData.sid === null) {
           return route.fulfill({
             status: 200,
             contentType: 'application/json',
