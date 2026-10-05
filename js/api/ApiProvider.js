@@ -218,6 +218,13 @@ const ApiProvider = ({ children }) => {
   const sendEnvQuery = (envIDs, showAll) => {
     // This kicks off a new stream of events from the socket so there's nothing
     // to handle here. We might want to surface the error state.
+
+    // Without a session id the server has no socket to stream the reply to,
+    // and /compare answers a null sid with 400, which the .fail() below
+    // writes over the whole page. The query is sent again once 'register'
+    // sets the id (see the sessionInfo effect in main.js).
+    if (sessionInfo.id === null) return;
+
     if (envIDs.length == 1) {
       $.post(
         correctPathname() + 'env/' + envIDs[0],
