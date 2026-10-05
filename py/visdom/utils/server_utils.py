@@ -505,7 +505,11 @@ def extract_eid(args):
     eid = args.get("eid") if isinstance(args, Mapping) else None
     if eid is None:
         eid = "main"
-    if isinstance(eid, bool) or not isinstance(eid, (str, int, float)):
+    if (
+        isinstance(eid, bool)
+        or not isinstance(eid, (str, int, float))
+        or (isinstance(eid, float) and (eid != eid or abs(eid) == float("inf")))
+    ):
         raise tornado.web.HTTPError(400, reason="'eid' must be a string or number")
     return escape_eid(str(eid))
 

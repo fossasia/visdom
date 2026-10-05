@@ -78,6 +78,11 @@ from visdom.experiments import (
 logger = logging.getLogger(__name__)
 
 
+def _reject_json_constant(value):
+    """Reject non-standard JSON constants (NaN, Infinity, -Infinity) per RFC 8259."""
+    raise ValueError("invalid JSON constant: {}".format(value))
+
+
 def _decode_json_body(body):
     """Return a request body decoded into a dict of arguments.
 
@@ -92,7 +97,7 @@ def _decode_json_body(body):
         text = tornado.escape.to_basestring(body).strip()
         if not text:
             return {}
-        args = tornado.escape.json_decode(text)
+        args = json.loads(text, parse_constant=_reject_json_constant)
     except ValueError as error:
         raise tornado.web.HTTPError(
             400, reason="request body must be valid JSON"

@@ -109,8 +109,24 @@ def test_extract_eid(args, eid):
 
 @pytest.mark.parametrize(
     "invalid_eid",
-    [True, False, [1, 2], {"nested": "dict"}],
-    ids=["bool_true", "bool_false", "list", "dict"],
+    [
+        True,
+        False,
+        [1, 2],
+        {"nested": "dict"},
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+    ],
+    ids=[
+        "bool_true",
+        "bool_false",
+        "list",
+        "dict",
+        "float_nan",
+        "float_inf",
+        "float_neg_inf",
+    ],
 )
 def test_extract_eid_rejects_non_string_or_number(invalid_eid):
     with pytest.raises(tornado.web.HTTPError) as exc_info:
