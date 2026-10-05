@@ -233,8 +233,14 @@ class TestLogHistory(unittest.TestCase):
         ).fit(X, y)
 
     def _plot(self, logger, attr):
+        """The call that plotted ``attr``, matched on the whole curve name.
+
+        Titles are "<EstimatorName> <attr>", so a substring test would let
+        validation_score_ and validation_scores_ match each other's pane as
+        soon as either name changes.
+        """
         for call in logger.viz.line.call_args_list:
-            if attr in call.kwargs["opts"]["title"]:
+            if call.kwargs["opts"]["title"].split()[-1] == attr:
                 return call.kwargs
         return None
 
@@ -352,8 +358,12 @@ class TestValidationCurveDiscovery(unittest.TestCase):
             early_stopping=True, max_iter=15, random_state=0
         ).fit(X, y)
 
-    def _titles(self, logger):
-        return [c.kwargs["opts"]["title"] for c in logger.viz.line.call_args_list]
+    def _curves(self, logger):
+        """The curve name each pane plotted, taken from the end of its title."""
+        return [
+            c.kwargs["opts"]["title"].split()[-1]
+            for c in logger.viz.line.call_args_list
+        ]
 
     def test_singular_attribute_is_found(self):
         logger = _logger()
@@ -361,7 +371,7 @@ class TestValidationCurveDiscovery(unittest.TestCase):
         self.assertFalse(hasattr(est, "validation_scores_"))
         self.assertTrue(hasattr(est, "validation_score_"))
         logger._log_history(est)
-        self.assertTrue(any("validation_score_" in t for t in self._titles(logger)))
+        self.assertIn("validation_score_", self._curves(logger))
 
     def test_found_without_a_loss_curve(self):
         # The lookup used to sit inside the loss_curve_ branch, which these
@@ -383,8 +393,7 @@ class TestValidationCurveDiscovery(unittest.TestCase):
             random_state=0,
         ).fit(rng.rand(40, 2), np.array([0, 1] * 20))
         logger._log_history(est)
-        titles = self._titles(logger)
-        self.assertTrue(any("validation_scores_" in t for t in titles))
+        self.assertIn("validation_scores_", self._curves(logger))
         self.assertEqual(logger.viz.line.call_count, 2)
 
     def test_only_one_validation_curve_when_both_names_exist(self):
@@ -394,8 +403,10 @@ class TestValidationCurveDiscovery(unittest.TestCase):
         est = self._hist_gb()
         est.validation_scores_ = list(est.validation_score_)
         logger._log_history(est)
-        titles = self._titles(logger)
-        self.assertEqual(sum(1 for t in titles if "validation" in t), 1, titles)
+        curves = self._curves(logger)
+        self.assertEqual(
+            sum(1 for c in curves if c.startswith("validation")), 1, curves
+        )
 
 
 class TestLogCv(unittest.TestCase):

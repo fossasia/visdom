@@ -286,7 +286,7 @@ class VisdomSklearnLogger:
         across fits while ``n_iter_`` reports only the latest one, so a
         length comparison can match by coincidence and shift a 1-based curve.
         """
-        return hasattr(est, "validation_score_") or hasattr(est, "_baseline_prediction")
+        return hasattr(est, "validation_score_")
 
     @classmethod
     def _history_x_start(cls, est):
