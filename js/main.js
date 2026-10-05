@@ -274,8 +274,9 @@ const App = () => {
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 
-  // clear expandedPaneID if its pane is ever gone; state only, not history,
-  // so this can't double up with the explicit history.back() calls elsewhere
+  // clear expandedPaneID if its pane is ever gone for any reason; state
+  // only, not history, so this can't double up with the explicit
+  // history.back() calls elsewhere
   useEffect(() => {
     if (expandedPaneID != null && !storeData.panes[expandedPaneID]) {
       setExpandedPaneID(null);

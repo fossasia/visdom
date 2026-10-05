@@ -159,18 +159,37 @@ function MetricDetailView({ pane, envID, onClose }) {
 
   const set = (patch) => setSettings((s) => ({ ...s, ...patch }));
 
+  const historyFrames = isHistory
+    ? Array.isArray(pane.content)
+      ? pane.content.length
+      : 1
+    : 0;
+  // a frame index restored from localStorage can be stale (the history
+  // shrank since it was saved) -- clamp once here and use this everywhere,
+  // rather than letting the raw, possibly out-of-range settings.frame leak
+  // into the displayed label or the annotation calls below
+  const clampedFrame = isHistory
+    ? Math.min(Math.max(settings.frame, 0), Math.max(historyFrames - 1, 0))
+    : settings.frame;
+
+  useEffect(() => {
+    if (isHistory && settings.frame !== clampedFrame) {
+      set({ frame: clampedFrame });
+    }
+  }, [isHistory, clampedFrame]);
+
   const content = useMemo(() => {
     if (!isHistory) return pane.content || {};
     const arr = Array.isArray(pane.content) ? pane.content : [pane.content];
-    return arr[Math.min(settings.frame, arr.length - 1)] || arr[0] || {};
-  }, [pane.content, isHistory, settings.frame]);
+    return arr[clampedFrame] || arr[0] || {};
+  }, [pane.content, isHistory, clampedFrame]);
 
   const annotations = useAnnotations({
     plotlyRef: plotRef,
     content,
     envID,
     paneID: pane.id,
-    frame: settings.frame,
+    frame: clampedFrame,
     sendPlotLayoutUpdate,
     readonly: sessionInfo?.readonly,
   });
@@ -180,10 +199,18 @@ function MetricDetailView({ pane, envID, onClose }) {
   const names = allTraces.map((t, i) =>
     traceName(t, i, pane.title, allTraces.length)
   );
+  // two traces can render under the same display name (duplicate/renamed
+  // legends); disambiguate so hiding one doesn't hide every trace sharing
+  // that name, while keeping the common, non-duplicate case keyed by name
+  // (so hidden state still survives a reorder across reloads)
+  const hideKeys = names.map((n, i) => {
+    const occurrence = names.slice(0, i).filter((other) => other === n).length;
+    return occurrence === 0 ? n : `${n}#${occurrence}`;
+  });
   const hiddenSet = new Set(settings.hidden);
   const visibleIdx = allTraces
     .map((_, i) => i)
-    .filter((i) => !hiddenSet.has(names[i]));
+    .filter((i) => !hiddenSet.has(hideKeys[i]));
 
   // ----- per-step stats table -----
   const [stepsDesc, setStepsDesc] = useState(false);
@@ -269,7 +296,7 @@ function MetricDetailView({ pane, envID, onClose }) {
         zerolinecolor: 'rgba(128,128,128,0.35)',
         autorange: true,
       },
-      datarevision: `${pane.version}:${settings.frame}:${settings.smoothing}:${settings.logY}:${settings.points}:${settings.hidden.join(',')}`,
+      datarevision: `${pane.version}:${clampedFrame}:${settings.smoothing}:${settings.logY}:${settings.points}:${settings.hidden.join(',')}`,
     };
 
     Plotly.react(plotRef.current, data, layout, {
@@ -338,12 +365,6 @@ function MetricDetailView({ pane, envID, onClose }) {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
-  const historyFrames = isHistory
-    ? Array.isArray(pane.content)
-      ? pane.content.length
-      : 1
-    : 0;
-
   return (
     <div className="metric-detail" role="dialog" aria-modal="true">
       <div className="metric-detail-breadcrumb">
@@ -409,11 +430,11 @@ function MetricDetailView({ pane, envID, onClose }) {
                 <label key={`${n}-${i}`}>
                   <input
                     type="checkbox"
-                    checked={!hiddenSet.has(n)}
+                    checked={!hiddenSet.has(hideKeys[i])}
                     onChange={(e) => {
                       const next = new Set(settings.hidden);
-                      if (e.target.checked) next.delete(n);
-                      else next.add(n);
+                      if (e.target.checked) next.delete(hideKeys[i]);
+                      else next.add(hideKeys[i]);
                       set({ hidden: [...next] });
                     }}
                   />{' '}
@@ -438,11 +459,11 @@ function MetricDetailView({ pane, envID, onClose }) {
                   type="range"
                   min="0"
                   max={historyFrames - 1}
-                  value={settings.frame}
+                  value={clampedFrame}
                   onChange={(e) => set({ frame: parseInt(e.target.value, 10) })}
                 />
                 <span className="rail-num">
-                  {settings.frame}/{historyFrames - 1}
+                  {clampedFrame}/{historyFrames - 1}
                 </span>
               </div>
             )}
