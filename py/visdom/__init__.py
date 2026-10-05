@@ -55,8 +55,8 @@ if sys.version_info < (3, 12):
 
 def _normalize_tsne(Y):
     Y = np.asarray(Y)
-    xmin, xmax = np.min(Y[:, 0]), np.max(Y[:, 0])
-    ymin, ymax = np.min(Y[:, 1]), np.max(Y[:, 1])
+    xmin, xmax = np.nanmin(Y[:, 0]), np.nanmax(Y[:, 0])
+    ymin, ymax = np.nanmin(Y[:, 1]), np.nanmax(Y[:, 1])
     xrange = xmax - xmin
     yrange = ymax - ymin
     normx = (
@@ -2567,6 +2567,8 @@ class Visdom(object):
             audiofile = os.path.join(
                 tempfile.gettempdir(), "%s.wav" % next(tempfile._get_candidate_names())
             )
+            # NaN samples would make max_val, and the whole scaled tensor, NaN.
+            tensor = np.nan_to_num(tensor, nan=0.0)
             max_val = np.max(np.abs(tensor))
             if max_val == 0:
                 # When all zero tensor, skip normalisation to avoid division by zero
