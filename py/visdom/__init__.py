@@ -54,6 +54,7 @@ if sys.version_info < (3, 12):
 
 
 def _normalize_tsne(Y):
+    """Rescale 2-D t-SNE coordinates to [-1, 1], ignoring NaN when finding bounds."""
     Y = np.asarray(Y)
     xmin, xmax = (
         (0, 0)
