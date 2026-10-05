@@ -362,7 +362,8 @@ class ServerState:
                 return
             self.stop_autosave()
             self.storage_executor.shutdown(wait=True)
-            self.storage.save_all(self.state)
+            if not self.readonly:
+                self.storage.save_all(self.state)
             self._storage_shut_down = True
             self.dirty_envs.clear()
             self.saving_envs.clear()

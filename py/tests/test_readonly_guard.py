@@ -13,6 +13,7 @@ handlers that remembered to apply it.
 """
 
 import json
+import os
 import shutil
 import tempfile
 import unittest
@@ -169,6 +170,27 @@ class TestReadonlyAllowsReads(ReadonlyEndpointCase):
         self.assertEqual(response.code, 200)
 
 
+class TestReadonlyRefusesEnvCreation(ReadonlyEndpointCase):
+    """POST /env/<id> with an 'eid' adds an environment, so it is refused in readonly mode."""
+
+    def test_env_creation_is_refused(self):
+        response = self.post_json("/env/anything", {"eid": "made-on-a-readonly-server"})
+        self.assertRefused(response)
+        self.assertNotIn("made-on-a-readonly-server", self._app.state)
+
+    def test_env_stream_with_sid_is_allowed(self):
+        """Streaming an environment to a subscriber via sid is a read, so it is allowed."""
+        response = self.post_json("/env/main", {"sid": "dummy-sid"})
+        self.assertEqual(response.code, 200)
+
+    def test_shutdown_does_not_save_all_on_readonly_server(self):
+        """On a readonly server, shutdown_storage never writes state to disk."""
+        self._app.state["in_memory_only"] = {"jsons": {}, "reload": {}}
+        self._app.server_state.shutdown_storage()
+        files = os.listdir(self._tmp_dir)
+        self.assertNotIn("in_memory_only.json", files)
+
+
 class TestWritableServerStillWrites(ReadonlyEndpointCase):
     """The same requests succeed with readonly off — the guard is the only gate."""
 
@@ -186,6 +208,13 @@ class TestWritableServerStillWrites(ReadonlyEndpointCase):
             "/experiments/hparams", {"eid": "main", "query": "lr = 0.1"}
         )
         self.assertEqual(response.code, 200)
+
+    def test_env_creation_is_accepted(self):
+        response = self.post_json(
+            "/env/anything", {"eid": "created-on-writable-server"}
+        )
+        self.assertEqual(response.code, 200)
+        self.assertIn("created-on-writable-server", self._app.state)
 
 
 if __name__ == "__main__":

@@ -742,6 +742,7 @@ class EnvHandler(BaseHandler):
 
     @check_auth
     async def post(self, args):
+        """Handle POST request to stream an environment or add a new environment."""
         msg_args = tornado.escape.json_decode(
             tornado.escape.to_basestring(self.request.body)
         )
@@ -768,6 +769,9 @@ class EnvHandler(BaseHandler):
                     )
                     return
         if "eid" in msg_args:
+            if self.readonly:
+                reject_readonly(self)
+                return
             eid = escape_eid(msg_args["eid"])
             if eid not in self.state:
                 self.state[eid] = {"jsons": {}, "reload": {}}
