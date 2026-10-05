@@ -12,6 +12,7 @@ parts of the visdom stack. Not to be used for particularly specific
 helper functions.
 """
 
+import copy
 import importlib
 import json
 import math
@@ -180,20 +181,26 @@ def _normalize_table_data(data, headers):
 
 
 def _sanitize_nan_key(key):
-    """Replace a non-finite float dict key with the token json wrote for it.
+    """Unwrap a numpy scalar dict key that json cannot stringify itself.
 
     A non-finite *value* becomes None, but a key cannot: JSON keys are
-    strings, so the encoder stringifies the float itself. Under the
-    ``allow_nan=True`` default that this module encoded with historically,
-    that gave "NaN", "Infinity" and "-Infinity"; keep emitting those rather
-    than dropping the key or renaming it to "None".
+    strings, so json writes the float itself as "NaN", "Infinity" or
+    "-Infinity" -- which is exactly what this module emitted under the
+    ``allow_nan=True`` default it encoded with historically. Leaving the
+    float a float rather than pre-stringifying it here is what keeps
+    ``sort_keys=True`` comparing it against the other numeric keys instead
+    of a str against an int.
+
+    json only recognises a real float, though, and np.float32 is not one, so
+    for a non-finite numpy scalar the wrapper is what has to go. Finite keys
+    are handed over untouched, numpy or not.
     """
-    value = key.item() if isinstance(key, np.generic) else key
-    if not isinstance(value, float) or not (math.isnan(value) or math.isinf(value)):
+    if not isinstance(key, np.generic):
         return key
-    if math.isnan(value):
-        return "NaN"
-    return "Infinity" if value > 0 else "-Infinity"
+    value = key.item()
+    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+        return value
+    return key
 
 
 def _sanitize_nans(obj):
@@ -282,6 +289,7 @@ class NanSafeEncoder(json.JSONEncoder):
     """
 
     def __init__(self, **kwargs):
+        self._requested_allow_nan = kwargs.get("allow_nan", True)
         kwargs["allow_nan"] = False
         super().__init__(**kwargs)
 
@@ -294,11 +302,28 @@ class NanSafeEncoder(json.JSONEncoder):
         subclassed = type(self).default is not json.JSONEncoder.default
         return subclassed or "default" in vars(self)
 
+    def _iterencode_sanitized(self, o, _one_shot):
+        """Encode a sanitized payload under the ``allow_nan`` the caller asked for.
+
+        ``allow_nan=False`` is this encoder's detector, not a setting anyone
+        requested, and the sanitized payload must not be judged by it: every
+        non-finite *value* is None by now, but a non-finite *key* is still a
+        float, and json is the one that turns it into "NaN", "Infinity" or
+        "-Infinity". Restoring the caller's value is therefore what makes the
+        two passes add up to what a single ``allow_nan``-honouring pass over
+        the sanitized payload would have emitted.
+        """
+        encoder = self
+        if self._requested_allow_nan:
+            encoder = copy.copy(self)
+            encoder.allow_nan = True
+        return json.JSONEncoder.iterencode(
+            encoder, _sanitize_nans(o), _one_shot=_one_shot
+        )
+
     def iterencode(self, o, _one_shot=False):
         if not _one_shot or self._has_custom_default():
-            return json.JSONEncoder.iterencode(
-                self, _sanitize_nans(o), _one_shot=_one_shot
-            )
+            return self._iterencode_sanitized(o, _one_shot)
         try:
             # Materialized so a non-finite value raises here, where the retry
             # can still start from the beginning. json.dumps is about to join
@@ -312,4 +337,4 @@ class NanSafeEncoder(json.JSONEncoder):
             # coerces it via .item(). With no custom default() hook in play,
             # every TypeError arriving here is json's own.
             pass
-        return json.JSONEncoder.iterencode(self, _sanitize_nans(o), _one_shot=True)
+        return self._iterencode_sanitized(o, True)

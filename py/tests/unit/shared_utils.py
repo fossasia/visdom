@@ -171,6 +171,11 @@ ENCODER_PAYLOADS = [
     pytest.param({float("nan"): 1}, id="nan-key"),
     pytest.param({float("inf"): 1, float("-inf"): 2}, id="inf-keys"),
     pytest.param({np.float32("nan"): 1}, id="np-float32-nan-key"),
+    # sort_keys has to order these keys against each other. Swapping the
+    # non-finite one for its "NaN" string up front would leave a str to
+    # compare with an int, which raises TypeError; leaving it a float does not.
+    pytest.param({float("nan"): 1, 2: 3}, id="nan-key-mixed-numeric"),
+    pytest.param({float("inf"): 1, 2.5: 2, 3: 4}, id="inf-key-mixed-numeric"),
     pytest.param({}, id="empty"),
     pytest.param("just a string", id="top-level-str"),
     pytest.param(float("nan"), id="top-level-nan"),
@@ -182,11 +187,25 @@ ENCODER_PAYLOADS = [
 ]
 
 
+def encode_outcome(payload, cls, **options):
+    """What ``json.dumps`` did: the string it returned, or the error it raised.
+
+    Some of the payloads above are meant to raise -- ``allow_nan=False`` and a
+    non-finite *key* leave json nowhere to go, since a key cannot become null
+    -- and raising the same way is as much a part of the parity contract as
+    the bytes are.
+    """
+    try:
+        return json.dumps(payload, cls=cls, **options)
+    except Exception as error:
+        return type(error), str(error)
+
+
 @pytest.mark.parametrize("payload", ENCODER_PAYLOADS)
 def test_encoder_output_matches_the_legacy_encoder(payload):
     """Skipping the sanitise pass must not change a single byte it emitted."""
-    assert json.dumps(payload, cls=NanSafeEncoder) == json.dumps(
-        payload, cls=LegacyNanSafeEncoder
+    assert encode_outcome(payload, NanSafeEncoder) == encode_outcome(
+        payload, LegacyNanSafeEncoder
     )
 
 
@@ -208,8 +227,8 @@ def test_encoder_output_matches_the_legacy_encoder(payload):
 @pytest.mark.parametrize("payload", ENCODER_PAYLOADS)
 def test_encoder_options_survive_the_fast_path(payload, options):
     """``indent`` and friends reach the C encoder unchanged on both paths."""
-    assert json.dumps(payload, cls=NanSafeEncoder, **options) == json.dumps(
-        payload, cls=LegacyNanSafeEncoder, **options
+    assert encode_outcome(payload, NanSafeEncoder, **options) == encode_outcome(
+        payload, LegacyNanSafeEncoder, **options
     )
 
 
@@ -287,10 +306,42 @@ def test_non_finite_dict_keys_keep_the_token_json_wrote_for_them(key, token):
 
     ``allow_nan=False`` makes the encoder raise on a non-finite key as well as
     on a non-finite value, and the retry only helps if the rebuilt payload no
-    longer trips it. A key is not allowed to be null, so it takes the string
-    the encoder itself produced under the old allow_nan=True default.
+    longer trips it. A key is not allowed to be null, so the retry hands json
+    back the ``allow_nan`` the caller actually asked for and lets it write the
+    same token it wrote under that default before.
     """
     assert json.dumps({key: 1}, cls=NanSafeEncoder) == f'{{"{token}": 1}}'
+
+
+def test_sort_keys_orders_a_non_finite_key_against_the_numeric_ones():
+    """A rewritten key has to stay sortable against the keys beside it.
+
+    ``sort_keys=True`` runs ``sorted()`` over the keys as they are: a float
+    sorts against an int, a str raises TypeError. Leaving the key a float and
+    letting json stringify it keeps the stdlib's own ordering.
+    """
+    payload = {float("inf"): 1, float("-inf"): 2, 0: 3}
+
+    assert (
+        json.dumps(payload, cls=NanSafeEncoder, sort_keys=True)
+        == '{"-Infinity": 2, "0": 3, "Infinity": 1}'
+    )
+
+
+def test_a_caller_asking_for_allow_nan_false_still_gets_a_strict_encoder():
+    """The forced allow_nan=False is this encoder's detector, not a setting.
+
+    Restoring the caller's own value for the retry is what makes a non-finite
+    key encodable at all. It also has to stay restored the other way: a caller
+    who asked for strict JSON keeps getting the ValueError the plain encoder
+    raises, since there is no null for a key to become.
+    """
+    assert json.dumps({"y": float("nan")}, cls=NanSafeEncoder, allow_nan=False) == (
+        '{"y": null}'
+    )
+
+    with pytest.raises(ValueError, match="Out of range float"):
+        json.dumps({float("nan"): 1}, cls=NanSafeEncoder, allow_nan=False)
 
 
 def test_circular_payload_still_reports_a_circular_reference():
