@@ -336,16 +336,20 @@ class ServerState:
         final save and putting a stale env back on disk. The final save covers
         whatever was still marked dirty, so the marks are cleared with it.
 
+        On a readonly server, the final save is skipped entirely so that no
+        state is written to disk during shutdown, and storage is marked shut
+        down immediately after draining.
+
         Idempotent: the graceful shutdown calls this, and the ``atexit`` hook
         that covers a teardown which never reaches it calls it again. A second
         pass must not re-run ``save_all`` -- the executor is already gone, so
         anything written after the first pass could only be state the process
         never served.
 
-        Only a final save that succeeded counts as shut down. If ``save_all``
-        raises, the ``atexit`` call tries it again instead of returning early
-        and leaving the changed environments in memory only. Stopping the timer
-        and the executor again on that retry is harmless.
+        When writable, only a final save that succeeded counts as shut down.
+        If ``save_all`` raises, the ``atexit`` call tries it again instead of
+        returning early and leaving the changed environments in memory only.
+        Stopping the timer and the executor again on that retry is harmless.
 
         That retry is also why the flag alone cannot be the whole guard: it is
         not set until the save has returned, so two callers arriving at once
