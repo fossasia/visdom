@@ -368,6 +368,24 @@ class TestWideIntegers(unittest.TestCase):
         self.assertTrue(match("steps = %d" % stored, {"steps": stored}))
         self.assertTrue(match("steps < %d" % (stored + 1), {"steps": stored}))
 
+    def test_an_integer_shaped_string_is_not_rounded_either(self):
+        """A stored ``"100000000000000000001"`` keeps every digit.
+
+        Read through ``float`` it lands on 1e20, so it matched the integer it
+        differs from and failed to match the one it spells.
+        """
+        stored = {"steps": str(10**20 + 1)}
+        self.assertTrue(match("steps = %d" % (10**20 + 1), stored))
+        self.assertFalse(match("steps = %d" % 10**20, stored))
+        self.assertFalse(match("steps < %d" % (10**20 + 1), stored))
+        self.assertTrue(match("steps > %d" % 10**20, stored))
+
+    def test_a_string_too_long_for_int_still_reads_as_a_number(self):
+        """``int()`` refuses past ``sys.get_int_max_str_digits()``; ``float`` saturates."""
+        self.assertTrue(match("steps > 1", {"steps": "9" * 5000}))
+        self.assertTrue(match("steps = 1.5", {"steps": "1.5"}))
+        self.assertTrue(match("steps < 1e999", {"steps": "1e5"}))
+
     def test_a_wide_value_still_answers_contains_and_string_compares(self):
         """The non-numeric operators were never the problem and stay put."""
         self.assertTrue(match("steps contains 1000", {"steps": self.WIDE}))

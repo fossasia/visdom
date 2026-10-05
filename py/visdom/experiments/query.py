@@ -408,14 +408,21 @@ def _to_number(value: Any) -> Optional[int | float]:
     against ``float`` without routing either through the other's precision, so
     the values now answer for themselves.
 
-    Only a string still needs converting, and that conversion cannot raise the
-    same way: ``float`` of an over-large *string* saturates to ``inf``.
+    Only a string still needs converting. One spelling an integer is read with
+    ``int`` first, so a stored ``"100000000000000000001"`` keeps the same digits
+    a literal of that value does. Anything else falls back to ``float``, which
+    cannot raise the same way: it saturates an over-large *string* to ``inf``,
+    and that includes a digit string longer than ``int`` will parse.
     """
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
         return value
     if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            pass
         try:
             return float(value)
         except ValueError:
