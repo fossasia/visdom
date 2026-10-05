@@ -31,6 +31,27 @@ async function prepareDemoForScreenshot(page, run) {
 }
 
 async function openCompareView(page, envs) {
+  await page.unroute('**/compare/**').catch(() => {});
+  await page.route('**/compare/**', async (route) => {
+    const request = route.request();
+    if (request.method() === 'POST') {
+      try {
+        const raw = request.postData();
+        const postData = raw ? JSON.parse(raw) : null;
+        if (postData && (postData.sid === null || postData.sid === undefined)) {
+          return route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({}),
+          });
+        }
+      } catch (e) {
+        // Fall through to continue request
+      }
+    }
+    return route.continue();
+  });
+
   await page.goto(`/compare/${envs.join('+')}`);
   await page.locator('text=online').first().waitFor({ state: 'visible' });
 }
