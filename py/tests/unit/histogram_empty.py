@@ -38,3 +38,15 @@ def test_nonempty_histogram_retains_default_bins(capture_send, count, bins):
 def test_explicit_zero_bins_is_still_rejected(offline_client):
     with pytest.raises(ValueError, match="positive"):
         offline_client.histogram(np.array([]), opts={"numbins": 0})
+
+
+@pytest.mark.parametrize("numbins", [None, 3])
+def test_reused_histogram_options_do_not_freeze_automatic_bins(capture_send, numbins):
+    opts = {"title": "Filtered metrics"}
+    if numbins is not None:
+        opts["numbins"] = numbins
+    original = opts.copy()
+    capture_send(lambda client: client.histogram(np.array([]), opts=opts))
+    sent = capture_send(lambda client: client.histogram(np.arange(40), opts=opts))
+    assert len(sent["payload"]["data"][0]["y"]) == (30 if numbins is None else numbins)
+    assert opts == original
