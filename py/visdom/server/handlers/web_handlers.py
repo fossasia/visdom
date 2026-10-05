@@ -685,7 +685,7 @@ class EnvStateHandler(BaseHandler):
             eid = extract_eid(args)
             if eid not in handler.state:
                 handler.set_status(404)
-                handler.write(json.dumps({"error": "env '{}' not found".format(eid)}))
+                handler.write_json({"error": "env '{}' not found".format(eid)})
                 return
             handler.write(json.dumps(handler.state[eid]["jsons"], cls=NanSafeEncoder))
         else:
