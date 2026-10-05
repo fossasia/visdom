@@ -394,6 +394,22 @@ class TestEnvStateEndpoint(VisdomHTTPTestCase):
         envs = json.loads(resp.body.decode())
         self.assertIn("main", envs)
 
+    def test_unknown_eid_escapes_html_and_sets_json_headers(self):
+        """Unknown eid errors use write_json to prevent reflected XSS."""
+        resp = self.post_json("/env_state", {"eid": "<img src=x onerror=alert(1)>"})
+        self.assertEqual(resp.code, 404)
+        self.assertEqual(
+            resp.headers.get("Content-Type"), "application/json; charset=UTF-8"
+        )
+        self.assertEqual(resp.headers.get("X-Content-Type-Options"), "nosniff")
+        self.assertIn(b"\\u003cimg src=x onerror=alert(1)\\u003e", resp.body)
+        self.assertNotIn(b"<", resp.body)
+        self.assertNotIn(b">", resp.body)
+        parsed = json.loads(resp.body)
+        self.assertEqual(
+            parsed["error"], "env '<img src=x onerror=alert(1)>' not found"
+        )
+
 
 class TestWinExistsEndpoint(VisdomHTTPTestCase):
     """Integration tests for POST ``/win_exists`` payload validation."""
