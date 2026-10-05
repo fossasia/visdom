@@ -26,6 +26,7 @@ from collections import OrderedDict
 
 import tornado.escape
 import tornado.ioloop
+import tornado.web
 
 MAX_ENV_NAME_LEN = 25
 from collections.abc import Mapping, Sequence
@@ -597,6 +598,8 @@ def extract_eid(args):
     eid = args.get("eid") if isinstance(args, Mapping) else None
     if eid is None:
         eid = "main"
+    if isinstance(eid, bool) or not isinstance(eid, (str, int, float)):
+        raise tornado.web.HTTPError(400, reason="'eid' must be a string or number")
     return escape_eid(str(eid))
 
 
