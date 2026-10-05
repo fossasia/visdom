@@ -34,6 +34,7 @@ var Pane = forwardRef((props, ref) => {
   // --------------
   const [propertyListShown, setPropertyListShown] = useState(false);
   const barRef = useRef();
+  const titleMouseDownPos = useRef(null);
 
   const { sendCommentUpdate, sessionInfo } = useContext(ApiContext);
   const [commentOpen, setCommentOpen] = useState(false);
@@ -215,7 +216,22 @@ var Pane = forwardRef((props, ref) => {
           <button
             className="pull-right pane-title"
             title="Open full-screen view"
-            onClick={() => props.onExpand(id)}
+            onMouseDown={(e) => {
+              titleMouseDownPos.current = { x: e.clientX, y: e.clientY };
+            }}
+            onClick={(e) => {
+              // react-grid-layout moves the pane with the mouse 1:1, so this
+              // button stays under the cursor for the whole drag and still
+              // gets a native click on mouseup. Comparing click position to
+              // where the mousedown started tells a real click (no
+              // movement) apart from a drag that happened to start here.
+              const start = titleMouseDownPos.current;
+              const dragged =
+                start &&
+                (Math.abs(e.clientX - start.x) > 5 ||
+                  Math.abs(e.clientY - start.y) > 5);
+              if (!dragged) props.onExpand(id);
+            }}
           >
             <Maximize2 size={10} />
             {title}
