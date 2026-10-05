@@ -12,6 +12,7 @@ No server needed — these test pure functions directly.
 """
 
 import pytest
+import tornado.web
 
 from visdom.data_model.json_store import JSONStore
 from visdom.utils.server_utils import (
@@ -89,11 +90,33 @@ def test_escape_eid_collapses_whitespace_only_differing_ids(padded):
         ({"eid": "test"}, "test"),
         ({"eid": "a/b"}, "a_b"),
         ({"eid": "main "}, "main"),
+        ({"eid": 123}, "123"),
+        ({"eid": 45.6}, "45.6"),
     ],
-    ids=["default", "none_value", "with_value", "escapes_value", "strips_whitespace"],
+    ids=[
+        "default",
+        "none_value",
+        "with_value",
+        "escapes_value",
+        "strips_whitespace",
+        "coerces_int",
+        "coerces_float",
+    ],
 )
 def test_extract_eid(args, eid):
     assert extract_eid(args) == eid
+
+
+@pytest.mark.parametrize(
+    "invalid_eid",
+    [True, False, [1, 2], {"nested": "dict"}],
+    ids=["bool_true", "bool_false", "list", "dict"],
+)
+def test_extract_eid_rejects_non_string_or_number(invalid_eid):
+    with pytest.raises(tornado.web.HTTPError) as exc_info:
+        extract_eid({"eid": invalid_eid})
+    assert exc_info.value.status_code == 400
+    assert "'eid' must be a string or number" in exc_info.value.reason
 
 
 # ----------------------------------------------------------- hash_password ----

@@ -317,6 +317,18 @@ class TestDeleteEnvEndpoint(VisdomHTTPTestCase):
         resp = self.post_json("/delete_env", {"eid": 123})
         self.assertEqual(resp.code, 200)
 
+    def test_boolean_eid_returns_400(self):
+        """A delete_env request with boolean 'eid' returns HTTP 400."""
+        resp = self.post_json("/delete_env", {"eid": True})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'eid' must be a string or number", resp.reason)
+
+    def test_structured_eid_returns_400(self):
+        """A delete_env request with structured 'eid' returns HTTP 400."""
+        resp = self.post_json("/delete_env", {"eid": [1, 2]})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'eid' must be a string or number", resp.reason)
+
     def test_empty_string_or_whitespace_eid_is_noop(self):
         """A delete_env request with empty or whitespace-only 'eid' is a safe no-op returning 200."""
         for empty_eid in ("", "   "):
@@ -363,6 +375,18 @@ class TestEnvStateEndpoint(VisdomHTTPTestCase):
         self.assertEqual(resp.code, 404)
         self.assertIn("123", json.loads(resp.body)["error"])
 
+    def test_boolean_eid_returns_400(self):
+        """An env_state request with boolean 'eid' returns HTTP 400."""
+        resp = self.post_json("/env_state", {"eid": True})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'eid' must be a string or number", resp.reason)
+
+    def test_structured_eid_returns_400(self):
+        """An env_state request with structured 'eid' returns HTTP 400."""
+        resp = self.post_json("/env_state", {"eid": [1, 2]})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'eid' must be a string or number", resp.reason)
+
     def test_empty_body_returns_all_envs(self):
         """An env_state request with an empty object returns all environment IDs."""
         resp = self.post_json("/env_state", {})
@@ -401,6 +425,18 @@ class TestWinExistsEndpoint(VisdomHTTPTestCase):
         resp = self.post_json("/win_exists", {"eid": "main"})
         self.assertEqual(resp.code, 400)
         self.assertIn("missing required field: win", resp.reason)
+
+    def test_boolean_eid_returns_400(self):
+        """A win_exists request with boolean 'eid' returns HTTP 400."""
+        resp = self.post_json("/win_exists", {"win": "w1", "eid": True})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'eid' must be a string or number", resp.reason)
+
+    def test_structured_eid_returns_400(self):
+        """A win_exists request with structured 'eid' returns HTTP 400."""
+        resp = self.post_json("/win_exists", {"win": "w1", "eid": [1, 2]})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'eid' must be a string or number", resp.reason)
 
 
 if __name__ == "__main__":

@@ -130,6 +130,7 @@ class PostHandler(BaseHandler):
 class ExistsHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
+        """Check if a window exists within the specified environment."""
         if not isinstance(args, Mapping):
             raise tornado.web.HTTPError(400, reason="request body must be an object")
         if "win" not in args:
@@ -142,6 +143,7 @@ class ExistsHandler(BaseHandler):
 
     @check_auth
     async def post(self):
+        """Handle POST request to check window existence."""
         args = _decode_json_body(self.request.body)
         await ensure_env_loaded(self, extract_eid(args))
         self.wrap_func(self, args)
@@ -654,7 +656,7 @@ class DeleteEnvHandler(BaseHandler):
         eid = args.get("eid")
         if eid is None:
             return None
-        eid = escape_eid(str(eid))
+        eid = extract_eid(args)
         if not eid or eid == "main":
             return None
         handler.state.pop(eid, None)
@@ -665,6 +667,7 @@ class DeleteEnvHandler(BaseHandler):
     @check_auth
     @check_readonly
     async def post(self):
+        """Handle POST request to delete an environment."""
         args = _decode_json_body(self.request.body)
         removal = self.wrap_func(self, args)
         if removal is not None:
@@ -674,11 +677,12 @@ class DeleteEnvHandler(BaseHandler):
 class EnvStateHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
+        """Handle request for environment state or list of environments."""
         if not isinstance(args, Mapping):
             raise tornado.web.HTTPError(400, reason="request body must be an object")
         eid = args.get("eid")
         if eid is not None:
-            eid = escape_eid(str(eid))
+            eid = extract_eid(args)
             if eid not in handler.state:
                 handler.set_status(404)
                 handler.write(json.dumps({"error": "env '{}' not found".format(eid)}))
@@ -690,10 +694,11 @@ class EnvStateHandler(BaseHandler):
 
     @check_auth
     async def post(self):
+        """Handle POST request for environment state."""
         args = _decode_json_body(self.request.body)
         eid = args.get("eid")
         if eid is not None:
-            await ensure_env_loaded(self, escape_eid(str(eid)))
+            await ensure_env_loaded(self, extract_eid(args))
         self.wrap_func(self, args)
 
 
