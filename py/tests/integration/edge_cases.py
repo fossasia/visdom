@@ -301,6 +301,22 @@ class TestDeleteEnvEndpoint(VisdomHTTPTestCase):
         self.assertEqual(resp.code, 400)
         self.assertIn("request body must be valid JSON", resp.reason)
 
+    def test_json_constants_in_body_returns_400(self):
+        """A delete_env request with non-standard JSON constants returns HTTP 400."""
+        for constant_body in (
+            '{"eid": NaN}',
+            '{"eid": Infinity}',
+            '{"eid": -Infinity}',
+        ):
+            resp = self.fetch(
+                "/delete_env",
+                method="POST",
+                body=constant_body,
+                headers={"Content-Type": "application/json"},
+            )
+            self.assertEqual(resp.code, 400)
+            self.assertIn("request body must be valid JSON", resp.reason)
+
     def test_non_object_json_body_returns_400(self):
         """A delete_env request where body is not a JSON object returns HTTP 400."""
         resp = self.fetch(
@@ -360,6 +376,22 @@ class TestEnvStateEndpoint(VisdomHTTPTestCase):
         )
         self.assertEqual(resp.code, 400)
         self.assertIn("request body must be valid JSON", resp.reason)
+
+    def test_json_constants_in_body_returns_400(self):
+        """An env_state request with non-standard JSON constants returns HTTP 400."""
+        for constant_body in (
+            '{"eid": NaN}',
+            '{"eid": Infinity}',
+            '{"eid": -Infinity}',
+        ):
+            resp = self.fetch(
+                "/env_state",
+                method="POST",
+                body=constant_body,
+                headers={"Content-Type": "application/json"},
+            )
+            self.assertEqual(resp.code, 400)
+            self.assertIn("request body must be valid JSON", resp.reason)
 
     def test_non_object_json_body_returns_400(self):
         """An env_state request where body is not a JSON object returns HTTP 400."""
