@@ -226,6 +226,7 @@ var Pane = forwardRef((props, ref) => {
               // where the mousedown started tells a real click (no
               // movement) apart from a drag that happened to start here.
               const start = titleMouseDownPos.current;
+              titleMouseDownPos.current = null;
               const dragged =
                 start &&
                 (Math.abs(e.clientX - start.x) > 5 ||
