@@ -314,8 +314,11 @@ class TestDeleteEnvEndpoint(VisdomHTTPTestCase):
 
     def test_numeric_eid_is_coerced(self):
         """A delete_env request with numeric 'eid' is safely coerced to string."""
+        self.create_text_window(eid="123", content="numeric")
+        self.assertIn("123", self.get_envs())
         resp = self.post_json("/delete_env", {"eid": 123})
         self.assertEqual(resp.code, 200)
+        self.assertNotIn("123", self.get_envs())
 
     def test_boolean_eid_returns_400(self):
         """A delete_env request with boolean 'eid' returns HTTP 400."""
