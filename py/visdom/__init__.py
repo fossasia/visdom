@@ -55,8 +55,16 @@ if sys.version_info < (3, 12):
 
 def _normalize_tsne(Y):
     Y = np.asarray(Y)
-    xmin, xmax = np.nanmin(Y[:, 0]), np.nanmax(Y[:, 0])
-    ymin, ymax = np.nanmin(Y[:, 1]), np.nanmax(Y[:, 1])
+    xmin, xmax = (
+        (0, 0)
+        if np.all(np.isnan(Y[:, 0]))
+        else (np.nanmin(Y[:, 0]), np.nanmax(Y[:, 0]))
+    )
+    ymin, ymax = (
+        (0, 0)
+        if np.all(np.isnan(Y[:, 1]))
+        else (np.nanmin(Y[:, 1]), np.nanmax(Y[:, 1]))
+    )
     xrange = xmax - xmin
     yrange = ymax - ymin
     normx = (
