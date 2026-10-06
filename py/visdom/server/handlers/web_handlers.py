@@ -676,8 +676,20 @@ class EnvStateHandler(BaseHandler):
 class ForkEnvHandler(BaseHandler):
     @staticmethod
     async def wrap_func(handler, args):
-        prev_eid = escape_eid(args.get("prev_eid"))
-        eid = escape_eid(args.get("eid"))
+        if not isinstance(args, Mapping):
+            raise tornado.web.HTTPError(400, reason="request body must be an object")
+        prev_eid = args.get("prev_eid")
+        eid = args.get("eid")
+        if not isinstance(prev_eid, str) or not isinstance(eid, str):
+            raise tornado.web.HTTPError(
+                400, reason="both 'prev_eid' and 'eid' must be strings"
+            )
+        prev_eid = escape_eid(prev_eid)
+        eid = escape_eid(eid)
+        if not eid:
+            raise tornado.web.HTTPError(400, reason="'eid' must not be empty")
+        if not prev_eid:
+            raise tornado.web.HTTPError(400, reason="'prev_eid' must not be empty")
 
         if prev_eid not in handler.state:
             # the eid stays out of the reason: it is echoed on the status line,
@@ -707,9 +719,14 @@ class ForkEnvHandler(BaseHandler):
     @check_auth
     @check_readonly
     async def post(self):
-        args = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
+        try:
+            args = tornado.escape.json_decode(
+                tornado.escape.to_basestring(self.request.body)
+            )
+        except (ValueError, TypeError):
+            raise tornado.web.HTTPError(
+                400, reason="request body must be valid JSON"
+            ) from None
         await self.wrap_func(self, args)
 
 
@@ -760,7 +777,8 @@ class EnvHandler(BaseHandler):
 class CompareHandler(BaseHandler):
     @check_auth
     def get(self, eids):
-        for eid in eids.split("+"):
+        for raw_eid in eids.split("+"):
+            eid = escape_eid(raw_eid)
             if eid not in self.state:
                 raise tornado.web.HTTPError(
                     404, reason=f"Environment '{eid}' not found"
@@ -772,13 +790,33 @@ class CompareHandler(BaseHandler):
 
     @check_auth
     async def post(self, args):
-        body = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
+        """Send environment comparison data to a subscriber socket.
+
+        Expects a JSON object with a required ``sid`` string identifying the
+        target subscriber session. Returns HTTP 400 if the request body is
+        not valid JSON, is not an object, or is missing ``sid``.
+        """
+        try:
+            body = tornado.escape.json_decode(
+                tornado.escape.to_basestring(self.request.body)
+            )
+        except ValueError:
+            raise tornado.web.HTTPError(400, reason="request body must be valid JSON")
+
+        if not isinstance(body, Mapping):
+            raise tornado.web.HTTPError(400, reason="request body must be an object")
+
+        if (
+            "sid" not in body
+            or not isinstance(body["sid"], str)
+            or not body["sid"].strip()
+        ):
+            raise tornado.web.HTTPError(400, reason="missing required field: 'sid'")
+
         sid = body["sid"]
         show_all = body.get("show_all", False)
         if sid in self.subs:
-            eids = args.split("+")
+            eids = [escape_eid(eid) for eid in args.split("+")]
             try:
                 # comparison reads every named env in full, and reads it from
                 # state -- so each one is brought into memory here, where the
@@ -803,22 +841,53 @@ class CompareHandler(BaseHandler):
                 return
 
 
+def _decode_json_body(body):
+    """Return a request body decoded into a dict of arguments.
+
+    Shared by handlers whose bodies are JSON objects, so an empty body is read
+    as an empty object and each handler decides on its own whether the arguments
+    it needs are missing. Anything else that is not a JSON object is the caller's
+    error: without this check, malformed JSON or a bare list would surface as an
+    unhandled exception and a 500 rather than a 400 naming what was wrong with
+    the request.
+    """
+    try:
+        text = tornado.escape.to_basestring(body).strip()
+        if not text:
+            return {}
+        args = tornado.escape.json_decode(text)
+    except ValueError as error:
+        raise tornado.web.HTTPError(
+            400, reason="request body must be valid JSON"
+        ) from error
+    if not isinstance(args, Mapping):
+        raise tornado.web.HTTPError(400, reason="request body must be an object")
+    return args
+
+
 class SaveHandler(BaseHandler):
     @staticmethod
     async def wrap_func(handler, args):
+        """Validate payload parameters, filter invalid env IDs, and persist valid environments."""
+        if "data" not in args:
+            raise tornado.web.HTTPError(400, reason="missing required field: 'data'")
         envs = args["data"]
-        envs = [escape_eid(eid) for eid in envs]
+        if not isinstance(envs, Sequence) or isinstance(envs, (str, bytes)):
+            raise tornado.web.HTTPError(
+                400, reason="'data' must be a list of environment ids"
+            )
+        valid_envs = [
+            escape_eid(eid) for eid in envs if isinstance(eid, str) and eid.strip()
+        ]
         # this drops invalid env ids
-        ret = await save_envs_off_loop(handler, envs)
+        ret = await save_envs_off_loop(handler, valid_envs)
         handler.write(json.dumps(ret))
 
     @check_auth
     @check_readonly
     async def post(self):
-        args = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
-        await self.wrap_func(self, args)
+        """Decode JSON request body and save environments."""
+        await self.wrap_func(self, _decode_json_body(self.request.body))
 
 
 class DataHandler(BaseHandler):
@@ -1115,28 +1184,6 @@ def _stored_experiment_map(store):
     worker is already in the shape the overlay on the loop needs.
     """
     return {exp.env_id: exp for exp in ExperimentStore(store).list_experiments()}
-
-
-def _decode_json_body(body):
-    """Return a request body decoded into a dict of arguments.
-
-    Shared by the ``/experiments/*`` endpoints, whose bodies are all optional
-    JSON objects, so an empty body is read as an empty object and each handler
-    decides on its own whether the arguments it needs are missing. Anything else
-    that is not a JSON object is the caller's error: without this check,
-    malformed JSON or a bare list would surface as an unhandled exception and a
-    500 rather than a 400 naming what was wrong with the request.
-    """
-    try:
-        text = tornado.escape.to_basestring(body).strip()
-        if not text:
-            return {}
-        args = tornado.escape.json_decode(text)
-    except ValueError:
-        raise tornado.web.HTTPError(400, reason="request body must be valid JSON")
-    if not isinstance(args, Mapping):
-        raise tornado.web.HTTPError(400, reason="request body must be an object")
-    return args
 
 
 class ExperimentLogHandler(BaseHandler):
