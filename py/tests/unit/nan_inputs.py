@@ -46,7 +46,7 @@ def test_audio_non_finite_samples_become_silence(offline_client, monkeypatch):
     tensor = np.random.default_rng(1).standard_normal(1000)
     tensor[42] = np.nan
     tensor[10] = np.inf
-    tensor[20] = -np.inf 
+    tensor[20] = -np.inf
 
     with warnings.catch_warnings():
         warnings.simplefilter("error", RuntimeWarning)
