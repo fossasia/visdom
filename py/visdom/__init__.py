@@ -4027,7 +4027,7 @@ class Visdom(object):
                 and opts["normalize"] > 0
                 and np.isfinite(opts["normalize"])
             ), "opts.normalize should be a finite positive number"
-            magnitude = np.sqrt(np.add(np.multiply(X, X), np.multiply(Y, Y)))
+            magnitude = np.hypot(X, Y)
             finite_mask = np.isfinite(magnitude)
 
             if not np.any(finite_mask):
