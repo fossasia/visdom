@@ -603,7 +603,16 @@ class TestEventsValidation(VisdomHTTPTestCase):
             {"eid": 123, "data": [{"type": "text", "content": "hello"}]},
         )
         self.assertEqual(resp.code, 400)
-        self.assertIn("'eid' must be a string", resp.reason)
+        self.assertIn("'eid' must be a non-empty string", resp.reason)
+
+    def test_events_whitespace_eid_is_bad_request(self):
+        for whitespace in ("", "   ", "\t\n"):
+            resp = self.post_json(
+                "/events",
+                {"eid": whitespace, "data": [{"type": "text", "content": "hello"}]},
+            )
+            self.assertEqual(resp.code, 400)
+            self.assertIn("'eid' must be a non-empty string", resp.reason)
 
     def test_events_non_string_type_is_bad_request(self):
         resp = self.post_json(
@@ -678,7 +687,16 @@ class TestUpdateValidation(VisdomHTTPTestCase):
             {"win": "w1", "eid": 123, "opts": {}},
         )
         self.assertEqual(resp.code, 400)
-        self.assertIn("'eid' must be a string", resp.reason)
+        self.assertIn("'eid' must be a non-empty string", resp.reason)
+
+    def test_update_whitespace_eid_is_bad_request(self):
+        for whitespace in ("", "   ", "\t\n"):
+            resp = self.post_json(
+                "/update",
+                {"win": "w1", "eid": whitespace, "opts": {}},
+            )
+            self.assertEqual(resp.code, 400)
+            self.assertIn("'eid' must be a non-empty string", resp.reason)
 
     def test_update_null_eid_succeeds(self):
         win = self.create_text_window(eid="main", content="before")

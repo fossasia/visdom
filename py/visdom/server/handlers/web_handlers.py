@@ -159,8 +159,10 @@ class PostHandler(BaseHandler):
         elif "layout" not in req:
             raise tornado.web.HTTPError(400, reason="missing required field: 'layout'")
 
-        if req.get("eid") is not None and not isinstance(req["eid"], str):
-            raise tornado.web.HTTPError(400, reason="'eid' must be a string")
+        if req.get("eid") is not None and (
+            not isinstance(req["eid"], str) or not req["eid"].strip()
+        ):
+            raise tornado.web.HTTPError(400, reason="'eid' must be a non-empty string")
 
         eid = extract_eid(req)
         await ensure_env_loaded(self, eid)
@@ -736,8 +738,10 @@ class UpdateHandler(BaseHandler):
             self.set_status(400)
             return
         args = _decode_json_body(self.request.body)
-        if args.get("eid") is not None and not isinstance(args["eid"], str):
-            raise tornado.web.HTTPError(400, reason="'eid' must be a string")
+        if args.get("eid") is not None and (
+            not isinstance(args["eid"], str) or not args["eid"].strip()
+        ):
+            raise tornado.web.HTTPError(400, reason="'eid' must be a non-empty string")
         await ensure_env_loaded(self, extract_eid(args))
         self.wrap_func(self, args)
 
