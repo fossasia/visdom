@@ -4575,10 +4575,13 @@ class Visdom(object):
         except ImportError:
             raise RuntimeError("networkx must be installed to plot Graph figures")
 
+        input_edges = list(edges)
         G = nx.DiGraph() if opts.get("directed", False) else nx.Graph()
-        G.add_edges_from(edges)
+        G.add_edges_from(input_edges)
         node_data = list(G.nodes())
         link_data = list(G.edges())
+        if opts.get("directed", False):
+            link_data = list(dict.fromkeys(tuple(edge[:2]) for edge in input_edges))
         node_data.sort()
         if edgeLabels is not None:
             assert len(edgeLabels) == len(
