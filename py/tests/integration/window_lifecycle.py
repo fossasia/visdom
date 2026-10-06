@@ -597,6 +597,15 @@ class TestEventsValidation(VisdomHTTPTestCase):
         self.assertEqual(resp.code, 400)
         self.assertIn("'opts' must be an object", resp.reason)
 
+    def test_events_embeddings_non_object_content_is_bad_request(self):
+        for invalid_content in (None, "string", [1, 2]):
+            resp = self.post_json(
+                "/events",
+                {"data": [{"type": "embeddings", "content": invalid_content}]},
+            )
+            self.assertEqual(resp.code, 400)
+            self.assertIn("'content' for embeddings must be an object", resp.reason)
+
     def test_events_non_string_eid_is_bad_request(self):
         resp = self.post_json(
             "/events",

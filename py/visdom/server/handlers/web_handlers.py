@@ -156,6 +156,12 @@ class PostHandler(BaseHandler):
                 raise tornado.web.HTTPError(
                     400, reason="missing required field: 'content'"
                 )
+            if data[0]["type"] == "embeddings" and not isinstance(
+                data[0]["content"], Mapping
+            ):
+                raise tornado.web.HTTPError(
+                    400, reason="'content' for embeddings must be an object"
+                )
         elif "layout" not in req:
             raise tornado.web.HTTPError(400, reason="missing required field: 'layout'")
 
