@@ -84,9 +84,14 @@ class PostHandler(BaseHandler):
     @check_auth
     @check_readonly
     async def post(self):
-        req = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
+        try:
+            req = tornado.escape.json_decode(
+                tornado.escape.to_basestring(self.request.body)
+            )
+        except (ValueError, json.JSONDecodeError):
+            raise tornado.web.HTTPError(400, reason="invalid JSON in request body")
+        if not isinstance(req, dict):
+            raise tornado.web.HTTPError(400, reason="request body must be a JSON object")
 
         if req.get("func") is not None:
             raise Exception(
@@ -116,9 +121,14 @@ class ExistsHandler(BaseHandler):
 
     @check_auth
     async def post(self):
-        args = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
+        try:
+            args = tornado.escape.json_decode(
+                tornado.escape.to_basestring(self.request.body)
+            )
+        except (ValueError, json.JSONDecodeError):
+            raise tornado.web.HTTPError(400, reason="invalid JSON in request body")
+        if not isinstance(args, dict):
+            raise tornado.web.HTTPError(400, reason="request body must be a JSON object")
         await ensure_env_loaded(self, extract_eid(args))
         self.wrap_func(self, args)
 
