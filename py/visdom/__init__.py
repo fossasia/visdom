@@ -2562,25 +2562,23 @@ class Visdom(object):
 
         if tensor is not None:
             import scipy.io.wavfile  # type: ignore
-            import tempfile
 
-            audiofile = os.path.join(
-                tempfile.gettempdir(), "%s.wav" % next(tempfile._get_candidate_names())
-            )
             max_val = np.max(np.abs(tensor))
             if max_val == 0:
                 # When all zero tensor, skip normalisation to avoid division by zero
                 tensor = np.zeros_like(tensor, dtype=np.int16)
             else:
                 tensor = np.int16(tensor / max_val * 32767)
-            scipy.io.wavfile.write(audiofile, opts.get("sample_frequency"), tensor)
-
-        extension = audiofile.split(".")[-1].lower()
-        mimetypes = {"wav": "wav", "mp3": "mp3", "ogg": "ogg", "flac": "flac"}
-        mimetype = mimetypes.get(extension)
-        assert mimetype is not None, "unknown audio type: %s" % extension
-
-        bytestr = loadfile(audiofile)
+            with BytesIO() as buffer:
+                scipy.io.wavfile.write(buffer, opts.get("sample_frequency"), tensor)
+                bytestr = buffer.getvalue()
+            mimetype = "wav"
+        else:
+            extension = audiofile.split(".")[-1].lower()
+            mimetypes = {"wav": "wav", "mp3": "mp3", "ogg": "ogg", "flac": "flac"}
+            mimetype = mimetypes.get(extension)
+            assert mimetype is not None, "unknown audio type: %s" % extension
+            bytestr = loadfile(audiofile)
         audiodata = """
             <audio controls>
                 <source type="audio/%s" src="data:audio/%s;base64,%s">
