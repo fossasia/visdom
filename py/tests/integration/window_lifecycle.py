@@ -753,6 +753,7 @@ class TestUpdateValidation(VisdomHTTPTestCase):
             {"win": win, "opts": None, "data": []},
         )
         self.assertEqual(resp.code, 200)
+        self.assertEqual(self.get_win_data(win)["content"], "orig")
 
     def test_update_append_non_string_type_is_bad_request(self):
         resp = self.post_json(
