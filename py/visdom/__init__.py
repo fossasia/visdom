@@ -2795,8 +2795,8 @@ class Visdom(object):
 
         if update is not None:
             result = None
-            # Send one named update per metric so mapping order cannot swap traces.
-            for name, values in zip(names, series):
+            # Use the same trace names for creation and named updates.
+            for name, values in zip(legend, series):
                 metric_opts = None
                 if update != "remove":
                     metric_opts = dict(opts)

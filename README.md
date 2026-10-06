@@ -1203,6 +1203,8 @@ vis.learning_curve(
 ```
 
 
+When using custom `opts.legend` labels, pass those labels again on updates, in the order of the metrics being updated. Updates and removals address the displayed trace names.
+
 #### vis.stem
 This function draws a stem plot. It takes as input an `N` or `NxM` tensor
 `X` that specifies the values of the `N` points in the `M` time series.
