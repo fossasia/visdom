@@ -32,8 +32,8 @@ def test_normalize_tsne_nan_does_not_collapse_axis(col):
     assert finite.max() == pytest.approx(1.0)
 
 
-def test_audio_nan_sample_becomes_silence(offline_client, monkeypatch):
-    """A NaN sample used to make the scale factor NaN and corrupt the cast."""
+def test_audio_non_finite_samples_become_silence(offline_client, monkeypatch):
+    """NaN and +/-inf used to corrupt the scale factor and the int16 cast."""
     captured = {}
 
     def fake_write(path, freq, data):
@@ -45,10 +45,14 @@ def test_audio_nan_sample_becomes_silence(offline_client, monkeypatch):
 
     tensor = np.random.default_rng(1).standard_normal(1000)
     tensor[42] = np.nan
+    tensor[10] = np.inf
+    tensor[20] = -np.inf 
 
     with warnings.catch_warnings():
         warnings.simplefilter("error", RuntimeWarning)
         offline_client.audio(tensor=tensor, opts={"sample_frequency": 44100})
 
     assert captured["data"][42] == 0
+    assert captured["data"][10] == 0
+    assert captured["data"][20] == 0
     assert np.abs(captured["data"]).max() > 0
