@@ -123,6 +123,32 @@ def test_scrub_dict_passes_non_dicts_through(value):
     assert _scrub_dict(value) == value
 
 
+def test_scrub_dict_visits_each_node_once():
+    """Guards against testing a value and then rebuilding it separately.
+
+    Doing both walks every subtree twice per level, so the cost of a nested
+    ``layoutopts`` grows as 2**depth: at depth 20 a single plot call spent
+    seconds inside this helper. Counting reads of the nested mapping keeps
+    the guard about the number of walks rather than about wall-clock time.
+    """
+
+    class CountingDict(dict):
+        reads = 0
+
+        def items(self):
+            type(self).reads += 1
+            return super().items()
+
+    depth = 20
+    nested = {"leaf": 1}
+    for _ in range(depth):
+        nested = CountingDict(k=nested)
+
+    assert _scrub_dict(nested) == nested
+    # One read per level. Walking twice per level would make this 2**depth.
+    assert CountingDict.reads == depth
+
+
 @pytest.mark.parametrize(
     "field",
     [
