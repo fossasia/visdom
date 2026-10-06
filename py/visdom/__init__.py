@@ -4575,7 +4575,7 @@ class Visdom(object):
         except ImportError:
             raise RuntimeError("networkx must be installed to plot Graph figures")
 
-        G = nx.Graph()
+        G = nx.DiGraph() if opts.get("directed", False) else nx.Graph()
         G.add_edges_from(edges)
         node_data = list(G.nodes())
         link_data = list(G.edges())
