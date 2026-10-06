@@ -809,13 +809,13 @@ class CompareHandler(BaseHandler):
         if not isinstance(body, Mapping):
             raise tornado.web.HTTPError(400, reason="request body must be an object")
 
-        if "sid" not in body or (
-            body["sid"] is not None
-            and (not isinstance(body["sid"], str) or not body["sid"].strip())
-        ):
+        if "sid" not in body:
             raise tornado.web.HTTPError(400, reason="missing required field: 'sid'")
 
         sid = body["sid"]
+        if sid is not None and (not isinstance(sid, str) or not sid.strip()):
+            raise tornado.web.HTTPError(400, reason="invalid required field: 'sid'")
+
         show_all = body.get("show_all", False)
         if sid and sid in self.subs:
             eids = [escape_eid(eid) for eid in args.split("+")]
