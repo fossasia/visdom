@@ -2,6 +2,9 @@
 # https://www.apache.org/licenses/LICENSE-2.0
 """Unknown scores must not displace the best parallel-coordinate runs."""
 
+import subprocess
+import sys
+
 import numpy as np
 import pytest
 
@@ -32,19 +35,50 @@ def test_missing_scores_rank_after_known_scores(capture_send, scores, cap, expec
     np.testing.assert_array_equal(x[:, 0], np.arange(4))
 
 
-@pytest.mark.skipif(
-    not __debug__, reason="assert-based validation is stripped under python -O"
-)
 @pytest.mark.parametrize("cap", [0, -1, True, 1.5, "2"])
 def test_invalid_experiment_cap_is_rejected_before_sending(offline_client, cap):
-    with pytest.raises(
-        AssertionError, match="max_experiments must be a positive integer"
-    ):
+    with pytest.raises(ValueError, match="max_experiments must be a positive integer"):
         offline_client.parallel_coordinates(
             np.array([[1.0, 2.0], [3.0, 4.0]]),
             Y=np.array([0.1, 0.2]),
             opts={"max_experiments": cap},
         )
+
+
+def test_invalid_experiment_caps_are_rejected_under_optimized_python():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-O",
+            "-c",
+            """
+from unittest.mock import Mock
+import numpy as np
+from visdom import Visdom
+
+client = Visdom.__new__(Visdom)
+client._send = Mock()
+for cap in (0, -1, True, 1.5, "2"):
+    try:
+        client.parallel_coordinates(
+            np.array([[1., 2.], [3., 4.]]),
+            Y=np.array([.1, .2]),
+            opts={"max_experiments": cap},
+        )
+    except ValueError as error:
+        if str(error) != "opts.max_experiments must be a positive integer":
+            raise
+    else:
+        raise RuntimeError("Invalid cap accepted: %r" % (cap,))
+client._send.assert_not_called()
+""",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.parametrize("cap", [None, np.int64(4), 5])
