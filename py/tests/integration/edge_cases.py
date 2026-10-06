@@ -426,8 +426,40 @@ class TestEnvStateEndpoint(VisdomHTTPTestCase):
         """An env_state request with an empty object returns all environment IDs."""
         resp = self.post_json("/env_state", {})
         self.assertEqual(resp.code, 200)
+        self.assertEqual(
+            resp.headers.get("Content-Type"), "application/json; charset=UTF-8"
+        )
+        self.assertEqual(resp.headers.get("X-Content-Type-Options"), "nosniff")
         envs = json.loads(resp.body.decode())
         self.assertIn("main", envs)
+
+    def test_known_eid_success_uses_write_json_headers(self):
+        """A known env_state request returns panes with write_json headers."""
+        self.create_text_window(eid="main", content="hello")
+        resp = self.post_json("/env_state", {"eid": "main"})
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(
+            resp.headers.get("Content-Type"), "application/json; charset=UTF-8"
+        )
+        self.assertEqual(resp.headers.get("X-Content-Type-Options"), "nosniff")
+        panes = json.loads(resp.body.decode())
+        self.assertIsInstance(panes, dict)
+
+    def test_all_envs_success_escapes_html_in_eid(self):
+        """All-envs list escapes HTML in environment IDs via write_json."""
+        xss_eid = "<img src=x onerror=alert(1)>"
+        self.create_text_window(eid=xss_eid, content="test")
+        resp = self.post_json("/env_state", {})
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(
+            resp.headers.get("Content-Type"), "application/json; charset=UTF-8"
+        )
+        self.assertEqual(resp.headers.get("X-Content-Type-Options"), "nosniff")
+        self.assertIn(b"\\u003cimg src=x onerror=alert(1)\\u003e", resp.body)
+        self.assertNotIn(b"<", resp.body)
+        self.assertNotIn(b">", resp.body)
+        envs = json.loads(resp.body.decode())
+        self.assertIn(xss_eid, envs)
 
     def test_unknown_eid_escapes_html_and_sets_json_headers(self):
         """Unknown eid errors use write_json to prevent reflected XSS."""

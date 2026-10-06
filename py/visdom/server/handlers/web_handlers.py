@@ -692,10 +692,10 @@ class EnvStateHandler(BaseHandler):
                 handler.set_status(404)
                 handler.write_json({"error": "env '{}' not found".format(eid)})
                 return
-            handler.write(json.dumps(handler.state[eid]["jsons"], cls=NanSafeEncoder))
+            handler.write_json(handler.state[eid]["jsons"])
         else:
             all_eids = list(handler.state.keys())
-            handler.write(json.dumps(all_eids))
+            handler.write_json(all_eids)
 
     @check_auth
     async def post(self):
