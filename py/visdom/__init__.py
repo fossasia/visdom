@@ -2085,10 +2085,10 @@ class Visdom(object):
                 selection = event["selectedIdxs"]
                 sub_features = np.take(features, selection, axis=0)
                 Y = do_tsne(sub_features)
-                label_set = list(set(labels))
+                labels_normalized, _, _ = _normalize_labels(labels)
                 points = [
                     {
-                        "group": int(label_set.index(labels[i])),
+                        "group": int(labels_normalized[i] - 1),
                         "name": "Entity {}".format(i),
                         "position": xy,
                         "label": labels[i],
