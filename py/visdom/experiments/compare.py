@@ -80,10 +80,15 @@ def _same_value(a: Any, b: Any) -> bool:
     ``amp=1``; :mod:`~visdom.experiments.query` draws the same line by refusing to
     treat a bool as a number. Looser than ``==`` about NaN, which is never equal
     to itself: a metric that is NaN in every run agrees across them, and calling
-    that a difference would bury the real ones.
+    that a difference would bury the real ones. Apply these rules recursively
+    to JSON lists and dictionaries, so nested settings follow the same policy.
     """
     if isinstance(a, bool) != isinstance(b, bool):
         return False
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(_same_value(x, y) for x, y in zip(a, b))
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(_same_value(a[key], b[key]) for key in a)
     if isinstance(a, float) and isinstance(b, float):
         if math.isnan(a) and math.isnan(b):
             return True
