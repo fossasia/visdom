@@ -6,6 +6,8 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import json
+
 import pytest
 
 from visdom.experiments import Experiment, build_comparison
@@ -61,3 +63,19 @@ def test_nested_structure_differences_are_preserved(left, right):
     for run, value in zip(runs, [left, right]):
         run.set_param("config", value)
     assert build_comparison(runs)["params"]["differing"] == ["config"]
+
+
+@pytest.mark.parametrize("right_leaf,differing", [(True, False), (1, True)])
+def test_deep_json_settings_do_not_exhaust_comparison_stack(right_leaf, differing):
+    left, right = True, right_leaf
+    for depth in range(600):
+        if depth % 2:
+            left, right = {"value": left}, {"value": right}
+        else:
+            left, right = [left], [right]
+    runs = [Experiment("a"), Experiment("b")]
+    for run, value in zip(runs, [left, right]):
+        run.set_param("config", json.loads(json.dumps(value)))
+    params = build_comparison(runs)["params"]
+    assert params["differing"] == (["config"] if differing else [])
+    assert len(params["groups"]["config"]) == (2 if differing else 1)
