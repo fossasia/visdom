@@ -553,23 +553,49 @@ class TestEventsValidation(VisdomHTTPTestCase):
     def test_events_empty_data_is_bad_request(self):
         resp = self.post_json("/events", {"data": []})
         self.assertEqual(resp.code, 400)
-        self.assertIn("'data' must be a non-empty list", resp.reason)
+        self.assertIn("missing required field: 'data'", resp.reason)
 
     def test_events_non_sequence_data_is_bad_request(self):
         for invalid in ("not_a_list", 123, {"k": "v"}):
             resp = self.post_json("/events", {"data": invalid})
             self.assertEqual(resp.code, 400)
-            self.assertIn("'data' must be a non-empty list", resp.reason)
+            self.assertIn("'data' must be a list", resp.reason)
 
     def test_events_non_object_data_element_is_bad_request(self):
         resp = self.post_json("/events", {"data": [123]})
         self.assertEqual(resp.code, 400)
-        self.assertIn("'data[0]' must be an object with 'type'", resp.reason)
+        self.assertIn("all entries in 'data' must be objects", resp.reason)
+
+    def test_events_non_object_data_later_entry_is_bad_request(self):
+        resp = self.post_json(
+            "/events",
+            {"data": [{"type": "scatter"}, "not_an_object"], "layout": {}},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("all entries in 'data' must be objects", resp.reason)
 
     def test_events_missing_type_in_data_element_is_bad_request(self):
         resp = self.post_json("/events", {"data": [{"content": "hello"}]})
         self.assertEqual(resp.code, 400)
         self.assertIn("'data[0]' must be an object with 'type'", resp.reason)
+
+    def test_events_plot_missing_layout_is_bad_request(self):
+        resp = self.post_json("/events", {"data": [{"type": "scatter"}]})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("missing required field: 'layout'", resp.reason)
+
+    def test_events_native_pane_missing_content_is_bad_request(self):
+        resp = self.post_json("/events", {"data": [{"type": "text"}]})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("missing required field: 'content'", resp.reason)
+
+    def test_events_non_object_opts_is_bad_request(self):
+        resp = self.post_json(
+            "/events",
+            {"data": [{"type": "text", "content": "hello"}], "opts": [1, 2]},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'opts' must be an object", resp.reason)
 
     def test_events_non_string_eid_is_bad_request(self):
         resp = self.post_json(
@@ -578,6 +604,15 @@ class TestEventsValidation(VisdomHTTPTestCase):
         )
         self.assertEqual(resp.code, 400)
         self.assertIn("'eid' must be a string", resp.reason)
+
+    def test_events_null_eid_targets_main_env(self):
+        resp = self.post_json(
+            "/events",
+            {"eid": None, "data": [{"type": "text", "content": "null_eid_test"}]},
+        )
+        self.assertEqual(resp.code, 200)
+        win = resp.body.decode()
+        self.assertEqual(self.get_win_data(win, eid="main")["content"], "null_eid_test")
 
 
 class TestUpdateValidation(VisdomHTTPTestCase):
@@ -615,6 +650,11 @@ class TestUpdateValidation(VisdomHTTPTestCase):
         self.assertEqual(resp.code, 400)
         self.assertIn("missing required field: win", resp.reason)
 
+    def test_update_unhashable_win_is_bad_request(self):
+        resp = self.post_json("/update", {"win": [], "data": []})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'win' must be hashable", resp.reason)
+
     def test_update_non_string_eid_is_bad_request(self):
         resp = self.post_json(
             "/update",
@@ -622,6 +662,70 @@ class TestUpdateValidation(VisdomHTTPTestCase):
         )
         self.assertEqual(resp.code, 400)
         self.assertIn("'eid' must be a string", resp.reason)
+
+    def test_update_null_eid_succeeds(self):
+        win = self.create_text_window(eid="main", content="before")
+        resp = self.post_json(
+            "/update",
+            {"win": win, "eid": None, "data": [{"content": "after"}], "append": False},
+        )
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(
+            self.get_win_data(win, eid="main")["content"], "before<br>after"
+        )
+
+    def test_update_text_non_list_data_is_bad_request(self):
+        win = self.create_text_window(content="orig")
+        resp = self.post_json(
+            "/update",
+            {"win": win, "data": "not_a_list"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("text update data must be a list", resp.reason)
+
+    def test_update_malformed_payload_is_bad_request(self):
+        win = self.create_text_window(content="orig")
+        resp = self.post_json(
+            "/update",
+            {"win": win, "data": [{"invalid_key": 123}]},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("invalid update payload", resp.reason)
+
+    def test_update_non_object_opts_is_bad_request(self):
+        win = self.create_text_window(content="orig")
+        resp = self.post_json(
+            "/update",
+            {"win": win, "opts": "not_an_object"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'opts' must be an object", resp.reason)
+
+    def test_update_non_object_layout_is_bad_request(self):
+        win = self.create_text_window(content="orig")
+        resp = self.post_json(
+            "/update",
+            {"win": win, "layout": 123},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'layout' must be an object", resp.reason)
+
+    def test_update_append_nonexistent_win_empty_data_is_bad_request(self):
+        resp = self.post_json(
+            "/update",
+            {"win": "nonexistent_win", "append": True, "data": []},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'data' must be a non-empty list", resp.reason)
+
+    def test_update_opts_only_with_empty_data_succeeds(self):
+        win = self.create_text_window(content="orig")
+        resp = self.post_json(
+            "/update",
+            {"win": win, "opts": {"title": "new_title"}, "data": []},
+        )
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(self.get_win_data(win)["title"], "new_title")
 
 
 if __name__ == "__main__":
