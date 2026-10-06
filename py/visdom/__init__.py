@@ -131,6 +131,20 @@ logger = logging.getLogger(__name__)
 SESSION_IDLE_TIMEOUT = 600
 SESSION_IDLE_CHECK_INTERVAL = 60
 
+# Endpoints that change what the server holds, so replay_log() can rebuild it.
+# Reads (search, compare, get_tags, ...) stay out: replaying one only asks
+# the question again.
+LOGGED_ENDPOINTS = frozenset(
+    {
+        "events",
+        "update",
+        "experiments/log",
+        "experiments/tags",
+        "experiments/hparams",
+        "experiments/hparams/update",
+    }
+)
+
 
 def get_rand_id():
     return str(hex(int(time.time() * 10000000))[2:])
@@ -1145,19 +1159,22 @@ class Visdom(object):
 
     # Utils
     def _log(self, msg, endpoint):
-        if self.log_to_filename is not None:
-            if endpoint in ["events", "update"]:
-                with open(self.log_to_filename, "a+") as log_file:
-                    log_file.write(
-                        json.dumps(
-                            [
-                                endpoint,
-                                msg,
-                            ],
-                            cls=NanSafeEncoder,
-                        )
-                        + "\n"
-                    )
+        if self.log_to_filename is None or endpoint not in LOGGED_ENDPOINTS:
+            return
+        # get_tags shares its endpoint with set_tags; only the write is kept.
+        if endpoint == "experiments/tags" and msg.get("action") == "get":
+            return
+        with open(self.log_to_filename, "a+") as log_file:
+            log_file.write(
+                json.dumps(
+                    [
+                        endpoint,
+                        msg,
+                    ],
+                    cls=NanSafeEncoder,
+                )
+                + "\n"
+            )
 
     def _handle_post(self, url, data=None):
         """

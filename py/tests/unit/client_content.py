@@ -789,6 +789,73 @@ def test_finish_experiment_defaults_to_finished(offline_client):
     assert msg["status"] == "finished"
 
 
+@pytest.fixture
+def logging_client(offline_client, tmp_path):
+    """An offline client writing a replay log, as on a machine with no server."""
+    offline_client.offline = True
+    offline_client.log_to_filename = str(tmp_path / "run.log")
+    return offline_client
+
+
+def _logged(client):
+    try:
+        with open(client.log_to_filename) as f:
+            return [json.loads(line) for line in f]
+    except FileNotFoundError:
+        return []
+
+
+@pytest.mark.parametrize(
+    "call, endpoint",
+    [
+        (lambda v: v.experiment(name="r", params={"lr": 0.1}), "experiments/log"),
+        (lambda v: v.log_metrics({"acc": 0.9}, step=1), "experiments/log"),
+        (lambda v: v.finish_experiment(), "experiments/log"),
+        (lambda v: v.set_tags({"dataset": "cifar10"}), "experiments/tags"),
+        (lambda v: v.hparams(win="hp"), "experiments/hparams"),
+        (lambda v: v.update_hparams(win="hp"), "experiments/hparams/update"),
+    ],
+    ids=[
+        "experiment",
+        "log_metrics",
+        "finish_experiment",
+        "set_tags",
+        "hparams",
+        "update_hparams",
+    ],
+)
+def test_offline_log_keeps_experiment_writes(logging_client, call, endpoint):
+    """replay_log() can only rebuild what was written to the log."""
+    call(logging_client)
+    assert [logged[0] for logged in _logged(logging_client)] == [endpoint]
+
+
+def test_offline_log_leaves_reads_out(logging_client):
+    """Replaying a read would only ask the question again."""
+    logging_client.get_tags()
+    logging_client.search_experiments("lr < 0.1")
+    logging_client.compare_experiments(["a", "b"])
+    assert _logged(logging_client) == []
+
+
+def test_replay_log_resends_an_offline_experiment(logging_client):
+    logging_client.experiment(name="r", params={"lr": 0.1})
+    logging_client.log_metrics({"acc": 0.9}, step=1)
+    logging_client.set_tags({"dataset": "cifar10"})
+    logging_client.finish_experiment()
+
+    with echoes(logging_client) as send:
+        logging_client.replay_log(logging_client.log_to_filename)
+
+    replayed = [(c.args[1], c.args[0]["action"]) for c in send.call_args_list]
+    assert replayed == [
+        ("experiments/log", "log"),
+        ("experiments/log", "metrics"),
+        ("experiments/tags", "set"),
+        ("experiments/log", "finish"),
+    ]
+
+
 @pytest.mark.parametrize(
     "call",
     [
