@@ -131,13 +131,14 @@ class PostHandler(BaseHandler):
             raise tornado.web.HTTPError(
                 400, reason="'data[0]' must be an object with 'type'"
             )
+        if not isinstance(data[0]["type"], str):
+            raise tornado.web.HTTPError(400, reason="'data[0][type]' must be a string")
 
-        if (
-            "opts" in req
-            and req["opts"] is not None
-            and not isinstance(req["opts"], Mapping)
-        ):
-            raise tornado.web.HTTPError(400, reason="'opts' must be an object")
+        if "opts" in req:
+            if req["opts"] is None:
+                req["opts"] = {}
+            elif not isinstance(req["opts"], Mapping):
+                raise tornado.web.HTTPError(400, reason="'opts' must be an object")
 
         native_types = {
             "image_history",
@@ -249,9 +250,17 @@ class UpdateHandler(BaseHandler):
             raise tornado.web.HTTPError(
                 400, reason="embeddings update data must be an object"
             )
+        if "update_type" not in data or not isinstance(data["update_type"], str):
+            raise tornado.web.HTTPError(
+                400, reason="missing or invalid required field: 'update_type'"
+            )
         update_type = data["update_type"]
         content_id = get_rand_id()
         if update_type == "EntitySelected":
+            if "selected" not in data:
+                raise tornado.web.HTTPError(
+                    400, reason="missing required field: 'selected'"
+                )
             selected = data["selected"]
             p["content"]["selected"] = selected
             p["contentID"] = content_id
@@ -264,6 +273,10 @@ class UpdateHandler(BaseHandler):
                 {"op": "replace", "path": "/version", "value": version},
             ]
         if update_type == "RegionSelected":
+            if "points" not in data:
+                raise tornado.web.HTTPError(
+                    400, reason="missing required field: 'points'"
+                )
             old_data = p["content"]["data"]
             new_data = data["points"]
             p["old_content"].append(old_data)
@@ -545,12 +558,11 @@ class UpdateHandler(BaseHandler):
             raise tornado.web.HTTPError(
                 400, reason="request must include one of: data, layout, or opts"
             )
-        if (
-            "opts" in args
-            and args["opts"] is not None
-            and not isinstance(args["opts"], Mapping)
-        ):
-            raise tornado.web.HTTPError(400, reason="'opts' must be an object")
+        if "opts" in args:
+            if args["opts"] is None:
+                args["opts"] = {}
+            elif not isinstance(args["opts"], Mapping):
+                raise tornado.web.HTTPError(400, reason="'opts' must be an object")
         if (
             "layout" in args
             and args["layout"] is not None
@@ -586,6 +598,10 @@ class UpdateHandler(BaseHandler):
                 if "type" not in data[0]:
                     raise tornado.web.HTTPError(
                         400, reason="'data[0]' must be an object with 'type'"
+                    )
+                if not isinstance(data[0]["type"], str):
+                    raise tornado.web.HTTPError(
+                        400, reason="'data[0][type]' must be a string"
                     )
                 p = window(create_args)
                 register_window(handler, p, eid)
@@ -639,15 +655,43 @@ class UpdateHandler(BaseHandler):
             )
             return
 
+        if is_content_update and data is not None:
+            if p["type"] != "embeddings":
+                if not isinstance(data, Sequence) or isinstance(data, (str, bytes)):
+                    raise tornado.web.HTTPError(400, reason="'data' must be a list")
+                if not all(isinstance(entry, Mapping) for entry in data):
+                    raise tornado.web.HTTPError(
+                        400, reason="all entries in 'data' must be objects"
+                    )
+                if p["type"] == "text" and not all(
+                    "content" in entry for entry in data
+                ):
+                    raise tornado.web.HTTPError(
+                        400, reason="text update entries must contain 'content'"
+                    )
+                if p["type"] in ("image_history", "plot_history") and len(data) > 0:
+                    if "type" not in data[0] or not isinstance(data[0]["type"], str):
+                        raise tornado.web.HTTPError(
+                            400, reason="'data[0]' must contain a valid string 'type'"
+                        )
+
         if p["type"] == "embeddings" and args.get("data"):
-            diff_packet = UpdateHandler.update_embeddings_packet(
-                p, args, handler.max_old_content
-            )
+            p_copy = copy.deepcopy(p)
+            try:
+                diff_packet = UpdateHandler.update_embeddings_packet(
+                    p_copy, args, handler.max_old_content
+                )
+            except (KeyError, TypeError, ValueError, AttributeError) as exc:
+                raise tornado.web.HTTPError(
+                    400, reason=f"invalid embeddings update: {exc}"
+                ) from exc
             # An empty patch means the update_type was not recognised and the
             # pane is unchanged. Broadcasting it anyway would send a version the
             # client cannot reconcile, costing it a full environment reload for a
             # no-op.
             if diff_packet:
+                handler.state[eid]["jsons"][args["win"]] = p_copy
+                p = p_copy
                 UpdateHandler.broadcast_window_update(
                     handler, args, eid, p, diff_packet
                 )
@@ -656,14 +700,17 @@ class UpdateHandler(BaseHandler):
             return
 
         try:
-            p, diff_packet = UpdateHandler.update_packet(
-                p,
+            p_copy = copy.deepcopy(p)
+            p_updated, diff_packet = UpdateHandler.update_packet(
+                p_copy,
                 args,
                 handler.max_text_lines,
                 handler.max_old_content,
                 handler.max_image_history,
                 handler.max_plot_history,
             )
+            handler.state[eid]["jsons"][args["win"]] = p_updated
+            p = p_updated
         except (TypeError, ValueError, KeyError, AttributeError) as exc:
             if is_image_slider_update:
                 handler.set_status(400)
