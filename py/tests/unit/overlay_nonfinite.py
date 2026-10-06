@@ -25,11 +25,14 @@ pytestmark = pytest.mark.unit
         ([np.nan, np.inf, -np.inf], [0.0, 1.0, 0.0]),
     ],
 )
+@pytest.mark.parametrize("strided", [False, True])
 def test_overlay_rescaling_preserves_missing_and_infinite_values(
-    capture_send, raw, normalized
+    capture_send, raw, normalized, strided
 ):
     image = np.full((1, len(raw)), 100, dtype=np.uint8)
     heatmap = np.array([raw], dtype=np.float32)
+    if strided:
+        heatmap = np.repeat(heatmap, 2, axis=1)[:, ::2]
     original = heatmap.copy()
 
     def render(values):
