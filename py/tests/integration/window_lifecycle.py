@@ -515,5 +515,114 @@ class TestErrorsSurviveTheAsyncShells(VisdomHTTPTestCase):
         self.assertEqual(self.post_json("/events", {"func": "anything"}).code, 500)
 
 
+class TestEventsValidation(VisdomHTTPTestCase):
+    """Payload validation on POST /events."""
+
+    def test_events_invalid_json_is_bad_request(self):
+        resp = self.fetch(
+            "/events",
+            method="POST",
+            body="{invalid_json",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("must be valid JSON", resp.reason)
+
+    def test_events_empty_body_is_bad_request(self):
+        for empty in ("", "   "):
+            resp = self.fetch(
+                "/events",
+                method="POST",
+                body=empty,
+                headers={"Content-Type": "application/json"},
+            )
+            self.assertEqual(resp.code, 400)
+            self.assertIn("missing required field: 'data'", resp.reason)
+
+    def test_events_non_object_body_is_bad_request(self):
+        for invalid in ("not_a_dict", [1, 2, 3], None):
+            resp = self.post_json("/events", invalid)
+            self.assertEqual(resp.code, 400)
+            self.assertIn("must be an object", resp.reason)
+
+    def test_events_missing_data_is_bad_request(self):
+        resp = self.post_json("/events", {})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("missing required field: 'data'", resp.reason)
+
+    def test_events_empty_data_is_bad_request(self):
+        resp = self.post_json("/events", {"data": []})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'data' must be a non-empty list", resp.reason)
+
+    def test_events_non_sequence_data_is_bad_request(self):
+        for invalid in ("not_a_list", 123, {"k": "v"}):
+            resp = self.post_json("/events", {"data": invalid})
+            self.assertEqual(resp.code, 400)
+            self.assertIn("'data' must be a non-empty list", resp.reason)
+
+    def test_events_non_object_data_element_is_bad_request(self):
+        resp = self.post_json("/events", {"data": [123]})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'data[0]' must be an object with 'type'", resp.reason)
+
+    def test_events_missing_type_in_data_element_is_bad_request(self):
+        resp = self.post_json("/events", {"data": [{"content": "hello"}]})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'data[0]' must be an object with 'type'", resp.reason)
+
+    def test_events_non_string_eid_is_bad_request(self):
+        resp = self.post_json(
+            "/events",
+            {"eid": 123, "data": [{"type": "text", "content": "hello"}]},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'eid' must be a string", resp.reason)
+
+
+class TestUpdateValidation(VisdomHTTPTestCase):
+    """Payload validation on POST /update."""
+
+    def test_update_invalid_json_is_bad_request(self):
+        resp = self.fetch(
+            "/update",
+            method="POST",
+            body="{invalid_json",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("must be valid JSON", resp.reason)
+
+    def test_update_empty_body_is_bad_request(self):
+        for empty in ("", "   "):
+            resp = self.fetch(
+                "/update",
+                method="POST",
+                body=empty,
+                headers={"Content-Type": "application/json"},
+            )
+            self.assertEqual(resp.code, 400)
+            self.assertIn("missing required field: win", resp.reason)
+
+    def test_update_non_object_body_is_bad_request(self):
+        for invalid in ("not_a_dict", [1, 2, 3], None):
+            resp = self.post_json("/update", invalid)
+            self.assertEqual(resp.code, 400)
+            self.assertIn("must be an object", resp.reason)
+
+    def test_update_missing_win_is_bad_request(self):
+        resp = self.post_json("/update", {})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("missing required field: win", resp.reason)
+
+    def test_update_non_string_eid_is_bad_request(self):
+        resp = self.post_json(
+            "/update",
+            {"win": "w1", "eid": 123, "opts": {}},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'eid' must be a string", resp.reason)
+
+
 if __name__ == "__main__":
     unittest.main()

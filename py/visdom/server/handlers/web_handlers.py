@@ -78,15 +78,37 @@ from visdom.experiments import (
 logger = logging.getLogger(__name__)
 
 
+def _decode_json_body(body):
+    """Return a request body decoded into a dict of arguments.
+
+    Shared by handlers whose bodies are JSON objects, so an empty body is read
+    as an empty object and each handler decides on its own whether the arguments
+    it needs are missing. Anything else that is not a JSON object is the caller's
+    error: without this check, malformed JSON or a bare list would surface as an
+    unhandled exception and a 500 rather than a 400 naming what was wrong with
+    the request.
+    """
+    try:
+        text = tornado.escape.to_basestring(body).strip()
+        if not text:
+            return {}
+        args = tornado.escape.json_decode(text)
+    except ValueError as error:
+        raise tornado.web.HTTPError(
+            400, reason="request body must be valid JSON"
+        ) from error
+    if not isinstance(args, Mapping):
+        raise tornado.web.HTTPError(400, reason="request body must be an object")
+    return args
+
+
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
 class PostHandler(BaseHandler):
     @check_auth
     @check_readonly
     async def post(self):
-        req = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
+        req = _decode_json_body(self.request.body)
 
         if req.get("func") is not None:
             raise Exception(
@@ -95,6 +117,23 @@ class PostHandler(BaseHandler):
                 "that release. You can follow the usage instructions there, "
                 "but it is no longer officially supported."
             )
+
+        if "data" not in req:
+            raise tornado.web.HTTPError(400, reason="missing required field: 'data'")
+        data = req["data"]
+        if (
+            not isinstance(data, Sequence)
+            or isinstance(data, (str, bytes))
+            or len(data) == 0
+        ):
+            raise tornado.web.HTTPError(400, reason="'data' must be a non-empty list")
+        if not isinstance(data[0], Mapping) or "type" not in data[0]:
+            raise tornado.web.HTTPError(
+                400, reason="'data[0]' must be an object with 'type'"
+            )
+
+        if "eid" in req and not isinstance(req["eid"], str):
+            raise tornado.web.HTTPError(400, reason="'eid' must be a string")
 
         eid = extract_eid(req)
         await ensure_env_loaded(self, eid)
@@ -466,6 +505,8 @@ class UpdateHandler(BaseHandler):
 
     @staticmethod
     def wrap_func(handler, args):
+        if not isinstance(args, Mapping):
+            raise tornado.web.HTTPError(400, reason="request body must be an object")
         if "win" not in args:
             raise tornado.web.HTTPError(400, reason="missing required field: win")
         if "data" not in args and args.get("append"):
@@ -583,9 +624,9 @@ class UpdateHandler(BaseHandler):
         if self.login_enabled and not self.current_user:
             self.set_status(400)
             return
-        args = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
+        args = _decode_json_body(self.request.body)
+        if "eid" in args and not isinstance(args["eid"], str):
+            raise tornado.web.HTTPError(400, reason="'eid' must be a string")
         await ensure_env_loaded(self, extract_eid(args))
         self.wrap_func(self, args)
 
@@ -839,30 +880,6 @@ class CompareHandler(BaseHandler):
                     target_subs=[self.subs[sid]],
                 )
                 return
-
-
-def _decode_json_body(body):
-    """Return a request body decoded into a dict of arguments.
-
-    Shared by handlers whose bodies are JSON objects, so an empty body is read
-    as an empty object and each handler decides on its own whether the arguments
-    it needs are missing. Anything else that is not a JSON object is the caller's
-    error: without this check, malformed JSON or a bare list would surface as an
-    unhandled exception and a 500 rather than a 400 naming what was wrong with
-    the request.
-    """
-    try:
-        text = tornado.escape.to_basestring(body).strip()
-        if not text:
-            return {}
-        args = tornado.escape.json_decode(text)
-    except ValueError as error:
-        raise tornado.web.HTTPError(
-            400, reason="request body must be valid JSON"
-        ) from error
-    if not isinstance(args, Mapping):
-        raise tornado.web.HTTPError(400, reason="request body must be an object")
-    return args
 
 
 class SaveHandler(BaseHandler):
