@@ -6,7 +6,7 @@
 #   2. Nothing else. Every hour each open pull request with that label is checked:
 #      - The author added a video, in the description or in a comment made after
 #        the request: the labels are removed and the pull request is back with
-#        the maintainers.
+#        the maintainers. An "on hold" label that a maintainer added is left alone.
 #      - No video after REMIND_AFTER_HOURS: one reminder is posted.
 #      - No video after HOLD_AFTER_HOURS: the label "on hold" is added and the
 #        author is told. A pull request is never closed by this workflow.
@@ -73,6 +73,9 @@ jobs:
     if: github.event_name != 'pull_request_target'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    concurrency:
+      group: screencast-required-enforce
+      cancel-in-progress: false
     steps:
       - name: Remind, release or put on hold
         uses: actions/github-script@v9
@@ -85,6 +88,7 @@ jobs:
             const DRY_RUN = String(context.payload.inputs?.dry_run ?? 'false') === 'true';
             const REMIND_MARKER = '<!-- screencast-reminder -->';
             const HOLD_MARKER = '<!-- screencast-on-hold -->';
+            const BOT = 'github-actions[bot]';
             const HOUR = 60 * 60 * 1000;
             const { owner, repo } = context.repo;
             const now = Date.now();
@@ -128,7 +132,8 @@ jobs:
                 const requestedAt = new Date(labelled[labelled.length - 1].created_at).getTime();
                 const after = ts => ts && new Date(ts).getTime() > requestedAt;
                 const botSaid = marker => events.some(e =>
-                  e.event === 'commented' && after(e.created_at) && (e.body ?? '').includes(marker));
+                  e.event === 'commented' && (e.user?.login ?? e.actor?.login) === BOT
+                  && after(e.created_at) && (e.body ?? '').includes(marker));
 
                 const videoInComments = events.some(e => {
                   switch (e.event) {
@@ -143,12 +148,14 @@ jobs:
                   }
                 });
                 const videoInDescription = hasVideoText(pr.body);
-                const heldHere = botSaid(HOLD_MARKER);
+                const holds = events.filter(e => e.event === 'labeled' && e.label?.name === HOLD_LABEL);
+                const heldByWorkflow = pr.labels.some(l => l.name === HOLD_LABEL)
+                  && holds.length > 0 && holds[holds.length - 1].actor?.login === BOT;
 
                 if (videoInComments || videoInDescription) {
                   const where = videoInComments ? 'in an author comment' : 'in the description';
                   await act(`#${n}: video found ${where}, removing labels`, async () => {
-                    if (heldHere && pr.labels.some(l => l.name === HOLD_LABEL)) {
+                    if (heldByWorkflow) {
                       await github.rest.issues.removeLabel({ owner, repo, issue_number: n, name: HOLD_LABEL });
                     }
                     await github.rest.issues.removeLabel({ owner, repo, issue_number: n, name: LABEL });
@@ -159,7 +166,7 @@ jobs:
                 const hoursWaiting = (now - requestedAt) / HOUR;
 
                 if (hoursWaiting >= HOLD_HOURS) {
-                  if (heldHere) {
+                  if (botSaid(HOLD_MARKER)) {
                     core.info(`#${n}: on hold, waiting for a video`);
                     continue;
                   }
