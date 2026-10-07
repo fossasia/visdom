@@ -515,5 +515,86 @@ class TestErrorsSurviveTheAsyncShells(VisdomHTTPTestCase):
         self.assertEqual(self.post_json("/events", {"func": "anything"}).code, 500)
 
 
+class TestWinExistsValidation(VisdomHTTPTestCase):
+    """Payload validation for POST /win_exists."""
+
+    def test_malformed_json_body_is_400(self):
+        resp = self.fetch(
+            "/win_exists",
+            method="POST",
+            body="{bad_json",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be valid JSON", resp.reason)
+
+    def test_non_object_body_is_400(self):
+        resp = self.fetch(
+            "/win_exists",
+            method="POST",
+            body="[1, 2, 3]",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be an object", resp.reason)
+
+    def test_empty_body_is_400(self):
+        resp = self.fetch(
+            "/win_exists",
+            method="POST",
+            body="",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("missing required field: win", resp.reason)
+
+    def test_unhashable_win_is_400(self):
+        resp = self.post_json("/win_exists", {"eid": "main", "win": ["unhashable"]})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("invalid window identifier: win", resp.reason)
+
+    def test_invalid_eid_is_400(self):
+        for invalid_eid in (123, "   ", []):
+            resp = self.post_json("/win_exists", {"eid": invalid_eid, "win": "w1"})
+            self.assertEqual(resp.code, 400)
+            self.assertIn("invalid 'eid'", resp.reason)
+
+
+class TestCloseValidation(VisdomHTTPTestCase):
+    """Payload validation for POST /close."""
+
+    def test_malformed_json_body_is_400(self):
+        resp = self.fetch(
+            "/close",
+            method="POST",
+            body="{bad_json",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be valid JSON", resp.reason)
+
+    def test_non_object_body_is_400(self):
+        resp = self.fetch(
+            "/close",
+            method="POST",
+            body='["win1"]',
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be an object", resp.reason)
+
+    def test_unhashable_win_is_400(self):
+        self.create_text_window(win="w1")
+        resp = self.post_json("/close", {"eid": "main", "win": ["unhashable"]})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("invalid window identifier: win", resp.reason)
+
+    def test_invalid_eid_is_400(self):
+        for invalid_eid in (123, "   ", []):
+            resp = self.post_json("/close", {"eid": invalid_eid, "win": "w1"})
+            self.assertEqual(resp.code, 400)
+            self.assertIn("invalid 'eid'", resp.reason)
+
+
 if __name__ == "__main__":
     unittest.main()

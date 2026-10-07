@@ -283,3 +283,50 @@ class TestWinDataTransfer(VisdomHTTPTestCase):
         first = self.create_text_window()
         second = self.create_text_window()
         self.assertEqual(sorted(self.get_win_data()), sorted([first, second]))
+
+    def test_win_data_malformed_json_body_is_400(self):
+        resp = self.fetch(
+            "/win_data",
+            method="POST",
+            body="{bad_json",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be valid JSON", resp.reason)
+
+    def test_win_data_non_object_body_is_400(self):
+        resp = self.fetch(
+            "/win_data",
+            method="POST",
+            body="[1, 2]",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be an object", resp.reason)
+
+    def test_win_data_missing_win_is_400(self):
+        resp = self.post_json("/win_data", {"eid": "main"})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("missing required field: 'win'", resp.reason)
+
+    def test_win_data_unhashable_win_is_400(self):
+        resp = self.post_json("/win_data", {"eid": "main", "win": ["bad"]})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("invalid window identifier: 'win'", resp.reason)
+
+    def test_win_data_invalid_eid_is_400(self):
+        resp = self.post_json("/win_data", {"eid": "   ", "win": "w1"})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("invalid 'eid'", resp.reason)
+
+    def test_win_data_write_invalid_json_string_is_400(self):
+        resp = self.post_json(
+            "/win_data", {"eid": "main", "win": "w1", "data": "{invalid"}
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("invalid 'data' JSON string", resp.reason)
+
+    def test_win_data_write_invalid_type_is_400(self):
+        resp = self.post_json("/win_data", {"eid": "main", "win": "w1", "data": 12345})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'data' must be a valid JSON string or object", resp.reason)
