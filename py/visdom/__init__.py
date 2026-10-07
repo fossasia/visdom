@@ -2217,13 +2217,14 @@ class Visdom(object):
         if np.issubdtype(img.dtype, np.floating):
             finite = img[np.isfinite(img)]
             if finite.size > 0:
-                img_min, img_max = float(finite.min()), float(finite.max())
+                img_min, img_max = finite.min().item(), finite.max().item()
             else:
                 img_min, img_max = 0.0, 0.0
             if opts.get("normalize", False):
                 if img_max > img_min:
-                    span = img_max - img_min
-                    if span > float(np.finfo(img.dtype).max):
+                    with np.errstate(over="ignore"):
+                        span = img_max - img_min
+                    if span > np.finfo(img.dtype).max.item():
                         scale = max(abs(img_min), abs(img_max))
                         img = img / scale
                         img_min, img_max = img_min / scale, img_max / scale
@@ -2359,13 +2360,14 @@ class Visdom(object):
         if np.issubdtype(img.dtype, np.floating):
             finite = img[np.isfinite(img)]
             if finite.size > 0:
-                img_min, img_max = float(finite.min()), float(finite.max())
+                img_min, img_max = finite.min().item(), finite.max().item()
             else:
                 img_min, img_max = 0.0, 0.0
             if opts.get("normalize", False):
                 if img_max > img_min:
-                    span = img_max - img_min
-                    if span > float(np.finfo(img.dtype).max):
+                    with np.errstate(over="ignore"):
+                        span = img_max - img_min
+                    if span > np.finfo(img.dtype).max.item():
                         scale = max(abs(img_min), abs(img_max))
                         img = img / scale
                         img_min, img_max = img_min / scale, img_max / scale

@@ -17,7 +17,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.filterwarnings("error::RuntimeWarnin
 
 
 @pytest.mark.parametrize("method", ["image", "image_heatmap"])
-@pytest.mark.parametrize("dtype", [np.float16, np.float32, np.float64])
+@pytest.mark.parametrize("dtype", [np.float16, np.float32, np.float64, np.longdouble])
 @pytest.mark.parametrize("channels", [None, 1, 3, 4])
 def test_normalize_extreme_finite_range(capture_send, method, dtype, channels):
     limit = np.finfo(dtype).max
@@ -43,7 +43,7 @@ def test_normalize_extreme_finite_range(capture_send, method, dtype, channels):
 
 
 @pytest.mark.parametrize("method", ["image", "image_heatmap"])
-@pytest.mark.parametrize("dtype", [np.float16, np.float32, np.float64])
+@pytest.mark.parametrize("dtype", [np.float16, np.float32, np.float64, np.longdouble])
 def test_normalize_large_positive_range(capture_send, method, dtype):
     limit = np.finfo(dtype).max
     img = np.array([[limit / 2, limit * 0.75, limit]], dtype=dtype)
