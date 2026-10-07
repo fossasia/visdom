@@ -1687,6 +1687,7 @@ class Visdom(object):
         """
         if not isinstance(env_list, list):
             raise TypeError("env_list must be a list of strings")
+        env_list = tuple(env_list)
         for env in env_list:
             if not isinstance(env, str):
                 raise TypeError(f"Environment ID must be a string, got {type(env)}")

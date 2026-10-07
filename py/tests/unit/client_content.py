@@ -818,3 +818,19 @@ def test_experiment_decodes_a_json_reply(offline_client):
 def test_experiment_passes_through_a_non_json_reply(offline_client):
     with replies(offline_client, "server exploded"):
         assert offline_client.experiment(name="r1") == "server exploded"
+
+
+def test_delete_envs_uses_validated_ids_when_caller_mutates_list(offline_client):
+    ids = ["first", "second"]
+
+    def delete_and_mutate(env):
+        if env == "first":
+            ids[1] = None
+            ids.append("third")
+        return "ok"
+
+    with patch.object(
+        offline_client, "delete_env", side_effect=delete_and_mutate
+    ) as delete:
+        assert offline_client.delete_envs(ids) == ["ok", "ok"]
+    assert [call.args[0] for call in delete.call_args_list] == ["first", "second"]
