@@ -154,7 +154,8 @@ class UpdateHandler(BaseHandler):
         renames traces on top of that. A value already equal to what the pane
         holds writes the same bytes back, so it produces no patch operation --
         which is the case every append after the first one hits, because the
-        client resends the same ``opts`` each time.
+        client resends the same ``opts`` each time. ``legend`` has to clear
+        both halves of what it does, so it is asked about separately.
         """
         content = p.get("content")
         if isinstance(content, dict) and isinstance(content.get("layout"), dict):
@@ -165,14 +166,48 @@ class UpdateHandler(BaseHandler):
         for key, val in (args.get("opts") or {}).items():
             if val is None:
                 continue
-            if key == "legend":
-                return False
             if key == "caption":
                 if not isinstance(content, dict) or content.get("caption") != val:
                     return False
-            elif p.get(key) != val:
+                continue
+            if p.get(key) != val:
+                return False
+            if key == "legend" and not UpdateHandler.legend_renames_nothing(p, args):
                 return False
         return True
+
+    @staticmethod
+    def legend_renames_nothing(p, args):
+        """Whether ``update_window``'s ``legend`` pass leaves every name as it is.
+
+        A legend equal to the one already on the pane still has to be walked
+        against the traces: the two are written at different times -- the opts
+        loop stores ``legend`` on the pane, the pass below copies its entries
+        onto ``name`` -- so a pane can carry the legend while a trace added
+        since does not carry its name. Only when the pass would write back the
+        names already there is the append still a pure append.
+
+        Mirrors ``update_window`` exactly, including the named form's "rename
+        the traces called ``name``", so the answer cannot drift from what the
+        rename actually does.
+        """
+        content = p.get("content")
+        if p.get("type") != "plot" or not isinstance(content, dict):
+            return True
+        pdata = content.get("data")
+        if not isinstance(pdata, list):
+            return True
+        legend = args["opts"]["legend"]
+        name = args.get("name")
+        if name is not None:
+            if not legend:
+                return True
+            return all(
+                d.get("name") == legend[0] for d in pdata if d.get("name") == name
+            )
+        return all(
+            d.get("name") == legend[i] for i, d in enumerate(pdata) if i < len(legend)
+        )
 
     @staticmethod
     def appendable(p, args):
@@ -298,10 +333,22 @@ class UpdateHandler(BaseHandler):
             # does it once per accepted update, so the fast path has to as well
             # -- and the patch has to carry the new value, or the frontend
             # discards it and reloads the whole environment (``bump_version``).
+            # ``bump_version`` creates the field on a pane persisted before
+            # panes carried one, and JSON Patch ``replace`` requires the path to
+            # already exist on the client's copy -- so that pane needs the
+            # ``add`` the diffed path would have emitted, or its first append
+            # arrives as a patch that cannot be applied.
+            version_existed = "version" in p
             version = UpdateHandler.bump_version(p)
             p["contentID"] = get_rand_id()
             ops.append({"op": "replace", "path": "/contentID", "value": p["contentID"]})
-            ops.append({"op": "replace", "path": "/version", "value": version})
+            ops.append(
+                {
+                    "op": "replace" if version_existed else "add",
+                    "path": "/version",
+                    "value": version,
+                }
+            )
             return p, ops
 
         # Shallow copy the packet to dynamically capture changes to top-level keys.

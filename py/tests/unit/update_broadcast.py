@@ -718,6 +718,100 @@ def test_resent_opts_that_change_nothing_still_take_the_fast_path(extra):
     assert_patches_agree(pane, args)
 
 
+def legended_pane(names, traces=None):
+    """A pane whose traces are named and whose ``legend`` opt is already stored.
+
+    The shape every append after the first one lands on when the client passes
+    ``opts["legend"]``: ``update_window`` wrote the list onto the pane and
+    copied its entries onto the trace names on that first call.
+    """
+    pane = plot_pane(traces=len(names), names=names)
+    pane["legend"] = list(names) if traces is None else list(traces)
+    return pane
+
+
+def test_a_resent_legend_that_renames_nothing_takes_the_fast_path():
+    """A client passing ``legend`` must not be stuck on the slow path forever.
+
+    It resends the same list on every append, and from the second one on it
+    renames nothing -- which is the case #1805 is about, so it has to reach the
+    fast path like any other resent opt.
+    """
+    pane = legended_pane(["first", "second"])
+    args = trace_append_args(traces=2, opts={"legend": ["first", "second"]})
+
+    assert UpdateHandler.appendable(pane, args) is True
+    assert_patches_agree(pane, args)
+
+
+@pytest.mark.parametrize(
+    "pane,legend",
+    [
+        pytest.param(
+            legended_pane(["first", "second"]),
+            ["first", "renamed"],
+            id="legend-differs-from-the-stored-one",
+        ),
+        pytest.param(
+            legended_pane(["first", "stale"], traces=["first", "second"]),
+            ["first", "second"],
+            id="stored-legend-matches-but-a-name-does-not",
+        ),
+    ],
+)
+def test_a_legend_that_would_rename_a_trace_keeps_the_diffed_path(pane, legend):
+    """Both halves of what ``legend`` does have to be noops, not just one.
+
+    The opts loop stores the list on the pane and the pass after it copies the
+    entries onto the trace names, so a pane can carry the list while a trace
+    still holds the name it had before.
+    """
+    args = trace_append_args(traces=2, opts={"legend": legend})
+
+    assert UpdateHandler.appendable(pane, args) is False
+    assert_patches_agree(pane, args)
+
+
+def test_a_named_resent_legend_that_renames_nothing_takes_the_fast_path():
+    """The named form renames the traces called ``name`` to ``legend[0]``.
+
+    Resending the name a trace already carries writes it straight back, so it
+    is as much a noop as the unnamed form's is.
+    """
+    pane = legended_pane(["first"])
+    args = trace_append_args(name="first", opts={"legend": ["first"]})
+
+    assert UpdateHandler.appendable(pane, args) is True
+    assert_patches_agree(pane, args)
+
+
+def test_a_named_legend_that_renames_the_trace_keeps_the_diffed_path():
+    pane = legended_pane(["first"], traces=["renamed"])
+    args = trace_append_args(name="first", opts={"legend": ["renamed"]})
+
+    assert UpdateHandler.appendable(pane, args) is False
+    assert_patches_agree(pane, args)
+
+
+def test_an_append_to_a_pane_without_a_version_adds_the_field():
+    """``replace`` on a path the client's copy lacks fails the whole patch.
+
+    ``bump_version`` deliberately creates ``version`` on panes persisted before
+    panes carried one (``pane_versions.py``), and the browser's copy of such a
+    pane has no ``/version`` either -- so the op that announces the new number
+    has to be the ``add`` the diffed path emits, or the first append after the
+    upgrade arrives as a patch that cannot be applied.
+    """
+    pane = plot_pane()
+    del pane["version"]
+    args = trace_append_args()
+
+    assert UpdateHandler.appendable(pane, args) is True
+    ops = assert_patches_agree(pane, args)
+
+    assert {"op": "add", "path": "/version", "value": 2} in ops
+
+
 def test_the_first_append_after_a_plot_is_created_falls_back_and_is_correct():
     """A fresh pane lacks the keys the client's ``opts`` carry, so they are adds.
 
