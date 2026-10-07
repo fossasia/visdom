@@ -135,18 +135,19 @@ jobs:
                   e.event === 'commented' && (e.user?.login ?? e.actor?.login) === BOT
                   && after(e.created_at) && (e.body ?? '').includes(marker));
 
+                const inline = await github.paginate(github.rest.pulls.listReviewComments, {
+                  owner, repo, pull_number: n, per_page: 100,
+                });
                 const videoInComments = events.some(e => {
                   switch (e.event) {
                     case 'commented':
                       return (e.user?.login ?? e.actor?.login) === author && after(e.created_at) && hasVideoText(e.body);
                     case 'reviewed':
                       return e.user?.login === author && after(e.submitted_at) && hasVideoText(e.body);
-                    case 'line-commented':
-                      return (e.comments ?? []).some(c => c.user?.login === author && after(c.created_at) && hasVideoText(c.body));
                     default:
                       return false;
                   }
-                });
+                }) || inline.some(c => c.user?.login === author && after(c.created_at) && hasVideoText(c.body));
                 const videoInDescription = hasVideoText(pr.body);
                 const holds = events.filter(e => e.event === 'labeled' && e.label?.name === HOLD_LABEL);
                 const heldByWorkflow = pr.labels.some(l => l.name === HOLD_LABEL)
