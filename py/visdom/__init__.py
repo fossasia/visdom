@@ -2222,7 +2222,13 @@ class Visdom(object):
                 img_min, img_max = 0.0, 0.0
             if opts.get("normalize", False):
                 if img_max > img_min:
-                    img = (img - img_min) / (img_max - img_min) * 255.0
+                    span = img_max - img_min
+                    if span > float(np.finfo(img.dtype).max):
+                        scale = max(abs(img_min), abs(img_max))
+                        img = img / scale
+                        img_min, img_max = img_min / scale, img_max / scale
+                        span = img_max - img_min
+                    img = (img - img_min) / span * 255.0
                 else:
                     img = np.zeros_like(img)
             elif img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
@@ -2358,7 +2364,13 @@ class Visdom(object):
                 img_min, img_max = 0.0, 0.0
             if opts.get("normalize", False):
                 if img_max > img_min:
-                    img = (img - img_min) / (img_max - img_min) * 255.0
+                    span = img_max - img_min
+                    if span > float(np.finfo(img.dtype).max):
+                        scale = max(abs(img_min), abs(img_max))
+                        img = img / scale
+                        img_min, img_max = img_min / scale, img_max / scale
+                        span = img_max - img_min
+                    img = (img - img_min) / span * 255.0
                 else:
                     img = np.zeros_like(img)
             elif img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
