@@ -665,6 +665,7 @@ class DeleteEnvHandler(BaseHandler):
     @check_auth
     @check_readonly
     async def post(self):
+        """Handle POST /delete_env request to remove an environment."""
         args = _decode_json_body(self.request.body)
         removal = self.wrap_func(self, args)
         if removal is not None:
@@ -674,8 +675,11 @@ class DeleteEnvHandler(BaseHandler):
 class EnvStateHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
+        """Retrieve state for a specific environment or list all environment IDs."""
         eid = args.get("eid")
         if eid is not None:
+            if isinstance(eid, (list, dict)):
+                raise tornado.web.HTTPError(400, reason="invalid 'eid'")
             eid = escape_eid(str(eid))
             if not eid:
                 raise tornado.web.HTTPError(400, reason="invalid 'eid'")
@@ -690,10 +694,16 @@ class EnvStateHandler(BaseHandler):
 
     @check_auth
     async def post(self):
+        """Handle POST /env_state request to fetch environment state or list."""
         args = _decode_json_body(self.request.body)
         eid = args.get("eid")
         if eid is not None:
-            await ensure_env_loaded(self, escape_eid(str(eid)))
+            if isinstance(eid, (list, dict)):
+                raise tornado.web.HTTPError(400, reason="invalid 'eid'")
+            eid_str = escape_eid(str(eid))
+            if not eid_str:
+                raise tornado.web.HTTPError(400, reason="invalid 'eid'")
+            await ensure_env_loaded(self, eid_str)
         self.wrap_func(self, args)
 
 
@@ -766,6 +776,7 @@ class EnvHandler(BaseHandler):
 
     @check_auth
     async def post(self, args):
+        """Handle POST /env/{eid} request to initialize or load environment messages."""
         msg_args = _decode_json_body(self.request.body)
         if "sid" in msg_args:
             sid = msg_args["sid"]

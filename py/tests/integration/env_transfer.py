@@ -289,6 +289,7 @@ class TestPostEnvValidation(VisdomHTTPTestCase):
     """Payload validation for POST /env/{eid}."""
 
     def test_post_env_malformed_json_is_400(self):
+        """Malformed JSON request body returns HTTP 400."""
         resp = self.fetch(
             "/env/main",
             method="POST",
@@ -299,6 +300,7 @@ class TestPostEnvValidation(VisdomHTTPTestCase):
         self.assertIn("request body must be valid JSON", resp.reason)
 
     def test_post_env_non_object_is_400(self):
+        """Non-object JSON request body returns HTTP 400."""
         resp = self.fetch(
             "/env/main",
             method="POST",
@@ -309,6 +311,7 @@ class TestPostEnvValidation(VisdomHTTPTestCase):
         self.assertIn("request body must be an object", resp.reason)
 
     def test_post_env_invalid_eid_in_body_is_400(self):
+        """Non-string, empty, or whitespace eid returns HTTP 400."""
         for invalid in (123, [], "   "):
             resp = self.post_json("/env/main", {"eid": invalid})
             self.assertEqual(resp.code, 400)
