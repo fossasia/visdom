@@ -708,8 +708,20 @@ class EnvStateHandler(BaseHandler):
 class ForkEnvHandler(BaseHandler):
     @staticmethod
     async def wrap_func(handler, args):
-        prev_eid = escape_eid(args.get("prev_eid"))
-        eid = escape_eid(args.get("eid"))
+        if not isinstance(args, Mapping):
+            raise tornado.web.HTTPError(400, reason="request body must be an object")
+        prev_eid = args.get("prev_eid")
+        eid = args.get("eid")
+        if not isinstance(prev_eid, str) or not isinstance(eid, str):
+            raise tornado.web.HTTPError(
+                400, reason="both 'prev_eid' and 'eid' must be strings"
+            )
+        prev_eid = escape_eid(prev_eid)
+        eid = escape_eid(eid)
+        if not eid:
+            raise tornado.web.HTTPError(400, reason="'eid' must not be empty")
+        if not prev_eid:
+            raise tornado.web.HTTPError(400, reason="'prev_eid' must not be empty")
 
         if prev_eid not in handler.state:
             # the eid stays out of the reason: it is echoed on the status line,
@@ -739,9 +751,14 @@ class ForkEnvHandler(BaseHandler):
     @check_auth
     @check_readonly
     async def post(self):
-        args = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
+        try:
+            args = tornado.escape.json_decode(
+                tornado.escape.to_basestring(self.request.body)
+            )
+        except (ValueError, TypeError):
+            raise tornado.web.HTTPError(
+                400, reason="request body must be valid JSON"
+            ) from None
         await self.wrap_func(self, args)
 
 
@@ -792,7 +809,8 @@ class EnvHandler(BaseHandler):
 class CompareHandler(BaseHandler):
     @check_auth
     def get(self, eids):
-        for eid in eids.split("+"):
+        for raw_eid in eids.split("+"):
+            eid = escape_eid(raw_eid)
             if eid not in self.state:
                 raise tornado.web.HTTPError(
                     404, reason=f"Environment '{eid}' not found"
@@ -804,13 +822,35 @@ class CompareHandler(BaseHandler):
 
     @check_auth
     async def post(self, args):
-        body = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
+        """Send environment comparison data to a subscriber socket.
+
+        Expects a JSON object with a ``sid`` string identifying the target
+        subscriber session, or null representing an uninitialized client
+        session that is handled as a no-op. Returns HTTP 400 if the request
+        body is not valid JSON, is not an object, or contains an invalid
+        ``sid`` type. When ``sid`` is unknown, the request safely returns
+        HTTP 200 without dispatching comparison data.
+        """
+        try:
+            body = tornado.escape.json_decode(
+                tornado.escape.to_basestring(self.request.body)
+            )
+        except ValueError:
+            raise tornado.web.HTTPError(400, reason="request body must be valid JSON")
+
+        if not isinstance(body, Mapping):
+            raise tornado.web.HTTPError(400, reason="request body must be an object")
+
+        if "sid" not in body:
+            raise tornado.web.HTTPError(400, reason="missing required field: 'sid'")
+
         sid = body["sid"]
+        if sid is not None and (not isinstance(sid, str) or not sid.strip()):
+            raise tornado.web.HTTPError(400, reason="invalid required field: 'sid'")
+
         show_all = body.get("show_all", False)
-        if sid in self.subs:
-            eids = args.split("+")
+        if sid and sid in self.subs:
+            eids = [escape_eid(eid) for eid in args.split("+")]
             try:
                 # comparison reads every named env in full, and reads it from
                 # state -- so each one is brought into memory here, where the
