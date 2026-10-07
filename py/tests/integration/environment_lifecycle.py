@@ -263,5 +263,64 @@ class TestApplicationSettings(VisdomHTTPTestCase):
         self.assertEqual(built.settings["static_url_prefix"], "/sub/static/")
 
 
+class TestDeleteEnvValidation(VisdomHTTPTestCase):
+    """Payload validation for POST /delete_env."""
+
+    def test_malformed_json_body_is_400(self):
+        resp = self.fetch(
+            "/delete_env",
+            method="POST",
+            body="{invalid_json",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be valid JSON", resp.reason)
+
+    def test_non_object_body_is_400(self):
+        resp = self.fetch(
+            "/delete_env",
+            method="POST",
+            body='["env1"]',
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be an object", resp.reason)
+
+    def test_non_string_eid_is_400(self):
+        for invalid in (123, [], {"nested": "obj"}, "   "):
+            resp = self.post_json("/delete_env", {"eid": invalid})
+            self.assertEqual(resp.code, 400)
+            self.assertIn("invalid 'eid'", resp.reason)
+
+
+class TestEnvStateValidation(VisdomHTTPTestCase):
+    """Payload validation for POST /env_state."""
+
+    def test_malformed_json_body_is_400(self):
+        resp = self.fetch(
+            "/env_state",
+            method="POST",
+            body="{bad_json",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be valid JSON", resp.reason)
+
+    def test_non_object_body_is_400(self):
+        resp = self.fetch(
+            "/env_state",
+            method="POST",
+            body='["main"]',
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be an object", resp.reason)
+
+    def test_whitespace_only_eid_is_400(self):
+        resp = self.post_json("/env_state", {"eid": "   "})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("invalid 'eid'", resp.reason)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -283,3 +283,33 @@ class TestWinDataTransfer(VisdomHTTPTestCase):
         first = self.create_text_window()
         second = self.create_text_window()
         self.assertEqual(sorted(self.get_win_data()), sorted([first, second]))
+
+
+class TestPostEnvValidation(VisdomHTTPTestCase):
+    """Payload validation for POST /env/{eid}."""
+
+    def test_post_env_malformed_json_is_400(self):
+        resp = self.fetch(
+            "/env/main",
+            method="POST",
+            body="{bad_json",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be valid JSON", resp.reason)
+
+    def test_post_env_non_object_is_400(self):
+        resp = self.fetch(
+            "/env/main",
+            method="POST",
+            body="[1, 2]",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be an object", resp.reason)
+
+    def test_post_env_invalid_eid_in_body_is_400(self):
+        for invalid in (123, [], "   "):
+            resp = self.post_json("/env/main", {"eid": invalid})
+            self.assertEqual(resp.code, 400)
+            self.assertIn("invalid 'eid'", resp.reason)
