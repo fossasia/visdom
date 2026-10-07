@@ -646,8 +646,7 @@ class DeleteEnvHandler(BaseHandler):
         The env leaves memory and the subscribers hear about it here; the files
         it owns -- its undo stack as well as the env itself -- are handed to
         the storage worker, so callers that need the disk to be settled -- the
-        request handler below, and tests -- await what comes back. ``None``
-        means there was nothing to delete.
+        request handler below, and tests -- await what comes back.
         """
         eid = args.get("eid")
         if eid is None:
@@ -666,6 +665,8 @@ class DeleteEnvHandler(BaseHandler):
     @check_readonly
     async def post(self):
         """Handle POST /delete_env request to remove an environment."""
+        if not self.request.body or not self.request.body.strip():
+            raise tornado.web.HTTPError(400, reason="request body must not be empty")
         args = _decode_json_body(self.request.body)
         removal = self.wrap_func(self, args)
         if removal is not None:

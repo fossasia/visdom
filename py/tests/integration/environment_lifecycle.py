@@ -295,6 +295,18 @@ class TestDeleteEnvValidation(VisdomHTTPTestCase):
             self.assertEqual(resp.code, 400)
             self.assertIn("invalid 'eid'", resp.reason)
 
+    def test_empty_body_is_400(self):
+        """Empty request body returns HTTP 400."""
+        for empty in ("", "   "):
+            resp = self.fetch(
+                "/delete_env",
+                method="POST",
+                body=empty,
+                headers={"Content-Type": "application/json"},
+            )
+            self.assertEqual(resp.code, 400)
+            self.assertIn("request body must not be empty", resp.reason)
+
 
 class TestEnvStateValidation(VisdomHTTPTestCase):
     """Payload validation for POST /env_state."""
