@@ -347,3 +347,10 @@ class TestWinDataTransfer(VisdomHTTPTestCase):
         resp = self.post_json("/win_data", {"eid": "nonexistent_env", "win": "w1"})
         self.assertEqual(resp.code, 400)
         self.assertIn("environment 'nonexistent_env' does not exist", resp.reason)
+
+    def test_win_data_write_whole_env_non_mapping_panes_is_400(self):
+        resp = self.post_json(
+            "/win_data", {"eid": "main", "win": None, "data": {"w1": "not-a-pane"}}
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'data' values must be JSON objects", resp.reason)

@@ -941,6 +941,10 @@ class DataHandler(BaseHandler):
                 handler.state[eid] = {"jsons": {}, "reload": {}}
 
             if "win" in args and args["win"] is None:
+                if any(not isinstance(pane, Mapping) for pane in data.values()):
+                    raise tornado.web.HTTPError(
+                        400, reason="'data' values must be JSON objects"
+                    )
                 handler.state[eid]["jsons"] = data
             elif "win" in args:
                 try:
