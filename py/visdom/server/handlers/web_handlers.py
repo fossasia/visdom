@@ -919,7 +919,7 @@ class DataHandler(BaseHandler):
                 return
 
             raw_data = args["data"]
-            if isinstance(raw_data, (dict, list)):
+            if isinstance(raw_data, Mapping):
                 data = raw_data
             elif isinstance(raw_data, str):
                 try:
@@ -928,6 +928,10 @@ class DataHandler(BaseHandler):
                     raise tornado.web.HTTPError(
                         400, reason="invalid 'data' JSON string"
                     ) from e
+                if not isinstance(data, Mapping):
+                    raise tornado.web.HTTPError(
+                        400, reason="'data' must decode to a JSON object"
+                    )
             else:
                 raise tornado.web.HTTPError(
                     400, reason="'data' must be a valid JSON string or object"
@@ -952,6 +956,10 @@ class DataHandler(BaseHandler):
             broadcast_envs(handler)
         else:
             # Dump data to client
+            if eid not in handler.state:
+                raise tornado.web.HTTPError(
+                    400, reason=f"environment '{eid}' does not exist"
+                )
             if "win" in args and args["win"] is None:
                 handler.write(
                     json.dumps(handler.state[eid]["jsons"], cls=NanSafeEncoder)

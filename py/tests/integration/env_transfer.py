@@ -330,3 +330,20 @@ class TestWinDataTransfer(VisdomHTTPTestCase):
         resp = self.post_json("/win_data", {"eid": "main", "win": "w1", "data": 12345})
         self.assertEqual(resp.code, 400)
         self.assertIn("'data' must be a valid JSON string or object", resp.reason)
+
+    def test_win_data_write_array_data_is_400(self):
+        resp = self.post_json("/win_data", {"eid": "main", "win": "w1", "data": [1, 2]})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'data' must be a valid JSON string or object", resp.reason)
+
+    def test_win_data_write_json_array_string_is_400(self):
+        resp = self.post_json(
+            "/win_data", {"eid": "main", "win": "w1", "data": "[1, 2]"}
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'data' must decode to a JSON object", resp.reason)
+
+    def test_win_data_read_missing_env_is_400(self):
+        resp = self.post_json("/win_data", {"eid": "nonexistent_env", "win": "w1"})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("environment 'nonexistent_env' does not exist", resp.reason)
