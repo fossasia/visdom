@@ -737,10 +737,13 @@ def test_delete_envs_rejects_a_non_list(offline_client, bad):
         offline_client.delete_envs(bad)
 
 
-def test_delete_envs_rejects_a_non_string_entry(offline_client):
-    with patch.object(offline_client, "delete_env"):
+@pytest.mark.parametrize("bad", [7, None, {}])
+@pytest.mark.parametrize("prefix", [["keep"], ["first", "second"]])
+def test_delete_envs_rejects_a_non_string_entry(offline_client, bad, prefix):
+    with patch.object(offline_client, "delete_env") as delete:
         with pytest.raises(TypeError):
-            offline_client.delete_envs(["ok", 7])
+            offline_client.delete_envs(prefix + [bad])
+        delete.assert_not_called()
 
 
 # -------------------------------------------------- experiment messages ----
