@@ -4482,16 +4482,35 @@ class Visdom(object):
         assert X is not None, "X Cannot be None"
         assert Y1 is not None, "Y1 Cannot be None"
         assert Y2 is not None, "Y2 Cannot be None"
+
+        opts = {} if opts is None else dict(opts)
+        _title2str(opts)
+        _assert_opts(opts)
+
         X = np.asarray(X)
         Y1 = np.asarray(Y1)
         Y2 = np.asarray(Y2)
+
+        if X.ndim == 2 and X.shape[1] == 1:
+            X = X.ravel()
+        if Y1.ndim == 2 and Y1.shape[1] == 1:
+            Y1 = Y1.ravel()
+        if Y2.ndim == 2 and Y2.shape[1] == 1:
+            Y2 = Y2.ravel()
+
         assert X.shape == Y1.shape, "values of X and Y1 are not in proper shape"
         assert X.shape == Y2.shape, "values of X and Y2 are not in proper shape"
-        if opts is None:
-            opts = {}
+        assert X.ndim == 1, "values of X and Y1 are not in proper shape"
+
+        if "height" not in opts:
             opts["height"] = 300
+        if "width" not in opts:
             opts["width"] = 500
-        X = [float(value) for value in X]
+
+        try:
+            X = [float(value) for value in X]
+        except (ValueError, TypeError):
+            X = [str(value) for value in X]
         Y1 = [float(value) for value in Y1]
         Y2 = [float(value) for value in Y2]
         trace1 = {
