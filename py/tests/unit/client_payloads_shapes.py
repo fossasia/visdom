@@ -555,3 +555,16 @@ def test_dual_axis_lines_accepts_categorical_x(capture_send):
     assert first["y"] == [10.0, 20.0]
     assert second["x"] == ["Jan", "Feb"]
     assert second["y"] == [100.0, 200.0]
+
+
+def test_dual_axis_lines_preserves_numeric_string_labels(capture_send):
+    sent = capture_send(
+        lambda v: v.dual_axis_lines(
+            X=["001", "002"], Y1=np.array([10, 20]), Y2=np.array([100, 200])
+        )
+    )
+    first, second = sent["payload"]["data"]
+    assert first["x"] == ["001", "002"]
+    assert first["y"] == [10.0, 20.0]
+    assert second["x"] == ["001", "002"]
+    assert second["y"] == [100.0, 200.0]
