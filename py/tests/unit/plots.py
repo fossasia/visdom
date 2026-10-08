@@ -926,9 +926,42 @@ def test_contour_color_bounds_use_z_properties(capture_send, opts, expected, mis
     original = X.copy()
     sent = capture_send(lambda v: v.contour(X, opts=opts.copy()))
     trace = sent["payload"]["data"][0]
-    assert (trace["zmin"], trace["zmax"]) == expected
+    if opts:
+        assert (trace["zmin"], trace["zmax"]) == expected
+    else:
+        assert "zmin" not in trace
+        assert "zmax" not in trace
     assert "cmin" not in trace
     assert "cmax" not in trace
     assert trace["colorscale"] == "Viridis"
     np.testing.assert_equal(trace["z"], original)
     np.testing.assert_equal(X, original)
+
+
+@pytest.mark.parametrize("method", ["contour", "surf"])
+@pytest.mark.parametrize(
+    "opts",
+    [
+        {},
+        {"title": 42, "colormap": "Blues", "custom": "keep"},
+        {"xmin": 0, "xmax": 4, "title": 42, "colormap": "Blues", "custom": "keep"},
+    ],
+)
+def test_surface_preserves_reused_options(capture_send, method, opts):
+    opts = opts.copy()
+    original = opts.copy()
+    first = np.array([[-2.0, 5.0], [3.0, 9.0]])
+    second = first + 20.0
+    bounds = ("zmin", "zmax") if method == "contour" else ("cmin", "cmax")
+    for values in (first, second):
+        sent = capture_send(lambda v: getattr(v, method)(values, opts=opts))
+        trace = sent["payload"]["data"][0]
+        if method == "surf" or "xmin" in original or "xmax" in original:
+            assert trace[bounds[0]] == original.get("xmin", values.min())
+            assert trace[bounds[1]] == original.get("xmax", values.max())
+        else:
+            assert bounds[0] not in trace
+            assert bounds[1] not in trace
+        assert opts == original
+        if "custom" in original:
+            assert sent["payload"]["opts"]["custom"] == "keep"
