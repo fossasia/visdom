@@ -4507,10 +4507,15 @@ class Visdom(object):
         if "width" not in opts:
             opts["width"] = 500
 
-        try:
-            X = [float(value) for value in X]
-        except (ValueError, TypeError):
+        if any(isinstance(val, str) for val in X) or (
+            hasattr(X, "dtype") and np.issubdtype(X.dtype, np.character)
+        ):
             X = [str(value) for value in X]
+        else:
+            try:
+                X = [float(value) for value in X]
+            except (ValueError, TypeError):
+                X = [str(value) for value in X]
         Y1 = [float(value) for value in Y1]
         Y2 = [float(value) for value in Y2]
         trace1 = {
