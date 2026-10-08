@@ -193,6 +193,14 @@ class TestImageHistorySelection(ImageHistoryTestCase):
         self.select_image(win, 0)
         self.assertEqual(len(self.get_win_data(win)["content"]), 2)
 
+    def test_missing_selected_is_bad_request_and_preserves_pane(self):
+        win = self.create_image_history()
+        self.append_image(win, "c1")
+        before = self.get_win_data(win)
+        resp = self.update(win, [{"type": "image_update_selected"}])
+        self.assertEqual(resp.code, 400)
+        self.assertEqual(self.get_win_data(win), before)
+
     def test_selection_on_a_text_pane_is_rejected(self):
         win = self.create_text_window(content="not an image")
         resp = self.select_image(win, 0)

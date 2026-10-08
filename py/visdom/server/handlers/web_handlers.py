@@ -78,15 +78,37 @@ from visdom.experiments import (
 logger = logging.getLogger(__name__)
 
 
+def _decode_json_body(body):
+    """Return a request body decoded into a dict of arguments.
+
+    Shared by handlers whose bodies are JSON objects, so an empty body is read
+    as an empty object and each handler decides on its own whether the arguments
+    it needs are missing. Anything else that is not a JSON object is the caller's
+    error: without this check, malformed JSON or a bare list would surface as an
+    unhandled exception and a 500 rather than a 400 naming what was wrong with
+    the request.
+    """
+    try:
+        text = tornado.escape.to_basestring(body).strip()
+        if not text:
+            return {}
+        args = tornado.escape.json_decode(text)
+    except ValueError as error:
+        raise tornado.web.HTTPError(
+            400, reason="request body must be valid JSON"
+        ) from error
+    if not isinstance(args, Mapping):
+        raise tornado.web.HTTPError(400, reason="request body must be an object")
+    return args
+
+
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
 class PostHandler(BaseHandler):
     @check_auth
     @check_readonly
     async def post(self):
-        req = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
+        req = _decode_json_body(self.request.body)
 
         if req.get("func") is not None:
             raise Exception(
@@ -95,6 +117,58 @@ class PostHandler(BaseHandler):
                 "that release. You can follow the usage instructions there, "
                 "but it is no longer officially supported."
             )
+
+        if "data" not in req or not req["data"]:
+            raise tornado.web.HTTPError(400, reason="missing required field: 'data'")
+        data = req["data"]
+        if not isinstance(data, Sequence) or isinstance(data, (str, bytes)):
+            raise tornado.web.HTTPError(400, reason="'data' must be a list")
+        if not all(isinstance(entry, Mapping) for entry in data):
+            raise tornado.web.HTTPError(
+                400, reason="all entries in 'data' must be objects"
+            )
+        if "type" not in data[0]:
+            raise tornado.web.HTTPError(
+                400, reason="'data[0]' must be an object with 'type'"
+            )
+        if not isinstance(data[0]["type"], str):
+            raise tornado.web.HTTPError(400, reason="'data[0][type]' must be a string")
+
+        if "opts" in req:
+            if req["opts"] is None:
+                req["opts"] = {}
+            elif not isinstance(req["opts"], Mapping):
+                raise tornado.web.HTTPError(400, reason="'opts' must be an object")
+
+        native_types = {
+            "image_history",
+            "plot_history",
+            "image",
+            "text",
+            "properties",
+            "hparams",
+            "table",
+            "network",
+            "embeddings",
+        }
+        if data[0]["type"] in native_types:
+            if "content" not in data[0]:
+                raise tornado.web.HTTPError(
+                    400, reason="missing required field: 'content'"
+                )
+            if data[0]["type"] == "embeddings" and not isinstance(
+                data[0]["content"], Mapping
+            ):
+                raise tornado.web.HTTPError(
+                    400, reason="'content' for embeddings must be an object"
+                )
+        elif "layout" not in req:
+            raise tornado.web.HTTPError(400, reason="missing required field: 'layout'")
+
+        if req.get("eid") is not None and (
+            not isinstance(req["eid"], str) or not req["eid"].strip()
+        ):
+            raise tornado.web.HTTPError(400, reason="'eid' must be a non-empty string")
 
         eid = extract_eid(req)
         await ensure_env_loaded(self, eid)
@@ -184,9 +258,17 @@ class UpdateHandler(BaseHandler):
             raise tornado.web.HTTPError(
                 400, reason="embeddings update data must be an object"
             )
+        if "update_type" not in data or not isinstance(data["update_type"], str):
+            raise tornado.web.HTTPError(
+                400, reason="missing or invalid required field: 'update_type'"
+            )
         update_type = data["update_type"]
         content_id = get_rand_id()
         if update_type == "EntitySelected":
+            if "selected" not in data:
+                raise tornado.web.HTTPError(
+                    400, reason="missing required field: 'selected'"
+                )
             selected = data["selected"]
             p["content"]["selected"] = selected
             p["contentID"] = content_id
@@ -199,6 +281,10 @@ class UpdateHandler(BaseHandler):
                 {"op": "replace", "path": "/version", "value": version},
             ]
         if update_type == "RegionSelected":
+            if "points" not in data:
+                raise tornado.web.HTTPError(
+                    400, reason="missing required field: 'points'"
+                )
             old_data = p["content"]["data"]
             new_data = data["points"]
             p["old_content"].append(old_data)
@@ -466,14 +552,31 @@ class UpdateHandler(BaseHandler):
 
     @staticmethod
     def wrap_func(handler, args):
+        if not isinstance(args, Mapping):
+            raise tornado.web.HTTPError(400, reason="request body must be an object")
         if "win" not in args:
             raise tornado.web.HTTPError(400, reason="missing required field: win")
+        try:
+            hash(args["win"])
+        except TypeError:
+            raise tornado.web.HTTPError(400, reason="'win' must be hashable")
         if "data" not in args and args.get("append"):
             raise tornado.web.HTTPError(400, reason="missing required field: data")
         if "data" not in args and "layout" not in args and "opts" not in args:
             raise tornado.web.HTTPError(
                 400, reason="request must include one of: data, layout, or opts"
             )
+        if "opts" in args:
+            if args["opts"] is None:
+                args["opts"] = {}
+            elif not isinstance(args["opts"], Mapping):
+                raise tornado.web.HTTPError(400, reason="'opts' must be an object")
+        if (
+            "layout" in args
+            and args["layout"] is not None
+            and not isinstance(args["layout"], Mapping)
+        ):
+            raise tornado.web.HTTPError(400, reason="'layout' must be an object")
         if not isinstance(args.get("layout_create", {}), dict):
             raise tornado.web.HTTPError(400, reason="layout_create must be an object")
         eid = extract_eid(args)
@@ -486,7 +589,29 @@ class UpdateHandler(BaseHandler):
             # that window
             append = args.get("append")
             if append:
-                p = window(create_args_for_append(args))
+                create_args = create_args_for_append(args)
+                data = create_args.get("data")
+                if (
+                    not isinstance(data, Sequence)
+                    or isinstance(data, (str, bytes))
+                    or len(data) == 0
+                ):
+                    raise tornado.web.HTTPError(
+                        400, reason="'data' must be a non-empty list"
+                    )
+                if not all(isinstance(entry, Mapping) for entry in data):
+                    raise tornado.web.HTTPError(
+                        400, reason="all entries in 'data' must be objects"
+                    )
+                if "type" not in data[0]:
+                    raise tornado.web.HTTPError(
+                        400, reason="'data[0]' must be an object with 'type'"
+                    )
+                if not isinstance(data[0]["type"], str):
+                    raise tornado.web.HTTPError(
+                        400, reason="'data[0][type]' must be a string"
+                    )
+                p = window(create_args)
                 register_window(handler, p, eid)
             else:
                 handler.write("win does not exist")
@@ -494,6 +619,8 @@ class UpdateHandler(BaseHandler):
 
         p = handler.state[eid]["jsons"][args["win"]]
         data = args.get("data")
+        if p["type"] == "text" and data is not None and not isinstance(data, list):
+            raise tornado.web.HTTPError(400, reason="text update data must be a list")
         is_image_slider_update = isinstance(data, list) and any(
             isinstance(entry, dict) and entry.get("type") == "image_update_selected"
             for entry in data
@@ -536,15 +663,43 @@ class UpdateHandler(BaseHandler):
             )
             return
 
+        if is_content_update and data is not None:
+            if p["type"] != "embeddings":
+                if not isinstance(data, Sequence) or isinstance(data, (str, bytes)):
+                    raise tornado.web.HTTPError(400, reason="'data' must be a list")
+                if not all(isinstance(entry, Mapping) for entry in data):
+                    raise tornado.web.HTTPError(
+                        400, reason="all entries in 'data' must be objects"
+                    )
+                if p["type"] == "text" and not all(
+                    "content" in entry for entry in data
+                ):
+                    raise tornado.web.HTTPError(
+                        400, reason="text update entries must contain 'content'"
+                    )
+                if p["type"] in ("image_history", "plot_history") and len(data) > 0:
+                    if "type" not in data[0] or not isinstance(data[0]["type"], str):
+                        raise tornado.web.HTTPError(
+                            400, reason="'data[0]' must contain a valid string 'type'"
+                        )
+
         if p["type"] == "embeddings" and args.get("data"):
-            diff_packet = UpdateHandler.update_embeddings_packet(
-                p, args, handler.max_old_content
-            )
+            p_copy = copy.deepcopy(p)
+            try:
+                diff_packet = UpdateHandler.update_embeddings_packet(
+                    p_copy, args, handler.max_old_content
+                )
+            except (KeyError, TypeError, ValueError, AttributeError) as exc:
+                raise tornado.web.HTTPError(
+                    400, reason=f"invalid embeddings update: {exc}"
+                ) from exc
             # An empty patch means the update_type was not recognised and the
             # pane is unchanged. Broadcasting it anyway would send a version the
             # client cannot reconcile, costing it a full environment reload for a
             # no-op.
             if diff_packet:
+                handler.state[eid]["jsons"][args["win"]] = p_copy
+                p = p_copy
                 UpdateHandler.broadcast_window_update(
                     handler, args, eid, p, diff_packet
                 )
@@ -553,20 +708,25 @@ class UpdateHandler(BaseHandler):
             return
 
         try:
-            p, diff_packet = UpdateHandler.update_packet(
-                p,
+            p_copy = copy.deepcopy(p)
+            p_updated, diff_packet = UpdateHandler.update_packet(
+                p_copy,
                 args,
                 handler.max_text_lines,
                 handler.max_old_content,
                 handler.max_image_history,
                 handler.max_plot_history,
             )
-        except (TypeError, ValueError) as exc:
+            handler.state[eid]["jsons"][args["win"]] = p_updated
+            p = p_updated
+        except (TypeError, ValueError, KeyError, AttributeError) as exc:
             if is_image_slider_update:
                 handler.set_status(400)
                 handler.write(str(exc))
                 return
-            raise
+            raise tornado.web.HTTPError(
+                400, reason=f"invalid update payload: {exc}"
+            ) from exc
         # send the smaller of the patch and the updated pane
         if len(stringify(p)) <= len(stringify(diff_packet)):
             broadcast_msg = dict(p)
@@ -583,9 +743,11 @@ class UpdateHandler(BaseHandler):
         if self.login_enabled and not self.current_user:
             self.set_status(400)
             return
-        args = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
+        args = _decode_json_body(self.request.body)
+        if args.get("eid") is not None and (
+            not isinstance(args["eid"], str) or not args["eid"].strip()
+        ):
+            raise tornado.web.HTTPError(400, reason="'eid' must be a non-empty string")
         await ensure_env_loaded(self, extract_eid(args))
         self.wrap_func(self, args)
 
@@ -841,30 +1003,6 @@ class CompareHandler(BaseHandler):
                     target_subs=[self.subs[sid]],
                 )
                 return
-
-
-def _decode_json_body(body):
-    """Return a request body decoded into a dict of arguments.
-
-    Shared by handlers whose bodies are JSON objects, so an empty body is read
-    as an empty object and each handler decides on its own whether the arguments
-    it needs are missing. Anything else that is not a JSON object is the caller's
-    error: without this check, malformed JSON or a bare list would surface as an
-    unhandled exception and a 500 rather than a 400 naming what was wrong with
-    the request.
-    """
-    try:
-        text = tornado.escape.to_basestring(body).strip()
-        if not text:
-            return {}
-        args = tornado.escape.json_decode(text)
-    except ValueError as error:
-        raise tornado.web.HTTPError(
-            400, reason="request body must be valid JSON"
-        ) from error
-    if not isinstance(args, Mapping):
-        raise tornado.web.HTTPError(400, reason="request body must be an object")
-    return args
 
 
 class SaveHandler(BaseHandler):
