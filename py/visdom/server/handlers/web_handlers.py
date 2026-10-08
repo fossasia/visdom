@@ -66,10 +66,11 @@ from visdom.utils.server_utils import (
 from visdom.server.handlers.base_handlers import BaseHandler
 from visdom.experiments import (
     DEFAULT_SORT_FIELD,
-    Experiment,
     ExperimentStore,
     ExperimentFinishedError,
+    METADATA_KEY,
     QueryParseError,
+    experiment_from_blob,
     retarget_experiment,
     STATUS_FINISHED,
     tags_to_mapping,
@@ -1636,13 +1637,26 @@ class TagsHandler(BaseHandler):
 
     @staticmethod
     def _experiment_from_env(eid, env):
-        """Return an experiment from one materialized in-memory environment."""
-        blob = env.get("experiment")
-        if not isinstance(blob, Mapping):
-            return None
-        experiment = Experiment.from_dict(blob)
-        experiment.env_id = eid
-        return experiment
+        """Return an experiment from one materialized in-memory environment.
+
+        A blob the model cannot rebuild yields ``None``, like one that is not
+        metadata at all. :meth:`_experiment_map` runs this over every resident
+        environment to answer ``GET /tags``, so a single corrupt blob raising
+        here would empty the whole tag map with a 500 rather than omit the one
+        environment it belongs to.
+        """
+        return experiment_from_blob(eid, env.get(METADATA_KEY))
+
+    @staticmethod
+    def _has_metadata(env):
+        """Whether ``env`` carries a metadata blob, readable or not.
+
+        What separates an env the store has simply never been told about from
+        one whose metadata is present but will not rebuild. The two read the
+        same through :meth:`_experiment_from_env` — both ``None`` — but only
+        the first may be answered from storage.
+        """
+        return env.get(METADATA_KEY) is not None
 
     @staticmethod
     async def _read_experiment(handler, eid):
@@ -1658,6 +1672,14 @@ class TagsHandler(BaseHandler):
             experiment = TagsHandler._experiment_from_env(eid, env)
             if experiment is not None:
                 return experiment
+            if TagsHandler._has_metadata(env):
+                # A materialized env is the version being served, so its
+                # metadata is the current one even when it cannot be read.
+                # Falling through to storage would answer with whatever the
+                # last successful save left on disk — an older run, reported
+                # as this one's tags. "No readable experiment" is the honest
+                # answer, and the one the unreadable resident blob supports.
+                return None
         return await run_on_storage_executor(
             handler, _read_stored_experiment, handler.storage, eid
         )
@@ -1680,6 +1702,11 @@ class TagsHandler(BaseHandler):
             experiment = TagsHandler._experiment_from_env(eid, env)
             if experiment is not None:
                 experiments[eid] = experiment
+            elif TagsHandler._has_metadata(env):
+                # As in :meth:`_read_experiment`: the stored entry underneath
+                # an unreadable resident blob is stale, so drop it rather than
+                # publish it as the env's current tags.
+                experiments.pop(eid, None)
         return experiments
 
     @staticmethod
