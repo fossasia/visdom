@@ -907,3 +907,28 @@ def test_parallel_coordinates_multi_experiment(capture_send):
     trace = sent["payload"]["data"][0]
     assert trace["type"] == "parcoords"
     assert trace["line"]["color"] == [0.1, 0.9]
+
+
+@pytest.mark.parametrize(
+    "opts, expected",
+    [
+        ({}, (-2.0, 9.0)),
+        ({"xmin": 0.0, "xmax": 4.0}, (0.0, 4.0)),
+        ({"xmin": 0.0}, (0.0, 9.0)),
+        ({"xmax": 4.0}, (-2.0, 4.0)),
+    ],
+)
+@pytest.mark.parametrize("missing", [False, True])
+def test_contour_color_bounds_use_z_properties(capture_send, opts, expected, missing):
+    X = np.array([[-2.0, 5.0], [3.0, 9.0]])
+    if missing:
+        X[0, 1] = np.nan
+    original = X.copy()
+    sent = capture_send(lambda v: v.contour(X, opts=opts.copy()))
+    trace = sent["payload"]["data"][0]
+    assert (trace["zmin"], trace["zmax"]) == expected
+    assert "cmin" not in trace
+    assert "cmax" not in trace
+    assert trace["colorscale"] == "Viridis"
+    np.testing.assert_equal(trace["z"], original)
+    np.testing.assert_equal(X, original)

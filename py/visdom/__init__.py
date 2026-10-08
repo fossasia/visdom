@@ -3930,11 +3930,14 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
+        lower_bound, upper_bound = (
+            ("zmin", "zmax") if stype == "contour" else ("cmin", "cmax")
+        )
         data = [
             {
                 "z": X.tolist(),
-                "cmin": opts["xmin"],
-                "cmax": opts["xmax"],
+                lower_bound: opts["xmin"],
+                upper_bound: opts["xmax"],
                 "type": stype,
                 "colorscale": opts["colormap"],
             }
