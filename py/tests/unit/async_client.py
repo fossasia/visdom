@@ -816,6 +816,19 @@ class TestAsyncVisdomErrors(tornado.testing.AsyncTestCase):
         assert caught.value.status == 409
         assert caught.value.body == "<html>"
 
+    @gen_test
+    async def test_an_undecodable_error_page_still_raises_server_error(self):
+        """Decoded with replacement, as ``requests`` does for ``r.text``."""
+        transport = _AsyncTransport("http://localhost", 8097)
+
+        async def _fetch(request):
+            return _FakeResponse(code=409, body=b"<html>\xff</html>")
+
+        transport._fetch = _fetch
+        with pytest.raises(ServerError) as caught:
+            await transport.post("http://localhost:8097/experiments/log", "{}")
+        assert caught.value.body == "<html>�</html>"
+
 
 class TestAsyncVisdomLifecycle(tornado.testing.AsyncTestCase):
     @gen_test
