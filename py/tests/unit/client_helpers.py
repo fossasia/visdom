@@ -42,6 +42,7 @@ from visdom import (
     _markerColorCheck,
     _markerSizeCheck,
     _normalize_labels,
+    _normalize_title_strings,
     _opts2layout,
     _scrub_dict,
     _title2str,
@@ -121,6 +122,78 @@ def test_scrub_dict_keeps_an_emptied_dict():
 def test_scrub_dict_passes_non_dicts_through(value):
     """Lists are not descended into, so a None inside one survives."""
     assert _scrub_dict(value) == value
+
+
+def test_scrub_dict_visits_each_value_once():
+    """The scrub is a single pass, not one pass per nesting level.
+
+    The surviving-key test used to be ``v is not None and _scrub_dict(v) is not
+    None``, so every value was scrubbed twice -- once to answer the condition
+    and once to produce the result -- and because each of those two passes
+    scrubbed the children twice in turn, the cost doubled at every level. The
+    second test could never fail, so counting the calls pins the cheap shape
+    without changing what comes out.
+    """
+    seen = []
+
+    class Counted(dict):
+        def items(self):
+            seen.append(self)
+            return super().items()
+
+    nested = Counted(b=Counted(c=Counted(d=1)))
+    assert _scrub_dict(Counted(a=nested)) == {"a": {"b": {"c": {"d": 1}}}}
+    assert len(seen) == 4
+
+
+def test_normalize_title_strings_wraps_a_bare_string():
+    """plotly.js v3 rejects a bare string, so it becomes {'text': ...}."""
+    assert _normalize_title_strings({"title": "Loss"}) == {"title": {"text": "Loss"}}
+
+
+def test_normalize_title_strings_leaves_an_object_title_alone():
+    """Visdom's own layouts already emit the object form; it must pass through."""
+    layout = {"title": {"text": "Loss", "font": {"size": 14}}}
+    assert _normalize_title_strings(layout) == layout
+
+
+@pytest.mark.parametrize("value", [5, 5.0, True, None, ["a"], {"text": "t"}])
+def test_normalize_title_strings_only_wraps_strings(value):
+    """Only a ``str`` is the deprecated form; anything else is left as it is."""
+    assert _normalize_title_strings({"title": value}) == {"title": value}
+
+
+def test_normalize_title_strings_reaches_every_depth():
+    """A raw figure from plotlyplot() can hide a title at any depth."""
+    layout = {"scene": {"xaxis": {"title": "epoch"}}}
+    assert _normalize_title_strings(layout) == {
+        "scene": {"xaxis": {"title": {"text": "epoch"}}}
+    }
+
+
+def test_normalize_title_strings_descends_into_lists_of_dicts():
+    """Why it walks lists at all: layout['annotations'] is a list of dicts.
+
+    This is also why it must be kept away from a trace, whose coordinate arrays
+    are lists of numbers that can hold no title and cost one call apiece.
+    """
+    layout = {"annotations": [{"title": "note"}, {"title": {"text": "kept"}}]}
+    assert _normalize_title_strings(layout) == {
+        "annotations": [{"title": {"text": "note"}}, {"title": {"text": "kept"}}]
+    }
+
+
+@pytest.mark.parametrize("value", [5, "text", None, [1.0, 2.0]])
+def test_normalize_title_strings_passes_scalars_and_plain_lists_through(value):
+    """Nothing outside a dict can carry a title key, so nothing changes."""
+    assert _normalize_title_strings(value) == value
+
+
+def test_normalize_title_strings_does_not_mutate_its_argument():
+    """It returns a new structure; plotlyplot() hands it a user's own figure."""
+    layout = {"xaxis": {"title": "epoch"}}
+    _normalize_title_strings(layout)
+    assert layout == {"xaxis": {"title": "epoch"}}
 
 
 @pytest.mark.parametrize(
