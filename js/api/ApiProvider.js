@@ -218,6 +218,9 @@ const ApiProvider = ({ children }) => {
   const sendEnvQuery = (envIDs, showAll) => {
     // This kicks off a new stream of events from the socket so there's nothing
     // to handle here. We might want to surface the error state.
+    if (!sessionInfo.id) {
+      return;
+    }
     if (envIDs.length == 1) {
       $.post(
         correctPathname() + 'env/' + envIDs[0],
