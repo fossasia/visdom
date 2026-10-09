@@ -833,9 +833,12 @@ class CompareHandler(BaseHandler):
     async def post(self, args):
         """Send environment comparison data to a subscriber socket.
 
-        Expects a JSON object with a required ``sid`` string identifying the
-        target subscriber session. Returns HTTP 400 if the request body is
-        not valid JSON, is not an object, or is missing ``sid``.
+        Expects a JSON object with a ``sid`` string identifying the target
+        subscriber session, or null representing an uninitialized client
+        session that is handled as a no-op. Returns HTTP 400 if the request
+        body is not valid JSON, is not an object, or contains an invalid
+        ``sid`` type. When ``sid`` is unknown, the request safely returns
+        HTTP 200 without dispatching comparison data.
         """
         try:
             body = tornado.escape.json_decode(
@@ -847,16 +850,15 @@ class CompareHandler(BaseHandler):
         if not isinstance(body, Mapping):
             raise tornado.web.HTTPError(400, reason="request body must be an object")
 
-        if (
-            "sid" not in body
-            or not isinstance(body["sid"], str)
-            or not body["sid"].strip()
-        ):
+        if "sid" not in body:
             raise tornado.web.HTTPError(400, reason="missing required field: 'sid'")
 
         sid = body["sid"]
+        if sid is not None and (not isinstance(sid, str) or not sid.strip()):
+            raise tornado.web.HTTPError(400, reason="invalid required field: 'sid'")
+
         show_all = body.get("show_all", False)
-        if sid in self.subs:
+        if sid and sid in self.subs:
             eids = [escape_eid(eid) for eid in args.split("+")]
             try:
                 # comparison reads every named env in full, and reads it from
