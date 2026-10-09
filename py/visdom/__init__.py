@@ -2839,6 +2839,9 @@ class Visdom(object):
         Update data that is all NaN is ignored (can be used for masking update).
         Using `update='append'` will create a plot if it doesn't exist
         and append to the existing plot otherwise.
+        'insert' and 'new' are older names kept for compatibility: they act
+        like 'replace' on the trace in `name`, adding it if it is missing.
+        Any other value raises ValueError.
 
         The following `opts` are supported:
 
@@ -2854,6 +2857,14 @@ class Visdom(object):
         - `opts.aspectratio`      : `{'x', 'y', 'z'}` scale dict, applied when
                                     `aspectmode` is `'manual'`
         """
+        # Anything not 'append' replaces the data, so a typo such as 'apend'
+        # would silently wipe the plot. 'insert' and 'new' are kept because
+        # the examples use them to add a trace.
+        valid_update = (None, "append", "replace", "remove", "insert", "new")
+        if update not in valid_update:
+            raise ValueError(
+                "update must be one of {}, got {!r}".format(valid_update, update)
+            )
         if opts and opts.get("store_history") and update is not None:
             raise ValueError(
                 "Cannot use store_history=True together with the update parameter"
@@ -3112,6 +3123,9 @@ class Visdom(object):
         Update data that is all NaN is ignored (can be used for masking update).
         Using `update='append'` will create a plot if it doesn't exist
         and append to the existing plot otherwise.
+        'insert' and 'new' are older names kept for compatibility: they act
+        like 'replace' on the trace in `name`, adding it if it is missing.
+        Any other value raises ValueError.
 
         The following `opts` are supported:
 
