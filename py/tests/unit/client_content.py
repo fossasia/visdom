@@ -872,6 +872,7 @@ def _stored(metrics=(), status="running"):
 
 
 def _replayed_metrics(client, stored):
+    client.offline = False  # replayed by an online client, as in practice
     with patch.object(client, "search_experiments", return_value=stored) as search:
         with echoes(client) as send:
             client.replay_log(client.log_to_filename)
@@ -914,12 +915,44 @@ def test_replay_log_sends_nothing_to_a_finished_experiment(logging_client):
     logging_client.experiment(name="r")
     logging_client.log_metrics({"acc": 0.9}, step=1)
     logging_client.finish_experiment()
+    logging_client.offline = False
     with patch.object(
         logging_client, "search_experiments", return_value=_stored(status="finished")
     ):
         with echoes(logging_client) as send:
             logging_client.replay_log(logging_client.log_to_filename)
     assert send.call_args_list == []
+
+
+def test_replay_log_counts_env_id_aliases_together(logging_client):
+    """ "runs\\a" and "runs_a" are one env on the server, so one stored entry
+    covers only one of the two logged copies."""
+    for env in ("runs\\a", "runs_a"):
+        logging_client.log_metrics({"acc": 0.9}, step=1, env=env)
+    sent, search = _replayed_metrics(logging_client, _stored([("acc", 0.9, 1)]))
+    assert sent == [("acc", 0.9, 1)]
+    assert search.call_count == 1
+
+
+@pytest.mark.parametrize("reply", [False, "<html>error</html>", {"error": "x"}])
+def test_replay_log_stops_when_the_lookup_fails(logging_client, reply):
+    """Treating a failed lookup as "nothing stored" would resend metrics."""
+    logging_client.log_metrics({"acc": 0.9}, step=1)
+    logging_client.offline = False
+    with patch.object(logging_client, "search_experiments", return_value=reply):
+        with echoes(logging_client) as send:
+            with pytest.raises(RuntimeError, match="replay stopped"):
+                logging_client.replay_log(logging_client.log_to_filename)
+    assert send.call_args_list == []
+
+
+def test_offline_replay_does_not_look_anything_up(logging_client):
+    logging_client.log_metrics({"acc": 0.9}, step=1)
+    with patch.object(logging_client, "search_experiments") as search:
+        with echoes(logging_client) as send:
+            logging_client.replay_log(logging_client.log_to_filename)
+    search.assert_not_called()
+    assert len(send.call_args_list) == 1
 
 
 def test_replay_log_looks_up_the_escaped_env_id(logging_client):

@@ -1832,7 +1832,10 @@ class Visdom(object):
         began. Each logged metric uses up one matching stored entry, so a value
         that really was logged twice is still sent the second time.
         """
-        eid = msg.get("eid")
+        # Keyed by the id the server stores, so aliases share one count.
+        from visdom.utils.server_utils import extract_eid
+
+        eid = extract_eid(msg)
         if eid not in stored:
             stored[eid] = self._stored_experiment(eid)
         metrics, finished = stored[eid]
@@ -1851,14 +1854,22 @@ class Visdom(object):
         return dict(msg, metrics=missing) if missing else None
 
     def _stored_experiment(self, eid):
-        """``(Counter of (key, value, step), finished)`` for ``eid`` on the server."""
-        # The server stores the escaped id ("a\\b" as "a_b"), so look that up.
-        from visdom.utils.server_utils import escape_eid
+        """``(Counter of (key, value, step), finished)`` for ``eid`` on the server.
 
+        ``eid`` is already the id the server stores.
+        """
+        if self.offline:
+            return Counter(), False
         reply = self.search_experiments(
-            query="env_id = " + json.dumps(escape_eid(eid), ensure_ascii=False)
+            query="env_id = " + json.dumps(eid, ensure_ascii=False)
         )
-        found = reply.get("experiments") if isinstance(reply, dict) else None
+        if not isinstance(reply, dict) or "experiments" not in reply:
+            # Guessing "nothing stored" would resend, and so duplicate, metrics.
+            raise RuntimeError(
+                "could not read the stored experiment for {!r}; replay "
+                "stopped so no metric is recorded twice".format(eid)
+            )
+        found = reply["experiments"]
         if not found:
             return Counter(), False
         experiment = found[0]
