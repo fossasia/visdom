@@ -292,6 +292,16 @@ class TestRank(unittest.TestCase):
         self.assertEqual(logger._pending, {})
         logger.viz.line.assert_not_called()
 
+    def test_pending_points_are_not_flushed_once_the_rank_is_nonzero(self):
+        logger = _logger(log_every=3)
+        with self._rank(0):
+            logger.log("loss", 1.0)
+            logger.log("loss", 2.0)
+        logger.viz.line.assert_called_once()
+        with self._rank(1):
+            logger.__exit__(None, None, None)
+        logger.viz.line.assert_called_once()
+
     def test_nonzero_rank_skips_experiment_tracking(self):
         logger = self._tracked_logger()
         with self._rank(1):
