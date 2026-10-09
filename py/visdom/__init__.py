@@ -35,6 +35,7 @@ import logging
 import warnings
 import time
 import errno
+from collections import Counter
 from collections.abc import Mapping
 from io import BytesIO, StringIO
 from functools import wraps
@@ -1807,12 +1808,64 @@ class Visdom(object):
         """
         This function takes the contents of a visdom log and replays them to
         the current server to restore the state or handle any missing entries.
+
+        Experiment metrics are appended rather than replaced, so a metric the
+        server already holds is skipped instead of being recorded twice.
+        Replaying a log kept next to an online run, or the same log again,
+        leaves the metric history as it was.
         """
         with open(log_filename) as f:
             log_entries = f.readlines()
+        stored = {}
         for entry in log_entries:
             endpoint, msg = json.loads(entry)
+            if endpoint == "experiments/log":
+                msg = self._unreplayed(msg, stored)
+                if msg is None:
+                    continue
             self._send(msg, endpoint, from_log=True)
+
+    def _unreplayed(self, msg, stored):
+        """The part of a logged experiment call the server does not hold yet.
+
+        ``stored`` caches, per env, what the server held before the replay
+        began. Each logged metric uses up one matching stored entry, so a value
+        that really was logged twice is still sent the second time.
+        """
+        eid = msg.get("eid")
+        if eid not in stored:
+            stored[eid] = self._stored_experiment(eid)
+        metrics, finished = stored[eid]
+        if finished:
+            # The server refuses any further log, metric or finish for it.
+            return None
+        if msg.get("action") != "metrics":
+            return msg
+        missing = {}
+        for key, value in msg.get("metrics", {}).items():
+            logged = (key, value, msg.get("step"))
+            if metrics[logged] > 0:
+                metrics[logged] -= 1
+            else:
+                missing[key] = value
+        return dict(msg, metrics=missing) if missing else None
+
+    def _stored_experiment(self, eid):
+        """``(Counter of (key, value, step), finished)`` for ``eid`` on the server."""
+        # The server stores the escaped id ("a\\b" as "a_b"), so look that up.
+        from visdom.utils.server_utils import escape_eid
+
+        reply = self.search_experiments(
+            query="env_id = " + json.dumps(escape_eid(eid), ensure_ascii=False)
+        )
+        found = reply.get("experiments") if isinstance(reply, dict) else None
+        if not found:
+            return Counter(), False
+        experiment = found[0]
+        metrics = Counter(
+            (m["key"], m["value"], m["step"]) for m in experiment.get("metrics", [])
+        )
+        return metrics, experiment.get("status", "running") != "running"
 
     # Content
 

@@ -856,6 +856,80 @@ def test_replay_log_resends_an_offline_experiment(logging_client):
     ]
 
 
+def _stored(metrics=(), status="running"):
+    """A search reply holding one experiment with ``metrics`` already logged."""
+    return {
+        "experiments": [
+            {
+                "status": status,
+                "metrics": [
+                    {"key": k, "value": v, "step": s, "timestamp": 0.0}
+                    for k, v, s in metrics
+                ],
+            }
+        ]
+    }
+
+
+def _replayed_metrics(client, stored):
+    with patch.object(client, "search_experiments", return_value=stored) as search:
+        with echoes(client) as send:
+            client.replay_log(client.log_to_filename)
+    sent = [
+        (key, value, c.args[0].get("step"))
+        for c in send.call_args_list
+        if c.args[0].get("action") == "metrics"
+        for key, value in c.args[0]["metrics"].items()
+    ]
+    return sent, search
+
+
+def test_replay_log_skips_metrics_the_server_already_holds(logging_client):
+    """Metrics are appended, so resending a stored one would record it twice."""
+    logging_client.experiment(name="r")
+    logging_client.log_metrics({"acc": 0.7}, step=1)
+    logging_client.log_metrics({"acc": 0.8}, step=2)
+    sent, _ = _replayed_metrics(logging_client, _stored([("acc", 0.7, 1)]))
+    assert sent == [("acc", 0.8, 2)]
+
+
+def test_replay_log_sends_only_the_missing_keys_of_a_call(logging_client):
+    logging_client.experiment(name="r")
+    logging_client.log_metrics({"acc": 0.6, "loss": 0.4}, step=1)
+    sent, _ = _replayed_metrics(logging_client, _stored([("acc", 0.6, 1)]))
+    assert sent == [("loss", 0.4, 1)]
+
+
+def test_replay_log_keeps_a_value_that_was_logged_twice(logging_client):
+    """Each stored entry covers one logged entry, not every copy of it."""
+    logging_client.experiment(name="r")
+    logging_client.log_metrics({"loss": 0.5})
+    logging_client.log_metrics({"loss": 0.5})
+    sent, _ = _replayed_metrics(logging_client, _stored([("loss", 0.5, None)]))
+    assert sent == [("loss", 0.5, None)]
+
+
+def test_replay_log_sends_nothing_to_a_finished_experiment(logging_client):
+    """The server refuses any further log, metric or finish once finished."""
+    logging_client.experiment(name="r")
+    logging_client.log_metrics({"acc": 0.9}, step=1)
+    logging_client.finish_experiment()
+    with patch.object(
+        logging_client, "search_experiments", return_value=_stored(status="finished")
+    ):
+        with echoes(logging_client) as send:
+            logging_client.replay_log(logging_client.log_to_filename)
+    assert send.call_args_list == []
+
+
+def test_replay_log_looks_up_the_escaped_env_id(logging_client):
+    """The server stores "a\\b" as "a_b"; asking for the raw id finds nothing."""
+    logging_client.env = "runs\\a"
+    logging_client.log_metrics({"acc": 0.9}, step=1)
+    _, search = _replayed_metrics(logging_client, {"experiments": []})
+    assert search.call_args.kwargs["query"] == 'env_id = "runs_a"'
+
+
 @pytest.mark.parametrize(
     "call",
     [
