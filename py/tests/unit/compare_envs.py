@@ -438,9 +438,7 @@ def test_a_malformed_base_image_is_never_marked_initialised(fake_socket, store):
 
 
 @pytest.mark.parametrize("layout", ["missing", None, [], "not a dict"])
-def test_a_base_plot_without_a_usable_layout_still_compares(
-    layout, fake_socket, store
-):
+def test_a_base_plot_without_a_usable_layout_still_compares(layout, fake_socket, store):
     """Layout is optional in Plotly; its absence must not sink the comparison."""
     pane = _plot_pane("w1", "loss")
     if layout == "missing":
