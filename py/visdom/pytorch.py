@@ -8,6 +8,8 @@
 import datetime
 import warnings
 
+from visdom.utils import rank_utils
+
 
 class VisdomLogger:
     """Context manager for logging scalar metrics to Visdom from a raw PyTorch
@@ -24,6 +26,16 @@ class VisdomLogger:
     Without params, VisdomLogger only ever calls viz.line() — same as
     before this existed. status is "failed" if the with-block raised,
     "finished" otherwise.
+
+    Under distributed training (torchrun, SLURM, mp.spawn) only the main
+    process, global rank 0, plots and tracks; every other rank only
+    validates its inputs. The value plotted is whatever rank 0 logs, so
+    average a metric across processes (dist.all_reduce) before calling
+    log() if you want the global value. Pass is_main_process=True or
+    False to choose the plotting process yourself, e.g. the last stage
+    of a pipeline-parallel job, which is the one that holds the loss.
+    Also pass is_main_process=True when SLURM starts independent runs
+    with srun -n N, since each task gets its own SLURM_PROCID.
 
     Usage::
 
@@ -44,8 +56,9 @@ class VisdomLogger:
                 tracker.log("Train Loss", train_loss)
     """
 
-    def __init__(self, viz, env=None, log_every=1, params=None):
+    def __init__(self, viz, env=None, log_every=1, params=None, is_main_process=None):
         self.viz = viz
+        self._main_override = is_main_process
         self.env = env or "run_{}".format(
             datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         )
@@ -57,6 +70,12 @@ class VisdomLogger:
         self._step = {}
         self._counter = {}
         self._pending = {}
+
+    @property
+    def _is_main(self):
+        if self._main_override is not None:
+            return bool(self._main_override)
+        return rank_utils.is_main_process()
 
     @staticmethod
     def _check_experiment_reply(reply, action):
@@ -81,7 +100,7 @@ class VisdomLogger:
         return True
 
     def __enter__(self):
-        if self._params is not None:
+        if self._params is not None and self._is_main:
             try:
                 reply = self.viz.experiment(params=self._params, env=self.env)
                 if not self._check_experiment_reply(reply, "start experiment tracking"):
@@ -96,7 +115,7 @@ class VisdomLogger:
     def __exit__(self, exc_type, exc_val, exc_tb):
         for name, (x_val, value, xlabel) in self._pending.items():
             self._plot(name, x_val, value, xlabel)
-        if self._params is not None:
+        if self._params is not None and self._is_main:
             try:
                 reply = self.viz.finish_experiment(
                     status="failed" if exc_type else "finished", env=self.env
@@ -166,6 +185,9 @@ class VisdomLogger:
             raise TypeError(
                 "value must be a number, got {!r}".format(type(value).__name__)
             )
+
+        if not self._is_main:
+            return
 
         self._counter[name] = self._counter.get(name, 0) + 1
         if x is None:
