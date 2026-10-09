@@ -311,6 +311,44 @@ class TestRank(unittest.TestCase):
         logger.viz.log_metrics.assert_not_called()
         logger.viz.finish_experiment.assert_not_called()
 
+    def test_experiment_started_as_main_is_finished_if_rank_turns_nonzero(self):
+        logger = self._tracked_logger()
+        with self._rank(0):
+            logger.__enter__()
+        with self._rank(1):
+            logger.__exit__(None, None, None)
+        logger.viz.finish_experiment.assert_called_once()
+
+    def test_experiment_never_started_is_not_finished_or_fed_metrics(self):
+        logger = self._tracked_logger()
+        with self._rank(1):
+            logger.__enter__()
+        with self._rank(0):
+            logger.log("loss", 1.0)
+            logger.__exit__(None, None, None)
+        logger.viz.experiment.assert_not_called()
+        logger.viz.log_metrics.assert_not_called()
+        logger.viz.finish_experiment.assert_not_called()
+
+    def test_explicit_false_skips_tracking_without_any_rank_information(self):
+        logger = self._tracked_logger(is_main_process=False)
+        env = {k: v for k, v in os.environ.items() if k not in ("RANK", "SLURM_PROCID")}
+        with patch.dict(os.environ, env, clear=True):
+            with logger as tracker:
+                tracker.log("loss", 1.0)
+        logger.viz.line.assert_not_called()
+        logger.viz.experiment.assert_not_called()
+        logger.viz.finish_experiment.assert_not_called()
+
+    def test_override_must_be_a_bool_or_none(self):
+        for bad in ("False", "false", 0, 1, 0.0):
+            with self.subTest(bad=bad):
+                with self.assertRaises(TypeError):
+                    _logger(is_main_process=bad)
+        for good in (True, False, None):
+            with self.subTest(good=good):
+                _logger(is_main_process=good)
+
     def test_rank_zero_runs_experiment_tracking(self):
         logger = self._tracked_logger()
         with self._rank(0):

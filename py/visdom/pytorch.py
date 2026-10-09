@@ -61,6 +61,12 @@ class VisdomLogger:
 
     def __init__(self, viz, env=None, log_every=1, params=None, is_main_process=None):
         self.viz = viz
+        if is_main_process is not None and not isinstance(is_main_process, bool):
+            raise TypeError(
+                "is_main_process must be True, False or None, got {!r}".format(
+                    is_main_process
+                )
+            )
         self._main_override = is_main_process
         self.env = env or "run_{}".format(
             datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -69,6 +75,7 @@ class VisdomLogger:
         if self.log_every < 1:
             raise ValueError("log_every must be >= 1, got {}".format(log_every))
         self._params = params
+        self._tracking = False
         self._wins = {}
         self._step = {}
         self._counter = {}
@@ -77,7 +84,7 @@ class VisdomLogger:
     @property
     def _is_main(self):
         if self._main_override is not None:
-            return bool(self._main_override)
+            return self._main_override
         return rank_utils.is_main_process()
 
     @staticmethod
@@ -106,20 +113,20 @@ class VisdomLogger:
         if self._params is not None and self._is_main:
             try:
                 reply = self.viz.experiment(params=self._params, env=self.env)
-                if not self._check_experiment_reply(reply, "start experiment tracking"):
-                    self._params = None
+                self._tracking = self._check_experiment_reply(
+                    reply, "start experiment tracking"
+                )
             except Exception as e:
                 warnings.warn(
                     "VisdomLogger failed to start experiment tracking: {}".format(e)
                 )
-                self._params = None
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self._is_main:
             for name, (x_val, value, xlabel) in self._pending.items():
                 self._plot(name, x_val, value, xlabel)
-        if self._params is not None and self._is_main:
+        if self._tracking:
             try:
                 reply = self.viz.finish_experiment(
                     status="failed" if exc_type else "finished", env=self.env
@@ -151,7 +158,7 @@ class VisdomLogger:
                     env=self.env,
                     update="append",
                 )
-            if self._params is not None:
+            if self._tracking:
                 reply = self.viz.log_metrics({name: value}, step=x_val, env=self.env)
                 self._check_experiment_reply(reply, "log metric {!r}".format(name))
         except Exception as e:
