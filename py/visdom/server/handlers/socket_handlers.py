@@ -90,16 +90,19 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
         """
         if target_subs is None:
             target_subs = self.subs.values()
+        if not target_subs:
+            return
+        # Built once rather than once per subscriber. ``initialize`` calls this
+        # with no argument, so every new connection sends the layouts to every
+        # subscriber already registered: encoding per recipient made opening the
+        # Nth tab re-encode the layouts for the N-1 tabs whose layouts had not
+        # changed. (``open`` sends to ``[self]`` and was never the problem.)
+        message = json.dumps(
+            {"command": "layout_update", "data": self.server_state.get_layouts()},
+            cls=NanSafeEncoder,
+        )
         for sub in target_subs:
-            sub.write_message(
-                json.dumps(
-                    {
-                        "command": "layout_update",
-                        "data": self.server_state.get_layouts(),
-                    },
-                    cls=NanSafeEncoder,
-                )
-            )
+            sub.write_message(message)
 
     async def on_message(self, message):
         """Dispatch one socket command, keeping its disk work off the loop.
