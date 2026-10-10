@@ -79,41 +79,75 @@ def _get_perplexity(num_entities):
     return min(base, max_perplexity)
 
 
-try:
-    from openTSNE import TSNE as TSNE_OPEN
+NO_TSNE_BACKEND = (
+    "In order to use the embeddings feature, you'll "
+    "need to install a backend to support the calculation. "
+    "Currently we support openTSNE "
+    "(https://github.com/pavlin-policar/openTSNE) for "
+    "t-SNE computation, or the bhtsne implementation at "
+    "https://github.com/lvdmaaten/bhtsne/. Install openTSNE via "
+    "pip install openTSNE, or install bhtsne by cloning it into "
+    "the /py/visdom/extra_deps/ directory and running the "
+    "installation steps as listed on that github "
+    "in the created /py/visdom/extra_deps/bhtsne directory."
+)
 
-    def do_tsne(X):
-        perplexity = _get_perplexity(len(X))
-        tsne = TSNE_OPEN(n_components=2, perplexity=perplexity, verbose=True)
-        Y = tsne.fit(X)
-        return _normalize_tsne(Y)
+#: The t-SNE backend, resolved on first use and kept. ``None`` means the
+#: search has not run yet, which is not the same as having run and found
+#: nothing -- that is recorded as a function that raises.
+_tsne_backend = None
 
-except ImportError:
+
+def _resolve_tsne_backend():
+    """Pick a t-SNE backend, preferring openTSNE over the bundled bhtsne.
+
+    The search used to run at import time, which meant every ``import visdom``
+    paid for openTSNE -- and so for scikit-learn and SciPy underneath it --
+    to support ``embeddings()``, the one call that needs them. Running it here
+    keeps the same preference order and the same error, and charges it to the
+    callers that actually reach for a backend.
+    """
+    try:
+        from openTSNE import TSNE as TSNE_OPEN
+    except ImportError:
+        pass
+    else:
+
+        def with_opentsne(X):
+            perplexity = _get_perplexity(len(X))
+            tsne = TSNE_OPEN(n_components=2, perplexity=perplexity, verbose=True)
+            Y = tsne.fit(X)
+            return _normalize_tsne(Y)
+
+        return with_opentsne
+
     try:
         import visdom.extra_deps.bhtsne.bhtsne as bhtsne
+    except ImportError:
+        pass
+    else:
 
-        def do_tsne(X):
+        def with_bhtsne(X):
             perplexity = _get_perplexity(len(X))
             Y = bhtsne.run_bh_tsne(
                 X, initial_dims=X.shape[1], perplexity=perplexity, verbose=True
             )
             return _normalize_tsne(Y)
 
-    except ImportError:
+        return with_bhtsne
 
-        def do_tsne(X):
-            raise Exception(
-                "In order to use the embeddings feature, you'll "
-                "need to install a backend to support the calculation. "
-                "Currently we support openTSNE "
-                "(https://github.com/pavlin-policar/openTSNE) for "
-                "t-SNE computation, or the bhtsne implementation at "
-                "https://github.com/lvdmaaten/bhtsne/. Install openTSNE via "
-                "pip install openTSNE, or install bhtsne by cloning it into "
-                "the /py/visdom/extra_deps/ directory and running the "
-                "installation steps as listed on that github "
-                "in the created /py/visdom/extra_deps/bhtsne directory."
-            )
+    def without_a_backend(X):
+        raise Exception(NO_TSNE_BACKEND)
+
+    return without_a_backend
+
+
+def do_tsne(X):
+    """Embed ``X`` in two dimensions with whichever backend is installed."""
+    global _tsne_backend
+    if _tsne_backend is None:
+        _tsne_backend = _resolve_tsne_backend()
+    return _tsne_backend(X)
 
 
 here = os.path.abspath(os.path.dirname(__file__))
@@ -526,22 +560,53 @@ def _assert_sunburst_opts(opts):
         ), "branchvalues must be 'total' or 'remainder'"
 
 
+#: Extra types ``_to_numpy`` should unwrap, beyond the torch ones it finds on
+#: its own. Left here as the extension point the module-scope list used to be.
 torch_types = []
-try:
-    import torch
 
-    torch_types.append(torch.Tensor)
-    torch_types.append(torch.nn.Parameter)
-except (ImportError, AttributeError):
-    pass
+#: ``(torch module, types)`` from the last lookup, so a caller plotting in a
+#: loop does not re-read ``torch.nn`` on every argument. Keyed by the module
+#: object rather than its name: a reloaded torch invalidates it by identity.
+_torch_types_cache = (None, ())
+
+
+def _resolve_torch_types():
+    """Return the torch tensor types to unwrap, without importing torch.
+
+    ``import torch`` at module scope cost every ``import visdom`` well over a
+    second, to build an isinstance tuple. It is not needed: a caller cannot be
+    holding a tensor unless they imported torch themselves, so torch being
+    absent from ``sys.modules`` is proof there is nothing here to unwrap. When
+    it is present this is a dict lookup, not an import.
+    """
+    global _torch_types_cache
+    torch = sys.modules.get("torch")
+    if torch is None:
+        return ()
+    cached_module, cached_types = _torch_types_cache
+    if cached_module is torch:
+        return cached_types
+    try:
+        types = (torch.Tensor, torch.nn.Parameter)
+    except AttributeError:
+        # a partially initialised torch -- ``import visdom`` from inside
+        # torch's own import, or a stub standing in for it
+        types = ()
+    _torch_types_cache = (torch, types)
+    return types
 
 
 def _to_numpy(a):
     if isinstance(a, list):
         return np.array(a)
-    for kind in torch_types:
-        if isinstance(a, kind):
-            return a.detach().cpu().numpy()
+    # one isinstance against the whole tuple rather than a Python loop: this
+    # runs per argument of every plot call, and torch_types is empty unless a
+    # caller has added to it, so the common path allocates nothing.
+    kinds = _resolve_torch_types()
+    if torch_types:
+        kinds = tuple(torch_types) + kinds
+    if kinds and isinstance(a, kinds):
+        return a.detach().cpu().numpy()
     return a
 
 
