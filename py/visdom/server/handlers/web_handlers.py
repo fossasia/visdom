@@ -124,6 +124,30 @@ class ExistsHandler(BaseHandler):
 
 class UpdateHandler(BaseHandler):
     @staticmethod
+    def bump_version(p):
+        """Advance the pane's broadcast sequence number and return the new value.
+
+        The frontend applies an incremental patch only when the message carries
+        exactly ``pane.version + 1`` (``updateWindow`` in ``js/main.js``); any
+        other value makes it discard the patch and re-request the whole
+        environment. Every path that broadcasts a ``window_update`` therefore has
+        to move this counter.
+
+        It lives here rather than in ``update_window()`` because
+        ``UpdateHandler.update()`` returns before that helper for text,
+        image_history, plot_history and table panes, and the embeddings route
+        never calls it at all. Those types stayed pinned at version 1 while the
+        server kept broadcasting updates, so the client's check could never pass
+        and every update cost a full environment reload.
+
+        Reads through ``get`` rather than ``+= 1`` so that an environment
+        persisted before panes carried a version still updates instead of raising
+        ``KeyError`` out of a request.
+        """
+        p["version"] = p.get("version", 1) + 1
+        return p["version"]
+
+    @staticmethod
     def update_packet(
         p, args, max_text_lines, max_old_content, max_image_history, max_plot_history
     ):
@@ -144,6 +168,21 @@ class UpdateHandler(BaseHandler):
             max_image_history,
             max_plot_history,
         )
+        # ``update()`` hands the pane straight back when it turns an update
+        # down: a ``/update`` aimed at a table, an image slider move on a pane
+        # holding no frames, a heatmap append whose shape does not line up with
+        # the plot it is aimed at. ``old_p`` deep-copied everything ``update()``
+        # mutates in place, so an unchanged pane here means nothing was applied.
+        # A rejected update has no revision to announce: bumping for one spends
+        # a version on a patch that carries no change and rerolls ``contentID``
+        # to make the frontend redraw the pane it already has. Leave both alone
+        # and hand back an empty patch, which ``wrap_func`` declines to send.
+        if p == old_p:
+            return p, []
+
+        # Bumped before the patch is computed so the diff carries the new
+        # version to the client, keeping its copy in step for the next update.
+        UpdateHandler.bump_version(p)
         p["contentID"] = get_rand_id()
 
         patch = jsonpatch.make_patch(old_p, p)
@@ -162,11 +201,13 @@ class UpdateHandler(BaseHandler):
             selected = data["selected"]
             p["content"]["selected"] = selected
             p["contentID"] = content_id
+            version = UpdateHandler.bump_version(p)
             # `selected` may not exist yet on the first selection, so use "add"
             # (which also overwrites when the key is already present).
             return [
                 {"op": "add", "path": "/content/selected", "value": selected},
                 {"op": "replace", "path": "/contentID", "value": content_id},
+                {"op": "replace", "path": "/version", "value": version},
             ]
         if update_type == "RegionSelected":
             old_data = p["content"]["data"]
@@ -179,12 +220,16 @@ class UpdateHandler(BaseHandler):
             p["content"]["has_previous"] = True
             p["content"]["selected"] = None
             p["contentID"] = content_id
+            version = UpdateHandler.bump_version(p)
             return [
                 {"op": "replace", "path": "/content/data", "value": new_data},
                 {"op": "add", "path": "/content/has_previous", "value": True},
                 {"op": "add", "path": "/content/selected", "value": None},
                 {"op": "replace", "path": "/contentID", "value": content_id},
+                {"op": "replace", "path": "/version", "value": version},
             ]
+        # An unrecognised update_type changed nothing, so there is no version to
+        # announce and no patch to send.
         return []
 
     @staticmethod
@@ -551,8 +596,15 @@ class UpdateHandler(BaseHandler):
             diff_packet = UpdateHandler.update_embeddings_packet(
                 p, args, handler.max_old_content
             )
-            UpdateHandler.broadcast_window_update(handler, args, eid, p, diff_packet)
-            handler.mark_dirty(eid)
+            # An empty patch means the update_type was not recognised and the
+            # pane is unchanged. Broadcasting it anyway would send a version the
+            # client cannot reconcile, costing it a full environment reload for a
+            # no-op.
+            if diff_packet:
+                UpdateHandler.broadcast_window_update(
+                    handler, args, eid, p, diff_packet
+                )
+                handler.mark_dirty(eid)
             handler.write(p["id"])
             return
 
@@ -571,20 +623,28 @@ class UpdateHandler(BaseHandler):
                 handler.write(str(exc))
                 return
             raise
-        # Send the smaller of the patch and the updated pane. The pane is only
-        # encoded when it could actually win: pane_min_bytes bounds its encoded
-        # size from below, so a patch already shorter than that bound cannot be
-        # beaten and the encode -- the one whose cost grows with the data
-        # already plotted -- is skipped. Every other update compares for real.
-        msg = UpdateHandler.window_update_message(args, eid, p, diff_packet)
-        if UpdateHandler.pane_min_bytes(p) < len(msg):
-            broadcast_msg = dict(p)
-            broadcast_msg["eid"] = eid
-            pane_msg = json.dumps(broadcast_msg, cls=NanSafeEncoder)
-            if len(pane_msg) <= len(msg):
-                msg = pane_msg
-        broadcast(handler, msg, eid)
-        handler.mark_dirty(eid)
+        # An empty patch means ``update_packet`` refused the update and left the
+        # pane on the version the browser already holds. A ``window_update``
+        # repeating that version fails the frontend's "exactly one ahead" check
+        # and sends it back for the whole environment, so say nothing at all --
+        # there is no change to save either. The pane id below is still the
+        # ack, as it is for an update that did land.
+        if diff_packet:
+            # Send the smaller of the patch and the updated pane. The pane is
+            # only encoded when it could actually win: pane_min_bytes bounds its
+            # encoded size from below, so a patch already shorter than that
+            # bound cannot be beaten and the encode -- the one whose cost grows
+            # with the data already plotted -- is skipped. Every other update
+            # compares for real.
+            msg = UpdateHandler.window_update_message(args, eid, p, diff_packet)
+            if UpdateHandler.pane_min_bytes(p) < len(msg):
+                broadcast_msg = dict(p)
+                broadcast_msg["eid"] = eid
+                pane_msg = json.dumps(broadcast_msg, cls=NanSafeEncoder)
+                if len(pane_msg) <= len(msg):
+                    msg = pane_msg
+            broadcast(handler, msg, eid)
+            handler.mark_dirty(eid)
         handler.write(p["id"])
 
     @check_auth
@@ -686,8 +746,20 @@ class EnvStateHandler(BaseHandler):
 class ForkEnvHandler(BaseHandler):
     @staticmethod
     async def wrap_func(handler, args):
-        prev_eid = escape_eid(args.get("prev_eid"))
-        eid = escape_eid(args.get("eid"))
+        if not isinstance(args, Mapping):
+            raise tornado.web.HTTPError(400, reason="request body must be an object")
+        prev_eid = args.get("prev_eid")
+        eid = args.get("eid")
+        if not isinstance(prev_eid, str) or not isinstance(eid, str):
+            raise tornado.web.HTTPError(
+                400, reason="both 'prev_eid' and 'eid' must be strings"
+            )
+        prev_eid = escape_eid(prev_eid)
+        eid = escape_eid(eid)
+        if not eid:
+            raise tornado.web.HTTPError(400, reason="'eid' must not be empty")
+        if not prev_eid:
+            raise tornado.web.HTTPError(400, reason="'prev_eid' must not be empty")
 
         if prev_eid not in handler.state:
             # the eid stays out of the reason: it is echoed on the status line,
@@ -717,9 +789,14 @@ class ForkEnvHandler(BaseHandler):
     @check_auth
     @check_readonly
     async def post(self):
-        args = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
+        try:
+            args = tornado.escape.json_decode(
+                tornado.escape.to_basestring(self.request.body)
+            )
+        except (ValueError, TypeError):
+            raise tornado.web.HTTPError(
+                400, reason="request body must be valid JSON"
+            ) from None
         await self.wrap_func(self, args)
 
 
@@ -770,7 +847,8 @@ class EnvHandler(BaseHandler):
 class CompareHandler(BaseHandler):
     @check_auth
     def get(self, eids):
-        for eid in eids.split("+"):
+        for raw_eid in eids.split("+"):
+            eid = escape_eid(raw_eid)
             if eid not in self.state:
                 raise tornado.web.HTTPError(
                     404, reason=f"Environment '{eid}' not found"
@@ -782,13 +860,35 @@ class CompareHandler(BaseHandler):
 
     @check_auth
     async def post(self, args):
-        body = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
+        """Send environment comparison data to a subscriber socket.
+
+        Expects a JSON object with a ``sid`` string identifying the target
+        subscriber session, or null representing an uninitialized client
+        session that is handled as a no-op. Returns HTTP 400 if the request
+        body is not valid JSON, is not an object, or contains an invalid
+        ``sid`` type. When ``sid`` is unknown, the request safely returns
+        HTTP 200 without dispatching comparison data.
+        """
+        try:
+            body = tornado.escape.json_decode(
+                tornado.escape.to_basestring(self.request.body)
+            )
+        except ValueError:
+            raise tornado.web.HTTPError(400, reason="request body must be valid JSON")
+
+        if not isinstance(body, Mapping):
+            raise tornado.web.HTTPError(400, reason="request body must be an object")
+
+        if "sid" not in body:
+            raise tornado.web.HTTPError(400, reason="missing required field: 'sid'")
+
         sid = body["sid"]
+        if sid is not None and (not isinstance(sid, str) or not sid.strip()):
+            raise tornado.web.HTTPError(400, reason="invalid required field: 'sid'")
+
         show_all = body.get("show_all", False)
-        if sid in self.subs:
-            eids = args.split("+")
+        if sid and sid in self.subs:
+            eids = [escape_eid(eid) for eid in args.split("+")]
             try:
                 # comparison reads every named env in full, and reads it from
                 # state -- so each one is brought into memory here, where the
@@ -813,22 +913,53 @@ class CompareHandler(BaseHandler):
                 return
 
 
+def _decode_json_body(body):
+    """Return a request body decoded into a dict of arguments.
+
+    Shared by handlers whose bodies are JSON objects, so an empty body is read
+    as an empty object and each handler decides on its own whether the arguments
+    it needs are missing. Anything else that is not a JSON object is the caller's
+    error: without this check, malformed JSON or a bare list would surface as an
+    unhandled exception and a 500 rather than a 400 naming what was wrong with
+    the request.
+    """
+    try:
+        text = tornado.escape.to_basestring(body).strip()
+        if not text:
+            return {}
+        args = tornado.escape.json_decode(text)
+    except ValueError as error:
+        raise tornado.web.HTTPError(
+            400, reason="request body must be valid JSON"
+        ) from error
+    if not isinstance(args, Mapping):
+        raise tornado.web.HTTPError(400, reason="request body must be an object")
+    return args
+
+
 class SaveHandler(BaseHandler):
     @staticmethod
     async def wrap_func(handler, args):
+        """Validate payload parameters, filter invalid env IDs, and persist valid environments."""
+        if "data" not in args:
+            raise tornado.web.HTTPError(400, reason="missing required field: 'data'")
         envs = args["data"]
-        envs = [escape_eid(eid) for eid in envs]
+        if not isinstance(envs, Sequence) or isinstance(envs, (str, bytes)):
+            raise tornado.web.HTTPError(
+                400, reason="'data' must be a list of environment ids"
+            )
+        valid_envs = [
+            escape_eid(eid) for eid in envs if isinstance(eid, str) and eid.strip()
+        ]
         # this drops invalid env ids
-        ret = await save_envs_off_loop(handler, envs)
+        ret = await save_envs_off_loop(handler, valid_envs)
         handler.write(json.dumps(ret))
 
     @check_auth
     @check_readonly
     async def post(self):
-        args = tornado.escape.json_decode(
-            tornado.escape.to_basestring(self.request.body)
-        )
-        await self.wrap_func(self, args)
+        """Decode JSON request body and save environments."""
+        await self.wrap_func(self, _decode_json_body(self.request.body))
 
 
 class DataHandler(BaseHandler):
@@ -1125,28 +1256,6 @@ def _stored_experiment_map(store):
     worker is already in the shape the overlay on the loop needs.
     """
     return {exp.env_id: exp for exp in ExperimentStore(store).list_experiments()}
-
-
-def _decode_json_body(body):
-    """Return a request body decoded into a dict of arguments.
-
-    Shared by the ``/experiments/*`` endpoints, whose bodies are all optional
-    JSON objects, so an empty body is read as an empty object and each handler
-    decides on its own whether the arguments it needs are missing. Anything else
-    that is not a JSON object is the caller's error: without this check,
-    malformed JSON or a bare list would surface as an unhandled exception and a
-    500 rather than a 400 naming what was wrong with the request.
-    """
-    try:
-        text = tornado.escape.to_basestring(body).strip()
-        if not text:
-            return {}
-        args = tornado.escape.json_decode(text)
-    except ValueError:
-        raise tornado.web.HTTPError(400, reason="request body must be valid JSON")
-    if not isinstance(args, Mapping):
-        raise tornado.web.HTTPError(400, reason="request body must be an object")
-    return args
 
 
 class ExperimentLogHandler(BaseHandler):

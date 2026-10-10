@@ -13,6 +13,7 @@ receives, so these run on the ``capture_send`` fixture, which intercepts the
 payload, and on ``offline_client`` where only the input validation is under
 test. Neither opens a socket or reaches a server.
 """
+
 import math
 import unittest
 from unittest.mock import patch
@@ -543,6 +544,29 @@ def test_bar_legend_with_rownames_on_1d_raises(offline_client):
         offline_client.bar(np.array([1.0, 2.0, 3.0]), opts=opts)
 
 
+def test_bar_size_one_x_renders(capture_send):
+    """Regression test for #1787: a single-value X used to collapse to a
+    0-d array via an unconditional np.squeeze() and fail the ndim assert."""
+    sent = capture_send(lambda v: v.bar(np.array([5.0])))
+    assert sent["payload"]["data"][0]["y"] == [5.0]
+
+
+def test_bar_size_one_y_renders(capture_send):
+    """Regression test for #1787: a single-value Y hit the same unconditional
+    np.squeeze() bug as X, one call deeper in bar()."""
+    sent = capture_send(lambda v: v.bar(np.array([5.0]), Y=np.array([10.0])))
+    assert sent["payload"]["data"][0]["x"] == [10.0]
+
+
+def test_bar_2d_row_vector_still_squeezes(capture_send):
+    """A 2D row vector must still collapse to a single 1D trace, matching
+    np.squeeze()'s original behavior -- only the size-1 case should be
+    guarded, not squeezing in general."""
+    sent = capture_send(lambda v: v.bar(np.array([[1.0, 2.0, 3.0, 4.0, 5.0]])))
+    assert len(sent["payload"]["data"]) == 1
+    assert sent["payload"]["data"][0]["y"] == [1.0, 2.0, 3.0, 4.0, 5.0]
+
+
 def test_bar_stacked_sets_barmode(capture_send):
     """stacked=True stacks the columns instead of grouping them."""
     X = np.array([[1.0, 2.0], [3.0, 4.0]])
@@ -589,6 +613,13 @@ def test_histogram_bin_edges_span_data_range(capture_send):
     x = sent["payload"]["data"][0]["x"]
     assert x[0] == 0.0
     assert x[-1] == 99.0
+
+
+def test_histogram_size_one_x_renders(capture_send):
+    """Regression test for #1787: a single-value X used to collapse to a
+    0-d array via an unconditional np.squeeze() and fail the ndim assert."""
+    sent = capture_send(lambda v: v.histogram(np.array([42.0])))
+    assert sum(sent["payload"]["data"][0]["y"]) == 1
 
 
 # ------------------------------------------------------------------- boxplot ----
@@ -808,3 +839,71 @@ class TestMatplotResizable(unittest.TestCase):
         opts = self._matplot(_FakePlot(width_pt="100.5", height_pt="200.5"))
         self.assertEqual(opts["height"], 1.4 * math.ceil(200.5))  # 1.4 * 201
         self.assertEqual(opts["width"], 1.35 * math.ceil(100.5))  # 1.35 * 101
+
+
+# --------------------------------------------------- parallel_coordinates ----
+
+
+def test_parallel_coordinates_size1_list_y(capture_send):
+    """Size-1 Python list Y is preserved as a 1D vector and plots successfully."""
+    sent = capture_send(
+        lambda v: v.parallel_coordinates(
+            X=[[1.0, 2.0, 3.0]],
+            Y=[0.5],
+        )
+    )
+    trace = sent["payload"]["data"][0]
+    assert trace["type"] == "parcoords"
+    assert trace["line"]["color"] == [0.5]
+
+
+def test_parallel_coordinates_numpy_1d_size1_y(capture_send):
+    """NumPy 1D array of shape (1,) succeeds for size-1 Y."""
+    sent = capture_send(
+        lambda v: v.parallel_coordinates(
+            X=np.array([[1.0, 2.0]]),
+            Y=np.array([0.7]),
+        )
+    )
+    trace = sent["payload"]["data"][0]
+    assert trace["type"] == "parcoords"
+    assert trace["line"]["color"] == [0.7]
+
+
+def test_parallel_coordinates_numpy_2d_size1_y(capture_send):
+    """NumPy 2D array of shape (1, 1) is squeezed and preserved as a 1D vector."""
+    sent = capture_send(
+        lambda v: v.parallel_coordinates(
+            X=np.array([[1.0, 2.0]]),
+            Y=np.array([[0.7]]),
+        )
+    )
+    trace = sent["payload"]["data"][0]
+    assert trace["type"] == "parcoords"
+    assert trace["line"]["color"] == [0.7]
+
+
+def test_parallel_coordinates_scalar_y(capture_send):
+    """Pure numeric scalar Y is normalized to a 1D vector for N=1 experiment."""
+    sent = capture_send(
+        lambda v: v.parallel_coordinates(
+            X=[[1.0, 2.0]],
+            Y=0.7,
+        )
+    )
+    trace = sent["payload"]["data"][0]
+    assert trace["type"] == "parcoords"
+    assert trace["line"]["color"] == [0.7]
+
+
+def test_parallel_coordinates_multi_experiment(capture_send):
+    """Multi-experiment input with Y vector works as expected."""
+    sent = capture_send(
+        lambda v: v.parallel_coordinates(
+            X=[[1.0, 2.0], [3.0, 4.0]],
+            Y=[0.1, 0.9],
+        )
+    )
+    trace = sent["payload"]["data"][0]
+    assert trace["type"] == "parcoords"
+    assert trace["line"]["color"] == [0.1, 0.9]
