@@ -376,6 +376,31 @@ class TestHparamsUpdateRaces(tornado.testing.AsyncHTTPTestCase):
             staticmethod(held_build),
         )
 
+    def hold_after_selections(self):
+        """Let every selection read, then park it before it is written back.
+
+        ``hold_selections`` parks a rebuild before its read, which ties the
+        order the rebuilds read in to the order they are released in. Parking
+        after the read instead separates the two: each rebuild holds content
+        from the moment it ran, and the test chooses which of them reaches the
+        pane first.
+        """
+        build = ExperimentHparamsHandler._build_content_off_loop
+
+        async def held_build(handler, spec):
+            content = await build(handler, spec)
+            started, release = asyncio.Event(), asyncio.Event()
+            self.held.append((started, release))
+            started.set()
+            await release.wait()
+            return content
+
+        return mock.patch.object(
+            ExperimentHparamsHandler,
+            "_build_content_off_loop",
+            staticmethod(held_build),
+        )
+
     async def wait_held(self, count):
         """Wait until ``count`` selections are parked."""
         while len(self.held) < count:
@@ -464,6 +489,42 @@ class TestHparamsUpdateRaces(tornado.testing.AsyncHTTPTestCase):
         self.assertEqual(
             sorted(record["env_id"] for record in records), ["run-a", "run-b"]
         )
+
+    @tornado.testing.gen_test
+    async def test_a_refresh_does_not_undo_a_newer_refresh(self):
+        """Two refreshes of one pane: the one that read first must not win.
+
+        A refresh replays the selection stored on the pane, so both of these
+        carry the identical spec and a check on the spec alone lets the older
+        one through -- it is only the ``contentID`` that says the pane has
+        been rebuilt since. The older one holds a reading taken before the
+        newer metric was logged, so writing it would drop that metric from a
+        pane that was already showing it, and queue its snapshot behind the
+        newer save.
+        """
+        await self.post("/experiments/hparams", {"env_ids": ["run-a"], "win": "hp1"})
+
+        with self.hold_after_selections():
+            older = self.post("/experiments/hparams/update", {"win": "hp1"})
+            await self.wait_held(1)
+
+            ExperimentStore(self._app.storage).log_metric("run-a", "acc", 0.99)
+
+            newer = self.post("/experiments/hparams/update", {"win": "hp1"})
+            await self.wait_held(2)
+
+            self.held[1][1].set()
+            newer_resp = await newer
+            content_id = self.window()["contentID"]
+            self.held[0][1].set()
+            older_resp = await older
+
+        self.assertEqual((older_resp.code, newer_resp.code), (200, 200))
+        self.assertEqual(older_resp.body.decode(), "hp1")
+        # the newer reading stands, and nothing was written over it
+        self.assertEqual(self.window()["contentID"], content_id)
+        records = self.window()["content"]["records"]
+        self.assertEqual([record["metrics"]["acc"] for record in records], [0.99])
 
     @tornado.testing.gen_test
     async def test_an_explicit_update_does_not_undo_a_newer_rebuild(self):

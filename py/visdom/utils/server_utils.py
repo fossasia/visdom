@@ -14,6 +14,7 @@ At the moment, this just inherited all of the floating functions
 in the previous server.py class.
 """
 
+import contextlib
 import copy
 import functools
 import hashlib
@@ -301,9 +302,52 @@ def purge_env(store, eid):
     store.delete_env(eid)
 
 
+class EnvDeleteWatch:
+    """Records that ``eid`` was deleted while a request was off the loop.
+
+    ``env_is_deleting`` answers for the instant it is asked, and a delete is
+    only in flight until the worker is done with it. A request that reads for
+    longer than the delete takes asks after it has settled and is told
+    nothing: the counter has been dropped, and ``state`` holds no entry to
+    have changed identity either when the env was never materialised. This
+    outlives the delete instead -- once set, it stays set for as long as the
+    holder keeps the watch.
+    """
+
+    __slots__ = ("deleted",)
+
+    def __init__(self, deleted=False):
+        self.deleted = deleted
+
+
+@contextlib.contextmanager
+def watch_env_deletes(handler, eid):
+    """Hold a watch on ``eid`` for the body of the ``with``.
+
+    The watch starts out already tripped when a delete is in flight as it is
+    taken, so the holder does not have to ask separately: a delete running now
+    and a delete that starts later both leave the env gone by the time the
+    holder looks.
+    """
+    watch = EnvDeleteWatch(env_is_deleting(handler, eid))
+    handler.env_delete_watches.setdefault(eid, []).append(watch)
+    try:
+        yield watch
+    finally:
+        watches = handler.env_delete_watches.get(eid)
+        if watches is not None and watch in watches:
+            watches.remove(watch)
+            if not watches:
+                handler.env_delete_watches.pop(eid, None)
+
+
 def _note_env_deleting(handler, eid):
     """Record that a delete of ``eid`` is on its way to disk."""
     handler.deleting_envs[eid] = handler.deleting_envs.get(eid, 0) + 1
+    # tell everyone holding this env off the loop, before the delete settles
+    # and the record above is dropped again.
+    for watch in handler.env_delete_watches.get(eid, ()):
+        watch.deleted = True
 
 
 def _note_env_deleted(handler, eid):

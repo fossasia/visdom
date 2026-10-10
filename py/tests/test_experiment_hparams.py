@@ -464,9 +464,15 @@ class TestHparamsCreateRaces(tornado.testing.AsyncHTTPTestCase):
         with self.hold_selections():
             pending = self.post({"env_ids": ["run-a"], "win": "hp2", "eid": "dash"})
             await self.wait_held(1)
-            # the shape a real delete leaves behind: out of state, and marked
-            # on its way to disk. Without the mark the env is only absent, and
-            # the file it still has is materialised again rather than refused.
+            # the shape a delete leaves behind while the worker still has it:
+            # out of state, and marked on its way to disk. Without the mark the
+            # env is only absent, and the file it still has is materialised
+            # again rather than refused. The mark is set here rather than taken
+            # from a real delete so that it stays put for the whole of the
+            # read, which pins the in-flight branch on its own;
+            # ``test_a_delete_that_finishes_first_still_refuses_the_pane``
+            # drives the real handler to cover the delete that is over before
+            # the check runs, which this marker would otherwise hide.
             del self._app.state["dash"]
             self._app.server_state.deleting_envs["dash"] = 1
             self.held[0][1].set()
@@ -474,6 +480,46 @@ class TestHparamsCreateRaces(tornado.testing.AsyncHTTPTestCase):
 
         self.assertEqual(resp.code, 400)
         self.assertNotIn("dash", self._app.state)
+
+    @tornado.testing.gen_test
+    async def test_a_delete_that_finishes_first_still_refuses_the_pane(self):
+        """The real delete path, run to completion before the pane is built.
+
+        ``deleting_envs`` is cleared the moment the worker is done, so a delete
+        that outruns the selection leaves no mark for the resumed request to
+        find. With the env known only by its file there is no ``state`` entry
+        to have changed identity either, which together is how a deleted env
+        came back carrying a pane: the create passed both checks, registered
+        the window into a fresh env and saved it behind the delete.
+        """
+        await self.post({"env_ids": ["run-a"], "win": "hp1", "eid": "dash"})
+        env_file = os.path.join(self._tmp_dir, "dash.json")
+        self.assertTrue(os.path.exists(env_file))
+        # the server now knows the env only by its file, as it would after a
+        # restart; this is what leaves the create nothing to compare against.
+        del self._app.state["dash"]
+
+        with self.hold_selections():
+            pending = self.post({"env_ids": ["run-a"], "win": "hp2", "eid": "dash"})
+            await self.wait_held(1)
+
+            await self.http_client.fetch(
+                self.get_url("/delete_env"),
+                method="POST",
+                body=json.dumps({"eid": "dash"}),
+                headers={"Content-Type": "application/json"},
+            )
+            # the delete is settled: nothing is in flight for the create to
+            # notice when it resumes.
+            self.assertEqual(self._app.server_state.deleting_envs, {})
+            self.assertFalse(os.path.exists(env_file))
+
+            self.held[0][1].set()
+            resp = await pending
+
+        self.assertEqual(resp.code, 400)
+        self.assertNotIn("dash", self._app.state)
+        self.assertFalse(os.path.exists(env_file))
 
     @tornado.testing.gen_test
     async def test_an_env_replaced_during_the_read_is_rejected(self):

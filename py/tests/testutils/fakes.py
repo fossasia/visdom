@@ -101,6 +101,9 @@ class FakeHandler:
         # Envs with a delete on its way to disk, as ``ServerState`` tracks
         # them; readers that resume after yielding the loop consult it.
         self.deleting_envs = {}
+        # Watches those readers hold while they are away, so a delete that is
+        # over before they resume is still reported to them.
+        self.env_delete_watches = {}
 
         self.written = []
         self.status = None

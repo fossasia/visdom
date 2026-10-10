@@ -62,6 +62,7 @@ from visdom.utils.server_utils import (
     check_readonly_message,
     run_on_storage_executor,
     save_env_off_loop,
+    watch_env_deletes,
     window,
 )
 
@@ -340,49 +341,58 @@ class ExperimentHparamsHandler(BaseHandler):
         # and saves it there. ``None`` means ``state`` held nothing under the
         # id, which is not the same as there being nothing to go stale: the
         # env may exist as a file the server has never materialised, and the
-        # delete of one of those is caught by ``env_is_deleting`` below rather
-        # than by this.
+        # delete of one of those is caught by the watch rather than by this.
         destination = handler.state.get(eid)
 
-        content = await ExperimentHparamsHandler._build_content_off_loop(handler, spec)
-
-        # the pane lands in an env the server may know only by its file, and
-        # registering a window reads that env; bringing it in first keeps the
-        # read on the worker -- ``ensure_env_present`` rather than
-        # ``ensure_env_loaded`` because an env the server has never
-        # materialised is exactly that case, and priming only what ``state``
-        # already tracks would leave ``register_window`` to file an empty env
-        # over a file full of windows. Nothing awaits between here and the
-        # snapshot the save takes, so the window saved is the window
-        # registered.
-        await ensure_env_present(handler, eid)
-        # a delete of this env on its way to disk is as much a changed
-        # destination as a replaced entry, and it is the only form the change
-        # takes when ``state`` held nothing to compare: the env is gone from
-        # ``state`` already and ``ensure_env_present`` refuses to file what it
-        # read back, so without this the window would be registered into a
-        # fresh env and saved -- queued behind the delete on the one storage
-        # worker, so landing after it and bringing the deleted env back.
-        if env_is_deleting(handler, eid) or (
-            destination is not None and handler.state.get(eid) is not destination
-        ):
-            # the eid stays out of the reason: it is echoed on the status line,
-            # which is latin-1 only, and eids are free-form unicode.
-            raise tornado.web.HTTPError(
-                400, reason="env the pane targets changed while it was built"
+        # the watch covers the delete this would otherwise miss: the one that
+        # is over before the check runs. ``env_is_deleting`` answers only while
+        # the worker still has it, so a selection that takes longer is told
+        # nothing when it resumes -- and with the env known only by its file
+        # there is no ``state`` entry to have changed identity either, so the
+        # window would be registered into a fresh env and saved, which is the
+        # deleted env back on disk carrying a pane. The two are asked together
+        # below: one for a delete that has landed, one for a delete still on
+        # its way.
+        with watch_env_deletes(handler, eid) as deleted_meanwhile:
+            content = await ExperimentHparamsHandler._build_content_off_loop(
+                handler, spec
             )
-        opts = dict(args.get("opts") or {})
-        opts.setdefault("title", "Hyperparameters")
-        p = window(
-            {
-                "data": [{"content": content, "type": "hparams"}],
-                "win": args.get("win"),
-                "opts": opts,
-            }
-        )
-        p["hparams"] = spec
-        register_window(handler, p, eid)
-        await save_env_off_loop(handler, eid)
+
+            # the pane lands in an env the server may know only by its file,
+            # and registering a window reads that env; bringing it in first
+            # keeps the read on the worker -- ``ensure_env_present`` rather
+            # than ``ensure_env_loaded`` because an env the server has never
+            # materialised is exactly that case, and priming only what
+            # ``state`` already tracks would leave ``register_window`` to file
+            # an empty env over a file full of windows. Nothing awaits between
+            # here and the snapshot the save takes, so the window saved is the
+            # window registered.
+            await ensure_env_present(handler, eid)
+            if (
+                deleted_meanwhile.deleted
+                or env_is_deleting(handler, eid)
+                or (
+                    destination is not None
+                    and handler.state.get(eid) is not destination
+                )
+            ):
+                # the eid stays out of the reason: it is echoed on the status
+                # line, which is latin-1 only, and eids are free-form unicode.
+                raise tornado.web.HTTPError(
+                    400, reason="env the pane targets changed while it was built"
+                )
+            opts = dict(args.get("opts") or {})
+            opts.setdefault("title", "Hyperparameters")
+            p = window(
+                {
+                    "data": [{"content": content, "type": "hparams"}],
+                    "win": args.get("win"),
+                    "opts": opts,
+                }
+            )
+            p["hparams"] = spec
+            register_window(handler, p, eid)
+            await save_env_off_loop(handler, eid)
 
     @check_auth
     @check_readonly_message(READONLY_MESSAGE)
@@ -422,12 +432,13 @@ class ExperimentHparamsUpdateHandler(BaseHandler):
     that read is back, because the loop kept serving requests while it ran: an
     env deleted or a window closed or retyped in the meantime answers as it
     would have up front, and a rebuild that would undo a newer one is dropped
-    rather than written -- a refresh when the stored selection it replays has
-    since been replaced, an explicit update when the pane has since been
-    rebuilt (its ``contentID`` changed, which editing the window in place does
-    not). Either way the reply is still the window id: the pane the caller
-    asked about is there, carrying content at least as new as the content this
-    request built.
+    rather than written: the pane has since been rebuilt when its ``contentID``
+    has moved, which editing the window in place does not do. A refresh is held
+    to that the same way an explicit update is -- it replays the selection the
+    pane stores, so a newer rebuild of the same selection leaves nothing but
+    the ``contentID`` to tell them apart. Either way the reply is still the
+    window id: the pane the caller asked about is there, carrying content at
+    least as new as the content this request built.
 
     That write reaches disk, so the endpoint is rejected with 403 while the
     server runs in readonly mode.
@@ -488,17 +499,19 @@ class ExperimentHparamsUpdateHandler(BaseHandler):
         # the loop kept serving while the selection was read, so the pane may be
         # gone, retyped, or rebuilt by another update since it was looked up.
         existing = ExperimentHparamsUpdateHandler._hparams_window(handler, eid, win)
-        if not has_selection and existing.get("hparams") != spec:
-            # a newer selection has been written since this refresh read the
-            # old one; rebuilding from the old one would undo it.
-            handler.write(win)
-            return
-        if has_selection and existing.get("contentID") != rebuilt_from:
+        if existing.get("contentID") != rebuilt_from:
             # another rebuild landed while this one was reading, so the content
             # on the pane is newer than the content this holds -- every rebuild
             # carries a fresh contentID, which an edit to the window in place
-            # does not. Writing this one would put the older selection back and
+            # does not. Writing this one would put the older content back and
             # queue its snapshot behind the newer save.
+            #
+            # A refresh is held to this as firmly as an explicit update. It
+            # replays the selection stored on the pane, so a newer rebuild that
+            # only changed the content leaves the two specs equal and a check
+            # on the spec alone waves the stale content through; one that
+            # changed the selection too is caught either way. The contentID
+            # moves for both.
             handler.write(win)
             return
 

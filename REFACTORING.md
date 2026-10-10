@@ -181,7 +181,10 @@ empty 200. It now returns the result untouched and carries `functools.wraps`.
    in `socket_handlers.py`.
 3. **Re-check identity after every await.** An env can be deleted while a read
    of it is parked. `ServerState.deleting_envs` exists so a resumed read does
-   not file what it read back into `state` and resurrect a deleted env.
+   not file what it read back into `state` and resurrect a deleted env. It is
+   cleared the moment the delete lands, so it only answers for a delete the
+   read overlapped; a read that outlived one is told nothing, and the readers
+   that have to catch that hold a `watch_env_deletes` token across the await.
 4. **Shutdown order is: stop autosave, drain the executor, then save.** See
    `ServerState.shutdown_storage`. Draining after the final save lets a queued
    write land on top of it and put stale state back on disk. The method is

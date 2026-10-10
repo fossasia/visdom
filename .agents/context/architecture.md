@@ -131,7 +131,10 @@ of them fails quietly rather than loudly.
    an env mid-write.
 4. **Re-check identity after every `await`.** An env can be deleted while a read
    of it is parked; `ServerState.deleting_envs` records that, and a resumed read
-   must not file its result back into `state`.
+   must not file its result back into `state`. `deleting_envs` is dropped as
+   soon as the delete lands, so it says nothing to a read that outlived the
+   delete rather than overlapping it; a reader that has to tell those apart
+   holds a `watch_env_deletes` token across the await instead.
 
 Password hashing (PBKDF2, ~50-100 ms) goes to the **default** executor instead, so
 logins do not queue behind environment saves. Shutdown order is fixed in
