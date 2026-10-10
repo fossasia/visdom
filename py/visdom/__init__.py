@@ -3799,10 +3799,10 @@ class Visdom(object):
             minx, maxx = float(finite.min()), float(finite.max())
         else:
             minx, maxx = 0.0, 1.0
-        bins = np.histogram(X, bins=opts["numbins"], range=(minx, maxx))[0]
-        linrange = np.linspace(minx, maxx, opts["numbins"])
+        bins, edges = np.histogram(X, bins=opts["numbins"], range=(minx, maxx))
+        centers = edges[:-1] + np.diff(edges) / 2
 
-        return self.bar(X=bins, Y=linrange, opts=opts, win=win, env=env)
+        return self.bar(X=bins, Y=centers, opts=opts, win=win, env=env)
 
     @pytorch_wrap
     def histogram2d(self, X, Y, win=None, env=None, opts=None):
