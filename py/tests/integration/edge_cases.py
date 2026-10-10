@@ -15,6 +15,7 @@ missing envs and windows, twenty creations in a row, empty and enormous and
 markup-bearing content, and the pages that render straight from state.
 """
 
+import json
 import logging
 import os
 import unittest
@@ -284,6 +285,241 @@ class TestCompareEndpoint(VisdomHTTPTestCase):
         self.assertEqual(resp.body, b"")
         self.assertEqual(subscriber.eid, ["main", "main"])
         self.assertEqual(subscriber.commands(), ["reload", "window", "layout"])
+
+
+class TestDeleteEnvEndpoint(VisdomHTTPTestCase):
+    """Integration tests for POST ``/delete_env`` payload validation."""
+
+    def test_malformed_json_body_returns_400(self):
+        """A delete_env request with invalid JSON returns HTTP 400."""
+        resp = self.fetch(
+            "/delete_env",
+            method="POST",
+            body="not-valid-json",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be valid JSON", resp.reason)
+
+    def test_json_constants_in_body_returns_400(self):
+        """A delete_env request with non-standard JSON constants returns HTTP 400."""
+        for constant_body in (
+            '{"eid": NaN}',
+            '{"eid": Infinity}',
+            '{"eid": -Infinity}',
+        ):
+            resp = self.fetch(
+                "/delete_env",
+                method="POST",
+                body=constant_body,
+                headers={"Content-Type": "application/json"},
+            )
+            self.assertEqual(resp.code, 400)
+            self.assertIn("request body must be valid JSON", resp.reason)
+
+    def test_non_object_json_body_returns_400(self):
+        """A delete_env request where body is not a JSON object returns HTTP 400."""
+        resp = self.fetch(
+            "/delete_env",
+            method="POST",
+            body="[1, 2, 3]",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be an object", resp.reason)
+
+    def test_numeric_eid_is_coerced(self):
+        """A delete_env request with numeric 'eid' is safely coerced to string."""
+        self.create_text_window(eid="123", content="numeric")
+        self.assertIn("123", self.get_envs())
+        resp = self.post_json("/delete_env", {"eid": 123})
+        self.assertEqual(resp.code, 200)
+        self.assertNotIn("123", self.get_envs())
+
+    def test_boolean_eid_returns_400(self):
+        """A delete_env request with boolean 'eid' returns HTTP 400."""
+        resp = self.post_json("/delete_env", {"eid": True})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'eid' must be a string or number", resp.reason)
+
+    def test_structured_eid_returns_400(self):
+        """A delete_env request with structured 'eid' returns HTTP 400."""
+        resp = self.post_json("/delete_env", {"eid": [1, 2]})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'eid' must be a string or number", resp.reason)
+
+    def test_empty_string_or_whitespace_eid_is_noop(self):
+        """A delete_env request with empty or whitespace-only 'eid' is a safe no-op returning 200."""
+        for empty_eid in ("", "   "):
+            resp = self.post_json("/delete_env", {"eid": empty_eid})
+            self.assertEqual(resp.code, 200)
+
+    def test_valid_eid_deletes_env(self):
+        """A valid delete_env request deletes the environment."""
+        self.create_text_window(eid="to_delete", content="hello")
+        self.assertIn("to_delete", self.get_envs())
+        resp = self.post_json("/delete_env", {"eid": "to_delete"})
+        self.assertEqual(resp.code, 200)
+        self.assertNotIn("to_delete", self.get_envs())
+
+
+class TestEnvStateEndpoint(VisdomHTTPTestCase):
+    """Integration tests for POST ``/env_state`` payload validation."""
+
+    def test_malformed_json_body_returns_400(self):
+        """An env_state request with invalid JSON returns HTTP 400."""
+        resp = self.fetch(
+            "/env_state",
+            method="POST",
+            body="not-valid-json",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be valid JSON", resp.reason)
+
+    def test_json_constants_in_body_returns_400(self):
+        """An env_state request with non-standard JSON constants returns HTTP 400."""
+        for constant_body in (
+            '{"eid": NaN}',
+            '{"eid": Infinity}',
+            '{"eid": -Infinity}',
+        ):
+            resp = self.fetch(
+                "/env_state",
+                method="POST",
+                body=constant_body,
+                headers={"Content-Type": "application/json"},
+            )
+            self.assertEqual(resp.code, 400)
+            self.assertIn("request body must be valid JSON", resp.reason)
+
+    def test_non_object_json_body_returns_400(self):
+        """An env_state request where body is not a JSON object returns HTTP 400."""
+        resp = self.fetch(
+            "/env_state",
+            method="POST",
+            body="[1, 2, 3]",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be an object", resp.reason)
+
+    def test_numeric_eid_is_coerced_before_lookup(self):
+        """An env_state request with numeric 'eid' is coerced to string before lookup."""
+        resp = self.post_json("/env_state", {"eid": 123})
+        self.assertEqual(resp.code, 404)
+        self.assertIn("123", json.loads(resp.body)["error"])
+
+    def test_boolean_eid_returns_400(self):
+        """An env_state request with boolean 'eid' returns HTTP 400."""
+        resp = self.post_json("/env_state", {"eid": True})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'eid' must be a string or number", resp.reason)
+
+    def test_structured_eid_returns_400(self):
+        """An env_state request with structured 'eid' returns HTTP 400."""
+        resp = self.post_json("/env_state", {"eid": [1, 2]})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'eid' must be a string or number", resp.reason)
+
+    def test_empty_body_returns_all_envs(self):
+        """An env_state request with an empty object returns all environment IDs."""
+        resp = self.post_json("/env_state", {})
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(
+            resp.headers.get("Content-Type"), "application/json; charset=UTF-8"
+        )
+        self.assertEqual(resp.headers.get("X-Content-Type-Options"), "nosniff")
+        envs = json.loads(resp.body.decode())
+        self.assertIn("main", envs)
+
+    def test_known_eid_success_uses_write_json_headers(self):
+        """A known env_state request returns panes with write_json headers."""
+        self.create_text_window(eid="main", content="hello")
+        resp = self.post_json("/env_state", {"eid": "main"})
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(
+            resp.headers.get("Content-Type"), "application/json; charset=UTF-8"
+        )
+        self.assertEqual(resp.headers.get("X-Content-Type-Options"), "nosniff")
+        panes = json.loads(resp.body.decode())
+        self.assertIsInstance(panes, dict)
+
+    def test_all_envs_success_escapes_html_in_eid(self):
+        """All-envs list escapes HTML in environment IDs via write_json."""
+        xss_eid = "<img src=x onerror=alert(1)>"
+        self.create_text_window(eid=xss_eid, content="test")
+        resp = self.post_json("/env_state", {})
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(
+            resp.headers.get("Content-Type"), "application/json; charset=UTF-8"
+        )
+        self.assertEqual(resp.headers.get("X-Content-Type-Options"), "nosniff")
+        self.assertIn(b"\\u003cimg src=x onerror=alert(1)\\u003e", resp.body)
+        self.assertNotIn(b"<", resp.body)
+        self.assertNotIn(b">", resp.body)
+        envs = json.loads(resp.body.decode())
+        self.assertIn(xss_eid, envs)
+
+    def test_unknown_eid_escapes_html_and_sets_json_headers(self):
+        """Unknown eid errors use write_json to prevent reflected XSS."""
+        resp = self.post_json("/env_state", {"eid": "<img src=x onerror=alert(1)>"})
+        self.assertEqual(resp.code, 404)
+        self.assertEqual(
+            resp.headers.get("Content-Type"), "application/json; charset=UTF-8"
+        )
+        self.assertEqual(resp.headers.get("X-Content-Type-Options"), "nosniff")
+        self.assertIn(b"\\u003cimg src=x onerror=alert(1)\\u003e", resp.body)
+        self.assertNotIn(b"<", resp.body)
+        self.assertNotIn(b">", resp.body)
+        parsed = json.loads(resp.body)
+        self.assertEqual(
+            parsed["error"], "env '<img src=x onerror=alert(1)>' not found"
+        )
+
+
+class TestWinExistsEndpoint(VisdomHTTPTestCase):
+    """Integration tests for POST ``/win_exists`` payload validation."""
+
+    def test_malformed_json_body_returns_400(self):
+        """A win_exists request with invalid JSON returns HTTP 400."""
+        resp = self.fetch(
+            "/win_exists",
+            method="POST",
+            body="not-valid-json",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be valid JSON", resp.reason)
+
+    def test_non_object_json_body_returns_400(self):
+        """A win_exists request where body is not a JSON object returns HTTP 400."""
+        resp = self.fetch(
+            "/win_exists",
+            method="POST",
+            body="[1, 2, 3]",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.code, 400)
+        self.assertIn("request body must be an object", resp.reason)
+
+    def test_missing_win_field_returns_400(self):
+        """A win_exists request missing 'win' returns HTTP 400."""
+        resp = self.post_json("/win_exists", {"eid": "main"})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("missing required field: win", resp.reason)
+
+    def test_boolean_eid_returns_400(self):
+        """A win_exists request with boolean 'eid' returns HTTP 400."""
+        resp = self.post_json("/win_exists", {"win": "w1", "eid": True})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'eid' must be a string or number", resp.reason)
+
+    def test_structured_eid_returns_400(self):
+        """A win_exists request with structured 'eid' returns HTTP 400."""
+        resp = self.post_json("/win_exists", {"win": "w1", "eid": [1, 2]})
+        self.assertEqual(resp.code, 400)
+        self.assertIn("'eid' must be a string or number", resp.reason)
 
 
 if __name__ == "__main__":
