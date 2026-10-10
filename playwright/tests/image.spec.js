@@ -20,6 +20,59 @@ const IMG_WIDTH = 255;
 const IMG_HEIGHT = 510;
 const BASE_POS = 10;
 
+const TINY_PNG =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+const TINY_PNG_B =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+async function postJson(page, path, body) {
+  return page.request.post(path, {
+    headers: { 'Content-Type': 'application/json' },
+    data: JSON.stringify(body),
+  });
+}
+
+async function createImageHistory(page, env, win, frame) {
+  const resp = await postJson(page, '/events', {
+    data: [
+      {
+        type: 'image_history',
+        content: frame,
+      },
+    ],
+    win,
+    eid: env,
+    opts: { title: win, show_slider: true },
+    layout: {},
+  });
+  expect(resp.ok(), await resp.text()).toBeTruthy();
+  return resp;
+}
+
+async function readPane(page, env, win) {
+  const resp = await postJson(page, '/win_data', { eid: env, win });
+  expect(resp.ok(), await resp.text()).toBeTruthy();
+  return resp.json();
+}
+
+async function writePane(page, env, win, pane) {
+  const resp = await postJson(page, '/win_data', {
+    eid: env,
+    win,
+    data: JSON.stringify(pane),
+  });
+  expect(resp.ok(), await resp.text()).toBeTruthy();
+}
+
+async function appendImageHistory(page, env, win, frame) {
+  const resp = await postJson(page, '/update', {
+    win,
+    eid: env,
+    data: [{ type: 'image_history', content: frame }],
+  });
+  expect(resp.ok(), await resp.text()).toBeTruthy();
+}
+
 /**
  * Dispatches a WheelEvent with ctrlKey held directly on the target element.
  * page.mouse.wheel() does not support modifier keys, so we use evaluate().
@@ -489,5 +542,94 @@ test.describe('Image Pane', () => {
 
     const filenames = downloads.map((dl) => dl.suggestedFilename()).sort();
     expect(filenames).toEqual(['CompareTest_1.jpg', 'CompareTest_2.jpg']);
+  });
+
+  test('image_history missing selected defaults to the first frame', async ({
+    page,
+  }) => {
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(err));
+
+    const env = `imghist_missing_${Math.floor(Math.random() * 1e6)}`;
+    const win = 'hist_missing';
+    await createImageHistory(page, env, win, {
+      src: TINY_PNG,
+      caption: 'Frame 1',
+    });
+    const stored = await readPane(page, env, win);
+    expect(stored.selected).toBe(0);
+    delete stored.selected;
+    await writePane(page, env, win, stored);
+    const rewritten = await readPane(page, env, win);
+    expect(rewritten).not.toHaveProperty('selected');
+
+    await closeEnvs(page);
+    await openEnv(page, env);
+
+    const pane = page.locator(WIN_SEL).first();
+    await expect(pane).toBeVisible();
+    const img = pane.locator('img.content-image');
+    await expect(img).toHaveCount(1);
+    await expect(img).toHaveAttribute('src', TINY_PNG);
+    const slider = pane.locator('.widget input[type="range"]');
+    await expect(slider).toHaveValue('0');
+    expect(pageErrors, pageErrors.map((e) => e.message).join('\n')).toEqual([]);
+  });
+
+  test('image_history empty content stays mounted', async ({ page }) => {
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(err));
+
+    const env = `imghist_empty_${Math.floor(Math.random() * 1e6)}`;
+    const win = 'hist_empty';
+    await createImageHistory(page, env, win, {
+      src: TINY_PNG,
+      caption: 'Frame 1',
+    });
+    const stored = await readPane(page, env, win);
+    stored.content = [];
+    stored.selected = 0;
+    await writePane(page, env, win, stored);
+
+    await closeEnvs(page);
+    await openEnv(page, env);
+
+    const pane = page.locator(WIN_SEL).first();
+    await expect(pane).toBeVisible();
+    await expect(pane.locator('img.content-image')).toHaveCount(1);
+    expect(pageErrors, pageErrors.map((e) => e.message).join('\n')).toEqual([]);
+  });
+
+  test('image_history out-of-range selected clamps to the last frame', async ({
+    page,
+  }) => {
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(err));
+
+    const env = `imghist_clamp_${Math.floor(Math.random() * 1e6)}`;
+    const win = 'hist_clamp';
+    await createImageHistory(page, env, win, {
+      src: TINY_PNG,
+      caption: 'Frame 1',
+    });
+    await appendImageHistory(page, env, win, {
+      src: TINY_PNG_B,
+      caption: 'Frame 2',
+    });
+    const stored = await readPane(page, env, win);
+    expect(stored.content).toHaveLength(2);
+    stored.selected = 10;
+    await writePane(page, env, win, stored);
+
+    await closeEnvs(page);
+    await openEnv(page, env);
+
+    const pane = page.locator(WIN_SEL).first();
+    await expect(pane).toBeVisible();
+    const img = pane.locator('img.content-image');
+    await expect(img).toHaveAttribute('src', TINY_PNG_B);
+    const slider = pane.locator('.widget input[type="range"]');
+    await expect(slider).toHaveValue('1');
+    expect(pageErrors, pageErrors.map((e) => e.message).join('\n')).toEqual([]);
   });
 });
