@@ -2217,12 +2217,19 @@ class Visdom(object):
         if np.issubdtype(img.dtype, np.floating):
             finite = img[np.isfinite(img)]
             if finite.size > 0:
-                img_min, img_max = float(finite.min()), float(finite.max())
+                img_min, img_max = finite.min().item(), finite.max().item()
             else:
                 img_min, img_max = 0.0, 0.0
             if opts.get("normalize", False):
                 if img_max > img_min:
-                    img = (img - img_min) / (img_max - img_min) * 255.0
+                    with np.errstate(over="ignore"):
+                        span = img_max - img_min
+                    if span > np.finfo(img.dtype).max.item():
+                        scale = max(abs(img_min), abs(img_max))
+                        img = img / scale
+                        img_min, img_max = img_min / scale, img_max / scale
+                        span = img_max - img_min
+                    img = (img - img_min) / span * 255.0
                 else:
                     img = np.zeros_like(img)
             elif img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
@@ -2353,12 +2360,19 @@ class Visdom(object):
         if np.issubdtype(img.dtype, np.floating):
             finite = img[np.isfinite(img)]
             if finite.size > 0:
-                img_min, img_max = float(finite.min()), float(finite.max())
+                img_min, img_max = finite.min().item(), finite.max().item()
             else:
                 img_min, img_max = 0.0, 0.0
             if opts.get("normalize", False):
                 if img_max > img_min:
-                    img = (img - img_min) / (img_max - img_min) * 255.0
+                    with np.errstate(over="ignore"):
+                        span = img_max - img_min
+                    if span > np.finfo(img.dtype).max.item():
+                        scale = max(abs(img_min), abs(img_max))
+                        img = img / scale
+                        img_min, img_max = img_min / scale, img_max / scale
+                        span = img_max - img_min
+                    img = (img - img_min) / span * 255.0
                 else:
                     img = np.zeros_like(img)
             elif img_min >= -1e-5 and img_max <= 1.0 + 1e-5:
