@@ -3719,7 +3719,9 @@ class Visdom(object):
         - `opts.stacked` : stack multiple columns in `X`
             - `opts.legend`  : `list` containing legend labels
         """
-        X = np.atleast_1d(np.squeeze(np.asarray(X)))
+        X = np.asarray(X)
+        if X.ndim != 2 or opts is None or opts.get("legend") is None:
+            X = np.atleast_1d(np.squeeze(X))
 
         assert X.ndim == 1 or X.ndim == 2, "X should be one or two-dimensional"
         if X.ndim == 1:
