@@ -3606,15 +3606,15 @@ class Visdom(object):
 
         raw_cm = cm.copy()
         if normalize == "true":
-            row_sums = cm.sum(axis=1, keepdims=True).astype(float)
+            row_sums = cm.sum(axis=1, keepdims=True, dtype=float)
             row_sums[row_sums == 0] = 1
             cm = cm.astype(float) / row_sums
         elif normalize == "pred":
-            col_sums = cm.sum(axis=0, keepdims=True).astype(float)
+            col_sums = cm.sum(axis=0, keepdims=True, dtype=float)
             col_sums[col_sums == 0] = 1
             cm = cm.astype(float) / col_sums
         elif normalize == "all":
-            total = float(cm.sum())
+            total = float(cm.sum(dtype=float))
             if total == 0:
                 warnings.warn(
                     "confusion matrix sum is zero; normalized values will be zero",
@@ -3648,7 +3648,7 @@ class Visdom(object):
         annotations = []
         max_val = float(cm.max()) if cm.size > 0 else 1.0
         threshold = max_val / 2.0
-        raw_total = float(raw_cm.sum())
+        raw_total = float(raw_cm.sum(dtype=float))
         raw_is_integer = np.issubdtype(raw_cm.dtype, np.integer)
 
         for i in range(cm.shape[0]):
@@ -3665,7 +3665,7 @@ class Visdom(object):
                     if normalize is not None:
                         parts.append("{:.1%}".format(cell_val))
                     else:
-                        pct = raw_cm[i, j] / raw_total if raw_total > 0 else 0
+                        pct = float(raw_cm[i, j]) / raw_total if raw_total > 0 else 0
                         parts.append("{:.1%}".format(pct))
                 text = "<br>".join(parts) if parts else ""
 
