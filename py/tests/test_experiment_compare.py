@@ -682,3 +682,13 @@ class TestCompareClientMessage(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_nested_boolean_comparison_survives_storage_reload(tmp_path):
+    store = ExperimentStore(JSONStore(str(tmp_path)))
+    store.log_experiment("a", params={"config": {"layers": [{"enabled": True}]}})
+    store.log_experiment("b", params={"config": {"layers": [{"enabled": 1}]}})
+    reloaded = ExperimentStore(JSONStore(str(tmp_path)))
+    params = reloaded.compare(env_ids=["a", "b"])["params"]
+    assert params["differing"] == ["config"]
+    assert [group["env_ids"] for group in params["groups"]["config"]] == [["a"], ["b"]]
