@@ -319,6 +319,13 @@ class TestRank(unittest.TestCase):
             logger.__exit__(None, None, None)
         logger.viz.finish_experiment.assert_called_once()
 
+    def test_metrics_are_mirrored_without_a_context_manager(self):
+        logger = self._tracked_logger()
+        with self._rank(0):
+            logger.log("loss", 1.0)
+        logger.viz.line.assert_called_once()
+        logger.viz.log_metrics.assert_called_once()
+
     def test_experiment_never_started_is_not_finished_or_fed_metrics(self):
         logger = self._tracked_logger()
         with self._rank(1):

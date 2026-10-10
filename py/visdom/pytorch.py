@@ -75,7 +75,7 @@ class VisdomLogger:
         if self.log_every < 1:
             raise ValueError("log_every must be >= 1, got {}".format(log_every))
         self._params = params
-        self._tracking = False
+        self._tracking = params is not None
         self._wins = {}
         self._step = {}
         self._counter = {}
@@ -110,7 +110,8 @@ class VisdomLogger:
         return True
 
     def __enter__(self):
-        if self._params is not None and self._is_main:
+        self._tracking = self._params is not None and self._is_main
+        if self._tracking:
             try:
                 reply = self.viz.experiment(params=self._params, env=self.env)
                 self._tracking = self._check_experiment_reply(
@@ -120,6 +121,7 @@ class VisdomLogger:
                 warnings.warn(
                     "VisdomLogger failed to start experiment tracking: {}".format(e)
                 )
+                self._tracking = False
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
