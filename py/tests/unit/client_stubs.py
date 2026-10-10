@@ -262,6 +262,19 @@ class TestClientStub:
         } <= declared
 
 
+class TestServerErrorStub:
+    """Callers import and catch ``ServerError``, so a checker has to see it."""
+
+    def test_constructor_signature_matches(self):
+        stubbed = stub_functions(stub_class(CLIENT_STUB, "ServerError"))["__init__"]
+        assert stub_signature(stubbed) == runtime_signature(visdom.ServerError.__init__)
+
+    def test_attributes_are_declared(self):
+        declared = set(stub_annotations(stub_class(CLIENT_STUB, "ServerError")))
+        assert declared == {"status", "reason", "body"}
+        assert declared <= runtime_attributes(visdom.ServerError)
+
+
 class TestAsyncStub:
     """``visdom/async_client.pyi`` against ``AsyncVisdom`` and the sync stub."""
 

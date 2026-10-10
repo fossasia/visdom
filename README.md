@@ -283,7 +283,13 @@ The python visdom client takes a few options:
 - `port`: the port for your visdom server (default: `8097`)
 - `base_url`: the base visdom server url (default: `/`)
 - `env`: Default environment to plot to when no `env` is provided (default: `main`)
-- `raise_exceptions`: Raise exceptions upon failure rather than printing them (default: `True` (soon))
+- `raise_exceptions`: Raise exceptions upon failure rather than printing them (default: `True` (soon)). When it is `True`, a request the server refuses with a 4xx/5xx status raises `visdom.ServerError`, which carries the `status`, the server's `reason` and the error page as `body`. Otherwise the error page is returned as text, as before, so callers that read that text keep working:
+  ```python
+  try:
+      vis.log_metrics({"acc": 0.9}, step=2)
+  except visdom.ServerError as e:
+      print(e.status, e.reason)   # 409 experiment 'run' is finished; ...
+  ```
 - `log_to_filename`: If not none, log all plotting and updating events to the given file (append mode) so that they can be replayed later using `replay_log` (default: `None`)
 - `use_incoming_socket`: enable use of the socket for receiving events from the web client, allowing user to register callbacks (default: `True`)
 - `http_proxy_host`: Deprecated. Use Proxies argument for complete proxy support.

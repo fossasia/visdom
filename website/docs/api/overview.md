@@ -53,7 +53,7 @@ The python Visdom client takes the following options:
 | `port` | `8097` | The port for your visdom server |
 | `base_url` | `/` | The base visdom server url |
 | `env` | `'main'` | Default environment to plot to when no `env` is provided |
-| `raise_exceptions` | `True` (soon) | Raise exceptions upon failure rather than printing them |
+| `raise_exceptions` | `True` (soon) | Raise exceptions upon failure rather than printing them. When `True`, a request the server refuses (4xx/5xx) raises `visdom.ServerError` with `status`, `reason` and `body`; otherwise the error page is returned as text, as before |
 | `log_to_filename` | `None` | If not none, log all plotting and updating events to the given file (append mode) so that they can be replayed later using `replay_log` |
 | `use_incoming_socket` | `True` | Enable use of the socket for receiving events from the web client, allowing user to register callbacks |
 | `username` | `None` | Username for authentication, if server started with `-enable_login` |

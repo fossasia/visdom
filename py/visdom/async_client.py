@@ -69,7 +69,7 @@ from tornado.httpclient import AsyncHTTPClient, HTTPClientError, HTTPRequest
 from tornado.simple_httpclient import HTTPTimeoutError
 from tornado.websocket import websocket_connect
 
-from visdom import Visdom
+from visdom import Visdom, _response_text
 
 logger = logging.getLogger(__name__)
 
@@ -297,7 +297,8 @@ class _AsyncTransport(object):
         """POST ``data`` to ``url`` and return the response body as text.
 
         Raises the ``requests`` exception the synchronous ``_send`` expects, so
-        callers cannot tell which transport produced the failure.
+        callers cannot tell which transport produced the failure, and
+        ``ServerError`` for an error status, as the synchronous transport does.
         """
         await self._ensure_login()
         body = "" if data is None else data
@@ -316,7 +317,10 @@ class _AsyncTransport(object):
             except (OSError, HTTPClientError) as retry_error:
                 raise _as_requests_error(retry_error) from e
         self._connected = True
-        return response.body.decode("utf-8") if response.body else ""
+        # 'replace', as requests does for r.text: an undecodable error page must
+        # still surface as a ServerError rather than a UnicodeDecodeError.
+        text = response.body.decode("utf-8", errors="replace") if response.body else ""
+        return _response_text(response.code, getattr(response, "reason", ""), text)
 
     def close(self):
         if self._client is not None:
