@@ -204,8 +204,16 @@ test.describe.serial('Test Env Modal', () => {
       })
     ).toBeVisible();
 
-    // Select All applies only to the remaining filtered environments
+    // Select env before filtering to verify it remains checked across filter
+    // operations. The filter and the checkboxes live inside the dropdown, so
+    // it has to be open before either can be reached.
     await openEnvSelect(page);
+    await filterInput.fill('');
+    await page
+      .locator(envmodal + `input[type="checkbox"][value="${env}"]`)
+      .check();
+
+    // Select All applies only to the remaining filtered environments
     await filterInput.fill(env + '_fork');
     await page.getByLabel('Select All').check();
     await expect(
@@ -217,6 +225,45 @@ test.describe.serial('Test Env Modal', () => {
     await expect(
       page.locator(envmodal + `input[type="checkbox"][value="${env}"]`)
     ).toHaveCount(0);
+
+    // Unchecking Select All deselects only the visible filtered environments
+    await page.getByLabel('Select All').uncheck();
+    await expect(
+      page.locator(envmodal + `input[type="checkbox"][value="${env}_fork"]`)
+    ).not.toBeChecked();
+    await expect(
+      page.locator(envmodal + `input[type="checkbox"][value="${env}_fork3"]`)
+    ).not.toBeChecked();
+
+    // Filter back to env and assert its checkbox remains checked
+    await filterInput.fill(env);
+    await expect(
+      page.locator(envmodal + `input[type="checkbox"][value="${env}"]`)
+    ).toBeChecked();
+    await page
+      .locator(envmodal + `input[type="checkbox"][value="${env}"]`)
+      .uncheck();
+
+    // Verify selections persist across filter changes
+    await page
+      .locator(envmodal + `input[type="checkbox"][value="${env}_fork"]`)
+      .check();
+    await filterInput.fill(env + '_fork3');
+    await page.getByLabel('Select All').check();
+    await expect(
+      page.locator(envmodal + `input[type="checkbox"][value="${env}_fork3"]`)
+    ).toBeChecked();
+    await filterInput.fill('');
+    await expect(
+      page.locator(envmodal + `input[type="checkbox"][value="${env}_fork"]`)
+    ).toBeChecked();
+    await expect(
+      page.locator(envmodal + `input[type="checkbox"][value="${env}_fork3"]`)
+    ).toBeChecked();
+    await expect(
+      page.locator(envmodal + `input[type="checkbox"][value="${env}"]`)
+    ).not.toBeChecked();
+
     await closeEnvSelect(page);
     await page.locator('button', { hasText: 'Delete Selected' }).click();
     await expect(page.locator(envmodal)).toBeVisible();

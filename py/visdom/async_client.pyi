@@ -17,6 +17,7 @@
 # to prevent.
 
 import asyncio
+import contextvars
 from concurrent.futures import Future as _ConcurrentFuture
 from concurrent.futures import ThreadPoolExecutor
 from types import TracebackType
@@ -55,7 +56,8 @@ from visdom import (
 _A = TypeVar("_A", bound="AsyncVisdom")
 
 # 'AsyncVisdom.register_event_handler' takes either kind: a plain handler runs on
-# the client's dispatch thread, a coroutine one is awaited on its loop.
+# the client's dispatch thread, one that returns an awaitable -- an 'async def'
+# or an object with an 'async def __call__' -- is awaited on its loop.
 _AsyncEventHandler = Callable[[_Event], Awaitable[Any]]
 
 CONNECT_TIMEOUT: float
@@ -66,7 +68,16 @@ HANDSHAKE_TIMEOUT: float
 RECONNECT_DELAY: float
 POLL_INTERVAL: float
 PING_INTERVAL: float
+# How long 'drain' waits for a handler that was already running when the
+# backchannel closed, before giving up on it.
 DISPATCH_DRAIN_TIMEOUT: float
+
+# The client whose event handler the running task belongs to, and the cleanup
+# tasks nobody awaits. Both are module state rather than constants, but they are
+# spelled in capitals for the same reason: nothing outside this module may
+# rebind them.
+_HANDLER_CLIENT: contextvars.ContextVar[Optional[AsyncVisdom]]
+_CLEANUPS: Set["asyncio.Task[Any]"]
 
 # The names 'AsyncVisdom.__getattr__' will proxy. Every one of them appears
 # below as an 'async def'.
@@ -74,6 +85,7 @@ _PROXIED: FrozenSet[Text]
 
 def _extract_cookie(response: HTTPResponse, name: Text) -> _OptStr: ...
 def _as_requests_error(error: BaseException) -> Exception: ...
+def _is_loopback(host: _OptStr) -> bool: ...
 
 class _AsyncTransport:
     server: Text
@@ -111,7 +123,7 @@ class _AsyncBackchannel:
     ) -> None: ...
     def start(self) -> None: ...
     def close(self) -> None: ...
-    async def drain(self) -> bool: ...
+    async def drain(self, abandon: Optional[asyncio.Event] = ...) -> bool: ...
 
 class _AsyncWebSocket(_AsyncBackchannel): ...
 class _AsyncPolling(_AsyncBackchannel): ...
