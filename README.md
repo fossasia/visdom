@@ -1351,9 +1351,12 @@ that specifies the value at each location in the contour plot.
 The following `opts` are supported:
 
 - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
-- `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
-- `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
+- `opts.xmin`    : clip minimum value (`number`; default = automatic color domain)
+- `opts.xmax`    : clip maximum value (`number`; default = automatic color domain)
 - `opts.layoutopts`  : `dict` of any additional options that the graph backend accepts for a layout. For example `layoutopts = {'plotly': {'legend': {'x':0, 'y':0}}}`.
+
+When either color limit is supplied, the missing limit defaults to the corresponding
+minimum or maximum of `X`. Without explicit limits, Plotly chooses the color domain.
 
 #### vis.quiver
 This function draws a quiver plot in which the direction and length of the

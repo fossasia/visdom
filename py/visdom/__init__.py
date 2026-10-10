@@ -3919,6 +3919,9 @@ class Visdom(object):
         - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
         - `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
         - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
+
+        Contours keep Plotly's automatic color domain unless either color limit
+        is supplied. A missing explicit limit then defaults to the data bound.
         """
 
         X = np.asarray(X)
@@ -3929,22 +3932,29 @@ class Visdom(object):
             "Only singleton dimensions are removed — pass a 2D matrix." % X.ndim
         )
 
-        opts = {} if opts is None else opts
-        opts["xmin"] = float(opts.get("xmin", np.nanmin(X)))
-        opts["xmax"] = float(opts.get("xmax", np.nanmax(X)))
+        opts = {} if opts is None else opts.copy()
+        explicit_bounds = "xmin" in opts or "xmax" in opts
+        if stype == "surface" or explicit_bounds:
+            opts["xmin"] = float(opts["xmin"] if "xmin" in opts else np.nanmin(X))
+            opts["xmax"] = float(opts["xmax"] if "xmax" in opts else np.nanmax(X))
         opts["colormap"] = opts.get("colormap", "Viridis")
         _title2str(opts)
         _assert_opts(opts)
 
+        lower_bound, upper_bound = (
+            ("zmin", "zmax") if stype == "contour" else ("cmin", "cmax")
+        )
         data = [
             {
                 "z": X.tolist(),
-                "cmin": opts["xmin"],
-                "cmax": opts["xmax"],
                 "type": stype,
                 "colorscale": opts["colormap"],
             }
         ]
+
+        if stype == "surface" or explicit_bounds:
+            data[0][lower_bound] = opts["xmin"]
+            data[0][upper_bound] = opts["xmax"]
 
         return self._send(
             {
@@ -3985,8 +3995,8 @@ class Visdom(object):
         The following `opts` are supported:
 
         - `opts.colormap`: colormap (`string`; default = `'Viridis'`)
-        - `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
-        - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
+        - `opts.xmin`    : clip minimum value (`number`; default = automatic color domain)
+        - `opts.xmax`    : clip maximum value (`number`; default = automatic color domain)
         """
 
         return self._surface(X=X, stype="contour", opts=opts, win=win, env=env)
