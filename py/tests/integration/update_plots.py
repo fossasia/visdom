@@ -11,8 +11,9 @@
 Once ``UpdateHandler.update`` is past the content panes it works on
 ``p["content"]["data"]``, and which branch runs depends on how many traces the
 ``name`` argument selects: none injects a trace, exactly one heatmap takes the
-``updateDir`` path, and anything else falls through to the positional trace
-update. Every one of those branches is driven here over HTTP.
+``updateDir`` path, and anything else falls through to the trace update, which
+pairs an unnamed update's entries with traces by name when it can and by
+position otherwise. Every one of those branches is driven here over HTTP.
 """
 
 import unittest
@@ -232,6 +233,58 @@ class TestTraceUpdates(PlotUpdateTestCase):
             name="t1",
         )
         self.assertEqual(resp.code, 400)
+
+
+class TestUnnamedTraceMatching(PlotUpdateTestCase):
+    """An unnamed append pairs its entries with traces by name.
+
+    A labelled scatter append only carries the labels present in that batch,
+    so pairing by position sent a batch holding only "dog" into "cat".
+    """
+
+    def create_classes(self):
+        return self.create_window(
+            [
+                {"type": "scatter", "x": [1], "y": [1], "name": "cat"},
+                {"type": "scatter", "x": [2], "y": [2], "name": "dog"},
+            ],
+            layout={"title": "classes"},
+        )
+
+    def append(self, win, *entries):
+        data = [{"type": "scatter", "x": [x], "y": [x], "name": n} for n, x in entries]
+        return self.update(win, data, append=True)
+
+    def xs(self, win):
+        return {t["name"]: t["x"] for t in self.traces(win)}
+
+    def test_a_batch_with_one_class_joins_that_class(self):
+        win = self.create_classes()
+        self.append(win, ("dog", 9))
+        self.assertEqual(self.xs(win), {"cat": [1], "dog": [2, 9]})
+
+    def test_entries_out_of_order_still_join_their_own_classes(self):
+        win = self.create_classes()
+        self.append(win, ("dog", 9), ("cat", 8))
+        self.assertEqual(self.xs(win), {"cat": [1, 8], "dog": [2, 9]})
+
+    def test_a_new_class_becomes_its_own_trace(self):
+        win = self.create_classes()
+        self.append(win, ("bird", 7), ("dog", 9))
+        self.assertEqual(self.xs(win), {"cat": [1], "dog": [2, 9], "bird": [7]})
+
+    def test_no_matching_name_keeps_positional_pairing(self):
+        """A line whose legend renamed its traces appends with the default
+        names, so with nothing to match the pairing stays positional."""
+        win = self.create_window(
+            [
+                {"type": "scatter", "x": [1], "y": [1], "name": "train"},
+                {"type": "scatter", "x": [1], "y": [10], "name": "val"},
+            ],
+            layout={"title": "line"},
+        )
+        self.append(win, ("1", 2), ("2", 2))
+        self.assertEqual(self.xs(win), {"train": [1, 2], "val": [1, 2]})
 
 
 class TestMarkerUpdates(PlotUpdateTestCase):

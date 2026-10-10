@@ -78,6 +78,31 @@ from visdom.experiments import (
 logger = logging.getLogger(__name__)
 
 
+def pair_traces(pdata, new_data):
+    """Pair each entry of an unnamed update with the trace it updates.
+
+    Returns ``(index, entry)`` pairs, with ``index`` None for an entry that
+    should become a new trace.
+
+    A labelled scatter append only carries the labels present in that batch,
+    so pairing by position put a batch holding only "dog" into the "cat"
+    trace. Entries are matched by name when any of them names an existing
+    trace, and the unmatched ones become new traces. When none match, the
+    pairing stays positional: a line whose legend renamed its traces still
+    appends with the default names, and relies on position.
+    """
+    by_name = {}
+    for i, trace in enumerate(pdata):
+        by_name.setdefault(trace.get("name"), []).append(i)
+    if not any(entry.get("name") in by_name for entry in new_data):
+        return list(zip(range(len(pdata)), new_data))
+    pairs = []
+    for entry in new_data:
+        free = by_name.get(entry.get("name"))
+        pairs.append((free.pop(0) if free else None, entry))
+    return pairs
+
+
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
 class PostHandler(BaseHandler):
@@ -434,8 +459,14 @@ class UpdateHandler(BaseHandler):
         # Update traces. An unnamed update may carry fewer entries than the plot
         # has traces, so walk only as far as the data reaches instead of
         # indexing past the end of it.
-        for idx, new_trace in zip(idxs, new_data):
+        pairs = (
+            zip(idxs, new_data) if name is not None else pair_traces(pdata, new_data)
+        )
+        for idx, new_trace in pairs:
             if all(_is_missing_value(i) for i in new_trace["x"]):
+                continue
+            if idx is None:
+                pdata.append(dict(new_trace))
                 continue
             # handle data for plotting
             axes = ["x", "y"]
