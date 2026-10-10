@@ -829,3 +829,27 @@ def test_confusion_matrix_input_errors(offline_client, kwargs, message):
     """Every ValueError guard on the public method."""
     with pytest.raises(ValueError, match=message):
         offline_client.confusion_matrix(**kwargs)
+
+
+@pytest.mark.parametrize("dtype", [np.float16, np.float32, np.float64, np.longdouble])
+@pytest.mark.parametrize("method", ["roc_curve", "pr_curve"])
+def test_curves_accept_extreme_finite_scores(capture_send, method, dtype):
+    limit = np.finfo(dtype).max
+    scores = np.array([-limit, -limit, limit, limit], dtype=dtype)
+    original = scores.copy()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        payload = capture_send(
+            lambda client: getattr(client, method)(
+                y_true=np.array([0, 0, 1, 1]), y_score=scores
+            )
+        )["payload"]
+    curve = payload["data"][0]
+    if method == "roc_curve":
+        assert curve["x"] == [0.0, 0.0, 1.0]
+        assert curve["y"] == [0.0, 1.0, 1.0]
+    else:
+        assert curve["x"] == [0.0, 1.0, 1.0]
+        assert curve["y"] == [1.0, 1.0, 0.5]
+    assert "AUC=1.0000" in payload["opts"]["title"]
+    np.testing.assert_array_equal(scores, original)
