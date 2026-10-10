@@ -1681,13 +1681,18 @@ class Visdom(object):
         )
 
     def delete_envs(self, env_list):
-        """This function deletes a list of environments."""
+        """Delete a list of environments.
+
+        Validate all environment ID types before sending any delete request.
+        """
         if not isinstance(env_list, list):
             raise TypeError("env_list must be a list of strings")
-        responses = []
+        env_list = tuple(env_list)
         for env in env_list:
             if not isinstance(env, str):
                 raise TypeError(f"Environment ID must be a string, got {type(env)}")
+        responses = []
+        for env in env_list:
             responses.append(self.delete_env(env))
         return responses
 
