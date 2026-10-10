@@ -441,6 +441,22 @@ def test_known_update_values_are_still_accepted(offline_client, method, update):
     send.assert_called()
 
 
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda v: v.line(X=None, Y=np.array([1.0]), win="w", update="apend"),
+        lambda v: v.learning_curve({"loss": [0.5]}, step=[1, 2], update="apend"),
+        lambda v: v.learning_curve([0.5], update="apend"),
+    ],
+    ids=["line_without_X", "learning_curve_bad_step", "learning_curve_bad_metrics"],
+)
+def test_update_is_checked_before_the_other_arguments(offline_client, call):
+    """A typo in update is reported as such, not as whatever argument check
+    happens to run first."""
+    with pytest.raises(ValueError, match="update must be one of"):
+        call(offline_client)
+
+
 def test_heatmap_colormap_defaults_to_viridis(capture_send):
     """colormap defaults to Viridis when not specified."""
     sent = capture_send(lambda v: v.heatmap(np.ones((2, 2))))
