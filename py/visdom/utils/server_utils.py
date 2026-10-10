@@ -870,6 +870,9 @@ def broadcast_envs(handler, target_subs=None):
     """
     if target_subs is None:
         target_subs = handler.subs.values()
+    # Materialized first: a generator is truthy even when it yields nothing, so
+    # an empty one would slip past the check below and pay for the encode.
+    target_subs = list(target_subs)
     if not target_subs:
         # Nothing to send to, so do not pay for the encode. Without this the
         # hoist above would make an empty room cost more than the per-subscriber

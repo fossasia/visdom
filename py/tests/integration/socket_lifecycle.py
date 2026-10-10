@@ -171,6 +171,34 @@ def test_broadcast_layouts_to_an_explicit_subscriber_list_reaches_only_it(app):
     assert list(subs[2].messages) == []
 
 
+def test_broadcast_layouts_with_an_empty_generator_does_not_encode(app):
+    """A generator is truthy even when it yields nothing, so it is drained first."""
+    sub = open_sub(app)
+
+    calls = []
+    real = socket_handlers.json.dumps
+
+    def counted(*args, **kwargs):
+        calls.append(args[0] if args else None)
+        return real(*args, **kwargs)
+
+    with mock.patch.object(socket_handlers.json, "dumps", counted):
+        sub.broadcast_layouts(s for s in [])
+
+    assert calls == []
+
+
+def test_broadcast_layouts_to_a_generator_of_subscribers_still_sends(app):
+    """Draining it for the emptiness check must not consume the recipients."""
+    subs = [open_sub(app) for _ in range(3)]
+    for sub in subs:
+        sub.messages.clear()
+
+    subs[0].broadcast_layouts(s for s in subs[:2])
+
+    assert [len(s.messages) for s in subs] == [1, 1, 0]
+
+
 # -- Opening a source --------------------------------------------------------
 
 

@@ -392,6 +392,29 @@ def test_broadcast_envs_with_no_subscribers_does_not_encode():
     assert calls == []
 
 
+def test_broadcast_envs_with_an_empty_generator_does_not_encode():
+    """A generator is truthy even when it yields nothing, so it is drained first."""
+    handler, _ = _subscribed_handler(0, state={"main": {}})
+    counted, calls = _counting_dumps()
+
+    with mock.patch.object(server_utils.json, "dumps", counted):
+        broadcast_envs(handler, (s for s in []))
+
+    assert calls == []
+
+
+def test_broadcast_envs_to_a_generator_of_subscribers_still_sends():
+    """Draining it for the emptiness check must not consume the recipients."""
+    handler, socks = _subscribed_handler(3, state={"main": {}})
+    counted, calls = _counting_dumps()
+
+    with mock.patch.object(server_utils.json, "dumps", counted):
+        broadcast_envs(handler, (s for s in socks[:2]))
+
+    assert len(calls) == 1
+    assert [len(s.messages) for s in socks] == [1, 1, 0]
+
+
 def test_send_to_sources_encodes_once_for_every_source():
     """A pane close ships the whole pane through here, so once is the point."""
     sources = [FakeSocket(sid="src_0"), FakeSocket(sid="src_1")]

@@ -90,6 +90,11 @@ class AnySocketHandlerOrWrapper(BaseWebSocketHandler):
         """
         if target_subs is None:
             target_subs = self.subs.values()
+        # Materialized before the emptiness check: a generator is truthy even
+        # when it yields nothing, so checking it as handed over would let an
+        # empty broadcast pay for the encode below and only then discover it
+        # has no recipients.
+        target_subs = list(target_subs)
         if not target_subs:
             return
         # Built once rather than once per subscriber. ``initialize`` calls this
@@ -720,8 +725,15 @@ class VisSocketHandlerOrWrapper(AnySocketHandlerOrWrapper):
 
         if cmd == "echo":
             logging.info(f"from visdom client: {message}")
-            for sub in self.sources.values():
-                sub.write_message(json.dumps(msg, cls=NanSafeEncoder))
+            target_sources = list(self.sources.values())
+            if not target_sources:
+                return
+            # Every source gets the same payload, so encode it once here
+            # instead of once per source: an echo fanned out to N connected
+            # clients used to run N identical encodes of the same message.
+            echo_message = json.dumps(msg, cls=NanSafeEncoder)
+            for sub in target_sources:
+                sub.write_message(echo_message)
             return
 
         await super().on_message(message)
