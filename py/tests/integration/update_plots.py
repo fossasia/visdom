@@ -288,8 +288,20 @@ class TestUnnamedTraceMatching(PlotUpdateTestCase):
             ],
             layout={"title": "line"},
         )
-        self.append(win, ("1", 2), ("2", 2))
-        self.assertEqual(self.xs(win), {"train": [1, 2], "val": [1, 2]})
+        self.append(win, ("1", 5), ("2", 50))
+        self.assertEqual(self.xs(win), {"train": [1, 5], "val": [1, 50]})
+
+    def test_a_new_numeric_label_becomes_its_own_trace(self):
+        """Traces named "2" and "3" were never renamed, so "1" is new."""
+        win = self.create_window(
+            [
+                {"type": "scatter", "x": [1], "y": [1], "name": "2"},
+                {"type": "scatter", "x": [2], "y": [2], "name": "3"},
+            ],
+            layout={"title": "numeric labels"},
+        )
+        self.append(win, ("1", 9))
+        self.assertEqual(self.xs(win), {"2": [1], "3": [2], "1": [9]})
 
 
 class TestMarkerUpdates(PlotUpdateTestCase):

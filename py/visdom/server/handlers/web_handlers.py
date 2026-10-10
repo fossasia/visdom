@@ -88,8 +88,8 @@ def pair_traces(pdata, new_data):
     so pairing by position put a batch holding only "dog" into the "cat"
     trace. Entries are matched by name, and one naming no existing trace
     becomes a new trace. Two cases stay positional: entries without names,
-    and entries named "1", "2", ... in order when none of those names is on
-    the plot -- the client's default naming for a line whose legend renamed
+    and entries named "1", "2", ... in order sent to a plot whose traces were
+    renamed -- the client's default naming for a line whose legend renamed
     its traces.
     """
     by_name = {}
@@ -98,7 +98,12 @@ def pair_traces(pdata, new_data):
     names = [entry.get("name") for entry in new_data]
     defaults = [str(i + 1) for i in range(len(new_data))]
     unnamed = all(n is None for n in names)
-    if unnamed or (names == defaults and not any(n in by_name for n in names)):
+    # Traces named only by numbers were never renamed, so a "1" sent to them
+    # is a label the plot hasn't seen yet, not a line's default name.
+    renamed = not all(str(n).isdigit() for n in by_name if n is not None)
+    if unnamed or (
+        names == defaults and renamed and not any(n in by_name for n in names)
+    ):
         return list(zip(range(len(pdata)), new_data))
     pairs = []
     for entry in new_data:
