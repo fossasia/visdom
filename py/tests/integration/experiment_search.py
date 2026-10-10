@@ -25,7 +25,7 @@ import tornado.testing
 
 from visdom import Visdom
 from visdom.data_model import JSONStore
-from visdom.experiments import ExperimentStore, QueryParseError
+from visdom.experiments import ExperimentStore, MAX_QUERY_LENGTH, QueryParseError
 from visdom.server.app import Application
 from visdom.server.handlers.web_handlers import ExperimentSearchHandler
 
@@ -456,6 +456,41 @@ class TestSearchEndpoint(tornado.testing.AsyncHTTPTestCase):
         for char in ("<", ">", "&"):
             self.assertNotIn(char, raw)
         self.assertEqual(json.loads(raw)["query"], query)
+
+    def test_a_wide_integer_literal_does_not_500(self):
+        """A query carrying an integer too wide for a float is answered, not fatal.
+
+        Nothing has to be stored for this: the literal alone used to reach
+        ``float()``, raise ``OverflowError`` and take the request with it, so
+        any caller could turn a plain query string into a 500.
+        """
+        wide = "9" * 400
+        for query in (
+            "lr < " + wide,
+            "lr > " + wide,
+            "lr = " + wide,
+            "lr != " + wide,
+        ):
+            with self.subTest(query[:12]):
+                self.assertLess(len(query), MAX_QUERY_LENGTH)
+                body = self.search_ok({"query": query})
+                self.assertEqual(body["query"], query)
+
+    def test_a_wide_integer_literal_still_filters(self):
+        """Answering is not the same as answering correctly."""
+        wide = "9" * 400
+        body = self.search_ok({"query": "lr < " + wide})
+        self.assertEqual(body["total"], 3)
+        self.assertEqual(self.search_ok({"query": "lr > " + wide})["total"], 0)
+
+    def test_a_wide_stored_param_does_not_500(self):
+        """The stored side is unbounded too, and is read on every match attempt."""
+        ExperimentStore(JSONStore(self._tmp_dir)).log_experiment(
+            "run-wide", params={"steps": 10**400}
+        )
+        body = self.search_ok({"query": "steps > 1"})
+        self.assertEqual([e["env_id"] for e in body["experiments"]], ["run-wide"])
+        self.assertEqual(self.search_ok({})["total"], 4)
 
     def test_search_sees_an_experiment_logged_over_http(self):
         """An experiment logged through /experiments/log is searchable at once."""
