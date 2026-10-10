@@ -3789,8 +3789,8 @@ class Visdom(object):
         X = np.atleast_1d(np.squeeze(np.asarray(X)))
         assert X.ndim == 1, "X should be one-dimensional"
 
-        opts = {} if opts is None else opts
-        opts["numbins"] = opts.get("numbins", min(30, len(X)))
+        opts = {} if opts is None else dict(opts)
+        opts["numbins"] = opts.get("numbins", max(1, min(30, len(X))))
         _title2str(opts)
         _assert_opts(opts)
 
