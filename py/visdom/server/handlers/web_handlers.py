@@ -59,6 +59,9 @@ from visdom.utils.server_utils import (
     update_window,
     hash_password_off_loop,
     stringify,
+    env_is_readable,
+    readable_panes,
+    reload_is_readable,
     push_deleted,
     notify,
     LazyEnvData,
@@ -1083,10 +1086,25 @@ class UploadEnvHandler(BaseHandler):
             self.write({"success": False, "error": "Invalid JSON file"})
             return
 
-        if not (isinstance(data, dict) and "jsons" in data and "reload" in data):
+        if not env_is_readable(data):
             self.set_status(400)
             self.write({"success": False, "error": "This is not a valid Visdom JSON"})
             return
+        panes, unreadable = readable_panes(data)
+        reload_unreadable = not reload_is_readable(data)
+        if unreadable or reload_unreadable:
+            logging.warning(
+                "upload_env: %s holds parts that cannot be read (%s); loading the rest",
+                filename,
+                ", ".join(
+                    part
+                    for part in (
+                        "{} pane(s)".format(len(unreadable)) if unreadable else "",
+                        "the saved layout" if reload_unreadable else "",
+                    )
+                    if part
+                ),
+            )
 
         uid = uuid.uuid4().hex[:8]
         new_eid = f"uploaded_{uid}"
@@ -1095,17 +1113,30 @@ class UploadEnvHandler(BaseHandler):
             if suggested_name and suggested_name != "main":
                 new_eid = f"uploaded_{suggested_name}_{uid}"
 
-        self.state[new_eid] = {"jsons": data["jsons"], "reload": data["reload"]}
+        self.state[new_eid] = {
+            "jsons": panes,
+            "reload": {} if reload_unreadable else data["reload"],
+        }
 
         await save_env_off_loop(self, new_eid)
 
         broadcast_envs(self)
 
+        not_shown = []
+        if unreadable:
+            not_shown.append(f"{len(unreadable)} pane(s)")
+        if reload_unreadable:
+            not_shown.append("the saved layout")
+        message = f"Dashboard loaded successfully as '{new_eid}'"
+        if not_shown:
+            message += ", but " + " and ".join(not_shown) + " could not be read"
         self.write(
             {
                 "success": True,
                 "eid": new_eid,
-                "message": f"Dashboard loaded successfully as '{new_eid}'",
+                "message": message,
+                "unreadable_panes": unreadable,
+                "unreadable_reload": reload_unreadable,
             }
         )
 
