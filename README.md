@@ -487,6 +487,9 @@ Tracking is opt-in: without `params`, `VisdomLogger` only ever calls `viz.line()
 - `env`: environment name (default: auto-generated from timestamp)
 - `log_every`: send every N calls per metric — use with per-batch logging on large datasets (default: `1`)
 - `params`: dict of hyperparameters; opts into experiment tracking (default: `None`, tracking off)
+- `is_main_process`: `True` or `False` to choose whether this process plots (default: `None`, only global rank 0 plots); any other type raises `TypeError`
+
+**Distributed training:** under `torchrun`, SLURM or `mp.spawn`, only global rank 0 plots and tracks; other ranks just validate their inputs, so one window is created per metric and nothing extra needs to be passed. The plotted value is whatever rank 0 logs, so to log a global average every rank must call `dist.all_reduce` and divide by `dist.get_world_size()` before `tracker.log()`. An `mp.spawn` worker has no rank to go by until `dist.init_process_group` has run, so create the logger after it or pass `is_main_process=(rank == 0)`. Pass `is_main_process=True` or `False` to pick the plotting process yourself, for example the last stage of a pipeline-parallel job, or when SLURM starts independent runs with `srun -n N`. Single-GPU and `nn.DataParallel` scripts run as one process and plot as before.
 
 Each unique name passed to `tracker.log()` gets its own window. The first call creates it; subsequent calls append. See `example/train_example.py` for a full working example.
 
