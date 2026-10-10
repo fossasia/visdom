@@ -1,0 +1,208 @@
+# Asks for a screencast on pull requests that need one.
+#
+# How maintainers use it:
+#   1. Add the label "needs-screencast" to a pull request.
+#      The author is asked for a short video straight away.
+#   2. Nothing else. Every hour each open pull request with that label is checked:
+#      - The author added a video, in the description or in a comment made after
+#        the request: the labels are removed and the pull request is back with
+#        the maintainers. An "on hold" label that a maintainer added is left alone.
+#      - No video after REMIND_AFTER_HOURS: one reminder is posted.
+#      - No video after HOLD_AFTER_HOURS: the label "on hold" is added and the
+#        author is told. A pull request is never closed by this workflow.
+#   Removing "needs-screencast" by hand stops the process, for example on a
+#   backend-only change where a video makes no sense. Adding it again restarts
+#   the clock.
+#
+# What counts as a video: a file uploaded to GitHub that is not embedded as an
+# image, a link to an .mp4, .mov, .webm or .mkv file, or a YouTube, Loom or Vimeo
+# link. Comments and commits without a video do not count.
+#
+# Setup: create the labels "needs-screencast" and "on hold" in the repository.
+# The first name is also written out in the `if` of the request job, because
+# `env` cannot be read there.
+
+name: Screencast required
+
+on:
+  pull_request_target:
+    types: [labeled]
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Only log what would happen, do not comment or label"
+        type: boolean
+        default: true
+
+permissions:
+  pull-requests: write
+
+env:
+  LABEL: needs-screencast
+  HOLD_LABEL: on hold
+  REMIND_AFTER_HOURS: "72"
+  HOLD_AFTER_HOURS: "168"
+
+jobs:
+  request:
+    if: github.event_name == 'pull_request_target' && github.event.label.name == 'needs-screencast'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ask the author for a screencast
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const days = Math.round(Number(process.env.HOLD_AFTER_HOURS) / 24);
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: pr.number,
+              body: [
+                `Hi @${pr.user.login}, thanks for your contribution!`,
+                ``,
+                `Before we can review this pull request, please add a **short screencast video** showing the change working (before and after where relevant). You can put it in the description or in a comment.`,
+                ``,
+                `If no video is added within **${days} days**, the pull request is put on hold until one is added. Nothing is closed.`,
+              ].join('\n'),
+            });
+
+  enforce:
+    if: github.event_name != 'pull_request_target'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: screencast-required-enforce
+      cancel-in-progress: false
+    steps:
+      - name: Remind, release or put on hold
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const LABEL = process.env.LABEL;
+            const HOLD_LABEL = process.env.HOLD_LABEL;
+            const REMIND_HOURS = Number(process.env.REMIND_AFTER_HOURS);
+            const HOLD_HOURS = Number(process.env.HOLD_AFTER_HOURS);
+            const DRY_RUN = String(context.payload.inputs?.dry_run ?? 'false') === 'true';
+            const REMIND_MARKER = '<!-- screencast-reminder -->';
+            const HOLD_MARKER = '<!-- screencast-on-hold -->';
+            const BOT = 'github-actions[bot]';
+            const HOUR = 60 * 60 * 1000;
+            const { owner, repo } = context.repo;
+            const now = Date.now();
+
+            const ASSET_RE = /https:\/\/github\.com\/user-attachments\/assets\/[\w-]+/gi;
+            const LINK_RE = /https:\/\/[^\s)"'<>]+\.(mp4|mov|webm|mkv)\b|https:\/\/(www\.)?(youtube\.com|youtu\.be|loom\.com|vimeo\.com)\/\S+/i;
+            const hasVideoText = body => {
+              body = body ?? '';
+              if (LINK_RE.test(body)) return true;
+              for (const m of body.matchAll(ASSET_RE)) {
+                const before = body.slice(Math.max(0, m.index - 500), m.index);
+                if (/!\[[^\]]*\]\(\s*$/.test(before)) continue;
+                if (/<img\b[^>]*$/i.test(before)) continue;
+                return true;
+              }
+              return false;
+            };
+
+            const act = async (msg, fn) => {
+              core.info((DRY_RUN ? '[dry-run] ' : '') + msg);
+              if (!DRY_RUN) await fn();
+            };
+
+            const prs = await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: 'open', per_page: 100,
+            });
+            const targets = prs.filter(pr => pr.labels.some(l => l.name === LABEL));
+            core.info(`${targets.length} open pull request(s) labelled "${LABEL}"`);
+
+            const failed = [];
+            for (const pr of targets) {
+              try {
+                const n = pr.number;
+                const author = pr.user.login;
+                const events = await github.paginate(github.rest.issues.listEventsForTimeline, {
+                  owner, repo, issue_number: n, per_page: 100,
+                });
+
+                const labelled = events.filter(e => e.event === 'labeled' && e.label?.name === LABEL);
+                if (!labelled.length) continue;
+                const requestedAt = new Date(labelled[labelled.length - 1].created_at).getTime();
+                const after = ts => ts && new Date(ts).getTime() > requestedAt;
+                const botSaid = marker => events.some(e =>
+                  e.event === 'commented' && (e.user?.login ?? e.actor?.login) === BOT
+                  && after(e.created_at) && (e.body ?? '').includes(marker));
+
+                const inline = await github.paginate(github.rest.pulls.listReviewComments, {
+                  owner, repo, pull_number: n, per_page: 100,
+                });
+                const videoInComments = events.some(e => {
+                  switch (e.event) {
+                    case 'commented':
+                      return (e.user?.login ?? e.actor?.login) === author && after(e.created_at) && hasVideoText(e.body);
+                    case 'reviewed':
+                      return e.user?.login === author && after(e.submitted_at) && hasVideoText(e.body);
+                    default:
+                      return false;
+                  }
+                }) || inline.some(c => c.user?.login === author && after(c.created_at) && hasVideoText(c.body));
+                const videoInDescription = hasVideoText(pr.body);
+                const holds = events.filter(e => e.event === 'labeled' && e.label?.name === HOLD_LABEL);
+                const heldByWorkflow = pr.labels.some(l => l.name === HOLD_LABEL)
+                  && holds.length > 0 && holds[holds.length - 1].actor?.login === BOT;
+
+                if (videoInComments || videoInDescription) {
+                  const where = videoInComments ? 'in an author comment' : 'in the description';
+                  await act(`#${n}: video found ${where}, removing labels`, async () => {
+                    if (heldByWorkflow) {
+                      await github.rest.issues.removeLabel({ owner, repo, issue_number: n, name: HOLD_LABEL });
+                    }
+                    await github.rest.issues.removeLabel({ owner, repo, issue_number: n, name: LABEL });
+                  });
+                  continue;
+                }
+
+                const hoursWaiting = (now - requestedAt) / HOUR;
+
+                if (hoursWaiting >= HOLD_HOURS) {
+                  if (botSaid(HOLD_MARKER)) {
+                    core.info(`#${n}: on hold, waiting for a video`);
+                    continue;
+                  }
+                  const days = Math.round(HOLD_HOURS / 24);
+                  await act(`#${n}: no video for ${hoursWaiting.toFixed(1)} hours, putting on hold`, async () => {
+                    await github.rest.issues.addLabels({ owner, repo, issue_number: n, labels: [HOLD_LABEL] });
+                    await github.rest.issues.createComment({
+                      owner, repo, issue_number: n,
+                      body: [
+                        HOLD_MARKER,
+                        `Hi @${author}, we asked for a screencast on this pull request ${days} days ago and have not received a video, so it is now on hold.`,
+                        ``,
+                        `Nothing is closed and this is not a judgement on the code. Add a short screencast showing the change working, in the description or in a comment, and the hold is lifted automatically. Thank you for contributing!`,
+                      ].join('\n'),
+                    });
+                  });
+                  continue;
+                }
+
+                if (hoursWaiting >= REMIND_HOURS && !botSaid(REMIND_MARKER)) {
+                  const left = Math.max(1, Math.ceil((HOLD_HOURS - hoursWaiting) / 24));
+                  await act(`#${n}: posting reminder (${left} day(s) left)`, () =>
+                    github.rest.issues.createComment({
+                      owner, repo, issue_number: n,
+                      body: `${REMIND_MARKER}\nHi @${author}, friendly reminder: please add a **short screencast video** to this pull request. It is put on hold in about **${left} day(s)** if no video is added.`,
+                    }));
+                  continue;
+                }
+
+                core.info(`#${n}: waiting (${hoursWaiting.toFixed(1)} of ${HOLD_HOURS} hours)`);
+              } catch (err) {
+                failed.push(pr.number);
+                core.warning(`#${pr.number}: skipped because of an error: ${err.message}`);
+              }
+            }
+            if (failed.length) {
+              core.setFailed(`Could not process pull request(s): ${failed.map(x => '#' + x).join(', ')}. They are retried on the next run.`);
+            }
