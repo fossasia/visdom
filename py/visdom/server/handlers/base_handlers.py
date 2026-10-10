@@ -89,6 +89,22 @@ class BaseHandler(StateAccessorsMixin, tornado.web.RequestHandler):
         self.set_header("X-Content-Type-Options", "nosniff")
         self.finish(body)
 
+    def write_text(self, body):
+        """Answer with ``body`` as a plain-text body, typed and inert.
+
+        The routes that answer with a bare identifier -- ``/update`` returns
+        the window it updated, which the Python client hands back as the return
+        value of ``vis.line()`` -- cannot wrap it in JSON without changing what
+        every existing client reads off the wire. So the bytes stay exactly as
+        they were and only the type is fixed: ``self.write(a_str)`` leaves
+        Tornado's default ``text/html`` on a body that repeats an identifier
+        the caller chose, which a browser is free to render as a page, and
+        ``nosniff`` stops the declared type being guessed back to HTML.
+        """
+        self.set_header("Content-Type", "text/plain; charset=UTF-8")
+        self.set_header("X-Content-Type-Options", "nosniff")
+        self.finish(body)
+
     def is_authorized(self):
         """Update access time and validate authentication for protected methods."""
         self.last_access = time.time()
