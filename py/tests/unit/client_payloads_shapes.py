@@ -504,8 +504,67 @@ def test_dual_axis_lines_resolves_the_environment_itself(capture_send, offline_c
             dict(X=np.arange(3), Y1=np.arange(3), Y2=np.arange(2)),
             "values of X and Y2 are not in proper shape",
         ),
+        (
+            dict(X=np.zeros((3, 2)), Y1=np.zeros((3, 2)), Y2=np.zeros((3, 2))),
+            "values of X and Y1 are not in proper shape",
+        ),
+        (
+            dict(X=np.zeros((3, 2, 2)), Y1=np.zeros((3, 2, 2)), Y2=np.zeros((3, 2, 2))),
+            "values of X and Y1 are not in proper shape",
+        ),
     ],
 )
 def test_dual_axis_lines_rejects_malformed_input(offline_client, kwargs, message):
     with pytest.raises(AssertionError, match=message):
         offline_client.dual_axis_lines(**kwargs)
+
+
+def test_dual_axis_lines_accepts_column_vectors(capture_send):
+    sent = capture_send(
+        lambda v: v.dual_axis_lines(
+            X=np.array([[10.0], [20.0]]),
+            Y1=np.array([[1.0], [2.0]]),
+            Y2=np.array([[3.0], [4.0]]),
+        )
+    )
+    first, second = sent["payload"]["data"]
+    assert first["x"] == [10.0, 20.0]
+    assert first["y"] == [1.0, 2.0]
+    assert second["x"] == [10.0, 20.0]
+    assert second["y"] == [3.0, 4.0]
+
+
+def test_dual_axis_lines_does_not_mutate_caller_opts(capture_send):
+    opts = {"title": "Immutable Options"}
+    capture_send(
+        lambda v: v.dual_axis_lines(
+            X=np.arange(2), Y1=np.arange(2), Y2=np.arange(2), opts=opts
+        )
+    )
+    assert opts == {"title": "Immutable Options"}
+
+
+def test_dual_axis_lines_accepts_categorical_x(capture_send):
+    sent = capture_send(
+        lambda v: v.dual_axis_lines(
+            X=["Jan", "Feb"], Y1=np.array([10, 20]), Y2=np.array([100, 200])
+        )
+    )
+    first, second = sent["payload"]["data"]
+    assert first["x"] == ["Jan", "Feb"]
+    assert first["y"] == [10.0, 20.0]
+    assert second["x"] == ["Jan", "Feb"]
+    assert second["y"] == [100.0, 200.0]
+
+
+def test_dual_axis_lines_preserves_numeric_string_labels(capture_send):
+    sent = capture_send(
+        lambda v: v.dual_axis_lines(
+            X=["001", "002"], Y1=np.array([10, 20]), Y2=np.array([100, 200])
+        )
+    )
+    first, second = sent["payload"]["data"]
+    assert first["x"] == ["001", "002"]
+    assert first["y"] == [10.0, 20.0]
+    assert second["x"] == ["001", "002"]
+    assert second["y"] == [100.0, 200.0]
