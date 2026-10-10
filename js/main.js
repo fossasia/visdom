@@ -35,6 +35,7 @@ import ApiProvider from './api/ApiProvider';
 import EventSystem from './EventSystem';
 import EnvModal from './modals/EnvModal';
 import ViewModal from './modals/ViewModal';
+import MetricDetailView from './panes/detail/MetricDetailView';
 import TextPane from './panes/TextPane';
 import {
   DEFAULT_LAYOUT,
@@ -94,6 +95,7 @@ const PaneWrapper = React.memo(
     envID,
     onClose,
     onFocus,
+    onExpand,
     isFocused,
     defaultWidth,
     defaultHeight,
@@ -114,6 +116,7 @@ const PaneWrapper = React.memo(
           envID={envID}
           onClose={onClose}
           onFocus={onFocus}
+          onExpand={onExpand}
           isFocused={isFocused}
           w={panelayout.w}
           h={panelayout.h}
@@ -186,6 +189,7 @@ const App = () => {
   const [showEnvModal, setShowEnvModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
   const [focusedPaneID, setFocusedPaneID] = useState(null);
+  const [expandedPaneID, setExpandedPaneID] = useState(null);
   const [selection, setSelection] = useState({
     envIDs: use_envs,
     layoutID: DEFAULT_LAYOUT,
@@ -208,7 +212,76 @@ const App = () => {
   const savedStateRecoveryToastShown = useRef(false);
   const serverLayoutErrorToastShown = useRef(false);
   const latestRef = useRef({});
-  latestRef.current = { selection, sessionInfo, filterString, focusedPaneID };
+  latestRef.current = {
+    selection,
+    sessionInfo,
+    filterString,
+    focusedPaneID,
+    expandedPaneID,
+  };
+
+  // ----------------------- //
+  // full-screen metric view //
+  // ----------------------- //
+
+  const sameEnvIDs = (a, b) =>
+    Array.isArray(a) &&
+    Array.isArray(b) &&
+    a.length === b.length &&
+    a.every((id, i) => id === b[i]);
+
+  const openDetail = (paneID) => {
+    if (latestRef.current.expandedPaneID == null) {
+      try {
+        window.history.pushState(
+          {
+            visdomDetail: true,
+            paneID,
+            envIDs: latestRef.current.selection.envIDs,
+          },
+          ''
+        );
+      } catch (e) {
+        // history unavailable
+      }
+    }
+    setExpandedPaneID(paneID);
+  };
+
+  const closeDetail = () => {
+    if (
+      latestRef.current.expandedPaneID != null &&
+      window.history.state &&
+      window.history.state.visdomDetail
+    ) {
+      window.history.back();
+    } else {
+      setExpandedPaneID(null);
+    }
+  };
+
+  useEffect(() => {
+    const onPop = () => {
+      const state = window.history.state;
+      // only restore if still in the same env the entry was pushed from
+      const valid =
+        state &&
+        state.visdomDetail &&
+        sameEnvIDs(state.envIDs, latestRef.current.selection.envIDs);
+      setExpandedPaneID(valid ? state.paneID : null);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  // clear expandedPaneID if its pane is ever gone for any reason; state
+  // only, not history, so this can't double up with the explicit
+  // history.back() calls elsewhere
+  useEffect(() => {
+    if (expandedPaneID != null && !storeData.panes[expandedPaneID]) {
+      setExpandedPaneID(null);
+    }
+  }, [expandedPaneID, storeData.panes]);
 
   // --------------------- //
   // grid helper functions //
@@ -502,6 +575,9 @@ const App = () => {
       setFocusedPaneID((currentFocusedPaneID) =>
         currentFocusedPaneID === paneID ? null : currentFocusedPaneID
       );
+      if (latestRef.current.expandedPaneID === paneID) {
+        closeDetail();
+      }
       relayout();
     }
   };
@@ -519,6 +595,9 @@ const App = () => {
       panes: {},
     }));
     setFocusedPaneID(null);
+    if (expandedPaneID != null) {
+      closeDetail();
+    }
   };
 
   const onEnvSelect = (selectedNodes) => {
@@ -541,6 +620,9 @@ const App = () => {
       layout: isSameEnv ? storeData.layout : [],
     }));
     setFocusedPaneID(isSameEnv ? focusedPaneID : null);
+    if (!isSameEnv && expandedPaneID != null) {
+      closeDetail();
+    }
     localStorage.setItem('envIDs', JSON.stringify(selectedNodes));
     sendEnvQuery(selectedNodes, showAllEnvWindows);
   };
@@ -594,6 +676,9 @@ const App = () => {
         layout: [],
       }));
       setFocusedPaneID(null);
+      if (expandedPaneID != null) {
+        closeDetail();
+      }
     }
 
     if (selectionChanged) {
@@ -1022,6 +1107,7 @@ const App = () => {
               envID={selection.envIDs[0]}
               onClose={closePane}
               onFocus={focusPane}
+              onExpand={openDetail}
               isFocused={pane.id === focusedPaneID}
               defaultWidth={_width}
               defaultHeight={_height}
@@ -1268,6 +1354,13 @@ const App = () => {
           {panes}
         </GridLayout>
       </div>
+      {expandedPaneID && storeData.panes[expandedPaneID] && (
+        <MetricDetailView
+          pane={storeData.panes[expandedPaneID]}
+          envID={selection.envIDs[0]}
+          onClose={closeDetail}
+        />
+      )}
     </div>
   );
 };
