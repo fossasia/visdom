@@ -133,6 +133,7 @@ def image_grid(viz, env, args):
         env=env,
     )
 
+
 # image slider sync demo — one slider drives two panes
 def image_slider_sync(viz, env, args):
     n_frames = 4

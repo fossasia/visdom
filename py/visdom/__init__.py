@@ -2608,7 +2608,7 @@ class Visdom(object):
         # backward-compatibility with OpenCV.
         if np.issubdtype(tensor.dtype, np.floating):
             tensor = 255 * tensor
-        tensor = tensor.astype(np.uint8).clip(0, 255)
+        tensor = tensor.clip(0, 255).astype(np.uint8)
 
         # Use BGR for backward-compatibility with OpenCV
         pixelformats = {1: "gray", 3: "bgr24"}
@@ -3824,8 +3824,8 @@ class Visdom(object):
                            `'probability density'`
         """
 
-        X = np.squeeze(np.asarray(X))
-        Y = np.squeeze(np.asarray(Y))
+        X = np.atleast_1d(np.squeeze(np.asarray(X)))
+        Y = np.atleast_1d(np.squeeze(np.asarray(Y)))
         assert X.ndim == 1 and Y.ndim == 1, "X and Y should be one-dimensional"
         assert len(X) == len(Y), "X and Y should have the same length"
 
@@ -3869,7 +3869,7 @@ class Visdom(object):
         - `opts.legend`: labels for each of the columns in `X`
         """
 
-        X = np.squeeze(X)
+        X = np.atleast_1d(np.squeeze(X))
         assert X.ndim == 1 or X.ndim == 2, "X should be one or two-dimensional"
         if X.ndim == 1:
             X = X[:, None]
@@ -3920,8 +3920,14 @@ class Visdom(object):
         - `opts.xmin`    : clip minimum value (`number`; default = `X:min()`)
         - `opts.xmax`    : clip maximum value (`number`; default = `X:max()`)
         """
-        X = np.squeeze(X)
-        assert X.ndim == 2, "X should be two-dimensional"
+
+        X = np.asarray(X)
+        if X.ndim > 2:
+            X = np.squeeze(X)
+        assert X.ndim == 2, (
+            "X should be two-dimensional; got ndim=%d after squeeze. "
+            "Only singleton dimensions are removed — pass a 2D matrix." % X.ndim
+        )
 
         opts = {} if opts is None else opts
         opts["xmin"] = float(opts.get("xmin", np.nanmin(X)))
@@ -4108,13 +4114,14 @@ class Visdom(object):
         - `opts.legend`  : `list` containing legend names
         """
 
-        X = np.squeeze(X)
+        X = np.atleast_1d(np.squeeze(np.asarray(X)))
         assert X.ndim == 1 or X.ndim == 2, "X should be one or two-dimensional"
         if X.ndim == 1:
             X = X[:, None]
 
         if Y is None:
             Y = np.arange(1, X.shape[0] + 1)
+        Y = np.atleast_1d(np.squeeze(np.asarray(Y)))
         if Y.ndim == 1:
             Y = Y[:, None]
         assert Y.shape[0] == X.shape[0], "number of rows in X and Y must match"
@@ -4262,7 +4269,7 @@ class Visdom(object):
         - `opts.legend`: `list` containing legend names
         """
 
-        X = np.squeeze(X)
+        X = np.atleast_1d(np.squeeze(X))
         assert X.ndim == 1, "X should be one-dimensional"
         assert np.all(np.greater_equal(X, 0)), "X cannot contain negative values"
 
