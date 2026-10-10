@@ -4502,11 +4502,6 @@ class Visdom(object):
         assert X.shape == Y2.shape, "values of X and Y2 are not in proper shape"
         assert X.ndim == 1, "values of X and Y1 are not in proper shape"
 
-        if "height" not in opts:
-            opts["height"] = 300
-        if "width" not in opts:
-            opts["width"] = 500
-
         if any(isinstance(val, str) for val in X) or (
             hasattr(X, "dtype") and np.issubdtype(X.dtype, np.character)
         ):
