@@ -860,15 +860,30 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
 
 
 def broadcast_envs(handler, target_subs=None):
+    """Broadcast the environment list to browser clients.
+
+    Every recipient gets the same bytes, so the list and its encoding are built
+    once here rather than once per subscriber, the way ``broadcast_tags`` below
+    already does it. Writing one shared string to every socket is safe: a
+    ``str`` is immutable, and the polling transport's ``write_message`` only
+    appends it to a deque.
+    """
     if target_subs is None:
         target_subs = handler.subs.values()
+    # Materialized first: a generator is truthy even when it yields nothing, so
+    # an empty one would slip past the check below and pay for the encode.
+    target_subs = list(target_subs)
+    if not target_subs:
+        # Nothing to send to, so do not pay for the encode. Without this the
+        # hoist above would make an empty room cost more than the per-subscriber
+        # loop it replaces, which never ran at all.
+        return
+    message = json.dumps(
+        {"command": "env_update", "data": list(handler.state.keys())},
+        cls=NanSafeEncoder,
+    )
     for sub in target_subs:
-        sub.write_message(
-            json.dumps(
-                {"command": "env_update", "data": list(handler.state.keys())},
-                cls=NanSafeEncoder,
-            )
-        )
+        sub.write_message(message)
 
 
 def broadcast_tags(handler, eid, tags, target_subs=None):
@@ -884,9 +899,20 @@ def broadcast_tags(handler, eid, tags, target_subs=None):
 
 
 def send_to_sources(handler, msg):
+    """Relay one event to every connected python client.
+
+    The encode is hoisted out of the loop because ``msg`` can be large: a pane
+    close sends the whole closed pane as ``pane_data``, so a plot with many
+    points cost one full encode per connected client. The early return keeps an
+    unattended server from paying that encode for nobody -- the loop it replaces
+    did not run when there were no sources.
+    """
     target_sources = handler.sources.values()
+    if not target_sources:
+        return
+    message = json.dumps(msg, cls=NanSafeEncoder)
     for source in target_sources:
-        source.write_message(json.dumps(msg, cls=NanSafeEncoder))
+        source.write_message(message)
 
 
 def load_env(state, eid, socket, store, undo_count=None, warmed=False):
