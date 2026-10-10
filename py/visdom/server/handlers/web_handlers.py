@@ -615,6 +615,8 @@ class CloseHandler(BaseHandler):
     @staticmethod
     def wrap_func(handler, args):
         eid = extract_eid(args)
+        if eid not in handler.state:
+            return
         win = args.get("win")
 
         keys = list(handler.state[eid]["jsons"].keys()) if win is None else [win]
@@ -939,6 +941,14 @@ class DataHandler(BaseHandler):
             broadcast_envs(handler)
         else:
             # Dump data to client
+            if eid not in handler.state:
+                if "win" in args and args["win"] is None:
+                    handler.write(json.dumps({}, cls=NanSafeEncoder))
+                    return
+                raise tornado.web.HTTPError(
+                    404, reason=f"environment '{eid}' not found"
+                )
+
             if "win" in args and args["win"] is None:
                 handler.write(
                     json.dumps(handler.state[eid]["jsons"], cls=NanSafeEncoder)
