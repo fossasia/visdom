@@ -965,3 +965,19 @@ def test_surface_preserves_reused_options(capture_send, method, opts):
         assert opts == original
         if "custom" in original:
             assert sent["payload"]["opts"]["custom"] == "keep"
+
+
+@pytest.mark.parametrize("opts", [{}, {"xmin": 0, "xmax": 4}])
+def test_contour_skips_unused_data_bounds(capture_send, opts):
+    X = np.full((2, 2), np.nan)
+    with patch.object(
+        np, "nanmin", side_effect=AssertionError("unused minimum")
+    ), patch.object(np, "nanmax", side_effect=AssertionError("unused maximum")):
+        sent = capture_send(lambda v: v.contour(X, opts=opts))
+    trace = sent["payload"]["data"][0]
+    if opts:
+        assert (trace["zmin"], trace["zmax"]) == (0, 4)
+    else:
+        assert "zmin" not in trace
+        assert "zmax" not in trace
+    np.testing.assert_equal(trace["z"], X)
