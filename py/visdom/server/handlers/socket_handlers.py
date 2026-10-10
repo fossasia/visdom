@@ -818,10 +818,12 @@ class SocketFailureReason(Enum):
         return resp
 
 
-def _spawn_socket(cls, server_state, request):
+def _spawn_socket(cls, server_state, request, application):
     """Construct a polling socket wrapper using shared server state."""
     wrapper = cls()
     wrapper.request = request
+    # Signed-cookie verification needs the application before open() runs.
+    wrapper.application = application
     wrapper.initialize(server_state)
     return wrapper
 
@@ -848,7 +850,10 @@ def WrapSocketWrapper(BaseWrapper):
                 # below gives it one. Without it every polling client raised
                 # AttributeError here and never got a sid back.
                 new_sub = _spawn_socket(
-                    VisSocketWrapper, self.server_state, self.request
+                    VisSocketWrapper,
+                    self.server_state,
+                    self.request,
+                    self.application,
                 )
                 self.write(json.dumps({"success": True, "sid": new_sub.sid}))
                 return
@@ -895,7 +900,9 @@ def WrapSocketWrapper(BaseWrapper):
         @check_auth
         def _get(self):
             """Create a new socket wrapper for this requester, return the id"""
-            new_sub = _spawn_socket(SocketWrapper, self.server_state, self.request)
+            new_sub = _spawn_socket(
+                SocketWrapper, self.server_state, self.request, self.application
+            )
             self.write(json.dumps({"success": True, "sid": new_sub.sid}))
 
         WrappedSocketWrap.get = _get

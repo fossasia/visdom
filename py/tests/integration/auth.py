@@ -280,6 +280,72 @@ class TestAuthDisabledByDefault(VisdomHTTPTestCase):
 # -- Sockets under login -----------------------------------------------------
 
 
+class TestAuthenticatedPolling(LoginTestCase):
+    app_kwargs = {
+        "user_credential": CREDENTIAL,
+        "use_frontend_client_polling": True,
+    }
+
+    def _open(self, route, headers):
+        if route == "/socket_wrap":
+            return self.fetch(route, headers=headers)
+        return self.fetch(
+            route,
+            method="POST",
+            body=json.dumps({"message_type": "init"}),
+            headers=headers,
+        )
+
+    def _poll(self, route, sid, message_type, headers, message=None):
+        body = {"sid": sid, "message_type": message_type}
+        if message is not None:
+            body["message"] = json.dumps(message)
+        return self.fetch(route, method="POST", body=json.dumps(body), headers=headers)
+
+    def _assert_handshake(self, route, command, registry):
+        headers = self.session_headers()
+        response = self._open(route, headers)
+        self.assertEqual(response.code, 200)
+        opened = json.loads(response.body)
+        self.assertTrue(opened["success"])
+        sid = opened["sid"]
+        self.assertIn(sid, registry)
+
+        response = self._poll(route, sid, "query", headers)
+        self.assertEqual(response.code, 200)
+        queried = json.loads(response.body)
+        self.assertTrue(queried["success"])
+        messages = [json.loads(message) for message in queried["messages"]]
+        self.assertEqual(messages[0]["command"], command)
+        self.assertEqual(
+            messages[0]["data"], sid if command == "register" else "vis_alive"
+        )
+
+        # Knowing a sid never replaces authentication on later requests.
+        for message_type in ("query", "send"):
+            response = self._poll(route, sid, message_type, {}, {"cmd": "save_all"})
+            self.assertEqual(response.code, 401)
+        self.assertIn(sid, registry)
+
+    def test_a_logged_in_subscriber_receives_its_handshake(self):
+        self._assert_handshake("/socket_wrap", "register", self._app.subs)
+
+    def test_a_logged_in_source_receives_its_handshake(self):
+        self._assert_handshake("/vis_socket_wrap", "alive", self._app.sources)
+
+    def _assert_rejected(self, headers):
+        for route in ("/socket_wrap", "/vis_socket_wrap"):
+            self.assertEqual(self._open(route, headers).code, 401)
+        self.assertEqual(self._app.subs, {})
+        self.assertEqual(self._app.sources, {})
+
+    def test_missing_cookies_cannot_create_polling_connections(self):
+        self._assert_rejected({})
+
+    def test_forged_cookies_cannot_create_polling_connections(self):
+        self._assert_rejected({"Cookie": "user_password=made_up"})
+
+
 @pytest.fixture
 def login_app(env_path, monkeypatch):
     """Login-enabled Application whose cookie secret lives in ``env_path``."""
