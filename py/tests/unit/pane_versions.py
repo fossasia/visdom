@@ -77,10 +77,6 @@ def _plot_history_pane():
     return _pane("plot_history", content=[{"data": [], "layout": {}}], selected=0)
 
 
-def _table_pane():
-    return _pane("table", content=[["a", "b"]], editable=True)
-
-
 def _embeddings_pane():
     return _pane(
         "embeddings",
@@ -90,11 +86,17 @@ def _embeddings_pane():
 
 
 #: ``(id, pane factory, update args)`` for every type ``/update`` accepts.
-#: ``table`` is here because the handler broadcasts for it even though the
-#: update itself is refused -- a broadcast the client cannot reconcile is the
-#: bug under test, whether or not the content changed.
+#: Each update has to change the pane: one that leaves it as it was is refused,
+#: with no bump and no broadcast. That is why ``plot`` appends rather than
+#: replacing its trace with the same point, and why ``table`` -- whose
+#: ``/update`` ``update()`` refuses outright -- is pinned with the other
+#: refusals in ``unit/pane_versioning.py`` instead.
 PANE_CASES = [
-    ("plot", _plot_pane, {"data": [{"type": "scatter", "x": [2], "y": [2]}]}),
+    (
+        "plot",
+        _plot_pane,
+        {"data": [{"type": "scatter", "x": [2], "y": [2]}], "append": True},
+    ),
     ("text", _text_pane, {"data": [{"content": "line1"}]}),
     (
         "image_history",
@@ -106,7 +108,6 @@ PANE_CASES = [
         _plot_history_pane,
         {"data": [{"type": "plot_history", "content": {"data": [], "layout": {}}}]},
     ),
-    ("table", _table_pane, {"data": [{"content": [["c"]]}]}),
 ]
 
 
