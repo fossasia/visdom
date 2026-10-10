@@ -78,6 +78,40 @@ from visdom.experiments import (
 logger = logging.getLogger(__name__)
 
 
+def pair_traces(pdata, new_data):
+    """Pair each entry of an unnamed update with the trace it updates.
+
+    Returns ``(index, entry)`` pairs, with ``index`` None for an entry that
+    should become a new trace.
+
+    A labelled scatter append only carries the labels present in that batch,
+    so pairing by position put a batch holding only "dog" into the "cat"
+    trace. Entries are matched by name, and one naming no existing trace
+    becomes a new trace. Two cases stay positional: entries without names,
+    and entries named "1", "2", ... in order sent to a plot whose traces were
+    renamed -- the client's default naming for a line whose legend renamed
+    its traces.
+    """
+    by_name = {}
+    for i, trace in enumerate(pdata):
+        by_name.setdefault(trace.get("name"), []).append(i)
+    names = [entry.get("name") for entry in new_data]
+    defaults = [str(i + 1) for i in range(len(new_data))]
+    unnamed = all(n is None for n in names)
+    # Traces named only by numbers were never renamed, so a "1" sent to them
+    # is a label the plot hasn't seen yet, not a line's default name.
+    renamed = not all(str(n).isdigit() for n in by_name if n is not None)
+    if unnamed or (
+        names == defaults and renamed and not any(n in by_name for n in names)
+    ):
+        return list(zip(range(len(pdata)), new_data))
+    pairs = []
+    for entry in new_data:
+        free = by_name.get(entry.get("name"))
+        pairs.append((free.pop(0) if free else None, entry))
+    return pairs
+
+
 # TODO move the logic that actually parses environments and layouts to
 # new classes in the data_model folder.
 class PostHandler(BaseHandler):
@@ -434,8 +468,14 @@ class UpdateHandler(BaseHandler):
         # Update traces. An unnamed update may carry fewer entries than the plot
         # has traces, so walk only as far as the data reaches instead of
         # indexing past the end of it.
-        for idx, new_trace in zip(idxs, new_data):
+        pairs = (
+            zip(idxs, new_data) if name is not None else pair_traces(pdata, new_data)
+        )
+        for idx, new_trace in pairs:
             if all(_is_missing_value(i) for i in new_trace["x"]):
+                continue
+            if idx is None:
+                pdata.append(dict(new_trace))
                 continue
             # handle data for plotting
             axes = ["x", "y"]
