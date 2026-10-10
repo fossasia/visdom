@@ -815,3 +815,40 @@ def test_experiment_decodes_a_json_reply(offline_client):
 def test_experiment_passes_through_a_non_json_reply(offline_client):
     with replies(offline_client, "server exploded"):
         assert offline_client.experiment(name="r1") == "server exploded"
+
+
+@pytest.mark.parametrize(
+    "labels", [[1, 3, 1], [2.5, -1.5, 2.5], ["zebra", "ant", "zebra"]]
+)
+def test_embedding_lasso_preserves_original_groups(offline_client, labels):
+    offline_client.use_socket = True
+    calls = []
+    with patch("visdom.do_tsne", return_value=TSNE_XY), patch.object(
+        offline_client,
+        "_send",
+        side_effect=lambda message, **kwargs: calls.append(message) or "w",
+    ):
+        offline_client.embeddings(FEATURES, labels, env="e")
+    original = calls[1]["data"][0]["content"]["data"]
+    handler = offline_client.event_handlers[("e", "w")][0]
+    for selection in ([2, 1], [1, 0]):
+        with patch("visdom.do_tsne", return_value=TSNE_XY[:2]) as tsne, patch.object(
+            offline_client, "_send"
+        ) as send:
+            handler(
+                {
+                    "target": "w",
+                    "event_type": "RegionSelected",
+                    "selectedIdxs": selection,
+                }
+            )
+        np.testing.assert_array_equal(tsne.call_args.args[0], FEATURES[selection])
+        selected = send.call_args.args[0]["data"]["points"]
+        assert [point["group"] for point in selected] == [
+            original[i]["group"] for i in selection
+        ]
+        assert [point["label"] for point in selected] == [labels[i] for i in selection]
+        assert [point["idx"] for point in selected] == selection
+        np.testing.assert_array_equal(
+            [point["position"] for point in selected], TSNE_XY[:2]
+        )
