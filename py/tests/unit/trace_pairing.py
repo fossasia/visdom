@@ -37,10 +37,24 @@ def test_an_unmatched_entry_becomes_a_new_trace():
     assert pairs == [(None, "bird"), (1, "dog")]
 
 
-def test_no_match_at_all_stays_positional():
+def test_default_names_with_no_match_stay_positional():
     """A line renamed by its legend still appends with the default names."""
     pairs = paired(traces("train", "val"), traces("1", "2"))
     assert pairs == [(0, "1"), (1, "2")]
+
+
+def test_a_batch_of_only_new_classes_becomes_new_traces():
+    assert paired(traces("cat", "dog"), traces("bird")) == [(None, "bird")]
+
+
+def test_non_default_names_with_no_match_become_new_traces():
+    """Only "1", "2", ... in order is the client's default naming."""
+    assert paired(traces("a", "b"), traces("2")) == [(None, "2")]
+
+
+def test_entries_without_names_stay_positional():
+    pairs = pair_traces(traces("cat", "dog"), [{"x": [1]}, {"x": [2]}])
+    assert [i for i, _ in pairs] == [0, 1]
 
 
 def test_positional_pairing_stops_at_the_shorter_side():

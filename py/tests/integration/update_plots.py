@@ -273,6 +273,11 @@ class TestUnnamedTraceMatching(PlotUpdateTestCase):
         self.append(win, ("bird", 7), ("dog", 9))
         self.assertEqual(self.xs(win), {"cat": [1], "dog": [2, 9], "bird": [7]})
 
+    def test_a_batch_of_only_a_new_class_becomes_its_own_trace(self):
+        win = self.create_classes()
+        self.append(win, ("bird", 7))
+        self.assertEqual(self.xs(win), {"cat": [1], "dog": [2], "bird": [7]})
+
     def test_no_matching_name_keeps_positional_pairing(self):
         """A line whose legend renamed its traces appends with the default
         names, so with nothing to match the pairing stays positional."""

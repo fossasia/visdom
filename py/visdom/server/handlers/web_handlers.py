@@ -86,15 +86,19 @@ def pair_traces(pdata, new_data):
 
     A labelled scatter append only carries the labels present in that batch,
     so pairing by position put a batch holding only "dog" into the "cat"
-    trace. Entries are matched by name when any of them names an existing
-    trace, and the unmatched ones become new traces. When none match, the
-    pairing stays positional: a line whose legend renamed its traces still
-    appends with the default names, and relies on position.
+    trace. Entries are matched by name, and one naming no existing trace
+    becomes a new trace. Two cases stay positional: entries without names,
+    and entries named "1", "2", ... in order when none of those names is on
+    the plot -- the client's default naming for a line whose legend renamed
+    its traces.
     """
     by_name = {}
     for i, trace in enumerate(pdata):
         by_name.setdefault(trace.get("name"), []).append(i)
-    if not any(entry.get("name") in by_name for entry in new_data):
+    names = [entry.get("name") for entry in new_data]
+    defaults = [str(i + 1) for i in range(len(new_data))]
+    unnamed = all(n is None for n in names)
+    if unnamed or (names == defaults and not any(n in by_name for n in names)):
         return list(zip(range(len(pdata)), new_data))
     pairs = []
     for entry in new_data:
