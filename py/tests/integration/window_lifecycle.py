@@ -45,6 +45,7 @@ from visdom.server.handlers.web_handlers import (
 )
 from visdom.utils.server_utils import LazyEnvData
 
+from testutils.fakes import SpyStore
 from testutils.http import VisdomHTTPTestCase
 from testutils.payloads import env_payload
 
@@ -114,6 +115,80 @@ class TestWindowClose(VisdomHTTPTestCase):
         self.create_text_window(content="b")
         self.close_window(None)
         self.assertEqual(self.get_win_data(), {})
+
+
+class TestCloseWritesUndoOffTheLoop(VisdomHTTPTestCase):
+    """``/close`` records the panes it closed without writing on the loop.
+
+    The route became a coroutine with the other hot posts, but the undo entry
+    it leaves behind was still written inline: one read and one rewrite of the
+    environment's undo file per pane, on the thread serving every other
+    request. Closing an environment with a screenful of panes therefore stalled
+    the server for as many file writes as it had panes.
+    """
+
+    def get_app(self):
+        # ``ServerState`` keeps its own reference to the store, so the spy has
+        # to be what the application builds for itself.
+        with mock.patch("visdom.server.app.JSONStore", SpyStore):
+            app = super().get_app()
+        self.spy = app.storage
+        return app
+
+    def setUp(self):
+        super().setUp()
+        for win in ("win_0", "win_1", "win_2"):
+            self.create_text_window(win=win)
+        self.spy.threads.clear()
+
+    def threads_for(self, method):
+        return [name for called, name in self.spy.threads if called == method]
+
+    def assertOnTheStorageWorker(self, *methods):
+        """Each of ``methods`` reached the store, and only on the worker."""
+        for method in methods:
+            ran = self.threads_for(method)
+            self.assertTrue(ran, "{0} never reached the store".format(method))
+            for name in ran:
+                self.assertTrue(name.startswith("visdom-storage"), (method, name))
+
+    def test_the_undo_stack_is_read_and_written_on_the_storage_worker(self):
+        self.assertEqual(self.close_window("win_0").code, 200)
+
+        self.assertOnTheStorageWorker("load_undo", "save_undo")
+
+    def test_closing_the_whole_env_writes_the_stack_once(self):
+        self.assertEqual(self.close_window(None).code, 200)
+
+        self.assertEqual(self.panes(), {})
+        self.assertEqual(len(self.threads_for("save_undo")), 1)
+        self.assertOnTheStorageWorker("load_undo", "save_undo")
+
+    def test_every_closed_pane_is_still_recorded_for_undo(self):
+        self.close_window(None)
+
+        self.assertEqual(self._app.storage.load_undo("main")[-1][0], "win_2")
+        self.assertEqual(len(self._app.storage.load_undo("main")), 3)
+
+    def test_closing_the_whole_env_marks_it_once_per_pane(self):
+        """The save counter is what it was when each pane wrote its own entry."""
+        before = self._app.dirty_envs["main"]
+
+        self.close_window(None)
+
+        self.assertEqual(self._app.dirty_envs["main"] - before, 3)
+
+    def test_a_pane_that_is_already_gone_writes_no_undo_entry(self):
+        self.close_window("win_0")
+        self.spy.threads.clear()
+
+        self.assertEqual(self.close_window("win_0").code, 200)
+
+        self.assertEqual(self.threads_for("save_undo"), [])
+
+    def test_the_close_wrap_function_is_a_coroutine(self):
+        """It awaits the undo write, so a caller that forgets to await it breaks."""
+        self.assertTrue(inspect.iscoroutinefunction(CloseHandler.wrap_func))
 
 
 class TestUpdateMissingWindow(VisdomHTTPTestCase):
