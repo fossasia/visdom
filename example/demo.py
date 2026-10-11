@@ -320,9 +320,15 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-testing",
-        help="(To be mainly to be used for automated testing). If set to true, waits 10 seconds for callback actions and closes then automatically. Also this sets a random seed for consistent outcomes.",
+        help="(To be mainly to be used for automated testing). If set to true, waits -testing_wait seconds for callback actions and closes then automatically. Also this sets a random seed for consistent outcomes.",
         default=False,
         action="store_true",
+    )
+    parser.add_argument(
+        "-testing_wait",
+        help="Seconds a -testing run with callbacks stays alive waiting for them. (Default: 45). This is the browser's budget, not the demo's: a test driver has to load the page, find the env and click before the process exits, which takes longer than the demo takes to start.",
+        type=float,
+        default=45,
     )
     FLAGS = parser.parse_args()
 
@@ -364,7 +370,7 @@ if __name__ == "__main__":
 
     if len(viz.event_handlers) > 0:
         if FLAGS.testing:
-            time.sleep(10)
+            time.sleep(FLAGS.testing_wait)
         else:
             try:
                 input = raw_input  # for Python 2 compatibility
