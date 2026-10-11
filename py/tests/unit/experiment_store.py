@@ -187,6 +187,12 @@ def test_normalize_tags_enforces_limits(tags):
         normalize_tags(tags)
 
 
+def test_normalize_tags_rejects_names_that_collide_after_trimming():
+    """Two names that differ only by whitespace never merge silently."""
+    with pytest.raises(ValueError):
+        normalize_tags({"dataset": "cifar10", " dataset ": "mnist"})
+
+
 # -- ExperimentStore over a real backend --------------------------------------
 
 
