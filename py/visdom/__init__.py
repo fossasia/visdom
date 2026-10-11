@@ -564,11 +564,6 @@ def _assert_sunburst_opts(opts):
 #: its own. Left here as the extension point the module-scope list used to be.
 torch_types = []
 
-#: ``(torch module, types)`` from the last lookup, so a caller plotting in a
-#: loop does not re-read ``torch.nn`` on every argument. Keyed by the module
-#: object rather than its name: a reloaded torch invalidates it by identity.
-_torch_types_cache = (None, ())
-
 
 def _resolve_torch_types():
     """Return the torch tensor types to unwrap, without importing torch.
@@ -577,31 +572,35 @@ def _resolve_torch_types():
     second, to build an isinstance tuple. It is not needed: a caller cannot be
     holding a tensor unless they imported torch themselves, so torch being
     absent from ``sys.modules`` is proof there is nothing here to unwrap. When
-    it is present this is a dict lookup, not an import.
+    it is present this is three attribute reads, not an import.
+
+    The types are read fresh every call rather than cached. A cache would have
+    to be invalidated whenever torch rebinds them -- a reload keeps the same
+    module object, and a torch caught mid-import has no ``nn`` yet but grows
+    one moments later -- and a stale entry there is silent: tensors would stop
+    being converted and reach the server as unserialisable objects. Rereading
+    costs a dict lookup per plotted argument, which is what the old
+    module-scope list cost to iterate.
     """
-    global _torch_types_cache
     torch = sys.modules.get("torch")
     if torch is None:
         return ()
-    cached_module, cached_types = _torch_types_cache
-    if cached_module is torch:
-        return cached_types
     try:
-        types = (torch.Tensor, torch.nn.Parameter)
+        return (torch.Tensor, torch.nn.Parameter)
     except AttributeError:
         # a partially initialised torch -- ``import visdom`` from inside
-        # torch's own import, or a stub standing in for it
-        types = ()
-    _torch_types_cache = (torch, types)
-    return types
+        # torch's own import, or a stub standing in for it. Nothing to unwrap
+        # yet, and nothing to remember: the attributes turn up once that
+        # import finishes.
+        return ()
 
 
 def _to_numpy(a):
     if isinstance(a, list):
         return np.array(a)
     # one isinstance against the whole tuple rather than a Python loop: this
-    # runs per argument of every plot call, and torch_types is empty unless a
-    # caller has added to it, so the common path allocates nothing.
+    # runs per argument of every plot call, and with no torch imported and
+    # nothing registered in torch_types it is a single dict lookup.
     kinds = _resolve_torch_types()
     if torch_types:
         kinds = tuple(torch_types) + kinds

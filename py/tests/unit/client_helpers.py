@@ -758,6 +758,25 @@ class _FakeParameter(_FakeTensor):
     """Stands in for ``torch.nn.Parameter``, which is not a ``Tensor`` here."""
 
 
+def _tensor_class(name):
+    """Build another tensor-like class, unrelated to the ones above.
+
+    It has to be unrelated: a subclass of ``_FakeTensor`` would satisfy an
+    isinstance check against the stale types too, so a test built on one would
+    pass whether or not the rebinding was noticed.
+    """
+    return type(
+        name,
+        (),
+        {
+            "__init__": _FakeTensor.__init__,
+            "detach": _FakeTensor.detach,
+            "cpu": _FakeTensor.cpu,
+            "numpy": _FakeTensor.numpy,
+        },
+    )
+
+
 @pytest.fixture
 def fake_torch(monkeypatch):
     """Install a torch stand-in in ``sys.modules`` and hand it back.
@@ -808,32 +827,45 @@ def test_to_numpy_unwraps_a_tensor_once_torch_is_imported(fake_torch, kind):
     assert _to_numpy(cls(array)) is array
 
 
-def test_to_numpy_caches_the_types_per_torch_module(fake_torch, monkeypatch):
-    """A plotting loop re-reads ``sys.modules``, not ``torch.nn``.
+def test_to_numpy_picks_up_a_torch_that_finishes_initialising(monkeypatch):
+    """A torch that had no ``nn`` on the first call must not stay unusable.
 
-    The cache is keyed by the module object, so a torch that is swapped out --
-    a reload, or the stub above -- is noticed by identity rather than kept.
+    Holding on to the first answer would be silent: every later tensor would
+    be passed through unconverted and reach the server as an object it cannot
+    serialise.
     """
+    half = types.ModuleType("torch")
+    half.Tensor = _FakeTensor
+    monkeypatch.setitem(sys.modules, "torch", half)
+    untouched = np.arange(2)
+    assert _to_numpy(untouched) is untouched
+
+    half.nn = types.SimpleNamespace(Parameter=_FakeParameter)
+    array = np.arange(4)
+    assert _to_numpy(_FakeParameter(array)) is array
+
+
+def test_to_numpy_follows_a_torch_reloaded_in_place(fake_torch, monkeypatch):
+    """A reload keeps the module object but rebinds the classes."""
     _to_numpy(fake_torch.Tensor(np.arange(2)))
 
-    reads = []
+    reloaded = _tensor_class("ReloadedTensor")
+    monkeypatch.setattr(fake_torch, "Tensor", reloaded)
+    array = np.arange(3)
+    assert _to_numpy(reloaded(array)) is array
 
-    class CountingNN:
-        @property
-        def Parameter(self):
-            reads.append(1)
-            return _FakeParameter
 
-    monkeypatch.setattr(fake_torch, "nn", CountingNN())
-    _to_numpy(np.arange(2))
-    assert reads == []
+def test_to_numpy_follows_a_swapped_torch_module(fake_torch, monkeypatch):
+    """Replacing the module in ``sys.modules`` is picked up just as well."""
+    _to_numpy(fake_torch.Tensor(np.arange(2)))
 
+    swapped = _tensor_class("SwappedTensor")
     replacement = types.ModuleType("torch")
-    replacement.Tensor = _FakeTensor
-    replacement.nn = CountingNN()
+    replacement.Tensor = swapped
+    replacement.nn = types.SimpleNamespace(Parameter=_FakeParameter)
     monkeypatch.setitem(sys.modules, "torch", replacement)
-    _to_numpy(np.arange(2))
-    assert reads == [1]
+    array = np.arange(3)
+    assert _to_numpy(swapped(array)) is array
 
 
 def test_to_numpy_survives_a_half_initialised_torch(monkeypatch):
