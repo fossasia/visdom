@@ -408,6 +408,52 @@ class TestPipelineHistory(unittest.TestCase):
         body = self.log(est).viz.text.call_args[0][0]
         self.assertIn("Pipeline", body)
 
+    def test_pipelines_sharing_a_model_keep_their_own_windows(self):
+        """The pane belongs to the Pipeline that was fitted, not to the model
+        object, which two pipelines can share."""
+        from sklearn.preprocessing import MinMaxScaler
+
+        mlp = MLPClassifier(hidden_layer_sizes=(2,), max_iter=5, random_state=0)
+        logger = _logger()
+        wins = []
+        for first in (MinMaxScaler(), MinMaxScaler()):
+            est = self.pipeline(first, mlp).fit(self.X, self.y)
+            logger._log_plain(est, self.X, self.y, 0.1)
+            wins.append(logger.viz.line.call_args.kwargs["win"])
+        self.assertNotEqual(wins[0], wins[1])
+
+    def test_an_unhashable_final_model_still_gets_its_curve(self):
+        class Unhashable(MLPClassifier):
+            def __eq__(self, other):
+                return self is other
+
+            __hash__ = None
+
+        model = Unhashable(hidden_layer_sizes=(2,), max_iter=5, random_state=0)
+        est = self.pipeline(model).fit(self.X, self.y)
+        self.assertEqual(self.titles(self.log(est)), ["Unhashable loss_curve_"])
+
+    def test_a_search_plots_its_refitted_models_curve(self):
+        mlp = MLPClassifier(hidden_layer_sizes=(2,), max_iter=5, random_state=0)
+        search = GridSearchCV(
+            self.pipeline(mlp), {"mlpclassifier__alpha": [1e-4, 1e-2]}, cv=2
+        ).fit(self.X, self.y)
+        logger = _logger()
+        logger._log_cv(search, 0.1)
+        self.assertEqual(self.titles(logger), ["MLPClassifier loss_curve_"])
+
+    def test_a_search_without_refit_plots_no_curve(self):
+        mlp = MLPClassifier(hidden_layer_sizes=(2,), max_iter=5, random_state=0)
+        search = GridSearchCV(
+            self.pipeline(mlp),
+            {"mlpclassifier__alpha": [1e-4, 1e-2]},
+            cv=2,
+            refit=False,
+        ).fit(self.X, self.y)
+        logger = _logger()
+        logger._log_cv(search, 0.1)
+        logger.viz.line.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
