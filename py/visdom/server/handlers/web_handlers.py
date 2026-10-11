@@ -123,6 +123,11 @@ class ExistsHandler(BaseHandler):
         self.wrap_func(self, args)
 
 
+RESERVED_PANE_FIELDS = frozenset(
+    {"command", "content", "contentID", "i", "id", "old_content", "type", "version"}
+)
+
+
 class UpdateHandler(BaseHandler):
     @staticmethod
     def bump_version(p):
@@ -237,7 +242,50 @@ class UpdateHandler(BaseHandler):
     def update(
         p, args, max_text_lines, max_old_content, max_image_history, max_plot_history
     ):
-        if not args.get("data") and not args.get("delete") and args.get("name") is None:
+        name = args.get("name")
+        new_data = args.get("data")
+        delete = args.get("delete")
+        if new_data is not None and not isinstance(new_data, list):
+            raise tornado.web.HTTPError(
+                400, reason="data must be a list of trace updates"
+            )
+
+        if (
+            name is not None
+            and not delete
+            and (not isinstance(new_data, list) or len(new_data) != 1)
+        ):
+            raise tornado.web.HTTPError(
+                400, reason="a named trace update takes exactly one data entry"
+            )
+
+        layout_update = args.get("layout")
+        if layout_update is not None and not isinstance(layout_update, dict):
+            raise tornado.web.HTTPError(400, reason="layout must be an object")
+
+        opts = args.get("opts")
+        if opts is not None and not isinstance(opts, dict):
+            raise tornado.web.HTTPError(400, reason="opts must be an object")
+
+        if (
+            opts is not None
+            and "legend" in opts
+            and not isinstance(opts["legend"], list)
+        ):
+            raise tornado.web.HTTPError(
+                400, reason="opts.legend must be a list of trace names"
+            )
+
+        reserved = sorted(RESERVED_PANE_FIELDS.intersection(opts or {}))
+        if reserved:
+            raise tornado.web.HTTPError(
+                400,
+                reason="opts cannot set the pane's own fields: {}".format(
+                    ", ".join(reserved)
+                ),
+            )
+
+        if not new_data and not delete and name is None:
             # opts/layout-only update (e.g. update_window_opts): works for
             # any pane type. A delete/named update also carries no data but
             # is a content change, so it must reach the branches below.
@@ -247,7 +295,7 @@ class UpdateHandler(BaseHandler):
         # delete/name semantics and would otherwise crash indexing
         # args["data"], or (embeddings) silently empty every point instead
         # of being rejected.
-        if not args.get("data") and p["type"] in (
+        if not new_data and p["type"] in (
             "text",
             "image_history",
             "plot_history",
@@ -305,10 +353,7 @@ class UpdateHandler(BaseHandler):
 
         pdata = p["content"]["data"]
 
-        new_data = args.get("data")
         p = update_window(p, args)
-        name = args.get("name")
-        delete = args.get("delete")
         # An unnamed delete carries no name and no data, which this shortcut used
         # to read as "opts-only update" and return early, silently dropping the
         # deletion. Ask about the delete flag first. ``not new_data`` also covers
@@ -320,10 +365,6 @@ class UpdateHandler(BaseHandler):
         idxs = list(range(len(pdata)))
 
         if name is not None:
-            if not delete and len(new_data) != 1:
-                raise tornado.web.HTTPError(
-                    400, reason="a named trace update takes exactly one data entry"
-                )
             idxs = [i for i in idxs if pdata[i]["name"] == name]
 
         # Delete a trace
