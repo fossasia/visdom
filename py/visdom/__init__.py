@@ -4582,6 +4582,14 @@ class Visdom(object):
         link_data = list(G.edges())
         if opts.get("directed", False):
             link_data = list(dict.fromkeys(tuple(edge[:2]) for edge in input_edges))
+        else:
+            link_data = []
+            seen = set()
+            for edge in input_edges:
+                key = frozenset(edge[:2])
+                if key not in seen:
+                    seen.add(key)
+                    link_data.append(tuple(edge[:2]))
         node_data.sort()
         if edgeLabels is not None:
             assert len(edgeLabels) == len(

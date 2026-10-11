@@ -71,3 +71,15 @@ def test_directed_duplicate_edges_keep_first_seen_unique_order(capture_send):
         (1, 0, "back"),
         (0, 1, "forward"),
     ]
+
+
+@pytest.mark.parametrize(
+    "requested", [[(0, 1), (2, 3), (1, 2), (0, 3)], [(1, 0), (2, 3), (2, 1), (3, 0)]]
+)
+def test_undirected_labels_follow_unique_input_order(capture_send, requested):
+    labels = ["first", "second", "third", "fourth"]
+    sent = capture_send(lambda client: client.graph(requested, edgeLabels=labels))
+    actual = sent["payload"]["data"][0]["content"]["edges"]
+    assert [
+        (frozenset((edge["source"], edge["target"])), edge["label"]) for edge in actual
+    ] == [(frozenset(edge), label) for edge, label in zip(requested, labels)]
