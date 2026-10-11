@@ -256,8 +256,9 @@ class VisdomSklearnLogger:
             params=param_rows,
         )
         self.viz.text(body, win=self._win(est, "summary"), env=self.env)
+        # best_estimator_ outlives a later refit=False fit, so check refit too.
         best = getattr(est, "best_estimator_", None)
-        if best is not None:
+        if getattr(est, "refit", False) and best is not None:
             self._log_history(self._history_source(best), owner=est)
 
     def _plot_history(self, est, curve, attr, xlabel, ylabel, owner=None):

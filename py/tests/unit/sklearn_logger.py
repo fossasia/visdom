@@ -454,6 +454,18 @@ class TestPipelineHistory(unittest.TestCase):
         logger._log_cv(search, 0.1)
         logger.viz.line.assert_not_called()
 
+    def test_a_stale_best_estimator_is_not_plotted_after_refit_false(self):
+        """sklearn keeps best_estimator_ from an earlier refit=True fit."""
+        mlp = MLPClassifier(hidden_layer_sizes=(2,), max_iter=5, random_state=0)
+        search = GridSearchCV(
+            self.pipeline(mlp), {"mlpclassifier__alpha": [1e-4, 1e-2]}, cv=2
+        ).fit(self.X, self.y)
+        search.set_params(refit=False).fit(self.X, self.y)
+        self.assertTrue(hasattr(search, "best_estimator_"))
+        logger = _logger()
+        logger._log_cv(search, 0.1)
+        logger.viz.line.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
