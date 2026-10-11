@@ -60,7 +60,9 @@ visdom/
 
 ## API Endpoints
 
-Defined in `py/visdom/server/app.py`. All endpoints are prefixed with `base_url`. Handler entrypoints are `async def`; see Concurrency Model below.
+Defined in `py/visdom/server/app.py`. All endpoints are prefixed with `base_url`. Handler entrypoints that touch
+storage are `async def`; ones that only read memory or serve a static asset stay
+synchronous. See Concurrency Model below.
 
 | Endpoint | Handler | Purpose |
 |----------|---------|---------|
@@ -113,9 +115,10 @@ Pane updates are batched via `addPaneBatched()` → `processBatchedPanes()` usin
 
 ## Concurrency Model
 
-Tornado runs on asyncio and the handler entrypoints are `async def`, so anything
-that blocks the IOLoop stalls every other connection. Four rules keep that from
-happening; breaking one of them fails quietly rather than loudly.
+Tornado runs on asyncio and every handler entrypoint that touches storage is
+`async def`, so anything that blocks the IOLoop stalls every other connection.
+The four rules below are **required** for new and changed handlers; breaking one
+of them fails quietly rather than loudly.
 
 1. **No disk work on the loop.** Go through `run_on_storage_executor` (or the
    `*_off_loop` helpers) in `py/visdom/utils/server_utils.py`.
@@ -128,7 +131,10 @@ happening; breaking one of them fails quietly rather than loudly.
    an env mid-write.
 4. **Re-check identity after every `await`.** An env can be deleted while a read
    of it is parked; `ServerState.deleting_envs` records that, and a resumed read
-   must not file its result back into `state`.
+   must not file its result back into `state`. `deleting_envs` is dropped as
+   soon as the delete lands, so it says nothing to a read that outlived the
+   delete rather than overlapping it; a reader that has to tell those apart
+   holds a `watch_env_deletes` token across the await instead.
 
 Password hashing (PBKDF2, ~50-100 ms) goes to the **default** executor instead, so
 logins do not queue behind environment saves. Shutdown order is fixed in

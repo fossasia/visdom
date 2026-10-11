@@ -879,11 +879,18 @@ paths:
           description: >
             Invalid request — no selection given, a mode/argument combination
             that is not allowed, a malformed `query`, or non-string `env_ids`.
-            Also returned when authentication is required but not provided.
+            Also returned when the environment the pane was to be registered
+            in changed while the selection was being read — deleted, deleted
+            and recreated, or with a delete still on its way to disk. Also
+            returned when authentication is required but not provided.
         "403":
           description: >
             Creating a pane writes a window, so it is disabled because the
             server is in readonly mode.
+        "404":
+          description: >
+            An `env_ids` selection names an environment that has no
+            experiment.
 
   /experiments/hparams/update:
     post:
@@ -940,7 +947,10 @@ paths:
                   description: Overrides for the pane's window options.
       responses:
         "200":
-          description: The updated window ID as plain text.
+          description: >
+            The updated window ID as plain text. The pane is left as it is,
+            and the same ID returned, when a newer rebuild of it landed while
+            this one was reading its selection.
           content:
             text/plain:
               schema:
