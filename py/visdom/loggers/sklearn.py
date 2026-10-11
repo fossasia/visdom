@@ -331,6 +331,20 @@ class VisdomSklearnLogger:
             },
         )
 
+    @staticmethod
+    def _history_source(est):
+        """The estimator whose training history to plot for ``est``.
+
+        A Pipeline records no history of its own; its final step does. Only
+        the outer fit is logged, so without unwrapping, a model inside a
+        Pipeline never had its curve plotted.
+        """
+        from sklearn.pipeline import Pipeline
+
+        while isinstance(est, Pipeline):
+            est = est[-1]
+        return est
+
     def _log_plain(self, est, X, y, duration):
         summary_rows = [self._row("fit_time", "{:.2f}s".format(duration))]
 
@@ -370,4 +384,4 @@ class VisdomSklearnLogger:
         self.viz.text(body, win=self._win(est, "summary"), env=self.env)
         if residuals is not None:
             self._plot_residuals(est, residuals)
-        self._log_history(est)
+        self._log_history(self._history_source(est))

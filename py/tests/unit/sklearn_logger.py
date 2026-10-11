@@ -341,5 +341,73 @@ class TestPatchDepth(unittest.TestCase):
         self.assertIsInstance(result, Est)
 
 
+class TestPipelineHistory(unittest.TestCase):
+    """Only the outer fit is logged, and a Pipeline has no history of its
+    own, so the curve comes from its final step."""
+
+    def setUp(self):
+        rng = np.random.RandomState(0)
+        self.X = rng.rand(60, 3)
+        self.y = (self.X[:, 0] > 0.5).astype(int)
+
+    @staticmethod
+    def pipeline(*steps):
+        from sklearn.pipeline import make_pipeline
+        from sklearn.preprocessing import StandardScaler
+
+        return make_pipeline(StandardScaler(), *steps)
+
+    def titles(self, logger):
+        return [c.kwargs["opts"]["title"] for c in logger.viz.line.call_args_list]
+
+    _SAME_Y = object()
+
+    def log(self, est, y=_SAME_Y):
+        logger = _logger()
+        logger._log_plain(est, self.X, self.y if y is self._SAME_Y else y, 0.1)
+        return logger
+
+    def test_the_final_steps_loss_curve_is_plotted(self):
+        mlp = MLPClassifier(hidden_layer_sizes=(2,), max_iter=5, random_state=0)
+        est = self.pipeline(mlp).fit(self.X, self.y)
+        self.assertEqual(self.titles(self.log(est)), ["MLPClassifier loss_curve_"])
+
+    def test_the_final_steps_train_score_is_plotted(self):
+        gb = GradientBoostingRegressor(n_estimators=3, random_state=0)
+        est = self.pipeline(gb).fit(self.X, self.X[:, 0])
+        logger = self.log(est, y=self.X[:, 0])
+        self.assertIn("GradientBoostingRegressor train_score_", self.titles(logger))
+
+    def test_a_nested_pipeline_is_unwrapped_to_the_model(self):
+        mlp = MLPClassifier(hidden_layer_sizes=(2,), max_iter=5, random_state=0)
+        est = self.pipeline(self.pipeline(mlp)).fit(self.X, self.y)
+        self.assertEqual(self.titles(self.log(est)), ["MLPClassifier loss_curve_"])
+
+    def test_a_passthrough_final_step_plots_nothing(self):
+        from sklearn.pipeline import Pipeline
+        from sklearn.preprocessing import StandardScaler
+
+        est = Pipeline([("scale", StandardScaler()), ("last", "passthrough")])
+        est.fit(self.X)
+        self.log(est, y=None).viz.line.assert_not_called()
+
+    def test_refitting_the_pipeline_reuses_the_curves_window(self):
+        mlp = MLPClassifier(hidden_layer_sizes=(2,), max_iter=5, random_state=0)
+        est = self.pipeline(mlp)
+        logger = _logger()
+        wins = []
+        for _ in range(2):
+            est.fit(self.X, self.y)
+            logger._log_plain(est, self.X, self.y, 0.1)
+            wins.append(logger.viz.line.call_args.kwargs["win"])
+        self.assertEqual(wins[0], wins[1])
+
+    def test_the_summary_still_describes_the_pipeline(self):
+        mlp = MLPClassifier(hidden_layer_sizes=(2,), max_iter=5, random_state=0)
+        est = self.pipeline(mlp).fit(self.X, self.y)
+        body = self.log(est).viz.text.call_args[0][0]
+        self.assertIn("Pipeline", body)
+
+
 if __name__ == "__main__":
     unittest.main()
