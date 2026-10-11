@@ -63,3 +63,26 @@ def test_one_dimensional_legend_and_rownames_remain_ambiguous(offline_client):
         offline_client.bar(
             np.array([1, 2]), opts={"legend": ["first", "second"], "rownames": ["row"]}
         )
+
+
+@pytest.mark.parametrize("positions", [None, np.array([5])])
+def test_column_vector_row_legends_keep_legacy_series(capture_send, positions):
+    values = np.array([[1], [2]])
+    sent = capture_send(
+        lambda client: client.bar(
+            values, Y=positions, opts={"legend": ["first", "second"]}
+        )
+    )
+    traces = sent["payload"]["data"]
+    assert [trace["y"] for trace in traces] == [[1], [2]]
+    assert [trace["name"] for trace in traces] == ["first", "second"]
+    assert all(trace["x"] == ([1] if positions is None else [5]) for trace in traces)
+    np.testing.assert_array_equal(values, [[1], [2]])
+
+
+def test_column_vector_row_legends_and_rownames_remain_ambiguous(offline_client):
+    with pytest.raises(AssertionError, match="both rownames and legend"):
+        offline_client.bar(
+            np.array([[1], [2]]),
+            opts={"legend": ["first", "second"], "rownames": ["row"]},
+        )

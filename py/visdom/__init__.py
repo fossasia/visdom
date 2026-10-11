@@ -3722,6 +3722,9 @@ class Visdom(object):
         X = np.asarray(X)
         if X.ndim != 2 or opts is None or opts.get("legend") is None:
             X = np.atleast_1d(np.squeeze(X))
+        elif X.shape[1] == 1 and X.shape[0] > 1 and len(opts["legend"]) == X.shape[0]:
+            # A label per row retains the legacy column-vector series layout.
+            X = X[:, 0]
 
         assert X.ndim == 1 or X.ndim == 2, "X should be one or two-dimensional"
         if X.ndim == 1:
