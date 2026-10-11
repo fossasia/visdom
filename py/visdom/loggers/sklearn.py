@@ -258,12 +258,16 @@ class VisdomSklearnLogger:
             params=param_rows,
         )
         self.viz.text(body, win=self._win(est, "summary"), env=self.env)
+        best = getattr(est, "best_estimator_", None)
+        if best is not None:
+            self._log_history(self._history_source(best), owner=est)
 
-    def _plot_history(self, est, curve, attr, xlabel, ylabel, x_start=1):
+    def _plot_history(self, est, curve, attr, xlabel, ylabel, x_start=1, owner=None):
+        """Plot ``est``'s ``curve``; ``owner`` (default ``est``) keys the pane."""
         self.viz.line(
             X=list(range(x_start, x_start + len(curve))),
             Y=curve,
-            win=self._win(est, attr),
+            win=self._win(est if owner is None else owner, attr),
             env=self.env,
             opts={
                 "title": "{} {}".format(type(est).__name__, attr),
@@ -292,7 +296,12 @@ class VisdomSklearnLogger:
     def _history_x_start(cls, est):
         return 0 if cls._counts_a_baseline(est) else 1
 
-    def _log_history(self, est):
+    def _log_history(self, est, owner=None):
+        """Plot ``est``'s training history in panes keyed on ``owner``.
+
+        ``owner`` is the estimator the user fitted, a Pipeline or a search,
+        when ``est`` is the model inside it.
+        """
         # loss_curve_ is reported per epoch over the training set; the
         # score histories are reported per boosting iteration.
         step = "epoch" if hasattr(est, "loss_curve_") else "iteration"
@@ -300,7 +309,9 @@ class VisdomSklearnLogger:
 
         loss_curve = getattr(est, "loss_curve_", None)
         if loss_curve is not None and len(loss_curve) > 0:
-            self._plot_history(est, loss_curve, "loss_curve_", "epoch", "loss")
+            self._plot_history(
+                est, loss_curve, "loss_curve_", "epoch", "loss", owner=owner
+            )
 
         # MLP* spell this plural, the boosting estimators singular. Kept out
         # of the loss_curve_ branch above: the boosting estimators report a
@@ -315,6 +326,7 @@ class VisdomSklearnLogger:
                     step,
                     "val_score",
                     x_start=x_start,
+                    owner=owner,
                 )
                 break
 
@@ -327,6 +339,7 @@ class VisdomSklearnLogger:
                 "iteration",
                 "train_score",
                 x_start=x_start,
+                owner=owner,
             )
 
     def _log_regression_diagnostics(self, est, X, y, summary_rows):
@@ -376,10 +389,11 @@ class VisdomSklearnLogger:
 
     @staticmethod
     def _history_source(est):
-        """The estimator whose training history to plot for ``est``.
+        """The estimator to read training history from for ``est``.
 
-        A Pipeline records no history of its own; its final step does. Only
-        the outer fit is logged, so without unwrapping, a model inside a
+        A Pipeline has no history of its own, so this is its final step, which
+        may not have any either (a ``"passthrough"`` step, a linear model).
+        Only the outer fit is logged, so without unwrapping, a model inside a
         Pipeline never had its curve plotted.
         """
         from sklearn.pipeline import Pipeline
@@ -427,4 +441,4 @@ class VisdomSklearnLogger:
         self.viz.text(body, win=self._win(est, "summary"), env=self.env)
         if residuals is not None:
             self._plot_residuals(est, residuals)
-        self._log_history(self._history_source(est))
+        self._log_history(self._history_source(est), owner=est)
