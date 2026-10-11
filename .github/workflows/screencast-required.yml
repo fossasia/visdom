@@ -11,8 +11,9 @@
 #      - No video after HOLD_AFTER_HOURS: the label "on hold" is added and the
 #        author is told. A pull request is never closed by this workflow.
 #   Removing "needs-screencast" by hand stops the process, for example on a
-#   backend-only change where a video makes no sense. Adding it again restarts
-#   the clock.
+#   backend-only change where a video makes no sense. If this workflow had put
+#   the pull request on hold, the hold is lifted on the next hourly run. Adding
+#   the label again restarts the clock.
 #
 # What counts as a video: a file uploaded to GitHub that is not embedded as an
 # image, a link to an .mp4, .mov, .webm or .mkv file, or a link to one video on
@@ -200,6 +201,23 @@ jobs:
                 }
 
                 core.info(`#${n}: waiting (${hoursWaiting.toFixed(1)} of ${HOLD_HOURS} hours)`);
+              } catch (err) {
+                failed.push(pr.number);
+                core.warning(`#${pr.number}: skipped because of an error: ${err.message}`);
+              }
+            }
+            const stranded = prs.filter(pr =>
+              pr.labels.some(l => l.name === HOLD_LABEL) && !pr.labels.some(l => l.name === LABEL));
+            for (const pr of stranded) {
+              try {
+                const n = pr.number;
+                const events = await github.paginate(github.rest.issues.listEventsForTimeline, {
+                  owner, repo, issue_number: n, per_page: 100,
+                });
+                const holds = events.filter(e => e.event === 'labeled' && e.label?.name === HOLD_LABEL);
+                if (!holds.length || holds[holds.length - 1].actor?.login !== BOT) continue;
+                await act(`#${n}: "${LABEL}" was removed, lifting the hold`, () =>
+                  github.rest.issues.removeLabel({ owner, repo, issue_number: n, name: HOLD_LABEL }));
               } catch (err) {
                 failed.push(pr.number);
                 core.warning(`#${pr.number}: skipped because of an error: ${err.message}`);
