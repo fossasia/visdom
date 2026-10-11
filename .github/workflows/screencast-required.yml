@@ -15,8 +15,9 @@
 #   the clock.
 #
 # What counts as a video: a file uploaded to GitHub that is not embedded as an
-# image, a link to an .mp4, .mov, .webm or .mkv file, or a YouTube, Loom or Vimeo
-# link. Comments and commits without a video do not count.
+# image, a link to an .mp4, .mov, .webm or .mkv file, or a link to one video on
+# YouTube, Loom or Vimeo. A channel, profile or other page on those sites does
+# not count, and neither do comments and commits without a video.
 #
 # Setup: create the labels "needs-screencast" and "on hold" in the repository.
 # The first name is also written out in the `if` of the request job, because
@@ -94,10 +95,11 @@ jobs:
             const now = Date.now();
 
             const ASSET_RE = /https:\/\/github\.com\/user-attachments\/assets\/[\w-]+/gi;
-            const LINK_RE = /https:\/\/[^\s)"'<>]+\.(mp4|mov|webm|mkv)\b|https:\/\/(www\.)?(youtube\.com|youtu\.be|loom\.com|vimeo\.com)\/\S+/i;
+            const FILE_RE = /https:\/\/[^\s)"'<>]+\.(mp4|mov|webm|mkv)\b/i;
+            const WATCH_RE = /https:\/\/(?:(?:www\.|m\.)?youtube\.com\/(?:watch\?(?:[^\s#]*&)?v=[\w-]+|shorts\/[\w-]+|live\/[\w-]+)|youtu\.be\/[\w-]+|(?:www\.)?loom\.com\/share\/[\w-]+|(?:www\.|player\.)?vimeo\.com\/(?:video\/)?\d+)/i;
             const hasVideoText = body => {
               body = body ?? '';
-              if (LINK_RE.test(body)) return true;
+              if (FILE_RE.test(body) || WATCH_RE.test(body)) return true;
               for (const m of body.matchAll(ASSET_RE)) {
                 const before = body.slice(Math.max(0, m.index - 500), m.index);
                 if (/!\[[^\]]*\]\(\s*$/.test(before)) continue;
