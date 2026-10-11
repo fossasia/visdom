@@ -14,6 +14,7 @@ At the moment, this just inherited all of the floating functions
 in the previous server.py class.
 """
 
+import contextlib
 import copy
 import functools
 import hashlib
@@ -301,9 +302,52 @@ def purge_env(store, eid):
     store.delete_env(eid)
 
 
+class EnvDeleteWatch:
+    """Records that ``eid`` was deleted while a request was off the loop.
+
+    ``env_is_deleting`` answers for the instant it is asked, and a delete is
+    only in flight until the worker is done with it. A request that reads for
+    longer than the delete takes asks after it has settled and is told
+    nothing: the counter has been dropped, and ``state`` holds no entry to
+    have changed identity either when the env was never materialised. This
+    outlives the delete instead -- once set, it stays set for as long as the
+    holder keeps the watch.
+    """
+
+    __slots__ = ("deleted",)
+
+    def __init__(self, deleted=False):
+        self.deleted = deleted
+
+
+@contextlib.contextmanager
+def watch_env_deletes(handler, eid):
+    """Hold a watch on ``eid`` for the body of the ``with``.
+
+    The watch starts out already tripped when a delete is in flight as it is
+    taken, so the holder does not have to ask separately: a delete running now
+    and a delete that starts later both leave the env gone by the time the
+    holder looks.
+    """
+    watch = EnvDeleteWatch(env_is_deleting(handler, eid))
+    handler.env_delete_watches.setdefault(eid, []).append(watch)
+    try:
+        yield watch
+    finally:
+        watches = handler.env_delete_watches.get(eid)
+        if watches is not None and watch in watches:
+            watches.remove(watch)
+            if not watches:
+                handler.env_delete_watches.pop(eid, None)
+
+
 def _note_env_deleting(handler, eid):
     """Record that a delete of ``eid`` is on its way to disk."""
     handler.deleting_envs[eid] = handler.deleting_envs.get(eid, 0) + 1
+    # tell everyone holding this env off the loop, before the delete settles
+    # and the record above is dropped again.
+    for watch in handler.env_delete_watches.get(eid, ()):
+        watch.deleted = True
 
 
 def _note_env_deleted(handler, eid):
@@ -666,6 +710,17 @@ def window(args):
     return p
 
 
+def _is_named_trace(trace):
+    """True if ``trace`` is a mapping carrying a ``name``.
+
+    Pane content is read back from stored env JSON, so a trace list can hold
+    anything -- ``None`` and non-mapping entries included. Checking the shape
+    before testing for ``"name"`` keeps a malformed env from raising out of a
+    comparison.
+    """
+    return isinstance(trace, dict) and "name" in trace
+
+
 def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
     """Send a comparison of the named envs to one subscriber.
 
@@ -711,8 +766,8 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
             ptype = win.get("type", None)
             if ptype not in ["plot", "image"]:
                 continue
-            if "content" not in win:
-                continue
+            if not isinstance(win.get("content"), dict):
+                continue  # pane content is missing or not in the expected shape
             if "title" not in win:
                 continue
             title = win["title"]
@@ -735,6 +790,12 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
             # long environment id string), to make combined plot lines readable.
             if ptype == "image":
                 if ix == 0 and destWid not in seen_dest_wids:
+                    if not isinstance(destWidJson["content"], dict):
+                        # Bail before marking the pane initialised, so a later
+                        # env cannot treat a base we never converted to a list
+                        # as one that is ready to be appended to.
+                        continue  # base image content is not in the expected shape
+
                     seen_dest_wids.add(destWid)
                     destWidJson["has_compare"] = False
                     destWidJson["contentID"] = get_rand_id()
@@ -758,28 +819,45 @@ def compare_envs(state, eids, socket, store, show_all=False, warmed=False):
                     )
                     destWidJson["content"].append(next_img)
             elif ptype == "plot":
-                base_data = destWidJson["content"].get("data") or []
-                if not base_data or "name" not in base_data[0]:
+                if not isinstance(destWidJson["content"], dict):
+                    continue  # base plot content is not in the expected shape
+                base_data = destWidJson["content"].get("data")
+                if not isinstance(base_data, list) or not base_data:
+                    continue  # Skip windows with no usable data
+                if not all(_is_named_trace(trace) for trace in base_data):
                     continue  # Skip windows with unnamed data
                 if ix == 0:
                     destWidJson["has_compare"] = False
+                    # Plotly treats layout as optional, so a stored plot can
+                    # legitimately carry none. Give the merged pane one rather
+                    # than failing the whole comparison over a missing key.
+                    if not isinstance(destWidJson["content"].get("layout"), dict):
+                        destWidJson["content"]["layout"] = {}
                     destWidJson["content"]["layout"]["showlegend"] = True
                     destWidJson["contentID"] = get_rand_id()
+                    # Every base trace was validated above, so the rename
+                    # cannot stop half way and leave the pane part renamed.
                     for dataIdx, data in enumerate(destWidJson["content"]["data"]):
-                        if "name" not in data:
-                            break  # stop working with this plot, not right format
                         destWidJson["content"]["data"][dataIdx][
                             "name"
                         ] = "{}_{}".format(eidNums[eid], data["name"])
                 else:
                     # has_compare will be set to True only if the window title is
                     # shared by at least 2 envs.
+                    # A contributor is merged only if every one of its traces
+                    # is named, so a malformed one cannot leave half its traces
+                    # behind. has_compare is deliberately left untouched when we
+                    # skip: if an earlier env already contributed, that
+                    # comparison is still valid, and if none has, the flag is
+                    # still False from the base env and the pane drops out below.
+                    incoming_data = win["content"].get("data")
+                    if not isinstance(incoming_data, list) or not incoming_data:
+                        continue
+                    if not all(_is_named_trace(trace) for trace in incoming_data):
+                        continue  # not the right format for this plot
                     destWidJson["has_compare"] = True
-                    for _dataIdx, data in enumerate(win["content"]["data"]):
+                    for data in incoming_data:
                         data = copy.deepcopy(data)
-                        if "name" not in data:
-                            destWidJson["has_compare"] = False
-                            break  # stop working with this plot, not right format
                         data["name"] = "{}_{}".format(eidNums[eid], data["name"])
                         destWidJson["content"]["data"].append(data)
 
