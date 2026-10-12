@@ -46,30 +46,29 @@ LICENSE file in the root directory of this source tree.
 
     <!-- Custom styles for this template -->
     <script>
-    function getActiveEnvFromPath() {
+    // The route is whichever of /env/ and /compare/ comes first in the path;
+    // the env names after it may contain '+' or those words themselves.
+    function getActiveRoute() {
       var path = window.location.pathname || '';
-      if (path.includes('/env/')) {
+      var env = path.indexOf('/env/');
+      var compare = path.indexOf('/compare/');
+      var isCompare = compare !== -1 && (env === -1 || compare < env);
+      var start = isCompare ? compare + '/compare/'.length
+        : env !== -1 ? env + '/env/'.length : -1;
+      var name = '';
+      if (start !== -1) {
         try {
-          return decodeURIComponent(path.split('/env/')[1]);
+          name = decodeURIComponent(path.slice(start));
         } catch (e) {
-          return '';
+          name = '';
         }
       }
-      if (path.includes('/compare/')) {
-        try {
-          return decodeURIComponent(path.split('/compare/')[1]);
-        } catch (e) {
-          return '';
-        }
-      }
-      return '';
+      return { name: name, isCompare: isCompare };
     }
-    var ACTIVE_ENV = getActiveEnvFromPath();
-    // Only a /compare/ page lists several envs joined by '+'. On an /env/
-    // page the name is a single env, and env names may contain '+'.
-    var ACTIVE_ENV_IS_COMPARE =
-      !(window.location.pathname || '').includes('/env/') &&
-      (window.location.pathname || '').includes('/compare/');
+    var ACTIVE_ROUTE = getActiveRoute();
+    var ACTIVE_ENV = ACTIVE_ROUTE.name;
+    // Only a /compare/ page joins several envs with '+'.
+    var ACTIVE_ENV_IS_COMPARE = ACTIVE_ROUTE.isCompare;
     var USE_POLLING = ('{{wrap_socket}}' == 'True');
 
     </script>
