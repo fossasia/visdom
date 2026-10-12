@@ -225,14 +225,22 @@ class TestCompareEndpoint(VisdomHTTPTestCase):
         for invalid_sid in ("", "   "):
             resp = self.post_json("/compare/main+main", {"sid": invalid_sid})
             self.assertEqual(resp.code, 400)
-            self.assertIn("missing required field: 'sid'", resp.reason)
+            self.assertIn("invalid required field: 'sid'", resp.reason)
+            self.assertNotIn("missing", resp.reason)
 
     def test_non_string_sid_returns_400(self):
-        """A compare request with non-string 'sid' (None, number) returns HTTP 400."""
-        for invalid_sid in (None, 123, []):
+        """A compare request with non-string 'sid' (number, list, boolean) returns HTTP 400."""
+        for invalid_sid in (123, [], True):
             resp = self.post_json("/compare/main+main", {"sid": invalid_sid})
             self.assertEqual(resp.code, 400)
-            self.assertIn("missing required field: 'sid'", resp.reason)
+            self.assertIn("invalid required field: 'sid'", resp.reason)
+            self.assertNotIn("missing", resp.reason)
+
+    def test_null_sid_uninitialized_socket_returns_200(self):
+        """A compare request with null 'sid' (pre-socket client handshake) safely returns HTTP 200."""
+        resp = self.post_json("/compare/main+main", {"sid": None, "show_all": False})
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(resp.body, b"")
 
     def test_malformed_json_body_returns_400(self):
         """A compare request with invalid JSON returns HTTP 400."""
