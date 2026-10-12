@@ -12,6 +12,7 @@ No server needed — these test pure functions directly.
 """
 
 import os
+import stat
 
 import pytest
 
@@ -149,6 +150,22 @@ def test_set_cookie_creates_a_missing_env_dir(tmp_path, monkeypatch):
     set_cookie("secret")
 
     assert (env_dir / "COOKIE_SECRET").read_text() == "secret"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+@pytest.mark.parametrize("existing", [False, True])
+def test_set_cookie_keeps_the_secret_owner_only(tmp_path, monkeypatch, existing):
+    """Other local users must not be able to read the cookie signing key."""
+    secret = tmp_path / "COOKIE_SECRET"
+    if existing:
+        secret.write_text("old")
+        secret.chmod(0o644)
+    monkeypatch.setattr(server_utils, "DEFAULT_ENV_PATH", str(tmp_path) + os.sep)
+
+    set_cookie("secret")
+
+    assert stat.S_IMODE(secret.stat().st_mode) == 0o600
+    assert secret.read_text() == "secret"
 
 
 # ------------------------------------------------- create_args_for_append ----
