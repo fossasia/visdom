@@ -46,29 +46,25 @@ LICENSE file in the root directory of this source tree.
 
     <!-- Custom styles for this template -->
     <script>
-    // The route is whichever of /env/ and /compare/ comes first in the path;
-    // the env names after it may contain '+' or those words themselves.
-    function getActiveRoute() {
+    function getActiveEnvFromPath() {
       var path = window.location.pathname || '';
-      var env = path.indexOf('/env/');
-      var compare = path.indexOf('/compare/');
-      var isCompare = compare !== -1 && (env === -1 || compare < env);
-      var start = isCompare ? compare + '/compare/'.length
-        : env !== -1 ? env + '/env/'.length : -1;
-      var name = '';
-      if (start !== -1) {
+      if (path.includes('/env/')) {
         try {
-          name = decodeURIComponent(path.slice(start));
+          return decodeURIComponent(path.split('/env/')[1]);
         } catch (e) {
-          name = '';
+          return '';
         }
       }
-      return { name: name, isCompare: isCompare };
+      if (path.includes('/compare/')) {
+        try {
+          return decodeURIComponent(path.split('/compare/')[1]);
+        } catch (e) {
+          return '';
+        }
+      }
+      return '';
     }
-    var ACTIVE_ROUTE = getActiveRoute();
-    var ACTIVE_ENV = ACTIVE_ROUTE.name;
-    // Only a /compare/ page joins several envs with '+'.
-    var ACTIVE_ENV_IS_COMPARE = ACTIVE_ROUTE.isCompare;
+    var ACTIVE_ENV = getActiveEnvFromPath();
     var USE_POLLING = ('{{wrap_socket}}' == 'True');
 
     </script>
