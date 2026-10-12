@@ -880,6 +880,7 @@ def test_calibration_curve_skips_empty_bins_and_uses_pos_label():
         ({"y_true": [], "y_prob": []}, "should be non-empty"),
         ({"y_true": [0, 1], "y_prob": [0.1, 1.2]}, "probabilities in"),
         ({"y_true": [0, 1], "y_prob": [0.1, float("nan")]}, "finite values"),
+        ({"y_true": [0, 1], "y_prob": np.array([0.1 + 0.5j, 0.2])}, "real values"),
         ({"y_true": [0, 1, 2], "y_prob": [0.1, 0.2, 0.3]}, "binary labels only"),
         ({"y_true": [0, 1], "y_prob": [0.1, 0.2], "n_bins": 0}, "positive integer"),
         ({"y_true": [0, 1], "y_prob": [0.1, 0.2], "n_bins": 2.5}, "positive integer"),

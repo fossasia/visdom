@@ -625,7 +625,10 @@ def _compute_calibration_curve(
     the same as ``sklearn.calibration.calibration_curve``.
     """
     y_true = np.asarray(y_true)
-    y_prob = np.asarray(y_prob, dtype=float)
+    y_prob = np.asarray(y_prob)
+    if np.iscomplexobj(y_prob):
+        raise ValueError("y_prob should only contain real values")
+    y_prob = y_prob.astype(float)
     if y_true.ndim != 1 or y_prob.ndim != 1:
         raise ValueError("y_true and y_prob should have 1 dim")
     if y_true.shape[0] != y_prob.shape[0]:
