@@ -7,7 +7,7 @@
  *
  */
 
-/* global ACTIVE_ENV Bin */
+/* global ACTIVE_ENV ACTIVE_ENV_IS_COMPARE Bin */
 
 'use strict';
 
@@ -71,7 +71,7 @@ const safeJsonParse = (raw, fallback, onError) => {
 
 var use_envs = null;
 if (ACTIVE_ENV !== '') {
-  if (ACTIVE_ENV.indexOf('+') > -1) {
+  if (ACTIVE_ENV_IS_COMPARE) {
     // Compare case
     use_envs = ACTIVE_ENV.split('+');
   } else {
