@@ -32,9 +32,9 @@ def main():
     dataset = TensorDataset(X, y)
     train_set, val_set = random_split(dataset, [800, 200])
     train_loader = DataLoader(train_set, batch_size=32, shuffle=True)
-    val_loader   = DataLoader(val_set,   batch_size=64)
+    val_loader = DataLoader(val_set, batch_size=64)
 
-    model     = MLP()
+    model = MLP()
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=1e-2)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
@@ -50,7 +50,7 @@ def main():
             train_losses, train_accs = [], []
             for inputs, targets in train_loader:
                 outputs = model(inputs)
-                loss    = criterion(outputs, targets)
+                loss = criterion(outputs, targets)
 
                 optimizer.zero_grad()
                 loss.backward()
@@ -66,27 +66,30 @@ def main():
             with torch.no_grad():
                 for inputs, targets in val_loader:
                     outputs = model(inputs)
-                    loss    = criterion(outputs, targets)
-                    preds   = outputs.argmax(dim=1)
+                    loss = criterion(outputs, targets)
+                    preds = outputs.argmax(dim=1)
                     val_losses.append(loss.item())
                     val_accs.append((preds == targets).float().mean().item())
 
             train_loss = sum(train_losses) / len(train_losses)
-            train_acc  = sum(train_accs)   / len(train_accs)
-            val_loss   = sum(val_losses)   / len(val_losses)
-            val_acc    = sum(val_accs)     / len(val_accs)
+            train_acc = sum(train_accs) / len(train_accs)
+            val_loss = sum(val_losses) / len(val_losses)
+            val_acc = sum(val_accs) / len(val_accs)
 
-            tracker.log("Train Loss",     train_loss)
+            tracker.log("Train Loss", train_loss)
             tracker.log("Train Accuracy", train_acc)
-            tracker.log("Learning Rate",  optimizer.param_groups[0]["lr"])
-            tracker.log("Val Loss",       val_loss)
-            tracker.log("Val Accuracy",   val_acc)
+            tracker.log("Learning Rate", optimizer.param_groups[0]["lr"])
+            tracker.log("Val Loss", val_loss)
+            tracker.log("Val Accuracy", val_acc)
 
             scheduler.step()
 
             print(
                 "epoch {:02d}  train_loss={:.4f}  val_loss={:.4f}  val_acc={:.4f}".format(
-                    epoch + 1, train_loss, val_loss, val_acc,
+                    epoch + 1,
+                    train_loss,
+                    val_loss,
+                    val_acc,
                 )
             )
 
