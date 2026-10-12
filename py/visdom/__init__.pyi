@@ -328,6 +328,17 @@ class Visdom:
         env: _OptStr = ...,
         opts: _OptOps = ...,
     ) -> _SendReturn: ...
+    def calibration_curve(
+        self,
+        y_true: Tensor,
+        y_prob: Tensor,
+        n_bins: int = ...,
+        strategy: Text = ...,
+        pos_label: Union[int, float] = ...,
+        win: _OptStr = ...,
+        env: _OptStr = ...,
+        opts: _OptOps = ...,
+    ) -> _SendReturn: ...
     def confusion_matrix(
         self,
         y_true: Optional[Tensor] = ...,
