@@ -882,6 +882,43 @@ def test_to_numpy_survives_a_half_initialised_torch(monkeypatch):
     assert _to_numpy(value) is value
 
 
+def test_to_numpy_unwraps_a_tensor_while_torch_nn_is_absent(monkeypatch):
+    """The missing ``nn`` must not cost the ``Tensor`` that is there.
+
+    Resolving the pair together would discard both the moment one of them is
+    missing, and that failure is silent: the tensor is handed back as it came
+    in and reaches the server as an object it cannot serialise.
+    """
+    half = types.ModuleType("torch")
+    half.Tensor = _FakeTensor
+    monkeypatch.setitem(sys.modules, "torch", half)
+    array = np.arange(4)
+    assert _to_numpy(_FakeTensor(array)) is array
+
+
+def test_to_numpy_unwraps_a_parameter_while_torch_tensor_is_absent(monkeypatch):
+    """And the other way round, for the same reason."""
+    half = types.ModuleType("torch")
+    half.nn = types.SimpleNamespace(Parameter=_FakeParameter)
+    monkeypatch.setitem(sys.modules, "torch", half)
+    array = np.arange(4)
+    assert _to_numpy(_FakeParameter(array)) is array
+
+
+def test_to_numpy_ignores_torch_attributes_that_are_not_types(monkeypatch):
+    """A stub whose ``Tensor`` is not a class must not break ``isinstance``.
+
+    Passing a non-type into the isinstance tuple raises ``TypeError`` out of
+    the plot call, which is worse than the conversion being skipped.
+    """
+    stub = types.ModuleType("torch")
+    stub.Tensor = object()
+    stub.nn = types.SimpleNamespace(Parameter=_FakeParameter)
+    monkeypatch.setitem(sys.modules, "torch", stub)
+    array = np.arange(4)
+    assert _to_numpy(_FakeParameter(array)) is array
+
+
 def test_torch_types_is_still_an_extension_point(monkeypatch):
     """The module-scope list stays honoured, so an added type still unwraps."""
     monkeypatch.delitem(sys.modules, "torch", raising=False)

@@ -118,6 +118,20 @@ from components.plot_violin import (
 from components.plot_table import html_table, table
 
 
+def wait_seconds(value):
+    """Parse a -testing_wait value, rejecting the ones time.sleep cannot take.
+
+    argparse's own ``type=float`` accepts a negative, which only fails much
+    later, as a ``ValueError`` out of ``time.sleep`` after the whole demo has
+    already been plotted. Rejecting it here turns that into the usage error it
+    is, before the run starts.
+    """
+    seconds = float(value)
+    if seconds < 0:
+        raise argparse.ArgumentTypeError("must not be negative, got {0}".format(value))
+    return seconds
+
+
 # This demo shows all features in a single environment.
 def run_demo(viz, env, args):
     global input
@@ -327,7 +341,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-testing_wait",
         help="Seconds a -testing run with callbacks stays alive waiting for them. (Default: 45). This is the browser's budget, not the demo's: a test driver has to load the page, find the env and click before the process exits, which takes longer than the demo takes to start.",
-        type=float,
+        type=wait_seconds,
         default=45,
     )
     FLAGS = parser.parse_args()

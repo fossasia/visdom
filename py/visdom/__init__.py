@@ -581,18 +581,19 @@ def _resolve_torch_types():
     being converted and reach the server as unserialisable objects. Rereading
     costs a dict lookup per plotted argument, which is what the old
     module-scope list cost to iterate.
+
+    Each type is resolved on its own. A partially initialised torch -- an
+    ``import visdom`` from inside torch's own import, or a stub standing in
+    for it -- can have ``Tensor`` without ``nn`` yet, and dropping the type it
+    does have would pass a real tensor through unconverted, to reach the
+    server as an object it cannot serialise.
     """
     torch = sys.modules.get("torch")
     if torch is None:
         return ()
-    try:
-        return (torch.Tensor, torch.nn.Parameter)
-    except AttributeError:
-        # a partially initialised torch -- ``import visdom`` from inside
-        # torch's own import, or a stub standing in for it. Nothing to unwrap
-        # yet, and nothing to remember: the attributes turn up once that
-        # import finishes.
-        return ()
+    nn = getattr(torch, "nn", None)
+    kinds = (getattr(torch, "Tensor", None), getattr(nn, "Parameter", None))
+    return tuple(kind for kind in kinds if isinstance(kind, type))
 
 
 def _to_numpy(a):
