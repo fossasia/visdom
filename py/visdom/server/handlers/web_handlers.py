@@ -329,6 +329,17 @@ class UpdateHandler(BaseHandler):
                 max_plot_history,
                 record_ops=ops,
             )
+            # An append whose axis lists are empty, or hold nothing but missing
+            # values, appends no points: ``update`` skips the trace and records
+            # no op. Nothing about the pane changed, so there is no revision to
+            # announce -- bumping the version and rerolling ``contentID`` for
+            # one makes the frontend redraw a pane it already has, and marks the
+            # environment dirty for a write that would save nothing. The diffed
+            # path below says nothing at all for an update it applied nothing
+            # of; this one has to agree, or ``vis.line(X=[], Y=[],
+            # update="append")`` in a loop repaints on every empty batch.
+            if not ops:
+                return p, []
             # ``update_window`` does not advance the version; ``update_packet``
             # does it once per accepted update, so the fast path has to as well
             # -- and the patch has to carry the new value, or the frontend

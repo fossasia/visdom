@@ -886,3 +886,100 @@ def test_appendable_handles_panes_that_are_not_plots(content):
     args = {"win": "win_0", "eid": "main", "append": True, "data": [{"x": [1.0]}]}
 
     assert UpdateHandler.appendable(pane, args) is False
+
+
+@pytest.mark.parametrize(
+    "x,y",
+    [
+        pytest.param([], [], id="empty-lists"),
+        pytest.param([None, None], [None, None], id="all-missing"),
+    ],
+)
+def test_an_empty_append_leaves_the_pane_exactly_as_it_was(x, y):
+    """An append of no points is still an append, and still changes nothing.
+
+    ``update`` skips a trace whose x values are all missing -- an empty list is
+    vacuously all-missing -- so no point lands anywhere. ``appendable`` has no
+    reason to turn the update down: it is a plain append onto existing traces.
+    The fast path therefore has to notice that it recorded nothing, or it
+    announces a revision the pane never had.
+    """
+    pane = plot_pane()
+    before = copy.deepcopy(pane)
+    args = dict(trace_append_args(), data=[{"type": "scatter", "x": x, "y": y}])
+
+    assert UpdateHandler.appendable(pane, args) is True
+    updated, ops = UpdateHandler.update_packet(pane, args, *CAPS)
+
+    assert ops == []
+    assert updated == before
+
+
+def test_the_empty_append_fast_path_agrees_with_the_diffed_path(monkeypatch):
+    """Both paths say nothing, which is the whole claim the fast path makes.
+
+    The diffed path reaches ``p == old_p`` and hands back an empty patch; the
+    direct one has to arrive at the same pane and the same patch, or taking it
+    changes observable behaviour rather than just its cost.
+    """
+    pane = plot_pane()
+    args = dict(trace_append_args(), data=[{"type": "scatter", "x": [], "y": []}])
+
+    direct_pane, direct_ops = UpdateHandler.update_packet(
+        copy.deepcopy(pane), copy.deepcopy(args), *CAPS
+    )
+
+    monkeypatch.setattr(UpdateHandler, "appendable", staticmethod(lambda p, a: False))
+    general_pane, general_ops = UpdateHandler.update_packet(
+        copy.deepcopy(pane), copy.deepcopy(args), *CAPS
+    )
+
+    assert direct_ops == general_ops == []
+    assert direct_pane == general_pane
+
+
+def test_an_empty_append_broadcasts_nothing_and_saves_nothing():
+    """The regression in one assertion: no message, no version, no dirty env.
+
+    ``vis.line(X=np.array([]), Y=np.array([]), win=w, update="append")`` gets
+    past the client's checks, so a loop that occasionally logs an empty batch
+    reaches here. Rerolling ``contentID`` for one makes the frontend re-render
+    the pane on every such batch.
+    """
+    handler = FakeHandler()
+    sub = handler.add_sub()
+    pane = make_pane(handler, 10)
+    version = pane["version"]
+    content_id = pane["contentID"]
+
+    UpdateHandler.wrap_func(
+        handler, dict(append_args(), data=[{"type": "scatter", "x": [], "y": []}])
+    )
+
+    assert sub.messages == []
+    assert handler.dirtied == []
+    assert pane["version"] == version
+    assert pane["contentID"] == content_id
+    assert handler.body == pane["id"]
+
+
+def test_a_non_empty_append_in_the_same_loop_still_broadcasts():
+    """The guard must not swallow the appends that do carry points.
+
+    An empty batch between two real ones is the shape the report describes, so
+    the pane has to come out one version ahead per real append and no more.
+    """
+    handler = FakeHandler()
+    sub = handler.add_sub()
+    pane = make_pane(handler, 10)
+    version = pane["version"]
+
+    UpdateHandler.wrap_func(handler, append_args(x=1.0, y=2.0))
+    UpdateHandler.wrap_func(
+        handler, dict(append_args(), data=[{"type": "scatter", "x": [], "y": []}])
+    )
+    UpdateHandler.wrap_func(handler, append_args(x=3.0, y=4.0))
+
+    assert sub.commands() == ["window_update", "window_update"]
+    assert pane["version"] == version + 2
+    assert pane["content"]["data"][0]["x"][-2:] == [1.0, 3.0]
