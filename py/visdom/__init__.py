@@ -614,6 +614,14 @@ def _compute_pr_curve(y_true, y_score, pos_label=1):
     return precision, recall
 
 
+def _squeeze_vector(x):
+    """Turn a single row or column into 1-D; other shapes are left as they are."""
+    x = np.asarray(x)
+    if x.ndim > 1 and max(x.shape) == x.size:
+        x = x.reshape(-1)
+    return x
+
+
 def _compute_calibration_curve(
     y_true, y_prob, n_bins=10, strategy="uniform", pos_label=1
 ):
@@ -624,8 +632,8 @@ def _compute_calibration_curve(
     samples in each bin, and the expected calibration error. The binning is
     the same as ``sklearn.calibration.calibration_curve``.
     """
-    y_true = np.asarray(y_true)
-    y_prob = np.asarray(y_prob)
+    y_true = _squeeze_vector(y_true)
+    y_prob = _squeeze_vector(y_prob)
     if np.iscomplexobj(y_prob):
         raise ValueError("y_prob should only contain real values")
     y_prob = y_prob.astype(float)
@@ -639,8 +647,15 @@ def _compute_calibration_curve(
         raise ValueError("y_prob should only contain finite values")
     if y_prob.min() < 0 or y_prob.max() > 1:
         raise ValueError("y_prob should be probabilities in [0, 1]")
-    if len(np.unique(y_true)) > 2:
+    labels = np.unique(y_true)
+    if len(labels) > 2:
         raise ValueError("calibration_curve supports binary labels only")
+    if len(labels) == 2 and not np.any(labels == pos_label):
+        raise ValueError(
+            "pos_label={!r} is not one of the labels {}".format(
+                pos_label, labels.tolist()
+            )
+        )
     if isinstance(n_bins, bool) or not isinstance(n_bins, (int, np.integer)):
         raise ValueError("n_bins should be a positive integer")
     if n_bins < 1:
@@ -3500,8 +3515,8 @@ class Visdom(object):
         _assert_opts(opts)
 
         prob_true, prob_pred, counts, ece = _compute_calibration_curve(
-            y_true=np.ravel(y_true),
-            y_prob=np.ravel(y_prob),
+            y_true=y_true,
+            y_prob=y_prob,
             n_bins=n_bins,
             strategy=strategy,
             pos_label=pos_label,

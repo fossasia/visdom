@@ -882,6 +882,8 @@ def test_calibration_curve_skips_empty_bins_and_uses_pos_label():
         ({"y_true": [0, 1], "y_prob": [0.1, float("nan")]}, "finite values"),
         ({"y_true": [0, 1], "y_prob": np.array([0.1 + 0.5j, 0.2])}, "real values"),
         ({"y_true": [0, 1, 2], "y_prob": [0.1, 0.2, 0.3]}, "binary labels only"),
+        ({"y_true": [2, 3], "y_prob": [0.1, 0.2]}, "pos_label=1 is not one of"),
+        ({"y_true": [[0, 1], [1, 0]], "y_prob": [[0.2, 0.8], [0.7, 0.3]]}, "1 dim"),
         ({"y_true": [0, 1], "y_prob": [0.1, 0.2], "n_bins": 0}, "positive integer"),
         ({"y_true": [0, 1], "y_prob": [0.1, 0.2], "n_bins": 2.5}, "positive integer"),
         ({"y_true": [0, 1], "y_prob": [0.1, 0.2], "strategy": "x"}, "strategy"),
@@ -907,7 +909,8 @@ def test_calibration_curve_sends_curve_and_diagonal(capture_send):
     assert diagonal["line"]["dash"] == "dash"
     opts = sent["payload"]["opts"]
     assert opts["legend"] == ["Model", "Perfectly calibrated"]
-    assert opts["title"].startswith("Calibration Curve (ECE=")
+    # (2 * |0.5 - 0.2| + 3 * |2/3 - 2.3/3|) / 5 = 0.18
+    assert opts["title"] == "Calibration Curve (ECE=0.1800)"
     assert opts["xlabel"] == "Mean predicted probability"
 
 
@@ -922,3 +925,19 @@ def test_calibration_curve_keeps_a_custom_title_and_legend(capture_send):
     )
     assert sent["payload"]["opts"]["title"] == "Calib"
     assert [d["name"] for d in sent["payload"]["data"]] == ["Net", "Ideal"]
+
+
+def test_calibration_curve_accepts_a_single_column(capture_send):
+    """An (n, 1) column is one vector, unlike a one-hot (n, 2) matrix."""
+    sent = capture_send(
+        lambda v: v.calibration_curve(
+            y_true=[[0], [1], [1]], y_prob=[[0.2], [0.7], [0.9]], n_bins=2
+        )
+    )
+    assert sent["payload"]["data"][0]["text"] == ["n=1", "n=2"]
+
+
+def test_calibration_curve_allows_a_single_class():
+    """A batch with no positives is still valid input."""
+    prob_true, _, _, _ = _compute_calibration_curve([0, 0], [0.2, 0.7])
+    assert prob_true.tolist() == [0.0, 0.0]
