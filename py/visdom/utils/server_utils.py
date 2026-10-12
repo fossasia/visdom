@@ -37,6 +37,7 @@ from visdom.server.defaults import (
     DEFAULT_PORT,
 )
 from visdom.utils.shared_utils import (
+    ensure_dir_exists,
     warn_once,
     get_rand_id,
     get_new_window_id,
@@ -135,6 +136,9 @@ def set_cookie(value=None):
         cookie_secret = value
     else:
         cookie_secret = input("Please input your cookie secret key here: ")
+    # main() runs this before the server has created anything on disk, so on a
+    # fresh machine the directory is not there yet.
+    ensure_dir_exists(DEFAULT_ENV_PATH)
     with open(DEFAULT_ENV_PATH + "COOKIE_SECRET", "w") as cookie_file:
         cookie_file.write(cookie_secret)
 
