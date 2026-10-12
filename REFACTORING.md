@@ -223,7 +223,7 @@ Two details are load-bearing:
   `True` on `Visdom`. The synchronous client's wire traffic is unchanged
   byte-for-byte; opting in is a caller's decision.
 
-`AsyncVisdom` proxies 62 names through `__getattr__` against an explicit
+`AsyncVisdom` proxies 63 names through `__getattr__` against an explicit
 `_PROXIED` allowlist. Because the methods are manufactured, neither an import
 nor a type check catches a typo or a missing `await` — `py/tests/unit/async_docs.py`
 and `py/tests/unit/client_stubs.py` are what do.
