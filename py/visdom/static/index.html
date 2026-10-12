@@ -65,6 +65,11 @@ LICENSE file in the root directory of this source tree.
       return '';
     }
     var ACTIVE_ENV = getActiveEnvFromPath();
+    // Only a /compare/ page lists several envs joined by '+'. On an /env/
+    // page the name is a single env, and env names may contain '+'.
+    var ACTIVE_ENV_IS_COMPARE =
+      !(window.location.pathname || '').includes('/env/') &&
+      (window.location.pathname || '').includes('/compare/');
     var USE_POLLING = ('{{wrap_socket}}' == 'True');
 
     </script>
