@@ -632,4 +632,38 @@ test.describe('Image Pane', () => {
     await expect(slider).toHaveValue('1');
     expect(pageErrors, pageErrors.map((e) => e.message).join('\n')).toEqual([]);
   });
+
+  test('image_history fractional selected truncates to a valid frame', async ({
+    page,
+  }) => {
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(err));
+
+    const env = `imghist_frac_${Math.floor(Math.random() * 1e6)}`;
+    const win = 'hist_frac';
+    await createImageHistory(page, env, win, {
+      src: TINY_PNG,
+      caption: 'Frame 1',
+    });
+    await appendImageHistory(page, env, win, {
+      src: TINY_PNG_B,
+      caption: 'Frame 2',
+    });
+    const stored = await readPane(page, env, win);
+    expect(stored.content).toHaveLength(2);
+    stored.selected = 0.5;
+    await writePane(page, env, win, stored);
+
+    await closeEnvs(page);
+    await openEnv(page, env);
+
+    const pane = page.locator(WIN_SEL).first();
+    await expect(pane).toBeVisible();
+    const img = pane.locator('img.content-image');
+    await expect(img).toHaveCount(1);
+    await expect(img).toHaveAttribute('src', TINY_PNG);
+    const slider = pane.locator('.widget input[type="range"]');
+    await expect(slider).toHaveValue('0');
+    expect(pageErrors, pageErrors.map((e) => e.message).join('\n')).toEqual([]);
+  });
 });

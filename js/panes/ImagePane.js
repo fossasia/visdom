@@ -244,8 +244,8 @@ var ImagePane = function (props) {
 
   // reset image selection upon property change
   useEffect(() => {
-    if (isHistory && selected !== undefined) {
-      setActualSelected(selected);
+    if (isHistory) {
+      setActualSelected(selected ?? 0);
     }
   }, [isHistory, selected]);
 
@@ -388,7 +388,7 @@ var ImagePane = function (props) {
       content = {};
     } else {
       const raw = Number(actualSelected);
-      const idx = Number.isFinite(raw) ? raw : 0;
+      const idx = Number.isFinite(raw) ? Math.trunc(raw) : 0;
       displaySelected = Math.min(Math.max(0, idx), historyLen - 1);
       content = frames[displaySelected] || {};
     }
