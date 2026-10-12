@@ -21,6 +21,7 @@
 - Use `warn_once()` for deprecation warnings
 - **Never touch disk on the IOLoop.** Storage-touching handlers are `async def`; disk work goes through `run_on_storage_executor` / the `*_off_loop` helpers in `server_utils.py`, and the env is snapshotted on the loop first. A `server_utils` helper that takes a `store` is disk work as well, wherever it is called. `ServerState.storage_executor` has one worker on purpose — see Concurrency Model in `architecture.md`.
 - After an `await`, re-check that the env you were working on still exists before writing to `state`
+- If you take something out of `state` before awaiting the write that records it, put it back when that write fails — restore only the ids still missing, mark the env dirty, then re-raise
 
 ## License Headers
 

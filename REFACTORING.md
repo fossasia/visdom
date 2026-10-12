@@ -184,8 +184,10 @@ empty 200. It now returns the result untouched and carries `functools.wraps`.
    loop is the same stall as calling the backend there. `py/tests/unit/refactoring_docs.py`
    scans the handler modules for both shapes -- the backend called directly, and
    a store-taking helper called inline -- and the only calls it allows on the
-   loop are the ones handed the answer to the read (`warmed=True`, a `count=`
-   already known).
+   loop are the ones handed the answer to the read. What it checks there is the
+   *value*: `warmed=True` frees the read, `warmed=False` is the default spelled
+   out and still reads, so the scanner reads the argument rather than noting
+   that it is present.
 2. **Snapshot on the loop, hand the copy to the worker.** `snapshot_env` /
    `snapshot_envs` deep-copy on the IOLoop thread before the executor call.
    Passing live state to a worker means the loop can mutate an env mid-write.
@@ -201,6 +203,15 @@ empty 200. It now returns the result untouched and carries `functools.wraps`.
    `ServerState.shutdown_storage`. Draining after the final save lets a queued
    write land on top of it and put stale state back on disk. The method is
    idempotent because both the graceful stop and the `atexit` fallback call it.
+5. **State taken out of memory before an awaited write has to go back if the
+   write fails.** `CloseHandler` pops its panes on the loop and only then awaits
+   the undo entry that records them; between those two points the panes exist
+   nowhere else, so a write that raises would lose them -- the close is never
+   announced, and the next autosave persists an env without them. The rollback
+   restores only the ids that are still missing, because the loop kept serving
+   and one of them may hold a newer window by then, and it marks the env again
+   so the restore reaches disk. Any handler that empties state ahead of a write
+   owes the same.
 
 ### 4c / 4d — legacy shims and string formatting
 

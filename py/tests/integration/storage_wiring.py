@@ -639,6 +639,146 @@ def test_http_close_of_a_pane_that_is_already_gone_writes_nothing(spy_store, env
     assert sub.last()["data"] == "never_existed"
 
 
+@contextlib.contextmanager
+def undo_write_failing(store):
+    """Make ``save_undo`` raise, the way a full or read-only disk does.
+
+    The close has already popped its panes by the time the write goes out, so
+    this is the only moment where the panes exist nowhere but in the handler's
+    own frame -- which is what makes the failure worth a test of its own.
+    """
+    real_save = store.save_undo
+
+    def refuse(eid, stack):
+        raise OSError("no space left on device")
+
+    store.save_undo = refuse
+    try:
+        yield
+    finally:
+        store.save_undo = real_save
+
+
+def test_http_close_puts_the_panes_back_when_the_undo_write_fails(spy_store, env_path):
+    """A close that cannot be recorded is undone rather than left unundoable.
+
+    Without the rollback the panes were gone from ``state`` and the env was
+    marked dirty before the write that failed: the next autosave wrote the env
+    without them, and the undo file that was meant to hold them never landed,
+    so nothing anywhere could bring them back.
+    """
+    env = env_with("win_0", "win_1")
+    handler = close_handler(spy_store, env_path, {"expt": env})
+
+    with undo_write_failing(spy_store):
+        with pytest.raises(OSError):
+            close_over_http(handler, eid="expt", win=None)
+
+    assert handler.state["expt"]["jsons"] == {
+        "win_0": {"id": "win_0"},
+        "win_1": {"id": "win_1"},
+    }
+
+
+def test_a_failed_undo_write_announces_no_close(spy_store, env_path):
+    """The panes are still there, so no client is told they went away."""
+    handler = close_handler(spy_store, env_path, {"expt": env_with("win_0")})
+    sub = handler.add_sub(eid="expt")
+
+    with undo_write_failing(spy_store):
+        with pytest.raises(OSError):
+            close_over_http(handler, eid="expt", win="win_0")
+
+    assert sub.commands() == []
+
+
+def test_a_failed_undo_write_marks_the_env_it_put_back(spy_store, env_path):
+    """The restored panes have to reach disk the way the close's pops did.
+
+    The pop marked the env already; putting the pane back changes it again,
+    and an env left unmarked after that is one an autosave can skip -- the
+    restore would live only in memory until something else dirtied it.
+    """
+    handler = close_handler(spy_store, env_path, {"expt": env_with("win_0")})
+
+    with undo_write_failing(spy_store):
+        with pytest.raises(OSError):
+            close_over_http(handler, eid="expt", win="win_0")
+
+    assert handler.dirtied == ["expt", "expt"]
+
+
+def test_a_failed_undo_write_does_not_overwrite_a_pane_written_behind_it(
+    spy_store, env_path, storage_worker
+):
+    """Rolling back restores what is missing, not what is there.
+
+    The loop kept serving while the doomed write was out, so an ``/events``
+    post could have put a new window under one of the closed ids. Restoring
+    that id would throw the new pane away -- the rollback owes the close's
+    panes a place to come back to, not the id itself.
+    """
+    handler = close_handler(spy_store, env_path, {"expt": env_with("win_0", "win_1")})
+    handler.storage_executor = storage_worker
+
+    with undo_write_failing(spy_store):
+        with pytest.raises(OSError):
+            race_close_with_rewrite(handler, spy_store, "expt", "win_0", win=None)
+
+    panes = handler.state["expt"]["jsons"]
+    assert panes["win_0"]["type"] == "text"
+    assert panes["win_1"] == {"id": "win_1"}
+
+
+def test_a_failed_undo_write_restores_nothing_into_a_deleted_env(
+    spy_store, env_path, storage_worker
+):
+    """An env that was deleted meanwhile stays deleted, failure or not.
+
+    There is nothing to roll back into: the env the panes belonged to is gone
+    from ``state`` and its files are gone from disk. Marking it dirty anyway
+    would point the next autosave at an id the server no longer holds.
+    """
+    spy_store.save_env("expt", env_payload())
+    handler = close_handler(spy_store, env_path, {"expt": env_with("win_0")})
+    handler.storage_executor = storage_worker
+    marked_by_the_pop = ["expt"]
+
+    with undo_write_failing(spy_store):
+        with pytest.raises(OSError):
+            race_close_with_delete(handler, spy_store, "expt", win="win_0")
+
+    assert "expt" not in handler.state
+    assert handler.dirtied == marked_by_the_pop
+
+
+def test_a_cancelled_close_puts_its_panes_back_too(spy_store, env_path, storage_worker):
+    """A client that goes away mid-close must not take its panes with it.
+
+    The await is where the close can be interrupted, and a cancellation
+    arriving there leaves exactly what a failed write leaves: panes out of
+    ``state`` with no undo entry anywhere. This is why the rollback catches
+    more than ``Exception``.
+    """
+    handler = close_handler(spy_store, env_path, {"expt": env_with("win_0")})
+    handler.storage_executor = storage_worker
+
+    async def main():
+        with call_held_open(spy_store, "load_undo", "expt") as (running, finish):
+            close = asyncio.ensure_future(
+                CloseHandler.wrap_func(handler, {"eid": "expt", "win": "win_0"})
+            )
+            assert await asyncio.to_thread(running.wait, 10)
+            close.cancel()
+            finish.set()
+            with pytest.raises(asyncio.CancelledError):
+                await close
+
+    asyncio.run(main())
+
+    assert handler.state["expt"]["jsons"] == {"win_0": {"id": "win_0"}}
+
+
 def test_socket_close_reports_the_depth_it_was_just_told(spy_store, env_path):
     """The undo count rides back on the push, so the stack is read once."""
     handler = socket_handler(spy_store, env_path, {"expt": env_payload()})
@@ -796,9 +936,13 @@ def race_close_with_delete(handler, store, eid, **args):
             ), "the close never reached the disk"
             removal = DeleteEnvHandler.wrap_func(handler, {"eid": eid})
             finish.set()
-            await close
-            if removal is not None:
-                await removal
+            try:
+                await close
+            finally:
+                # The delete is on its way to the worker either way: a close
+                # that raises here must not leave its future unawaited.
+                if removal is not None:
+                    await removal
 
     asyncio.run(main())
 

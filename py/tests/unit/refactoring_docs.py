@@ -9,12 +9,13 @@
 """Drift tests for the Phase 4 record in ``REFACTORING.md``.
 
 That section is a closeout: it says what the async work landed, and -- the part
-worth guarding -- it states four invariants that a later change can break
+worth guarding -- it states five invariants that a later change can break
 without breaking a test. A single-worker storage executor widened to two is not
 a slower server, it is interleaved writes and a truncated env file. A save
 handed live state instead of a snapshot corrupts only under load. A disk write
 that slips back onto the IOLoop stalls every other connection and nothing goes
-red.
+red. A handler that empties state before awaiting the write that records it
+loses that state outright the one time the write fails.
 
 So these tests read the prose and then check the code against it: the paths and
 symbols it names resolve, ``max_workers`` really is 1, the off-loop helpers
@@ -329,6 +330,46 @@ def test_shutdown_storage_orders_its_three_steps():
     assert steps == ["autosave", "drain", "save"], steps
 
 
+# --- invariant 5: state popped before an awaited write is put back ---------
+
+HANDLERS = os.path.join(HANDLER_DIR, "web_handlers.py")
+
+
+def test_the_close_rolls_its_panes_back_when_the_undo_write_fails():
+    """The pop is on the loop and the write is awaited: nothing else holds them.
+
+    Between the two the panes exist only in the handler's frame, so an
+    exception from the write that is simply allowed to propagate loses them --
+    the close is never announced and the next autosave writes the env without
+    them. The shape this looks for is the recovery: the await wrapped, the
+    panes put back where they are still missing, and the error re-raised rather
+    than swallowed.
+    """
+    body = find_function(parse(HANDLERS), "wrap_func", "CloseHandler")
+    guarded = [
+        node
+        for node in ast.walk(body)
+        if isinstance(node, ast.Try)
+        and "push_deleted_many_off_loop" in called_names(ast.Module(node.body, []))
+    ]
+    assert guarded, "the undo write is awaited with nothing to catch its failure"
+    recovery = ast.Module([node for try_ in guarded for node in try_.handlers], [])
+    assert "setdefault" in called_names(recovery), (
+        "the rollback overwrites by id -- a pane written back while the undo "
+        "write was out would be thrown away"
+    )
+    assert "mark_dirty" in called_names(recovery), "the restored panes never save"
+    assert any(
+        isinstance(node, ast.Raise) for node in ast.walk(recovery)
+    ), "a failed undo write is swallowed, so /close answers 200 having done nothing"
+
+
+def test_the_rollback_invariant_is_still_documented():
+    invariant = PHASE_4[PHASE_4.index("### Invariants a later change can break") :]
+    assert "CloseHandler" in invariant
+    assert "restores only the ids that are still missing" in invariant
+
+
 # --- invariant 1 (the other half): no disk writes on the loop --------------
 
 BLOCKING_STORE_CALLS = ("save_env", "save_envs", "save_all", "load_env")
@@ -413,12 +454,33 @@ def test_the_recorded_on_loop_writes_are_still_there():
 
 # The exceptions, and what makes them exceptions: an argument that says the
 # caller has already done the read off the loop and is handing the answer in.
-# Without it the same call does reach disk, so the keyword is the whole licence.
+# Without it the same call does reach disk, so the argument is the whole
+# licence -- and only when it carries the value that means the read is done.
+# ``warmed=False`` and ``count=None`` are the defaults spelled out: both read,
+# so passing the name alone proves nothing. Each exemption therefore names the
+# argument and what it has to say.
 READ_FREE_ARGUMENT = {
-    "load_env": "warmed",
-    "compare_envs": "warmed",
-    "broadcast_undo_state": "count",
+    "load_env": ("warmed", "true"),
+    "compare_envs": ("warmed", "true"),
+    "broadcast_undo_state": ("count", "not-none"),
 }
+
+
+def says_the_read_is_done(says, node):
+    """Whether the value handed to a read-free argument really frees the read.
+
+    ``true``: the flag has to be a literal ``True``. It is a constant at every
+    site that has one, and a flag computed at the call is not a promise the
+    read was done -- the branch where it is false reaches the disk on the loop.
+
+    ``not-none``: a depth, which only has to be *something*; ``None`` is the
+    default that makes the helper read the stack itself. The value is usually
+    the number an off-loop push or pop just reported, so a name or an
+    expression counts and only a literal ``None`` is rejected.
+    """
+    if says == "true":
+        return isinstance(node, ast.Constant) and node.value is True
+    return not (isinstance(node, ast.Constant) and node.value is None)
 
 
 def store_taking_helpers():
@@ -464,10 +526,15 @@ def store_helper_calls_on_the_loop(trees=None):
                 params = helpers.get(call.func.id)
                 if params is None:
                     continue
-                passed = set(params[: len(call.args)])
-                passed.update(keyword.arg for keyword in call.keywords)
-                if READ_FREE_ARGUMENT.get(call.func.id) in passed:
-                    continue
+                passed = dict(zip(params, call.args))
+                passed.update((keyword.arg, keyword.value) for keyword in call.keywords)
+                exemption = READ_FREE_ARGUMENT.get(call.func.id)
+                if exemption is not None:
+                    argument, says = exemption
+                    if argument in passed and says_the_read_is_done(
+                        says, passed[argument]
+                    ):
+                        continue
                 found.add((filename, qualname, call.func.id))
     return found
 
@@ -481,7 +548,7 @@ def test_the_store_taking_helpers_are_discovered_by_signature():
 def test_every_read_free_argument_is_a_real_parameter():
     """An exemption naming an argument the helper no longer takes is a hole."""
     helpers = store_taking_helpers()
-    for name, argument in READ_FREE_ARGUMENT.items():
+    for name, (argument, _says) in READ_FREE_ARGUMENT.items():
         assert name in helpers, f"{name} no longer takes a store"
         assert argument in helpers[name], (name, argument)
 
@@ -512,6 +579,48 @@ def test_the_guard_accepts_a_helper_told_not_to_read():
         "    async def post(self):\n"
         "        load_env(self.state, 'e', sub, self.storage, 0, warmed=True)\n"
         "        broadcast_undo_state(self, 'e', self.storage, 3)\n"
+    )
+    assert store_helper_calls_on_the_loop([("x.py", ast.parse(source))]) == set()
+
+
+def test_the_guard_reads_what_the_argument_says_not_that_it_is_there():
+    """The default spelled out is still the default: both of these read.
+
+    An exemption keyed on the argument's presence waved them through, and the
+    call they let past is the one the guard exists to catch -- ``warmed=False``
+    loads the env from the store, ``count=None`` reads the undo stack, both on
+    the loop.
+    """
+    source = (
+        "class EnvHandler:\n"
+        "    async def post(self):\n"
+        "        load_env(self.state, 'e', sub, self.storage, 0, warmed=False)\n"
+        "        broadcast_undo_state(self, 'e', self.storage, None)\n"
+    )
+    assert store_helper_calls_on_the_loop([("x.py", ast.parse(source))]) == {
+        ("x.py", "EnvHandler.post", "load_env"),
+        ("x.py", "EnvHandler.post", "broadcast_undo_state"),
+    }
+
+
+def test_a_warmed_flag_decided_at_the_call_is_not_a_promise():
+    """Only a literal frees the read: a variable is false on some path."""
+    source = (
+        "class EnvHandler:\n"
+        "    async def post(self):\n"
+        "        load_env(self.state, 'e', sub, self.storage, 0, warmed=ready)\n"
+    )
+    assert store_helper_calls_on_the_loop([("x.py", ast.parse(source))]) == {
+        ("x.py", "EnvHandler.post", "load_env")
+    }
+
+
+def test_a_depth_handed_in_by_name_still_frees_the_read():
+    """What the handlers actually pass: the number the off-loop push reported."""
+    source = (
+        "class SocketHandler:\n"
+        "    async def on_message(self):\n"
+        "        broadcast_undo_state(self, 'e', self.storage, undo_count)\n"
     )
     assert store_helper_calls_on_the_loop([("x.py", ast.parse(source))]) == set()
 

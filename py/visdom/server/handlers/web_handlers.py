@@ -622,6 +622,11 @@ class CloseHandler(BaseHandler):
         write rather than one per pane: closing an env with many panes used to
         read and rewrite its undo file once per pane, inline.
 
+        If that write fails the panes go back where they came from: the only
+        copy of a closed pane between the pop and the write is the one this
+        call is holding, so a close that cannot be recorded has to be a close
+        that did not happen rather than one nothing can undo.
+
         What is announced is decided after that write, against the env as it
         stands then: the loop kept serving while the undo stack was written, so
         a pane id this close popped may have been written again in the
@@ -644,7 +649,32 @@ class CloseHandler(BaseHandler):
 
         panes = [(key, p_data) for key, p_data in closed if p_data is not None]
         if panes:
-            await push_deleted_many_off_loop(handler, eid, panes)
+            try:
+                await push_deleted_many_off_loop(handler, eid, panes)
+            except BaseException:
+                # ``BaseException`` because a cancelled request loses the panes
+                # exactly as a failed write does: the await is where the close
+                # is interrupted either way, and the handler is the only thing
+                # holding them. Nothing is swallowed -- every one is re-raised.
+                #
+                # The undo stack never reached the disk, and the panes are
+                # already out of ``state``: the only copy of them left is the
+                # one in this frame. Dropping it loses them for good -- the
+                # close is not announced, so clients keep showing panes the
+                # server no longer has, and the next autosave writes the env
+                # without them. They go back instead, and the env is marked so
+                # that save records the env as it still is.
+                #
+                # Only ids that are still missing are restored. A pane written
+                # back under one of them while this write was out is newer than
+                # what the close popped, and overwriting it here would undo a
+                # live window. If the env itself is gone, there is nothing to
+                # restore it into.
+                if handler.state.get(eid) is env:
+                    for key, p_data in panes:
+                        env["jsons"].setdefault(key, p_data)
+                    handler.mark_dirty(eid)
+                raise
             if handler.state.get(eid) is not env:
                 # A delete_env landed while the undo stack was being written:
                 # the env these panes belonged to is gone, along with the file

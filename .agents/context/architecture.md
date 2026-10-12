@@ -117,7 +117,7 @@ Pane updates are batched via `addPaneBatched()` → `processBatchedPanes()` usin
 
 Tornado runs on asyncio and every handler entrypoint that touches storage is
 `async def`, so anything that blocks the IOLoop stalls every other connection.
-The four rules below are **required** for new and changed handlers; breaking one
+The five rules below are **required** for new and changed handlers; breaking one
 of them fails quietly rather than loudly.
 
 1. **No disk work on the loop.** Go through `run_on_storage_executor` (or the
@@ -137,6 +137,12 @@ of them fails quietly rather than loudly.
    soon as the delete lands, so it says nothing to a read that outlived the
    delete rather than overlapping it; a reader that has to tell those apart
    holds a `watch_env_deletes` token across the await instead.
+5. **Put state back if the write that records it fails.** A handler that takes
+   something out of `state` and only then awaits the write recording it — the
+   panes `CloseHandler` pops before awaiting their undo entry — is the only
+   thing holding it in between. Catch the failure, restore the ids that are
+   still missing (a newer one may have arrived while the write was out), mark
+   the env dirty, and re-raise.
 
 Password hashing (PBKDF2, ~50-100 ms) goes to the **default** executor instead, so
 logins do not queue behind environment saves. Shutdown order is fixed in
