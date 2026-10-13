@@ -210,8 +210,17 @@ empty 200. It now returns the result untouched and carries `functools.wraps`.
    announced, and the next autosave persists an env without them. The rollback
    restores only the ids that are still missing, because the loop kept serving
    and one of them may hold a newer window by then, and it marks the env again
-   so the restore reaches disk. Any handler that empties state ahead of a write
-   owes the same.
+   so the restore reaches disk. The write it was rolling back is then taken
+   back too: cancelling the future a handler awaits does not stop the worker
+   running the write, so a cancelled close very often records its panes a
+   moment after putting them back, leaving them in memory and on the undo stack
+   both -- an undo would restore what was never gone, over whatever holds the
+   id by then. `forget_closed_panes` submits the removal rather than running
+   it, so the single storage worker orders it behind the write it is undoing,
+   and it names only the panes that actually came back: an id taken by a newer
+   window keeps its entry, because the stack is then the one place the pane it
+   closed still exists. Any handler that empties state ahead of a write owes
+   the same.
 
 ### 4c / 4d — legacy shims and string formatting
 

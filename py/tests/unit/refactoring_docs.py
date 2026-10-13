@@ -364,10 +364,51 @@ def test_the_close_rolls_its_panes_back_when_the_undo_write_fails():
     ), "a failed undo write is swallowed, so /close answers 200 having done nothing"
 
 
+def test_the_close_takes_back_the_undo_entry_it_rolled_the_panes_out_of():
+    """Restoring the panes is only half of it: the write may still land.
+
+    Cancelling the future the close awaits does not stop the worker, so the
+    push it was waiting on can run after the rollback and leave the panes in
+    the env and on the undo stack both. The removal has to be asked for from
+    the recovery itself -- submitted there, so the one storage worker orders it
+    behind the write -- and for the panes that came back rather than for every
+    pane the close popped.
+    """
+    body = find_function(parse(HANDLERS), "wrap_func", "CloseHandler")
+    recovery = ast.Module(
+        [
+            node
+            for try_ in ast.walk(body)
+            if isinstance(try_, ast.Try)
+            and "push_deleted_many_off_loop" in called_names(ast.Module(try_.body, []))
+            for node in try_.handlers
+        ],
+        [],
+    )
+    assert "forget_closed_panes" in called_names(recovery), (
+        "a cancelled close leaves the undo entry for a pane it put back: the "
+        "worker finishes the write the cancellation did not stop"
+    )
+    removal = [
+        node
+        for node in ast.walk(recovery)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "forget_closed_panes"
+    ]
+    assert len(removal) == 1
+    named = removal[0].args[-1]
+    assert isinstance(named, ast.Name) and named.id != "panes", (
+        "the removal names every pane the close popped, so an id taken by a "
+        "newer window loses the entry holding the pane that was closed"
+    )
+
+
 def test_the_rollback_invariant_is_still_documented():
     invariant = PHASE_4[PHASE_4.index("### Invariants a later change can break") :]
     assert "CloseHandler" in invariant
     assert "restores only the ids that are still missing" in invariant
+    assert "forget_closed_panes" in invariant
 
 
 # --- invariant 1 (the other half): no disk writes on the loop --------------

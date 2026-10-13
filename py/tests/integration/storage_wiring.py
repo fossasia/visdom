@@ -49,6 +49,7 @@ from visdom.utils.server_utils import (
     clear_deleted,
     compare_envs,
     count_deleted,
+    drop_deleted_many,
     ensure_env_loaded,
     load_env,
     pop_deleted,
@@ -57,6 +58,7 @@ from visdom.utils.server_utils import (
     push_deleted_many,
     push_deleted_off_loop,
     register_window,
+    run_on_storage_executor,
     save_env_off_loop,
     warm_env,
 )
@@ -325,6 +327,74 @@ def test_pushing_many_keeps_what_an_earlier_close_left(store):
 
     assert push_deleted_many(store, "expt", closed_panes("win_1")) == 2
     assert pop_deleted(store, "expt") == ("win_1", {"id": "win_1"})
+    assert pop_deleted(store, "expt") == ("win_0", {"id": "win_0"})
+
+
+def test_dropping_many_takes_back_what_one_close_pushed(store):
+    """A rolled-back close's entries go; the close before it stays undoable."""
+    push_deleted(store, "expt", "win_0", {"id": "win_0"})
+    rolled_back = closed_panes("win_1", "win_2")
+    push_deleted_many(store, "expt", rolled_back)
+
+    assert drop_deleted_many(store, "expt", rolled_back) == 1
+    assert pop_deleted(store, "expt") == ("win_0", {"id": "win_0"})
+    assert pop_deleted(store, "expt") is None
+
+
+def test_dropping_many_removes_the_file_when_nothing_is_left(spy_store):
+    """An empty stack is no file, the way popping the last entry leaves it."""
+    panes = closed_panes("win_0")
+    push_deleted_many(spy_store, "expt", panes)
+
+    assert drop_deleted_many(spy_store, "expt", panes) == 0
+    assert spy_store.calls["clear_undo"] == ["expt"]
+    assert count_deleted(spy_store, "expt") == 0
+
+
+def test_dropping_many_writes_nothing_when_the_push_never_landed(spy_store):
+    """The failed-write case: there is no entry to take back, so no write."""
+    assert drop_deleted_many(spy_store, "expt", closed_panes("win_0")) == 0
+
+    assert spy_store.calls["save_undo"] == []
+    assert spy_store.calls["clear_undo"] == []
+
+
+def test_dropping_many_leaves_a_later_close_of_the_same_pane_alone(store):
+    """Two entries under one id: the one this close pushed is the one that goes.
+
+    The id was re-created and closed again while the rolled-back write was out,
+    so the stack holds the pane this close took and the newer pane behind it.
+    Matching on the id alone would take the newer pane, which the undo stack is
+    the only remaining copy of.
+    """
+    rolled_back = closed_panes("win_0")
+    push_deleted_many(store, "expt", rolled_back)
+    push_deleted(store, "expt", "win_0", {"id": "win_0", "type": "text"})
+
+    assert drop_deleted_many(store, "expt", rolled_back) == 1
+    assert pop_deleted(store, "expt") == ("win_0", {"id": "win_0", "type": "text"})
+    assert pop_deleted(store, "expt") is None
+
+
+def test_dropping_many_matches_by_id_when_the_stack_changed_the_pane(store):
+    """What comes back off disk is not always what went down.
+
+    ``NanSafeEncoder`` writes a NaN as ``null``, so the entry read back is not
+    equal to the pane the close is holding. The id it was closed under still
+    names it, and an entry left behind here is exactly the one this is for.
+    """
+    pane = {"id": "win_0", "content": [float("nan")]}
+    push_deleted_many(store, "expt", [("win_0", pane)])
+
+    assert drop_deleted_many(store, "expt", [("win_0", pane)]) == 0
+    assert count_deleted(store, "expt") == 0
+
+
+def test_dropping_many_keeps_an_entry_it_was_not_asked_about(store):
+    """Only the panes named are taken back, not the whole stack."""
+    push_deleted_many(store, "expt", closed_panes("win_0", "win_1"))
+
+    assert drop_deleted_many(store, "expt", closed_panes("win_1")) == 1
     assert pop_deleted(store, "expt") == ("win_0", {"id": "win_0"})
 
 
@@ -752,6 +822,44 @@ def test_a_failed_undo_write_restores_nothing_into_a_deleted_env(
     assert handler.dirtied == marked_by_the_pop
 
 
+async def worker_drained(handler):
+    """Wait for everything already queued on the storage worker to finish.
+
+    The single worker runs its tasks in the order they were submitted, so a
+    task submitted now settles behind them -- which is what the rollback of a
+    cancelled close relies on, and the only way a test can tell that the write
+    it was taking back has run.
+    """
+    await run_on_storage_executor(handler, lambda: None)
+
+
+def cancel_close_mid_write(handler, store, eid, **args):
+    """Cancel an HTTP close while its undo write is on the worker.
+
+    The undo read is held open, so the close is parked on the disk when the
+    cancellation arrives -- a client that went away, or a request Tornado gave
+    up on. Releasing it afterwards lets the write it no longer owns run to the
+    end, which is the point: cancelling the future does not stop the worker.
+    Everything the handler queued in response is settled before this returns.
+    """
+
+    async def main():
+        with call_held_open(store, "load_undo", eid) as (running, finish):
+            close = asyncio.ensure_future(
+                CloseHandler.wrap_func(handler, dict(args, eid=eid))
+            )
+            assert await asyncio.to_thread(
+                running.wait, 10
+            ), "the close never reached the disk"
+            close.cancel()
+            finish.set()
+            with pytest.raises(asyncio.CancelledError):
+                await close
+        await worker_drained(handler)
+
+    asyncio.run(main())
+
+
 def test_a_cancelled_close_puts_its_panes_back_too(spy_store, env_path, storage_worker):
     """A client that goes away mid-close must not take its panes with it.
 
@@ -763,20 +871,117 @@ def test_a_cancelled_close_puts_its_panes_back_too(spy_store, env_path, storage_
     handler = close_handler(spy_store, env_path, {"expt": env_with("win_0")})
     handler.storage_executor = storage_worker
 
+    cancel_close_mid_write(handler, spy_store, "expt", win="win_0")
+
+    assert handler.state["expt"]["jsons"] == {"win_0": {"id": "win_0"}}
+    # The pane is back, so nothing may still say it was closed: the write the
+    # cancellation did not stop ran to the end -- ``save_undo`` is the proof --
+    # and the rollback took its entry out again behind it.
+    assert spy_store.calls["save_undo"] == ["expt"]
+    assert count_deleted(spy_store, "expt") == 0
+
+
+def test_a_cancelled_close_of_a_whole_env_leaves_no_entry_behind(
+    spy_store, env_path, storage_worker
+):
+    """Every pane of the env comes back, and the stack is as it was before.
+
+    The batch is one entry per pane, so a cancellation that puts them all back
+    owes the stack all of them -- including when the env had a close of its own
+    to undo already, which is not this close's to take.
+    """
+    push_deleted(spy_store, "expt", "win_old", {"id": "win_old"})
+    handler = close_handler(spy_store, env_path, {"expt": env_with("win_0", "win_1")})
+    handler.storage_executor = storage_worker
+
+    cancel_close_mid_write(handler, spy_store, "expt", win=None)
+
+    assert handler.state["expt"]["jsons"] == {
+        "win_0": {"id": "win_0"},
+        "win_1": {"id": "win_1"},
+    }
+    assert count_deleted(spy_store, "expt") == 1
+    assert pop_deleted(spy_store, "expt") == ("win_old", {"id": "win_old"})
+
+
+def test_a_cancelled_close_keeps_the_entry_for_a_pane_it_could_not_put_back(
+    spy_store, env_path, storage_worker
+):
+    """An id taken by a newer window keeps its undo entry.
+
+    The rollback restores only the ids that are still missing, and an entry
+    whose pane did not come back is the one place that pane still exists:
+    dropping it with the others would lose it for good, where keeping it leaves
+    exactly what a close followed by a re-create leaves.
+    """
+    handler = close_handler(spy_store, env_path, {"expt": env_with("win_0", "win_1")})
+    handler.storage_executor = storage_worker
+
     async def main():
         with call_held_open(spy_store, "load_undo", "expt") as (running, finish):
             close = asyncio.ensure_future(
-                CloseHandler.wrap_func(handler, {"eid": "expt", "win": "win_0"})
+                CloseHandler.wrap_func(handler, {"eid": "expt", "win": None})
             )
             assert await asyncio.to_thread(running.wait, 10)
+            register_window(handler, {"id": "win_0", "type": "text"}, "expt")
             close.cancel()
             finish.set()
             with pytest.raises(asyncio.CancelledError):
                 await close
+        await worker_drained(handler)
 
     asyncio.run(main())
 
-    assert handler.state["expt"]["jsons"] == {"win_0": {"id": "win_0"}}
+    assert handler.state["expt"]["jsons"]["win_0"]["type"] == "text"
+    assert count_deleted(spy_store, "expt") == 1
+    assert pop_deleted(spy_store, "expt") == ("win_0", {"id": "win_0"})
+
+
+def test_a_failed_undo_write_asks_for_no_removal_it_does_not_need(
+    spy_store, env_path, storage_worker
+):
+    """A write that raised left no entry, so the rollback writes nothing.
+
+    The removal goes out either way -- the handler cannot know how far the
+    write got, and a cancellation is far more likely to have let it through
+    than to have stopped it -- but it finds the close's entries missing here,
+    and a stack it did not change is a stack it must not rewrite.
+    """
+    handler = close_handler(spy_store, env_path, {"expt": env_with("win_0")})
+    handler.storage_executor = storage_worker
+
+    async def main():
+        with undo_write_failing(spy_store):
+            with pytest.raises(OSError):
+                await CloseHandler.wrap_func(handler, {"eid": "expt", "win": "win_0"})
+            await worker_drained(handler)
+
+    asyncio.run(main())
+
+    assert spy_store.calls["load_undo"] == ["expt", "expt"]
+    assert spy_store.calls["clear_undo"] == []
+    assert count_deleted(spy_store, "expt") == 0
+
+
+def test_a_close_rolled_back_into_a_deleted_env_asks_for_nothing(
+    spy_store, env_path, storage_worker
+):
+    """Nothing came back, so there is nothing to take back.
+
+    The delete took the undo file with the env, and a removal queued behind it
+    would only read a stack that is already gone -- or, worse, write one back
+    under a name the server no longer holds.
+    """
+    spy_store.save_env("expt", env_payload())
+    handler = close_handler(spy_store, env_path, {"expt": env_with("win_0")})
+    handler.storage_executor = storage_worker
+    spy_store.calls["load_undo"] = []
+
+    with undo_write_failing(spy_store):
+        with pytest.raises(OSError):
+            race_close_with_delete(handler, spy_store, "expt", win="win_0")
+
+    assert spy_store.calls["load_undo"] == ["expt"]
 
 
 def test_socket_close_reports_the_depth_it_was_just_told(spy_store, env_path):

@@ -59,6 +59,7 @@ from visdom.utils.server_utils import (
     hash_password_off_loop,
     stringify,
     push_deleted_many_off_loop,
+    forget_closed_panes,
     notify,
     LazyEnvData,
 )
@@ -625,7 +626,9 @@ class CloseHandler(BaseHandler):
         If that write fails the panes go back where they came from: the only
         copy of a closed pane between the pop and the write is the one this
         call is holding, so a close that cannot be recorded has to be a close
-        that did not happen rather than one nothing can undo.
+        that did not happen rather than one nothing can undo. A close that did
+        not happen also leaves no undo entry, so whatever the write may still
+        manage to record for the panes that came back is taken out again.
 
         What is announced is decided after that write, against the env as it
         stands then: the loop kept serving while the undo stack was written, so
@@ -657,23 +660,36 @@ class CloseHandler(BaseHandler):
                 # is interrupted either way, and the handler is the only thing
                 # holding them. Nothing is swallowed -- every one is re-raised.
                 #
-                # The undo stack never reached the disk, and the panes are
-                # already out of ``state``: the only copy of them left is the
-                # one in this frame. Dropping it loses them for good -- the
-                # close is not announced, so clients keep showing panes the
-                # server no longer has, and the next autosave writes the env
-                # without them. They go back instead, and the env is marked so
-                # that save records the env as it still is.
+                # The panes are already out of ``state``: the only copy of
+                # them left is the one in this frame. Dropping it loses them
+                # for good -- the close is not announced, so clients keep
+                # showing panes the server no longer has, and the next autosave
+                # writes the env without them. They go back instead, and the
+                # env is marked so that save records the env as it still is.
                 #
                 # Only ids that are still missing are restored. A pane written
                 # back under one of them while this write was out is newer than
                 # what the close popped, and overwriting it here would undo a
                 # live window. If the env itself is gone, there is nothing to
                 # restore it into.
+                restored = []
                 if handler.state.get(eid) is env:
                     for key, p_data in panes:
-                        env["jsons"].setdefault(key, p_data)
+                        if env["jsons"].setdefault(key, p_data) is p_data:
+                            restored.append((key, p_data))
                     handler.mark_dirty(eid)
+                if restored:
+                    # Cancelling the future above does not stop the worker: the
+                    # push can still be queued, or running, and land after this
+                    # -- leaving the pane back in the env and recorded as
+                    # closed both, for an undo to restore over whatever holds
+                    # its id by then. The entries go back out behind the write
+                    # that may yet make them, which the single worker orders
+                    # for us. Only for the panes that actually came back: an id
+                    # taken by a newer window keeps the close that took it,
+                    # because the undo stack is then the one place the pane it
+                    # closed still exists.
+                    forget_closed_panes(handler, eid, restored)
                 raise
             if handler.state.get(eid) is not env:
                 # A delete_env landed while the undo stack was being written:
