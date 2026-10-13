@@ -2952,10 +2952,13 @@ class Visdom(object):
         _title2str(opts)
         _assert_opts(opts)
 
-        if opts.get("legend"):
-            assert isinstance(opts["legend"], (tuple, list)) and K <= len(
+        if opts.get("legend") is not None:
+            assert isinstance(
+                opts["legend"], (tuple, list)
+            ), "opts.legend must be a list or tuple"
+            assert K <= len(
                 opts["legend"]
-            ), ("largest label should not be greater than size of " "the legends table")
+            ), "largest label should not be greater than size of the legends table"
 
         data = []
         trace_opts = opts.get("traceopts", {"plotly": {}})["plotly"]
@@ -2971,8 +2974,8 @@ class Visdom(object):
         for k in labels:
             ind = np.equal(Y, k)
             if ind.any():
-                if "legend" in opts:
-                    trace_name = opts.get("legend")[k - 1]
+                if opts.get("legend") is not None:
+                    trace_name = opts["legend"][k - 1]
                 elif len(labels) == 1 and name is not None:
                     trace_name = name
                 else:

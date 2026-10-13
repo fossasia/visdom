@@ -252,6 +252,45 @@ def test_scatter_name_with_multiple_labels_raises(offline_client):
         offline_client.scatter(X, Y=np.array([1, 2]), name="trace1")
 
 
+def test_scatter_legend_none_uses_default_name(capture_send):
+    """legend=None does not raise TypeError and falls back to default name."""
+    X = np.array([[1.0, 2.0], [3.0, 4.0]])
+    sent = capture_send(lambda v: v.scatter(X, opts={"legend": None}))
+    assert sent["payload"]["data"][0]["name"] == "1"
+
+
+def test_scatter_legend_empty_sequence_raises(offline_client):
+    """legend=[] raises AssertionError rather than IndexError."""
+    X = np.array([[1.0, 2.0], [3.0, 4.0]])
+    with pytest.raises(
+        AssertionError, match="largest label should not be greater than size"
+    ):
+        offline_client.scatter(X, opts={"legend": []})
+
+
+def test_scatter_legend_invalid_type_raises(offline_client):
+    """legend with a non-sequence type raises AssertionError."""
+    X = np.array([[1.0, 2.0], [3.0, 4.0]])
+    with pytest.raises(AssertionError, match="opts.legend must be a list or tuple"):
+        offline_client.scatter(X, opts={"legend": "not-a-list"})
+
+
+def test_line_legend_none_uses_default_name(capture_send):
+    """line with legend=None does not raise TypeError and uses default name."""
+    Y = np.array([1.0, 2.0, 3.0])
+    sent = capture_send(lambda v: v.line(Y, opts={"legend": None}))
+    assert sent["payload"]["data"][0]["name"] == "1"
+
+
+def test_line_legend_empty_sequence_raises(offline_client):
+    """line with legend=[] raises AssertionError rather than IndexError."""
+    Y = np.array([1.0, 2.0, 3.0])
+    with pytest.raises(
+        AssertionError, match="largest label should not be greater than size"
+    ):
+        offline_client.line(Y, opts={"legend": []})
+
+
 def test_scatter_store_history_without_preflight_always_updates(
     capture_send, offline_client
 ):
